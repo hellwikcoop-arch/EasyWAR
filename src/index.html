@@ -1344,6 +1344,13 @@ body.lay-sizing, body.lay-sizing * { -webkit-user-select: none !important; user-
     <div id="fileBox"></div>
   </section>
 
+  <section class="panel" id="xlsxInspectPanel" aria-labelledby="h-xlsx-inspect" hidden>
+    <div class="panel-head"><h2 id="h-xlsx-inspect">Перевірка XLSX у програмі</h2></div>
+    <p class="muted">Окрема перевірка сумісності читає обраний файл лише на цьому пристрої. Вона не змінює таблицю, не записує дані в базу й не схвалює записи.</p>
+    <button type="button" class="btn quiet" id="xlsxInspectBtn">Перевірити сумісність…</button>
+    <p id="xlsxInspectStatus" role="status" aria-live="polite"></p>
+  </section>
+
   <section class="panel" aria-labelledby="h-paste">
     <div class="panel-head">
       <h2 id="h-paste">Повідомлення</h2>
@@ -5364,5 +5371,6 @@ document.addEventListener('DOMContentLoaded', init);
 </script>
 <script type="module" src="./signal-settings.js"></script>
 <script type="module" src="./backup.js"></script>
+<script type="module" src="./xlsx-inspection.js"></script>
 </body>
 </html>

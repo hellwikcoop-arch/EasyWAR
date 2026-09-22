@@ -43,6 +43,7 @@
 
 - [x] reject ambiguous duplicate required headers (synthetic regression)
 - [ ] import current `Зведена`
+  - [x] user-selected, read-only desktop compatibility preflight
 - [ ] export compatible XLSX
 - [ ] preserve legacy field mapping
   - [x] verify all 15 serialized names against legacy CORE with synthetic records

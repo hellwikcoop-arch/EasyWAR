@@ -60,10 +60,16 @@ values remain unchanged. Fractional serials in that range use the whole day.
 
 ## Current boundary
 
-This step establishes the Desktop 0.5 adapter contract. It deliberately does
-not yet:
+The Desktop entry screen now offers a separate **read-only compatibility
+check**. A native file picker accepts a user-selected `.xlsx` up to 64 MiB.
+The Rust importer validates `Зведена` in memory and returns only the sheet
+name, row count and workbook SHA-256; the interface displays the first two
+items, not workbook rows or a file path. Cancel, invalid files and read errors
+leave the source and local database unchanged. This check is separate from the
+legacy “Відкрити таблицю” workflow, which can edit an XLSX after user actions.
 
-- expose a Tauri command or file picker;
+It deliberately does not yet:
+
 - write imported rows into SQLite;
 - approve imported records;
 - implement duplicate detection, reference workbooks or XLSX export.

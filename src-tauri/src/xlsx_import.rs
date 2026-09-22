@@ -112,6 +112,13 @@ pub struct XlsxImportBatch {
     pub rows: Vec<XlsxImportRow>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct XlsxInspection {
+    pub workbook_sha256: String,
+    pub sheet_name: String,
+    pub row_count: usize,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum XlsxImportError {
     #[error("Не вдалося відкрити файл .xlsx: {0}")]
@@ -183,6 +190,15 @@ pub fn import_easywar_xlsx(bytes: &[u8]) -> Result<XlsxImportBatch, XlsxImportEr
         workbook_sha256: sha256_hex(bytes),
         sheet_name,
         rows: imported_rows,
+    })
+}
+
+pub fn inspect_easywar_xlsx(bytes: &[u8]) -> Result<XlsxInspection, XlsxImportError> {
+    let batch = import_easywar_xlsx(bytes)?;
+    Ok(XlsxInspection {
+        workbook_sha256: batch.workbook_sha256,
+        sheet_name: batch.sheet_name,
+        row_count: batch.rows.len(),
     })
 }
 
@@ -387,6 +403,19 @@ mod tests {
             })
         );
         assert_eq!(batch.rows[0].raw_values["Дата"], "01.01.2026");
+    }
+
+    #[test]
+    fn inspection_returns_only_workbook_identity_and_count() {
+        let workbook = synthetic_workbook(EASYWAR_SHEET_NAME, &headers(), true);
+        let inspection = inspect_easywar_xlsx(&workbook).expect("synthetic workbook must inspect");
+
+        assert_eq!(inspection.sheet_name, EASYWAR_SHEET_NAME);
+        assert_eq!(inspection.row_count, 2);
+        assert_eq!(inspection.workbook_sha256, sha256_hex(&workbook));
+        let json = serde_json::to_value(&inspection).expect("inspection must serialize");
+        assert_eq!(json.as_object().expect("object").len(), 3);
+        assert!(json.get("rows").is_none());
     }
 
     #[test]

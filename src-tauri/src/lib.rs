@@ -13,9 +13,11 @@ use restore::BackupInspection;
 use signal_policy::SignalAdapterConfig;
 use signal_settings::SignalSettingsStore;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
-use std::time::Duration;
+use std::{io::Read, path::Path, time::Duration};
 use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
+
+const MAX_XLSX_BYTES: u64 = 64 * 1024 * 1024;
 
 #[tauri::command]
 async fn get_signal_settings(
@@ -90,6 +92,59 @@ async fn inspect_local_backup(app: tauri::AppHandle) -> Result<Option<BackupInsp
         .map_err(|error| error.to_string())
 }
 
+fn read_selected_xlsx(path: &Path) -> Result<Vec<u8>, String> {
+    if !path
+        .extension()
+        .is_some_and(|extension| extension.to_string_lossy().eq_ignore_ascii_case("xlsx"))
+    {
+        return Err("Оберіть файл із розширенням .xlsx".to_owned());
+    }
+
+    let file =
+        std::fs::File::open(path).map_err(|error| format!("Не вдалося відкрити XLSX: {error}"))?;
+    if file
+        .metadata()
+        .map_err(|error| format!("Не вдалося перевірити розмір XLSX: {error}"))?
+        .len()
+        > MAX_XLSX_BYTES
+    {
+        return Err("Файл XLSX перевищує обмеження 64 МБ".to_owned());
+    }
+
+    let mut bytes = Vec::new();
+    file.take(MAX_XLSX_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("Не вдалося прочитати XLSX: {error}"))?;
+    if bytes.len() as u64 > MAX_XLSX_BYTES {
+        return Err("Файл XLSX перевищує обмеження 64 МБ".to_owned());
+    }
+    Ok(bytes)
+}
+
+#[tauri::command]
+async fn inspect_local_xlsx(
+    app: tauri::AppHandle,
+) -> Result<Option<xlsx_import::XlsxInspection>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let selected = app
+            .dialog()
+            .file()
+            .set_title("Перевірити сумісність таблиці EasyWAR")
+            .add_filter("Таблиця XLSX", &["xlsx"])
+            .blocking_pick_file();
+        let Some(selected) = selected else {
+            return Ok(None);
+        };
+        let path = selected.into_path().map_err(|error| error.to_string())?;
+        let bytes = read_selected_xlsx(&path)?;
+        xlsx_import::inspect_easywar_xlsx(&bytes)
+            .map(Some)
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -121,8 +176,33 @@ pub fn run() {
             get_signal_settings,
             save_signal_settings,
             create_local_backup,
-            inspect_local_backup
+            inspect_local_backup,
+            inspect_local_xlsx
         ])
         .run(tauri::generate_context!())
         .expect("помилка запуску EasyWAR");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn selected_xlsx_reader_rejects_wrong_extension_and_oversize_file() {
+        let directory = tempfile::tempdir().expect("synthetic temp directory");
+        let wrong_extension = directory.path().join("synthetic.txt");
+        std::fs::write(&wrong_extension, b"synthetic only").expect("write synthetic test file");
+        assert!(read_selected_xlsx(&wrong_extension)
+            .expect_err("wrong extension must fail")
+            .contains(".xlsx"));
+
+        let oversized = directory.path().join("synthetic.xlsx");
+        std::fs::File::create(&oversized)
+            .expect("create sparse synthetic test file")
+            .set_len(MAX_XLSX_BYTES + 1)
+            .expect("set synthetic size");
+        assert!(read_selected_xlsx(&oversized)
+            .expect_err("oversized file must fail")
+            .contains("64 МБ"));
+    }
 }
