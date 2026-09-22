@@ -1,0 +1,68 @@
+# EasyWAR roadmap
+
+## 0.5 — Desktop foundation
+
+**Goal:** establish the canonical desktop application.
+
+- [ ] Tauri 2 project scaffold
+- [ ] preserve current HTML/CSS/JS UI as first frontend
+- [ ] Rust application core
+- [ ] SQLite plugin / schema / migrations
+- [ ] repository layer
+- [ ] settings store
+- [ ] audit log
+- [ ] import path for current EasyWAR/XLSX workflow
+- [ ] macOS build/run path
+- [ ] Windows-ready project structure
+- [ ] synthetic smoke/regression tests
+
+**Exit condition:** application opens as a desktop app, local database initializes, existing intake logic can be exercised without real data.
+
+## 0.6 — Signal intake
+
+- [ ] signal-cli local adapter
+- [ ] linked-account setup UX
+- [ ] account/group discovery
+- [ ] allowlist
+- [ ] Signal Inbox
+- [ ] statuses: NEW / PARSED / NEEDS_REVIEW / APPROVED / REJECTED
+- [ ] import message into intake parser
+- [ ] commands: /help, /status, /ping, /queue, /last
+- [ ] no automatic approval by default
+
+## 0.7 — XLSX compatibility
+
+- [ ] import current `Зведена`
+- [ ] export compatible XLSX
+- [ ] preserve legacy field mapping
+- [ ] duplicate detection
+- [ ] reference workbook support
+- [ ] regression comparison against legacy parser
+
+## 0.8 — Analytics
+
+- [ ] dashboard model from SQLite
+- [ ] period filters
+- [ ] effectiveness calculations
+- [ ] aircraft / munitions / unit breakdowns
+- [ ] data-quality view
+- [ ] map abstraction
+- [ ] export views
+
+## 0.9 — Roles and templates
+
+- [ ] local profiles
+- [ ] role-based workspace templates
+- [ ] position-specific empty database/template generation
+- [ ] backup / restore
+- [ ] update/migration UX
+
+## 1.0 — Production release
+
+- [ ] stable migration path
+- [ ] signed macOS build
+- [ ] notarization
+- [ ] Windows installer
+- [ ] release checklist
+- [ ] recovery/backup guide
+- [ ] user documentation
