@@ -9,7 +9,7 @@
 - [x] Rust application core scaffold
 - [x] SQLite plugin / schema / migrations
 - [x] repository layer
-- [ ] settings store
+- [x] settings store
 - [x] audit log
 - [ ] import path for current EasyWAR/XLSX workflow
 - [x] macOS build/run path

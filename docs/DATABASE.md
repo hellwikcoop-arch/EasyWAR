@@ -24,7 +24,7 @@ fixtures.
 | Review state | `review_decisions` | Append-only human decisions: `NEEDS_REVIEW`, `APPROVED`, or `REJECTED`. |
 | Revisions | `revision_history` | Immutable materialized snapshots with monotonically increasing report revisions. |
 | Audit | `audit_log` | Append-only system/user events. |
-| Settings | `settings` | Local JSON settings; mutable by the future repository layer. |
+| Settings | `settings` | Local JSON settings managed by the typed settings store. |
 
 The `report_current_state` view derives `NEW`, `PARSED`, or the latest review
 decision without overwriting source or parser records.
@@ -48,6 +48,21 @@ If any statement fails, none of the transaction's domain or audit rows persist.
 The repository exposes the derived current status as a read-only query. It does
 not expose Tauri commands yet and does not open or populate a real database in
 tests.
+
+## Settings store
+
+`SettingsStore` provides local JSON settings without mixing them into report
+provenance. It supports:
+
+- reading one setting by key;
+- listing settings in deterministic key order;
+- inserting or replacing one JSON value atomically;
+- idempotent deletion with a result that reports whether a row existed.
+
+Callers provide the `updated_at` timestamp, and reads return it with the parsed
+JSON value. Setting changes do not create report audit events: the `audit_log`
+remains reserved for provenance and review actions. No Tauri command exposes
+settings to the frontend yet.
 
 ## Invariants
 

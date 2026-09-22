@@ -124,15 +124,99 @@ pub struct ReviewAndReviseInput {
     pub audit: AuditContext,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct SettingUpdate {
+    pub key: String,
+    pub value: Value,
+    pub updated_at: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct StoredSetting {
+    pub key: String,
+    pub value: Value,
+    pub updated_at: String,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum RepositoryError {
     #[error("database operation failed")]
     Database(#[from] sqlx::Error),
+    #[error("stored setting contains invalid JSON")]
+    InvalidStoredSettingJson(#[from] serde_json::Error),
 }
 
 #[derive(Clone, Debug)]
 pub struct Repository {
     pool: SqlitePool,
+}
+
+#[derive(Clone, Debug)]
+pub struct SettingsStore {
+    pool: SqlitePool,
+}
+
+impl SettingsStore {
+    pub fn new(pool: SqlitePool) -> Self {
+        Self { pool }
+    }
+
+    pub async fn get(&self, key: &str) -> Result<Option<StoredSetting>, RepositoryError> {
+        let row = sqlx::query_as::<_, (String, String, String)>(
+            "SELECT key, value_json, updated_at FROM settings WHERE key = ?",
+        )
+        .bind(key)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(parse_stored_setting).transpose()
+    }
+
+    pub async fn list(&self) -> Result<Vec<StoredSetting>, RepositoryError> {
+        let rows = sqlx::query_as::<_, (String, String, String)>(
+            "SELECT key, value_json, updated_at FROM settings ORDER BY key",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter().map(parse_stored_setting).collect()
+    }
+
+    pub async fn upsert(&self, update: &SettingUpdate) -> Result<(), RepositoryError> {
+        sqlx::query(
+            "INSERT INTO settings (key, value_json, updated_at)
+             VALUES (?, ?, ?)
+             ON CONFLICT(key) DO UPDATE SET
+                 value_json = excluded.value_json,
+                 updated_at = excluded.updated_at",
+        )
+        .bind(&update.key)
+        .bind(update.value.to_string())
+        .bind(&update.updated_at)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn delete(&self, key: &str) -> Result<bool, RepositoryError> {
+        let result = sqlx::query("DELETE FROM settings WHERE key = ?")
+            .bind(key)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(result.rows_affected() == 1)
+    }
+}
+
+fn parse_stored_setting(
+    (key, value_json, updated_at): (String, String, String),
+) -> Result<StoredSetting, RepositoryError> {
+    Ok(StoredSetting {
+        key,
+        value: serde_json::from_str(&value_json)?,
+        updated_at,
+    })
 }
 
 impl Repository {
@@ -563,5 +647,108 @@ mod tests {
         .await
         .expect("rollback state must query");
         assert_eq!(leaked_rows, 0);
+    }
+
+    #[tokio::test]
+    async fn settings_store_round_trips_and_lists_local_json() {
+        let repository = repository().await;
+        let settings = SettingsStore::new(repository.pool.clone());
+
+        settings
+            .upsert(&SettingUpdate {
+                key: "ui.theme".to_owned(),
+                value: json!({ "mode": "dark", "synthetic": true }),
+                updated_at: NOW.to_owned(),
+            })
+            .await
+            .expect("synthetic theme setting must store");
+        settings
+            .upsert(&SettingUpdate {
+                key: "ui.motion".to_owned(),
+                value: json!({ "enabled": false, "synthetic": true }),
+                updated_at: NOW.to_owned(),
+            })
+            .await
+            .expect("synthetic motion setting must store");
+
+        let theme = settings
+            .get("ui.theme")
+            .await
+            .expect("synthetic theme setting must query")
+            .expect("synthetic theme setting must exist");
+        assert_eq!(theme.key, "ui.theme");
+        assert_eq!(theme.value, json!({ "mode": "dark", "synthetic": true }));
+        assert_eq!(theme.updated_at, NOW);
+
+        let keys: Vec<String> = settings
+            .list()
+            .await
+            .expect("synthetic settings must list")
+            .into_iter()
+            .map(|setting| setting.key)
+            .collect();
+        assert_eq!(keys, vec!["ui.motion", "ui.theme"]);
+
+        let audit_count: i64 = sqlx::query_scalar("SELECT count(*) FROM audit_log")
+            .fetch_one(&repository.pool)
+            .await
+            .expect("audit count must query");
+        assert_eq!(audit_count, 0);
+    }
+
+    #[tokio::test]
+    async fn settings_store_upserts_and_deletes_without_duplicates() {
+        let repository = repository().await;
+        let settings = SettingsStore::new(repository.pool.clone());
+        let key = "intake.synthetic";
+
+        settings
+            .upsert(&SettingUpdate {
+                key: key.to_owned(),
+                value: json!({ "enabled": false }),
+                updated_at: "2026-01-01T00:00:00Z".to_owned(),
+            })
+            .await
+            .expect("first synthetic setting version must store");
+        settings
+            .upsert(&SettingUpdate {
+                key: key.to_owned(),
+                value: json!({ "enabled": true }),
+                updated_at: "2026-01-02T00:00:00Z".to_owned(),
+            })
+            .await
+            .expect("second synthetic setting version must replace the first");
+
+        let row_count: i64 = sqlx::query_scalar("SELECT count(*) FROM settings WHERE key = ?")
+            .bind(key)
+            .fetch_one(&repository.pool)
+            .await
+            .expect("synthetic setting count must query");
+        assert_eq!(row_count, 1);
+        assert_eq!(
+            settings
+                .get(key)
+                .await
+                .expect("updated synthetic setting must query")
+                .expect("updated synthetic setting must exist")
+                .value,
+            json!({ "enabled": true })
+        );
+
+        assert!(settings
+            .delete(key)
+            .await
+            .expect("existing synthetic setting must delete"));
+        assert!(!settings
+            .delete(key)
+            .await
+            .expect("missing synthetic setting deletion must be idempotent"));
+        assert_eq!(
+            settings
+                .get(key)
+                .await
+                .expect("deleted synthetic setting lookup must succeed"),
+            None
+        );
     }
 }
