@@ -41,6 +41,7 @@
 
 ## 0.7 — XLSX compatibility
 
+- [x] reject ambiguous duplicate required headers (synthetic regression)
 - [ ] import current `Зведена`
 - [ ] export compatible XLSX
 - [ ] preserve legacy field mapping

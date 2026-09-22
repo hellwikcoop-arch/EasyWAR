@@ -117,6 +117,8 @@ pub enum XlsxImportError {
     MissingHeaderRow,
     #[error("На аркуші «Зведена» не знайдено стовпців: {0}")]
     MissingColumns(String),
+    #[error("На аркуші «Зведена» неоднозначні повторні заголовки: {0}")]
+    DuplicateColumns(String),
 }
 
 pub fn import_easywar_xlsx(bytes: &[u8]) -> Result<XlsxImportBatch, XlsxImportError> {
@@ -186,19 +188,25 @@ fn resolve_columns(header_row: &[Data]) -> Result<Vec<usize>, XlsxImportError> {
         .collect();
     let mut indexes = Vec::with_capacity(FIELD_SPECS.len());
     let mut missing = Vec::new();
+    let mut duplicates = Vec::new();
 
     for field in FIELD_SPECS {
-        if let Some(index) = normalized_headers
+        let expected_header = normalize_label(field.header);
+        let matches: Vec<usize> = normalized_headers
             .iter()
-            .position(|header| header == &normalize_label(field.header))
-        {
-            indexes.push(index);
-        } else {
-            missing.push(field.header);
+            .enumerate()
+            .filter_map(|(index, header)| (header == &expected_header).then_some(index))
+            .collect();
+        match matches.as_slice() {
+            [] => missing.push(field.header),
+            [index] => indexes.push(*index),
+            _ => duplicates.push(field.header),
         }
     }
 
-    if missing.is_empty() {
+    if !duplicates.is_empty() {
+        Err(XlsxImportError::DuplicateColumns(duplicates.join(", ")))
+    } else if missing.is_empty() {
         Ok(indexes)
     } else {
         Err(XlsxImportError::MissingColumns(missing.join(", ")))
@@ -353,6 +361,18 @@ mod tests {
         assert!(matches!(error, XlsxImportError::MissingColumns(_)));
         assert!(error.to_string().contains("DPI / Координати MGRS"));
         assert!(error.to_string().contains("Уточнення результату"));
+    }
+
+    #[test]
+    fn rejects_duplicate_required_header_after_case_normalization() {
+        let mut duplicate_headers = headers();
+        duplicate_headers.push("дата");
+        let workbook = synthetic_workbook(EASYWAR_SHEET_NAME, &duplicate_headers, false);
+
+        let error = import_easywar_xlsx(&workbook).expect_err("duplicate header must fail closed");
+
+        assert!(matches!(error, XlsxImportError::DuplicateColumns(_)));
+        assert!(error.to_string().contains("Дата"));
     }
 
     fn headers() -> Vec<&'static str> {

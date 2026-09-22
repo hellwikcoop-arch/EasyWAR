@@ -14,6 +14,9 @@ Rust `1.77.2` baseline. The current Calamine release requires a newer compiler.
 
 The first row must contain these headers. Whitespace and letter case are
 normalized only while matching headers; additional columns are allowed.
+If a required header appears more than once after this normalization, import
+fails rather than choosing one column silently. Unrelated extra columns remain
+allowed.
 
 1. `№`
 2. `Дата`
