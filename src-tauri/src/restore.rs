@@ -2,7 +2,13 @@ use crate::database;
 use serde::Serialize;
 use sha2::{Digest, Sha384};
 use sqlx::{sqlite::SqliteConnectOptions, sqlite::SqlitePoolOptions};
-use std::{ffi::OsString, io, path::Path};
+use std::{
+    ffi::OsString,
+    fs::File,
+    io,
+    path::{Path, PathBuf},
+};
+use tempfile::NamedTempFile;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct BackupInspection {
@@ -13,6 +19,10 @@ pub struct BackupInspection {
 pub enum RestoreInspectionError {
     #[error("оберіть файл резервної копії SQLite")]
     InvalidFile,
+    #[error("шлях локальної бази EasyWAR має бути абсолютним")]
+    InvalidTarget,
+    #[error("підготовлена копія вже існує; спочатку заверште або скасуйте попереднє відновлення")]
+    PendingAlreadyExists,
     #[error("копія має супровідні файли WAL/SHM/journal і не є самодостатньою")]
     SidecarsPresent,
     #[error("файл SQLite не пройшов перевірку цілісності")]
@@ -31,6 +41,59 @@ pub enum RestoreInspectionError {
     Io(#[from] io::Error),
     #[error("не вдалося перевірити SQLite-копію: {0}")]
     Database(#[from] sqlx::Error),
+}
+
+/// Keep the candidate in the same directory/filesystem as the live database.
+/// This is only a staging path; startup must never apply it implicitly.
+pub fn staged_backup_path(live_database: &Path) -> Result<PathBuf, RestoreInspectionError> {
+    if !live_database.is_absolute() || live_database.file_name().is_none() {
+        return Err(RestoreInspectionError::InvalidTarget);
+    }
+    let mut name: OsString = live_database.file_name().unwrap().to_owned();
+    name.push(".restore-pending");
+    Ok(live_database.with_file_name(name))
+}
+
+/// Make a separately validated, non-overwriting copy for a future offline
+/// restore. Neither the live database nor the selected source is changed.
+/// The caller must not interpret a staged file as authorization to apply it.
+pub async fn stage_backup(
+    source: &Path,
+    live_database: &Path,
+) -> Result<BackupInspection, RestoreInspectionError> {
+    let staged = staged_backup_path(live_database)?;
+    if staged.symlink_metadata().is_ok() {
+        return Err(RestoreInspectionError::PendingAlreadyExists);
+    }
+    let inspection = inspect_backup(source).await?;
+    let parent = live_database
+        .parent()
+        .ok_or(RestoreInspectionError::InvalidTarget)?
+        .to_owned();
+    let source = source.to_owned();
+    let temporary =
+        tauri::async_runtime::spawn_blocking(move || -> Result<NamedTempFile, io::Error> {
+            let mut input = File::open(source)?;
+            let mut temporary = NamedTempFile::new_in(parent)?;
+            io::copy(&mut input, temporary.as_file_mut())?;
+            temporary.as_file_mut().sync_all()?;
+            Ok(temporary)
+        })
+        .await
+        .map_err(|error| io::Error::other(error.to_string()))??;
+
+    // Verify the copied bytes too: the selected file may change mid-copy.
+    let copied_inspection = inspect_backup(temporary.path()).await?;
+    if copied_inspection != inspection {
+        return Err(RestoreInspectionError::UnsupportedSchema);
+    }
+    match temporary.persist_noclobber(&staged) {
+        Ok(_) => Ok(copied_inspection),
+        Err(error) if error.error.kind() == io::ErrorKind::AlreadyExists => {
+            Err(RestoreInspectionError::PendingAlreadyExists)
+        }
+        Err(error) => Err(RestoreInspectionError::Io(error.error)),
+    }
 }
 
 /// Inspect an offline, standalone backup without writing to the source file.
@@ -301,5 +364,62 @@ mod tests {
             Err(RestoreInspectionError::SidecarsPresent)
         ));
         assert_eq!(std::fs::read(&journal).unwrap(), b"synthetic sidecar");
+    }
+
+    #[tokio::test]
+    async fn stages_valid_copy_without_changing_source_or_live_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("synthetic-backup.sqlite3");
+        let pool = synthetic_database(&source).await;
+        pool.close().await;
+        let live = dir.path().join("easywar.db");
+        std::fs::write(&live, b"synthetic current database placeholder").unwrap();
+        let before = std::fs::read(&source).unwrap();
+
+        assert_eq!(
+            stage_backup(&source, &live).await.unwrap(),
+            BackupInspection { schema_version: 1 }
+        );
+        assert_eq!(std::fs::read(&source).unwrap(), before);
+        assert_eq!(
+            std::fs::read(staged_backup_path(&live).unwrap()).unwrap(),
+            before
+        );
+        assert_eq!(
+            std::fs::read(&live).unwrap(),
+            b"synthetic current database placeholder"
+        );
+    }
+
+    #[tokio::test]
+    async fn never_overwrites_an_existing_pending_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("synthetic-backup.sqlite3");
+        let pool = synthetic_database(&source).await;
+        pool.close().await;
+        let live = dir.path().join("easywar.db");
+        let pending = staged_backup_path(&live).unwrap();
+        std::fs::write(&pending, b"keep pending copy").unwrap();
+
+        assert!(matches!(
+            stage_backup(&source, &live).await,
+            Err(RestoreInspectionError::PendingAlreadyExists)
+        ));
+        assert_eq!(std::fs::read(&pending).unwrap(), b"keep pending copy");
+    }
+
+    #[tokio::test]
+    async fn rejects_invalid_source_without_publishing_pending_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("not-easywar.sqlite3");
+        std::fs::write(&source, b"synthetic invalid SQLite bytes").unwrap();
+        let live = dir.path().join("easywar.db");
+
+        assert!(stage_backup(&source, &live).await.is_err());
+        assert!(!staged_backup_path(&live).unwrap().exists());
+        assert_eq!(
+            std::fs::read(&source).unwrap(),
+            b"synthetic invalid SQLite bytes"
+        );
     }
 }

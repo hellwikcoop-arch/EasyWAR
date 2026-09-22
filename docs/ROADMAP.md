@@ -64,6 +64,7 @@
 - [ ] backup / restore
   - [x] user-selected, non-overwriting local SQLite backup with integrity check
   - [x] read-only compatibility preflight for a selected backup
+  - [x] non-overwriting, revalidated staging primitive (not exposed in UI)
   - [ ] in-app restore with preflight and controlled restart
 - [ ] update/migration UX
 

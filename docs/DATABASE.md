@@ -80,7 +80,12 @@ matches applied `_sqlx_migrations` versions and SHA-384 checksums to the
 registered EasyWAR migrations. It also requires the core tables and current
 state view. A missing, altered, newer, or unrelated database is rejected.
 Preflight also rejects SQLite files with companion WAL, SHM, or rollback-journal
-files. It does not stage or replace the running database.
+files. The separate staging primitive copies a validated file to a temporary
+file next to the live database, validates the copy again, and publishes it only
+if no pending candidate exists. It is not exposed in the desktop UI yet and
+does not replace or restart the running database. A future restore flow must
+serialize app instances, close SQLite connections, preserve a rollback copy,
+and recover interrupted swaps before enabling this primitive in the UI.
 
 ## Invariants
 
