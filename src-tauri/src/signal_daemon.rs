@@ -1,4 +1,4 @@
-use crate::signal_policy::{SignalDaemonEndpoint, SIGNAL_HTTP_RPC_PATH};
+use crate::signal_policy::{SignalDaemonEndpoint, SIGNAL_HTTP_EVENTS_PATH, SIGNAL_HTTP_RPC_PATH};
 use reqwest::{redirect::Policy, Client};
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -8,6 +8,7 @@ use std::{
 };
 
 const MAX_RPC_BYTES: usize = 1024 * 1024;
+const MAX_SSE_EVENT_BYTES: usize = 1024 * 1024;
 const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(8);
 const LINK_TIMEOUT: Duration = Duration::from_secs(120);
 const MAX_LINK_URI_BYTES: usize = 2048;
@@ -34,6 +35,19 @@ pub struct SignalLinkStart {
     pub device_link_uri: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct SignalReceiveNotification {
+    pub subscription: u64,
+    pub account: String,
+    pub envelope: Value,
+}
+
+#[derive(Debug, Default)]
+pub struct SignalSseDecoder {
+    buffered_line: Vec<u8>,
+    data: Vec<u8>,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum SignalDaemonError {
     #[error("для перевірки signal-cli наразі підтримується лише локальний HTTP-інтерфейс")]
@@ -52,14 +66,120 @@ pub enum SignalDaemonError {
     InvalidLinkUri,
     #[error("назва пов’язаного пристрою має містити 1–64 видимі символи")]
     InvalidDeviceName,
+    #[error("signal-cli повернув некоректну подію ручного приймання")]
+    InvalidEvent,
+    #[error("подія signal-cli перевищила обмеження розміру")]
+    OversizedEvent,
+}
+
+fn http_url(endpoint: &SignalDaemonEndpoint, path: &str) -> Result<String, SignalDaemonError> {
+    match endpoint {
+        SignalDaemonEndpoint::Http { address } if address.ip().is_loopback() => {
+            Ok(format!("http://{address}{path}"))
+        }
+        _ => Err(SignalDaemonError::UnsupportedTransport),
+    }
 }
 
 fn rpc_url(endpoint: &SignalDaemonEndpoint) -> Result<String, SignalDaemonError> {
-    match endpoint {
-        SignalDaemonEndpoint::Http { address } if address.ip().is_loopback() => {
-            Ok(format!("http://{address}{SIGNAL_HTTP_RPC_PATH}"))
+    http_url(endpoint, SIGNAL_HTTP_RPC_PATH)
+}
+
+pub fn events_url(endpoint: &SignalDaemonEndpoint) -> Result<String, SignalDaemonError> {
+    http_url(endpoint, SIGNAL_HTTP_EVENTS_PATH)
+}
+
+fn parse_receive_notification(
+    value: Value,
+) -> Result<SignalReceiveNotification, SignalDaemonError> {
+    if value.get("jsonrpc").and_then(Value::as_str) != Some("2.0")
+        || value.get("method").and_then(Value::as_str) != Some("receive")
+        || value.get("id").is_some()
+    {
+        return Err(SignalDaemonError::InvalidEvent);
+    }
+
+    let params = value
+        .get("params")
+        .and_then(Value::as_object)
+        .ok_or(SignalDaemonError::InvalidEvent)?;
+    let subscription = params
+        .get("subscription")
+        .and_then(Value::as_u64)
+        .ok_or(SignalDaemonError::InvalidEvent)?;
+    let result = params
+        .get("result")
+        .and_then(Value::as_object)
+        .ok_or(SignalDaemonError::InvalidEvent)?;
+    let account = result
+        .get("account")
+        .and_then(Value::as_str)
+        .filter(|account| {
+            !account.is_empty()
+                && account.trim() == *account
+                && !account.chars().any(char::is_control)
+        })
+        .ok_or(SignalDaemonError::InvalidEvent)?;
+    let envelope = result
+        .get("envelope")
+        .filter(|envelope| envelope.is_object())
+        .cloned()
+        .ok_or(SignalDaemonError::InvalidEvent)?;
+
+    Ok(SignalReceiveNotification {
+        subscription,
+        account: account.to_owned(),
+        envelope,
+    })
+}
+
+impl SignalSseDecoder {
+    pub fn push(
+        &mut self,
+        chunk: &[u8],
+    ) -> Result<Vec<SignalReceiveNotification>, SignalDaemonError> {
+        if self.buffered_line.len().saturating_add(chunk.len()) > MAX_SSE_EVENT_BYTES {
+            return Err(SignalDaemonError::OversizedEvent);
         }
-        _ => Err(SignalDaemonError::UnsupportedTransport),
+        self.buffered_line.extend_from_slice(chunk);
+        let mut notifications = Vec::new();
+
+        while let Some(newline) = self.buffered_line.iter().position(|byte| *byte == b'\n') {
+            let mut line = self.buffered_line.drain(..=newline).collect::<Vec<_>>();
+            line.pop();
+            if line.last() == Some(&b'\r') {
+                line.pop();
+            }
+
+            if line.is_empty() {
+                if self.data.is_empty() {
+                    continue;
+                }
+                let event = std::mem::take(&mut self.data);
+                let value = serde_json::from_slice::<Value>(&event)
+                    .map_err(|_| SignalDaemonError::InvalidEvent)?;
+                notifications.push(parse_receive_notification(value)?);
+                continue;
+            }
+
+            if line.starts_with(b":") {
+                continue;
+            }
+            let Some(raw_data) = line.strip_prefix(b"data:") else {
+                continue;
+            };
+            let data = raw_data.strip_prefix(b" ").unwrap_or(raw_data);
+            let extra = data.len() + usize::from(!self.data.is_empty());
+            if self.data.len().saturating_add(extra) > MAX_SSE_EVENT_BYTES {
+                return Err(SignalDaemonError::OversizedEvent);
+            }
+            if !self.data.is_empty() {
+                self.data.push(b'\n');
+            }
+            self.data.extend_from_slice(data);
+        }
+
+        Ok(notifications)
     }
 }
 
@@ -365,6 +485,10 @@ mod tests {
             address: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8080),
         };
         assert_eq!(rpc_url(&local).unwrap(), "http://127.0.0.1:8080/api/v1/rpc");
+        assert_eq!(
+            events_url(&local).unwrap(),
+            "http://127.0.0.1:8080/api/v1/events"
+        );
         let remote = SignalDaemonEndpoint::Http {
             address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)), 8080),
         };
@@ -548,6 +672,88 @@ mod tests {
             )
             .await,
             Err(SignalDaemonError::InvalidDeviceName)
+        ));
+    }
+
+    #[test]
+    fn decodes_chunked_synthetic_manual_receive_event() {
+        let event = json!({
+            "jsonrpc": "2.0",
+            "method": "receive",
+            "params": {
+                "subscription": 7,
+                "result": {
+                    "account": "synthetic-account",
+                    "envelope": {
+                        "sourceUuid": "synthetic-sender",
+                        "timestamp": 1,
+                        "dataMessage": {"message": "Синтетичне повідомлення"}
+                    }
+                }
+            }
+        });
+        let stream = format!(": synthetic keepalive\r\ndata: {}\r\n\r\n", event);
+        let split = stream.len() / 2;
+        let mut decoder = SignalSseDecoder::default();
+        assert!(decoder
+            .push(&stream.as_bytes()[..split])
+            .unwrap()
+            .is_empty());
+        let notifications = decoder.push(&stream.as_bytes()[split..]).unwrap();
+        assert_eq!(notifications.len(), 1);
+        assert_eq!(notifications[0].subscription, 7);
+        assert_eq!(notifications[0].account, "synthetic-account");
+        assert_eq!(notifications[0].envelope["sourceUuid"], "synthetic-sender");
+    }
+
+    #[test]
+    fn accepts_multiple_synthetic_events_and_ignores_sse_metadata() {
+        let notification = |subscription| {
+            json!({
+                "jsonrpc": "2.0",
+                "method": "receive",
+                "params": {
+                    "subscription": subscription,
+                    "result": {
+                        "account": "synthetic-account",
+                        "envelope": {"timestamp": subscription}
+                    }
+                }
+            })
+        };
+        let stream = format!(
+            "event: receive\nid: synthetic\ndata: {}\n\ndata: {}\n\n",
+            notification(1),
+            notification(2)
+        );
+        let events = SignalSseDecoder::default()
+            .push(stream.as_bytes())
+            .expect("synthetic SSE must decode");
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].subscription, 1);
+        assert_eq!(events[1].subscription, 2);
+    }
+
+    #[test]
+    fn rejects_non_manual_or_oversized_synthetic_events() {
+        let automatic = format!(
+            "data: {}\n\n",
+            json!({
+                "jsonrpc": "2.0",
+                "method": "receive",
+                "params": {"envelope": {"timestamp": 1}}
+            })
+        );
+        assert!(matches!(
+            SignalSseDecoder::default().push(automatic.as_bytes()),
+            Err(SignalDaemonError::InvalidEvent)
+        ));
+
+        let mut decoder = SignalSseDecoder::default();
+        let oversized = vec![b'x'; MAX_SSE_EVENT_BYTES + 1];
+        assert!(matches!(
+            decoder.push(&oversized),
+            Err(SignalDaemonError::OversizedEvent)
         ));
     }
 }

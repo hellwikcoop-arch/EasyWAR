@@ -50,6 +50,23 @@ and receives no Signal messages. A successful explicit discovery is a one-shot
 daemon check, not an active intake connection. A saved configuration with
 `intake_enabled: true` still cannot make the desktop connector receive messages.
 
+## Event-stream foundation
+
+The Rust adapter has a bounded decoder for the official HTTP
+`/api/v1/events` Server-Sent Events framing. It accepts only JSON-RPC
+`receive` notifications in the manual-subscription shape: a numeric
+subscription identifier, an explicit local account, and an object-valued raw
+envelope. Automatic-mode notifications, malformed JSON-RPC messages, invalid
+accounts, and events larger than 1 MiB are rejected.
+
+This decoder currently has no network loop and is not registered as a Tauri
+command. It does not open the event endpoint, call `subscribeReceive`, consume
+messages, apply the allowlist, or persist content. Tests feed fragmented and
+multi-event synthetic SSE byte streams directly into the decoder. A managed
+connection must open the SSE stream before subscribing, guarantee
+unsubscribe/cleanup, and preserve raw input before the live connector can be
+marked complete.
+
 ## Inbox review model
 
 The current in-memory model supports `NEW`, `PARSED`, `NEEDS_REVIEW`, `APPROVED`, and `REJECTED`. A new item can be marked parsed or sent directly for review. Approval and rejection are possible only from `NEEDS_REVIEW` and require a nonblank reviewer identifier. Final states cannot be reopened by this model. Each accepted action returns a transition record for a future transactional audit write; no message content is stored by this module. The model does not authenticate a reviewer or provide an approval UI; those checks belong to a later integration step.
@@ -65,6 +82,7 @@ source contract for a future persistent implementation.
 
 - daemon process management;
 - a persistent RPC or event-stream receive connection;
+- subscribe/unsubscribe lifecycle management;
 - account/group discovery over UNIX or raw TCP;
 - enabling or connecting a Signal account;
 - message ingestion and parsing;
