@@ -1,0 +1,54 @@
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Build outputs
+dist/
+build/
+target/
+DerivedData/
+*.app
+*.dmg
+*.msi
+*.exe
+
+# Local runtime data
+data/
+*.sqlite
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+
+# Operational/user data — never commit
+*.xlsx
+*.xls
+*.csv
+*.kml
+*.kmz
+*.geojson
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Signal
+signal-cli-data/
+.signal-cli/
+
+# Logs / temporary
+*.log
+*.tmp
+*.bak
+app_lite.html
+
+# Codex coordination runtime state
+.codex/coordination/*
+!.codex/coordination/project.yaml
