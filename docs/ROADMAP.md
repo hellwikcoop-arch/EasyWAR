@@ -32,6 +32,7 @@
 - [x] explicit disconnected/no-intake state in desktop UI
 - [ ] Signal Inbox
   - [x] synthetic status transitions with a reviewer identifier
+  - [x] clearly labelled synthetic-only UI preview (no persistence)
   - [ ] persistence and UI
 - [x] status model: NEW / PARSED / NEEDS_REVIEW / APPROVED / REJECTED
 - [ ] import message into intake parser

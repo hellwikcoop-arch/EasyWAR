@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { createSyntheticInbox, transitionSyntheticItem, SYNTHETIC_REVIEWER } from './signal-inbox-preview.js';
 import { describeSignalRuntime } from './signal-runtime.js';
 import './signal-settings.css';
 
@@ -41,6 +42,12 @@ function initializeSignalSettings() {
         <textarea id="ew-signal-groups" rows="4" spellcheck="false" autocomplete="off"></textarea>
       </label>
       <p class="ew-signal-note">Приймання повідомлень залишатиметься вимкненим. Схвалення записів виконується лише після перевірки.</p>
+      <details id="ew-signal-demo" class="ew-signal-demo">
+        <summary>Черга Signal — демонстрація</summary>
+        <p>Лише вигадані записи. Вони не надходять із Signal, не зберігаються й скидаються після закриття вікна. Не вводьте реальні дані.</p>
+        <ul id="ew-signal-demo-list" class="ew-signal-demo-list"></ul>
+        <p id="ew-signal-demo-status" class="ew-signal-status" role="status" aria-live="polite"></p>
+      </details>
       <p id="ew-signal-status" class="ew-signal-status" role="status" aria-live="polite"></p>
       <div class="ew-signal-actions">
         <button type="button" class="btn" id="ew-signal-cancel">Скасувати</button>
@@ -55,7 +62,57 @@ function initializeSignalSettings() {
   const status = dialog.querySelector('#ew-signal-status');
   const runtime = dialog.querySelector('#ew-signal-runtime');
   const saveButton = dialog.querySelector('#ew-signal-save');
+  const demo = dialog.querySelector('#ew-signal-demo');
+  const demoList = dialog.querySelector('#ew-signal-demo-list');
+  const demoStatus = dialog.querySelector('#ew-signal-demo-status');
   let currentConfig = null;
+  let demoItems = createSyntheticInbox();
+  const statusLabels = {
+    NEW: 'Нове', PARSED: 'Розібрано', NEEDS_REVIEW: 'Потребує перевірки',
+    APPROVED: 'Схвалено в демо', REJECTED: 'Відхилено в демо',
+  };
+
+  function applyDemoAction(item, action) {
+    try {
+      const changed = transitionSyntheticItem(item, action, SYNTHETIC_REVIEWER);
+      demoItems = demoItems.map(current => current.id === item.id ? changed : current);
+      renderDemo();
+      demoStatus.textContent = `Тестовий стан змінено: ${statusLabels[changed.status]}. Дані не збережено.`;
+    } catch (error) {
+      demoStatus.textContent = String(error);
+    }
+  }
+
+  function renderDemo() {
+    demoList.replaceChildren();
+    for (const item of demoItems) {
+      const row = document.createElement('li');
+      const heading = document.createElement('strong');
+      heading.textContent = item.title;
+      const state = document.createElement('span');
+      state.textContent = statusLabels[item.status];
+      row.append(heading, state);
+      const actions = document.createElement('div');
+      actions.className = 'ew-signal-demo-actions';
+      const options = item.status === 'NEW'
+        ? [['Позначити розібраним', 'MARK_PARSED'], ['На перевірку', 'REQUEST_REVIEW']]
+        : item.status === 'PARSED'
+          ? [['На перевірку', 'REQUEST_REVIEW']]
+          : item.status === 'NEEDS_REVIEW'
+            ? [['Схвалити в демо', 'APPROVE'], ['Відхилити в демо', 'REJECT']]
+            : [];
+      for (const [label, action] of options) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'btn quiet';
+        button.textContent = label;
+        button.addEventListener('click', () => applyDemoAction(item, action));
+        actions.append(button);
+      }
+      row.append(actions);
+      demoList.append(row);
+    }
+  }
 
   function close() {
     dialog.close();
@@ -64,6 +121,10 @@ function initializeSignalSettings() {
 
   openButton.addEventListener('click', async () => {
     currentConfig = null;
+    demoItems = createSyntheticInbox();
+    demo.open = false;
+    demoStatus.textContent = '';
+    renderDemo();
     runtime.textContent = describeSignalRuntime(null).message;
     saveButton.disabled = true;
     status.textContent = 'Завантаження локальних налаштувань…';

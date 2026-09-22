@@ -46,6 +46,13 @@ with `intake_enabled: true` still cannot make the desktop connector active.
 
 The current in-memory model supports `NEW`, `PARSED`, `NEEDS_REVIEW`, `APPROVED`, and `REJECTED`. A new item can be marked parsed or sent directly for review. Approval and rejection are possible only from `NEEDS_REVIEW` and require a nonblank reviewer identifier. Final states cannot be reopened by this model. Each accepted action returns a transition record for a future transactional audit write; no message content is stored by this module. The model does not authenticate a reviewer or provide an approval UI; those checks belong to a later integration step.
 
+The settings dialog includes a separately labelled synthetic Inbox preview. It
+starts with two fabricated items, uses an explicit synthetic reviewer for manual
+decisions, and resets on reopening. It does not read Signal, persist messages,
+or constitute an operational approval UI. The preview's JavaScript transition
+rules are regression-tested separately; the Rust review model remains the
+source contract for a future persistent implementation.
+
 ## Not implemented in this step
 
 - daemon process management;
@@ -54,7 +61,7 @@ The current in-memory model supports `NEW`, `PARSED`, `NEEDS_REVIEW`, `APPROVED`
 - account or group discovery;
 - enabling or connecting a Signal account;
 - message ingestion and parsing;
-- Signal Inbox persistence or UI.
+- Signal Inbox persistence or a UI for real messages.
 
 All tests use synthetic configuration values only, including the disconnected
 UI-state regression tests.
