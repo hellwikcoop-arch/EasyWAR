@@ -1,5 +1,6 @@
 mod database;
 pub mod repository;
+pub mod xlsx_import;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
