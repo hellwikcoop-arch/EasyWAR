@@ -1,5 +1,11 @@
 import { invoke } from '@tauri-apps/api/core';
+import QRCode from 'qrcode';
 import { createSyntheticInbox, transitionSyntheticItem, SYNTHETIC_REVIEWER } from './signal-inbox-preview.js';
+import {
+  clearSignalLinkSession,
+  completeSignalLinkSession,
+  createSignalLinkSession,
+} from './signal-link.js';
 import { describeSignalRuntime } from './signal-runtime.js';
 import './signal-settings.css';
 
@@ -31,6 +37,17 @@ function initializeSignalSettings() {
       </div>
       <p id="ew-signal-runtime" class="ew-signal-runtime" role="status" aria-live="polite"></p>
       <p class="ew-signal-note">Вкажіть дозволені джерела. Перевірка локального демона показує акаунти й групи, але не читає повідомлень і не вмикає приймання.</p>
+      <section class="ew-signal-link" aria-label="Прив’язка Signal як пов’язаного пристрою">
+        <h3>Пов’язати цей EasyWAR із Signal</h3>
+        <p class="ew-signal-note">Створює короткочасний QR у вже запущеному локальному signal-cli. URI не зберігається. Після початку не закривайте вікно до результату.</p>
+        <label class="ew-signal-field" for="ew-signal-device-name">
+          <span>Назва пристрою</span>
+          <input id="ew-signal-device-name" maxlength="64" value="EasyWAR Desktop" autocomplete="off" spellcheck="false">
+        </label>
+        <button type="button" class="btn quiet" id="ew-signal-link-start">Створити QR і чекати сканування</button>
+        <canvas id="ew-signal-link-qr" class="ew-signal-link-qr" width="240" height="240" role="img" aria-label="QR для короткочасної прив’язки Signal" hidden></canvas>
+        <p id="ew-signal-link-status" class="ew-signal-status" role="status" aria-live="polite"></p>
+      </section>
       <section class="ew-signal-discovery" aria-label="Пошук локальних акаунтів і груп">
         <button type="button" class="btn quiet" id="ew-signal-discover">Перевірити локальний signal-cli</button>
         <p class="ew-signal-note">Потрібен уже запущений signal-cli у багатокористувацькому HTTP-режимі з ручним прийманням на збереженій локальній адресі. Це не прив’язує новий пристрій.</p>
@@ -81,10 +98,19 @@ function initializeSignalSettings() {
   const groupsButton = dialog.querySelector('#ew-signal-groups-discover');
   const foundGroups = dialog.querySelector('#ew-signal-found-groups');
   const discoveryStatus = dialog.querySelector('#ew-signal-discovery-status');
+  const linkButton = dialog.querySelector('#ew-signal-link-start');
+  const linkDeviceName = dialog.querySelector('#ew-signal-device-name');
+  const linkCanvas = dialog.querySelector('#ew-signal-link-qr');
+  const linkStatus = dialog.querySelector('#ew-signal-link-status');
+  const closeButton = dialog.querySelector('#ew-signal-close');
+  const cancelButton = dialog.querySelector('#ew-signal-cancel');
   let currentConfig = null;
   let demoItems = createSyntheticInbox();
   let discoveryEpoch = 0;
   let groupsEpoch = 0;
+  let linkEpoch = 0;
+  let linkBusy = false;
+  let linkSession = clearSignalLinkSession();
   const statusLabels = {
     NEW: 'Нове', PARSED: 'Розібрано', NEEDS_REVIEW: 'Потребує перевірки',
     APPROVED: 'Схвалено в демо', REJECTED: 'Відхилено в демо',
@@ -133,14 +159,91 @@ function initializeSignalSettings() {
   }
 
   function close() {
+    if (linkBusy) {
+      linkStatus.textContent = 'Завершуємо прив’язку. Зачекайте на результат або завершення двохвилинного очікування.';
+      return;
+    }
     discoveryEpoch += 1;
     groupsEpoch += 1;
+    linkEpoch += 1;
     dialog.close();
     openButton.focus();
   }
   dialog.addEventListener('close', () => {
     discoveryEpoch += 1;
     groupsEpoch += 1;
+    linkEpoch += 1;
+    resetLink();
+  });
+  dialog.addEventListener('cancel', event => {
+    if (!linkBusy) return;
+    event.preventDefault();
+    linkStatus.textContent = 'Завершуємо прив’язку. Зачекайте на результат або завершення двохвилинного очікування.';
+  });
+
+  function clearLinkCanvas() {
+    const context = linkCanvas.getContext('2d');
+    context?.clearRect(0, 0, linkCanvas.width, linkCanvas.height);
+    linkCanvas.hidden = true;
+  }
+
+  function setLinkBusy(busy) {
+    linkBusy = busy;
+    linkButton.disabled = busy || !currentConfig;
+    linkDeviceName.disabled = busy;
+    closeButton.disabled = busy;
+    cancelButton.disabled = busy;
+    saveButton.disabled = busy || !currentConfig;
+    discoverButton.disabled = busy || !currentConfig;
+  }
+
+  function resetLink() {
+    linkSession = clearSignalLinkSession();
+    clearLinkCanvas();
+    linkStatus.textContent = '';
+    if (!linkBusy) setLinkBusy(false);
+  }
+
+  linkButton.addEventListener('click', async () => {
+    if (!currentConfig || linkBusy) return;
+    const deviceName = linkDeviceName.value.trim();
+    if (!deviceName || deviceName.length > 64 || /[\u0000-\u001f\u007f]/.test(deviceName)) {
+      linkStatus.textContent = 'Вкажіть назву пристрою від 1 до 64 видимих символів.';
+      return;
+    }
+    const epoch = ++linkEpoch;
+    resetLink();
+    setLinkBusy(true);
+    linkStatus.textContent = 'Створюємо короткочасний QR…';
+    try {
+      const started = await invoke('start_signal_link');
+      if (epoch !== linkEpoch) return;
+      linkSession = createSignalLinkSession(started.device_link_uri);
+      await QRCode.toCanvas(linkCanvas, linkSession.deviceLinkUri, {
+        width: 240,
+        margin: 2,
+        errorCorrectionLevel: 'M',
+        color: { dark: '#000000', light: '#ffffff' },
+      });
+      if (epoch !== linkEpoch) return;
+      linkCanvas.hidden = false;
+      linkStatus.textContent = 'Відскануйте QR у Signal на основному телефоні. Очікуємо підтвердження до двох хвилин…';
+      const account = await invoke('finish_signal_link', {
+        deviceLinkUri: linkSession.deviceLinkUri,
+        deviceName,
+      });
+      if (epoch !== linkEpoch) return;
+      linkSession = completeSignalLinkSession(account);
+      clearLinkCanvas();
+      linkStatus.textContent = `Пристрій пов’язано. Локальний акаунт: ${linkSession.accountId}. Натисніть «Перевірити локальний signal-cli», щоб оновити список.`;
+    } catch (error) {
+      if (epoch !== linkEpoch) return;
+      linkSession = clearSignalLinkSession();
+      clearLinkCanvas();
+      linkStatus.textContent = `Не вдалося пов’язати пристрій: ${String(error)}`;
+    } finally {
+      if (epoch === linkEpoch) setLinkBusy(false);
+    }
   });
 
   function resetDiscovery() {
@@ -217,6 +320,8 @@ function initializeSignalSettings() {
     discoveryEpoch += 1;
     const epoch = discoveryEpoch;
     currentConfig = null;
+    linkEpoch += 1;
+    resetLink();
     discoverButton.disabled = true;
     demoItems = createSyntheticInbox();
     demo.open = false;
@@ -239,14 +344,15 @@ function initializeSignalSettings() {
         : 'Налаштування завантажено. Приймання повідомлень вимкнено.';
       saveButton.disabled = false;
       discoverButton.disabled = false;
+      linkButton.disabled = false;
     } catch (error) {
       if (epoch !== discoveryEpoch) return;
       status.textContent = `Не вдалося відкрити налаштування: ${String(error)}`;
     }
   });
 
-  dialog.querySelector('#ew-signal-close').addEventListener('click', close);
-  dialog.querySelector('#ew-signal-cancel').addEventListener('click', close);
+  closeButton.addEventListener('click', close);
+  cancelButton.addEventListener('click', close);
   form.addEventListener('submit', async event => {
     event.preventDefault();
     if (!currentConfig) return;

@@ -25,6 +25,8 @@
   - [x] explicit read-only HTTP loopback discovery of local accounts and groups
   - [ ] live daemon connector
 - [ ] linked-account setup UX
+  - [x] short-lived local QR workflow with synthetic `startLink` / `finishLink` coverage
+  - [ ] acceptance with an installed real signal-cli and primary phone
 - [ ] account/group discovery
   - [x] user-triggered HTTP multi-account discovery (no receive or persistence)
 - [ ] allowlist

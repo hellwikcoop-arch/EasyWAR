@@ -11,7 +11,7 @@ pub mod xlsx_import;
 use backup::BackupStore;
 use repository::SettingsStore;
 use restore::BackupInspection;
-use signal_daemon::{SignalAccountSummary, SignalGroupSummary};
+use signal_daemon::{SignalAccountSummary, SignalGroupSummary, SignalLinkStart};
 use signal_policy::SignalAdapterConfig;
 use signal_settings::SignalSettingsStore;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
@@ -61,6 +61,28 @@ async fn discover_signal_groups(
 ) -> Result<Vec<SignalGroupSummary>, String> {
     let config = store.load().await.map_err(|error| error.to_string())?;
     signal_daemon::discover_groups(&config.as_config().endpoint, &account)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn start_signal_link(
+    store: tauri::State<'_, SignalSettingsStore>,
+) -> Result<SignalLinkStart, String> {
+    let config = store.load().await.map_err(|error| error.to_string())?;
+    signal_daemon::start_link(&config.as_config().endpoint)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn finish_signal_link(
+    store: tauri::State<'_, SignalSettingsStore>,
+    device_link_uri: String,
+    device_name: String,
+) -> Result<SignalAccountSummary, String> {
+    let config = store.load().await.map_err(|error| error.to_string())?;
+    signal_daemon::finish_link(&config.as_config().endpoint, &device_link_uri, &device_name)
         .await
         .map_err(|error| error.to_string())
 }
@@ -200,6 +222,8 @@ pub fn run() {
             save_signal_settings,
             discover_signal_accounts,
             discover_signal_groups,
+            start_signal_link,
+            finish_signal_link,
             create_local_backup,
             inspect_local_backup,
             inspect_local_xlsx

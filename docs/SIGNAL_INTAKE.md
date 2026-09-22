@@ -37,7 +37,13 @@ The Rust settings store saves a versioned `signal.adapter.v1` JSON setting in th
 
 The desktop window offers a Ukrainian allowlist form. It reads the local setting and saves sender/group IDs through the validated Rust command. The command itself rejects any attempt to enable intake, even if a caller bypasses the form and supplies an otherwise valid allowlist. Saving from this form keeps intake disabled and never contacts Signal. The same form reports validation or storage errors without silently changing the setting.
 
-The same dialog has separate, user-triggered discovery buttons. They use the saved, validated HTTP loopback endpoint to call `listAccounts` and then `listGroups` for a chosen local account. The daemon must be running in multi-account mode so these calls have a defined account identity. The app sends no `subscribeReceive`, `startLink`, `finishLink`, or `send` request. It disables HTTP redirects and proxies, caps each response at 1 MiB, and uses a request timeout. Returned account and group identifiers are shown locally only; discovery does not add them to the allowlist or persist them. UNIX and raw TCP transports remain configuration-only and return an explicit unsupported-transport error for discovery.
+The same dialog has separate, user-triggered discovery buttons. They use the saved, validated HTTP loopback endpoint to call `listAccounts` and then `listGroups` for a chosen local account. The daemon must be running in multi-account mode so these calls have a defined account identity. Discovery sends no `subscribeReceive`, `startLink`, `finishLink`, or `send` request. The adapter disables HTTP redirects and proxies, caps each response at 1 MiB, and uses a request timeout. Returned account and group identifiers are shown locally only; discovery does not add them to the allowlist or persist them. UNIX and raw TCP transports remain configuration-only and return an explicit unsupported-transport error for discovery.
+
+## Linked-device setup
+
+The user can explicitly start a linked-device flow against the same validated HTTP loopback daemon. EasyWAR calls `startLink`, validates the returned `sgnl://linkdevice` URI, renders it locally as a QR code from a bundled dependency, and immediately calls `finishLink` with a locally entered device name. The finish request waits for the primary phone for at most two minutes. The setup window cannot be dismissed while that wait is active, so it does not imply that a request was cancelled when it was not.
+
+The link URI is kept only in the live JavaScript/Rust request path. It is never written to SQLite, application settings, logs, documentation, fixtures, or Git, and the canvas plus in-memory reference are cleared after success, error, timeout, or dialog close. The returned account identity is shown for the current dialog session only. Linking does not enable intake, change the allowlist, subscribe to messages, or approve any record. Synthetic tests exercise `startLink`/`finishLink` against a temporary loopback server; acceptance with an installed real `signal-cli` remains unverified.
 
 The toolbar and settings dialog say that EasyWAR is not continuously connected
 and receives no Signal messages. A successful explicit discovery is a one-shot
@@ -59,7 +65,6 @@ source contract for a future persistent implementation.
 
 - daemon process management;
 - a persistent RPC or event-stream receive connection;
-- linked-account setup;
 - account/group discovery over UNIX or raw TCP;
 - enabling or connecting a Signal account;
 - message ingestion and parsing;
