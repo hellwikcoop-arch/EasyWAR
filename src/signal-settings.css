@@ -1,0 +1,74 @@
+.ew-signal-dialog {
+  width: min(620px, calc(100vw - 24px));
+  max-height: min(760px, calc(100vh - 24px));
+  overflow: auto;
+  padding: 22px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, .38);
+  font: inherit;
+}
+
+.ew-signal-dialog::backdrop {
+  background: rgba(0, 0, 0, .65);
+}
+
+.ew-signal-dialog form,
+.ew-signal-field {
+  display: grid;
+  gap: 12px;
+}
+
+.ew-signal-head,
+.ew-signal-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ew-signal-head h2 {
+  margin: 0;
+}
+
+.ew-signal-note,
+.ew-signal-field small {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.ew-signal-field {
+  gap: 5px;
+  font-weight: 600;
+}
+
+.ew-signal-field textarea {
+  width: 100%;
+  min-height: 90px;
+  resize: vertical;
+  padding: 9px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--ink);
+  font: 13px/1.5 var(--mono);
+}
+
+.ew-signal-field textarea:focus-visible {
+  border-color: var(--accent);
+}
+
+.ew-signal-status {
+  min-height: 2.7em;
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.ew-signal-actions {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}

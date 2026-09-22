@@ -28,7 +28,7 @@
 - [ ] allowlist
   - [x] exact sender and group match policy; deny by default
   - [x] validated local settings persistence
-  - [ ] local configuration and management UI
+  - [x] local allowlist management UI (intake remains disabled)
 - [ ] Signal Inbox
   - [x] synthetic status transitions with a reviewer identifier
   - [ ] persistence and UI

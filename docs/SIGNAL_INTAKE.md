@@ -35,6 +35,8 @@ References:
 
 The Rust settings store saves a versioned `signal.adapter.v1` JSON setting in the application-local SQLite database. Tauri commands expose validated read and write operations to the desktop window; the window has no direct SQL plugin permission. With no saved setting, intake remains disabled. Saving validates the endpoint, receive mode, allowlist, and approval policy; loading validates them again. Invalid or unknown-version settings fail closed. Real allowlist identifiers are local application data and must not be committed or copied into test fixtures.
 
+The desktop window offers a Ukrainian allowlist form. It reads the local setting and saves sender/group IDs through the validated Rust command. Saving from this form always keeps intake disabled and never contacts Signal. The same form reports validation or storage errors without silently changing the setting.
+
 ## Inbox review model
 
 The current in-memory model supports `NEW`, `PARSED`, `NEEDS_REVIEW`, `APPROVED`, and `REJECTED`. A new item can be marked parsed or sent directly for review. Approval and rejection are possible only from `NEEDS_REVIEW` and require a nonblank reviewer identifier. Final states cannot be reopened by this model. Each accepted action returns a transition record for a future transactional audit write; no message content is stored by this module. The model does not authenticate a reviewer or provide an approval UI; those checks belong to a later integration step.
@@ -45,7 +47,7 @@ The current in-memory model supports `NEW`, `PARSED`, `NEEDS_REVIEW`, `APPROVED`
 - a live RPC or event-stream connection;
 - linked-account setup;
 - account or group discovery;
-- local allowlist management UI;
+- enabling or connecting a Signal account;
 - message ingestion and parsing;
 - Signal Inbox persistence or UI.
 
