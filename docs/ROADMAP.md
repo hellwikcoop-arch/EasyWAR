@@ -8,7 +8,7 @@
 - [x] preserve current HTML/CSS/JS UI as first frontend
 - [x] Rust application core scaffold
 - [x] SQLite plugin / schema / migrations
-- [ ] repository layer
+- [x] repository layer
 - [ ] settings store
 - [x] audit log
 - [ ] import path for current EasyWAR/XLSX workflow

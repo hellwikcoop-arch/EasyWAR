@@ -29,6 +29,26 @@ fixtures.
 The `report_current_state` view derives `NEW`, `PARSED`, or the latest review
 decision without overwriting source or parser records.
 
+## Repository layer
+
+`src-tauri/src/repository.rs` is the typed Rust write boundary for provenance
+data. It accepts caller-generated identifiers and timestamps so future import
+adapters can preserve stable identities and retry safely without inventing
+hidden database state.
+
+Each write method uses one SQLite transaction:
+
+- `capture_report` stores the raw source, report identity and `CAPTURED` audit event;
+- `store_parse` stores one immutable parser version and its `PARSED` audit event;
+- `record_correction` stores one append-only correction and its audit event;
+- `review_and_revise` stores a review decision, matching revision snapshot and
+  one decision audit event.
+
+If any statement fails, none of the transaction's domain or audit rows persist.
+The repository exposes the derived current status as a read-only query. It does
+not expose Tauri commands yet and does not open or populate a real database in
+tests.
+
 ## Invariants
 
 - Raw source, parsed payload, corrections and approval decisions are separate.
@@ -37,8 +57,8 @@ decision without overwriting source or parser records.
 - Cross-table keys prevent a correction, decision or revision from referencing
   a parser version belonging to another report.
 - Tests use a temporary in-memory database and synthetic values only.
-- Application code must add a matching audit event when it changes mutable
-  state; the repository layer is responsible for making those writes atomic.
+- Application code must use the repository write boundary so domain records and
+  matching audit events remain atomic.
 
 ## Migration workflow
 

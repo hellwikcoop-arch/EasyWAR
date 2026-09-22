@@ -4,7 +4,8 @@ use tauri_plugin_sql::{Migration, MigrationKind};
 /// configuration directory. Runtime database files must never be committed.
 pub const DATABASE_URL: &str = "sqlite:easywar.db";
 
-const INITIAL_SCHEMA_SQL: &str = include_str!("../migrations/0001_provenance_schema.sql");
+pub(crate) const INITIAL_SCHEMA_SQL: &str =
+    include_str!("../migrations/0001_provenance_schema.sql");
 
 pub fn migrations() -> Vec<Migration> {
     vec![Migration {
