@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeSet,
     net::{Ipv4Addr, SocketAddr},
@@ -9,7 +9,7 @@ pub const SIGNAL_HTTP_RPC_PATH: &str = "/api/v1/rpc";
 pub const SIGNAL_HTTP_EVENTS_PATH: &str = "/api/v1/events";
 pub const SIGNAL_HTTP_CHECK_PATH: &str = "/api/v1/check";
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(tag = "transport", rename_all = "snake_case")]
 pub enum SignalDaemonEndpoint {
     UnixSocket { path: PathBuf },
@@ -39,7 +39,7 @@ impl SignalDaemonEndpoint {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SignalReceiveMode {
     Manual,
@@ -47,7 +47,8 @@ pub enum SignalReceiveMode {
     OnConnection,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct SignalAllowlist {
     allowed_senders: BTreeSet<String>,
     allowed_groups: BTreeSet<String>,
@@ -74,6 +75,19 @@ impl SignalAllowlist {
     fn has_allowed_sender(&self) -> bool {
         !self.allowed_senders.is_empty()
     }
+
+    fn validate(&self) -> Result<(), SignalPolicyError> {
+        if self
+            .allowed_senders
+            .iter()
+            .chain(self.allowed_groups.iter())
+            .all(|id| valid_id(id))
+        {
+            Ok(())
+        } else {
+            Err(SignalPolicyError::InvalidAllowlistId)
+        }
+    }
 }
 
 fn collect_ids(
@@ -81,7 +95,7 @@ fn collect_ids(
 ) -> Result<BTreeSet<String>, SignalPolicyError> {
     ids.into_iter()
         .map(|id| {
-            if id.is_empty() || id.trim() != id || id == "*" || id.chars().any(char::is_control) {
+            if !valid_id(&id) {
                 Err(SignalPolicyError::InvalidAllowlistId)
             } else {
                 Ok(id)
@@ -90,7 +104,12 @@ fn collect_ids(
         .collect()
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+fn valid_id(id: &str) -> bool {
+    !id.is_empty() && id.trim() == id && id != "*" && !id.chars().any(char::is_control)
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct SignalAdapterConfig {
     pub endpoint: SignalDaemonEndpoint,
     pub receive_mode: SignalReceiveMode,
@@ -116,6 +135,7 @@ impl Default for SignalAdapterConfig {
 impl SignalAdapterConfig {
     pub fn validate(self) -> Result<ValidatedSignalAdapterConfig, SignalPolicyError> {
         self.endpoint.validate()?;
+        self.allowlist.validate()?;
 
         if self.receive_mode != SignalReceiveMode::Manual {
             return Err(SignalPolicyError::ManualReceiveRequired);
@@ -334,6 +354,25 @@ mod tests {
         );
         assert_eq!(
             SignalAllowlist::new(["sender\nalpha".to_owned()], Vec::new()),
+            Err(SignalPolicyError::InvalidAllowlistId)
+        );
+    }
+
+    #[test]
+    fn deserialized_allowlist_is_revalidated() {
+        let allowlist: SignalAllowlist = serde_json::from_value(serde_json::json!({
+            "allowed_senders": ["*"],
+            "allowed_groups": []
+        }))
+        .unwrap();
+
+        assert_eq!(
+            SignalAdapterConfig {
+                intake_enabled: true,
+                allowlist,
+                ..SignalAdapterConfig::default()
+            }
+            .validate(),
             Err(SignalPolicyError::InvalidAllowlistId)
         );
     }

@@ -27,6 +27,7 @@
 - [ ] account/group discovery
 - [ ] allowlist
   - [x] exact sender and group match policy; deny by default
+  - [x] validated local settings persistence
   - [ ] local configuration and management UI
 - [ ] Signal Inbox
   - [x] synthetic status transitions with a reviewer identifier

@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Основні локальні можливості вікна EasyWAR.",
   "windows": ["main"],
-  "permissions": ["core:default", "sql:default"]
+  "permissions": ["core:default"]
 }
