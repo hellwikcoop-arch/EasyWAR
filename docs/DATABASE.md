@@ -43,11 +43,15 @@ Each write method uses one SQLite transaction:
 - `record_correction` stores one append-only correction and its audit event;
 - `review_and_revise` stores a review decision, matching revision snapshot and
   one decision audit event.
+- `stage_xlsx_batch` writes all new XLSX rows in one transaction as immutable
+  interpreted-cell snapshots plus separate parsed versions and audit events;
+  it never approves rows and rejects conflicting exact-file retries.
 
 If any statement fails, none of the transaction's domain or audit rows persist.
 The repository exposes the derived current status as a read-only query. It does
-not expose Tauri commands yet and does not open or populate a real database in
-tests.
+not expose a Tauri command for XLSX staging yet and does not open or populate
+a real database in tests. Only the read-only XLSX compatibility check is
+currently exposed in the desktop UI.
 
 ## Settings store
 

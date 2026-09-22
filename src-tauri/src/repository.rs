@@ -1,5 +1,9 @@
+use crate::xlsx_import::XlsxImportBatch;
+use serde::Serialize;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use sqlx::{Sqlite, SqlitePool, Transaction};
+use std::collections::BTreeSet;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SourceType {
@@ -138,12 +142,26 @@ pub struct StoredSetting {
     pub updated_at: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct XlsxStageResult {
+    pub staged_rows: usize,
+    pub already_present_rows: usize,
+}
+
+type ExistingXlsxRow = (String, Option<String>, Option<String>, Option<String>);
+
 #[derive(Debug, thiserror::Error)]
 pub enum RepositoryError {
     #[error("database operation failed")]
     Database(#[from] sqlx::Error),
     #[error("stored setting contains invalid JSON")]
     InvalidStoredSettingJson(#[from] serde_json::Error),
+    #[error("Некоректний пакет імпорту XLSX: {0}")]
+    InvalidXlsxBatch(String),
+    #[error("Наявний рядок XLSX має інший вміст або неповну історію: {0}")]
+    XlsxIdentityConflict(String),
+    #[error("Не вдалося серіалізувати розібраний рядок XLSX")]
+    InvalidXlsxPayload(serde_json::Error),
 }
 
 #[derive(Clone, Debug)]
@@ -222,6 +240,172 @@ fn parse_stored_setting(
 impl Repository {
     pub fn new(pool: SqlitePool) -> Self {
         Self { pool }
+    }
+
+    pub async fn stage_xlsx_batch(
+        &self,
+        batch: &XlsxImportBatch,
+        captured_at: &str,
+    ) -> Result<XlsxStageResult, RepositoryError> {
+        let hash = &batch.workbook_sha256;
+        if hash.len() != 64
+            || !hash
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            || batch.sheet_name.trim().is_empty()
+            || captured_at.trim().is_empty()
+        {
+            return Err(RepositoryError::InvalidXlsxBatch(
+                "немає коректної ідентичності файлу, аркуша або часу".to_owned(),
+            ));
+        }
+        let mut row_numbers = BTreeSet::new();
+        for row in &batch.rows {
+            if row.row_number < 2
+                || !row_numbers.insert(row.row_number)
+                || row.source_cells.is_empty()
+            {
+                return Err(RepositoryError::InvalidXlsxBatch(format!(
+                    "неоднозначний або порожній рядок {}",
+                    row.row_number
+                )));
+            }
+        }
+
+        let mut transaction = self.pool.begin().await?;
+        let mut result = XlsxStageResult {
+            staged_rows: 0,
+            already_present_rows: 0,
+        };
+        for row in &batch.rows {
+            let key = format!("{hash}:{}", row.row_number);
+            let source_id = format!("xlsx-source:{key}");
+            let report_id = format!("xlsx-report:{key}");
+            let parse_id = format!("xlsx-parse:{key}:v1");
+            let capture_audit_id = format!("xlsx-audit:capture:{key}");
+            let parse_audit_id = format!("xlsx-audit:parse:{key}");
+            let source_item_key = format!("row:{}", row.row_number);
+            let raw_payload_json = json!({ "cells": &row.source_cells }).to_string();
+            let raw_sha256 = format!("{:x}", Sha256::digest(raw_payload_json.as_bytes()));
+            let parsed_payload_json =
+                serde_json::to_string(&row.parsed).map_err(RepositoryError::InvalidXlsxPayload)?;
+
+            let existing: Option<ExistingXlsxRow> = sqlx::query_as(
+                    "SELECT raw_sources.raw_sha256, reports.id,
+                            parsed_report_versions.id, parsed_report_versions.parsed_payload_json
+                     FROM raw_sources
+                     LEFT JOIN reports ON reports.raw_source_id = raw_sources.id AND reports.id = ?
+                     LEFT JOIN parsed_report_versions ON parsed_report_versions.report_id = reports.id
+                         AND parsed_report_versions.id = ?
+                     WHERE raw_sources.id = ?",
+                )
+                .bind(&report_id)
+                .bind(&parse_id)
+                .bind(&source_id)
+                .fetch_optional(&mut *transaction)
+                .await?;
+            if let Some((stored_hash, stored_report, stored_parse, stored_payload)) = existing {
+                let audit_count: i64 = sqlx::query_scalar(
+                    "SELECT count(*) FROM audit_log
+                     WHERE (id = ? AND report_id = ? AND action = 'CAPTURED')
+                        OR (id = ? AND report_id = ? AND action = 'PARSED')",
+                )
+                .bind(&capture_audit_id)
+                .bind(&report_id)
+                .bind(&parse_audit_id)
+                .bind(&report_id)
+                .fetch_one(&mut *transaction)
+                .await?;
+                if stored_hash != raw_sha256
+                    || stored_report.as_deref() != Some(&report_id)
+                    || stored_parse.as_deref() != Some(&parse_id)
+                    || stored_payload.as_deref() != Some(&parsed_payload_json)
+                    || audit_count != 2
+                {
+                    return Err(RepositoryError::XlsxIdentityConflict(key));
+                }
+                result.already_present_rows += 1;
+                continue;
+            }
+
+            sqlx::query(
+                "INSERT INTO raw_sources
+                 (id, source_type, captured_at, content_type, raw_payload_json,
+                  raw_sha256, metadata_json, created_at)
+                 VALUES (?, 'XLSX', ?, 'application/json', ?, ?, ?, ?)",
+            )
+            .bind(&source_id)
+            .bind(captured_at)
+            .bind(&raw_payload_json)
+            .bind(&raw_sha256)
+            .bind(
+                json!({
+                    "workbook_sha256": hash,
+                    "sheet_name": &batch.sheet_name,
+                    "row_number": row.row_number,
+                    "snapshot_kind": "interpreted_cell_values"
+                })
+                .to_string(),
+            )
+            .bind(captured_at)
+            .execute(&mut *transaction)
+            .await?;
+            sqlx::query(
+                "INSERT INTO reports (id, raw_source_id, source_item_key, created_at)
+                 VALUES (?, ?, ?, ?)",
+            )
+            .bind(&report_id)
+            .bind(&source_id)
+            .bind(&source_item_key)
+            .bind(captured_at)
+            .execute(&mut *transaction)
+            .await?;
+            insert_audit(
+                &mut transaction,
+                &AuditContext {
+                    id: capture_audit_id,
+                    actor_type: ActorType::System,
+                    actor_label: None,
+                    occurred_at: captured_at.to_owned(),
+                },
+                Some(&report_id),
+                "report",
+                &report_id,
+                "CAPTURED",
+                json!({ "sourceType": "XLSX" }),
+            )
+            .await?;
+            sqlx::query(
+                "INSERT INTO parsed_report_versions
+                 (id, report_id, version, parser_name, parser_version, parsed_payload_json, parsed_at)
+                 VALUES (?, ?, 1, 'easywar-xlsx', '1', ?, ?)",
+            )
+            .bind(&parse_id)
+            .bind(&report_id)
+            .bind(&parsed_payload_json)
+            .bind(captured_at)
+            .execute(&mut *transaction)
+            .await?;
+            insert_audit(
+                &mut transaction,
+                &AuditContext {
+                    id: parse_audit_id,
+                    actor_type: ActorType::System,
+                    actor_label: None,
+                    occurred_at: captured_at.to_owned(),
+                },
+                Some(&report_id),
+                "parsed_report_version",
+                &parse_id,
+                "PARSED",
+                json!({ "version": 1 }),
+            )
+            .await?;
+            result.staged_rows += 1;
+        }
+
+        transaction.commit().await?;
+        Ok(result)
     }
 
     pub async fn capture_report(&self, input: &CaptureReportInput) -> Result<(), RepositoryError> {
@@ -456,6 +640,7 @@ async fn insert_audit(
 mod tests {
     use super::*;
     use crate::database::INITIAL_SCHEMA_SQL;
+    use crate::xlsx_import::{EasyWarRecord, XlsxImportRow, XlsxSourceCell};
     use sqlx::sqlite::SqlitePoolOptions;
 
     const NOW: &str = "2026-01-01T00:00:00Z";
@@ -513,6 +698,229 @@ mod tests {
             parsed_at: NOW.to_owned(),
             audit: audit(audit_id),
         }
+    }
+
+    fn synthetic_xlsx_row(row_number: u32) -> XlsxImportRow {
+        let number = (row_number - 1).to_string();
+        let raw_date = if row_number == 2 {
+            "01.01.2026"
+        } else {
+            "02.01.2026"
+        };
+        let parsed_date = if row_number == 2 {
+            "2026-01-01"
+        } else {
+            "2026-01-02"
+        };
+        let headers = [
+            "№",
+            "Дата",
+            "Час ураження",
+            "№ цілі (TS/KS)",
+            "В інтересах",
+            "Район / н.п.",
+            "DPI / Координати MGRS",
+            "Тип цілі",
+            "Місяць",
+            "Тип ЛА",
+            "Тип боєприпасу",
+            "К-сть боєприпасів",
+            "Результат ураження",
+            "Причина",
+            "Уточнення результату",
+        ];
+        let values = [
+            number.as_str(),
+            raw_date,
+            "10:15",
+            "SYN-ONLY",
+            "Синтетичний підрозділ",
+            "Тестовий район",
+            "",
+            "Навчальна ціль",
+            "Січень",
+            "Навчальний ЛА",
+            "Навчальний БП",
+            "1",
+            "НЕВІДОМО",
+            "",
+            "Синтетичний запис",
+        ];
+        let raw_values = headers
+            .iter()
+            .zip(values)
+            .map(|(header, value)| ((*header).to_owned(), value.to_owned()))
+            .collect();
+        let mut source_cells: Vec<XlsxSourceCell> = headers
+            .iter()
+            .zip(values)
+            .enumerate()
+            .map(|(index, (header, value))| XlsxSourceCell {
+                column: index as u32 + 1,
+                header: (*header).to_owned(),
+                value: value.to_owned(),
+            })
+            .collect();
+        source_cells.push(XlsxSourceCell {
+            column: 16,
+            header: "Додаткове поле".to_owned(),
+            value: "Синтетичне значення".to_owned(),
+        });
+        XlsxImportRow {
+            row_number,
+            raw_values,
+            source_cells,
+            parsed: EasyWarRecord {
+                number,
+                date: parsed_date.to_owned(),
+                time: "10:15".to_owned(),
+                target_ids: "SYN-ONLY".to_owned(),
+                unit: "Синтетичний підрозділ".to_owned(),
+                district: "Тестовий район".to_owned(),
+                coordinates: String::new(),
+                target_type: "Навчальна ціль".to_owned(),
+                month: "Січень".to_owned(),
+                aircraft: "Навчальний ЛА".to_owned(),
+                munition: "Навчальний БП".to_owned(),
+                munition_count: "1".to_owned(),
+                result: "НЕВІДОМО".to_owned(),
+                cause: String::new(),
+                note: "Синтетичний запис".to_owned(),
+            },
+        }
+    }
+
+    fn synthetic_xlsx_batch() -> XlsxImportBatch {
+        XlsxImportBatch {
+            workbook_sha256: format!("{:x}", Sha256::digest(b"synthetic-only-workbook")),
+            sheet_name: "Зведена".to_owned(),
+            rows: vec![synthetic_xlsx_row(2), synthetic_xlsx_row(3)],
+        }
+    }
+
+    #[tokio::test]
+    async fn stages_synthetic_xlsx_in_separate_provenance_layers_without_approval() {
+        let repository = repository().await;
+        let batch = synthetic_xlsx_batch();
+        let first = repository
+            .stage_xlsx_batch(&batch, NOW)
+            .await
+            .expect("synthetic rows must stage");
+        assert_eq!(first.staged_rows, 2);
+        assert_eq!(first.already_present_rows, 0);
+
+        let counts: (i64, i64, i64, i64, i64, i64, i64) = sqlx::query_as(
+            "SELECT (SELECT count(*) FROM raw_sources),
+                    (SELECT count(*) FROM reports),
+                    (SELECT count(*) FROM parsed_report_versions),
+                    (SELECT count(*) FROM audit_log),
+                    (SELECT count(*) FROM manual_corrections),
+                    (SELECT count(*) FROM review_decisions),
+                    (SELECT count(*) FROM revision_history)",
+        )
+        .fetch_one(&repository.pool)
+        .await
+        .expect("synthetic provenance counts must query");
+        assert_eq!(counts, (2, 2, 2, 4, 0, 0, 0));
+        let statuses: Vec<String> = sqlx::query_scalar(
+            "SELECT current_status FROM report_current_state ORDER BY report_id",
+        )
+        .fetch_all(&repository.pool)
+        .await
+        .expect("synthetic statuses must query");
+        assert_eq!(statuses, vec!["PARSED", "PARSED"]);
+        let raw_payload: String =
+            sqlx::query_scalar("SELECT raw_payload_json FROM raw_sources WHERE id = ?")
+                .bind(format!("xlsx-source:{}:2", batch.workbook_sha256))
+                .fetch_one(&repository.pool)
+                .await
+                .expect("synthetic raw payload must query");
+        assert!(raw_payload.contains("Синтетичне значення"));
+        assert!(raw_payload.contains("01.01.2026"));
+        let parsed_payload: String = sqlx::query_scalar(
+            "SELECT parsed_payload_json FROM parsed_report_versions WHERE report_id = ?",
+        )
+        .bind(format!("xlsx-report:{}:2", batch.workbook_sha256))
+        .fetch_one(&repository.pool)
+        .await
+        .expect("synthetic parsed payload must query");
+        assert_eq!(
+            serde_json::from_str::<Value>(&parsed_payload)
+                .expect("synthetic parsed JSON")
+                .get("date"),
+            Some(&json!("2026-01-01"))
+        );
+
+        let retry = repository
+            .stage_xlsx_batch(&batch, NOW)
+            .await
+            .expect("exact synthetic retry must be idempotent");
+        assert_eq!(retry.staged_rows, 0);
+        assert_eq!(retry.already_present_rows, 2);
+        let audit_count: i64 = sqlx::query_scalar("SELECT count(*) FROM audit_log")
+            .fetch_one(&repository.pool)
+            .await
+            .expect("retry audit count must query");
+        assert_eq!(audit_count, 4);
+
+        let mut changed_parse = batch.clone();
+        changed_parse.rows[0].parsed.note = "Інше синтетичне значення".to_owned();
+        assert!(matches!(
+            repository.stage_xlsx_batch(&changed_parse, NOW).await,
+            Err(RepositoryError::XlsxIdentityConflict(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn duplicate_xlsx_row_numbers_are_rejected_before_any_write() {
+        let repository = repository().await;
+        let mut batch = synthetic_xlsx_batch();
+        batch.rows[1].row_number = batch.rows[0].row_number;
+
+        assert!(matches!(
+            repository.stage_xlsx_batch(&batch, NOW).await,
+            Err(RepositoryError::InvalidXlsxBatch(_))
+        ));
+        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM raw_sources")
+            .fetch_one(&repository.pool)
+            .await
+            .expect("empty synthetic database must query");
+        assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn xlsx_identity_conflict_rolls_back_the_entire_new_batch() {
+        let repository = repository().await;
+        let batch = synthetic_xlsx_batch();
+        sqlx::query(
+            "INSERT INTO raw_sources
+             (id, source_type, captured_at, content_type, raw_text, raw_sha256, created_at)
+             VALUES (?, 'XLSX', ?, 'text/plain', ?, ?, ?)",
+        )
+        .bind(format!("xlsx-source:{}:3", batch.workbook_sha256))
+        .bind(NOW)
+        .bind("синтетичний конфлікт")
+        .bind("b".repeat(64))
+        .bind(NOW)
+        .execute(&repository.pool)
+        .await
+        .expect("synthetic conflict must seed");
+
+        let error = repository
+            .stage_xlsx_batch(&batch, NOW)
+            .await
+            .expect_err("conflicting identity must fail closed");
+        assert!(matches!(error, RepositoryError::XlsxIdentityConflict(_)));
+        let counts: (i64, i64, i64, i64) = sqlx::query_as(
+            "SELECT (SELECT count(*) FROM raw_sources),
+                    (SELECT count(*) FROM reports),
+                    (SELECT count(*) FROM parsed_report_versions),
+                    (SELECT count(*) FROM audit_log)",
+        )
+        .fetch_one(&repository.pool)
+        .await
+        .expect("rollback counts must query");
+        assert_eq!(counts, (1, 0, 0, 0));
     }
 
     #[tokio::test]

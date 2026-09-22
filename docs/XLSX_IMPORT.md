@@ -42,6 +42,8 @@ allowed.
 - the resolved sheet name;
 - the original worksheet row number;
 - `raw_values`, preserving each required cell before field normalization;
+- ordered `source_cells` with the interpreted value and original header for
+  every worksheet column, including additional columns;
 - a typed `EasyWarRecord`. Its Rust member names are descriptive, while its
   serialized field names match the existing CORE record contract exactly.
 
@@ -68,9 +70,21 @@ items, not workbook rows or a file path. Cancel, invalid files and read errors
 leave the source and local database unchanged. This check is separate from the
 legacy “Відкрити таблицю” workflow, which can edit an XLSX after user actions.
 
+A separate repository primitive can stage an already parsed batch in one local
+SQLite transaction. Each row gets an immutable interpreted-cell snapshot,
+workbook SHA-256 and worksheet row identity, a separate parsed version, and
+matching capture/parse audit events. No correction or approval is created;
+the derived status is `PARSED`. Retrying identical workbook bytes is
+idempotent. A conflicting identity or incomplete prior history fails and
+rolls back the whole new batch. This primitive is tested only with synthetic
+data and is **not yet callable from the desktop UI**. It retains cell values,
+not the original XLSX bytes, XML, formulas or formatting: keep the source
+workbook separately for full source-file provenance. Similar rows in different
+workbooks are not yet deduplicated.
+
 It deliberately does not yet:
 
-- write imported rows into SQLite;
+- let the desktop UI write imported rows into SQLite;
 - approve imported records;
 - implement duplicate detection, reference workbooks or XLSX export.
 

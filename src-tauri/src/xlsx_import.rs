@@ -99,9 +99,17 @@ pub struct EasyWarRecord {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct XlsxSourceCell {
+    pub column: u32,
+    pub header: String,
+    pub value: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct XlsxImportRow {
     pub row_number: u32,
     pub raw_values: BTreeMap<String, String>,
+    pub source_cells: Vec<XlsxSourceCell>,
     pub parsed: EasyWarRecord,
 }
 
@@ -167,6 +175,16 @@ pub fn import_easywar_xlsx(bytes: &[u8]) -> Result<XlsxImportBatch, XlsxImportEr
 
         let mut raw_values = BTreeMap::new();
         let mut parsed_values = BTreeMap::new();
+        let source_cells = (0..header_row.len().max(row.len()))
+            .map(|index| XlsxSourceCell {
+                column: start.1 + index as u32 + 1,
+                header: header_row
+                    .get(index)
+                    .map(raw_cell_value)
+                    .unwrap_or_default(),
+                value: row.get(index).map(raw_cell_value).unwrap_or_default(),
+            })
+            .collect();
         for (field, column_index) in FIELD_SPECS.iter().zip(column_indexes.iter()) {
             let cell = row.get(*column_index).unwrap_or(&Data::Empty);
             let raw_value = raw_cell_value(cell);
@@ -182,6 +200,7 @@ pub fn import_easywar_xlsx(bytes: &[u8]) -> Result<XlsxImportBatch, XlsxImportEr
         imported_rows.push(XlsxImportRow {
             row_number: start.0 + offset as u32 + 2,
             raw_values,
+            source_cells,
             parsed: record_from_values(&parsed_values),
         });
     }
@@ -370,6 +389,8 @@ mod tests {
         assert_eq!(batch.rows.len(), 2);
         assert_eq!(batch.rows[0].row_number, 2);
         assert_eq!(batch.rows[0].raw_values["Дата"], "01.01.2026");
+        assert_eq!(batch.rows[0].source_cells[1].header, "Дата");
+        assert_eq!(batch.rows[0].source_cells[1].value, "01.01.2026");
         assert_eq!(batch.rows[0].parsed.date, "2026-01-01");
         assert_eq!(batch.rows[0].parsed.target_ids, "SYN-001");
         assert_eq!(batch.rows[1].row_number, 4);
@@ -441,6 +462,33 @@ mod tests {
         assert!(matches!(error, XlsxImportError::MissingColumns(_)));
         assert!(error.to_string().contains("DPI / Координати MGRS"));
         assert!(error.to_string().contains("Уточнення результату"));
+    }
+
+    #[test]
+    fn preserves_extra_column_values_in_immutable_source_snapshot() {
+        let mut column_headers = headers();
+        column_headers.push("Додаткове поле");
+        let mut source_values = vec![String::new(); column_headers.len()];
+        source_values[0] = "1".to_owned();
+        source_values[15] = "Синтетичне значення".to_owned();
+        let sheet_xml = worksheet_xml(
+            &[
+                column_headers
+                    .iter()
+                    .map(|header| header.to_string())
+                    .collect(),
+                source_values,
+            ],
+            &[],
+        );
+        let workbook = build_synthetic_workbook(EASYWAR_SHEET_NAME, &sheet_xml);
+
+        let batch = import_easywar_xlsx(&workbook).expect("synthetic extra column must import");
+        assert_eq!(batch.rows[0].raw_values.len(), 15);
+        assert_eq!(batch.rows[0].source_cells.len(), 16);
+        assert_eq!(batch.rows[0].source_cells[15].column, 16);
+        assert_eq!(batch.rows[0].source_cells[15].header, "Додаткове поле");
+        assert_eq!(batch.rows[0].source_cells[15].value, "Синтетичне значення");
     }
 
     #[test]
