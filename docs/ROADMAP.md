@@ -7,10 +7,10 @@
 - [x] Tauri 2 project scaffold
 - [x] preserve current HTML/CSS/JS UI as first frontend
 - [x] Rust application core scaffold
-- [ ] SQLite plugin / schema / migrations
+- [x] SQLite plugin / schema / migrations
 - [ ] repository layer
 - [ ] settings store
-- [ ] audit log
+- [x] audit log
 - [ ] import path for current EasyWAR/XLSX workflow
 - [x] macOS build/run path
 - [x] Windows-ready project structure

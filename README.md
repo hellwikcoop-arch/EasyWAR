@@ -46,6 +46,7 @@ The original source must remain auditable and must not be silently overwritten b
 │   └── environments/environment.toml
 ├── docs/
 │   ├── ARCHITECTURE.md
+│   ├── DATABASE.md
 │   ├── ROADMAP.md
 │   └── PROJECT_CONTEXT.md
 ├── script/build_and_run.sh
@@ -64,8 +65,8 @@ The original source must remain auditable and must not be silently overwritten b
 
 `src/index.html` is a byte-for-byte copy of the current single-file EasyWAR
 frontend. It is embedded as the first Tauri frontend without a wholesale
-rewrite. SQLite is registered, but Issue #1 intentionally creates no product
-tables or real data.
+rewrite. SQLite is registered with a versioned provenance schema; see
+[`docs/DATABASE.md`](docs/DATABASE.md). No real data is stored in the repository.
 
 The Tauri content security policy is temporarily unset because the preserved
 legacy application relies on inline scripts and styles. CSP hardening must be

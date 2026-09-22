@@ -72,6 +72,10 @@ Initial logical domains:
 
 Schema details are versioned through migrations.
 
+The first implemented schema and its invariants are documented in
+[`DATABASE.md`](DATABASE.md). It deliberately covers provenance and audit
+foundations only; domain repositories are added incrementally.
+
 ## 5. Data provenance
 
 Every intake item carries provenance.
