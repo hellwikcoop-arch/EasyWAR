@@ -29,6 +29,7 @@
   - [x] exact sender and group match policy; deny by default
   - [x] validated local settings persistence
   - [x] local allowlist management UI (intake remains disabled)
+- [x] explicit disconnected/no-intake state in desktop UI
 - [ ] Signal Inbox
   - [x] synthetic status transitions with a reviewer identifier
   - [ ] persistence and UI

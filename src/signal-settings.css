@@ -40,6 +40,15 @@
   font-size: 13px;
 }
 
+.ew-signal-runtime {
+  margin: 0;
+  padding: 10px 12px;
+  border-left: 3px solid var(--warn);
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 13px;
+}
+
 .ew-signal-field {
   gap: 5px;
   font-weight: 600;

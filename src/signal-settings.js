@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { describeSignalRuntime } from './signal-runtime.js';
 import './signal-settings.css';
 
 function uniqueLines(value) {
@@ -14,7 +15,8 @@ function initializeSignalSettings() {
   const openButton = document.createElement('button');
   openButton.type = 'button';
   openButton.className = 'btn quiet';
-  openButton.textContent = 'Налаштування Signal';
+  openButton.textContent = 'Signal: не підключено';
+  openButton.setAttribute('aria-label', 'Signal не підключено. Відкрити локальні налаштування');
   toolbar.prepend(openButton);
 
   const dialog = document.createElement('dialog');
@@ -26,6 +28,7 @@ function initializeSignalSettings() {
         <h2 id="ew-signal-title">Локальні налаштування Signal</h2>
         <button type="button" class="btn quiet" id="ew-signal-close" aria-label="Закрити налаштування">Закрити</button>
       </div>
+      <p id="ew-signal-runtime" class="ew-signal-runtime" role="status" aria-live="polite"></p>
       <p class="ew-signal-note">Вкажіть дозволені джерела. Ця форма не підключає акаунт і не читає повідомлення.</p>
       <label class="ew-signal-field" for="ew-signal-senders">
         <span>Дозволені відправники</span>
@@ -50,6 +53,7 @@ function initializeSignalSettings() {
   const senders = dialog.querySelector('#ew-signal-senders');
   const groups = dialog.querySelector('#ew-signal-groups');
   const status = dialog.querySelector('#ew-signal-status');
+  const runtime = dialog.querySelector('#ew-signal-runtime');
   const saveButton = dialog.querySelector('#ew-signal-save');
   let currentConfig = null;
 
@@ -60,12 +64,14 @@ function initializeSignalSettings() {
 
   openButton.addEventListener('click', async () => {
     currentConfig = null;
+    runtime.textContent = describeSignalRuntime(null).message;
     saveButton.disabled = true;
     status.textContent = 'Завантаження локальних налаштувань…';
     dialog.showModal();
     try {
       const config = await invoke('get_signal_settings');
       currentConfig = config;
+      runtime.textContent = describeSignalRuntime(config).message;
       senders.value = (config.allowlist?.allowed_senders || []).join('\n');
       groups.value = (config.allowlist?.allowed_groups || []).join('\n');
       status.textContent = config.intake_enabled
@@ -100,6 +106,7 @@ function initializeSignalSettings() {
         updatedAt: new Date().toISOString(),
       });
       currentConfig = config;
+      runtime.textContent = describeSignalRuntime(config).message;
       status.textContent = 'Збережено в локальній базі. Приймання повідомлень вимкнено.';
     } catch (error) {
       status.textContent = `Не вдалося зберегти: ${String(error)}`;
