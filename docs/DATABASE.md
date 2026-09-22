@@ -84,8 +84,16 @@ files. The separate staging primitive copies a validated file to a temporary
 file next to the live database, validates the copy again, and publishes it only
 if no pending candidate exists. It is not exposed in the desktop UI yet and
 does not replace or restart the running database. A future restore flow must
-serialize app instances, close SQLite connections, preserve a rollback copy,
-and recover interrupted swaps before enabling this primitive in the UI.
+serialize app instances and close SQLite connections before enabling restore
+in the UI. An offline-only swap primitive now rejects live WAL/SHM/journal
+sidecars, validates the staged database again, and moves the prior database to
+`easywar.db.restore-previous` before replacing the live file. If interrupted
+between renames, a separate recovery primitive moves the prior file back and
+leaves the staged candidate intact. After a completed swap, the prior file is
+retained and blocks another swap until explicitly handled. These primitives
+are tested only with temporary synthetic databases and are **not wired into
+application startup or any desktop command**: instance locking, controlled
+restart, recovery UX, and real-platform acceptance remain open.
 
 ## Invariants
 

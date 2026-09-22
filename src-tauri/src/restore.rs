@@ -4,7 +4,7 @@ use sha2::{Digest, Sha384};
 use sqlx::{sqlite::SqliteConnectOptions, sqlite::SqlitePoolOptions};
 use std::{
     ffi::OsString,
-    fs::File,
+    fs::{self, File},
     io,
     path::{Path, PathBuf},
 };
@@ -23,6 +23,16 @@ pub enum RestoreInspectionError {
     InvalidTarget,
     #[error("підготовлена копія вже існує; спочатку заверште або скасуйте попереднє відновлення")]
     PendingAlreadyExists,
+    #[error("поточна база відсутня або не є звичайним файлом")]
+    InvalidLiveDatabase,
+    #[error("попередня база вже збережена; нове відновлення заблоковано")]
+    PreviousBackupExists,
+    #[error("поточна база має супровідні файли WAL/SHM/journal; заміна заборонена")]
+    LiveSidecarsPresent,
+    #[error("нова база не пройшла перевірку; попередню базу збережено: {0}")]
+    RestoredDatabaseInvalid(String),
+    #[error("не вдалося повернути попередню базу після помилки: заміна: {0}; відкат: {1}")]
+    RollbackFailed(io::Error, io::Error),
     #[error("копія має супровідні файли WAL/SHM/journal і не є самодостатньою")]
     SidecarsPresent,
     #[error("файл SQLite не пройшов перевірку цілісності")]
@@ -46,12 +56,126 @@ pub enum RestoreInspectionError {
 /// Keep the candidate in the same directory/filesystem as the live database.
 /// This is only a staging path; startup must never apply it implicitly.
 pub fn staged_backup_path(live_database: &Path) -> Result<PathBuf, RestoreInspectionError> {
+    sibling_path(live_database, ".restore-pending")
+}
+
+pub fn previous_backup_path(live_database: &Path) -> Result<PathBuf, RestoreInspectionError> {
+    sibling_path(live_database, ".restore-previous")
+}
+
+fn sibling_path(live_database: &Path, suffix: &str) -> Result<PathBuf, RestoreInspectionError> {
     if !live_database.is_absolute() || live_database.file_name().is_none() {
         return Err(RestoreInspectionError::InvalidTarget);
     }
     let mut name: OsString = live_database.file_name().unwrap().to_owned();
-    name.push(".restore-pending");
+    name.push(suffix);
     Ok(live_database.with_file_name(name))
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub enum OfflineRestoreState {
+    NoInterruptedSwap,
+    RolledBack,
+    AppliedWithPreviousCopy,
+}
+
+/// Recover the rename gap before any SQLite pool opens. This does not retry a
+/// pending restore: if the previous file exists and live is missing, it puts
+/// the previous file back and leaves the staged candidate untouched.
+/// Caller must hold an exclusive app-instance lock before using this in-app.
+pub async fn recover_interrupted_swap(
+    live_database: &Path,
+) -> Result<OfflineRestoreState, RestoreInspectionError> {
+    let previous = previous_backup_path(live_database)?;
+    if !path_exists(&previous)? {
+        return Ok(OfflineRestoreState::NoInterruptedSwap);
+    }
+    if !fs::symlink_metadata(&previous)?.file_type().is_file() {
+        return Err(RestoreInspectionError::PreviousBackupExists);
+    }
+    if path_exists(live_database)? {
+        inspect_backup(live_database)
+            .await
+            .map_err(|error| RestoreInspectionError::RestoredDatabaseInvalid(error.to_string()))?;
+        return Ok(OfflineRestoreState::AppliedWithPreviousCopy);
+    }
+    fs::rename(&previous, live_database)?;
+    sync_parent(live_database)?;
+    Ok(OfflineRestoreState::RolledBack)
+}
+
+/// Swap only after every SQLite connection is closed and one app instance has
+/// an exclusive lock. The desktop does NOT call this yet. Both renames are in
+/// the same directory; a previous database is retained for manual recovery.
+pub async fn swap_staged_backup_offline(
+    live_database: &Path,
+) -> Result<BackupInspection, RestoreInspectionError> {
+    let staged = staged_backup_path(live_database)?;
+    let previous = previous_backup_path(live_database)?;
+    if path_exists(&previous)? {
+        return Err(RestoreInspectionError::PreviousBackupExists);
+    }
+    if !fs::symlink_metadata(live_database).is_ok_and(|metadata| metadata.file_type().is_file()) {
+        return Err(RestoreInspectionError::InvalidLiveDatabase);
+    }
+    if has_sidecars(live_database)? {
+        return Err(RestoreInspectionError::LiveSidecarsPresent);
+    }
+    let inspection = inspect_backup(&staged).await?;
+
+    fs::rename(live_database, &previous)?;
+    if let Err(error) = sync_parent(live_database) {
+        return rollback_rename(live_database, &previous, error);
+    }
+    if let Err(error) = fs::rename(&staged, live_database) {
+        return rollback_rename(live_database, &previous, error);
+    }
+    sync_parent(live_database)?;
+    Ok(inspection)
+}
+
+fn rollback_rename<T>(
+    live_database: &Path,
+    previous: &Path,
+    error: io::Error,
+) -> Result<T, RestoreInspectionError> {
+    match fs::rename(previous, live_database) {
+        Ok(()) => {
+            sync_parent(live_database)?;
+            Err(RestoreInspectionError::Io(error))
+        }
+        Err(rollback_error) => Err(RestoreInspectionError::RollbackFailed(
+            error,
+            rollback_error,
+        )),
+    }
+}
+
+fn path_exists(path: &Path) -> Result<bool, io::Error> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
+fn has_sidecars(path: &Path) -> Result<bool, io::Error> {
+    for suffix in ["-wal", "-shm", "-journal"] {
+        let mut sidecar: OsString = path.as_os_str().to_owned();
+        sidecar.push(suffix);
+        if path_exists(Path::new(&sidecar))? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn sync_parent(path: &Path) -> Result<(), io::Error> {
+    #[cfg(unix)]
+    File::open(path.parent().ok_or(io::Error::other("missing parent"))?)?.sync_all()?;
+    #[cfg(not(unix))]
+    let _ = path;
+    Ok(())
 }
 
 /// Make a separately validated, non-overwriting copy for a future offline
@@ -103,12 +227,8 @@ pub async fn inspect_backup(path: &Path) -> Result<BackupInspection, RestoreInsp
         return Err(RestoreInspectionError::InvalidFile);
     }
     let path = std::fs::canonicalize(path)?;
-    for suffix in ["-wal", "-shm", "-journal"] {
-        let mut sidecar: OsString = path.as_os_str().to_owned();
-        sidecar.push(suffix);
-        if Path::new(&sidecar).exists() {
-            return Err(RestoreInspectionError::SidecarsPresent);
-        }
+    if has_sidecars(&path)? {
+        return Err(RestoreInspectionError::SidecarsPresent);
     }
 
     let pool = SqlitePoolOptions::new()
@@ -421,5 +541,95 @@ mod tests {
             std::fs::read(&source).unwrap(),
             b"synthetic invalid SQLite bytes"
         );
+    }
+
+    #[tokio::test]
+    async fn offline_swap_keeps_exact_previous_database() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("synthetic-backup.sqlite3");
+        let source_pool = synthetic_database(&source).await;
+        sqlx::query("INSERT INTO settings (key, value_json, updated_at) VALUES ('version', '2', '2026-01-01')")
+            .execute(&source_pool)
+            .await
+            .unwrap();
+        source_pool.close().await;
+        let live = dir.path().join("easywar.db");
+        let live_pool = synthetic_database(&live).await;
+        sqlx::query("INSERT INTO settings (key, value_json, updated_at) VALUES ('version', '1', '2026-01-01')")
+            .execute(&live_pool)
+            .await
+            .unwrap();
+        live_pool.close().await;
+        let old_bytes = fs::read(&live).unwrap();
+        let new_bytes = fs::read(&source).unwrap();
+
+        stage_backup(&source, &live).await.unwrap();
+        assert_eq!(
+            swap_staged_backup_offline(&live).await.unwrap(),
+            BackupInspection { schema_version: 1 }
+        );
+        assert_eq!(fs::read(&live).unwrap(), new_bytes);
+        assert_eq!(
+            fs::read(previous_backup_path(&live).unwrap()).unwrap(),
+            old_bytes
+        );
+        assert!(!staged_backup_path(&live).unwrap().exists());
+        assert_eq!(
+            recover_interrupted_swap(&live).await.unwrap(),
+            OfflineRestoreState::AppliedWithPreviousCopy
+        );
+    }
+
+    #[tokio::test]
+    async fn interrupted_rename_gap_rolls_back_without_consuming_candidate() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("synthetic-backup.sqlite3");
+        let pool = synthetic_database(&source).await;
+        pool.close().await;
+        let live = dir.path().join("easywar.db");
+        let pool = synthetic_database(&live).await;
+        pool.close().await;
+        let old_bytes = fs::read(&live).unwrap();
+        stage_backup(&source, &live).await.unwrap();
+        let previous = previous_backup_path(&live).unwrap();
+        fs::rename(&live, &previous).unwrap();
+
+        assert_eq!(
+            recover_interrupted_swap(&live).await.unwrap(),
+            OfflineRestoreState::RolledBack
+        );
+        assert_eq!(fs::read(&live).unwrap(), old_bytes);
+        assert!(staged_backup_path(&live).unwrap().exists());
+        assert!(!previous.exists());
+    }
+
+    #[tokio::test]
+    async fn offline_swap_rejects_sidecars_and_existing_previous_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("synthetic-backup.sqlite3");
+        let pool = synthetic_database(&source).await;
+        pool.close().await;
+        let live = dir.path().join("easywar.db");
+        let pool = synthetic_database(&live).await;
+        pool.close().await;
+        stage_backup(&source, &live).await.unwrap();
+        let old_bytes = fs::read(&live).unwrap();
+        let wal = dir.path().join("easywar.db-wal");
+        fs::write(&wal, b"synthetic WAL guard").unwrap();
+
+        assert!(matches!(
+            swap_staged_backup_offline(&live).await,
+            Err(RestoreInspectionError::LiveSidecarsPresent)
+        ));
+        assert_eq!(fs::read(&live).unwrap(), old_bytes);
+        fs::remove_file(&wal).unwrap();
+        let previous = previous_backup_path(&live).unwrap();
+        fs::write(&previous, b"keep previous copy").unwrap();
+        assert!(matches!(
+            swap_staged_backup_offline(&live).await,
+            Err(RestoreInspectionError::PreviousBackupExists)
+        ));
+        assert_eq!(fs::read(&previous).unwrap(), b"keep previous copy");
+        assert_eq!(fs::read(&live).unwrap(), old_bytes);
     }
 }
