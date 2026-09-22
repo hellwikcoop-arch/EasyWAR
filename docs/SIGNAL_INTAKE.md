@@ -1,6 +1,6 @@
 # Signal intake boundary
 
-This document records the defensive boundary for the future EasyWAR Signal adapter. The current implementation validates configuration only. It does not start `signal-cli`, connect to a daemon, read chats, parse messages, or write Signal content to the database.
+This document records the defensive boundary for the EasyWAR Signal adapter. The desktop can now make an explicit, read-only discovery request to an already running local `signal-cli` HTTP daemon. It does not start `signal-cli`, subscribe to messages, parse chats, or write Signal content to the database.
 
 ## Supported local daemon interfaces
 
@@ -37,10 +37,12 @@ The Rust settings store saves a versioned `signal.adapter.v1` JSON setting in th
 
 The desktop window offers a Ukrainian allowlist form. It reads the local setting and saves sender/group IDs through the validated Rust command. The command itself rejects any attempt to enable intake, even if a caller bypasses the form and supplies an otherwise valid allowlist. Saving from this form keeps intake disabled and never contacts Signal. The same form reports validation or storage errors without silently changing the setting.
 
-The toolbar and settings dialog explicitly say that EasyWAR is not connected
-and receives no Signal messages. This is a statement about the current app
-implementation, not a live health check of `signal-cli`. A saved configuration
-with `intake_enabled: true` still cannot make the desktop connector active.
+The same dialog has separate, user-triggered discovery buttons. They use the saved, validated HTTP loopback endpoint to call `listAccounts` and then `listGroups` for a chosen local account. The daemon must be running in multi-account mode so these calls have a defined account identity. The app sends no `subscribeReceive`, `startLink`, `finishLink`, or `send` request. It disables HTTP redirects and proxies, caps each response at 1 MiB, and uses a request timeout. Returned account and group identifiers are shown locally only; discovery does not add them to the allowlist or persist them. UNIX and raw TCP transports remain configuration-only and return an explicit unsupported-transport error for discovery.
+
+The toolbar and settings dialog say that EasyWAR is not continuously connected
+and receives no Signal messages. A successful explicit discovery is a one-shot
+daemon check, not an active intake connection. A saved configuration with
+`intake_enabled: true` still cannot make the desktop connector receive messages.
 
 ## Inbox review model
 
@@ -56,9 +58,9 @@ source contract for a future persistent implementation.
 ## Not implemented in this step
 
 - daemon process management;
-- a live RPC or event-stream connection;
+- a persistent RPC or event-stream receive connection;
 - linked-account setup;
-- account or group discovery;
+- account/group discovery over UNIX or raw TCP;
 - enabling or connecting a Signal account;
 - message ingestion and parsing;
 - Signal Inbox persistence or a UI for real messages.

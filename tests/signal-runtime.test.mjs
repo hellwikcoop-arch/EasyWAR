@@ -6,7 +6,7 @@ test('Signal is described as disconnected with no saved configuration', () => {
   const state = describeSignalRuntime(null);
   assert.equal(state.connected, false);
   assert.equal(state.receiving, false);
-  assert.match(state.message, /не підключений/);
+  assert.match(state.message, /не отримує повідомлень/);
 });
 
 test('a saved enabled flag never claims that EasyWAR is connected', () => {
@@ -14,4 +14,5 @@ test('a saved enabled flag never claims that EasyWAR is connected', () => {
   assert.equal(state.connected, false);
   assert.equal(state.receiving, false);
   assert.match(state.message, /позначка приймання/);
+  assert.match(state.message, /не отримує повідомлень/);
 });

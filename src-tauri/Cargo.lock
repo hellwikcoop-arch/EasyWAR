@@ -880,6 +880,7 @@ name = "easywar"
 version = "0.5.0"
 dependencies = [
  "calamine",
+ "reqwest",
  "serde",
  "serde_json",
  "sha2",

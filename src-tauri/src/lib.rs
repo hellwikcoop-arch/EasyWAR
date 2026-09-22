@@ -2,6 +2,7 @@ pub mod backup;
 mod database;
 pub mod repository;
 pub mod restore;
+pub mod signal_daemon;
 pub mod signal_inbox;
 pub mod signal_policy;
 pub mod signal_settings;
@@ -10,6 +11,7 @@ pub mod xlsx_import;
 use backup::BackupStore;
 use repository::SettingsStore;
 use restore::BackupInspection;
+use signal_daemon::{SignalAccountSummary, SignalGroupSummary};
 use signal_policy::SignalAdapterConfig;
 use signal_settings::SignalSettingsStore;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
@@ -38,6 +40,27 @@ async fn save_signal_settings(
 ) -> Result<(), String> {
     store
         .save_from_desktop(config, &updated_at)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn discover_signal_accounts(
+    store: tauri::State<'_, SignalSettingsStore>,
+) -> Result<Vec<SignalAccountSummary>, String> {
+    let config = store.load().await.map_err(|error| error.to_string())?;
+    signal_daemon::discover_accounts(&config.as_config().endpoint)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn discover_signal_groups(
+    store: tauri::State<'_, SignalSettingsStore>,
+    account: String,
+) -> Result<Vec<SignalGroupSummary>, String> {
+    let config = store.load().await.map_err(|error| error.to_string())?;
+    signal_daemon::discover_groups(&config.as_config().endpoint, &account)
         .await
         .map_err(|error| error.to_string())
 }
@@ -175,6 +198,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_signal_settings,
             save_signal_settings,
+            discover_signal_accounts,
+            discover_signal_groups,
             create_local_backup,
             inspect_local_backup,
             inspect_local_xlsx

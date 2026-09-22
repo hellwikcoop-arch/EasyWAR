@@ -55,6 +55,53 @@
   border-radius: 8px;
 }
 
+.ew-signal-discovery {
+  display: grid;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+}
+
+.ew-signal-discovery > .btn {
+  justify-self: start;
+}
+
+.ew-signal-discovery select {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+}
+
+.ew-signal-discovery select:focus-visible {
+  outline: 2px solid var(--accent);
+}
+
+.ew-signal-found-groups {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ew-signal-found-groups li {
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+}
+
+.ew-signal-found-groups code {
+  overflow-wrap: anywhere;
+  color: var(--muted);
+}
+
 .ew-signal-demo summary {
   cursor: pointer;
   font-weight: 600;

@@ -22,9 +22,11 @@
 
 - [ ] signal-cli local adapter
   - [x] local-only daemon endpoint and deny-by-default policy
+  - [x] explicit read-only HTTP loopback discovery of local accounts and groups
   - [ ] live daemon connector
 - [ ] linked-account setup UX
 - [ ] account/group discovery
+  - [x] user-triggered HTTP multi-account discovery (no receive or persistence)
 - [ ] allowlist
   - [x] exact sender and group match policy; deny by default
   - [x] validated local settings persistence
