@@ -27,9 +27,13 @@ References:
 - TCP and HTTP endpoints must resolve to an IP loopback address.
 - A UNIX socket must use an absolute path without parent traversal.
 - `signal-cli` receive mode must be `manual`.
-- Intake cannot be enabled until an allowlist policy is explicitly configured.
+- Intake cannot be enabled without at least one explicitly listed sender. Group messages require both a listed sender and a listed group. Matches are exact; empty IDs and wildcards are rejected.
 - Records received through Signal can never be approved automatically.
-- Credentials, account storage, message content, attachments, and identifiers must never enter Git.
+- Credentials, account storage, message content, attachments, and real identifiers must never enter Git.
+
+## Inbox review model
+
+The current in-memory model supports `NEW`, `PARSED`, `NEEDS_REVIEW`, `APPROVED`, and `REJECTED`. A new item can be marked parsed or sent directly for review. Approval and rejection are possible only from `NEEDS_REVIEW` and require a nonblank reviewer identifier. Final states cannot be reopened by this model. Each accepted action returns a transition record for a future transactional audit write; no message content is stored by this module. The model does not authenticate a reviewer or provide an approval UI; those checks belong to a later integration step.
 
 ## Not implemented in this step
 
@@ -37,7 +41,7 @@ References:
 - a live RPC or event-stream connection;
 - linked-account setup;
 - account or group discovery;
-- allowlist contents;
+- local allowlist management and persistence;
 - message ingestion and parsing;
 - Signal Inbox persistence or UI.
 

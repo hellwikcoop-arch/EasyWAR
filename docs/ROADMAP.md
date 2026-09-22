@@ -26,8 +26,12 @@
 - [ ] linked-account setup UX
 - [ ] account/group discovery
 - [ ] allowlist
+  - [x] exact sender and group match policy; deny by default
+  - [ ] local configuration and management UI
 - [ ] Signal Inbox
-- [ ] statuses: NEW / PARSED / NEEDS_REVIEW / APPROVED / REJECTED
+  - [x] synthetic status transitions with a reviewer identifier
+  - [ ] persistence and UI
+- [x] status model: NEW / PARSED / NEEDS_REVIEW / APPROVED / REJECTED
 - [ ] import message into intake parser
 - [ ] commands: /help, /status, /ping, /queue, /last
 - [x] no automatic approval by default

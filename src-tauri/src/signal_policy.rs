@@ -1,5 +1,6 @@
 use serde::Serialize;
 use std::{
+    collections::BTreeSet,
     net::{Ipv4Addr, SocketAddr},
     path::{Component, PathBuf},
 };
@@ -46,12 +47,55 @@ pub enum SignalReceiveMode {
     OnConnection,
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
+pub struct SignalAllowlist {
+    allowed_senders: BTreeSet<String>,
+    allowed_groups: BTreeSet<String>,
+}
+
+impl SignalAllowlist {
+    pub fn new(
+        senders: impl IntoIterator<Item = String>,
+        groups: impl IntoIterator<Item = String>,
+    ) -> Result<Self, SignalPolicyError> {
+        let allowed_senders = collect_ids(senders)?;
+        let allowed_groups = collect_ids(groups)?;
+        Ok(Self {
+            allowed_senders,
+            allowed_groups,
+        })
+    }
+
+    fn permits_source(&self, sender: &str, group: Option<&str>) -> bool {
+        self.allowed_senders.contains(sender)
+            && group.map_or(true, |group_id| self.allowed_groups.contains(group_id))
+    }
+
+    fn has_allowed_sender(&self) -> bool {
+        !self.allowed_senders.is_empty()
+    }
+}
+
+fn collect_ids(
+    ids: impl IntoIterator<Item = String>,
+) -> Result<BTreeSet<String>, SignalPolicyError> {
+    ids.into_iter()
+        .map(|id| {
+            if id.is_empty() || id.trim() != id || id == "*" || id.chars().any(char::is_control) {
+                Err(SignalPolicyError::InvalidAllowlistId)
+            } else {
+                Ok(id)
+            }
+        })
+        .collect()
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct SignalAdapterConfig {
     pub endpoint: SignalDaemonEndpoint,
     pub receive_mode: SignalReceiveMode,
     pub intake_enabled: bool,
-    pub allowlist_configured: bool,
+    pub allowlist: SignalAllowlist,
     pub auto_approve: bool,
 }
 
@@ -63,7 +107,7 @@ impl Default for SignalAdapterConfig {
             },
             receive_mode: SignalReceiveMode::Manual,
             intake_enabled: false,
-            allowlist_configured: false,
+            allowlist: SignalAllowlist::default(),
             auto_approve: false,
         }
     }
@@ -79,7 +123,7 @@ impl SignalAdapterConfig {
         if self.auto_approve {
             return Err(SignalPolicyError::AutoApprovalForbidden);
         }
-        if self.intake_enabled && !self.allowlist_configured {
+        if self.intake_enabled && !self.allowlist.has_allowed_sender() {
             return Err(SignalPolicyError::AllowlistRequired);
         }
 
@@ -95,6 +139,10 @@ impl ValidatedSignalAdapterConfig {
     pub fn as_config(&self) -> &SignalAdapterConfig {
         &self.0
     }
+
+    pub fn permits_source(&self, sender: &str, group: Option<&str>) -> bool {
+        self.0.intake_enabled && self.0.allowlist.permits_source(sender, group)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
@@ -107,6 +155,8 @@ pub enum SignalPolicyError {
     ManualReceiveRequired,
     #[error("перед увімкненням Signal intake потрібно налаштувати allowlist")]
     AllowlistRequired,
+    #[error("allowlist містить порожній або некоректний ідентифікатор")]
+    InvalidAllowlistId,
     #[error("автоматичне схвалення записів із Signal заборонене")]
     AutoApprovalForbidden,
 }
@@ -125,7 +175,7 @@ mod tests {
 
         assert_eq!(config.receive_mode, SignalReceiveMode::Manual);
         assert!(!config.intake_enabled);
-        assert!(!config.allowlist_configured);
+        assert_eq!(config.allowlist, SignalAllowlist::default());
         assert!(!config.auto_approve);
         assert_eq!(
             config.endpoint,
@@ -216,20 +266,76 @@ mod tests {
 
     #[test]
     fn enabled_intake_accepts_only_an_explicit_allowlist_policy() {
+        let allowlist =
+            SignalAllowlist::new(["sender-alpha".to_owned()], ["group-green".to_owned()])
+                .expect("синтетичні ідентифікатори коректні");
         let validated = SignalAdapterConfig {
             endpoint: SignalDaemonEndpoint::Tcp {
                 address: SocketAddr::from((Ipv4Addr::LOCALHOST, 7583)),
             },
             intake_enabled: true,
-            allowlist_configured: true,
+            allowlist,
             ..SignalAdapterConfig::default()
         }
         .validate()
         .expect("локальна конфігурація з allowlist має бути дійсною");
 
         assert!(validated.as_config().intake_enabled);
-        assert!(validated.as_config().allowlist_configured);
+        assert!(validated.permits_source("sender-alpha", Some("group-green")));
         assert!(!validated.as_config().auto_approve);
+    }
+
+    #[test]
+    fn disabled_intake_denies_even_a_listed_sender() {
+        let validated = SignalAdapterConfig {
+            allowlist: SignalAllowlist::new(["sender-alpha".to_owned()], Vec::new()).unwrap(),
+            ..SignalAdapterConfig::default()
+        }
+        .validate()
+        .unwrap();
+
+        assert!(!validated.permits_source("sender-alpha", None));
+    }
+
+    #[test]
+    fn allowlist_requires_exact_sender_and_group_matches() {
+        let allowlist =
+            SignalAllowlist::new(["sender-alpha".to_owned()], ["group-green".to_owned()])
+                .expect("синтетичні ідентифікатори коректні");
+
+        assert!(allowlist.permits_source("sender-alpha", None));
+        assert!(allowlist.permits_source("sender-alpha", Some("group-green")));
+        assert!(!allowlist.permits_source("sender-beta", None));
+        assert!(!allowlist.permits_source("sender-alpha", Some("group-blue")));
+        assert!(!allowlist.permits_source("sender-beta", Some("group-green")));
+    }
+
+    #[test]
+    fn group_only_or_wildcard_rules_cannot_enable_intake() {
+        let group_only = SignalAllowlist::new(Vec::new(), ["group-green".to_owned()])
+            .expect("синтетичний ідентифікатор коректний");
+        assert_eq!(
+            SignalAdapterConfig {
+                intake_enabled: true,
+                allowlist: group_only,
+                ..SignalAdapterConfig::default()
+            }
+            .validate(),
+            Err(SignalPolicyError::AllowlistRequired)
+        );
+
+        assert_eq!(
+            SignalAllowlist::new(["*".to_owned()], Vec::new()),
+            Err(SignalPolicyError::InvalidAllowlistId)
+        );
+        assert_eq!(
+            SignalAllowlist::new([" sender-alpha".to_owned()], Vec::new()),
+            Err(SignalPolicyError::InvalidAllowlistId)
+        );
+        assert_eq!(
+            SignalAllowlist::new(["sender\nalpha".to_owned()], Vec::new()),
+            Err(SignalPolicyError::InvalidAllowlistId)
+        );
     }
 
     #[test]

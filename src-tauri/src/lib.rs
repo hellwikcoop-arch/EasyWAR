@@ -1,5 +1,6 @@
 mod database;
 pub mod repository;
+pub mod signal_inbox;
 pub mod signal_policy;
 pub mod xlsx_import;
 
