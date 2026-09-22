@@ -1,6 +1,7 @@
 pub mod backup;
 mod database;
 pub mod repository;
+pub mod restore;
 pub mod signal_inbox;
 pub mod signal_policy;
 pub mod signal_settings;
@@ -8,6 +9,7 @@ pub mod xlsx_import;
 
 use backup::BackupStore;
 use repository::SettingsStore;
+use restore::BackupInspection;
 use signal_policy::SignalAdapterConfig;
 use signal_settings::SignalSettingsStore;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
@@ -67,6 +69,27 @@ async fn create_local_backup(
     Ok(Some(destination.to_string_lossy().into_owned()))
 }
 
+#[tauri::command]
+async fn inspect_local_backup(app: tauri::AppHandle) -> Result<Option<BackupInspection>, String> {
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title("Перевірити резервну копію EasyWAR")
+            .add_filter("База SQLite", &["sqlite3"])
+            .blocking_pick_file()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let file = selected.into_path().map_err(|error| error.to_string())?;
+    restore::inspect_backup(&file)
+        .await
+        .map(Some)
+        .map_err(|error| error.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -97,7 +120,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_signal_settings,
             save_signal_settings,
-            create_local_backup
+            create_local_backup,
+            inspect_local_backup
         ])
         .run(tauri::generate_context!())
         .expect("помилка запуску EasyWAR");

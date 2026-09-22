@@ -75,6 +75,13 @@ publishes it without replacing an existing file. Failure removes the temporary
 file. It does not modify the live database, contact a network service, encrypt
 the copy, or restore from one. Tests use only temporary synthetic databases.
 
+The read-only restore preflight checks SQLite integrity and foreign keys, then
+matches applied `_sqlx_migrations` versions and SHA-384 checksums to the
+registered EasyWAR migrations. It also requires the core tables and current
+state view. A missing, altered, newer, or unrelated database is rejected.
+Preflight also rejects SQLite files with companion WAL, SHM, or rollback-journal
+files. It does not stage or replace the running database.
+
 ## Invariants
 
 - Raw source, parsed payload, corrections and approval decisions are separate.

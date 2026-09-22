@@ -27,6 +27,7 @@ function initializeBackup() {
     <p id="ew-backup-location" class="ew-backup-location" hidden></p>
     <div class="ew-backup-actions">
       <button type="button" class="btn" id="ew-backup-cancel">Скасувати</button>
+      <button type="button" class="btn" id="ew-backup-inspect">Перевірити копію</button>
       <button type="button" class="btn primary" id="ew-backup-create">Обрати місце й створити</button>
     </div>`;
   document.body.append(dialog);
@@ -34,6 +35,7 @@ function initializeBackup() {
   const status = dialog.querySelector('#ew-backup-status');
   const location = dialog.querySelector('#ew-backup-location');
   const createButton = dialog.querySelector('#ew-backup-create');
+  const inspectButton = dialog.querySelector('#ew-backup-inspect');
 
   function close() {
     dialog.close();
@@ -45,12 +47,32 @@ function initializeBackup() {
     location.textContent = '';
     location.hidden = true;
     createButton.disabled = false;
+    inspectButton.disabled = false;
     dialog.showModal();
   });
   dialog.querySelector('#ew-backup-close').addEventListener('click', close);
   dialog.querySelector('#ew-backup-cancel').addEventListener('click', close);
+  inspectButton.addEventListener('click', async () => {
+    createButton.disabled = true;
+    inspectButton.disabled = true;
+    status.textContent = 'Оберіть копію для перевірки…';
+    location.hidden = true;
+    location.textContent = '';
+    try {
+      const inspection = await invoke('inspect_local_backup');
+      status.textContent = inspection === null
+        ? 'Перевірку скасовано.'
+        : `Копія EasyWAR сумісна. Версія схеми: ${inspection.schema_version}. Відновлення даних не виконувалося.`;
+    } catch (error) {
+      status.textContent = `Копія не пройшла перевірку: ${String(error)}`;
+    } finally {
+      createButton.disabled = false;
+      inspectButton.disabled = false;
+    }
+  });
   createButton.addEventListener('click', async () => {
     createButton.disabled = true;
+    inspectButton.disabled = true;
     status.textContent = 'Оберіть місце для резервної копії…';
     try {
       const path = await invoke('create_local_backup');
@@ -65,6 +87,7 @@ function initializeBackup() {
       status.textContent = `Не вдалося створити копію: ${String(error)}`;
     } finally {
       createButton.disabled = false;
+      inspectButton.disabled = false;
     }
   });
 }

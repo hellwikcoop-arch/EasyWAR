@@ -63,6 +63,7 @@
 - [ ] position-specific empty database/template generation
 - [ ] backup / restore
   - [x] user-selected, non-overwriting local SQLite backup with integrity check
+  - [x] read-only compatibility preflight for a selected backup
   - [ ] in-app restore with preflight and controlled restart
 - [ ] update/migration UX
 
