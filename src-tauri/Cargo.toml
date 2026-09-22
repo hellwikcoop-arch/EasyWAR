@@ -1,0 +1,18 @@
+[package]
+name = "easywar"
+version = "0.5.0"
+description = "Local-first EasyWAR desktop shell"
+authors = ["EasyWAR contributors"]
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "easywar_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-sql = { version = "2", features = ["sqlite"] }

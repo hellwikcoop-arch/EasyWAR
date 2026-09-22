@@ -5,9 +5,11 @@ Thumbs.db
 .vscode/
 
 # Build outputs
+node_modules/
 dist/
 build/
 target/
+src-tauri/gen/
 DerivedData/
 *.app
 *.dmg

@@ -42,16 +42,54 @@ The original source must remain auditable and must not be silently overwritten b
 .
 ├── AGENTS.md
 ├── .codex/
-│   └── coordination/
-│       └── project.yaml
+│   ├── coordination/project.yaml
+│   └── environments/environment.toml
 ├── docs/
 │   ├── ARCHITECTURE.md
 │   ├── ROADMAP.md
 │   └── PROJECT_CONTEXT.md
+├── script/build_and_run.sh
+├── src/
+│   └── index.html
+├── src-tauri/
+│   ├── capabilities/default.json
+│   ├── migrations/README.md
+│   ├── src/
+│   ├── Cargo.toml
+│   └── tauri.conf.json
+├── package.json
+├── vite.config.js
 └── README.md
 ```
 
-The application source will be migrated into this repository in controlled stages rather than rewritten wholesale.
+`src/index.html` is a byte-for-byte copy of the current single-file EasyWAR
+frontend. It is embedded as the first Tauri frontend without a wholesale
+rewrite. SQLite is registered, but Issue #1 intentionally creates no product
+tables or real data.
+
+The Tauri content security policy is temporarily unset because the preserved
+legacy application relies on inline scripts and styles. CSP hardening must be
+done alongside the incremental frontend migration, not by silently breaking
+the existing application.
+
+## Local development
+
+Prerequisites:
+
+- Node.js and npm;
+- Rust toolchain compatible with Tauri 2;
+- the platform prerequisites from the Tauri documentation.
+
+Install dependencies and run the desktop shell:
+
+```text
+npm ci
+./script/build_and_run.sh
+```
+
+The Codex `Run` action calls the same script. Use
+`./script/build_and_run.sh --verify` for a debug build plus a process check.
+On Windows, use `npm run tauri dev` from a supported developer shell.
 
 ## Current milestone
 

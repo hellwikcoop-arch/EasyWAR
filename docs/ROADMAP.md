@@ -4,17 +4,17 @@
 
 **Goal:** establish the canonical desktop application.
 
-- [ ] Tauri 2 project scaffold
-- [ ] preserve current HTML/CSS/JS UI as first frontend
-- [ ] Rust application core
+- [x] Tauri 2 project scaffold
+- [x] preserve current HTML/CSS/JS UI as first frontend
+- [x] Rust application core scaffold
 - [ ] SQLite plugin / schema / migrations
 - [ ] repository layer
 - [ ] settings store
 - [ ] audit log
 - [ ] import path for current EasyWAR/XLSX workflow
-- [ ] macOS build/run path
-- [ ] Windows-ready project structure
-- [ ] synthetic smoke/regression tests
+- [x] macOS build/run path
+- [x] Windows-ready project structure
+- [x] synthetic desktop-shell smoke test
 
 **Exit condition:** application opens as a desktop app, local database initializes, existing intake logic can be exercised without real data.
 

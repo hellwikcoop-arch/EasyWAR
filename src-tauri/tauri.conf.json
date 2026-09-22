@@ -1,0 +1,33 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "EasyWAR",
+  "version": "0.5.0",
+  "identifier": "com.hellwikcoop.easywar",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "EasyWAR",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1024,
+        "minHeight": 700,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all"
+  }
+}
