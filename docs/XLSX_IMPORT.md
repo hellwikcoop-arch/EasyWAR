@@ -51,9 +51,12 @@ The five names that differ inside Rust are `number` → `num`, `target_ids` →
 serialized parsed record nor its date normalization replaces `raw_values`.
 
 Only the date field is normalized at this boundary. ISO dates, Ukrainian
-`дд.мм.рррр` / `дд/мм/рррр` text and Excel date cells become `рррр-мм-дд`,
+`дд.мм.рррр` / `дд/мм/рррр` text and recognized Excel date serials become `рррр-мм-дд`,
 matching the legacy frontend behavior. Unknown date text is preserved so a
 later review layer can surface it instead of silently discarding it.
+Like the legacy CORE, a numeric Excel serial is converted only when it has
+five digits and falls strictly between `36526` and `73051`; other numeric
+values remain unchanged. Fractional serials in that range use the whole day.
 
 ## Current boundary
 
@@ -72,4 +75,7 @@ script from `src/index.html` and checks its 15-field output against an
 in-memory synthetic `Зведена` workbook. A separate Rust test checks all 15
 serialized field names and values with the matching synthetic row. These are
 contract checks, not yet a full cross-runtime comparison for varied workbook
-styles, dates, formulas or reference sheets.
+styles, formulas or reference sheets. Both readers now consume one shared
+synthetic case list for nine date forms, including numeric serials,
+out-of-range numbers, mixed text separators and ambiguous text. This is not
+yet evidence that every real-world workbook variant behaves identically.

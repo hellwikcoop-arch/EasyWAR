@@ -1,0 +1,11 @@
+[
+  { "raw": "46023", "numeric": true, "expected": "2026-01-01" },
+  { "raw": "46023.75", "numeric": true, "expected": "2026-01-01" },
+  { "raw": "42", "numeric": true, "expected": "42" },
+  { "raw": "36526", "numeric": true, "expected": "36526" },
+  { "raw": "73051", "numeric": true, "expected": "73051" },
+  { "raw": "2026-01-02T00:00:00", "numeric": false, "expected": "2026-01-02" },
+  { "raw": "2026-01-02garbage", "numeric": false, "expected": "2026-01-02garbage" },
+  { "raw": "1.2/2026", "numeric": false, "expected": "2026-02-01" },
+  { "raw": "невідома дата", "numeric": false, "expected": "невідома дата" }
+]

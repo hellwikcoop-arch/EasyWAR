@@ -49,6 +49,7 @@
 - [ ] duplicate detection
 - [ ] reference workbook support
 - [ ] regression comparison against legacy parser
+  - [x] match nine synthetic XLSX date cases across legacy CORE and Rust
 
 ## 0.8 — Analytics
 

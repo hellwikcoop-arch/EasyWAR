@@ -51,10 +51,13 @@ function column(index) {
   return letters;
 }
 
-function xmlRow(number, values) {
-  const cells = values.map((value, index) =>
-    `<c r="${column(index)}${number}" t="inlineStr"><is><t>${xmlEscape(value)}</t></is></c>`
-  ).join('');
+function xmlRow(number, values, numericDate = false) {
+  const cells = values.map((value, index) => {
+    const reference = `${column(index)}${number}`;
+    return index === 1 && numericDate
+      ? `<c r="${reference}" t="n"><v>${value}</v></c>`
+      : `<c r="${reference}" t="inlineStr"><is><t>${xmlEscape(value)}</t></is></c>`;
+  }).join('');
   return `<row r="${number}">${cells}</row>`;
 }
 
@@ -73,9 +76,12 @@ async function legacyCore() {
   return module.exports;
 }
 
-async function syntheticWorkbook(core) {
+async function syntheticWorkbook(core, dateCases = [{ raw: SYNTHETIC_ROW.date, numeric: false }]) {
   const fields = Object.keys(LEGACY_FIELDS);
-  const sheet = `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${xmlRow(1, fields.map(key => LEGACY_FIELDS[key]))}${xmlRow(2, fields.map(key => SYNTHETIC_ROW[key]))}</sheetData></worksheet>`;
+  const rows = dateCases.map(({ raw, numeric }, index) =>
+    xmlRow(index + 2, fields.map(key => key === 'date' ? raw : SYNTHETIC_ROW[key]), numeric)
+  ).join('');
+  const sheet = `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${xmlRow(1, fields.map(key => LEGACY_FIELDS[key]))}${rows}</sheetData></worksheet>`;
   const entries = {
     '[Content_Types].xml': '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>',
     '_rels/.rels': '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>',
@@ -107,4 +113,14 @@ test('legacy CORE reads all 15 fields from an in-memory synthetic Зведена
     ...SYNTHETIC_ROW,
     date: '2026-01-01',
   });
+});
+
+test('legacy CORE keeps numeric and ambiguous synthetic date semantics', async () => {
+  const cases = JSON.parse(await readFile(new URL('./fixtures/xlsx-date-cases.json', import.meta.url), 'utf8'));
+  const core = await legacyCore();
+  const result = await core.openWorkbook(await syntheticWorkbook(core, cases));
+  assert.equal(result.records.length, cases.length);
+  for (const [index, item] of cases.entries()) {
+    assert.equal(result.records[index].date, item.expected, `raw date: ${item.raw}`);
+  }
 });

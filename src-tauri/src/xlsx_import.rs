@@ -164,7 +164,7 @@ pub fn import_easywar_xlsx(bytes: &[u8]) -> Result<XlsxImportBatch, XlsxImportEr
             let cell = row.get(*column_index).unwrap_or(&Data::Empty);
             let raw_value = raw_cell_value(cell);
             let parsed_value = if field.key == "date" {
-                normalize_date(cell, &raw_value)
+                normalize_date(&raw_value)
             } else {
                 raw_value.clone()
             };
@@ -247,37 +247,48 @@ fn raw_cell_value(cell: &Data) -> String {
     }
 }
 
-fn normalize_date(cell: &Data, raw_value: &str) -> String {
-    if let Some(date) = cell.as_date() {
-        return date.to_string();
-    }
-
+fn normalize_date(raw_value: &str) -> String {
     let value = raw_value.trim();
     if is_iso_date(value) {
         return value.to_owned();
     }
-    if value.len() >= 10 && is_iso_date(&value[..10]) {
-        return value[..10].to_owned();
+    if let Some(prefix) = value.get(..10) {
+        if is_iso_date(prefix) && matches!(value.as_bytes().get(10), Some(b'T' | b' ')) {
+            return prefix.to_owned();
+        }
     }
 
-    let separator = if value.contains('.') {
-        Some('.')
-    } else if value.contains('/') {
-        Some('/')
-    } else {
-        None
+    let parts: Vec<&str> = value.split(['.', '/']).collect();
+    if parts.len() == 3
+        && (1..=2).contains(&parts[0].len())
+        && (1..=2).contains(&parts[1].len())
+        && parts[2].len() == 4
+        && parts
+            .iter()
+            .all(|part| part.chars().all(|ch| ch.is_ascii_digit()))
+    {
+        return format!("{}-{:0>2}-{:0>2}", parts[2], parts[1], parts[0]);
+    }
+
+    // CORE converts only five-digit serials in this window; arbitrary numbers are not dates.
+    let mut serial_parts = value.split('.');
+    let whole = serial_parts.next().unwrap_or_default();
+    let fraction = serial_parts.next();
+    let valid_fraction = match fraction {
+        None => true,
+        Some(part) => !part.is_empty() && part.bytes().all(|ch| ch.is_ascii_digit()),
     };
-    if let Some(separator) = separator {
-        let parts: Vec<&str> = value.split(separator).collect();
-        if parts.len() == 3
-            && (1..=2).contains(&parts[0].len())
-            && (1..=2).contains(&parts[1].len())
-            && parts[2].len() == 4
-            && parts
-                .iter()
-                .all(|part| part.chars().all(|ch| ch.is_ascii_digit()))
-        {
-            return format!("{}-{:0>2}-{:0>2}", parts[2], parts[1], parts[0]);
+    let serial_shape = whole.len() == 5
+        && whole.bytes().all(|ch| ch.is_ascii_digit())
+        && valid_fraction
+        && serial_parts.next().is_none();
+    if serial_shape {
+        if let Ok(serial) = value.parse::<f64>() {
+            if serial > 36526.0 && serial < 73051.0 {
+                if let Some(date) = Data::Float(serial.floor()).as_date() {
+                    return date.to_string();
+                }
+            }
         }
     }
 
@@ -324,6 +335,13 @@ mod tests {
     use super::*;
     use std::io::Write;
     use zip::{write::SimpleFileOptions, CompressionMethod, ZipWriter};
+
+    #[derive(serde::Deserialize)]
+    struct SyntheticDateCase {
+        raw: String,
+        numeric: bool,
+        expected: String,
+    }
 
     #[test]
     fn imports_synthetic_zvedena_rows_from_memory() {
@@ -408,6 +426,33 @@ mod tests {
         assert!(error.to_string().contains("Дата"));
     }
 
+    #[test]
+    fn synthetic_workbook_dates_match_legacy_core_rules() {
+        let cases: Vec<SyntheticDateCase> =
+            serde_json::from_str(include_str!("../../tests/fixtures/xlsx-date-cases.json"))
+                .expect("shared synthetic date cases must parse");
+        let mut rows = vec![headers().iter().map(|value| value.to_string()).collect()];
+        let mut numeric_date_rows = Vec::new();
+        for (index, case) in cases.iter().enumerate() {
+            let mut row = vec![String::new(); FIELD_SPECS.len()];
+            row[0] = (index + 1).to_string();
+            row[1] = case.raw.clone();
+            rows.push(row);
+            if case.numeric {
+                numeric_date_rows.push(index + 1);
+            }
+        }
+        let sheet_xml = worksheet_xml(&rows, &numeric_date_rows);
+        let workbook = build_synthetic_workbook(EASYWAR_SHEET_NAME, &sheet_xml);
+
+        let batch = import_easywar_xlsx(&workbook).expect("synthetic dates must import");
+        assert_eq!(batch.rows.len(), cases.len());
+        for (row, case) in batch.rows.iter().zip(&cases) {
+            assert_eq!(row.raw_values.get("Дата"), Some(&case.raw));
+            assert_eq!(row.parsed.date, case.expected, "raw date: {}", case.raw);
+        }
+    }
+
     fn headers() -> Vec<&'static str> {
         FIELD_SPECS.iter().map(|field| field.header).collect()
     }
@@ -452,7 +497,11 @@ mod tests {
             ]);
         }
 
-        let sheet_xml = worksheet_xml(&rows);
+        let sheet_xml = worksheet_xml(&rows, &[]);
+        build_synthetic_workbook(sheet_name, &sheet_xml)
+    }
+
+    fn build_synthetic_workbook(sheet_name: &str, sheet_xml: &str) -> Vec<u8> {
         let cursor = Cursor::new(Vec::new());
         let mut archive = ZipWriter::new(cursor);
         let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
@@ -476,12 +525,7 @@ mod tests {
             workbook_relationships(),
             options,
         );
-        write_zip_entry(
-            &mut archive,
-            "xl/worksheets/sheet1.xml",
-            &sheet_xml,
-            options,
-        );
+        write_zip_entry(&mut archive, "xl/worksheets/sheet1.xml", sheet_xml, options);
 
         archive
             .finish()
@@ -503,7 +547,7 @@ mod tests {
             .expect("synthetic entry must write");
     }
 
-    fn worksheet_xml(rows: &[Vec<String>]) -> String {
+    fn worksheet_xml(rows: &[Vec<String>], numeric_date_rows: &[usize]) -> String {
         let body = rows
             .iter()
             .enumerate()
@@ -514,10 +558,14 @@ mod tests {
                     .map(|(column_index, value)| {
                         let reference =
                             format!("{}{}", column_letters(column_index + 1), row_index + 1);
-                        format!(
-                            "<c r=\"{reference}\" t=\"inlineStr\"><is><t>{}</t></is></c>",
-                            xml_escape(value)
-                        )
+                        if column_index == 1 && numeric_date_rows.contains(&row_index) {
+                            format!("<c r=\"{reference}\" t=\"n\"><v>{value}</v></c>")
+                        } else {
+                            format!(
+                                "<c r=\"{reference}\" t=\"inlineStr\"><is><t>{}</t></is></c>",
+                                xml_escape(value)
+                            )
+                        }
                     })
                     .collect::<String>();
                 format!("<row r=\"{}\">{cells}</row>", row_index + 1)
