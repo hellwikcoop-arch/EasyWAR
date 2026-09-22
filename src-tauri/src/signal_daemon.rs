@@ -1,5 +1,9 @@
 use crate::signal_policy::{SignalDaemonEndpoint, SIGNAL_HTTP_EVENTS_PATH, SIGNAL_HTTP_RPC_PATH};
-use reqwest::{redirect::Policy, Client};
+use reqwest::{
+    header::{ACCEPT, CONTENT_TYPE},
+    redirect::Policy,
+    Client,
+};
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::{
@@ -10,6 +14,8 @@ use std::{
 const MAX_RPC_BYTES: usize = 1024 * 1024;
 const MAX_SSE_EVENT_BYTES: usize = 1024 * 1024;
 const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(8);
+const EVENT_CONNECT_TIMEOUT: Duration = Duration::from_secs(8);
+const MAX_LIVE_NOTIFICATIONS: usize = 64;
 const LINK_TIMEOUT: Duration = Duration::from_secs(120);
 const MAX_LINK_URI_BYTES: usize = 2048;
 const MAX_DEVICE_NAME_CHARS: usize = 64;
@@ -70,6 +76,16 @@ pub enum SignalDaemonError {
     InvalidEvent,
     #[error("подія signal-cli перевищила обмеження розміру")]
     OversizedEvent,
+    #[error("потік подій signal-cli не відповідає формату SSE")]
+    InvalidEventStream,
+    #[error("потік подій signal-cli завершився до отримання повідомлення")]
+    EventStreamEnded,
+    #[error("очікування події signal-cli завершилося за тайм-аутом")]
+    EventStreamTimeout,
+    #[error("кількість подій для обмеженого приймання має бути від 1 до 64")]
+    InvalidEventLimit,
+    #[error("не вдалося гарантовано скасувати підписку signal-cli")]
+    UnsubscribeFailed,
 }
 
 fn http_url(endpoint: &SignalDaemonEndpoint, path: &str) -> Result<String, SignalDaemonError> {
@@ -138,14 +154,17 @@ impl SignalSseDecoder {
         &mut self,
         chunk: &[u8],
     ) -> Result<Vec<SignalReceiveNotification>, SignalDaemonError> {
-        if self.buffered_line.len().saturating_add(chunk.len()) > MAX_SSE_EVENT_BYTES {
-            return Err(SignalDaemonError::OversizedEvent);
-        }
-        self.buffered_line.extend_from_slice(chunk);
         let mut notifications = Vec::new();
+        for byte in chunk {
+            if self.buffered_line.len() == MAX_SSE_EVENT_BYTES {
+                return Err(SignalDaemonError::OversizedEvent);
+            }
+            self.buffered_line.push(*byte);
+            if *byte != b'\n' {
+                continue;
+            }
 
-        while let Some(newline) = self.buffered_line.iter().position(|byte| *byte == b'\n') {
-            let mut line = self.buffered_line.drain(..=newline).collect::<Vec<_>>();
+            let mut line = std::mem::take(&mut self.buffered_line);
             line.pop();
             if line.last() == Some(&b'\r') {
                 line.pop();
@@ -181,6 +200,106 @@ impl SignalSseDecoder {
 
         Ok(notifications)
     }
+}
+
+fn valid_account(account: &str) -> bool {
+    !account.is_empty() && account.trim() == account && !account.chars().any(char::is_control)
+}
+
+fn parse_subscription(result: Value) -> Result<u64, SignalDaemonError> {
+    result.as_u64().ok_or(SignalDaemonError::InvalidResponse)
+}
+
+async fn open_event_stream(
+    endpoint: &SignalDaemonEndpoint,
+) -> Result<reqwest::Response, SignalDaemonError> {
+    let client = Client::builder()
+        .connect_timeout(EVENT_CONNECT_TIMEOUT)
+        .redirect(Policy::none())
+        .no_proxy()
+        .build()
+        .map_err(|_| SignalDaemonError::Connection)?;
+    let response = tokio::time::timeout(
+        EVENT_CONNECT_TIMEOUT,
+        client
+            .get(events_url(endpoint)?)
+            .header(ACCEPT, "text/event-stream")
+            .send(),
+    )
+    .await
+    .map_err(|_| SignalDaemonError::EventStreamTimeout)?
+    .map_err(|_| SignalDaemonError::Connection)?;
+    if !response.status().is_success()
+        || !response
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.split(';').next() == Some("text/event-stream"))
+    {
+        return Err(SignalDaemonError::InvalidEventStream);
+    }
+    Ok(response)
+}
+
+pub async fn receive_bounded(
+    endpoint: &SignalDaemonEndpoint,
+    account: &str,
+    max_notifications: usize,
+    wait_timeout: Duration,
+) -> Result<Vec<SignalReceiveNotification>, SignalDaemonError> {
+    if !valid_account(account) {
+        return Err(SignalDaemonError::MissingAccount);
+    }
+    if !(1..=MAX_LIVE_NOTIFICATIONS).contains(&max_notifications) {
+        return Err(SignalDaemonError::InvalidEventLimit);
+    }
+
+    // Open the SSE channel first so notifications cannot be emitted before the
+    // client is ready to consume them.
+    let mut response = open_event_stream(endpoint).await?;
+    let subscription = parse_subscription(
+        rpc(
+            endpoint,
+            "subscribeReceive",
+            Some(json!({ "account": account })),
+        )
+        .await?,
+    )?;
+
+    let receive_result = tokio::time::timeout(wait_timeout, async {
+        let mut decoder = SignalSseDecoder::default();
+        let mut notifications = Vec::with_capacity(max_notifications);
+        loop {
+            let chunk = response
+                .chunk()
+                .await
+                .map_err(|_| SignalDaemonError::Connection)?
+                .ok_or(SignalDaemonError::EventStreamEnded)?;
+            for notification in decoder.push(&chunk)? {
+                if notification.subscription == subscription && notification.account == account {
+                    notifications.push(notification);
+                    if notifications.len() == max_notifications {
+                        return Ok(notifications);
+                    }
+                }
+            }
+        }
+    })
+    .await
+    .map_err(|_| SignalDaemonError::EventStreamTimeout)
+    .and_then(|result| result);
+
+    let unsubscribe_result = rpc(
+        endpoint,
+        "unsubscribeReceive",
+        Some(json!({ "account": account, "subscription": subscription })),
+    )
+    .await;
+    if unsubscribe_result.is_err() {
+        return Err(SignalDaemonError::UnsubscribeFailed);
+    }
+
+    receive_result
 }
 
 async fn rpc(
@@ -414,9 +533,100 @@ mod tests {
     use super::*;
     use std::{
         io::{Read, Write},
-        net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener},
+        net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream},
         thread::JoinHandle,
     };
+
+    fn read_http_request(stream: &mut TcpStream) -> (String, Option<Value>) {
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("synthetic read timeout");
+        let mut bytes = Vec::new();
+        loop {
+            let mut chunk = [0_u8; 4096];
+            let count = stream.read(&mut chunk).expect("synthetic request read");
+            assert!(count > 0, "synthetic request ended before headers");
+            bytes.extend_from_slice(&chunk[..count]);
+            let Some(header_end) = bytes.windows(4).position(|part| part == b"\r\n\r\n") else {
+                continue;
+            };
+            let header = std::str::from_utf8(&bytes[..header_end])
+                .expect("synthetic HTTP header must be UTF-8");
+            let content_length = header
+                .lines()
+                .find_map(|line| {
+                    line.split_once(':').and_then(|(key, value)| {
+                        key.eq_ignore_ascii_case("content-length")
+                            .then(|| value.trim().parse::<usize>().ok())
+                            .flatten()
+                    })
+                })
+                .unwrap_or(0);
+            let body_start = header_end + 4;
+            if bytes.len() < body_start + content_length {
+                continue;
+            }
+            let request_line = header.lines().next().unwrap_or_default().to_owned();
+            let body = (content_length > 0).then(|| {
+                serde_json::from_slice(&bytes[body_start..body_start + content_length])
+                    .expect("synthetic request JSON")
+            });
+            return (request_line, body);
+        }
+    }
+
+    fn write_rpc_response(stream: &mut TcpStream, request: &Value, result: Value) {
+        let reply = json!({"jsonrpc":"2.0", "id":request["id"], "result":result}).to_string();
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            reply.len(), reply
+        );
+        stream
+            .write_all(response.as_bytes())
+            .expect("synthetic RPC reply");
+    }
+
+    fn synthetic_live_daemon(event: Option<Value>) -> (SignalDaemonEndpoint, JoinHandle<()>) {
+        let listener =
+            TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("synthetic live listener must bind");
+        let address = listener.local_addr().expect("synthetic live address");
+        let handle = std::thread::spawn(move || {
+            let (mut events, _) = listener.accept().expect("synthetic SSE connection");
+            let (request_line, body) = read_http_request(&mut events);
+            assert_eq!(request_line, "GET /api/v1/events HTTP/1.1");
+            assert!(body.is_none());
+            events
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream; charset=utf-8\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\n\r\n",
+                )
+                .expect("synthetic SSE headers");
+            events.flush().expect("flush synthetic SSE headers");
+
+            let (mut subscribe, _) = listener.accept().expect("synthetic subscribe request");
+            let (_, subscribe_body) = read_http_request(&mut subscribe);
+            let subscribe_body = subscribe_body.expect("synthetic subscribe JSON");
+            assert_eq!(subscribe_body["method"], "subscribeReceive");
+            assert_eq!(subscribe_body["params"]["account"], "synthetic-account");
+            write_rpc_response(&mut subscribe, &subscribe_body, json!(42));
+
+            if let Some(event) = event {
+                let frame = format!("data: {}\n\n", event);
+                events
+                    .write_all(frame.as_bytes())
+                    .expect("synthetic SSE event");
+                events.flush().expect("flush synthetic SSE event");
+            }
+
+            let (mut unsubscribe, _) = listener.accept().expect("synthetic unsubscribe request");
+            let (_, unsubscribe_body) = read_http_request(&mut unsubscribe);
+            let unsubscribe_body = unsubscribe_body.expect("synthetic unsubscribe JSON");
+            assert_eq!(unsubscribe_body["method"], "unsubscribeReceive");
+            assert_eq!(unsubscribe_body["params"]["account"], "synthetic-account");
+            assert_eq!(unsubscribe_body["params"]["subscription"], 42);
+            write_rpc_response(&mut unsubscribe, &unsubscribe_body, Value::Null);
+        });
+        (SignalDaemonEndpoint::Http { address }, handle)
+    }
 
     fn synthetic_http_daemon(
         expected_method: &'static str,
@@ -755,5 +965,53 @@ mod tests {
             decoder.push(&oversized),
             Err(SignalDaemonError::OversizedEvent)
         ));
+    }
+
+    #[tokio::test]
+    async fn bounded_live_lifecycle_opens_stream_then_subscribes_and_unsubscribes() {
+        let event = json!({
+            "jsonrpc": "2.0",
+            "method": "receive",
+            "params": {
+                "subscription": 42,
+                "result": {
+                    "account": "synthetic-account",
+                    "envelope": {"sourceUuid":"synthetic-sender", "timestamp":1}
+                }
+            }
+        });
+        let (endpoint, server) = synthetic_live_daemon(Some(event));
+        let notifications =
+            receive_bounded(&endpoint, "synthetic-account", 1, Duration::from_secs(5))
+                .await
+                .expect("synthetic lifecycle must succeed");
+        server.join().expect("synthetic live server");
+        assert_eq!(notifications.len(), 1);
+        assert_eq!(notifications[0].subscription, 42);
+    }
+
+    #[tokio::test]
+    async fn bounded_live_lifecycle_unsubscribes_after_invalid_event() {
+        let event = json!({
+            "jsonrpc": "2.0",
+            "method": "receive",
+            "params": {"envelope": {"timestamp":1}}
+        });
+        let (endpoint, server) = synthetic_live_daemon(Some(event));
+        assert!(matches!(
+            receive_bounded(&endpoint, "synthetic-account", 1, Duration::from_secs(5)).await,
+            Err(SignalDaemonError::InvalidEvent)
+        ));
+        server.join().expect("synthetic invalid-event server");
+    }
+
+    #[tokio::test]
+    async fn bounded_live_lifecycle_unsubscribes_after_timeout() {
+        let (endpoint, server) = synthetic_live_daemon(None);
+        assert!(matches!(
+            receive_bounded(&endpoint, "synthetic-account", 1, Duration::from_millis(50)).await,
+            Err(SignalDaemonError::EventStreamTimeout)
+        ));
+        server.join().expect("synthetic timeout server");
     }
 }

@@ -25,7 +25,8 @@
   - [x] explicit read-only HTTP loopback discovery of local accounts and groups
   - [ ] live daemon connector
     - [x] bounded SSE framing and manual-receive notification decoder (synthetic only)
-    - [ ] managed event-stream connection and subscribe/unsubscribe lifecycle
+    - [x] bounded event-stream connection and subscribe/unsubscribe lifecycle (synthetic loopback)
+    - [ ] desktop-managed continuous receive session with explicit user control
 - [ ] linked-account setup UX
   - [x] short-lived local QR workflow with synthetic `startLink` / `finishLink` coverage
   - [ ] acceptance with an installed real signal-cli and primary phone

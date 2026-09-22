@@ -59,13 +59,21 @@ subscription identifier, an explicit local account, and an object-valued raw
 envelope. Automatic-mode notifications, malformed JSON-RPC messages, invalid
 accounts, and events larger than 1 MiB are rejected.
 
-This decoder currently has no network loop and is not registered as a Tauri
-command. It does not open the event endpoint, call `subscribeReceive`, consume
-messages, apply the allowlist, or persist content. Tests feed fragmented and
-multi-event synthetic SSE byte streams directly into the decoder. A managed
-connection must open the SSE stream before subscribing, guarantee
-unsubscribe/cleanup, and preserve raw input before the live connector can be
-marked complete.
+The Rust adapter also has a bounded receive operation for lifecycle testing. It
+opens the SSE stream before calling `subscribeReceive`, accepts 1–64 matching
+notifications within a caller-supplied timeout, and then calls
+`unsubscribeReceive`. The subscription is cancelled after success, timeout,
+stream termination, or decoder failure; a failed cleanup is surfaced as a
+separate error. Notifications from another subscription or account are not
+returned.
+
+The bounded operation is not registered as a Tauri command and cannot be
+started from the desktop UI. It does not run continuously, apply the allowlist,
+or persist content. Tests use a temporary loopback HTTP server that verifies
+the order `events → subscribeReceive → receive → unsubscribeReceive`, including
+cleanup after a malformed synthetic event. A production connector still needs
+explicit user-controlled start/stop state, raw-source persistence, allowlist
+gating, and acceptance against an installed local `signal-cli`.
 
 ## Inbox review model
 
@@ -82,7 +90,7 @@ source contract for a future persistent implementation.
 
 - daemon process management;
 - a persistent RPC or event-stream receive connection;
-- subscribe/unsubscribe lifecycle management;
+- a desktop-managed continuous receive session;
 - account/group discovery over UNIX or raw TCP;
 - enabling or connecting a Signal account;
 - message ingestion and parsing;
