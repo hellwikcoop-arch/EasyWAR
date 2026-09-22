@@ -20,6 +20,8 @@ pub enum SignalSettingsError {
     InvalidStoredConfig,
     #[error("збережені налаштування Signal мають непідтримувану версію")]
     UnsupportedVersion,
+    #[error("приймання Signal ще не реалізовано; його не можна ввімкнути з вікна програми")]
+    DesktopIntakeUnavailable,
     #[error("налаштування Signal не пройшли перевірку: {0}")]
     Policy(#[from] SignalPolicyError),
 }
@@ -71,6 +73,17 @@ impl SignalSettingsStore {
             .await?;
 
         Ok(())
+    }
+
+    pub async fn save_from_desktop(
+        &self,
+        config: SignalAdapterConfig,
+        updated_at: &str,
+    ) -> Result<(), SignalSettingsError> {
+        if config.intake_enabled {
+            return Err(SignalSettingsError::DesktopIntakeUnavailable);
+        }
+        self.save(config, updated_at).await
     }
 }
 
@@ -185,5 +198,37 @@ mod tests {
             store.load().await,
             Err(SignalSettingsError::UnsupportedVersion)
         ));
+    }
+
+    #[tokio::test]
+    async fn desktop_cannot_enable_intake_even_with_a_valid_allowlist() {
+        let (store, settings) = stores().await;
+        let config = SignalAdapterConfig {
+            intake_enabled: true,
+            allowlist: SignalAllowlist::new(["sender-demo".to_owned()], []).unwrap(),
+            ..SignalAdapterConfig::default()
+        };
+        assert!(config.clone().validate().is_ok());
+
+        let result = store.save_from_desktop(config, NOW).await;
+        assert!(matches!(
+            result,
+            Err(SignalSettingsError::DesktopIntakeUnavailable)
+        ));
+        assert!(settings.get(SIGNAL_SETTINGS_KEY).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn desktop_saves_allowlist_only_while_intake_stays_disabled() {
+        let (store, _) = stores().await;
+        let config = SignalAdapterConfig {
+            allowlist: SignalAllowlist::new(["sender-demo".to_owned()], []).unwrap(),
+            ..SignalAdapterConfig::default()
+        };
+
+        store.save_from_desktop(config, NOW).await.unwrap();
+        let loaded = store.load().await.unwrap();
+        assert!(!loaded.as_config().intake_enabled);
+        assert!(!loaded.permits_source("sender-demo", None));
     }
 }

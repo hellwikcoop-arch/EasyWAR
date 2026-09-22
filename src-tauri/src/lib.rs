@@ -30,7 +30,7 @@ async fn save_signal_settings(
     updated_at: String,
 ) -> Result<(), String> {
     store
-        .save(config, &updated_at)
+        .save_from_desktop(config, &updated_at)
         .await
         .map_err(|error| error.to_string())
 }
