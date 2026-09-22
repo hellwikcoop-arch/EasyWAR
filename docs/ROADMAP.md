@@ -21,6 +21,8 @@
 ## 0.6 — Signal intake
 
 - [ ] signal-cli local adapter
+  - [x] local-only daemon endpoint and deny-by-default policy
+  - [ ] live daemon connector
 - [ ] linked-account setup UX
 - [ ] account/group discovery
 - [ ] allowlist
@@ -28,7 +30,7 @@
 - [ ] statuses: NEW / PARSED / NEEDS_REVIEW / APPROVED / REJECTED
 - [ ] import message into intake parser
 - [ ] commands: /help, /status, /ping, /queue, /last
-- [ ] no automatic approval by default
+- [x] no automatic approval by default
 
 ## 0.7 — XLSX compatibility
 
