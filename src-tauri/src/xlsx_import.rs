@@ -76,17 +76,22 @@ const FIELD_SPECS: [FieldSpec; 15] = [
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct EasyWarRecord {
+    #[serde(rename = "num")]
     pub number: String,
     pub date: String,
     pub time: String,
+    #[serde(rename = "targets")]
     pub target_ids: String,
     pub unit: String,
     pub district: String,
+    #[serde(rename = "dpi")]
     pub coordinates: String,
+    #[serde(rename = "type")]
     pub target_type: String,
     pub month: String,
     pub aircraft: String,
     pub munition: String,
+    #[serde(rename = "count")]
     pub munition_count: String,
     pub result: String,
     pub cause: String,
@@ -336,6 +341,34 @@ mod tests {
         assert_eq!(batch.rows[1].row_number, 4);
         assert_eq!(batch.rows[1].parsed.date, "2026-01-02");
         assert_eq!(batch.rows[1].parsed.result, "НЕВІДОМО");
+    }
+
+    #[test]
+    fn serialized_record_uses_all_legacy_core_field_names() {
+        let workbook = synthetic_workbook(EASYWAR_SHEET_NAME, &headers(), true);
+        let batch = import_easywar_xlsx(&workbook).expect("synthetic workbook must import");
+
+        assert_eq!(
+            serde_json::to_value(&batch.rows[0].parsed).expect("record must serialize"),
+            serde_json::json!({
+                "num": "1",
+                "date": "2026-01-01",
+                "time": "10:15",
+                "targets": "SYN-001",
+                "unit": "Синтетичний підрозділ",
+                "district": "Тестовий район",
+                "dpi": "",
+                "type": "Навчальна ціль",
+                "month": "Січень",
+                "aircraft": "Навчальний ЛА",
+                "munition": "Навчальний БП",
+                "count": "1",
+                "result": "НЕВІДОМО",
+                "cause": "",
+                "note": "Синтетичний запис"
+            })
+        );
+        assert_eq!(batch.rows[0].raw_values["Дата"], "01.01.2026");
     }
 
     #[test]

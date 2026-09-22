@@ -42,8 +42,13 @@ allowed.
 - the resolved sheet name;
 - the original worksheet row number;
 - `raw_values`, preserving each required cell before field normalization;
-- a typed `EasyWarRecord` with the same stable fields used by the current
-  frontend contract.
+- a typed `EasyWarRecord`. Its Rust member names are descriptive, while its
+  serialized field names match the existing CORE record contract exactly.
+
+The five names that differ inside Rust are `number` → `num`, `target_ids` →
+`targets`, `coordinates` → `dpi`, `target_type` → `type`, and
+`munition_count` → `count`. The other ten names are unchanged. Neither the
+serialized parsed record nor its date normalization replaces `raw_values`.
 
 Only the date field is normalized at this boundary. ISO dates, Ukrainian
 `дд.мм.рррр` / `дд/мм/рррр` text and Excel date cells become `рррр-мм-дд`,
@@ -62,4 +67,9 @@ not yet:
 
 Those compatibility and persistence steps remain tracked under milestone 0.7.
 Tests generate minimal synthetic workbooks entirely in memory and do not use or
-commit real `.xlsx` files.
+commit real `.xlsx` files. The test suite also loads the unchanged legacy CORE
+script from `src/index.html` and checks its 15-field output against an
+in-memory synthetic `Зведена` workbook. A separate Rust test checks all 15
+serialized field names and values with the matching synthetic row. These are
+contract checks, not yet a full cross-runtime comparison for varied workbook
+styles, dates, formulas or reference sheets.

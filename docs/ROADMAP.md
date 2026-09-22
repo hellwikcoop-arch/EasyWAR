@@ -45,6 +45,7 @@
 - [ ] import current `Зведена`
 - [ ] export compatible XLSX
 - [ ] preserve legacy field mapping
+  - [x] verify all 15 serialized names against legacy CORE with synthetic records
 - [ ] duplicate detection
 - [ ] reference workbook support
 - [ ] regression comparison against legacy parser
