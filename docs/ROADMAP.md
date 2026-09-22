@@ -62,6 +62,8 @@
 - [ ] role-based workspace templates
 - [ ] position-specific empty database/template generation
 - [ ] backup / restore
+  - [x] user-selected, non-overwriting local SQLite backup with integrity check
+  - [ ] in-app restore with preflight and controlled restart
 - [ ] update/migration UX
 
 ## 1.0 — Production release

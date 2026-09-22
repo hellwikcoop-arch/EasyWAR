@@ -20,7 +20,9 @@ serde_json = "1"
 sha2 = "0.10"
 sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "sqlite"] }
 tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
 tauri-plugin-sql = { version = "2", features = ["sqlite"] }
+tempfile = "3"
 thiserror = "2"
 
 [dev-dependencies]

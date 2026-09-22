@@ -61,8 +61,19 @@ provenance. It supports:
 
 Callers provide the `updated_at` timestamp, and reads return it with the parsed
 JSON value. Setting changes do not create report audit events: the `audit_log`
-remains reserved for provenance and review actions. No Tauri command exposes
-settings to the frontend yet.
+remains reserved for provenance and review actions. The desktop exposes only
+the validated Signal setting through dedicated Tauri commands, not the generic
+settings store or direct SQL access.
+
+## Local backup
+
+The desktop's `create_local_backup` command uses a native save dialog so the
+user explicitly chooses a destination. `VACUUM INTO` creates a consistent
+SQLite snapshot in a temporary file beside that destination. The command opens
+the snapshot read-only, requires `PRAGMA integrity_check` to return `ok`, and
+publishes it without replacing an existing file. Failure removes the temporary
+file. It does not modify the live database, contact a network service, encrypt
+the copy, or restore from one. Tests use only temporary synthetic databases.
 
 ## Invariants
 
