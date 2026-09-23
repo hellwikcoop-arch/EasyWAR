@@ -6,12 +6,12 @@ use std::{collections::BTreeMap, io::Cursor};
 pub const EASYWAR_SHEET_NAME: &str = "Зведена";
 
 #[derive(Clone, Copy)]
-struct FieldSpec {
+pub(crate) struct FieldSpec {
     key: &'static str,
     header: &'static str,
 }
 
-const FIELD_SPECS: [FieldSpec; 15] = [
+pub(crate) const FIELD_SPECS: [FieldSpec; 15] = [
     FieldSpec {
         key: "number",
         header: "№",
@@ -74,6 +74,12 @@ const FIELD_SPECS: [FieldSpec; 15] = [
     },
 ];
 
+impl FieldSpec {
+    pub(crate) const fn header(self) -> &'static str {
+        self.header
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct EasyWarRecord {
     #[serde(rename = "num")]
@@ -96,6 +102,28 @@ pub struct EasyWarRecord {
     pub result: String,
     pub cause: String,
     pub note: String,
+}
+
+impl EasyWarRecord {
+    pub(crate) fn legacy_values(&self) -> [&str; 15] {
+        [
+            &self.number,
+            &self.date,
+            &self.time,
+            &self.target_ids,
+            &self.unit,
+            &self.district,
+            &self.coordinates,
+            &self.target_type,
+            &self.month,
+            &self.aircraft,
+            &self.munition,
+            &self.munition_count,
+            &self.result,
+            &self.cause,
+            &self.note,
+        ]
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]

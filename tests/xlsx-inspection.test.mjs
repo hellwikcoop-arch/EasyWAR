@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { runXlsxInspection, runXlsxStage } from '../src/xlsx-inspection.js';
+import { runXlsxExport, runXlsxInspection, runXlsxStage } from '../src/xlsx-inspection.js';
 
 function controls() {
   return [{ disabled: false }, { textContent: '' }];
@@ -77,4 +77,30 @@ test('XLSX staging cancellation and errors do not claim an import', async () => 
   assert.match(status.textContent, /не виконано/);
   assert.match(status.textContent, /synthetic stage failure/);
   assert.equal(button.disabled, false);
+});
+
+test('approved XLSX export reports a new non-overwriting compatible file', async () => {
+  const [button, status] = controls();
+  const called = [];
+  await runXlsxExport(button, status, async command => {
+    called.push(command);
+    return { exported_rows: 3 };
+  });
+
+  assert.deepEqual(called, ['export_approved_xlsx']);
+  assert.equal(button.disabled, false);
+  assert.match(status.textContent, /Схвалених записів: 3/);
+  assert.match(status.textContent, /новий сумісний XLSX/);
+  assert.match(status.textContent, /не перезаписуються/);
+});
+
+test('approved XLSX export cancellation and errors make no completion claim', async () => {
+  const [button, status] = controls();
+  await runXlsxExport(button, status, async () => null);
+  assert.match(status.textContent, /скасовано/);
+  assert.match(status.textContent, /Файли не змінено/);
+
+  await runXlsxExport(button, status, async () => { throw new Error('synthetic export failure'); });
+  assert.match(status.textContent, /не виконано/);
+  assert.match(status.textContent, /synthetic export failure/);
 });

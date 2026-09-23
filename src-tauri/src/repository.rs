@@ -225,6 +225,8 @@ pub enum RepositoryError {
     InvalidSignalReviewer,
     #[error("Некоректний набір ручних виправлень Signal: {0}")]
     InvalidSignalCorrections(String),
+    #[error("Збережений схвалений знімок має некоректний JSON")]
+    InvalidApprovedSnapshotJson,
 }
 
 #[derive(Clone, Debug)]
@@ -728,6 +730,41 @@ impl Repository {
         .await?;
 
         Ok(status)
+    }
+
+    pub async fn approved_revision_snapshots(&self) -> Result<Vec<Value>, RepositoryError> {
+        let snapshots = sqlx::query_scalar::<_, String>(
+            "SELECT revision_history.snapshot_json
+             FROM reports
+             JOIN report_current_state ON report_current_state.report_id = reports.id
+             JOIN review_decisions ON review_decisions.report_id = reports.id
+               AND review_decisions.decision_number = (
+                   SELECT MAX(latest_decision.decision_number)
+                   FROM review_decisions AS latest_decision
+                   WHERE latest_decision.report_id = reports.id
+               )
+             JOIN revision_history ON revision_history.report_id = reports.id
+               AND revision_history.review_decision_id = review_decisions.id
+               AND revision_history.revision_number = (
+                   SELECT MAX(latest_revision.revision_number)
+                   FROM revision_history AS latest_revision
+                   WHERE latest_revision.report_id = reports.id
+                     AND latest_revision.review_decision_id = review_decisions.id
+               )
+             WHERE report_current_state.current_status = 'APPROVED'
+               AND review_decisions.decision = 'APPROVED'
+             ORDER BY review_decisions.decided_at, reports.id",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        snapshots
+            .into_iter()
+            .map(|snapshot| {
+                serde_json::from_str(&snapshot)
+                    .map_err(|_| RepositoryError::InvalidApprovedSnapshotJson)
+            })
+            .collect()
     }
 
     pub async fn list_signal_inbox(
@@ -2054,6 +2091,11 @@ mod tests {
             approved_snapshot.snapshot_json["records"][0]["note"],
             json!("Виправлений синтетичний результат")
         );
+        let export_snapshots = repository
+            .approved_revision_snapshots()
+            .await
+            .expect("approved snapshots must query for export");
+        assert_eq!(export_snapshots, vec![corrected_payload.clone()]);
 
         assert!(matches!(
             repository

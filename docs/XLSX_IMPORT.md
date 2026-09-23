@@ -96,7 +96,7 @@ this boundary.
 It deliberately does not:
 
 - approve imported records or create review decisions;
-- implement fuzzy duplicate detection, reference workbooks or XLSX export.
+- implement fuzzy duplicate detection or reference workbooks.
 
 Those compatibility and persistence steps remain tracked under milestone 0.7.
 Tests generate minimal synthetic workbooks entirely in memory and do not use or
@@ -109,3 +109,28 @@ styles, formulas or reference sheets. Both readers now consume one shared
 synthetic case list for nine date forms, including numeric serials,
 out-of-range numbers, mixed text separators and ambiguous text. This is not
 yet evidence that every real-world workbook variant behaves identically.
+
+## Compatible export
+
+The desktop entry screen also exposes an explicit **Експортувати схвалені
+записи** action. It reads only the latest revision whose current local review
+state is `APPROVED`. Records in `NEW`, `PARSED`, `NEEDS_REVIEW` or `REJECTED`
+state are not exported. Raw source content, parsed versions and manual
+correction history remain unchanged in SQLite.
+
+The export creates a new `.xlsx` with one `Зведена` sheet and the exact 15
+legacy headers in their established order. Signal record arrays are flattened
+with the existing CORE mapping: `types` use `, `, `cause` uses `; `, and a
+missing month is derived from an ISO date. A missing row number is assigned
+sequentially. The source workbook used by an earlier import is never opened or
+modified.
+
+The destination is written through a temporary file in the chosen directory
+and published with a no-clobber rename. An existing destination is never
+overwritten; the user must choose a new name. Cancellation creates nothing.
+Tests use only synthetic approved snapshots and verify all 15 fields by
+reopening both the in-memory and persisted export with the same Rust XLSX
+reader used for import. A separate test proves that an existing file remains
+byte-for-byte unchanged. This proves the current generated `Зведена` contract;
+it does not prove reference-workbook preservation, arbitrary workbook-style
+compatibility or full cross-runtime regression against every legacy workbook.

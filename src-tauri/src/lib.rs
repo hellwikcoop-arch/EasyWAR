@@ -8,6 +8,7 @@ pub mod signal_ingest;
 pub mod signal_policy;
 pub mod signal_session;
 pub mod signal_settings;
+pub mod xlsx_export;
 pub mod xlsx_import;
 
 use backup::BackupStore;
@@ -26,6 +27,7 @@ use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use std::{io::Read, path::Path, time::Duration};
 use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
+use xlsx_export::XlsxExportResult;
 
 const MAX_XLSX_BYTES: u64 = 64 * 1024 * 1024;
 const SIGNAL_SESSION_MAX_NOTIFICATIONS: usize = 64;
@@ -350,6 +352,47 @@ async fn stage_local_xlsx(
         .map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+async fn export_approved_xlsx(
+    app: tauri::AppHandle,
+    repository: tauri::State<'_, Repository>,
+) -> Result<Option<XlsxExportResult>, String> {
+    let snapshots = repository
+        .approved_revision_snapshots()
+        .await
+        .map_err(|error| error.to_string())?;
+    let records = xlsx_export::records_from_approved_snapshots(&snapshots)
+        .map_err(|error| error.to_string())?;
+    let exported_rows = records.len();
+    let bytes = tauri::async_runtime::spawn_blocking(move || {
+        xlsx_export::build_compatible_xlsx(&records).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    let suggested_name = format!("EasyWAR-export-{}.xlsx", Utc::now().format("%Y-%m-%d"));
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title("Експортувати схвалені записи EasyWAR")
+            .set_file_name(&suggested_name)
+            .add_filter("Таблиця XLSX", &["xlsx"])
+            .blocking_save_file()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let destination = selected.into_path().map_err(|error| error.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        xlsx_export::write_new_compatible_xlsx(&destination, &bytes)
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    Ok(Some(XlsxExportResult { exported_rows }))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -398,7 +441,8 @@ pub fn run() {
             create_local_backup,
             inspect_local_backup,
             inspect_local_xlsx,
-            stage_local_xlsx
+            stage_local_xlsx,
+            export_approved_xlsx
         ])
         .run(tauri::generate_context!())
         .expect("помилка запуску EasyWAR");

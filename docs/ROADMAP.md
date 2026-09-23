@@ -58,8 +58,8 @@
 - [x] import current `Зведена`
   - [x] user-selected, read-only desktop compatibility preflight
   - [x] explicit user-selected atomic SQLite staging with idempotent retry
-- [ ] export compatible XLSX
-- [ ] preserve legacy field mapping
+- [x] export compatible XLSX
+- [x] preserve legacy field mapping
   - [x] verify all 15 serialized names against legacy CORE with synthetic records
 - [x] exact parsed-payload duplicate detection with immutable provenance links
 - [ ] reference workbook support

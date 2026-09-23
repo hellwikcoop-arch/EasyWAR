@@ -1349,7 +1349,9 @@ body.lay-sizing, body.lay-sizing * { -webkit-user-select: none !important; user-
     <p class="muted">Окрема перевірка сумісності читає обраний файл лише на цьому пристрої. Вона не змінює таблицю, не записує дані в базу й не схвалює записи.</p>
     <button type="button" class="btn quiet" id="xlsxInspectBtn">Перевірити сумісність…</button>
     <button type="button" class="btn" id="xlsxStageBtn">Імпортувати в локальну базу…</button>
+    <button type="button" class="btn" id="xlsxExportBtn">Експортувати схвалені записи…</button>
     <p class="muted small">Імпорт повторно перевіряє вибраний файл і атомарно додає рядки як незмінні raw/parsed записи зі станом «Розібрано». Вихідний XLSX не змінюється; схвалення не виконується.</p>
+    <p class="muted small">Експорт містить лише останні явно схвалені редакції, створює новий аркуш «Зведена» з 15 сумісними полями й не перезаписує наявні файли.</p>
     <p id="xlsxInspectStatus" role="status" aria-live="polite"></p>
   </section>
 
