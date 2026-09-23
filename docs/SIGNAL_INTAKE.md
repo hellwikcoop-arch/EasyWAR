@@ -72,8 +72,32 @@ started from the desktop UI. It does not run continuously, apply the allowlist,
 or persist content. Tests use a temporary loopback HTTP server that verifies
 the order `events → subscribeReceive → receive → unsubscribeReceive`, including
 cleanup after a malformed synthetic event. A production connector still needs
-explicit user-controlled start/stop state, raw-source persistence, allowlist
-gating, and acceptance against an installed local `signal-cli`.
+explicit user-controlled start/stop state, connected raw-source persistence,
+allowlist gating, and acceptance against an installed local `signal-cli`.
+
+## Provenance capture bridge
+
+The Rust layer has a separate, non-command bridge that can accept one already
+decoded manual-receive notification. It rejects missing timestamps, sender
+identity, text messages, malformed group metadata, or a mismatch with the
+explicitly selected local account before any database write. It then requires
+intake to be enabled in a validated configuration and matches an exact sender
+plus, for group messages, an exact group. A denied or disabled source writes no
+rows.
+
+For an allowed synthetic notification, the bridge hashes the complete envelope
+and transactionally stores an immutable `SIGNAL` raw source, one `NEW` report,
+and its `CAPTURED` audit event. Deterministic hash-based identities make a
+repeated identical envelope fail closed at the database uniqueness boundary;
+the failed transaction leaves the first provenance chain unchanged. The raw
+message and envelope remain in the local provenance store but are not returned
+by the read-only Inbox list. Synthetic tests cover allowed, denied, disabled,
+wrong-group, malformed, and duplicate cases.
+
+The bridge is not connected to `receive_bounded`, is not a Tauri command, and
+does not enable the saved desktop intake flag. A future user-controlled session
+must connect these boundaries without weakening cleanup, allowlist, or audit
+requirements.
 
 ## Inbox review model
 
@@ -104,7 +128,7 @@ live connector is running.
 - a desktop-managed continuous receive session;
 - account/group discovery over UNIX or raw TCP;
 - enabling or connecting a Signal account;
-- message ingestion and parsing;
+- live message ingestion and parsing;
 - live Signal Inbox capture, parsing, or review-state writes.
 
 All tests use synthetic configuration values only, including the disconnected

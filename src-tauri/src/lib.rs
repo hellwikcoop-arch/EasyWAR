@@ -4,6 +4,7 @@ pub mod repository;
 pub mod restore;
 pub mod signal_daemon;
 pub mod signal_inbox;
+pub mod signal_ingest;
 pub mod signal_policy;
 pub mod signal_settings;
 pub mod xlsx_import;
