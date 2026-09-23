@@ -191,10 +191,42 @@ function initializeSignalSettings() {
       source.textContent = item.sourceItemKey;
       const details = document.createElement('span');
       details.textContent = `${item.capturedAt} · ${item.statusLabel}`;
-      row.append(heading, source, details);
+      const actions = document.createElement('div');
+      actions.className = 'ew-signal-inbox-actions';
+      const openForReview = document.createElement('button');
+      openForReview.type = 'button';
+      openForReview.className = 'btn quiet';
+      openForReview.textContent = 'Відкрити у внесенні';
+      openForReview.addEventListener('click', () => openInboxItemForReview(item, openForReview));
+      actions.append(openForReview);
+      row.append(heading, source, details, actions);
       inboxList.append(row);
     }
     inboxStatus.textContent = described.message;
+  }
+
+  async function openInboxItemForReview(item, button) {
+    const intake = window.__AV;
+    if (!intake?.S?.wb) {
+      inboxStatus.textContent = 'Спочатку відкрийте робочу таблицю у вкладці «Внесення доповідей».';
+      return;
+    }
+
+    button.disabled = true;
+    inboxStatus.textContent = `Відкриваємо запис ${item.reportId} для ручної перевірки…`;
+    try {
+      const rawText = await invoke('get_signal_report_text', { reportId: item.reportId });
+      if (typeof rawText !== 'string' || !rawText.trim()) {
+        throw new Error('Текст цього запису Signal недоступний.');
+      }
+      document.querySelector('#tab-entry')?.click();
+      intake.importForReview(rawText);
+      dialog.close();
+      document.querySelector('#paste')?.focus();
+    } catch (error) {
+      inboxStatus.textContent = `Не вдалося відкрити запис для перевірки: ${String(error)}`;
+      button.disabled = false;
+    }
   }
 
   async function refreshInbox() {

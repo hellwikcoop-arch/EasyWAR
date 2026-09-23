@@ -661,6 +661,24 @@ impl Repository {
             )
             .collect())
     }
+
+    pub async fn signal_report_text(
+        &self,
+        report_id: &str,
+    ) -> Result<Option<String>, RepositoryError> {
+        let raw_text = sqlx::query_scalar(
+            "SELECT raw_sources.raw_text
+             FROM reports
+             JOIN raw_sources ON raw_sources.id = reports.raw_source_id
+             WHERE reports.id = ? AND raw_sources.source_type = 'SIGNAL'",
+        )
+        .bind(report_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .flatten();
+
+        Ok(raw_text)
+    }
 }
 
 async fn insert_audit(
@@ -820,6 +838,50 @@ mod tests {
             repository.list_signal_inbox(101).await,
             Err(RepositoryError::InvalidSignalInboxLimit)
         ));
+    }
+
+    #[tokio::test]
+    async fn returns_raw_text_only_for_an_exact_signal_report_id() {
+        let repository = repository().await;
+        let mut signal = capture("signal-source-2", "signal-report-2", "signal-audit-2");
+        signal.source_type = SourceType::Signal;
+        signal.raw_text = Some("Синтетичний текст Signal для ручної перевірки".to_owned());
+        signal.raw_sha256 = "c".repeat(64);
+
+        repository
+            .capture_report(&signal)
+            .await
+            .expect("synthetic Signal report capture must succeed");
+        repository
+            .capture_report(&capture(
+                "paste-source-2",
+                "paste-report-2",
+                "paste-audit-2",
+            ))
+            .await
+            .expect("synthetic paste capture must succeed");
+
+        assert_eq!(
+            repository
+                .signal_report_text("signal-report-2")
+                .await
+                .expect("exact Signal lookup must query"),
+            Some("Синтетичний текст Signal для ручної перевірки".to_owned())
+        );
+        assert_eq!(
+            repository
+                .signal_report_text("paste-report-2")
+                .await
+                .expect("non-Signal lookup must query"),
+            None
+        );
+        assert_eq!(
+            repository
+                .signal_report_text("missing-report")
+                .await
+                .expect("missing lookup must query"),
+            None
+        );
     }
 
     fn synthetic_xlsx_row(row_number: u32) -> XlsxImportRow {

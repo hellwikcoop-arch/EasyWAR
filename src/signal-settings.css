@@ -167,6 +167,7 @@
   color: var(--muted);
 }
 
+.ew-signal-inbox-actions,
 .ew-signal-demo-actions {
   display: flex;
   flex-wrap: wrap;

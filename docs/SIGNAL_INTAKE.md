@@ -133,16 +133,28 @@ or constitute an operational approval UI. The preview's JavaScript transition
 rules are regression-tested separately; the Rust review model remains the
 source contract for a future persistent implementation.
 
-The dialog also has a separate user-triggered, read-only local queue. Its
-backend returns at most 100 existing `SIGNAL` provenance records from the
-application SQLite database with the report identifier, source item key,
-source/capture times, derived status, and stored SHA-256. The UI renders the
-identifier, source item key, capture time, and status. The command does not
-return `raw_text` or `raw_payload_json`, and the UI has no action that changes
-a record. Synthetic repository tests verify source filtering, the `NEW` to
-`PARSED` derived status, the fixed list bound, and the absence of raw content
-in the serialized result. This list does not capture messages or prove that a
-live connector is running.
+The dialog also has a separate user-triggered local queue. Its list command
+returns at most 100 existing `SIGNAL` provenance records from the application
+SQLite database with the report identifier, source item key, source/capture
+times, derived status, and stored SHA-256. The list never returns `raw_text` or
+`raw_payload_json`; the UI renders metadata only.
+
+Each persisted Inbox row has an explicit **Відкрити у внесенні** action. It is
+available only after the user opens a workbook. The action requests raw text
+for that exact report identifier through a separate command, and the
+repository returns text only when the report is backed by a `SIGNAL` raw
+source. Missing and non-Signal identifiers return no content. The UI then
+switches to the existing intake tab and invokes a narrow legacy helper that
+temporarily disables `S.auto`, runs the existing parser, and restores the prior
+setting in `finally`. This can populate review cards but cannot automatically
+append the Signal record to the workbook. Raw text is not logged or added to
+the Inbox list response.
+
+Synthetic repository tests verify source filtering, the `NEW` to `PARSED`
+derived status, the fixed list bound, the absence of raw content in the
+serialized list, and exact Signal/non-Signal/missing lookups. This bridge does
+not persist parser output or review-status transitions, capture messages, or
+prove that a live connector is running.
 
 ## Not implemented in this step
 
@@ -151,8 +163,8 @@ live connector is running.
 - a long-running or automatically restarted receive service;
 - account/group discovery over UNIX or raw TCP;
 - enabling or connecting a Signal account;
-- live message ingestion and parsing;
-- live Signal Inbox capture, parsing, or review-state writes.
+- persistence of parser output and review-status transitions;
+- live-daemon acceptance of Signal Inbox capture and parsing.
 
 All tests use synthetic configuration values only, including the disconnected
 UI-state regression tests.

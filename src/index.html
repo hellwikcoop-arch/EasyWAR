@@ -2399,6 +2399,19 @@ function doParse() {
   renderResults();
   if (S.auto && S.parsed.length && S.parsed.every(r => !Object.keys(r.warn).length && !r.dup) && S.handle) addSelected(true);
 }
+function importForReview(text) {
+  if (!S.wb) throw new Error('Спочатку відкрийте таблицю.');
+  const input = $('#paste');
+  if (!input) throw new Error('Поле внесення недоступне.');
+  const previousAuto = S.auto;
+  S.auto = false;
+  try {
+    input.value = String(text == null ? '' : text);
+    doParse();
+  } finally {
+    S.auto = previousAuto;
+  }
+}
 
 /* ------------------------------ додавання ------------------------------ */
 function explainWriteError(e) {
@@ -2692,7 +2705,7 @@ const autoRefresh = () => { clearTimeout(__refreshT); __refreshT = setTimeout(()
 window.addEventListener('focus', autoRefresh);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) autoRefresh(); });
 
-window.__AV = { S, connect, doParse, addSelected, pickFile, showError, downloadCurrent, toast, refresh: refreshFromDisk }; // для налагодження
+window.__AV = { S, connect, doParse, importForReview, addSelected, pickFile, showError, downloadCurrent, toast, refresh: refreshFromDisk }; // для налагодження
 document.addEventListener('DOMContentLoaded', init);
 })();
 </script>

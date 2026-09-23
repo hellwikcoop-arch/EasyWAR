@@ -103,6 +103,17 @@ async fn list_signal_inbox(
 }
 
 #[tauri::command]
+async fn get_signal_report_text(
+    repository: tauri::State<'_, Repository>,
+    report_id: String,
+) -> Result<Option<String>, String> {
+    repository
+        .signal_report_text(&report_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn run_signal_receive_session(
     controller: tauri::State<'_, SignalReceiveController>,
     settings: tauri::State<'_, SignalSettingsStore>,
@@ -277,6 +288,7 @@ pub fn run() {
             start_signal_link,
             finish_signal_link,
             list_signal_inbox,
+            get_signal_report_text,
             run_signal_receive_session,
             stop_signal_receive_session,
             get_signal_receive_status,
