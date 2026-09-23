@@ -99,5 +99,5 @@
 - [ ] notarization
 - [ ] Windows installer
 - [x] release checklist
-- [ ] recovery/backup guide
+- [x] recovery/backup guide
 - [ ] user documentation
