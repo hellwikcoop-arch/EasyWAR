@@ -51,6 +51,11 @@ Each write method uses one SQLite transaction:
   `NEEDS_REVIEW` decision, an immutable snapshot revision and its audit event.
   Repeating the request while the same report is already `NEEDS_REVIEW` returns
   the existing decision without adding rows.
+- `finalize_signal_review` accepts only `NEEDS_REVIEW`, a nonblank bounded local
+  reviewer identifier and an explicit `APPROVED` or `REJECTED` decision. It
+  atomically appends the final decision, matching immutable snapshot revision
+  and audit event. An identical retry is idempotent; final states cannot be
+  changed or reopened.
 - `stage_xlsx_batch` writes all new XLSX rows in one transaction as immutable
   interpreted-cell snapshots plus separate parsed versions and audit events;
   it never approves rows and rejects conflicting exact-file retries.
@@ -64,9 +69,10 @@ currently exposed in the desktop UI.
 The desktop Signal parse command generates timestamps in Rust and accepts a
 strict versioned JSON shape with 1–64 parsed records and a 1 MiB serialized
 limit. It rejects raw `srcText` and UI-only `_own`, `dup`, and `include` fields.
-The original `raw_sources` row is never changed. The current desktop review
-transition stops at `NEEDS_REVIEW`; manual corrections and reviewer-bound
-`APPROVED` / `REJECTED` decisions are intentionally not exposed yet.
+The original `raw_sources` row is never changed. Final decisions require a
+local reviewer identifier that is written to decision, revision and audit
+records; this is provenance, not authentication. Manual correction persistence
+and corrected snapshots are intentionally not exposed yet.
 
 ## Settings store
 

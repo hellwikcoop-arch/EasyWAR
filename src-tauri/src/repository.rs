@@ -205,6 +205,8 @@ pub enum RepositoryError {
     InvalidSignalParsePayload(String),
     #[error("Запис Signal має неприпустимий стан для цієї дії: {0}")]
     InvalidSignalReportState(String),
+    #[error("Потрібен коректний локальний ідентифікатор рецензента")]
+    InvalidSignalReviewer,
 }
 
 #[derive(Clone, Debug)]
@@ -988,6 +990,214 @@ impl Repository {
             inserted: true,
         })
     }
+
+    pub async fn finalize_signal_review(
+        &self,
+        report_id: &str,
+        decision: ReviewDecision,
+        reviewer: &str,
+        decided_at: &str,
+    ) -> Result<SignalReviewPersistence, RepositoryError> {
+        if !matches!(
+            decision,
+            ReviewDecision::Approved | ReviewDecision::Rejected
+        ) {
+            return Err(RepositoryError::InvalidSignalReportState(
+                decision.as_str().to_owned(),
+            ));
+        }
+        if report_id.trim().is_empty() || decided_at.trim().is_empty() {
+            return Err(RepositoryError::InvalidSignalReportState(
+                "немає ідентифікатора запису або часу рішення".to_owned(),
+            ));
+        }
+        if reviewer.is_empty()
+            || reviewer.trim() != reviewer
+            || reviewer.chars().count() > 128
+            || reviewer.chars().any(char::is_control)
+        {
+            return Err(RepositoryError::InvalidSignalReviewer);
+        }
+
+        let mut transaction = self.pool.begin().await?;
+        let source_type: Option<String> = sqlx::query_scalar(
+            "SELECT raw_sources.source_type
+             FROM reports
+             JOIN raw_sources ON raw_sources.id = reports.raw_source_id
+             WHERE reports.id = ?",
+        )
+        .bind(report_id)
+        .fetch_optional(&mut *transaction)
+        .await?;
+        if source_type.as_deref() != Some("SIGNAL") {
+            return Err(RepositoryError::SignalReportNotFound);
+        }
+
+        let current_status: String = sqlx::query_scalar(
+            "SELECT current_status FROM report_current_state WHERE report_id = ?",
+        )
+        .bind(report_id)
+        .fetch_one(&mut *transaction)
+        .await?;
+        if matches!(current_status.as_str(), "APPROVED" | "REJECTED") {
+            let existing: Option<(String, String, String, String, String)> = sqlx::query_as(
+                "SELECT review_decisions.id, review_decisions.parsed_version_id,
+                        review_decisions.decision, review_decisions.decided_by,
+                        revision_history.id
+                 FROM review_decisions
+                 JOIN revision_history
+                   ON revision_history.review_decision_id = review_decisions.id
+                  AND revision_history.report_id = review_decisions.report_id
+                 WHERE review_decisions.report_id = ?
+                   AND review_decisions.parsed_version_id IS NOT NULL
+                 ORDER BY review_decisions.decision_number DESC,
+                          revision_history.revision_number DESC
+                 LIMIT 1",
+            )
+            .bind(report_id)
+            .fetch_optional(&mut *transaction)
+            .await?;
+            if let Some((
+                decision_id,
+                parsed_version_id,
+                stored_decision,
+                decided_by,
+                revision_id,
+            )) = existing
+            {
+                if stored_decision == decision.as_str() && decided_by == reviewer {
+                    return Ok(SignalReviewPersistence {
+                        report_id: report_id.to_owned(),
+                        parsed_version_id,
+                        decision_id,
+                        revision_id,
+                        current_status,
+                        inserted: false,
+                    });
+                }
+            }
+            return Err(RepositoryError::InvalidSignalReportState(current_status));
+        }
+        if current_status != "NEEDS_REVIEW" {
+            return Err(RepositoryError::InvalidSignalReportState(current_status));
+        }
+
+        let (parsed_version_id, snapshot_json): (String, String) = sqlx::query_as(
+            "SELECT review_decisions.parsed_version_id, revision_history.snapshot_json
+             FROM review_decisions
+             JOIN revision_history
+               ON revision_history.review_decision_id = review_decisions.id
+              AND revision_history.report_id = review_decisions.report_id
+             WHERE review_decisions.report_id = ?
+               AND review_decisions.decision = 'NEEDS_REVIEW'
+               AND review_decisions.parsed_version_id IS NOT NULL
+             ORDER BY review_decisions.decision_number DESC,
+                      revision_history.revision_number DESC
+             LIMIT 1",
+        )
+        .bind(report_id)
+        .fetch_one(&mut *transaction)
+        .await?;
+        let decision_number: i64 = sqlx::query_scalar(
+            "SELECT COALESCE(MAX(decision_number), 0) + 1
+             FROM review_decisions WHERE report_id = ?",
+        )
+        .bind(report_id)
+        .fetch_one(&mut *transaction)
+        .await?;
+        let revision_number: i64 = sqlx::query_scalar(
+            "SELECT COALESCE(MAX(revision_number), 0) + 1
+             FROM revision_history WHERE report_id = ?",
+        )
+        .bind(report_id)
+        .fetch_one(&mut *transaction)
+        .await?;
+        let decision_number_text = decision_number.to_string();
+        let revision_number_text = revision_number.to_string();
+        let decision_id = signal_identity(
+            "signal-review",
+            &[
+                report_id,
+                &parsed_version_id,
+                &decision_number_text,
+                decision.as_str(),
+                reviewer,
+            ],
+        );
+        let revision_id = signal_identity(
+            "signal-revision",
+            &[report_id, &decision_id, &revision_number_text],
+        );
+        let audit_id = signal_identity("signal-audit-review", &[&decision_id]);
+        let rationale = match decision {
+            ReviewDecision::Approved => "Явно схвалено локальним рецензентом",
+            ReviewDecision::Rejected => "Явно відхилено локальним рецензентом",
+            ReviewDecision::NeedsReview => unreachable!("final decision checked above"),
+        };
+
+        sqlx::query(
+            "INSERT INTO review_decisions
+             (id, report_id, decision_number, parsed_version_id, decision,
+              decided_by, rationale, decided_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&decision_id)
+        .bind(report_id)
+        .bind(decision_number)
+        .bind(&parsed_version_id)
+        .bind(decision.as_str())
+        .bind(reviewer)
+        .bind(rationale)
+        .bind(decided_at)
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::query(
+            "INSERT INTO revision_history
+             (id, report_id, revision_number, parsed_version_id, review_decision_id,
+              snapshot_json, change_summary, created_by, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&revision_id)
+        .bind(report_id)
+        .bind(revision_number)
+        .bind(&parsed_version_id)
+        .bind(&decision_id)
+        .bind(&snapshot_json)
+        .bind(rationale)
+        .bind(reviewer)
+        .bind(decided_at)
+        .execute(&mut *transaction)
+        .await?;
+        insert_audit(
+            &mut transaction,
+            &AuditContext {
+                id: audit_id,
+                actor_type: ActorType::User,
+                actor_label: Some(reviewer.to_owned()),
+                occurred_at: decided_at.to_owned(),
+            },
+            Some(report_id),
+            "review_decision",
+            &decision_id,
+            decision.as_str(),
+            json!({
+                "decisionNumber": decision_number,
+                "revisionId": revision_id,
+                "revisionNumber": revision_number,
+            }),
+        )
+        .await?;
+        transaction.commit().await?;
+
+        Ok(SignalReviewPersistence {
+            report_id: report_id.to_owned(),
+            parsed_version_id,
+            decision_id,
+            revision_id,
+            current_status: decision.as_str().to_owned(),
+            inserted: true,
+        })
+    }
 }
 
 fn validate_signal_parse_payload(payload: &Value) -> Result<String, RepositoryError> {
@@ -1361,13 +1571,56 @@ mod tests {
 
         assert!(matches!(
             repository
-                .store_signal_parse(
+                .finalize_signal_review(
                     "signal-report-parse",
-                    &signal_parse_payload("Змінений результат після передачі"),
+                    ReviewDecision::Approved,
+                    "synthetic-reviewer",
                     "2026-01-01T00:00:04Z",
                 )
                 .await,
-            Err(RepositoryError::InvalidSignalReportState(status)) if status == "NEEDS_REVIEW"
+            Ok(SignalReviewPersistence { inserted: true, current_status, .. })
+                if current_status == "APPROVED"
+        ));
+        let retry_final = repository
+            .finalize_signal_review(
+                "signal-report-parse",
+                ReviewDecision::Approved,
+                "synthetic-reviewer",
+                "2026-01-01T00:00:05Z",
+            )
+            .await
+            .expect("identical final decision retry must be idempotent");
+        assert!(!retry_final.inserted);
+        assert!(matches!(
+            repository
+                .finalize_signal_review(
+                    "signal-report-parse",
+                    ReviewDecision::Rejected,
+                    "synthetic-reviewer",
+                    "2026-01-01T00:00:06Z",
+                )
+                .await,
+            Err(RepositoryError::InvalidSignalReportState(status)) if status == "APPROVED"
+        ));
+        let final_counts: (i64, i64, i64) = sqlx::query_as(
+            "SELECT (SELECT count(*) FROM review_decisions),
+                    (SELECT count(*) FROM revision_history),
+                    (SELECT count(*) FROM audit_log)",
+        )
+        .fetch_one(&repository.pool)
+        .await
+        .expect("final review provenance counts must query");
+        assert_eq!(final_counts, (2, 2, 4));
+
+        assert!(matches!(
+            repository
+                .store_signal_parse(
+                    "signal-report-parse",
+                    &signal_parse_payload("Змінений результат після передачі"),
+                    "2026-01-01T00:00:07Z",
+                )
+                .await,
+            Err(RepositoryError::InvalidSignalReportState(status)) if status == "APPROVED"
         ));
     }
 
@@ -1427,6 +1680,69 @@ mod tests {
                 .await,
             Err(RepositoryError::InvalidSignalReportState(status)) if status == "NEW"
         ));
+        assert!(matches!(
+            repository
+                .finalize_signal_review("signal-report-new", ReviewDecision::Approved, "", NOW,)
+                .await,
+            Err(RepositoryError::InvalidSignalReviewer)
+        ));
+    }
+
+    #[tokio::test]
+    async fn rejects_signal_review_with_an_explicit_reviewer() {
+        let repository = repository().await;
+        let mut signal = capture(
+            "signal-source-rejected",
+            "signal-report-rejected",
+            "signal-audit-rejected",
+        );
+        signal.source_type = SourceType::Signal;
+        signal.raw_sha256 = "f".repeat(64);
+        repository
+            .capture_report(&signal)
+            .await
+            .expect("synthetic rejected Signal report capture must succeed");
+        repository
+            .store_signal_parse(
+                "signal-report-rejected",
+                &signal_parse_payload("Синтетичний запис для відхилення"),
+                NOW,
+            )
+            .await
+            .expect("synthetic rejected Signal parse must persist");
+        repository
+            .request_signal_review("signal-report-rejected", NOW)
+            .await
+            .expect("synthetic rejected Signal report must enter review");
+
+        let final_result = repository
+            .finalize_signal_review(
+                "signal-report-rejected",
+                ReviewDecision::Rejected,
+                "synthetic-reviewer-reject",
+                NOW,
+            )
+            .await
+            .expect("explicit synthetic rejection must persist");
+        assert!(final_result.inserted);
+        assert_eq!(final_result.current_status, "REJECTED");
+        assert_eq!(
+            repository
+                .current_status("signal-report-rejected")
+                .await
+                .expect("rejected status must query")
+                .as_deref(),
+            Some("REJECTED")
+        );
+        let audit_actor: String = sqlx::query_scalar(
+            "SELECT actor_label FROM audit_log
+             WHERE report_id = ? AND action = 'REJECTED'",
+        )
+        .bind("signal-report-rejected")
+        .fetch_one(&repository.pool)
+        .await
+        .expect("rejection audit actor must query");
+        assert_eq!(audit_actor, "synthetic-reviewer-reject");
     }
 
     fn synthetic_xlsx_row(row_number: u32) -> XlsxImportRow {

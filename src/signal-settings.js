@@ -79,6 +79,11 @@ function initializeSignalSettings() {
       <details id="ew-signal-inbox" class="ew-signal-inbox">
         <summary>Локальна черга Signal</summary>
         <p>Показує лише метадані вже збережених записів походження. Текст і JSON повідомлень у цей список не передаються. Оновлення списку не запускає приймання.</p>
+        <label class="ew-signal-field" for="ew-signal-reviewer">
+          <span>Локальний ідентифікатор рецензента</span>
+          <input id="ew-signal-reviewer" type="text" maxlength="128" autocomplete="off" spellcheck="false">
+          <small>Обов'язковий для явного схвалення або відхилення. Це локальний підпис в аудиті, а не автентифікація.</small>
+        </label>
         <button type="button" class="btn quiet" id="ew-signal-inbox-refresh">Оновити локальну чергу</button>
         <ul id="ew-signal-inbox-list" class="ew-signal-inbox-list"></ul>
         <p id="ew-signal-inbox-status" class="ew-signal-status" role="status" aria-live="polite">Чергу ще не завантажено.</p>
@@ -107,6 +112,7 @@ function initializeSignalSettings() {
   const inboxRefresh = dialog.querySelector('#ew-signal-inbox-refresh');
   const inboxList = dialog.querySelector('#ew-signal-inbox-list');
   const inboxStatus = dialog.querySelector('#ew-signal-inbox-status');
+  const reviewerInput = dialog.querySelector('#ew-signal-reviewer');
   const demo = dialog.querySelector('#ew-signal-demo');
   const demoList = dialog.querySelector('#ew-signal-demo-list');
   const demoStatus = dialog.querySelector('#ew-signal-demo-status');
@@ -207,6 +213,18 @@ function initializeSignalSettings() {
         requestReview.addEventListener('click', () => requestInboxReview(item, requestReview));
         actions.append(requestReview);
       }
+      if (item.currentStatus === 'NEEDS_REVIEW') {
+        for (const [label, decision] of [['Схвалити', 'APPROVED'], ['Відхилити', 'REJECTED']]) {
+          const finalizeReview = document.createElement('button');
+          finalizeReview.type = 'button';
+          finalizeReview.className = 'btn quiet';
+          finalizeReview.textContent = label;
+          finalizeReview.addEventListener('click', () => (
+            finalizeInboxReview(item, decision, finalizeReview)
+          ));
+          actions.append(finalizeReview);
+        }
+      }
       row.append(heading, source, details, actions);
       inboxList.append(row);
     }
@@ -255,6 +273,34 @@ function initializeSignalSettings() {
         : 'Запис уже перебуває на ручній перевірці.';
     } catch (error) {
       inboxStatus.textContent = `Не вдалося передати запис на ручну перевірку: ${String(error)}`;
+      button.disabled = false;
+    }
+  }
+
+  async function finalizeInboxReview(item, decision, button) {
+    const reviewer = reviewerInput.value.trim();
+    if (!reviewer) {
+      inboxStatus.textContent = 'Введіть локальний ідентифікатор рецензента.';
+      reviewerInput.focus();
+      return;
+    }
+    button.disabled = true;
+    inboxStatus.textContent = decision === 'APPROVED'
+      ? `Схвалюємо запис ${item.reportId}…`
+      : `Відхиляємо запис ${item.reportId}…`;
+    try {
+      const result = await invoke('finalize_signal_review', {
+        reportId: item.reportId,
+        decision,
+        reviewer,
+      });
+      await refreshInbox();
+      const label = decision === 'APPROVED' ? 'схвалено' : 'відхилено';
+      inboxStatus.textContent = result?.inserted
+        ? `Запис ${label}. Рішення та рецензента додано до незмінного аудиту.`
+        : `Це саме фінальне рішення вже було збережено.`;
+    } catch (error) {
+      inboxStatus.textContent = `Не вдалося зберегти фінальне рішення: ${String(error)}`;
       button.disabled = false;
     }
   }

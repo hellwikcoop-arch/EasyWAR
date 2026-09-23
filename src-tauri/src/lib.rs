@@ -13,7 +13,8 @@ pub mod xlsx_import;
 use backup::BackupStore;
 use chrono::{SecondsFormat, Utc};
 use repository::{
-    Repository, SettingsStore, SignalInboxItem, SignalParsePersistence, SignalReviewPersistence,
+    Repository, ReviewDecision, SettingsStore, SignalInboxItem, SignalParsePersistence,
+    SignalReviewPersistence,
 };
 use restore::BackupInspection;
 use serde_json::Value;
@@ -138,6 +139,25 @@ async fn request_signal_review(
     let decided_at = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
     repository
         .request_signal_review(&report_id, &decided_at)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn finalize_signal_review(
+    repository: tauri::State<'_, Repository>,
+    report_id: String,
+    decision: String,
+    reviewer: String,
+) -> Result<SignalReviewPersistence, String> {
+    let decision = match decision.as_str() {
+        "APPROVED" => ReviewDecision::Approved,
+        "REJECTED" => ReviewDecision::Rejected,
+        _ => return Err("Фінальне рішення має бути APPROVED або REJECTED".to_owned()),
+    };
+    let decided_at = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
+    repository
+        .finalize_signal_review(&report_id, decision, &reviewer, &decided_at)
         .await
         .map_err(|error| error.to_string())
 }
@@ -320,6 +340,7 @@ pub fn run() {
             get_signal_report_text,
             store_signal_parse,
             request_signal_review,
+            finalize_signal_review,
             run_signal_receive_session,
             stop_signal_receive_session,
             get_signal_receive_status,

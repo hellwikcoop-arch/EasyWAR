@@ -45,7 +45,8 @@
   - [x] read-only provenance-backed local list and Ukrainian empty state (synthetic tests only)
   - [x] explicit persisted-message bridge to the legacy parser for manual review without auto-append
   - [x] persist parser output and explicit `PARSED` → `NEEDS_REVIEW` transition
-  - [ ] persist manual corrections and reviewer-bound `APPROVED` / `REJECTED` decisions
+  - [x] persist explicit reviewer-bound `APPROVED` / `REJECTED` decisions
+  - [ ] persist manual corrections and corrected revision snapshots
 - [x] status model: NEW / PARSED / NEEDS_REVIEW / APPROVED / REJECTED
 - [x] import message into intake parser
 - [ ] commands: /help, /status, /ping, /queue, /last

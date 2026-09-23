@@ -161,12 +161,20 @@ the derived state is `PARSED`, the Inbox exposes an explicit **На ручну
 the latest parser payload and its audit event. Repeating the same request adds
 no rows.
 
+While a record is `NEEDS_REVIEW`, the Inbox requires a nonblank local reviewer
+identifier before exposing an explicit **Схвалити** or **Відхилити** action.
+The backend accepts only `APPROVED` or `REJECTED`, then atomically appends the
+final decision, a matching immutable snapshot revision and an audit event with
+that reviewer identifier. An identical retry adds no rows; an opposite decision
+or any attempt to reopen a final state is rejected. The identifier is local
+provenance and does not authenticate a person.
+
 Synthetic repository tests verify source filtering, the `NEW` to `PARSED` to
 `NEEDS_REVIEW` path, exact-retry idempotency, immutable raw text, fixed list
 bounds, absence of raw content in the serialized list, and rejection of
 non-Signal/missing identifiers and raw/UI fields. This bridge does not persist
-manual corrections, expose `APPROVED` / `REJECTED`, write XLSX rows, capture
-messages, or prove that a live connector is running.
+manual corrections or corrected snapshots, write XLSX rows, capture messages,
+or prove that a live connector is running.
 
 ## Not implemented in this step
 
@@ -175,7 +183,7 @@ messages, or prove that a live connector is running.
 - a long-running or automatically restarted receive service;
 - account/group discovery over UNIX or raw TCP;
 - enabling or connecting a Signal account;
-- manual-correction persistence and reviewer-bound final decisions;
+- manual-correction persistence and corrected revision snapshots;
 - live-daemon acceptance of Signal Inbox capture and parsing.
 
 All tests use synthetic configuration values only, including the disconnected
