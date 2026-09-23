@@ -79,7 +79,7 @@ cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -
 - [ ] Імпорт еталонного workbook проходить без зміни оригінального файлу.
 - [ ] Експортований workbook відкривається в підтримуваному Excel/LibreOffice та
   зберігає 15 legacy fields, заголовки, типи дат/часу й порядок даних.
-- [ ] Повний regression comparison із legacy CORE пройдено на синтетичному
+- [x] Повний regression comparison із legacy CORE пройдено на синтетичному
   наборі, включно з неоднозначними заголовками, датами та дублями.
 - [ ] Exact-duplicate provenance посилається на канонічний попередній звіт, але
   не видаляє жодне джерело.

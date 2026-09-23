@@ -100,15 +100,27 @@ It deliberately does not:
 
 Those compatibility and persistence steps remain tracked under milestone 0.7.
 Tests generate minimal synthetic workbooks entirely in memory and do not use or
-commit real `.xlsx` files. The test suite also loads the unchanged legacy CORE
-script from `src/index.html` and checks its 15-field output against an
-in-memory synthetic `Зведена` workbook. A separate Rust test checks all 15
-serialized field names and values with the matching synthetic row. These are
-contract checks, not yet a full cross-runtime comparison for varied workbook
-styles, formulas or reference sheets. Both readers now consume one shared
-synthetic case list for nine date forms, including numeric serials,
-out-of-range numbers, mixed text separators and ambiguous text. This is not
-yet evidence that every real-world workbook variant behaves identically.
+commit real `.xlsx` files. The cross-runtime regression suite loads the
+unchanged legacy CORE script from `src/index.html`, creates four synthetic
+workbooks in memory, and sends the exact same workbook bytes to the actual Rust
+importer through a bounded test runner. It compares the worksheet row number
+and all 15 serialized fields for every returned record.
+
+The 14 compared rows cover inline and shared strings, numeric and styled date
+cells, a cached formula value, reordered and whitespace/case-normalized
+headers, extra columns, empty cells, sparse worksheet rows, multiple sheets,
+rich inline text, XML entities, exact duplicate rows and the shared nine-case
+date matrix. The date cases include numeric serials, fractional serials,
+boundary/out-of-range numbers, ISO timestamps, mixed text separators and
+ambiguous text. Both parsers also reject the same synthetic missing-sheet and
+missing-header workbooks.
+
+One intentional validation difference is pinned explicitly: legacy CORE keeps
+the first matching required header when a normalized duplicate exists, while
+Rust rejects that workbook as ambiguous. This is a fail-closed desktop
+hardening, not an unnoticed parser drift. The regression evidence remains
+synthetic; representative real-world workbook acceptance is still a separate
+release gate.
 
 ## Compatible export
 
@@ -132,8 +144,7 @@ Tests use only synthetic approved snapshots and verify all 15 fields by
 reopening both the in-memory and persisted export with the same Rust XLSX
 reader used for import. A separate test proves that an existing file remains
 byte-for-byte unchanged. This proves the current generated `Зведена` contract;
-it does not prove arbitrary workbook-style compatibility or full cross-runtime
-regression against every legacy workbook.
+it does not prove arbitrary real-world workbook-style compatibility.
 
 ## Export using a reference workbook
 
@@ -167,5 +178,5 @@ stop the export without publishing a destination.
 Synthetic tests prove that the reference byte buffer is unchanged, unrelated
 OOXML parts remain byte-for-byte identical, the linked table range grows, date
 styling is reused, a styled blank tail is handled, and all appended fields
-reopen correctly. Acceptance with representative real reference workbooks and
-full cross-runtime comparison against the legacy parser remain unverified.
+reopen correctly. Acceptance with representative real reference workbooks
+remains unverified.

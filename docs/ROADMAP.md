@@ -63,7 +63,7 @@
   - [x] verify all 15 serialized names against legacy CORE with synthetic records
 - [x] exact parsed-payload duplicate detection with immutable provenance links
 - [x] reference workbook support
-- [ ] regression comparison against legacy parser
+- [x] regression comparison against legacy parser
   - [x] match nine synthetic XLSX date cases across legacy CORE and Rust
 
 ## 0.8 — Analytics
