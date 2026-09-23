@@ -78,7 +78,7 @@
 
 ## 0.9 — Roles and templates
 
-- [ ] local profiles
+- [x] local profiles
 - [ ] role-based workspace templates
 - [ ] position-specific empty database/template generation
 - [ ] backup / restore

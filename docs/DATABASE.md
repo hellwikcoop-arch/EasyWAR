@@ -11,8 +11,10 @@ run during application startup before the frontend requests a connection.
 
 Migration `0001_provenance_schema.sql` creates the first provenance layer.
 Migration `0002_xlsx_duplicate_links.sql` adds immutable XLSX parsed-payload
-fingerprints and optional links to prior exact matches. Neither migration
-contains operational fixtures or creates Signal integration.
+fingerprints and optional links to prior exact matches. Migration
+`0003_local_profiles.sql` adds local profile identities and the singleton active
+profile selection. Migrations contain no operational fixtures and create no
+external integration.
 
 ## Provenance layers
 
@@ -27,6 +29,8 @@ contains operational fixtures or creates Signal integration.
 | Audit | `audit_log` | Append-only system/user events. |
 | Settings | `settings` | Local JSON settings managed by the typed settings store. |
 | XLSX duplicate provenance | `xlsx_row_fingerprints` | Immutable SHA-256 fingerprint plus an optional link to a previously stored exact parsed-payload match. |
+| Local profiles | `local_profiles` | Mutable local display names with stable opaque IDs; no credentials or roles. |
+| Active local profile | `local_profile_state` | Singleton local selection used by future workspace features. |
 
 The `report_current_state` view derives `NEW`, `PARSED`, or the latest review
 decision without overwriting source or parser records.
@@ -101,6 +105,26 @@ JSON value. Setting changes do not create report audit events: the `audit_log`
 remains reserved for provenance and review actions. The desktop exposes only
 the validated Signal setting through dedicated Tauri commands, not the generic
 settings store or direct SQL access.
+
+## Local profiles
+
+`LocalProfileStore` provides a dedicated SQLite boundary for profiles that
+exist only on the current device. A profile has a generated opaque ID,
+normalized display name and creation/update timestamps. Names are unique after
+whitespace and Unicode lowercase normalization; the store allows at most 32
+profiles.
+
+The first profile becomes active automatically. Selecting another profile is
+an explicit local action. Deleting the active profile deterministically selects
+the first remaining profile, or clears the selection when none remain. Create,
+rename, select and delete operations return the complete sorted state so the UI
+does not merge stale client copies.
+
+Profiles are not accounts, authentication identities, roles or permissions.
+They contain no secrets and are not transmitted to a service. Profile changes
+do not rewrite immutable raw sources, parsed values, corrections, approved
+revisions, reviewer labels or audit events. Role binding and workspace
+templates are separate ROADMAP items.
 
 ## Local backup
 

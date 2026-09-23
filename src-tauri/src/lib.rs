@@ -1,6 +1,7 @@
 pub mod analytics;
 pub mod backup;
 mod database;
+pub mod local_profiles;
 pub mod repository;
 pub mod restore;
 pub mod signal_commands;
@@ -15,6 +16,7 @@ pub mod xlsx_import;
 
 use backup::BackupStore;
 use chrono::{SecondsFormat, Utc};
+use local_profiles::{LocalProfileStore, LocalProfilesState};
 use repository::{
     Repository, ReviewDecision, SettingsStore, SignalInboxItem, SignalParsePersistence,
     SignalReviewPersistence, SignalReviewSnapshot, XlsxStageResult,
@@ -38,6 +40,63 @@ async fn get_dashboard_model(
     to: Option<String>,
 ) -> Result<analytics::DashboardModel, String> {
     analytics::load_dashboard_model(&repository, from.as_deref(), to.as_deref())
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn get_local_profiles(
+    profiles: tauri::State<'_, LocalProfileStore>,
+) -> Result<LocalProfilesState, String> {
+    profiles.list().await.map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn create_local_profile(
+    profiles: tauri::State<'_, LocalProfileStore>,
+    display_name: String,
+) -> Result<LocalProfilesState, String> {
+    let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
+    let profile_id = local_profiles::generate_profile_id(&display_name, &now);
+    profiles
+        .create(&profile_id, &display_name, &now)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn rename_local_profile(
+    profiles: tauri::State<'_, LocalProfileStore>,
+    profile_id: String,
+    display_name: String,
+) -> Result<LocalProfilesState, String> {
+    let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
+    profiles
+        .rename(&profile_id, &display_name, &now)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn activate_local_profile(
+    profiles: tauri::State<'_, LocalProfileStore>,
+    profile_id: String,
+) -> Result<LocalProfilesState, String> {
+    let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
+    profiles
+        .activate(&profile_id, &now)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn delete_local_profile(
+    profiles: tauri::State<'_, LocalProfileStore>,
+    profile_id: String,
+) -> Result<LocalProfilesState, String> {
+    let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
+    profiles
+        .delete(&profile_id, &now)
         .await
         .map_err(|error| error.to_string())
 }
@@ -496,12 +555,18 @@ pub fn run() {
             )?;
             app.manage(SignalSettingsStore::new(SettingsStore::new(pool.clone())));
             app.manage(Repository::new(pool.clone()));
+            app.manage(LocalProfileStore::new(pool.clone()));
             app.manage(SignalReceiveController::default());
             app.manage(BackupStore::new(pool));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             get_dashboard_model,
+            get_local_profiles,
+            create_local_profile,
+            rename_local_profile,
+            activate_local_profile,
+            delete_local_profile,
             get_signal_settings,
             save_signal_settings,
             discover_signal_accounts,

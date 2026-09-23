@@ -8,6 +8,7 @@ pub(crate) const INITIAL_SCHEMA_SQL: &str =
     include_str!("../migrations/0001_provenance_schema.sql");
 pub(crate) const XLSX_DUPLICATE_LINKS_SQL: &str =
     include_str!("../migrations/0002_xlsx_duplicate_links.sql");
+pub(crate) const LOCAL_PROFILES_SQL: &str = include_str!("../migrations/0003_local_profiles.sql");
 
 pub fn migrations() -> Vec<Migration> {
     vec![
@@ -23,12 +24,20 @@ pub fn migrations() -> Vec<Migration> {
             sql: XLSX_DUPLICATE_LINKS_SQL,
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 3,
+            description: "add_local_profiles",
+            sql: LOCAL_PROFILES_SQL,
+            kind: MigrationKind::Up,
+        },
     ]
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{migrations, DATABASE_URL, INITIAL_SCHEMA_SQL, XLSX_DUPLICATE_LINKS_SQL};
+    use super::{
+        migrations, DATABASE_URL, INITIAL_SCHEMA_SQL, LOCAL_PROFILES_SQL, XLSX_DUPLICATE_LINKS_SQL,
+    };
     use sqlx::{sqlite::SqlitePoolOptions, Row};
 
     #[test]
@@ -36,11 +45,13 @@ mod tests {
         assert_eq!(DATABASE_URL, "sqlite:easywar.db");
         assert!(include_str!("../tauri.conf.json").contains(DATABASE_URL));
         let registered = migrations();
-        assert_eq!(registered.len(), 2);
+        assert_eq!(registered.len(), 3);
         assert_eq!(registered[0].version, 1);
         assert_eq!(registered[0].description, "create_provenance_schema");
         assert_eq!(registered[1].version, 2);
         assert_eq!(registered[1].description, "add_xlsx_duplicate_links");
+        assert_eq!(registered[2].version, 3);
+        assert_eq!(registered[2].description, "add_local_profiles");
     }
 
     async fn migrated_pool() -> sqlx::SqlitePool {
@@ -58,8 +69,28 @@ mod tests {
             .execute(&pool)
             .await
             .expect("XLSX duplicate migration must apply");
+        sqlx::raw_sql(LOCAL_PROFILES_SQL)
+            .execute(&pool)
+            .await
+            .expect("local profiles migration must apply");
 
         pool
+    }
+
+    #[tokio::test]
+    async fn local_profile_migration_starts_empty_with_one_state_row() {
+        let pool = migrated_pool().await;
+        let profile_count: i64 = sqlx::query_scalar("SELECT count(*) FROM local_profiles")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let state: (i64, Option<String>) =
+            sqlx::query_as("SELECT singleton, active_profile_id FROM local_profile_state")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(profile_count, 0);
+        assert_eq!(state, (1, None));
     }
 
     #[tokio::test]
