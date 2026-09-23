@@ -23,6 +23,7 @@ pub struct DashboardModel {
     pub effectiveness: DashboardEffectivenessSummary,
     pub breakdowns: DashboardBreakdowns,
     pub quality: DashboardQualitySummary,
+    pub map: DashboardMapSummary,
     pub records: Vec<DashboardRecord>,
 }
 
@@ -95,6 +96,44 @@ pub struct DashboardQualityRecord {
     pub date: Option<String>,
     pub date_raw: String,
     pub issues: Vec<DashboardQualityIssue>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DashboardMapSummary {
+    pub provider: DashboardMapProvider,
+    pub geometry_policy: DashboardMapGeometryPolicy,
+    pub total_records: usize,
+    pub coordinate_text_records: usize,
+    pub missing_coordinate_records: usize,
+    pub display_ready_records: usize,
+    pub items: Vec<DashboardMapItem>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DashboardMapItem {
+    pub record_number: String,
+    pub status: DashboardMapStatus,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DashboardMapProvider {
+    None,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DashboardMapGeometryPolicy {
+    NotDerived,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DashboardMapStatus {
+    Missing,
+    SourceTextUnverified,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -229,6 +268,7 @@ pub fn dashboard_model_from_snapshots_for_period(
     }
     let effectiveness = calculate_effectiveness(&records);
     let breakdowns = calculate_breakdowns(&records);
+    let map = calculate_map(&records);
     let (period_from, period_to) = if is_filtered {
         (from, to)
     } else {
@@ -250,6 +290,7 @@ pub fn dashboard_model_from_snapshots_for_period(
         effectiveness,
         breakdowns,
         quality,
+        map,
         records,
     })
 }
@@ -291,6 +332,34 @@ fn calculate_quality(records: &[DashboardRecord]) -> DashboardQualitySummary {
         issue_count,
         issue_counts,
         affected_records,
+    }
+}
+
+fn calculate_map(records: &[DashboardRecord]) -> DashboardMapSummary {
+    let items = records
+        .iter()
+        .map(|record| DashboardMapItem {
+            record_number: record.number.clone(),
+            status: if record.coordinates.trim().is_empty() {
+                DashboardMapStatus::Missing
+            } else {
+                DashboardMapStatus::SourceTextUnverified
+            },
+        })
+        .collect::<Vec<_>>();
+    let coordinate_text_records = items
+        .iter()
+        .filter(|item| item.status == DashboardMapStatus::SourceTextUnverified)
+        .count();
+
+    DashboardMapSummary {
+        provider: DashboardMapProvider::None,
+        geometry_policy: DashboardMapGeometryPolicy::NotDerived,
+        total_records: records.len(),
+        coordinate_text_records,
+        missing_coordinate_records: records.len() - coordinate_text_records,
+        display_ready_records: 0,
+        items,
     }
 }
 
@@ -787,6 +856,16 @@ mod tests {
         assert!(model.breakdowns.units.is_empty());
         assert!(model.quality.issue_counts.is_empty());
         assert!(model.quality.affected_records.is_empty());
+        assert_eq!(model.map.provider, DashboardMapProvider::None);
+        assert_eq!(
+            model.map.geometry_policy,
+            DashboardMapGeometryPolicy::NotDerived
+        );
+        assert_eq!(model.map.total_records, 0);
+        assert_eq!(model.map.coordinate_text_records, 0);
+        assert_eq!(model.map.missing_coordinate_records, 0);
+        assert_eq!(model.map.display_ready_records, 0);
+        assert!(model.map.items.is_empty());
         assert!(model.records.is_empty());
     }
 
@@ -856,8 +935,94 @@ mod tests {
         assert_eq!(serialized["period"]["preset"], "custom");
         assert_eq!(serialized["effectiveness"]["overallEffectPercent"], 100.0);
         assert_eq!(serialized["effectiveness"]["dpiEffectPercent"], 100.0);
+        assert_eq!(serialized["map"]["provider"], "none");
+        assert_eq!(serialized["map"]["geometryPolicy"], "not_derived");
+        assert_eq!(serialized["map"]["displayReadyRecords"], 0);
         assert_eq!(serialized["records"][0]["result"], "hit");
         assert!(serialized["records"][0].get("qualityIssues").is_some());
+    }
+
+    #[test]
+    fn map_abstraction_is_filtered_and_never_derives_display_geometry() {
+        let model = dashboard_model_from_snapshots_for_period(
+            &[snapshot(json!([
+                {
+                    "num": "outside-before",
+                    "date": "2025-12-31",
+                    "dpi": "OUTSIDE-SOURCE-TEXT"
+                },
+                {
+                    "num": "missing",
+                    "date": "2026-01-01",
+                    "dpi": "   "
+                },
+                {
+                    "num": "sentinel",
+                    "date": "2026-01-02",
+                    "dpi": "1"
+                },
+                {
+                    "num": "unverified",
+                    "date": "2026-01-03",
+                    "dpi": "SYNTHETIC MGRS"
+                },
+                {
+                    "num": "outside-after",
+                    "date": "2026-02-01",
+                    "dpi": "OUTSIDE-SOURCE-TEXT"
+                }
+            ]))],
+            Some("2026-01-01"),
+            Some("2026-01-31"),
+        )
+        .unwrap();
+
+        assert_eq!(model.map.provider, DashboardMapProvider::None);
+        assert_eq!(
+            model.map.geometry_policy,
+            DashboardMapGeometryPolicy::NotDerived
+        );
+        assert_eq!(model.map.total_records, 3);
+        assert_eq!(model.map.coordinate_text_records, 2);
+        assert_eq!(model.map.missing_coordinate_records, 1);
+        assert_eq!(model.map.display_ready_records, 0);
+        assert_eq!(
+            model
+                .map
+                .items
+                .iter()
+                .map(|item| (item.record_number.as_str(), item.status))
+                .collect::<Vec<_>>(),
+            [
+                ("missing", DashboardMapStatus::Missing),
+                ("sentinel", DashboardMapStatus::SourceTextUnverified),
+                ("unverified", DashboardMapStatus::SourceTextUnverified),
+            ]
+        );
+
+        let serialized = serde_json::to_value(&model.map).unwrap();
+        assert_eq!(serialized["provider"], "none");
+        assert_eq!(serialized["geometryPolicy"], "not_derived");
+        assert_eq!(serialized["displayReadyRecords"], 0);
+        let items = serialized["items"].as_array().unwrap();
+        assert!(items.iter().all(|item| {
+            let fields = item.as_object().unwrap();
+            fields.len() == 2
+                && fields.contains_key("recordNumber")
+                && fields.contains_key("status")
+        }));
+        let map_json = serde_json::to_string(&serialized).unwrap();
+        for forbidden in [
+            "SYNTHETIC MGRS",
+            "coordinates",
+            "target",
+            "aircraft",
+            "munition",
+            "unit",
+            "result",
+        ] {
+            assert!(!map_json.contains(forbidden));
+        }
     }
 
     #[test]

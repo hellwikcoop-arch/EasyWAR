@@ -73,7 +73,7 @@
 - [x] effectiveness calculations
 - [x] aircraft / munitions / unit breakdowns
 - [x] data-quality view
-- [ ] map abstraction
+- [x] map abstraction (provider-neutral readiness, no geometry)
 - [ ] export views
 
 ## 0.9 — Roles and templates
