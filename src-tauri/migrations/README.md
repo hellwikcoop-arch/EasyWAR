@@ -7,5 +7,9 @@ raw sources, parser output, manual corrections, review decisions, revision
 snapshots and audit events separate. Immutable layers are protected by SQLite
 triggers, and the migration is exercised only with synthetic in-memory data.
 
+`0002_xlsx_duplicate_links.sql` adds immutable SHA-256 fingerprints for staged
+XLSX rows and an optional link to the first previously stored exact parsed
+payload. It does not delete, merge, hide or approve either report.
+
 New migrations must be append-only, registered in `src/database.rs`, and
 covered by a migration test. Never put operational fixtures in this directory.

@@ -157,6 +157,7 @@ pub struct StoredSetting {
 pub struct XlsxStageResult {
     pub staged_rows: usize,
     pub already_present_rows: usize,
+    pub duplicate_rows: usize,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -198,6 +199,7 @@ pub struct SignalReviewSnapshot {
 }
 
 type ExistingXlsxRow = (String, Option<String>, Option<String>, Option<String>);
+type ExistingXlsxFingerprint = (String, Option<String>);
 
 #[derive(Debug, thiserror::Error)]
 pub enum RepositoryError {
@@ -337,6 +339,7 @@ impl Repository {
         let mut result = XlsxStageResult {
             staged_rows: 0,
             already_present_rows: 0,
+            duplicate_rows: 0,
         };
         for row in &batch.rows {
             let key = format!("{hash}:{}", row.row_number);
@@ -345,11 +348,14 @@ impl Repository {
             let parse_id = format!("xlsx-parse:{key}:v1");
             let capture_audit_id = format!("xlsx-audit:capture:{key}");
             let parse_audit_id = format!("xlsx-audit:parse:{key}");
+            let duplicate_audit_id = format!("xlsx-audit:duplicate:{key}");
             let source_item_key = format!("row:{}", row.row_number);
             let raw_payload_json = json!({ "cells": &row.source_cells }).to_string();
             let raw_sha256 = format!("{:x}", Sha256::digest(raw_payload_json.as_bytes()));
             let parsed_payload_json =
                 serde_json::to_string(&row.parsed).map_err(RepositoryError::InvalidXlsxPayload)?;
+            let fingerprint_sha256 =
+                format!("{:x}", Sha256::digest(parsed_payload_json.as_bytes()));
 
             let existing: Option<ExistingXlsxRow> = sqlx::query_as(
                     "SELECT raw_sources.raw_sha256, reports.id,
@@ -385,7 +391,52 @@ impl Repository {
                 {
                     return Err(RepositoryError::XlsxIdentityConflict(key));
                 }
+                let stored_fingerprint: Option<ExistingXlsxFingerprint> = sqlx::query_as(
+                    "SELECT fingerprint_sha256, duplicate_of_report_id
+                     FROM xlsx_row_fingerprints WHERE report_id = ?",
+                )
+                .bind(&report_id)
+                .fetch_optional(&mut *transaction)
+                .await?;
+                let duplicate_of_report_id = match stored_fingerprint {
+                    Some((stored_fingerprint, duplicate_of_report_id)) => {
+                        if stored_fingerprint != fingerprint_sha256 {
+                            return Err(RepositoryError::XlsxIdentityConflict(key));
+                        }
+                        let duplicate_audit_count: i64 = sqlx::query_scalar(
+                            "SELECT count(*) FROM audit_log
+                             WHERE id = ? AND report_id = ? AND action = 'DUPLICATE_DETECTED'",
+                        )
+                        .bind(&duplicate_audit_id)
+                        .bind(&report_id)
+                        .fetch_one(&mut *transaction)
+                        .await?;
+                        if duplicate_audit_count != i64::from(duplicate_of_report_id.is_some()) {
+                            return Err(RepositoryError::XlsxIdentityConflict(key));
+                        }
+                        duplicate_of_report_id
+                    }
+                    None => {
+                        let duplicate_of_report_id = find_prior_xlsx_duplicate(
+                            &mut transaction,
+                            &report_id,
+                            &parsed_payload_json,
+                        )
+                        .await?;
+                        insert_xlsx_fingerprint(
+                            &mut transaction,
+                            &report_id,
+                            &fingerprint_sha256,
+                            duplicate_of_report_id.as_deref(),
+                            captured_at,
+                            &duplicate_audit_id,
+                        )
+                        .await?;
+                        duplicate_of_report_id
+                    }
+                };
                 result.already_present_rows += 1;
+                result.duplicate_rows += usize::from(duplicate_of_report_id.is_some());
                 continue;
             }
 
@@ -462,7 +513,20 @@ impl Repository {
                 json!({ "version": 1 }),
             )
             .await?;
+            let duplicate_of_report_id =
+                find_prior_xlsx_duplicate(&mut transaction, &report_id, &parsed_payload_json)
+                    .await?;
+            insert_xlsx_fingerprint(
+                &mut transaction,
+                &report_id,
+                &fingerprint_sha256,
+                duplicate_of_report_id.as_deref(),
+                captured_at,
+                &duplicate_audit_id,
+            )
+            .await?;
             result.staged_rows += 1;
+            result.duplicate_rows += usize::from(duplicate_of_report_id.is_some());
         }
 
         transaction.commit().await?;
@@ -1529,6 +1593,74 @@ fn signal_identity(prefix: &str, parts: &[&str]) -> String {
     format!("{prefix}:{:x}", digest.finalize())
 }
 
+async fn find_prior_xlsx_duplicate(
+    transaction: &mut Transaction<'_, Sqlite>,
+    report_id: &str,
+    parsed_payload_json: &str,
+) -> Result<Option<String>, sqlx::Error> {
+    let canonical: Option<String> = sqlx::query_scalar(
+        "SELECT reports.id
+         FROM reports
+         JOIN raw_sources ON raw_sources.id = reports.raw_source_id
+         JOIN parsed_report_versions ON parsed_report_versions.report_id = reports.id
+         WHERE raw_sources.source_type = 'XLSX'
+           AND parsed_report_versions.version = 1
+           AND parsed_report_versions.parser_name = 'easywar-xlsx'
+           AND parsed_report_versions.parsed_payload_json = ?
+         ORDER BY reports.created_at, reports.id
+         LIMIT 1",
+    )
+    .bind(parsed_payload_json)
+    .fetch_optional(&mut **transaction)
+    .await?;
+    Ok(canonical.filter(|canonical_report_id| canonical_report_id != report_id))
+}
+
+async fn insert_xlsx_fingerprint(
+    transaction: &mut Transaction<'_, Sqlite>,
+    report_id: &str,
+    fingerprint_sha256: &str,
+    duplicate_of_report_id: Option<&str>,
+    recorded_at: &str,
+    duplicate_audit_id: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO xlsx_row_fingerprints
+         (report_id, fingerprint_sha256, duplicate_of_report_id, recorded_at)
+         VALUES (?, ?, ?, ?)",
+    )
+    .bind(report_id)
+    .bind(fingerprint_sha256)
+    .bind(duplicate_of_report_id)
+    .bind(recorded_at)
+    .execute(&mut **transaction)
+    .await?;
+
+    if let Some(duplicate_of_report_id) = duplicate_of_report_id {
+        insert_audit(
+            transaction,
+            &AuditContext {
+                id: duplicate_audit_id.to_owned(),
+                actor_type: ActorType::System,
+                actor_label: None,
+                occurred_at: recorded_at.to_owned(),
+            },
+            Some(report_id),
+            "xlsx_row_fingerprint",
+            report_id,
+            "DUPLICATE_DETECTED",
+            json!({
+                "duplicateOfReportId": duplicate_of_report_id,
+                "fingerprintSha256": fingerprint_sha256,
+                "matchKind": "exactParsedPayload"
+            }),
+        )
+        .await?;
+    }
+
+    Ok(())
+}
+
 async fn insert_audit(
     transaction: &mut Transaction<'_, Sqlite>,
     audit: &AuditContext,
@@ -1562,7 +1694,7 @@ async fn insert_audit(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::database::INITIAL_SCHEMA_SQL;
+    use crate::database::{INITIAL_SCHEMA_SQL, XLSX_DUPLICATE_LINKS_SQL};
     use crate::xlsx_import::{EasyWarRecord, XlsxImportRow, XlsxSourceCell};
     use sqlx::sqlite::SqlitePoolOptions;
 
@@ -1579,6 +1711,10 @@ mod tests {
             .execute(&pool)
             .await
             .expect("initial migration must apply");
+        sqlx::raw_sql(XLSX_DUPLICATE_LINKS_SQL)
+            .execute(&pool)
+            .await
+            .expect("XLSX duplicate migration must apply");
 
         Repository::new(pool)
     }
@@ -2167,6 +2303,7 @@ mod tests {
             .expect("synthetic rows must stage");
         assert_eq!(first.staged_rows, 2);
         assert_eq!(first.already_present_rows, 0);
+        assert_eq!(first.duplicate_rows, 0);
 
         let counts: (i64, i64, i64, i64, i64, i64, i64) = sqlx::query_as(
             "SELECT (SELECT count(*) FROM raw_sources),
@@ -2216,6 +2353,7 @@ mod tests {
             .expect("exact synthetic retry must be idempotent");
         assert_eq!(retry.staged_rows, 0);
         assert_eq!(retry.already_present_rows, 2);
+        assert_eq!(retry.duplicate_rows, 0);
         let audit_count: i64 = sqlx::query_scalar("SELECT count(*) FROM audit_log")
             .fetch_one(&repository.pool)
             .await
@@ -2228,6 +2366,75 @@ mod tests {
             repository.stage_xlsx_batch(&changed_parse, NOW).await,
             Err(RepositoryError::XlsxIdentityConflict(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn links_exact_cross_workbook_duplicates_without_dropping_provenance() {
+        let repository = repository().await;
+        let first_batch = synthetic_xlsx_batch();
+        repository
+            .stage_xlsx_batch(&first_batch, NOW)
+            .await
+            .expect("first synthetic workbook must stage");
+
+        let mut second_batch = first_batch.clone();
+        second_batch.workbook_sha256 =
+            format!("{:x}", Sha256::digest(b"second-synthetic-only-workbook"));
+        let second = repository
+            .stage_xlsx_batch(&second_batch, "2026-01-02T00:00:00Z")
+            .await
+            .expect("second synthetic workbook must stage and link duplicates");
+        assert_eq!(second.staged_rows, 2);
+        assert_eq!(second.already_present_rows, 0);
+        assert_eq!(second.duplicate_rows, 2);
+
+        let counts: (i64, i64, i64, i64, i64) = sqlx::query_as(
+            "SELECT (SELECT count(*) FROM raw_sources),
+                    (SELECT count(*) FROM reports),
+                    (SELECT count(*) FROM parsed_report_versions),
+                    (SELECT count(*) FROM xlsx_row_fingerprints),
+                    (SELECT count(*) FROM audit_log)",
+        )
+        .fetch_one(&repository.pool)
+        .await
+        .expect("duplicate provenance counts must query");
+        assert_eq!(counts, (4, 4, 4, 4, 10));
+
+        let links: Vec<(String, String)> = sqlx::query_as(
+            "SELECT report_id, duplicate_of_report_id
+             FROM xlsx_row_fingerprints
+             WHERE duplicate_of_report_id IS NOT NULL
+             ORDER BY report_id",
+        )
+        .fetch_all(&repository.pool)
+        .await
+        .expect("duplicate links must query");
+        assert_eq!(links.len(), 2);
+        assert!(links.iter().all(|(report_id, duplicate_of)| {
+            report_id.starts_with(&format!("xlsx-report:{}:", second_batch.workbook_sha256))
+                && duplicate_of
+                    .starts_with(&format!("xlsx-report:{}:", first_batch.workbook_sha256))
+        }));
+        let statuses: Vec<String> = sqlx::query_scalar(
+            "SELECT current_status FROM report_current_state ORDER BY report_id",
+        )
+        .fetch_all(&repository.pool)
+        .await
+        .expect("duplicate statuses must query");
+        assert_eq!(statuses, vec!["PARSED", "PARSED", "PARSED", "PARSED"]);
+
+        let retry = repository
+            .stage_xlsx_batch(&second_batch, "2026-01-02T00:00:00Z")
+            .await
+            .expect("duplicate workbook retry must remain idempotent");
+        assert_eq!(retry.staged_rows, 0);
+        assert_eq!(retry.already_present_rows, 2);
+        assert_eq!(retry.duplicate_rows, 2);
+        let audit_count: i64 = sqlx::query_scalar("SELECT count(*) FROM audit_log")
+            .fetch_one(&repository.pool)
+            .await
+            .expect("duplicate retry audit count must query");
+        assert_eq!(audit_count, 10);
     }
 
     #[tokio::test]

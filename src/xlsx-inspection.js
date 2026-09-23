@@ -39,10 +39,11 @@ export async function runXlsxStage(button, status, invokeCommand = invoke) {
       status.textContent = 'Імпорт скасовано. Файл і локальну базу не змінено.';
     } else {
       if (!Number.isSafeInteger(result?.staged_rows) || result.staged_rows < 0 ||
-          !Number.isSafeInteger(result?.already_present_rows) || result.already_present_rows < 0) {
+          !Number.isSafeInteger(result?.already_present_rows) || result.already_present_rows < 0 ||
+          !Number.isSafeInteger(result?.duplicate_rows) || result.duplicate_rows < 0) {
         throw new Error('Некоректна відповідь локального імпорту.');
       }
-      status.textContent = `Імпорт завершено. Додано рядків: ${result.staged_rows}; вже були в базі: ${result.already_present_rows}. Вихідний XLSX не змінено. Записи мають стан «Розібрано» й не схвалені.`;
+      status.textContent = `Імпорт завершено. Додано рядків: ${result.staged_rows}; вже були в базі: ${result.already_present_rows}; точних дублікатів: ${result.duplicate_rows}. Дублікати збережено з окремим посиланням на збіг. Вихідний XLSX не змінено. Записи мають стан «Розібрано» й не схвалені.`;
     }
   } catch (error) {
     status.textContent = `Імпорт XLSX не виконано: ${String(error)}`;

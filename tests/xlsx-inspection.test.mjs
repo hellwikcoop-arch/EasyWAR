@@ -54,13 +54,15 @@ test('explicit XLSX staging reports inserted and idempotent rows without approva
   const called = [];
   await runXlsxStage(button, status, async command => {
     called.push(command);
-    return { staged_rows: 2, already_present_rows: 1 };
+    return { staged_rows: 2, already_present_rows: 1, duplicate_rows: 1 };
   });
 
   assert.deepEqual(called, ['stage_local_xlsx']);
   assert.equal(button.disabled, false);
   assert.match(status.textContent, /Додано рядків: 2/);
   assert.match(status.textContent, /вже були в базі: 1/);
+  assert.match(status.textContent, /точних дублікатів: 1/);
+  assert.match(status.textContent, /Дублікати збережено/);
   assert.match(status.textContent, /не схвалені/);
   assert.match(status.textContent, /XLSX не змінено/);
 });

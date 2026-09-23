@@ -308,6 +308,18 @@ async fn inspect_pool(pool: &sqlx::SqlitePool) -> Result<BackupInspection, Resto
         }
     }
 
+    if applied.last().unwrap().0 >= 2 {
+        let found: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM sqlite_master
+             WHERE type = 'table' AND name = 'xlsx_row_fingerprints'",
+        )
+        .fetch_one(pool)
+        .await?;
+        if found != 1 {
+            return Err(RestoreInspectionError::MissingSchemaObjects);
+        }
+    }
+
     Ok(BackupInspection {
         schema_version: applied.last().unwrap().0,
     })
@@ -316,7 +328,7 @@ async fn inspect_pool(pool: &sqlx::SqlitePool) -> Result<BackupInspection, Resto
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{backup::BackupStore, database::INITIAL_SCHEMA_SQL};
+    use crate::{backup::BackupStore, database};
     use sqlx::SqlitePool;
 
     async fn synthetic_database(path: &Path) -> SqlitePool {
@@ -329,10 +341,6 @@ mod tests {
             )
             .await
             .unwrap();
-        sqlx::raw_sql(INITIAL_SCHEMA_SQL)
-            .execute(&pool)
-            .await
-            .unwrap();
         sqlx::query(
             "CREATE TABLE _sqlx_migrations (
                 version BIGINT PRIMARY KEY, description TEXT NOT NULL,
@@ -343,16 +351,20 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
-        sqlx::query(
-            "INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time)
-             VALUES ($1, $2, 1, $3, 0)",
-        )
-        .bind(1_i64)
-        .bind("create_provenance_schema")
-        .bind(Sha384::digest(INITIAL_SCHEMA_SQL.as_bytes()).to_vec())
-        .execute(&pool)
-        .await
-        .unwrap();
+        for migration in database::migrations() {
+            sqlx::raw_sql(migration.sql).execute(&pool).await.unwrap();
+            sqlx::query(
+                "INSERT INTO _sqlx_migrations
+                 (version, description, success, checksum, execution_time)
+                 VALUES ($1, $2, 1, $3, 0)",
+            )
+            .bind(migration.version)
+            .bind(migration.description)
+            .bind(Sha384::digest(migration.sql.as_bytes()).to_vec())
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
         pool
     }
 
@@ -371,7 +383,7 @@ mod tests {
 
         assert_eq!(
             inspect_backup(&backup).await.unwrap(),
-            BackupInspection { schema_version: 1 }
+            BackupInspection { schema_version: 2 }
         );
         assert_eq!(std::fs::read(&backup).unwrap(), before);
     }
@@ -468,6 +480,18 @@ mod tests {
             inspect_backup(&second).await,
             Err(RestoreInspectionError::MissingSchemaObjects)
         ));
+
+        let third = dir.path().join("missing-v2-table.sqlite3");
+        let pool = synthetic_database(&third).await;
+        sqlx::query("DROP TABLE xlsx_row_fingerprints")
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+        assert!(matches!(
+            inspect_backup(&third).await,
+            Err(RestoreInspectionError::MissingSchemaObjects)
+        ));
     }
 
     #[tokio::test]
@@ -498,7 +522,7 @@ mod tests {
 
         assert_eq!(
             stage_backup(&source, &live).await.unwrap(),
-            BackupInspection { schema_version: 1 }
+            BackupInspection { schema_version: 2 }
         );
         assert_eq!(std::fs::read(&source).unwrap(), before);
         assert_eq!(
@@ -566,7 +590,7 @@ mod tests {
         stage_backup(&source, &live).await.unwrap();
         assert_eq!(
             swap_staged_backup_offline(&live).await.unwrap(),
-            BackupInspection { schema_version: 1 }
+            BackupInspection { schema_version: 2 }
         );
         assert_eq!(fs::read(&live).unwrap(), new_bytes);
         assert_eq!(

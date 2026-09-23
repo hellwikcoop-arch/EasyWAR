@@ -6,29 +6,41 @@ pub const DATABASE_URL: &str = "sqlite:easywar.db";
 
 pub(crate) const INITIAL_SCHEMA_SQL: &str =
     include_str!("../migrations/0001_provenance_schema.sql");
+pub(crate) const XLSX_DUPLICATE_LINKS_SQL: &str =
+    include_str!("../migrations/0002_xlsx_duplicate_links.sql");
 
 pub fn migrations() -> Vec<Migration> {
-    vec![Migration {
-        version: 1,
-        description: "create_provenance_schema",
-        sql: INITIAL_SCHEMA_SQL,
-        kind: MigrationKind::Up,
-    }]
+    vec![
+        Migration {
+            version: 1,
+            description: "create_provenance_schema",
+            sql: INITIAL_SCHEMA_SQL,
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 2,
+            description: "add_xlsx_duplicate_links",
+            sql: XLSX_DUPLICATE_LINKS_SQL,
+            kind: MigrationKind::Up,
+        },
+    ]
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{migrations, DATABASE_URL, INITIAL_SCHEMA_SQL};
+    use super::{migrations, DATABASE_URL, INITIAL_SCHEMA_SQL, XLSX_DUPLICATE_LINKS_SQL};
     use sqlx::{sqlite::SqlitePoolOptions, Row};
 
     #[test]
-    fn database_is_local_and_registers_one_versioned_migration() {
+    fn database_is_local_and_registers_versioned_migrations() {
         assert_eq!(DATABASE_URL, "sqlite:easywar.db");
         assert!(include_str!("../tauri.conf.json").contains(DATABASE_URL));
         let registered = migrations();
-        assert_eq!(registered.len(), 1);
+        assert_eq!(registered.len(), 2);
         assert_eq!(registered[0].version, 1);
         assert_eq!(registered[0].description, "create_provenance_schema");
+        assert_eq!(registered[1].version, 2);
+        assert_eq!(registered[1].description, "add_xlsx_duplicate_links");
     }
 
     async fn migrated_pool() -> sqlx::SqlitePool {
@@ -42,8 +54,80 @@ mod tests {
             .execute(&pool)
             .await
             .expect("initial migration must apply");
+        sqlx::raw_sql(XLSX_DUPLICATE_LINKS_SQL)
+            .execute(&pool)
+            .await
+            .expect("XLSX duplicate migration must apply");
 
         pool
+    }
+
+    #[tokio::test]
+    async fn xlsx_fingerprints_are_immutable_and_cannot_self_link() {
+        let pool = migrated_pool().await;
+        let now = "2026-01-01T00:00:00Z";
+
+        for suffix in ["a", "b"] {
+            sqlx::query(
+                "INSERT INTO raw_sources
+                 (id, source_type, captured_at, content_type, raw_text, raw_sha256, created_at)
+                 VALUES (?, 'XLSX', ?, 'text/plain', 'synthetic', ?, ?)",
+            )
+            .bind(format!("source-fingerprint-{suffix}"))
+            .bind(now)
+            .bind(if suffix == "a" { "a" } else { "b" }.repeat(64))
+            .bind(now)
+            .execute(&pool)
+            .await
+            .expect("synthetic source must insert");
+            sqlx::query(
+                "INSERT INTO reports (id, raw_source_id, source_item_key, created_at)
+                 VALUES (?, ?, ?, ?)",
+            )
+            .bind(format!("report-fingerprint-{suffix}"))
+            .bind(format!("source-fingerprint-{suffix}"))
+            .bind(format!("row-{suffix}"))
+            .bind(now)
+            .execute(&pool)
+            .await
+            .expect("synthetic report must insert");
+        }
+
+        sqlx::query(
+            "INSERT INTO xlsx_row_fingerprints
+             (report_id, fingerprint_sha256, duplicate_of_report_id, recorded_at)
+             VALUES ('report-fingerprint-b', ?, 'report-fingerprint-a', ?)",
+        )
+        .bind("c".repeat(64))
+        .bind(now)
+        .execute(&pool)
+        .await
+        .expect("synthetic duplicate link must insert");
+
+        assert!(sqlx::query(
+            "UPDATE xlsx_row_fingerprints SET duplicate_of_report_id = NULL
+             WHERE report_id = 'report-fingerprint-b'",
+        )
+        .execute(&pool)
+        .await
+        .is_err());
+        assert!(sqlx::query(
+            "DELETE FROM xlsx_row_fingerprints
+             WHERE report_id = 'report-fingerprint-b'",
+        )
+        .execute(&pool)
+        .await
+        .is_err());
+        assert!(sqlx::query(
+            "INSERT INTO xlsx_row_fingerprints
+             (report_id, fingerprint_sha256, duplicate_of_report_id, recorded_at)
+             VALUES ('report-fingerprint-a', ?, 'report-fingerprint-a', ?)",
+        )
+        .bind("d".repeat(64))
+        .bind(now)
+        .execute(&pool)
+        .await
+        .is_err());
     }
 
     #[tokio::test]

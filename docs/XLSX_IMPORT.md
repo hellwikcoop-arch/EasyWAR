@@ -81,15 +81,22 @@ the derived status is `PARSED`. Retrying identical workbook bytes is
 idempotent. A conflicting identity or incomplete prior history fails and
 rolls back the whole new batch. The interface reports newly staged and already
 present row counts, states that imported records are `PARSED` rather than
-approved, and never changes the selected XLSX. The store retains cell values,
-not the original XLSX bytes, XML, formulas or formatting: keep the source
-workbook separately for full source-file provenance. Similar rows in different
-workbooks are not yet deduplicated.
+approved, and never changes the selected XLSX. It also reports exact duplicate
+rows. Duplicate detection compares the deterministic parsed JSON payload, not
+the workbook bytes or free-form similarity. A row matching an already stored
+XLSX parsed payload gets an immutable SHA-256 fingerprint, a link to the first
+previously stored match and a `DUPLICATE_DETECTED` audit event. The new raw
+snapshot, report and parser version remain present and `PARSED`; nothing is
+merged, hidden, removed or approved. Repeating the same import adds neither a
+new link nor a new audit event. The store retains cell values, not the original
+XLSX bytes, XML, formulas or formatting: keep the source workbook separately
+for full source-file provenance. Fuzzy or domain-specific matching is outside
+this boundary.
 
 It deliberately does not:
 
 - approve imported records or create review decisions;
-- implement duplicate detection, reference workbooks or XLSX export.
+- implement fuzzy duplicate detection, reference workbooks or XLSX export.
 
 Those compatibility and persistence steps remain tracked under milestone 0.7.
 Tests generate minimal synthetic workbooks entirely in memory and do not use or

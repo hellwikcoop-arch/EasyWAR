@@ -9,9 +9,10 @@ must never be committed.
 The Tauri configuration preloads `sqlite:easywar.db`, so registered migrations
 run during application startup before the frontend requests a connection.
 
-Migration `0001_provenance_schema.sql` creates the first provenance layer. It
-does not import XLSX files, create Signal integration, or contain operational
-fixtures.
+Migration `0001_provenance_schema.sql` creates the first provenance layer.
+Migration `0002_xlsx_duplicate_links.sql` adds immutable XLSX parsed-payload
+fingerprints and optional links to prior exact matches. Neither migration
+contains operational fixtures or creates Signal integration.
 
 ## Provenance layers
 
@@ -25,6 +26,7 @@ fixtures.
 | Revisions | `revision_history` | Immutable materialized snapshots with monotonically increasing report revisions. |
 | Audit | `audit_log` | Append-only system/user events. |
 | Settings | `settings` | Local JSON settings managed by the typed settings store. |
+| XLSX duplicate provenance | `xlsx_row_fingerprints` | Immutable SHA-256 fingerprint plus an optional link to a previously stored exact parsed-payload match. |
 
 The `report_current_state` view derives `NEW`, `PARSED`, or the latest review
 decision without overwriting source or parser records.
@@ -60,7 +62,11 @@ Each write method uses one SQLite transaction:
   cannot be changed or reopened.
 - `stage_xlsx_batch` writes all new XLSX rows in one transaction as immutable
   interpreted-cell snapshots plus separate parsed versions and audit events;
-  it never approves rows and rejects conflicting exact-file retries.
+  it never approves rows and rejects conflicting exact-file retries. Every row
+  receives a SHA-256 fingerprint of the deterministic parsed JSON. A matching
+  parsed payload already stored from XLSX creates an immutable link and a
+  `DUPLICATE_DETECTED` audit event; both reports and both source snapshots stay
+  intact. An exact retry reuses the existing link and adds no audit row.
 
 If any statement fails, none of the transaction's domain or audit rows persist.
 The repository exposes the derived current status as a read-only query. The
@@ -130,6 +136,7 @@ restart, recovery UX, and real-platform acceptance remain open.
 
 - Raw source, parsed payload, corrections and approval decisions are separate.
 - Immutable provenance tables reject `UPDATE` and `DELETE`.
+- Duplicate detection records provenance; it never merges or discards a report.
 - JSON-bearing columns are validated with SQLite `json_valid`.
 - Cross-table keys prevent a correction, decision or revision from referencing
   a parser version belonging to another report.
