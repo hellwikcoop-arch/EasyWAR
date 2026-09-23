@@ -69,7 +69,7 @@
 ## 0.8 — Analytics
 
 - [x] dashboard model from SQLite
-- [ ] period filters
+- [x] period filters
 - [ ] effectiveness calculations
 - [ ] aircraft / munitions / unit breakdowns
 - [ ] data-quality view

@@ -1,7 +1,7 @@
 use crate::repository::{Repository, RepositoryError};
 use chrono::{Duration as ChronoDuration, NaiveDate};
 use regex::Regex;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::OnceLock;
 
@@ -16,8 +16,11 @@ pub struct DashboardModel {
     pub schema_version: u32,
     pub source: String,
     pub approved_reports: usize,
+    pub source_record_count: usize,
     pub record_count: usize,
+    pub available_date_range: DashboardDateRange,
     pub date_range: DashboardDateRange,
+    pub period: DashboardPeriodState,
     pub quality: DashboardQualitySummary,
     pub records: Vec<DashboardRecord>,
 }
@@ -27,6 +30,23 @@ pub struct DashboardModel {
 pub struct DashboardDateRange {
     pub from: Option<String>,
     pub to: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DashboardPeriodFilter {
+    pub from: Option<String>,
+    pub to: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DashboardPeriodState {
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub is_filtered: bool,
+    pub excluded_records: usize,
+    pub excluded_undated_records: usize,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -101,18 +121,31 @@ pub enum AnalyticsError {
     },
     #[error("Модель дашборда перевищує локальну межу у 100000 записів")]
     TooManyRecords,
+    #[error("Межа періоду «{field}» має бути календарною датою у форматі РРРР-ММ-ДД")]
+    InvalidPeriodDate { field: &'static str },
+    #[error("Початок періоду не може бути пізніше за його кінець")]
+    InvertedPeriod,
 }
 
 pub async fn load_dashboard_model(
     repository: &Repository,
+    period: Option<&DashboardPeriodFilter>,
 ) -> Result<DashboardModel, AnalyticsError> {
     let snapshots = repository.approved_revision_snapshots().await?;
-    dashboard_model_from_snapshots(&snapshots)
+    dashboard_model_from_snapshots_for_period(&snapshots, period)
 }
 
 pub fn dashboard_model_from_snapshots(
     snapshots: &[Value],
 ) -> Result<DashboardModel, AnalyticsError> {
+    dashboard_model_from_snapshots_for_period(snapshots, None)
+}
+
+pub fn dashboard_model_from_snapshots_for_period(
+    snapshots: &[Value],
+    period: Option<&DashboardPeriodFilter>,
+) -> Result<DashboardModel, AnalyticsError> {
+    let (from, to) = validate_period(period)?;
     let mut records = Vec::new();
     for (snapshot_index, snapshot) in snapshots.iter().enumerate() {
         let snapshot_number = snapshot_index + 1;
@@ -138,11 +171,24 @@ pub fn dashboard_model_from_snapshots(
         }
     }
 
-    let mut valid_dates = records
-        .iter()
-        .filter_map(|record| record.date.as_deref())
-        .collect::<Vec<_>>();
-    valid_dates.sort_unstable();
+    let source_record_count = records.len();
+    let available_date_range = date_range(&records);
+    let is_filtered = from.is_some() || to.is_some();
+    let mut excluded_undated_records = 0;
+    if is_filtered {
+        records.retain(|record| match record.date.as_deref() {
+            Some(date) => {
+                from.as_deref().map_or(true, |bound| date >= bound)
+                    && to.as_deref().map_or(true, |bound| date <= bound)
+            }
+            None => {
+                excluded_undated_records += 1;
+                false
+            }
+        });
+    }
+    let excluded_records = source_record_count - records.len();
+    let filtered_date_range = date_range(&records);
     let records_with_issues = records
         .iter()
         .filter(|record| !record.quality_issues.is_empty())
@@ -156,10 +202,16 @@ pub fn dashboard_model_from_snapshots(
         schema_version: DASHBOARD_SCHEMA_VERSION,
         source: DASHBOARD_SOURCE.to_owned(),
         approved_reports: snapshots.len(),
+        source_record_count,
         record_count: records.len(),
-        date_range: DashboardDateRange {
-            from: valid_dates.first().map(|date| (*date).to_owned()),
-            to: valid_dates.last().map(|date| (*date).to_owned()),
+        available_date_range,
+        date_range: filtered_date_range,
+        period: DashboardPeriodState {
+            from,
+            to,
+            is_filtered,
+            excluded_records,
+            excluded_undated_records,
         },
         quality: DashboardQualitySummary {
             records_with_issues,
@@ -167,6 +219,48 @@ pub fn dashboard_model_from_snapshots(
         },
         records,
     })
+}
+
+fn date_range(records: &[DashboardRecord]) -> DashboardDateRange {
+    let mut valid_dates = records
+        .iter()
+        .filter_map(|record| record.date.as_deref())
+        .collect::<Vec<_>>();
+    valid_dates.sort_unstable();
+    DashboardDateRange {
+        from: valid_dates.first().map(|date| (*date).to_owned()),
+        to: valid_dates.last().map(|date| (*date).to_owned()),
+    }
+}
+
+fn validate_period(
+    period: Option<&DashboardPeriodFilter>,
+) -> Result<(Option<String>, Option<String>), AnalyticsError> {
+    let from = normalize_period_bound(period.and_then(|period| period.from.as_deref()), "from")?;
+    let to = normalize_period_bound(period.and_then(|period| period.to.as_deref()), "to")?;
+    if from
+        .as_deref()
+        .zip(to.as_deref())
+        .is_some_and(|(from, to)| from > to)
+    {
+        return Err(AnalyticsError::InvertedPeriod);
+    }
+    Ok((from, to))
+}
+
+fn normalize_period_bound(
+    value: Option<&str>,
+    field: &'static str,
+) -> Result<Option<String>, AnalyticsError> {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    let date = NaiveDate::parse_from_str(value, "%Y-%m-%d")
+        .map_err(|_| AnalyticsError::InvalidPeriodDate { field })?;
+    if date.format("%Y-%m-%d").to_string() != value {
+        return Err(AnalyticsError::InvalidPeriodDate { field });
+    }
+    Ok(Some(value.to_owned()))
 }
 
 fn normalize_record(
@@ -495,8 +589,12 @@ mod tests {
         assert_eq!(model.schema_version, 1);
         assert_eq!(model.source, "approved_sqlite_revisions");
         assert_eq!(model.approved_reports, 0);
+        assert_eq!(model.source_record_count, 0);
         assert_eq!(model.record_count, 0);
+        assert_eq!(model.available_date_range.from, None);
         assert_eq!(model.date_range.from, None);
+        assert!(!model.period.is_filtered);
+        assert_eq!(model.period.excluded_records, 0);
         assert!(model.records.is_empty());
     }
 
@@ -557,8 +655,123 @@ mod tests {
         let serialized = serde_json::to_value(&model).unwrap();
         assert_eq!(serialized["schemaVersion"], 1);
         assert_eq!(serialized["source"], "approved_sqlite_revisions");
+        assert_eq!(serialized["sourceRecordCount"], 2);
+        assert_eq!(serialized["period"]["isFiltered"], false);
         assert_eq!(serialized["records"][0]["result"], "hit");
         assert!(serialized["records"][0].get("qualityIssues").is_some());
+    }
+
+    #[test]
+    fn period_filter_is_inclusive_and_reports_its_full_source_boundary() {
+        let period = DashboardPeriodFilter {
+            from: Some(" 2026-01-10 ".to_owned()),
+            to: Some("2026-01-20".to_owned()),
+        };
+        let model = dashboard_model_from_snapshots_for_period(
+            &[snapshot(json!([
+                {"num": "before", "date": "2026-01-09"},
+                {"num": "from", "date": "2026-01-10"},
+                {"num": "to", "date": "2026-01-20"},
+                {"num": "after", "date": "2026-01-21"},
+                {"num": "undated", "date": "невідома"}
+            ]))],
+            Some(&period),
+        )
+        .unwrap();
+
+        assert_eq!(model.source_record_count, 5);
+        assert_eq!(model.record_count, 2);
+        assert_eq!(
+            model.available_date_range.from.as_deref(),
+            Some("2026-01-09")
+        );
+        assert_eq!(model.available_date_range.to.as_deref(), Some("2026-01-21"));
+        assert_eq!(model.date_range.from.as_deref(), Some("2026-01-10"));
+        assert_eq!(model.date_range.to.as_deref(), Some("2026-01-20"));
+        assert_eq!(model.period.from.as_deref(), Some("2026-01-10"));
+        assert_eq!(model.period.to.as_deref(), Some("2026-01-20"));
+        assert!(model.period.is_filtered);
+        assert_eq!(model.period.excluded_records, 3);
+        assert_eq!(model.period.excluded_undated_records, 1);
+        assert_eq!(
+            model
+                .records
+                .iter()
+                .map(|record| record.number.as_str())
+                .collect::<Vec<_>>(),
+            ["from", "to"]
+        );
+    }
+
+    #[test]
+    fn period_filter_rejects_noncanonical_and_inverted_dates() {
+        let noncanonical = DashboardPeriodFilter {
+            from: Some("2026-1-10".to_owned()),
+            to: None,
+        };
+        assert!(matches!(
+            dashboard_model_from_snapshots_for_period(&[], Some(&noncanonical)),
+            Err(AnalyticsError::InvalidPeriodDate { field: "from" })
+        ));
+
+        let impossible = DashboardPeriodFilter {
+            from: None,
+            to: Some("2026-02-30".to_owned()),
+        };
+        assert!(matches!(
+            dashboard_model_from_snapshots_for_period(&[], Some(&impossible)),
+            Err(AnalyticsError::InvalidPeriodDate { field: "to" })
+        ));
+
+        let inverted = DashboardPeriodFilter {
+            from: Some("2026-02-01".to_owned()),
+            to: Some("2026-01-31".to_owned()),
+        };
+        assert!(matches!(
+            dashboard_model_from_snapshots_for_period(&[], Some(&inverted)),
+            Err(AnalyticsError::InvertedPeriod)
+        ));
+    }
+
+    #[test]
+    fn period_filter_supports_independent_and_blank_boundaries() {
+        let snapshots = [snapshot(json!([
+            {"num": "early", "date": "2026-01-01"},
+            {"num": "boundary", "date": "2026-01-10"},
+            {"num": "late", "date": "2026-01-20"},
+            {"num": "undated", "date": "невідома"}
+        ]))];
+        let to_only = DashboardPeriodFilter {
+            from: None,
+            to: Some("2026-01-10".to_owned()),
+        };
+        let filtered =
+            dashboard_model_from_snapshots_for_period(&snapshots, Some(&to_only)).unwrap();
+        assert_eq!(filtered.record_count, 2);
+        assert_eq!(filtered.period.from, None);
+        assert_eq!(filtered.period.to.as_deref(), Some("2026-01-10"));
+        assert_eq!(filtered.period.excluded_undated_records, 1);
+
+        let blank = DashboardPeriodFilter {
+            from: Some("".to_owned()),
+            to: Some("   ".to_owned()),
+        };
+        let unfiltered =
+            dashboard_model_from_snapshots_for_period(&snapshots, Some(&blank)).unwrap();
+        assert!(!unfiltered.period.is_filtered);
+        assert_eq!(unfiltered.record_count, 4);
+        assert_eq!(unfiltered.period.excluded_records, 0);
+    }
+
+    #[test]
+    fn period_filter_denies_unknown_input_fields() {
+        let error = serde_json::from_value::<DashboardPeriodFilter>(json!({
+            "from": "2026-01-01",
+            "unexpected": "synthetic-secret"
+        }))
+        .unwrap_err();
+        assert!(error.to_string().contains("unknown field"));
+        assert!(!error.to_string().contains("synthetic-secret"));
     }
 
     #[test]
@@ -707,7 +920,7 @@ mod tests {
         )
         .await;
 
-        let model = load_dashboard_model(&repository).await.unwrap();
+        let model = load_dashboard_model(&repository, None).await.unwrap();
         assert_eq!(model.approved_reports, 1);
         assert_eq!(model.record_count, 1);
         assert_eq!(model.records[0].target_ids, ["SYN-APPROVED"]);
