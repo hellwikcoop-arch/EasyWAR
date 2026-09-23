@@ -14,7 +14,7 @@ use backup::BackupStore;
 use chrono::{SecondsFormat, Utc};
 use repository::{
     Repository, ReviewDecision, SettingsStore, SignalInboxItem, SignalParsePersistence,
-    SignalReviewPersistence,
+    SignalReviewPersistence, SignalReviewSnapshot,
 };
 use restore::BackupInspection;
 use serde_json::Value;
@@ -144,11 +144,23 @@ async fn request_signal_review(
 }
 
 #[tauri::command]
+async fn get_signal_review_snapshot(
+    repository: tauri::State<'_, Repository>,
+    report_id: String,
+) -> Result<SignalReviewSnapshot, String> {
+    repository
+        .signal_review_snapshot(&report_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn finalize_signal_review(
     repository: tauri::State<'_, Repository>,
     report_id: String,
     decision: String,
     reviewer: String,
+    corrected_snapshot: Value,
 ) -> Result<SignalReviewPersistence, String> {
     let decision = match decision.as_str() {
         "APPROVED" => ReviewDecision::Approved,
@@ -157,7 +169,13 @@ async fn finalize_signal_review(
     };
     let decided_at = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
     repository
-        .finalize_signal_review(&report_id, decision, &reviewer, &decided_at)
+        .finalize_signal_review(
+            &report_id,
+            decision,
+            &reviewer,
+            &corrected_snapshot,
+            &decided_at,
+        )
         .await
         .map_err(|error| error.to_string())
 }
@@ -340,6 +358,7 @@ pub fn run() {
             get_signal_report_text,
             store_signal_parse,
             request_signal_review,
+            get_signal_review_snapshot,
             finalize_signal_review,
             run_signal_receive_session,
             stop_signal_receive_session,

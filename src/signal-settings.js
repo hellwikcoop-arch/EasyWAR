@@ -246,12 +246,17 @@ function initializeSignalSettings() {
         throw new Error('Текст цього запису Signal недоступний.');
       }
       document.querySelector('#tab-entry')?.click();
-      const parsedPayload = intake.importForReview(rawText);
-      if (item.currentStatus === 'NEW' || item.currentStatus === 'PARSED') {
-        await invoke('store_signal_parse', {
+      if (['NEEDS_REVIEW', 'APPROVED', 'REJECTED'].includes(item.currentStatus)) {
+        const stored = await invoke('get_signal_review_snapshot', { reportId: item.reportId });
+        const persistedPayload = intake.importPersistedReview(rawText, stored.snapshot_json);
+        intake.attachSignalReview(item.reportId, stored.parsed_version_id, persistedPayload);
+      } else {
+        const parsedPayload = intake.importForReview(rawText);
+        const stored = await invoke('store_signal_parse', {
           reportId: item.reportId,
           parsedPayload,
         });
+        intake.attachSignalReview(item.reportId, stored.parsed_version_id, parsedPayload);
       }
       dialog.close();
       intake.toast('Запис Signal розібрано й відкрито для ручної перевірки.', 'ok');
@@ -289,15 +294,17 @@ function initializeSignalSettings() {
       ? `Схвалюємо запис ${item.reportId}…`
       : `Відхиляємо запис ${item.reportId}…`;
     try {
+      const correctedSnapshot = intake.currentSignalReviewSnapshot(item.reportId);
       const result = await invoke('finalize_signal_review', {
         reportId: item.reportId,
         decision,
         reviewer,
+        correctedSnapshot,
       });
       await refreshInbox();
       const label = decision === 'APPROVED' ? 'схвалено' : 'відхилено';
       inboxStatus.textContent = result?.inserted
-        ? `Запис ${label}. Рішення та рецензента додано до незмінного аудиту.`
+        ? `Запис ${label}. Виправлень збережено: ${result.correction_count || 0}. Рішення та рецензента додано до незмінного аудиту.`
         : `Це саме фінальне рішення вже було збережено.`;
     } catch (error) {
       inboxStatus.textContent = `Не вдалося зберегти фінальне рішення: ${String(error)}`;

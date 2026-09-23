@@ -2295,7 +2295,7 @@ const plural = (n, f) => { const a = n % 100, b = n % 10; if (a > 10 && a < 20) 
 
 const S = {
   name: '', handle: null, bytes: null, wb: null, ctx: null, dirty: false, busy: false,
-  parsed: [], undo: [], session: [], auto: false, parseTimer: null, storedHandle: null
+  parsed: [], undo: [], session: [], auto: false, parseTimer: null, storedHandle: null, signalReview: null
 };
 S.clip = false; S.lastClip = '';
 try { S.auto = localStorage.getItem('avtovvid.auto') === '1'; S.clip = localStorage.getItem('avtovvid.clip') === '1'; } catch (e) {}
@@ -2335,7 +2335,7 @@ async function connect(u8, name, handle, fresh) {
   try {
     const wb = await C.openWorkbook(u8);
     S.bytes = u8; S.name = name; S.handle = handle || null; S.wb = wb; S.ctx = C.buildContext(wb);
-    S.dirty = false; S.undo = []; S.session = []; S.parsed = [];
+    S.dirty = false; S.undo = []; S.session = []; S.parsed = []; S.signalReview = null;
     $('#paste').value = '';
     renderAll();
     $('#paste').focus();
@@ -2382,6 +2382,7 @@ function downloadCurrent() {
 
 /* ------------------------------ розбір ------------------------------ */
 function scheduleParse(now) {
+  S.signalReview = null;
   clearTimeout(S.parseTimer);
   S.parseTimer = setTimeout(doParse, now ? 0 : 350);
 }
@@ -2400,6 +2401,23 @@ function doParse() {
   if (S.auto && S.parsed.length && S.parsed.every(r => !Object.keys(r.warn).length && !r.dup) && S.handle) addSelected(true);
   return out;
 }
+function signalReviewPayload(output, records) {
+  return {
+    schema_version: 1,
+    header_only: Boolean(output.headerOnly ?? output.header_only),
+    chat_date: output.chatDate || output.chat_date || null,
+    records: records.map(source => {
+      const record = { ...source };
+      delete record.srcText;
+      delete record._own;
+      delete record._openCause;
+      delete record.dup;
+      delete record.include;
+      record.month = C.MONTHS_NOM[+String(record.date).slice(5, 7) - 1] || '';
+      return record;
+    }),
+  };
+}
 function importForReview(text) {
   if (!S.wb) throw new Error('Спочатку відкрийте таблицю.');
   const input = $('#paste');
@@ -2416,19 +2434,38 @@ function importForReview(text) {
   if (!output || !Array.isArray(output.records) || !output.records.length) {
     throw new Error('Не вдалося розібрати жодного запису Signal.');
   }
-  return {
-    schema_version: 1,
-    header_only: Boolean(output.headerOnly),
-    chat_date: output.chatDate || null,
-    records: output.records.map(source => {
-      const record = { ...source };
-      delete record.srcText;
-      delete record._own;
-      delete record.dup;
-      delete record.include;
-      return record;
-    }),
+  return signalReviewPayload(output, output.records);
+}
+function importPersistedReview(text, payload) {
+  if (!S.wb) throw new Error('Спочатку відкрийте таблицю.');
+  if (!payload || !Array.isArray(payload.records) || !payload.records.length) {
+    throw new Error('Збережений знімок перевірки недоступний.');
+  }
+  const input = $('#paste');
+  input.value = String(text == null ? '' : text);
+  S.parsed = JSON.parse(JSON.stringify(payload.records)).map(record => ({
+    ...record,
+    warn: record.warn && typeof record.warn === 'object' ? record.warn : {},
+    dup: C.findDuplicate(record, S.wb.records),
+    include: false,
+  }));
+  S.headerOnly = payload.header_only ? 'Збережений заголовок' : '';
+  renderResults();
+  return signalReviewPayload(payload, S.parsed);
+}
+function attachSignalReview(reportId, parsedVersionId, baselinePayload) {
+  S.signalReview = {
+    reportId: String(reportId),
+    parsedVersionId: String(parsedVersionId),
+    baselinePayload: JSON.parse(JSON.stringify(baselinePayload)),
   };
+  updateAddButton();
+}
+function currentSignalReviewSnapshot(reportId) {
+  if (!S.signalReview || S.signalReview.reportId !== String(reportId)) {
+    throw new Error('Спочатку відкрийте саме цей запис у вкладці внесення.');
+  }
+  return signalReviewPayload(S.signalReview.baselinePayload, S.parsed);
 }
 
 /* ------------------------------ додавання ------------------------------ */
@@ -2440,6 +2477,7 @@ function explainWriteError(e) {
   return (e && e.message) ? e.message : String(e);
 }
 async function addSelected(fromAuto) {
+  if (S.signalReview) return;
   if (S.busy) return;
   const chosen = S.parsed.filter(r => r.include);
   if (!chosen.length || !S.wb) return;
@@ -2569,8 +2607,8 @@ function updateAddButton() {
   const n = S.parsed.filter(r => r.include).length;
   const btn = $('#addBtn');
   btn.hidden = !S.parsed.length; $('#actions').hidden = !S.parsed.length;
-  btn.disabled = !n || S.busy;
-  btn.textContent = n ? 'Додати ' + n + ' ' + plural(n, ['запис', 'записи', 'записів']) + ' у таблицю' : 'Немає записів для додавання';
+  btn.disabled = !n || S.busy || !!S.signalReview;
+  btn.textContent = S.signalReview ? 'Режим перевірки Signal — запис у таблицю вимкнено' : n ? 'Додати ' + n + ' ' + plural(n, ['запис', 'записи', 'записів']) + ' у таблицю' : 'Немає записів для додавання';
   $('#countLabel').textContent = 'Розпізнано: ' + S.parsed.length;
 }
 function renderCard(rec, i) {
@@ -2667,7 +2705,7 @@ DPI 3-4: 37T CP 44451 07978
 function init() {
   $('#paste').addEventListener('input', () => scheduleParse(false));
   $('#paste').addEventListener('paste', () => setTimeout(() => scheduleParse(true), 0));
-  $('#clearBtn').addEventListener('click', () => { $('#paste').value = ''; S.parsed = []; renderResults(); $('#paste').focus(); });
+  $('#clearBtn').addEventListener('click', () => { $('#paste').value = ''; S.parsed = []; S.signalReview = null; renderResults(); $('#paste').focus(); });
   $('#sampleBtn').addEventListener('click', () => { if (!S.wb) return; $('#paste').value = SAMPLE; scheduleParse(true); });
   $('#addBtn').addEventListener('click', () => addSelected(false));
   $('#undoBtn').addEventListener('click', undoLast);
@@ -2723,7 +2761,7 @@ const autoRefresh = () => { clearTimeout(__refreshT); __refreshT = setTimeout(()
 window.addEventListener('focus', autoRefresh);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) autoRefresh(); });
 
-window.__AV = { S, connect, doParse, importForReview, addSelected, pickFile, showError, downloadCurrent, toast, refresh: refreshFromDisk }; // для налагодження
+window.__AV = { S, connect, doParse, importForReview, importPersistedReview, attachSignalReview, currentSignalReviewSnapshot, addSelected, pickFile, showError, downloadCurrent, toast, refresh: refreshFromDisk }; // для налагодження
 document.addEventListener('DOMContentLoaded', init);
 })();
 </script>

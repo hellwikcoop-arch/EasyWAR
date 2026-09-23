@@ -53,9 +53,11 @@ Each write method uses one SQLite transaction:
   the existing decision without adding rows.
 - `finalize_signal_review` accepts only `NEEDS_REVIEW`, a nonblank bounded local
   reviewer identifier and an explicit `APPROVED` or `REJECTED` decision. It
-  atomically appends the final decision, matching immutable snapshot revision
-  and audit event. An identical retry is idempotent; final states cannot be
-  changed or reopened.
+  compares a corrected snapshot with the pending review snapshot, accepts only
+  bounded editable record fields, and atomically appends one correction/audit
+  pair per changed field plus the final decision, corrected immutable revision
+  and decision audit event. An identical retry is idempotent; final states
+  cannot be changed or reopened.
 - `stage_xlsx_batch` writes all new XLSX rows in one transaction as immutable
   interpreted-cell snapshots plus separate parsed versions and audit events;
   it never approves rows and rejects conflicting exact-file retries.
@@ -68,11 +70,14 @@ currently exposed in the desktop UI.
 
 The desktop Signal parse command generates timestamps in Rust and accepts a
 strict versioned JSON shape with 1–64 parsed records and a 1 MiB serialized
-limit. It rejects raw `srcText` and UI-only `_own`, `dup`, and `include` fields.
-The original `raw_sources` row is never changed. Final decisions require a
-local reviewer identifier that is written to decision, revision and audit
-records; this is provenance, not authentication. Manual correction persistence
-and corrected snapshots are intentionally not exposed yet.
+limit. It rejects raw `srcText` and UI-only `_own`, `_openCause`, `dup`, and
+`include` fields.
+The original `raw_sources` row and parser version are never changed. The review
+flow cannot change record count, schema metadata, raw text, or UI-only fields;
+it accepts at most 256 changed values across the editable record fields. Each
+manual correction preserves prior and corrected JSON values with a field path.
+Final decisions require a local reviewer identifier written to corrections,
+decision, revision and audit records; this is provenance, not authentication.
 
 ## Settings store
 

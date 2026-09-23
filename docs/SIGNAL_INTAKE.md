@@ -147,8 +147,9 @@ source. Missing and non-Signal identifiers return no content. The UI then
 switches to the existing intake tab and invokes a narrow legacy helper that
 temporarily disables `S.auto`, runs the existing parser, and restores the prior
 setting in `finally`. The helper returns a versioned parser payload with 1–64
-records, excluding per-record `srcText` and UI-only `_own`, `dup`, and `include`
-fields. It can populate review cards but cannot automatically append the Signal
+records, excluding per-record `srcText` and UI-only `_own`, `_openCause`, `dup`,
+and `include` fields. It can populate review cards but cannot automatically
+append the Signal
 record to the workbook. Raw text is not logged or added to the Inbox list
 response.
 
@@ -163,18 +164,21 @@ no rows.
 
 While a record is `NEEDS_REVIEW`, the Inbox requires a nonblank local reviewer
 identifier before exposing an explicit **Схвалити** or **Відхилити** action.
-The backend accepts only `APPROVED` or `REJECTED`, then atomically appends the
-final decision, a matching immutable snapshot revision and an audit event with
-that reviewer identifier. An identical retry adds no rows; an opposite decision
-or any attempt to reopen a final state is rejected. The identifier is local
-provenance and does not authenticate a person.
+The reviewer first opens that exact report in the existing editable cards. In
+this Signal review mode, adding rows to XLSX is disabled. Finalization compares
+the edited cards with the pending immutable snapshot, rejects changes to schema
+metadata or record count, and accepts at most 256 changed values across the 14
+editable/derived record fields. The backend then atomically appends one manual
+correction and audit event per changed field, the `APPROVED` or `REJECTED`
+decision, and a corrected immutable revision snapshot. An identical retry adds
+no rows; an opposite decision or attempt to reopen a final state is rejected.
+The reviewer identifier is local provenance and does not authenticate a person.
 
 Synthetic repository tests verify source filtering, the `NEW` to `PARSED` to
 `NEEDS_REVIEW` path, exact-retry idempotency, immutable raw text, fixed list
 bounds, absence of raw content in the serialized list, and rejection of
-non-Signal/missing identifiers and raw/UI fields. This bridge does not persist
-manual corrections or corrected snapshots, write XLSX rows, capture messages,
-or prove that a live connector is running.
+non-Signal/missing identifiers and raw/UI fields. This bridge does not write
+XLSX rows, capture messages, or prove that a live connector is running.
 
 ## Not implemented in this step
 
@@ -183,7 +187,6 @@ or prove that a live connector is running.
 - a long-running or automatically restarted receive service;
 - account/group discovery over UNIX or raw TCP;
 - enabling or connecting a Signal account;
-- manual-correction persistence and corrected revision snapshots;
 - live-daemon acceptance of Signal Inbox capture and parsing.
 
 All tests use synthetic configuration values only, including the disconnected

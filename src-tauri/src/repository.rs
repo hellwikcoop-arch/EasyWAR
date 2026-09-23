@@ -10,6 +10,11 @@ const SIGNAL_LEGACY_PARSER_VERSION: &str = "1";
 const SIGNAL_PARSE_MAX_BYTES: usize = 1024 * 1024;
 const SIGNAL_PARSE_MAX_RECORDS: usize = 64;
 const SIGNAL_REVIEW_ACTOR: &str = "easywar-local-user";
+const SIGNAL_CORRECTION_MAX_FIELDS: usize = 256;
+const SIGNAL_CORRECTION_FIELDS: &[&str] = &[
+    "date", "time", "targets", "unit", "district", "aircraft", "munition", "count", "result",
+    "types", "cause", "dpi", "note", "month",
+];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SourceType {
@@ -181,6 +186,15 @@ pub struct SignalReviewPersistence {
     pub revision_id: String,
     pub current_status: String,
     pub inserted: bool,
+    pub correction_count: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct SignalReviewSnapshot {
+    pub report_id: String,
+    pub parsed_version_id: String,
+    pub current_status: String,
+    pub snapshot_json: Value,
 }
 
 type ExistingXlsxRow = (String, Option<String>, Option<String>, Option<String>);
@@ -207,6 +221,8 @@ pub enum RepositoryError {
     InvalidSignalReportState(String),
     #[error("Потрібен коректний локальний ідентифікатор рецензента")]
     InvalidSignalReviewer,
+    #[error("Некоректний набір ручних виправлень Signal: {0}")]
+    InvalidSignalCorrections(String),
 }
 
 #[derive(Clone, Debug)]
@@ -884,6 +900,7 @@ impl Repository {
                     revision_id,
                     current_status,
                     inserted: false,
+                    correction_count: 0,
                 });
             }
             return Err(RepositoryError::InvalidSignalReportState(current_status));
@@ -988,6 +1005,42 @@ impl Repository {
             revision_id,
             current_status: "NEEDS_REVIEW".to_owned(),
             inserted: true,
+            correction_count: 0,
+        })
+    }
+
+    pub async fn signal_review_snapshot(
+        &self,
+        report_id: &str,
+    ) -> Result<SignalReviewSnapshot, RepositoryError> {
+        let row: Option<(String, String, String)> = sqlx::query_as(
+            "SELECT revision_history.parsed_version_id,
+                    report_current_state.current_status,
+                    revision_history.snapshot_json
+             FROM reports
+             JOIN raw_sources ON raw_sources.id = reports.raw_source_id
+             JOIN report_current_state ON report_current_state.report_id = reports.id
+             JOIN revision_history ON revision_history.report_id = reports.id
+             WHERE reports.id = ? AND raw_sources.source_type = 'SIGNAL'
+             ORDER BY revision_history.revision_number DESC
+             LIMIT 1",
+        )
+        .bind(report_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        let Some((parsed_version_id, current_status, snapshot_json)) = row else {
+            return Err(RepositoryError::SignalReportNotFound);
+        };
+        let snapshot_json = serde_json::from_str(&snapshot_json).map_err(|_| {
+            RepositoryError::InvalidSignalCorrections(
+                "збережений знімок перевірки пошкоджено".to_owned(),
+            )
+        })?;
+        Ok(SignalReviewSnapshot {
+            report_id: report_id.to_owned(),
+            parsed_version_id,
+            current_status,
+            snapshot_json,
         })
     }
 
@@ -996,8 +1049,10 @@ impl Repository {
         report_id: &str,
         decision: ReviewDecision,
         reviewer: &str,
+        corrected_snapshot: &Value,
         decided_at: &str,
     ) -> Result<SignalReviewPersistence, RepositoryError> {
+        validate_signal_parse_payload(corrected_snapshot)?;
         if !matches!(
             decision,
             ReviewDecision::Approved | ReviewDecision::Rejected
@@ -1040,10 +1095,13 @@ impl Repository {
         .fetch_one(&mut *transaction)
         .await?;
         if matches!(current_status.as_str(), "APPROVED" | "REJECTED") {
-            let existing: Option<(String, String, String, String, String)> = sqlx::query_as(
-                "SELECT review_decisions.id, review_decisions.parsed_version_id,
+            let existing: Option<(String, String, String, String, String, String, i64)> =
+                sqlx::query_as(
+                    "SELECT review_decisions.id, review_decisions.parsed_version_id,
                         review_decisions.decision, review_decisions.decided_by,
-                        revision_history.id
+                        revision_history.id, revision_history.snapshot_json,
+                        (SELECT count(*) FROM manual_corrections
+                         WHERE manual_corrections.report_id = review_decisions.report_id)
                  FROM review_decisions
                  JOIN revision_history
                    ON revision_history.review_decision_id = review_decisions.id
@@ -1053,19 +1111,26 @@ impl Repository {
                  ORDER BY review_decisions.decision_number DESC,
                           revision_history.revision_number DESC
                  LIMIT 1",
-            )
-            .bind(report_id)
-            .fetch_optional(&mut *transaction)
-            .await?;
+                )
+                .bind(report_id)
+                .fetch_optional(&mut *transaction)
+                .await?;
             if let Some((
                 decision_id,
                 parsed_version_id,
                 stored_decision,
                 decided_by,
                 revision_id,
+                stored_snapshot,
+                correction_count,
             )) = existing
             {
-                if stored_decision == decision.as_str() && decided_by == reviewer {
+                let same_snapshot = build_signal_corrections(&stored_snapshot, corrected_snapshot)
+                    .map(|(normalized, corrections)| {
+                        normalized == stored_snapshot && corrections.is_empty()
+                    })
+                    .unwrap_or(false);
+                if stored_decision == decision.as_str() && decided_by == reviewer && same_snapshot {
                     return Ok(SignalReviewPersistence {
                         report_id: report_id.to_owned(),
                         parsed_version_id,
@@ -1073,6 +1138,7 @@ impl Repository {
                         revision_id,
                         current_status,
                         inserted: false,
+                        correction_count: correction_count as usize,
                     });
                 }
             }
@@ -1094,6 +1160,15 @@ impl Repository {
              ORDER BY review_decisions.decision_number DESC,
                       revision_history.revision_number DESC
              LIMIT 1",
+        )
+        .bind(report_id)
+        .fetch_one(&mut *transaction)
+        .await?;
+        let (corrected_snapshot_json, corrections) =
+            build_signal_corrections(&snapshot_json, corrected_snapshot)?;
+        let next_correction_number: i64 = sqlx::query_scalar(
+            "SELECT COALESCE(MAX(correction_number), 0) + 1
+             FROM manual_corrections WHERE report_id = ?",
         )
         .bind(report_id)
         .fetch_one(&mut *transaction)
@@ -1135,6 +1210,60 @@ impl Repository {
             ReviewDecision::NeedsReview => unreachable!("final decision checked above"),
         };
 
+        for (offset, correction) in corrections.iter().enumerate() {
+            let correction_number = next_correction_number + offset as i64;
+            let correction_number_text = correction_number.to_string();
+            let corrected_value = correction.corrected.to_string();
+            let correction_id = signal_identity(
+                "signal-correction",
+                &[
+                    report_id,
+                    &parsed_version_id,
+                    &correction_number_text,
+                    &correction.field_path,
+                    &corrected_value,
+                ],
+            );
+            let correction_audit_id = signal_identity("signal-audit-correction", &[&correction_id]);
+            sqlx::query(
+                "INSERT INTO manual_corrections
+                 (id, report_id, correction_number, parsed_version_id, field_path,
+                  prior_value_json, corrected_value_json, reason, created_by, created_at,
+                  supersedes_correction_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+            )
+            .bind(&correction_id)
+            .bind(report_id)
+            .bind(correction_number)
+            .bind(&parsed_version_id)
+            .bind(&correction.field_path)
+            .bind(correction.prior.to_string())
+            .bind(&corrected_value)
+            .bind("Виправлено під час ручної перевірки Signal")
+            .bind(reviewer)
+            .bind(decided_at)
+            .execute(&mut *transaction)
+            .await?;
+            insert_audit(
+                &mut transaction,
+                &AuditContext {
+                    id: correction_audit_id,
+                    actor_type: ActorType::User,
+                    actor_label: Some(reviewer.to_owned()),
+                    occurred_at: decided_at.to_owned(),
+                },
+                Some(report_id),
+                "manual_correction",
+                &correction_id,
+                "CORRECTED",
+                json!({
+                    "correctionNumber": correction_number,
+                    "fieldPath": correction.field_path,
+                }),
+            )
+            .await?;
+        }
+
         sqlx::query(
             "INSERT INTO review_decisions
              (id, report_id, decision_number, parsed_version_id, decision,
@@ -1162,8 +1291,12 @@ impl Repository {
         .bind(revision_number)
         .bind(&parsed_version_id)
         .bind(&decision_id)
-        .bind(&snapshot_json)
-        .bind(rationale)
+        .bind(&corrected_snapshot_json)
+        .bind(if corrections.is_empty() {
+            rationale.to_owned()
+        } else {
+            format!("{rationale}; ручних виправлень: {}", corrections.len())
+        })
         .bind(reviewer)
         .bind(decided_at)
         .execute(&mut *transaction)
@@ -1196,8 +1329,120 @@ impl Repository {
             revision_id,
             current_status: decision.as_str().to_owned(),
             inserted: true,
+            correction_count: corrections.len(),
         })
     }
+}
+
+#[derive(Clone, Debug)]
+struct SignalCorrection {
+    field_path: String,
+    prior: Value,
+    corrected: Value,
+}
+
+fn build_signal_corrections(
+    base_snapshot_json: &str,
+    requested_snapshot: &Value,
+) -> Result<(String, Vec<SignalCorrection>), RepositoryError> {
+    validate_signal_parse_payload(requested_snapshot)?;
+    let base_snapshot: Value = serde_json::from_str(base_snapshot_json).map_err(|_| {
+        RepositoryError::InvalidSignalCorrections(
+            "збережений початковий знімок пошкоджено".to_owned(),
+        )
+    })?;
+    for key in ["schema_version", "header_only", "chat_date"] {
+        if base_snapshot.get(key) != requested_snapshot.get(key) {
+            return Err(RepositoryError::InvalidSignalCorrections(format!(
+                "службове поле {key} не можна змінювати"
+            )));
+        }
+    }
+    let base_records = base_snapshot
+        .get("records")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            RepositoryError::InvalidSignalCorrections(
+                "початковий знімок не містить records".to_owned(),
+            )
+        })?;
+    let requested_records = requested_snapshot
+        .get("records")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            RepositoryError::InvalidSignalCorrections(
+                "виправлений знімок не містить records".to_owned(),
+            )
+        })?;
+    if base_records.len() != requested_records.len() {
+        return Err(RepositoryError::InvalidSignalCorrections(
+            "кількість записів не можна змінювати під час перевірки".to_owned(),
+        ));
+    }
+
+    let mut final_snapshot = base_snapshot.clone();
+    let final_records = final_snapshot
+        .get_mut("records")
+        .and_then(Value::as_array_mut)
+        .expect("validated base records must remain an array");
+    let mut corrections = Vec::new();
+    for (record_index, ((base_record, requested_record), final_record)) in base_records
+        .iter()
+        .zip(requested_records)
+        .zip(final_records)
+        .enumerate()
+    {
+        let base_record = base_record.as_object().ok_or_else(|| {
+            RepositoryError::InvalidSignalCorrections(
+                "початковий запис не є JSON-об'єктом".to_owned(),
+            )
+        })?;
+        let requested_record = requested_record.as_object().ok_or_else(|| {
+            RepositoryError::InvalidSignalCorrections(
+                "виправлений запис не є JSON-об'єктом".to_owned(),
+            )
+        })?;
+        let final_record = final_record
+            .as_object_mut()
+            .expect("validated final record must remain an object");
+        for field in SIGNAL_CORRECTION_FIELDS {
+            if !base_record.contains_key(*field) && !requested_record.contains_key(*field) {
+                continue;
+            }
+            let prior = base_record.get(*field).cloned().unwrap_or(Value::Null);
+            let corrected = requested_record
+                .get(*field)
+                .cloned()
+                .unwrap_or_else(|| prior.clone());
+            let valid_type = if matches!(*field, "types" | "cause") {
+                corrected
+                    .as_array()
+                    .map(|values| values.iter().all(Value::is_string))
+                    .unwrap_or(false)
+            } else {
+                corrected.is_string()
+            };
+            if !valid_type {
+                return Err(RepositoryError::InvalidSignalCorrections(format!(
+                    "поле records[{record_index}].{field} має некоректний тип"
+                )));
+            }
+            if corrected != prior {
+                final_record.insert((*field).to_owned(), corrected.clone());
+                corrections.push(SignalCorrection {
+                    field_path: format!("$.records[{record_index}].{field}"),
+                    prior,
+                    corrected,
+                });
+            }
+        }
+    }
+    if corrections.len() > SIGNAL_CORRECTION_MAX_FIELDS {
+        return Err(RepositoryError::InvalidSignalCorrections(format!(
+            "за одне рішення дозволено не більше {SIGNAL_CORRECTION_MAX_FIELDS} змінених полів"
+        )));
+    }
+    Ok((final_snapshot.to_string(), corrections))
 }
 
 fn validate_signal_parse_payload(payload: &Value) -> Result<String, RepositoryError> {
@@ -1249,7 +1494,7 @@ fn validate_signal_parse_payload(payload: &Value) -> Result<String, RepositoryEr
         ));
     }
 
-    let forbidden_keys = ["srcText", "_own", "dup", "include"];
+    let forbidden_keys = ["srcText", "_own", "_openCause", "dup", "include"];
     let mut pending = vec![payload];
     while let Some(value) = pending.pop() {
         match value {
@@ -1501,6 +1746,28 @@ mod tests {
         })
     }
 
+    #[test]
+    fn signal_corrections_reject_schema_or_record_count_changes() {
+        let base = signal_parse_payload("Початковий синтетичний запис");
+        let base_json = base.to_string();
+        let mut changed_date = base.clone();
+        changed_date["chat_date"] = json!("2026-01-02");
+        assert!(matches!(
+            build_signal_corrections(&base_json, &changed_date),
+            Err(RepositoryError::InvalidSignalCorrections(_))
+        ));
+
+        let mut extra_record = base.clone();
+        extra_record["records"]
+            .as_array_mut()
+            .expect("synthetic records")
+            .push(json!({ "date": "2026-01-02", "note": "зайвий запис" }));
+        assert!(matches!(
+            build_signal_corrections(&base_json, &extra_record),
+            Err(RepositoryError::InvalidSignalCorrections(_))
+        ));
+    }
+
     #[tokio::test]
     async fn persists_signal_parse_and_review_transition_idempotently() {
         let repository = repository().await;
@@ -1551,6 +1818,15 @@ mod tests {
         assert!(!retry_review.inserted);
         assert_eq!(retry_review.decision_id, first_review.decision_id);
         assert_eq!(retry_review.revision_id, first_review.revision_id);
+        let pending_snapshot = repository
+            .signal_review_snapshot("signal-report-parse")
+            .await
+            .expect("pending review snapshot must query");
+        assert_eq!(pending_snapshot.current_status, "NEEDS_REVIEW");
+        assert_eq!(
+            pending_snapshot.snapshot_json["records"][0]["note"],
+            json!("Синтетичний результат")
+        );
 
         let counts: (i64, i64, i64, i64) = sqlx::query_as(
             "SELECT (SELECT count(*) FROM parsed_report_versions),
@@ -1569,23 +1845,26 @@ mod tests {
                 .expect("raw Signal source must remain available");
         assert_eq!(raw_text, "Синтетичний незмінний текст Signal");
 
-        assert!(matches!(
-            repository
-                .finalize_signal_review(
-                    "signal-report-parse",
-                    ReviewDecision::Approved,
-                    "synthetic-reviewer",
-                    "2026-01-01T00:00:04Z",
-                )
-                .await,
-            Ok(SignalReviewPersistence { inserted: true, current_status, .. })
-                if current_status == "APPROVED"
-        ));
+        let corrected_payload = signal_parse_payload("Виправлений синтетичний результат");
+        let approved = repository
+            .finalize_signal_review(
+                "signal-report-parse",
+                ReviewDecision::Approved,
+                "synthetic-reviewer",
+                &corrected_payload,
+                "2026-01-01T00:00:04Z",
+            )
+            .await
+            .expect("corrected synthetic approval must persist");
+        assert!(approved.inserted);
+        assert_eq!(approved.current_status, "APPROVED");
+        assert_eq!(approved.correction_count, 1);
         let retry_final = repository
             .finalize_signal_review(
                 "signal-report-parse",
                 ReviewDecision::Approved,
                 "synthetic-reviewer",
+                &corrected_payload,
                 "2026-01-01T00:00:05Z",
             )
             .await
@@ -1597,20 +1876,48 @@ mod tests {
                     "signal-report-parse",
                     ReviewDecision::Rejected,
                     "synthetic-reviewer",
+                    &corrected_payload,
                     "2026-01-01T00:00:06Z",
                 )
                 .await,
             Err(RepositoryError::InvalidSignalReportState(status)) if status == "APPROVED"
         ));
-        let final_counts: (i64, i64, i64) = sqlx::query_as(
+        let final_counts: (i64, i64, i64, i64) = sqlx::query_as(
             "SELECT (SELECT count(*) FROM review_decisions),
                     (SELECT count(*) FROM revision_history),
+                    (SELECT count(*) FROM manual_corrections),
                     (SELECT count(*) FROM audit_log)",
         )
         .fetch_one(&repository.pool)
         .await
         .expect("final review provenance counts must query");
-        assert_eq!(final_counts, (2, 2, 4));
+        assert_eq!(final_counts, (2, 2, 1, 5));
+        let stored_correction: (String, String, String) = sqlx::query_as(
+            "SELECT field_path, prior_value_json, corrected_value_json
+             FROM manual_corrections WHERE report_id = ?",
+        )
+        .bind("signal-report-parse")
+        .fetch_one(&repository.pool)
+        .await
+        .expect("stored Signal correction must query");
+        assert_eq!(stored_correction.0, "$.records[0].note");
+        assert_eq!(
+            stored_correction.1,
+            json!("Синтетичний результат").to_string()
+        );
+        assert_eq!(
+            stored_correction.2,
+            json!("Виправлений синтетичний результат").to_string()
+        );
+        let approved_snapshot = repository
+            .signal_review_snapshot("signal-report-parse")
+            .await
+            .expect("approved corrected snapshot must query");
+        assert_eq!(approved_snapshot.current_status, "APPROVED");
+        assert_eq!(
+            approved_snapshot.snapshot_json["records"][0]["note"],
+            json!("Виправлений синтетичний результат")
+        );
 
         assert!(matches!(
             repository
@@ -1682,7 +1989,13 @@ mod tests {
         ));
         assert!(matches!(
             repository
-                .finalize_signal_review("signal-report-new", ReviewDecision::Approved, "", NOW,)
+                .finalize_signal_review(
+                    "signal-report-new",
+                    ReviewDecision::Approved,
+                    "",
+                    &signal_parse_payload("x"),
+                    NOW,
+                )
                 .await,
             Err(RepositoryError::InvalidSignalReviewer)
         ));
@@ -1720,6 +2033,7 @@ mod tests {
                 "signal-report-rejected",
                 ReviewDecision::Rejected,
                 "synthetic-reviewer-reject",
+                &signal_parse_payload("Синтетичний запис для відхилення"),
                 NOW,
             )
             .await
