@@ -199,6 +199,14 @@ function initializeSignalSettings() {
       openForReview.textContent = 'Відкрити у внесенні';
       openForReview.addEventListener('click', () => openInboxItemForReview(item, openForReview));
       actions.append(openForReview);
+      if (item.currentStatus === 'PARSED') {
+        const requestReview = document.createElement('button');
+        requestReview.type = 'button';
+        requestReview.className = 'btn quiet';
+        requestReview.textContent = 'На ручну перевірку';
+        requestReview.addEventListener('click', () => requestInboxReview(item, requestReview));
+        actions.append(requestReview);
+      }
       row.append(heading, source, details, actions);
       inboxList.append(row);
     }
@@ -220,11 +228,33 @@ function initializeSignalSettings() {
         throw new Error('Текст цього запису Signal недоступний.');
       }
       document.querySelector('#tab-entry')?.click();
-      intake.importForReview(rawText);
+      const parsedPayload = intake.importForReview(rawText);
+      if (item.currentStatus === 'NEW' || item.currentStatus === 'PARSED') {
+        await invoke('store_signal_parse', {
+          reportId: item.reportId,
+          parsedPayload,
+        });
+      }
       dialog.close();
+      intake.toast('Запис Signal розібрано й відкрито для ручної перевірки.', 'ok');
       document.querySelector('#paste')?.focus();
     } catch (error) {
       inboxStatus.textContent = `Не вдалося відкрити запис для перевірки: ${String(error)}`;
+      button.disabled = false;
+    }
+  }
+
+  async function requestInboxReview(item, button) {
+    button.disabled = true;
+    inboxStatus.textContent = `Передаємо запис ${item.reportId} на ручну перевірку…`;
+    try {
+      const result = await invoke('request_signal_review', { reportId: item.reportId });
+      await refreshInbox();
+      inboxStatus.textContent = result?.inserted
+        ? 'Запис передано на ручну перевірку. Створено незмінний знімок ревізії.'
+        : 'Запис уже перебуває на ручній перевірці.';
+    } catch (error) {
+      inboxStatus.textContent = `Не вдалося передати запис на ручну перевірку: ${String(error)}`;
       button.disabled = false;
     }
   }

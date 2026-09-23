@@ -11,8 +11,12 @@ pub mod signal_settings;
 pub mod xlsx_import;
 
 use backup::BackupStore;
-use repository::{Repository, SettingsStore, SignalInboxItem};
+use chrono::{SecondsFormat, Utc};
+use repository::{
+    Repository, SettingsStore, SignalInboxItem, SignalParsePersistence, SignalReviewPersistence,
+};
 use restore::BackupInspection;
+use serde_json::Value;
 use signal_daemon::{SignalAccountSummary, SignalGroupSummary, SignalLinkStart};
 use signal_policy::SignalAdapterConfig;
 use signal_session::{SignalReceiveController, SignalSessionStatus, SignalSessionSummary};
@@ -109,6 +113,31 @@ async fn get_signal_report_text(
 ) -> Result<Option<String>, String> {
     repository
         .signal_report_text(&report_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn store_signal_parse(
+    repository: tauri::State<'_, Repository>,
+    report_id: String,
+    parsed_payload: Value,
+) -> Result<SignalParsePersistence, String> {
+    let parsed_at = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
+    repository
+        .store_signal_parse(&report_id, &parsed_payload, &parsed_at)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn request_signal_review(
+    repository: tauri::State<'_, Repository>,
+    report_id: String,
+) -> Result<SignalReviewPersistence, String> {
+    let decided_at = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
+    repository
+        .request_signal_review(&report_id, &decided_at)
         .await
         .map_err(|error| error.to_string())
 }
@@ -289,6 +318,8 @@ pub fn run() {
             finish_signal_link,
             list_signal_inbox,
             get_signal_report_text,
+            store_signal_parse,
+            request_signal_review,
             run_signal_receive_session,
             stop_signal_receive_session,
             get_signal_receive_status,

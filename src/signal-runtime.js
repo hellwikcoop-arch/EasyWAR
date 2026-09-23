@@ -44,6 +44,7 @@ export function describePersistedSignalInbox(items) {
       reportId: String(item?.report_id || ''),
       sourceItemKey: String(item?.source_item_key || ''),
       capturedAt: formatInboxTimestamp(item?.captured_at),
+      currentStatus: String(item?.current_status || ''),
       statusLabel: SIGNAL_INBOX_STATUS_LABELS[item?.current_status] || 'Невідомий стан',
     })).filter(item => item.reportId && item.sourceItemKey)
     : [];

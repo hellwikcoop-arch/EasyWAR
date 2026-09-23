@@ -5,6 +5,12 @@ use sha2::{Digest, Sha256};
 use sqlx::{Sqlite, SqlitePool, Transaction};
 use std::collections::BTreeSet;
 
+const SIGNAL_LEGACY_PARSER_NAME: &str = "easywar-legacy-core";
+const SIGNAL_LEGACY_PARSER_VERSION: &str = "1";
+const SIGNAL_PARSE_MAX_BYTES: usize = 1024 * 1024;
+const SIGNAL_PARSE_MAX_RECORDS: usize = 64;
+const SIGNAL_REVIEW_ACTOR: &str = "easywar-local-user";
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SourceType {
     Paste,
@@ -158,6 +164,25 @@ pub struct SignalInboxItem {
     pub raw_sha256: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct SignalParsePersistence {
+    pub report_id: String,
+    pub parsed_version_id: String,
+    pub version: i64,
+    pub current_status: String,
+    pub inserted: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct SignalReviewPersistence {
+    pub report_id: String,
+    pub parsed_version_id: String,
+    pub decision_id: String,
+    pub revision_id: String,
+    pub current_status: String,
+    pub inserted: bool,
+}
+
 type ExistingXlsxRow = (String, Option<String>, Option<String>, Option<String>);
 
 #[derive(Debug, thiserror::Error)]
@@ -174,6 +199,12 @@ pub enum RepositoryError {
     InvalidXlsxPayload(serde_json::Error),
     #[error("Ліміт локальної черги Signal має бути від 1 до 100")]
     InvalidSignalInboxLimit,
+    #[error("Запис Signal не знайдено")]
+    SignalReportNotFound,
+    #[error("Некоректний результат парсера Signal: {0}")]
+    InvalidSignalParsePayload(String),
+    #[error("Запис Signal має неприпустимий стан для цієї дії: {0}")]
+    InvalidSignalReportState(String),
 }
 
 #[derive(Clone, Debug)]
@@ -679,6 +710,368 @@ impl Repository {
 
         Ok(raw_text)
     }
+
+    pub async fn store_signal_parse(
+        &self,
+        report_id: &str,
+        parsed_payload_json: &Value,
+        parsed_at: &str,
+    ) -> Result<SignalParsePersistence, RepositoryError> {
+        let payload = validate_signal_parse_payload(parsed_payload_json)?;
+        if report_id.trim().is_empty() || parsed_at.trim().is_empty() {
+            return Err(RepositoryError::InvalidSignalParsePayload(
+                "немає ідентифікатора запису або часу розбору".to_owned(),
+            ));
+        }
+
+        let mut transaction = self.pool.begin().await?;
+        let source_type: Option<String> = sqlx::query_scalar(
+            "SELECT raw_sources.source_type
+             FROM reports
+             JOIN raw_sources ON raw_sources.id = reports.raw_source_id
+             WHERE reports.id = ?",
+        )
+        .bind(report_id)
+        .fetch_optional(&mut *transaction)
+        .await?;
+        if source_type.as_deref() != Some("SIGNAL") {
+            return Err(RepositoryError::SignalReportNotFound);
+        }
+
+        let current_status: String = sqlx::query_scalar(
+            "SELECT current_status FROM report_current_state WHERE report_id = ?",
+        )
+        .bind(report_id)
+        .fetch_one(&mut *transaction)
+        .await?;
+        let latest: Option<(String, i64, String, String, String)> = sqlx::query_as(
+            "SELECT id, version, parser_name, parser_version, parsed_payload_json
+             FROM parsed_report_versions
+             WHERE report_id = ?
+             ORDER BY version DESC
+             LIMIT 1",
+        )
+        .bind(report_id)
+        .fetch_optional(&mut *transaction)
+        .await?;
+
+        if let Some((id, version, parser_name, parser_version, stored_payload)) = &latest {
+            if parser_name == SIGNAL_LEGACY_PARSER_NAME
+                && parser_version == SIGNAL_LEGACY_PARSER_VERSION
+                && stored_payload == &payload
+            {
+                return Ok(SignalParsePersistence {
+                    report_id: report_id.to_owned(),
+                    parsed_version_id: id.clone(),
+                    version: *version,
+                    current_status,
+                    inserted: false,
+                });
+            }
+        }
+
+        if !matches!(current_status.as_str(), "NEW" | "PARSED") {
+            return Err(RepositoryError::InvalidSignalReportState(current_status));
+        }
+
+        let version = latest.map_or(1, |(_, version, _, _, _)| version + 1);
+        let version_text = version.to_string();
+        let parsed_version_id = signal_identity(
+            "signal-parse",
+            &[
+                report_id,
+                &version_text,
+                SIGNAL_LEGACY_PARSER_VERSION,
+                &payload,
+            ],
+        );
+        let audit_id = signal_identity("signal-audit-parse", &[&parsed_version_id]);
+        sqlx::query(
+            "INSERT INTO parsed_report_versions
+             (id, report_id, version, parser_name, parser_version, parsed_payload_json, parsed_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&parsed_version_id)
+        .bind(report_id)
+        .bind(version)
+        .bind(SIGNAL_LEGACY_PARSER_NAME)
+        .bind(SIGNAL_LEGACY_PARSER_VERSION)
+        .bind(&payload)
+        .bind(parsed_at)
+        .execute(&mut *transaction)
+        .await?;
+        insert_audit(
+            &mut transaction,
+            &AuditContext {
+                id: audit_id,
+                actor_type: ActorType::System,
+                actor_label: Some(SIGNAL_LEGACY_PARSER_NAME.to_owned()),
+                occurred_at: parsed_at.to_owned(),
+            },
+            Some(report_id),
+            "parsed_report_version",
+            &parsed_version_id,
+            "PARSED",
+            json!({ "version": version, "parserVersion": SIGNAL_LEGACY_PARSER_VERSION }),
+        )
+        .await?;
+        transaction.commit().await?;
+
+        Ok(SignalParsePersistence {
+            report_id: report_id.to_owned(),
+            parsed_version_id,
+            version,
+            current_status: "PARSED".to_owned(),
+            inserted: true,
+        })
+    }
+
+    pub async fn request_signal_review(
+        &self,
+        report_id: &str,
+        decided_at: &str,
+    ) -> Result<SignalReviewPersistence, RepositoryError> {
+        if report_id.trim().is_empty() || decided_at.trim().is_empty() {
+            return Err(RepositoryError::InvalidSignalReportState(
+                "немає ідентифікатора запису або часу рішення".to_owned(),
+            ));
+        }
+
+        let mut transaction = self.pool.begin().await?;
+        let source_type: Option<String> = sqlx::query_scalar(
+            "SELECT raw_sources.source_type
+             FROM reports
+             JOIN raw_sources ON raw_sources.id = reports.raw_source_id
+             WHERE reports.id = ?",
+        )
+        .bind(report_id)
+        .fetch_optional(&mut *transaction)
+        .await?;
+        if source_type.as_deref() != Some("SIGNAL") {
+            return Err(RepositoryError::SignalReportNotFound);
+        }
+
+        let current_status: String = sqlx::query_scalar(
+            "SELECT current_status FROM report_current_state WHERE report_id = ?",
+        )
+        .bind(report_id)
+        .fetch_one(&mut *transaction)
+        .await?;
+        if current_status == "NEEDS_REVIEW" {
+            let existing: Option<(String, String, String)> = sqlx::query_as(
+                "SELECT review_decisions.id, review_decisions.parsed_version_id,
+                        revision_history.id
+                 FROM review_decisions
+                 JOIN revision_history
+                   ON revision_history.review_decision_id = review_decisions.id
+                  AND revision_history.report_id = review_decisions.report_id
+                 WHERE review_decisions.report_id = ?
+                   AND review_decisions.decision = 'NEEDS_REVIEW'
+                   AND review_decisions.parsed_version_id IS NOT NULL
+                 ORDER BY review_decisions.decision_number DESC
+                 LIMIT 1",
+            )
+            .bind(report_id)
+            .fetch_optional(&mut *transaction)
+            .await?;
+            if let Some((decision_id, parsed_version_id, revision_id)) = existing {
+                return Ok(SignalReviewPersistence {
+                    report_id: report_id.to_owned(),
+                    parsed_version_id,
+                    decision_id,
+                    revision_id,
+                    current_status,
+                    inserted: false,
+                });
+            }
+            return Err(RepositoryError::InvalidSignalReportState(current_status));
+        }
+        if current_status != "PARSED" {
+            return Err(RepositoryError::InvalidSignalReportState(current_status));
+        }
+
+        let (parsed_version_id, snapshot_json): (String, String) = sqlx::query_as(
+            "SELECT id, parsed_payload_json
+             FROM parsed_report_versions
+             WHERE report_id = ?
+             ORDER BY version DESC
+             LIMIT 1",
+        )
+        .bind(report_id)
+        .fetch_one(&mut *transaction)
+        .await?;
+        let decision_number: i64 = sqlx::query_scalar(
+            "SELECT COALESCE(MAX(decision_number), 0) + 1
+             FROM review_decisions WHERE report_id = ?",
+        )
+        .bind(report_id)
+        .fetch_one(&mut *transaction)
+        .await?;
+        let revision_number: i64 = sqlx::query_scalar(
+            "SELECT COALESCE(MAX(revision_number), 0) + 1
+             FROM revision_history WHERE report_id = ?",
+        )
+        .bind(report_id)
+        .fetch_one(&mut *transaction)
+        .await?;
+        let decision_number_text = decision_number.to_string();
+        let revision_number_text = revision_number.to_string();
+        let decision_id = signal_identity(
+            "signal-review",
+            &[report_id, &parsed_version_id, &decision_number_text],
+        );
+        let revision_id = signal_identity(
+            "signal-revision",
+            &[report_id, &decision_id, &revision_number_text],
+        );
+        let audit_id = signal_identity("signal-audit-review", &[&decision_id]);
+
+        sqlx::query(
+            "INSERT INTO review_decisions
+             (id, report_id, decision_number, parsed_version_id, decision,
+              decided_by, rationale, decided_at)
+             VALUES (?, ?, ?, ?, 'NEEDS_REVIEW', ?, ?, ?)",
+        )
+        .bind(&decision_id)
+        .bind(report_id)
+        .bind(decision_number)
+        .bind(&parsed_version_id)
+        .bind(SIGNAL_REVIEW_ACTOR)
+        .bind("Передано з локальної черги Signal на ручну перевірку")
+        .bind(decided_at)
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::query(
+            "INSERT INTO revision_history
+             (id, report_id, revision_number, parsed_version_id, review_decision_id,
+              snapshot_json, change_summary, created_by, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&revision_id)
+        .bind(report_id)
+        .bind(revision_number)
+        .bind(&parsed_version_id)
+        .bind(&decision_id)
+        .bind(&snapshot_json)
+        .bind("Початковий знімок для ручної перевірки")
+        .bind(SIGNAL_REVIEW_ACTOR)
+        .bind(decided_at)
+        .execute(&mut *transaction)
+        .await?;
+        insert_audit(
+            &mut transaction,
+            &AuditContext {
+                id: audit_id,
+                actor_type: ActorType::User,
+                actor_label: Some(SIGNAL_REVIEW_ACTOR.to_owned()),
+                occurred_at: decided_at.to_owned(),
+            },
+            Some(report_id),
+            "review_decision",
+            &decision_id,
+            "NEEDS_REVIEW",
+            json!({
+                "decisionNumber": decision_number,
+                "revisionId": revision_id,
+                "revisionNumber": revision_number,
+            }),
+        )
+        .await?;
+        transaction.commit().await?;
+
+        Ok(SignalReviewPersistence {
+            report_id: report_id.to_owned(),
+            parsed_version_id,
+            decision_id,
+            revision_id,
+            current_status: "NEEDS_REVIEW".to_owned(),
+            inserted: true,
+        })
+    }
+}
+
+fn validate_signal_parse_payload(payload: &Value) -> Result<String, RepositoryError> {
+    let object = payload.as_object().ok_or_else(|| {
+        RepositoryError::InvalidSignalParsePayload("очікується JSON-об'єкт".to_owned())
+    })?;
+    let allowed_keys = ["schema_version", "header_only", "chat_date", "records"];
+    if object.len() != allowed_keys.len()
+        || object
+            .keys()
+            .any(|key| !allowed_keys.contains(&key.as_str()))
+    {
+        return Err(RepositoryError::InvalidSignalParsePayload(
+            "структура верхнього рівня не відповідає схемі".to_owned(),
+        ));
+    }
+    if object.get("schema_version").and_then(Value::as_u64) != Some(1) {
+        return Err(RepositoryError::InvalidSignalParsePayload(
+            "непідтримувана версія схеми".to_owned(),
+        ));
+    }
+    if object.get("header_only").and_then(Value::as_bool).is_none() {
+        return Err(RepositoryError::InvalidSignalParsePayload(
+            "header_only має бути логічним значенням".to_owned(),
+        ));
+    }
+    match object.get("chat_date") {
+        Some(Value::Null | Value::String(_)) => {}
+        _ => {
+            return Err(RepositoryError::InvalidSignalParsePayload(
+                "chat_date має бути рядком або null".to_owned(),
+            ));
+        }
+    }
+    let records = object
+        .get("records")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            RepositoryError::InvalidSignalParsePayload("records має бути масивом".to_owned())
+        })?;
+    if records.is_empty() || records.len() > SIGNAL_PARSE_MAX_RECORDS {
+        return Err(RepositoryError::InvalidSignalParsePayload(format!(
+            "кількість записів має бути від 1 до {SIGNAL_PARSE_MAX_RECORDS}"
+        )));
+    }
+    if records.iter().any(|record| !record.is_object()) {
+        return Err(RepositoryError::InvalidSignalParsePayload(
+            "кожен запис має бути JSON-об'єктом".to_owned(),
+        ));
+    }
+
+    let forbidden_keys = ["srcText", "_own", "dup", "include"];
+    let mut pending = vec![payload];
+    while let Some(value) = pending.pop() {
+        match value {
+            Value::Object(map) => {
+                if map.keys().any(|key| forbidden_keys.contains(&key.as_str())) {
+                    return Err(RepositoryError::InvalidSignalParsePayload(
+                        "payload містить сирий текст або службові поля інтерфейсу".to_owned(),
+                    ));
+                }
+                pending.extend(map.values());
+            }
+            Value::Array(values) => pending.extend(values),
+            _ => {}
+        }
+    }
+
+    let serialized = payload.to_string();
+    if serialized.len() > SIGNAL_PARSE_MAX_BYTES {
+        return Err(RepositoryError::InvalidSignalParsePayload(
+            "payload перевищує 1 МіБ".to_owned(),
+        ));
+    }
+    Ok(serialized)
+}
+
+fn signal_identity(prefix: &str, parts: &[&str]) -> String {
+    let mut digest = Sha256::new();
+    for part in parts {
+        digest.update((part.len() as u64).to_be_bytes());
+        digest.update(part.as_bytes());
+    }
+    format!("{prefix}:{:x}", digest.finalize())
 }
 
 async fn insert_audit(
@@ -882,6 +1275,158 @@ mod tests {
                 .expect("missing lookup must query"),
             None
         );
+    }
+
+    fn signal_parse_payload(note: &str) -> Value {
+        json!({
+            "schema_version": 1,
+            "header_only": false,
+            "chat_date": "2026-01-01",
+            "records": [{
+                "date": "2026-01-01",
+                "targetIds": "SYNTHETIC-ONLY",
+                "note": note,
+                "warn": {}
+            }]
+        })
+    }
+
+    #[tokio::test]
+    async fn persists_signal_parse_and_review_transition_idempotently() {
+        let repository = repository().await;
+        let mut signal = capture(
+            "signal-source-parse",
+            "signal-report-parse",
+            "signal-audit-capture",
+        );
+        signal.source_type = SourceType::Signal;
+        signal.raw_text = Some("Синтетичний незмінний текст Signal".to_owned());
+        signal.raw_sha256 = "d".repeat(64);
+        repository
+            .capture_report(&signal)
+            .await
+            .expect("synthetic Signal report capture must succeed");
+
+        let payload = signal_parse_payload("Синтетичний результат");
+        let first_parse = repository
+            .store_signal_parse("signal-report-parse", &payload, NOW)
+            .await
+            .expect("synthetic Signal parse must persist");
+        assert!(first_parse.inserted);
+        assert_eq!(first_parse.version, 1);
+        assert_eq!(first_parse.current_status, "PARSED");
+
+        let retry_parse = repository
+            .store_signal_parse("signal-report-parse", &payload, "2026-01-01T00:00:01Z")
+            .await
+            .expect("exact parse retry must be idempotent");
+        assert!(!retry_parse.inserted);
+        assert_eq!(retry_parse.parsed_version_id, first_parse.parsed_version_id);
+
+        let first_review = repository
+            .request_signal_review("signal-report-parse", "2026-01-01T00:00:02Z")
+            .await
+            .expect("parsed Signal report must enter review");
+        assert!(first_review.inserted);
+        assert_eq!(first_review.current_status, "NEEDS_REVIEW");
+        assert_eq!(
+            first_review.parsed_version_id,
+            first_parse.parsed_version_id
+        );
+
+        let retry_review = repository
+            .request_signal_review("signal-report-parse", "2026-01-01T00:00:03Z")
+            .await
+            .expect("review retry must be idempotent");
+        assert!(!retry_review.inserted);
+        assert_eq!(retry_review.decision_id, first_review.decision_id);
+        assert_eq!(retry_review.revision_id, first_review.revision_id);
+
+        let counts: (i64, i64, i64, i64) = sqlx::query_as(
+            "SELECT (SELECT count(*) FROM parsed_report_versions),
+                    (SELECT count(*) FROM review_decisions),
+                    (SELECT count(*) FROM revision_history),
+                    (SELECT count(*) FROM audit_log)",
+        )
+        .fetch_one(&repository.pool)
+        .await
+        .expect("synthetic Signal provenance counts must query");
+        assert_eq!(counts, (1, 1, 1, 3));
+        let raw_text: String =
+            sqlx::query_scalar("SELECT raw_text FROM raw_sources WHERE id = 'signal-source-parse'")
+                .fetch_one(&repository.pool)
+                .await
+                .expect("raw Signal source must remain available");
+        assert_eq!(raw_text, "Синтетичний незмінний текст Signal");
+
+        assert!(matches!(
+            repository
+                .store_signal_parse(
+                    "signal-report-parse",
+                    &signal_parse_payload("Змінений результат після передачі"),
+                    "2026-01-01T00:00:04Z",
+                )
+                .await,
+            Err(RepositoryError::InvalidSignalReportState(status)) if status == "NEEDS_REVIEW"
+        ));
+    }
+
+    #[tokio::test]
+    async fn rejects_invalid_or_non_signal_parse_persistence() {
+        let repository = repository().await;
+        let mut new_signal = capture("signal-source-new", "signal-report-new", "signal-audit-new");
+        new_signal.source_type = SourceType::Signal;
+        new_signal.raw_sha256 = "e".repeat(64);
+        repository
+            .capture_report(&new_signal)
+            .await
+            .expect("synthetic new Signal report capture must succeed");
+        repository
+            .capture_report(&capture(
+                "paste-source-parse",
+                "paste-report-parse",
+                "paste-audit-parse",
+            ))
+            .await
+            .expect("synthetic paste capture must succeed");
+
+        assert!(matches!(
+            repository
+                .store_signal_parse("paste-report-parse", &signal_parse_payload("x"), NOW)
+                .await,
+            Err(RepositoryError::SignalReportNotFound)
+        ));
+        assert!(matches!(
+            repository
+                .store_signal_parse("missing-report", &signal_parse_payload("x"), NOW)
+                .await,
+            Err(RepositoryError::SignalReportNotFound)
+        ));
+
+        let payload_with_raw_text = json!({
+            "schema_version": 1,
+            "header_only": false,
+            "chat_date": null,
+            "records": [{ "date": "2026-01-01", "srcText": "must not persist" }]
+        });
+        assert!(matches!(
+            repository
+                .store_signal_parse("missing-report", &payload_with_raw_text, NOW)
+                .await,
+            Err(RepositoryError::InvalidSignalParsePayload(_))
+        ));
+        assert!(matches!(
+            repository
+                .request_signal_review("paste-report-parse", NOW)
+                .await,
+            Err(RepositoryError::SignalReportNotFound)
+        ));
+        assert!(matches!(
+            repository
+                .request_signal_review("signal-report-new", NOW)
+                .await,
+            Err(RepositoryError::InvalidSignalReportState(status)) if status == "NEW"
+        ));
     }
 
     fn synthetic_xlsx_row(row_number: u32) -> XlsxImportRow {

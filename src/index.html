@@ -2387,7 +2387,7 @@ function scheduleParse(now) {
 }
 function doParse() {
   const text = $('#paste').value;
-  if (!text.trim() || !S.wb) { S.parsed = []; renderResults(); return; }
+  if (!text.trim() || !S.wb) { S.parsed = []; renderResults(); return null; }
   const ctx = C.buildContext(S.wb);
   const out = C.parseReport(text, ctx);
   S.parsed = out.records.map(r => {
@@ -2398,6 +2398,7 @@ function doParse() {
   S.headerOnly = out.headerOnly;
   renderResults();
   if (S.auto && S.parsed.length && S.parsed.every(r => !Object.keys(r.warn).length && !r.dup) && S.handle) addSelected(true);
+  return out;
 }
 function importForReview(text) {
   if (!S.wb) throw new Error('Спочатку відкрийте таблицю.');
@@ -2405,12 +2406,29 @@ function importForReview(text) {
   if (!input) throw new Error('Поле внесення недоступне.');
   const previousAuto = S.auto;
   S.auto = false;
+  let output = null;
   try {
     input.value = String(text == null ? '' : text);
-    doParse();
+    output = doParse();
   } finally {
     S.auto = previousAuto;
   }
+  if (!output || !Array.isArray(output.records) || !output.records.length) {
+    throw new Error('Не вдалося розібрати жодного запису Signal.');
+  }
+  return {
+    schema_version: 1,
+    header_only: Boolean(output.headerOnly),
+    chat_date: output.chatDate || null,
+    records: output.records.map(source => {
+      const record = { ...source };
+      delete record.srcText;
+      delete record._own;
+      delete record.dup;
+      delete record.include;
+      return record;
+    }),
+  };
 }
 
 /* ------------------------------ додавання ------------------------------ */

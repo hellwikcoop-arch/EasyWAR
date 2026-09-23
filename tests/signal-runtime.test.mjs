@@ -50,9 +50,10 @@ test('persisted Signal Inbox exposes only normalized list fields', () => {
 
   assert.equal(state.message, 'Записів у локальній черзі Signal: 1.');
   assert.deepEqual(Object.keys(state.rows[0]), [
-    'reportId', 'sourceItemKey', 'capturedAt', 'statusLabel',
+    'reportId', 'sourceItemKey', 'capturedAt', 'currentStatus', 'statusLabel',
   ]);
   assert.equal(state.rows[0].reportId, 'synthetic-report-1');
+  assert.equal(state.rows[0].currentStatus, 'NEEDS_REVIEW');
   assert.equal(state.rows[0].statusLabel, 'Потребує перевірки');
   assert.match(state.rows[0].capturedAt, /02\.01\.2026/);
   assert.doesNotMatch(JSON.stringify(state.rows), /SECRET-SYNTHETIC/);

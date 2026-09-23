@@ -146,15 +146,27 @@ repository returns text only when the report is backed by a `SIGNAL` raw
 source. Missing and non-Signal identifiers return no content. The UI then
 switches to the existing intake tab and invokes a narrow legacy helper that
 temporarily disables `S.auto`, runs the existing parser, and restores the prior
-setting in `finally`. This can populate review cards but cannot automatically
-append the Signal record to the workbook. Raw text is not logged or added to
-the Inbox list response.
+setting in `finally`. The helper returns a versioned parser payload with 1–64
+records, excluding per-record `srcText` and UI-only `_own`, `dup`, and `include`
+fields. It can populate review cards but cannot automatically append the Signal
+record to the workbook. Raw text is not logged or added to the Inbox list
+response.
 
-Synthetic repository tests verify source filtering, the `NEW` to `PARSED`
-derived status, the fixed list bound, the absence of raw content in the
-serialized list, and exact Signal/non-Signal/missing lookups. This bridge does
-not persist parser output or review-status transitions, capture messages, or
-prove that a live connector is running.
+For an exact `SIGNAL` report, the desktop stores that bounded payload as an
+immutable `easywar-legacy-core` parser version and a matching audit event. An
+identical latest payload is an idempotent retry; a changed parse is allowed only
+while the report is `NEW` or `PARSED`. The raw source is never rewritten. Once
+the derived state is `PARSED`, the Inbox exposes an explicit **На ручну
+перевірку** action. It atomically appends `NEEDS_REVIEW`, a revision snapshot of
+the latest parser payload and its audit event. Repeating the same request adds
+no rows.
+
+Synthetic repository tests verify source filtering, the `NEW` to `PARSED` to
+`NEEDS_REVIEW` path, exact-retry idempotency, immutable raw text, fixed list
+bounds, absence of raw content in the serialized list, and rejection of
+non-Signal/missing identifiers and raw/UI fields. This bridge does not persist
+manual corrections, expose `APPROVED` / `REJECTED`, write XLSX rows, capture
+messages, or prove that a live connector is running.
 
 ## Not implemented in this step
 
@@ -163,7 +175,7 @@ prove that a live connector is running.
 - a long-running or automatically restarted receive service;
 - account/group discovery over UNIX or raw TCP;
 - enabling or connecting a Signal account;
-- persistence of parser output and review-status transitions;
+- manual-correction persistence and reviewer-bound final decisions;
 - live-daemon acceptance of Signal Inbox capture and parsing.
 
 All tests use synthetic configuration values only, including the disconnected

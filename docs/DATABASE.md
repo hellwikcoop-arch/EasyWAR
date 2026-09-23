@@ -43,6 +43,14 @@ Each write method uses one SQLite transaction:
 - `record_correction` stores one append-only correction and its audit event;
 - `review_and_revise` stores a review decision, matching revision snapshot and
   one decision audit event.
+- `store_signal_parse` validates and stores a bounded legacy-parser payload for
+  an exact `SIGNAL` report. An identical latest payload is an idempotent retry;
+  a changed payload creates the next immutable parser version only while the
+  report is `NEW` or `PARSED`.
+- `request_signal_review` accepts only `PARSED`, then atomically appends a
+  `NEEDS_REVIEW` decision, an immutable snapshot revision and its audit event.
+  Repeating the request while the same report is already `NEEDS_REVIEW` returns
+  the existing decision without adding rows.
 - `stage_xlsx_batch` writes all new XLSX rows in one transaction as immutable
   interpreted-cell snapshots plus separate parsed versions and audit events;
   it never approves rows and rejects conflicting exact-file retries.
@@ -52,6 +60,13 @@ The repository exposes the derived current status as a read-only query. It does
 not expose a Tauri command for XLSX staging yet and does not open or populate
 a real database in tests. Only the read-only XLSX compatibility check is
 currently exposed in the desktop UI.
+
+The desktop Signal parse command generates timestamps in Rust and accepts a
+strict versioned JSON shape with 1–64 parsed records and a 1 MiB serialized
+limit. It rejects raw `srcText` and UI-only `_own`, `dup`, and `include` fields.
+The original `raw_sources` row is never changed. The current desktop review
+transition stops at `NEEDS_REVIEW`; manual corrections and reviewer-bound
+`APPROVED` / `REJECTED` decisions are intentionally not exposed yet.
 
 ## Settings store
 
