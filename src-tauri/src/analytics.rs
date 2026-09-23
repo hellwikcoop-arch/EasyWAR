@@ -10,7 +10,7 @@ const DASHBOARD_SOURCE: &str = "approved_sqlite_revisions";
 const MAX_RECORDS_PER_SNAPSHOT: usize = 64;
 const MAX_DASHBOARD_RECORDS: usize = 100_000;
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DashboardModel {
     pub schema_version: u32,
@@ -21,6 +21,7 @@ pub struct DashboardModel {
     pub available_date_range: DashboardDateRange,
     pub date_range: DashboardDateRange,
     pub period: DashboardPeriodState,
+    pub effectiveness: DashboardEffectivenessSummary,
     pub quality: DashboardQualitySummary,
     pub records: Vec<DashboardRecord>,
 }
@@ -47,6 +48,20 @@ pub struct DashboardPeriodState {
     pub is_filtered: bool,
     pub excluded_records: usize,
     pub excluded_undated_records: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DashboardEffectivenessSummary {
+    pub total_records: usize,
+    pub aborted_records: usize,
+    pub evaluated_records: usize,
+    pub hit_records: usize,
+    pub partial_records: usize,
+    pub miss_records: usize,
+    pub unknown_records: usize,
+    pub overall_effect_percent: Option<f64>,
+    pub dpi_effect_percent: Option<f64>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -189,6 +204,7 @@ pub fn dashboard_model_from_snapshots_for_period(
     }
     let excluded_records = source_record_count - records.len();
     let filtered_date_range = date_range(&records);
+    let effectiveness = calculate_effectiveness(&records);
     let records_with_issues = records
         .iter()
         .filter(|record| !record.quality_issues.is_empty())
@@ -213,12 +229,57 @@ pub fn dashboard_model_from_snapshots_for_period(
             excluded_records,
             excluded_undated_records,
         },
+        effectiveness,
         quality: DashboardQualitySummary {
             records_with_issues,
             issue_count,
         },
         records,
     })
+}
+
+fn calculate_effectiveness(records: &[DashboardRecord]) -> DashboardEffectivenessSummary {
+    let mut aborted_records = 0;
+    let mut hit_records = 0;
+    let mut partial_records = 0;
+    let mut miss_records = 0;
+    let mut unknown_records = 0;
+
+    for record in records {
+        if record.aborted {
+            aborted_records += 1;
+            continue;
+        }
+        match record.result {
+            DashboardResult::Hit => hit_records += 1,
+            DashboardResult::Partial => partial_records += 1,
+            DashboardResult::Miss => miss_records += 1,
+            DashboardResult::Unknown => unknown_records += 1,
+        }
+    }
+
+    let evaluated_records = records.len() - aborted_records;
+    let overall_score = (hit_records + partial_records) as f64;
+    let dpi_score = hit_records as f64 + 0.75 * partial_records as f64;
+    DashboardEffectivenessSummary {
+        total_records: records.len(),
+        aborted_records,
+        evaluated_records,
+        hit_records,
+        partial_records,
+        miss_records,
+        unknown_records,
+        overall_effect_percent: effectiveness_percent(overall_score, evaluated_records),
+        dpi_effect_percent: effectiveness_percent(dpi_score, evaluated_records),
+    }
+}
+
+fn effectiveness_percent(score: f64, evaluated_records: usize) -> Option<f64> {
+    if evaluated_records == 0 {
+        return None;
+    }
+    let percent = score / evaluated_records as f64 * 100.0;
+    Some((percent * 100.0).round() / 100.0)
 }
 
 fn date_range(records: &[DashboardRecord]) -> DashboardDateRange {
@@ -595,11 +656,15 @@ mod tests {
         assert_eq!(model.date_range.from, None);
         assert!(!model.period.is_filtered);
         assert_eq!(model.period.excluded_records, 0);
+        assert_eq!(model.effectiveness.total_records, 0);
+        assert_eq!(model.effectiveness.evaluated_records, 0);
+        assert_eq!(model.effectiveness.overall_effect_percent, None);
+        assert_eq!(model.effectiveness.dpi_effect_percent, None);
         assert!(model.records.is_empty());
     }
 
     #[test]
-    fn normalizes_legacy_fields_without_calculating_dashboard_metrics() {
+    fn normalizes_legacy_fields_and_serializes_the_dashboard_contract() {
         let model = dashboard_model_from_snapshots(&[snapshot(json!([
             {
                 "num": "7",
@@ -657,8 +722,65 @@ mod tests {
         assert_eq!(serialized["source"], "approved_sqlite_revisions");
         assert_eq!(serialized["sourceRecordCount"], 2);
         assert_eq!(serialized["period"]["isFiltered"], false);
+        assert_eq!(serialized["effectiveness"]["overallEffectPercent"], 100.0);
+        assert_eq!(serialized["effectiveness"]["dpiEffectPercent"], 100.0);
         assert_eq!(serialized["records"][0]["result"], "hit");
         assert!(serialized["records"][0].get("qualityIssues").is_some());
+    }
+
+    #[test]
+    fn effectiveness_matches_legacy_modes_and_excludes_aborted_records() {
+        let model = dashboard_model_from_snapshots(&[snapshot(json!([
+            {"result": "УРАЖЕНО"},
+            {"result": "Частково уражено"},
+            {"result": "НЕ УРАЖЕНО"},
+            {"result": "Невідомо"},
+            {"result": "УРАЖЕНО", "cause": "Відбій — синтетична суперечність"}
+        ]))])
+        .unwrap();
+
+        assert_eq!(model.effectiveness.total_records, 5);
+        assert_eq!(model.effectiveness.aborted_records, 1);
+        assert_eq!(model.effectiveness.evaluated_records, 4);
+        assert_eq!(model.effectiveness.hit_records, 1);
+        assert_eq!(model.effectiveness.partial_records, 1);
+        assert_eq!(model.effectiveness.miss_records, 1);
+        assert_eq!(model.effectiveness.unknown_records, 1);
+        assert_eq!(model.effectiveness.overall_effect_percent, Some(50.0));
+        assert_eq!(model.effectiveness.dpi_effect_percent, Some(43.75));
+    }
+
+    #[test]
+    fn effectiveness_distinguishes_real_zero_from_no_denominator_and_rounds() {
+        let zero = dashboard_model_from_snapshots(&[snapshot(json!([
+            {"result": "НЕ УРАЖЕНО"},
+            {"result": "Невідомо"}
+        ]))])
+        .unwrap();
+        assert_eq!(zero.effectiveness.overall_effect_percent, Some(0.0));
+        assert_eq!(zero.effectiveness.dpi_effect_percent, Some(0.0));
+
+        let unavailable = dashboard_model_from_snapshots(&[snapshot(json!([
+            {"result": "Відбій"},
+            {"result": "УРАЖЕНО", "cause": "Відбій"}
+        ]))])
+        .unwrap();
+        assert_eq!(unavailable.effectiveness.aborted_records, 2);
+        assert_eq!(unavailable.effectiveness.evaluated_records, 0);
+        assert_eq!(unavailable.effectiveness.hit_records, 0);
+        assert_eq!(unavailable.effectiveness.overall_effect_percent, None);
+        assert_eq!(unavailable.effectiveness.dpi_effect_percent, None);
+        let serialized = serde_json::to_value(unavailable).unwrap();
+        assert!(serialized["effectiveness"]["overallEffectPercent"].is_null());
+
+        let rounded = dashboard_model_from_snapshots(&[snapshot(json!([
+            {"result": "УРАЖЕНО"},
+            {"result": "НЕ УРАЖЕНО"},
+            {"result": "Невідомо"}
+        ]))])
+        .unwrap();
+        assert_eq!(rounded.effectiveness.overall_effect_percent, Some(33.33));
+        assert_eq!(rounded.effectiveness.dpi_effect_percent, Some(33.33));
     }
 
     #[test]
@@ -693,6 +815,9 @@ mod tests {
         assert!(model.period.is_filtered);
         assert_eq!(model.period.excluded_records, 3);
         assert_eq!(model.period.excluded_undated_records, 1);
+        assert_eq!(model.effectiveness.evaluated_records, 2);
+        assert_eq!(model.effectiveness.unknown_records, 2);
+        assert_eq!(model.effectiveness.overall_effect_percent, Some(0.0));
         assert_eq!(
             model
                 .records

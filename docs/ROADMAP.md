@@ -70,7 +70,7 @@
 
 - [x] dashboard model from SQLite
 - [x] period filters
-- [ ] effectiveness calculations
+- [x] effectiveness calculations
 - [ ] aircraft / munitions / unit breakdowns
 - [ ] data-quality view
 - [ ] map abstraction
