@@ -77,6 +77,24 @@ pub struct DashboardBreakdownGroup {
 pub struct DashboardQualitySummary {
     pub records_with_issues: usize,
     pub issue_count: usize,
+    pub issue_counts: Vec<DashboardQualityIssueCount>,
+    pub affected_records: Vec<DashboardQualityRecord>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DashboardQualityIssueCount {
+    pub issue: DashboardQualityIssue,
+    pub count: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DashboardQualityRecord {
+    pub record_number: String,
+    pub date: Option<String>,
+    pub date_raw: String,
+    pub issues: Vec<DashboardQualityIssue>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -112,7 +130,7 @@ pub enum DashboardResult {
     Unknown,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DashboardQualityIssue {
     InvalidDate,
@@ -198,14 +216,7 @@ pub fn dashboard_model_from_snapshots_for_period(
 
     let source_record_count = records.len();
     let date_range = date_range(&records);
-    let records_with_issues = records
-        .iter()
-        .filter(|record| !record.quality_issues.is_empty())
-        .count();
-    let issue_count = records
-        .iter()
-        .map(|record| record.quality_issues.len())
-        .sum();
+    let quality = calculate_quality(&records);
     let is_filtered = from.is_some() || to.is_some();
     if is_filtered {
         records.retain(|record| match record.date.as_deref() {
@@ -238,12 +249,49 @@ pub fn dashboard_model_from_snapshots_for_period(
         },
         effectiveness,
         breakdowns,
-        quality: DashboardQualitySummary {
-            records_with_issues,
-            issue_count,
-        },
+        quality,
         records,
     })
+}
+
+fn calculate_quality(records: &[DashboardRecord]) -> DashboardQualitySummary {
+    let mut issue_counts = BTreeMap::new();
+    let mut affected_records = Vec::new();
+    let mut issue_count = 0;
+
+    for record in records {
+        if record.quality_issues.is_empty() {
+            continue;
+        }
+        issue_count += record.quality_issues.len();
+        for issue in &record.quality_issues {
+            *issue_counts.entry(*issue).or_insert(0) += 1;
+        }
+        affected_records.push(DashboardQualityRecord {
+            record_number: record.number.clone(),
+            date: record.date.clone(),
+            date_raw: record.date_raw.clone(),
+            issues: record.quality_issues.clone(),
+        });
+    }
+
+    let mut issue_counts = issue_counts
+        .into_iter()
+        .map(|(issue, count)| DashboardQualityIssueCount { issue, count })
+        .collect::<Vec<_>>();
+    issue_counts.sort_by(|left, right| {
+        right
+            .count
+            .cmp(&left.count)
+            .then_with(|| left.issue.cmp(&right.issue))
+    });
+
+    DashboardQualitySummary {
+        records_with_issues: affected_records.len(),
+        issue_count,
+        issue_counts,
+        affected_records,
+    }
 }
 
 fn calculate_effectiveness(records: &[DashboardRecord]) -> DashboardEffectivenessSummary {
@@ -737,6 +785,8 @@ mod tests {
         assert!(model.breakdowns.aircraft.is_empty());
         assert!(model.breakdowns.munitions.is_empty());
         assert!(model.breakdowns.units.is_empty());
+        assert!(model.quality.issue_counts.is_empty());
+        assert!(model.quality.affected_records.is_empty());
         assert!(model.records.is_empty());
     }
 
@@ -863,6 +913,113 @@ mod tests {
         .unwrap();
         assert_eq!(rounded.effectiveness.overall_effect_percent, Some(33.33));
         assert_eq!(rounded.effectiveness.dpi_effect_percent, Some(33.33));
+    }
+
+    #[test]
+    fn quality_view_is_global_and_reports_every_issue_independently() {
+        let model = dashboard_model_from_snapshots_for_period(
+            &[snapshot(json!([
+                {
+                    "num": "Q-1",
+                    "date": "невідома",
+                    "count": "багато",
+                    "result": "незрозуміло"
+                },
+                {
+                    "num": "Q-2",
+                    "date": "2026-01-10",
+                    "targets": "SYN-2",
+                    "unit": "Синтетичний підрозділ",
+                    "district": "Тестовий район",
+                    "types": ["Навчальна ціль"],
+                    "aircraft": "Навчальний ЛА",
+                    "munition": "Навчальний БП",
+                    "count": "",
+                    "result": ""
+                },
+                {
+                    "num": "Q-3",
+                    "date": "також невідома",
+                    "targets": "SYN-3",
+                    "unit": "Синтетичний підрозділ",
+                    "district": "Тестовий район",
+                    "types": ["Навчальна ціль"],
+                    "aircraft": "Навчальний ЛА",
+                    "munition": "Навчальний БП",
+                    "count": "1",
+                    "result": "УРАЖЕНО"
+                }
+            ]))],
+            Some("2026-01-01"),
+            Some("2026-01-31"),
+        )
+        .unwrap();
+
+        assert_eq!(model.source_record_count, 3);
+        assert_eq!(model.record_count, 1);
+        assert_eq!(model.records[0].number, "Q-2");
+        assert_eq!(model.quality.records_with_issues, 3);
+        assert_eq!(model.quality.issue_count, 12);
+        assert_eq!(model.quality.issue_counts.len(), 11);
+        assert_eq!(
+            model
+                .quality
+                .issue_counts
+                .iter()
+                .map(|item| item.issue)
+                .collect::<Vec<_>>(),
+            [
+                DashboardQualityIssue::InvalidDate,
+                DashboardQualityIssue::InvalidMunitionCount,
+                DashboardQualityIssue::MissingMunitionCount,
+                DashboardQualityIssue::MissingResult,
+                DashboardQualityIssue::UnknownResult,
+                DashboardQualityIssue::MissingUnit,
+                DashboardQualityIssue::MissingDistrict,
+                DashboardQualityIssue::MissingTargets,
+                DashboardQualityIssue::MissingTargetTypes,
+                DashboardQualityIssue::MissingAircraft,
+                DashboardQualityIssue::MissingMunition,
+            ]
+        );
+        assert_eq!(model.quality.issue_counts[0].count, 2);
+        assert!(model.quality.issue_counts[1..]
+            .iter()
+            .all(|item| item.count == 1));
+        assert_eq!(
+            model
+                .quality
+                .issue_counts
+                .iter()
+                .map(|item| item.count)
+                .sum::<usize>(),
+            model.quality.issue_count
+        );
+
+        assert_eq!(model.quality.affected_records.len(), 3);
+        assert_eq!(model.quality.affected_records[0].record_number, "Q-1");
+        assert_eq!(model.quality.affected_records[0].date, None);
+        assert_eq!(model.quality.affected_records[0].date_raw, "невідома");
+        assert_eq!(
+            model.quality.affected_records[1].issues,
+            [
+                DashboardQualityIssue::MissingMunitionCount,
+                DashboardQualityIssue::MissingResult,
+            ]
+        );
+        assert_eq!(model.quality.affected_records[2].record_number, "Q-3");
+
+        let serialized = serde_json::to_value(&model).unwrap();
+        assert_eq!(
+            serialized["quality"]["issueCounts"][0]["issue"],
+            "invalid_date"
+        );
+        assert_eq!(serialized["quality"]["issueCounts"][0]["count"], 2);
+        assert_eq!(
+            serialized["quality"]["affectedRecords"][0]["recordNumber"],
+            "Q-1"
+        );
+        assert!(serialized["quality"]["affectedRecords"][0]["date"].is_null());
     }
 
     #[test]
@@ -1097,6 +1254,16 @@ mod tests {
         assert_eq!(model.date_range.to.as_deref(), Some("2026-01-10"));
         assert_eq!(model.quality.records_with_issues, 1);
         assert_eq!(model.quality.issue_count, 1);
+        assert_eq!(model.quality.issue_counts.len(), 1);
+        assert_eq!(
+            model.quality.issue_counts[0],
+            DashboardQualityIssueCount {
+                issue: DashboardQualityIssue::InvalidDate,
+                count: 1,
+            }
+        );
+        assert_eq!(model.quality.affected_records.len(), 1);
+        assert_eq!(model.quality.affected_records[0].record_number, "undated");
         assert_eq!(model.effectiveness.total_records, 0);
         assert!(model.breakdowns.aircraft.is_empty());
         assert!(model.breakdowns.munitions.is_empty());

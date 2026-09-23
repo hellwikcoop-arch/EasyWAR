@@ -72,7 +72,7 @@
 - [x] period filters (direct `from`/`to`, inclusive bounds, global date/quality context)
 - [x] effectiveness calculations
 - [x] aircraft / munitions / unit breakdowns
-- [ ] data-quality view
+- [x] data-quality view
 - [ ] map abstraction
 - [ ] export views
 
