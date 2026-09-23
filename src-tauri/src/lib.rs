@@ -1,3 +1,4 @@
+pub mod analytics;
 pub mod backup;
 mod database;
 pub mod repository;
@@ -29,6 +30,15 @@ use std::{io::Read, path::Path, time::Duration};
 use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
 use xlsx_export::XlsxExportResult;
+
+#[tauri::command]
+async fn get_dashboard_model(
+    repository: tauri::State<'_, Repository>,
+) -> Result<analytics::DashboardModel, String> {
+    analytics::load_dashboard_model(&repository)
+        .await
+        .map_err(|error| error.to_string())
+}
 
 const MAX_XLSX_BYTES: u64 = 64 * 1024 * 1024;
 const SIGNAL_SESSION_MAX_NOTIFICATIONS: usize = 64;
@@ -489,6 +499,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            get_dashboard_model,
             get_signal_settings,
             save_signal_settings,
             discover_signal_accounts,

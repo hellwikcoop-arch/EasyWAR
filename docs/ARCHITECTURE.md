@@ -76,6 +76,11 @@ The first implemented schema and its invariants are documented in
 [`DATABASE.md`](DATABASE.md). It deliberately covers provenance and audit
 foundations only; domain repositories are added incrementally.
 
+The first read-only SQLite analytics boundary is documented in
+[`ANALYTICS.md`](ANALYTICS.md). It exposes a versioned Tauri model derived only
+from current `APPROVED` revision snapshots. It does not expose raw sources,
+intermediate parses, rejected revisions, audit identity, or automatic approval.
+
 ## 5. Data provenance
 
 Every intake item carries provenance.
