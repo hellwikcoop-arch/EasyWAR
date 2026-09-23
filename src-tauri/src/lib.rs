@@ -34,9 +34,10 @@ use xlsx_export::XlsxExportResult;
 #[tauri::command]
 async fn get_dashboard_model(
     repository: tauri::State<'_, Repository>,
-    period: Option<analytics::DashboardPeriodFilter>,
+    from: Option<String>,
+    to: Option<String>,
 ) -> Result<analytics::DashboardModel, String> {
-    analytics::load_dashboard_model(&repository, period.as_ref())
+    analytics::load_dashboard_model(&repository, from.as_deref(), to.as_deref())
         .await
         .map_err(|error| error.to_string())
 }
