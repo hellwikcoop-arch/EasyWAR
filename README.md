@@ -51,6 +51,7 @@ The original source must remain auditable and must not be silently overwritten b
 │   ├── MACOS_PACKAGING.md
 │   ├── RELEASE_CHECKLIST.md
 │   ├── ROADMAP.md
+│   ├── USER_GUIDE.md
 │   └── PROJECT_CONTEXT.md
 ├── script/build_and_run.sh
 ├── src/
@@ -75,6 +76,11 @@ The Tauri content security policy is temporarily unset because the preserved
 legacy application relies on inline scripts and styles. CSP hardening must be
 done alongside the incremental frontend migration, not by silently breaking
 the existing application.
+
+## User documentation
+
+The Ukrainian end-user workflow, safety boundaries and troubleshooting guide
+is available in [docs/USER_GUIDE.md](docs/USER_GUIDE.md).
 
 ## Local development
 

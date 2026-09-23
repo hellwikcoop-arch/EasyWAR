@@ -100,4 +100,4 @@
 - [ ] Windows installer
 - [x] release checklist
 - [x] recovery/backup guide
-- [ ] user documentation
+- [x] user documentation
