@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { runXlsxInspection } from '../src/xlsx-inspection.js';
+import { runXlsxInspection, runXlsxStage } from '../src/xlsx-inspection.js';
 
 function controls() {
   return [{ disabled: false }, { textContent: '' }];
@@ -46,5 +46,33 @@ test('a pending inspection cannot open a second picker', async () => {
   assert.equal(callCount, 1);
   finish(null);
   await first;
+  assert.equal(button.disabled, false);
+});
+
+test('explicit XLSX staging reports inserted and idempotent rows without approval', async () => {
+  const [button, status] = controls();
+  const called = [];
+  await runXlsxStage(button, status, async command => {
+    called.push(command);
+    return { staged_rows: 2, already_present_rows: 1 };
+  });
+
+  assert.deepEqual(called, ['stage_local_xlsx']);
+  assert.equal(button.disabled, false);
+  assert.match(status.textContent, /Додано рядків: 2/);
+  assert.match(status.textContent, /вже були в базі: 1/);
+  assert.match(status.textContent, /не схвалені/);
+  assert.match(status.textContent, /XLSX не змінено/);
+});
+
+test('XLSX staging cancellation and errors do not claim an import', async () => {
+  const [button, status] = controls();
+  await runXlsxStage(button, status, async () => null);
+  assert.match(status.textContent, /скасовано/);
+  assert.match(status.textContent, /базу не змінено/);
+
+  await runXlsxStage(button, status, async () => { throw new Error('synthetic stage failure'); });
+  assert.match(status.textContent, /не виконано/);
+  assert.match(status.textContent, /synthetic stage failure/);
   assert.equal(button.disabled, false);
 });

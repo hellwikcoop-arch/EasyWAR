@@ -14,7 +14,7 @@ use backup::BackupStore;
 use chrono::{SecondsFormat, Utc};
 use repository::{
     Repository, ReviewDecision, SettingsStore, SignalInboxItem, SignalParsePersistence,
-    SignalReviewPersistence, SignalReviewSnapshot,
+    SignalReviewPersistence, SignalReviewSnapshot, XlsxStageResult,
 };
 use restore::BackupInspection;
 use serde_json::Value;
@@ -318,6 +318,38 @@ async fn inspect_local_xlsx(
     .map_err(|error| error.to_string())?
 }
 
+#[tauri::command]
+async fn stage_local_xlsx(
+    app: tauri::AppHandle,
+    repository: tauri::State<'_, Repository>,
+) -> Result<Option<XlsxStageResult>, String> {
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title("Імпортувати таблицю EasyWAR у локальну базу")
+            .add_filter("Таблиця XLSX", &["xlsx"])
+            .blocking_pick_file()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let path = selected.into_path().map_err(|error| error.to_string())?;
+    let batch = tauri::async_runtime::spawn_blocking(move || {
+        let bytes = read_selected_xlsx(&path)?;
+        xlsx_import::import_easywar_xlsx(&bytes).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    let captured_at = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
+    repository
+        .stage_xlsx_batch(&batch, &captured_at)
+        .await
+        .map(Some)
+        .map_err(|error| error.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -365,7 +397,8 @@ pub fn run() {
             get_signal_receive_status,
             create_local_backup,
             inspect_local_backup,
-            inspect_local_xlsx
+            inspect_local_xlsx,
+            stage_local_xlsx
         ])
         .run(tauri::generate_context!())
         .expect("помилка запуску EasyWAR");

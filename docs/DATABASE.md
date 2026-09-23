@@ -63,10 +63,11 @@ Each write method uses one SQLite transaction:
   it never approves rows and rejects conflicting exact-file retries.
 
 If any statement fails, none of the transaction's domain or audit rows persist.
-The repository exposes the derived current status as a read-only query. It does
-not expose a Tauri command for XLSX staging yet and does not open or populate
-a real database in tests. Only the read-only XLSX compatibility check is
-currently exposed in the desktop UI.
+The repository exposes the derived current status as a read-only query. The
+desktop exposes XLSX staging only through an explicit native file picker: it
+re-reads and validates the selected workbook in memory, then writes the entire
+batch transactionally. Tests use only in-memory workbooks and temporary SQLite;
+they do not open or populate a real user database.
 
 The desktop Signal parse command generates timestamps in Rust and accepts a
 strict versioned JSON shape with 1–64 parsed records and a 1 MiB serialized

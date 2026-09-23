@@ -70,22 +70,25 @@ items, not workbook rows or a file path. Cancel, invalid files and read errors
 leave the source and local database unchanged. This check is separate from the
 legacy “Відкрити таблицю” workflow, which can edit an XLSX after user actions.
 
-A separate repository primitive can stage an already parsed batch in one local
+The desktop now exposes a separate, explicit **Імпортувати в локальну базу**
+action. A native picker reads the selected file again, applies the same 64 MiB
+limit and `Зведена` validation, and passes the parsed batch to the repository.
+The repository stages that batch in one local
 SQLite transaction. Each row gets an immutable interpreted-cell snapshot,
 workbook SHA-256 and worksheet row identity, a separate parsed version, and
 matching capture/parse audit events. No correction or approval is created;
 the derived status is `PARSED`. Retrying identical workbook bytes is
 idempotent. A conflicting identity or incomplete prior history fails and
-rolls back the whole new batch. This primitive is tested only with synthetic
-data and is **not yet callable from the desktop UI**. It retains cell values,
+rolls back the whole new batch. The interface reports newly staged and already
+present row counts, states that imported records are `PARSED` rather than
+approved, and never changes the selected XLSX. The store retains cell values,
 not the original XLSX bytes, XML, formulas or formatting: keep the source
 workbook separately for full source-file provenance. Similar rows in different
 workbooks are not yet deduplicated.
 
-It deliberately does not yet:
+It deliberately does not:
 
-- let the desktop UI write imported rows into SQLite;
-- approve imported records;
+- approve imported records or create review decisions;
 - implement duplicate detection, reference workbooks or XLSX export.
 
 Those compatibility and persistence steps remain tracked under milestone 0.7.

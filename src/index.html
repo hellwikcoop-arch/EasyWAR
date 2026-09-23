@@ -1348,6 +1348,8 @@ body.lay-sizing, body.lay-sizing * { -webkit-user-select: none !important; user-
     <div class="panel-head"><h2 id="h-xlsx-inspect">Перевірка XLSX у програмі</h2></div>
     <p class="muted">Окрема перевірка сумісності читає обраний файл лише на цьому пристрої. Вона не змінює таблицю, не записує дані в базу й не схвалює записи.</p>
     <button type="button" class="btn quiet" id="xlsxInspectBtn">Перевірити сумісність…</button>
+    <button type="button" class="btn" id="xlsxStageBtn">Імпортувати в локальну базу…</button>
+    <p class="muted small">Імпорт повторно перевіряє вибраний файл і атомарно додає рядки як незмінні raw/parsed записи зі станом «Розібрано». Вихідний XLSX не змінюється; схвалення не виконується.</p>
     <p id="xlsxInspectStatus" role="status" aria-live="polite"></p>
   </section>
 

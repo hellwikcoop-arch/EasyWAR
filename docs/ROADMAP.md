@@ -55,9 +55,9 @@
 ## 0.7 — XLSX compatibility
 
 - [x] reject ambiguous duplicate required headers (synthetic regression)
-- [ ] import current `Зведена`
+- [x] import current `Зведена`
   - [x] user-selected, read-only desktop compatibility preflight
-  - [x] synthetic-tested atomic SQLite staging primitive (not yet wired to UI)
+  - [x] explicit user-selected atomic SQLite staging with idempotent retry
 - [ ] export compatible XLSX
 - [ ] preserve legacy field mapping
   - [x] verify all 15 serialized names against legacy CORE with synthetic records
