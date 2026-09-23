@@ -95,6 +95,6 @@
 - [ ] signed macOS build
 - [ ] notarization
 - [ ] Windows installer
-- [ ] release checklist
+- [x] release checklist
 - [ ] recovery/backup guide
 - [ ] user documentation

@@ -46,7 +46,10 @@ The original source must remain auditable and must not be silently overwritten b
 │   └── environments/environment.toml
 ├── docs/
 │   ├── ARCHITECTURE.md
+│   ├── BACKUP_AND_RECOVERY.md
 │   ├── DATABASE.md
+│   ├── MACOS_PACKAGING.md
+│   ├── RELEASE_CHECKLIST.md
 │   ├── ROADMAP.md
 │   └── PROJECT_CONTEXT.md
 ├── script/build_and_run.sh
@@ -106,4 +109,6 @@ Goal:
 - macOS build path
 - Windows-ready project structure
 
-See [docs/ROADMAP.md](docs/ROADMAP.md).
+See [docs/ROADMAP.md](docs/ROADMAP.md). Production distribution remains
+**NO-GO** until every mandatory gate in
+[docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md) has direct evidence.
