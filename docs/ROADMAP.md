@@ -94,7 +94,7 @@
 
 ## 1.0 — Production release
 
-- [ ] stable migration path
+- [x] stable migration path
 - [ ] signed macOS build
 - [ ] notarization
 - [ ] Windows installer

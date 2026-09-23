@@ -118,17 +118,26 @@ pub fn migrations() -> Vec<Migration> {
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum DatabaseBootstrapError {
-    #[error("не вдалося відкрити нову SQLite-базу: {0}")]
+    #[error("не вдалося відкрити локальну SQLite-базу: {0}")]
     Database(#[from] sqlx::Error),
     #[error("не вдалося застосувати вбудовані міграції EasyWAR: {0}")]
     Migration(#[from] MigrateError),
 }
 
-/// Create a standalone EasyWAR database by running the authoritative embedded
-/// migration files. There is deliberately no copied schema or SQL dump here.
-/// Callers publish the file only after closing and validating the database.
-pub(crate) async fn create_migrated_database(
+pub(crate) fn embedded_migrator() -> &'static Migrator {
+    &EMBEDDED_MIGRATOR
+}
+
+pub(crate) fn latest_schema_version() -> Option<i64> {
+    EMBEDDED_MIGRATOR
+        .iter()
+        .last()
+        .map(|migration| migration.version)
+}
+
+pub(crate) async fn migrate_database_file_with(
     path: &Path,
+    migrator: &Migrator,
 ) -> Result<SqlitePool, DatabaseBootstrapError> {
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
@@ -139,11 +148,20 @@ pub(crate) async fn create_migrated_database(
                 .foreign_keys(true),
         )
         .await?;
-    if let Err(error) = EMBEDDED_MIGRATOR.run(&pool).await {
+    if let Err(error) = migrator.run(&pool).await {
         pool.close().await;
         return Err(error.into());
     }
     Ok(pool)
+}
+
+/// Create a standalone EasyWAR database by running the authoritative embedded
+/// migration files. There is deliberately no copied schema or SQL dump here.
+/// Callers publish the file only after closing and validating the database.
+pub(crate) async fn create_migrated_database(
+    path: &Path,
+) -> Result<SqlitePool, DatabaseBootstrapError> {
+    migrate_database_file_with(path, embedded_migrator()).await
 }
 
 #[cfg(test)]
@@ -179,6 +197,17 @@ mod tests {
                 .map(|migration| migration.version)
                 .collect::<Vec<_>>()
         );
+        assert_eq!(
+            EMBEDDED_MIGRATOR
+                .iter()
+                .map(|migration| migration.sql.as_ref())
+                .collect::<Vec<_>>(),
+            registered
+                .iter()
+                .map(|migration| migration.sql)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(super::latest_schema_version(), Some(4));
     }
 
     #[tokio::test]

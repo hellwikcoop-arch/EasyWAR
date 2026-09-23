@@ -224,6 +224,42 @@ network updater: release discovery, download, signature verification and
 installation are not implemented. Cross-version data-preservation acceptance
 remains part of the separate stable-migration release gate.
 
+Before Tauri, the SQL plugin or any application pool opens `easywar.db`, the
+desktop startup path already holds the exclusive application-instance lock and
+runs the authoritative embedded SQLx migrator from `src-tauri/migrations`.
+There is no manually maintained schema dump:
+
+- if the database does not exist, all embedded migrations are applied to a
+  temporary SQLite file, the result passes the normal backup inspection, and
+  only then is it published as `easywar.db` without overwriting another file;
+- if the database has an exact supported migration-history prefix, startup
+  first creates and revalidates a byte-exact, non-overwriting sibling backup
+  named like `easywar.db.pre-migration-v3-to-v4.sqlite3`;
+- if that name already contains another valid older database, EasyWAR keeps it
+  and uses a numbered sibling instead of replacing it;
+- pending migrations run on a temporary copy of that verified backup. The live
+  database remains unchanged until the migrated copy passes integrity,
+  foreign-key, required-object, migration-version and checksum checks;
+- the verified candidate is installed with a same-directory rename. A
+  transient `easywar.db.migration-swap-previous` protects the rename gap; the
+  next startup restores it if the process stopped before the candidate was
+  installed, or finalizes a fully verified candidate after confirming that a
+  separate pre-migration backup exists;
+- a migration error removes only the temporary candidate and leaves the live
+  database plus its verified backup intact. A repeated startup against the
+  current schema is a no-op, and the Tauri SQL plugin subsequently sees the
+  same complete migration history;
+- a missing, altered, failed, newer or unrelated migration history fails
+  closed before application repositories open the database.
+
+The pre-migration backup contains local data and is not encrypted. It remains
+beside the app database for explicit recovery; EasyWAR never uploads it.
+Synthetic regression tests cover clean creation, v3-to-v4 preservation of raw
+source, parsed values, corrections, approved revision/decision and audit data,
+idempotent repeat startup, candidate failure, non-overwriting backups and an
+interrupted swap gap. Packaged macOS and Windows update acceptance remains a
+separate release gate.
+
 1. Add a numbered SQL file under `src-tauri/migrations/`.
 2. Register it in `src-tauri/src/database.rs` with the next integer version.
 3. Add a synthetic test that applies all migrations to an empty in-memory DB.

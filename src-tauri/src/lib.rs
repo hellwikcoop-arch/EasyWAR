@@ -2,6 +2,7 @@ pub mod analytics;
 pub mod backup;
 mod database;
 pub mod local_profiles;
+mod migration_startup;
 pub mod position_templates;
 pub mod repository;
 pub mod restore;
@@ -672,6 +673,8 @@ pub fn run() {
     let restore_startup_report =
         tauri::async_runtime::block_on(restore::process_requested_restore(&database_file))
             .expect("не вдалося безпечно обробити підготовлене відновлення");
+    tauri::async_runtime::block_on(migration_startup::prepare_database(&database_file))
+        .expect("не вдалося безпечно підготувати або оновити локальну SQLite-базу");
     let setup_database_file = database_file.clone();
 
     tauri::Builder::default()
