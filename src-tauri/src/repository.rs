@@ -170,6 +170,23 @@ pub struct SignalInboxItem {
     pub raw_sha256: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SignalCommandLastItem {
+    pub captured_at: String,
+    pub current_status: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SignalCommandQueueSnapshot {
+    pub total: u64,
+    pub new_count: u64,
+    pub parsed_count: u64,
+    pub needs_review_count: u64,
+    pub approved_count: u64,
+    pub rejected_count: u64,
+    pub last: Option<SignalCommandLastItem>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct SignalParsePersistence {
     pub report_id: String,
@@ -810,6 +827,50 @@ impl Repository {
                 },
             )
             .collect())
+    }
+
+    pub async fn signal_command_queue_snapshot(
+        &self,
+    ) -> Result<SignalCommandQueueSnapshot, RepositoryError> {
+        let counts = sqlx::query_as::<_, (i64, i64, i64, i64, i64, i64)>(
+            "SELECT COUNT(*),
+                    COALESCE(SUM(CASE WHEN report_current_state.current_status = 'NEW' THEN 1 ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN report_current_state.current_status = 'PARSED' THEN 1 ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN report_current_state.current_status = 'NEEDS_REVIEW' THEN 1 ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN report_current_state.current_status = 'APPROVED' THEN 1 ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN report_current_state.current_status = 'REJECTED' THEN 1 ELSE 0 END), 0)
+             FROM reports
+             JOIN raw_sources ON raw_sources.id = reports.raw_source_id
+             JOIN report_current_state ON report_current_state.report_id = reports.id
+             WHERE raw_sources.source_type = 'SIGNAL'",
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        let last = sqlx::query_as::<_, (String, String)>(
+            "SELECT raw_sources.captured_at, report_current_state.current_status
+             FROM reports
+             JOIN raw_sources ON raw_sources.id = reports.raw_source_id
+             JOIN report_current_state ON report_current_state.report_id = reports.id
+             WHERE raw_sources.source_type = 'SIGNAL'
+             ORDER BY raw_sources.captured_at DESC, reports.id DESC
+             LIMIT 1",
+        )
+        .fetch_optional(&self.pool)
+        .await?
+        .map(|(captured_at, current_status)| SignalCommandLastItem {
+            captured_at,
+            current_status,
+        });
+
+        Ok(SignalCommandQueueSnapshot {
+            total: counts.0 as u64,
+            new_count: counts.1 as u64,
+            parsed_count: counts.2 as u64,
+            needs_review_count: counts.3 as u64,
+            approved_count: counts.4 as u64,
+            rejected_count: counts.5 as u64,
+            last,
+        })
     }
 
     pub async fn signal_report_text(
@@ -1859,6 +1920,78 @@ mod tests {
             repository.list_signal_inbox(101).await,
             Err(RepositoryError::InvalidSignalInboxLimit)
         ));
+    }
+
+    #[tokio::test]
+    async fn command_snapshot_returns_only_aggregate_and_last_metadata() {
+        let repository = repository().await;
+        let empty = repository
+            .signal_command_queue_snapshot()
+            .await
+            .expect("empty synthetic command snapshot must query");
+        assert_eq!(empty.total, 0);
+        assert_eq!(empty.last, None);
+
+        let mut older = capture(
+            "signal-source-command-1",
+            "signal-report-command-1",
+            "signal-audit-command-1",
+        );
+        older.source_type = SourceType::Signal;
+        older.captured_at = "2026-01-01T00:00:00Z".to_owned();
+        older.created_at = older.captured_at.clone();
+        older.raw_text = Some("SECRET-SYNTHETIC-COMMAND-SOURCE".to_owned());
+        older.raw_sha256 = "d".repeat(64);
+        repository.capture_report(&older).await.unwrap();
+        repository
+            .store_parse(&parse(
+                "signal-parse-command-1",
+                "signal-report-command-1",
+                "signal-audit-command-2",
+            ))
+            .await
+            .unwrap();
+
+        let mut newer = capture(
+            "signal-source-command-2",
+            "signal-report-command-2",
+            "signal-audit-command-3",
+        );
+        newer.source_type = SourceType::Signal;
+        newer.captured_at = "2026-01-02T00:00:00Z".to_owned();
+        newer.created_at = newer.captured_at.clone();
+        newer.raw_text = Some("SECRET-SYNTHETIC-LATEST-SOURCE".to_owned());
+        newer.raw_sha256 = "e".repeat(64);
+        repository.capture_report(&newer).await.unwrap();
+
+        repository
+            .capture_report(&capture(
+                "paste-source-command",
+                "paste-report-command",
+                "paste-audit-command",
+            ))
+            .await
+            .unwrap();
+
+        let snapshot = repository
+            .signal_command_queue_snapshot()
+            .await
+            .expect("synthetic command snapshot must query");
+        assert_eq!(snapshot.total, 2);
+        assert_eq!(snapshot.new_count, 1);
+        assert_eq!(snapshot.parsed_count, 1);
+        assert_eq!(snapshot.needs_review_count, 0);
+        assert_eq!(
+            snapshot.last,
+            Some(SignalCommandLastItem {
+                captured_at: "2026-01-02T00:00:00Z".to_owned(),
+                current_status: "NEW".to_owned(),
+            })
+        );
+        let debug = format!("{snapshot:?}");
+        assert!(!debug.contains("SECRET-SYNTHETIC"));
+        assert!(!debug.contains("signal-report"));
+        assert!(!debug.contains(&"e".repeat(64)));
     }
 
     #[tokio::test]

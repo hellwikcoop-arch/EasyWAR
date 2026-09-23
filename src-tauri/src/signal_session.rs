@@ -1,7 +1,10 @@
 use crate::{
-    repository::Repository,
+    repository::{Repository, RepositoryError},
+    signal_commands::{parse_command, render_response},
     signal_daemon::{self, SignalDaemonError, SignalReceiveEnd},
-    signal_ingest::{persist_allowed_notification, SignalIngestError},
+    signal_ingest::{
+        inspect_allowed_notification, persist_allowed_notification, SignalIngestError,
+    },
     signal_policy::ValidatedSignalAdapterConfig,
 };
 use chrono::{SecondsFormat, Utc};
@@ -25,6 +28,7 @@ pub struct SignalSessionStatus {
 pub struct SignalSessionSummary {
     pub captured: usize,
     pub ignored: usize,
+    pub commands: usize,
     pub end: SignalReceiveEnd,
 }
 
@@ -36,6 +40,49 @@ pub enum SignalSessionError {
     Receive(#[from] SignalDaemonError),
     #[error(transparent)]
     Ingest(#[from] SignalIngestError),
+    #[error(transparent)]
+    Repository(#[from] RepositoryError),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum NotificationOutcome {
+    Captured,
+    Ignored,
+    CommandReplied,
+}
+
+async fn process_notification(
+    repository: &Repository,
+    config: &ValidatedSignalAdapterConfig,
+    notification: &signal_daemon::SignalReceiveNotification,
+    account: &str,
+) -> Result<NotificationOutcome, SignalSessionError> {
+    let inspected = match inspect_allowed_notification(config, notification, account) {
+        Ok(message) => message,
+        Err(SignalIngestError::SourceDenied) => return Ok(NotificationOutcome::Ignored),
+        Err(error) => return Err(error.into()),
+    };
+
+    if let Some(command) = parse_command(&inspected.message) {
+        let snapshot = if command.needs_queue_snapshot() {
+            Some(repository.signal_command_queue_snapshot().await?)
+        } else {
+            None
+        };
+        let response = render_response(command, snapshot.as_ref());
+        signal_daemon::send_direct_message(
+            &config.as_config().endpoint,
+            account,
+            &inspected.sender,
+            &response,
+        )
+        .await?;
+        return Ok(NotificationOutcome::CommandReplied);
+    }
+
+    let captured_at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+    persist_allowed_notification(repository, config, notification, account, &captured_at).await?;
+    Ok(NotificationOutcome::Captured)
 }
 
 #[derive(Clone, Debug, Default)]
@@ -109,30 +156,22 @@ impl SignalReceiveController {
         ));
         let mut captured = 0_usize;
         let mut ignored = 0_usize;
+        let mut commands = 0_usize;
 
         let end = loop {
             tokio::select! {
                 biased;
                 Some(notification) = receiver.recv() => {
-                    let captured_at = Utc::now()
-                        .to_rfc3339_opts(SecondsFormat::Millis, true);
-                    let persist_result = persist_allowed_notification(
-                        repository,
-                        config,
-                        &notification,
-                        account,
-                        &captured_at,
-                    )
-                    .await;
-                    match persist_result {
-                        Ok(_) => captured += 1,
-                        Err(SignalIngestError::SourceDenied) => ignored += 1,
+                    match process_notification(repository, config, &notification, account).await {
+                        Ok(NotificationOutcome::Captured) => captured += 1,
+                        Ok(NotificationOutcome::Ignored) => ignored += 1,
+                        Ok(NotificationOutcome::CommandReplied) => commands += 1,
                         Err(error) => {
                             lease.request_stop();
                             if let Err(cleanup_error) = receive.await {
                                 return Err(SignalSessionError::Receive(cleanup_error));
                             }
-                            return Err(SignalSessionError::Ingest(error));
+                            return Err(error);
                         }
                     }
                 }
@@ -143,6 +182,7 @@ impl SignalReceiveController {
         Ok(SignalSessionSummary {
             captured,
             ignored,
+            commands,
             end,
         })
     }
@@ -251,10 +291,18 @@ mod tests {
             assert_eq!(request["method"], "subscribeReceive");
             write_rpc(&mut subscribe, &request, json!(42));
 
-            for (index, sender) in ["synthetic-denied", "synthetic-sender"]
-                .into_iter()
-                .enumerate()
+            for (index, (sender, message)) in [
+                ("synthetic-denied", "/help"),
+                ("synthetic-sender", "/queue"),
+                ("synthetic-sender", "Синтетична доповідь без реальних даних"),
+            ]
+            .into_iter()
+            .enumerate()
             {
+                let mut data_message = json!({"message": message});
+                if message == "/queue" {
+                    data_message["groupInfo"] = json!({"groupId":"synthetic-group"});
+                }
                 let event = json!({
                     "jsonrpc": "2.0",
                     "method": "receive",
@@ -265,9 +313,7 @@ mod tests {
                             "envelope": {
                                 "sourceUuid": sender,
                                 "timestamp": 1_767_225_600_000_u64 + index as u64,
-                                "dataMessage": {
-                                    "message": "Синтетична доповідь без реальних даних"
-                                }
+                                "dataMessage": data_message
                             }
                         }
                     }
@@ -275,6 +321,79 @@ mod tests {
                 write!(events, "data: {event}\n\n").expect("synthetic SSE event");
             }
             events.flush().expect("synthetic event flush");
+
+            let mut saw_send = false;
+            let mut saw_unsubscribe = false;
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().expect("synthetic command cleanup RPC");
+                let (_, request) = read_request(&mut stream);
+                let request = request.expect("synthetic command cleanup JSON");
+                match request["method"].as_str() {
+                    Some("send") => {
+                        assert!(!saw_send, "command reply must be sent once");
+                        saw_send = true;
+                        assert_eq!(request["params"]["account"], "synthetic-account");
+                        assert_eq!(request["params"]["recipients"], json!(["synthetic-sender"]));
+                        let reply = request["params"]["message"]
+                            .as_str()
+                            .expect("synthetic command response text");
+                        assert!(reply.contains("Черга Signal: усього 0"));
+                        assert!(!reply.contains("synthetic-group"));
+                        write_rpc(&mut stream, &request, json!({"timestamp": 1_u64}));
+                    }
+                    Some("unsubscribeReceive") => {
+                        assert!(!saw_unsubscribe, "unsubscribe must run once");
+                        saw_unsubscribe = true;
+                        write_rpc(&mut stream, &request, Value::Null);
+                    }
+                    method => panic!("unexpected synthetic method: {method:?}"),
+                }
+            }
+            assert!(saw_send && saw_unsubscribe);
+        });
+        (SignalDaemonEndpoint::Http { address }, handle)
+    }
+
+    fn synthetic_failing_command_daemon() -> (SignalDaemonEndpoint, JoinHandle<()>) {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("synthetic listener");
+        let address = listener.local_addr().expect("synthetic address");
+        let handle = std::thread::spawn(move || {
+            let (mut events, _) = listener.accept().expect("synthetic SSE connection");
+            let (request, _) = read_request(&mut events);
+            assert_eq!(request, "GET /api/v1/events HTTP/1.1");
+            events
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: keep-alive\r\n\r\n")
+                .unwrap();
+            events.flush().unwrap();
+
+            let (mut subscribe, _) = listener.accept().expect("synthetic subscribe");
+            let (_, request) = read_request(&mut subscribe);
+            let request = request.expect("synthetic subscribe JSON");
+            write_rpc(&mut subscribe, &request, json!(42));
+
+            let event = json!({
+                "jsonrpc": "2.0",
+                "method": "receive",
+                "params": {
+                    "subscription": 42,
+                    "result": {
+                        "account": "synthetic-account",
+                        "envelope": {
+                            "sourceUuid": "synthetic-sender",
+                            "timestamp": 1_767_225_600_000_u64,
+                            "dataMessage": {"message": "/ping"}
+                        }
+                    }
+                }
+            });
+            write!(events, "data: {event}\n\n").unwrap();
+            events.flush().unwrap();
+
+            let (mut send, _) = listener.accept().expect("synthetic command reply");
+            let (_, request) = read_request(&mut send);
+            let request = request.expect("synthetic command reply JSON");
+            assert_eq!(request["method"], "send");
+            write_rpc(&mut send, &request, Value::Null);
 
             let (mut unsubscribe, _) = listener.accept().expect("synthetic unsubscribe");
             let (_, request) = read_request(&mut unsubscribe);
@@ -333,7 +452,11 @@ mod tests {
         let config = SignalAdapterConfig {
             endpoint,
             intake_enabled: true,
-            allowlist: SignalAllowlist::new(["synthetic-sender".to_owned()], Vec::new()).unwrap(),
+            allowlist: SignalAllowlist::new(
+                ["synthetic-sender".to_owned()],
+                ["synthetic-group".to_owned()],
+            )
+            .unwrap(),
             ..SignalAdapterConfig::default()
         }
         .validate()
@@ -345,7 +468,7 @@ mod tests {
                 &repository,
                 &config,
                 "synthetic-account",
-                2,
+                3,
                 Duration::from_secs(5),
             )
             .await
@@ -356,6 +479,7 @@ mod tests {
             SignalSessionSummary {
                 captured: 1,
                 ignored: 1,
+                commands: 1,
                 end: SignalReceiveEnd::LimitReached,
             }
         );
@@ -363,5 +487,39 @@ mod tests {
         let inbox = repository.list_signal_inbox(100).await.unwrap();
         assert_eq!(inbox.len(), 1);
         assert_eq!(inbox[0].current_status, "NEW");
+    }
+
+    #[tokio::test]
+    async fn failed_command_reply_still_unsubscribes_and_stores_no_command() {
+        let repository = repository().await;
+        let (endpoint, server) = synthetic_failing_command_daemon();
+        let config = SignalAdapterConfig {
+            endpoint,
+            intake_enabled: true,
+            allowlist: SignalAllowlist::new(["synthetic-sender".to_owned()], Vec::new()).unwrap(),
+            ..SignalAdapterConfig::default()
+        }
+        .validate()
+        .unwrap();
+        let controller = SignalReceiveController::default();
+
+        let result = controller
+            .run(
+                &repository,
+                &config,
+                "synthetic-account",
+                2,
+                Duration::from_secs(5),
+            )
+            .await;
+        server.join().expect("synthetic daemon must stop");
+        assert!(matches!(
+            result,
+            Err(SignalSessionError::Receive(
+                SignalDaemonError::InvalidResponse
+            ))
+        ));
+        assert!(!controller.status().active);
+        assert!(repository.list_signal_inbox(100).await.unwrap().is_empty());
     }
 }

@@ -1,6 +1,6 @@
 # Signal intake boundary
 
-This document records the defensive boundary for the EasyWAR Signal adapter. The desktop can now make an explicit, read-only discovery request to an already running local `signal-cli` HTTP daemon. It does not start `signal-cli`, subscribe to messages, parse chats, or write Signal content to the database.
+This document records the defensive boundary for the EasyWAR Signal adapter. The desktop can make explicit discovery and linking requests and run a user-started bounded receive session against an already running local `signal-cli` HTTP daemon. It does not start `signal-cli`, run a continuous receive service, or approve received records automatically.
 
 ## Supported local daemon interfaces
 
@@ -121,6 +121,30 @@ and the complete loopback path from SSE notification to a `NEW` SQLite Inbox
 record, including a denied notification followed by an allowed one. The UI and
 backend are built, but real daemon/account acceptance remains unverified because
 `signal-cli` is not installed in the current environment.
+
+## Commands during an explicit session
+
+An allowed sender can issue one of five exact slash commands while the explicit
+bounded session is active: `/help`, `/status`, `/ping`, `/queue`, or `/last`.
+Commands with arguments and unknown slash commands receive a bounded Ukrainian
+help response. The same account, sender, and group allowlist checks run before a
+command is recognized. A denied source receives no reply.
+
+The reply uses the local loopback JSON-RPC `send` method with the selected local
+account, an exact single `recipients` entry, and a bounded text body. Even when
+the command arrived through an allowed group, EasyWAR replies directly to the
+allowed sender instead of posting queue metadata to the group. `/queue` returns
+only counts for the five status values. `/last` returns only the capture time and
+current status of the latest Signal record. Neither response includes message
+content, report/source identifiers, account identifiers, hashes, or attachments.
+
+Command envelopes are control input and are not stored as raw sources or Inbox
+reports. A successful reply increments only the in-memory command counter shown
+in the session summary. An RPC failure stops the session and still requires
+`unsubscribeReceive` before the error is returned. Synthetic loopback tests
+cover a denied command, a group-origin command with a direct sender reply, a
+normal persisted message, and cleanup after a failed reply. Real-daemon command
+acceptance remains unverified together with the receive-session acceptance.
 
 ## Inbox review model
 

@@ -20,6 +20,8 @@ const MAX_LIVE_NOTIFICATIONS: usize = 64;
 const LINK_TIMEOUT: Duration = Duration::from_secs(120);
 const MAX_LINK_URI_BYTES: usize = 2048;
 const MAX_DEVICE_NAME_CHARS: usize = 64;
+const MAX_DIRECT_RECIPIENT_CHARS: usize = 128;
+const MAX_DIRECT_MESSAGE_CHARS: usize = 1024;
 static REQUEST_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -81,6 +83,10 @@ pub enum SignalDaemonError {
     InvalidLinkUri,
     #[error("назва пов’язаного пристрою має містити 1–64 видимі символи")]
     InvalidDeviceName,
+    #[error("одержувач відповіді Signal має містити 1–128 видимих символів")]
+    InvalidRecipient,
+    #[error("відповідь Signal має містити 1–1024 дозволені символи")]
+    InvalidMessage,
     #[error("signal-cli повернув некоректну подію ручного приймання")]
     InvalidEvent,
     #[error("подія signal-cli перевищила обмеження розміру")]
@@ -522,6 +528,21 @@ fn valid_device_name(name: &str) -> bool {
         && !name.chars().any(char::is_control)
 }
 
+fn valid_direct_recipient(recipient: &str) -> bool {
+    !recipient.is_empty()
+        && recipient.trim() == recipient
+        && recipient.chars().count() <= MAX_DIRECT_RECIPIENT_CHARS
+        && !recipient.chars().any(char::is_control)
+}
+
+fn valid_direct_message(message: &str) -> bool {
+    !message.trim().is_empty()
+        && message.chars().count() <= MAX_DIRECT_MESSAGE_CHARS
+        && !message
+            .chars()
+            .any(|character| character.is_control() && character != '\n')
+}
+
 fn parse_link_start(result: Value) -> Result<SignalLinkStart, SignalDaemonError> {
     let uri = result
         .get("deviceLinkUri")
@@ -592,6 +613,37 @@ pub async fn finish_link(
     )
     .await?;
     parse_linked_account(result)
+}
+
+pub async fn send_direct_message(
+    endpoint: &SignalDaemonEndpoint,
+    account: &str,
+    recipient: &str,
+    message: &str,
+) -> Result<(), SignalDaemonError> {
+    if !valid_account(account) {
+        return Err(SignalDaemonError::MissingAccount);
+    }
+    if !valid_direct_recipient(recipient) {
+        return Err(SignalDaemonError::InvalidRecipient);
+    }
+    if !valid_direct_message(message) {
+        return Err(SignalDaemonError::InvalidMessage);
+    }
+    let result = rpc(
+        endpoint,
+        "send",
+        Some(json!({
+            "account": account,
+            "recipients": [recipient],
+            "message": message,
+        })),
+    )
+    .await?;
+    if result.get("timestamp").and_then(Value::as_u64).is_none() {
+        return Err(SignalDaemonError::InvalidResponse);
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -859,6 +911,42 @@ mod tests {
             .expect("synthetic group discovery");
         server.join().expect("synthetic group server");
         assert_eq!(groups[0].name, "Навчальна група");
+    }
+
+    #[tokio::test]
+    async fn direct_reply_uses_exact_account_recipient_and_bounded_text() {
+        let listener =
+            TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("synthetic send listener must bind");
+        let address = listener.local_addr().expect("synthetic send address");
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("synthetic send request");
+            let (_, request) = read_http_request(&mut stream);
+            let request = request.expect("synthetic send JSON");
+            assert_eq!(request["method"], "send");
+            assert_eq!(request["params"]["account"], "synthetic-account");
+            assert_eq!(request["params"]["recipients"], json!(["synthetic-sender"]));
+            assert_eq!(request["params"]["message"], "Синтетична відповідь\n/help");
+            write_rpc_response(&mut stream, &request, json!({"timestamp": 1_u64}));
+        });
+        let endpoint = SignalDaemonEndpoint::Http { address };
+        send_direct_message(
+            &endpoint,
+            "synthetic-account",
+            "synthetic-sender",
+            "Синтетична відповідь\n/help",
+        )
+        .await
+        .expect("synthetic direct reply must succeed");
+        server.join().expect("synthetic send server");
+
+        assert!(matches!(
+            send_direct_message(&endpoint, "synthetic-account", "bad\nrecipient", "reply").await,
+            Err(SignalDaemonError::InvalidRecipient)
+        ));
+        assert!(matches!(
+            send_direct_message(&endpoint, "synthetic-account", "synthetic-sender", " \n").await,
+            Err(SignalDaemonError::InvalidMessage)
+        ));
     }
 
     #[tokio::test]

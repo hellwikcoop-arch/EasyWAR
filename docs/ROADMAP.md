@@ -49,7 +49,7 @@
   - [x] persist bounded field-level manual corrections and corrected revision snapshots
 - [x] status model: NEW / PARSED / NEEDS_REVIEW / APPROVED / REJECTED
 - [x] import message into intake parser
-- [ ] commands: /help, /status, /ping, /queue, /last
+- [x] commands: /help, /status, /ping, /queue, /last
 - [x] no automatic approval by default
 
 ## 0.7 — XLSX compatibility

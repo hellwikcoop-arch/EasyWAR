@@ -15,6 +15,14 @@ pub struct SignalCaptureResult {
     pub raw_sha256: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AllowedSignalMessage {
+    pub timestamp: u64,
+    pub message: String,
+    pub sender: String,
+    pub group: Option<String>,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum SignalIngestError {
     #[error("подія Signal не відповідає дозволеному формату повідомлення")]
@@ -39,6 +47,54 @@ pub async fn persist_allowed_notification(
     if captured_at.trim().is_empty() || captured_at.chars().any(char::is_control) {
         return Err(SignalIngestError::InvalidEnvelope);
     }
+    let inspected = inspect_allowed_notification(config, notification, expected_account)?;
+
+    let raw_payload = serde_json::to_vec(&notification.envelope)?;
+    let raw_sha256 = format!("{:x}", Sha256::digest(&raw_payload));
+    let report_id = format!("signal-report:{raw_sha256}");
+    let source_item_key = format!("envelope-sha256:{raw_sha256}");
+
+    repository
+        .capture_report(&CaptureReportInput {
+            raw_source_id: format!("signal-source:{raw_sha256}"),
+            report_id: report_id.clone(),
+            source_type: SourceType::Signal,
+            source_timestamp: Some(inspected.timestamp.to_string()),
+            captured_at: captured_at.to_owned(),
+            content_type: "application/vnd.signal-cli.envelope+json".to_owned(),
+            raw_text: Some(inspected.message),
+            raw_payload_json: Some(notification.envelope.clone()),
+            raw_sha256: raw_sha256.clone(),
+            metadata_json: json!({
+                "schema_version": 1,
+                "account": notification.account,
+                "sender": inspected.sender,
+                "group": inspected.group,
+                "subscription": notification.subscription,
+                "envelope_timestamp_ms": inspected.timestamp,
+            }),
+            source_item_key,
+            created_at: captured_at.to_owned(),
+            audit: AuditContext {
+                id: format!("signal-audit:capture:{raw_sha256}"),
+                actor_type: ActorType::System,
+                actor_label: Some("signal-cli-local".to_owned()),
+                occurred_at: captured_at.to_owned(),
+            },
+        })
+        .await?;
+
+    Ok(SignalCaptureResult {
+        report_id,
+        raw_sha256,
+    })
+}
+
+pub fn inspect_allowed_notification(
+    config: &ValidatedSignalAdapterConfig,
+    notification: &SignalReceiveNotification,
+    expected_account: &str,
+) -> Result<AllowedSignalMessage, SignalIngestError> {
     if !valid_identifier(expected_account) || notification.account != expected_account {
         return Err(SignalIngestError::AccountMismatch);
     }
@@ -65,45 +121,11 @@ pub async fn persist_allowed_notification(
         .into_iter()
         .find(|sender| config.permits_source(sender, group))
         .ok_or(SignalIngestError::SourceDenied)?;
-
-    let raw_payload = serde_json::to_vec(&notification.envelope)?;
-    let raw_sha256 = format!("{:x}", Sha256::digest(&raw_payload));
-    let report_id = format!("signal-report:{raw_sha256}");
-    let source_item_key = format!("envelope-sha256:{raw_sha256}");
-
-    repository
-        .capture_report(&CaptureReportInput {
-            raw_source_id: format!("signal-source:{raw_sha256}"),
-            report_id: report_id.clone(),
-            source_type: SourceType::Signal,
-            source_timestamp: Some(timestamp.to_string()),
-            captured_at: captured_at.to_owned(),
-            content_type: "application/vnd.signal-cli.envelope+json".to_owned(),
-            raw_text: Some(message.to_owned()),
-            raw_payload_json: Some(notification.envelope.clone()),
-            raw_sha256: raw_sha256.clone(),
-            metadata_json: json!({
-                "schema_version": 1,
-                "account": notification.account,
-                "sender": sender,
-                "group": group,
-                "subscription": notification.subscription,
-                "envelope_timestamp_ms": timestamp,
-            }),
-            source_item_key,
-            created_at: captured_at.to_owned(),
-            audit: AuditContext {
-                id: format!("signal-audit:capture:{raw_sha256}"),
-                actor_type: ActorType::System,
-                actor_label: Some("signal-cli-local".to_owned()),
-                occurred_at: captured_at.to_owned(),
-            },
-        })
-        .await?;
-
-    Ok(SignalCaptureResult {
-        report_id,
-        raw_sha256,
+    Ok(AllowedSignalMessage {
+        timestamp,
+        message: message.to_owned(),
+        sender: sender.to_owned(),
+        group: group.map(str::to_owned),
     })
 }
 

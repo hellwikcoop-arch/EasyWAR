@@ -2,6 +2,7 @@ pub mod backup;
 mod database;
 pub mod repository;
 pub mod restore;
+pub mod signal_commands;
 pub mod signal_daemon;
 pub mod signal_inbox;
 pub mod signal_ingest;
