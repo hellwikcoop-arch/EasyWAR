@@ -141,9 +141,21 @@ The active profile's template selects only the initial top-level section and,
 for dashboard templates, the initial dashboard focus. It does not hide data,
 grant permissions, authenticate a person, alter a reviewer identity or limit
 what the user can open afterward. Assignment replacement and cascade deletion
-are transactional and create no report audit events. Generating a distinct
-empty database or file template for a position remains a separate ROADMAP
-item.
+are transactional and create no report audit events.
+
+The profile dialog can explicitly generate a separate empty SQLite database for
+the selected position template. The new file is initialized by the embedded
+SQLx migrator from the same authoritative files in `src-tauri/migrations` that
+the main application registers with the Tauri SQL plugin; there is no separate
+schema dump or copied set of `CREATE TABLE` statements. It receives the complete
+current migration history, one active generic workstation profile and exactly
+one workspace-template assignment. It contains no raw sources, parsed values,
+corrections, decisions, approved revisions, settings or audit events, and it
+never reads or copies records from the live database. The destination is chosen
+by the user, an existing file is never overwritten, and the completed file must
+pass the same integrity, foreign-key, schema-object and migration-checksum
+inspection as a local backup before publication. Creating a template does not
+switch the running application to that file and is not a restore operation.
 
 ## Local backup
 

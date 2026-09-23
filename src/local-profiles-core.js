@@ -33,6 +33,10 @@ export function setProfileWorkspaceTemplate(profileId, templateKey, invokeComman
   return invokeCommand('set_profile_workspace_template', { profileId, templateKey });
 }
 
+export function createPositionDatabaseTemplate(templateKey, invokeCommand = invoke) {
+  return invokeCommand('create_position_database_template', { templateKey });
+}
+
 export function workspaceTemplateForProfile(state, profileId) {
   if (!profileId || !Array.isArray(state?.templates)) return null;
   const assignedKey = state?.assignments?.find(

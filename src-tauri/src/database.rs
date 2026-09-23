@@ -1,4 +1,9 @@
+use sqlx::migrate::{MigrateError, Migrator};
+use sqlx::{sqlite::SqliteConnectOptions, sqlite::SqlitePoolOptions, SqlitePool};
+use std::path::Path;
 use tauri_plugin_sql::{Migration, MigrationKind};
+
+static EMBEDDED_MIGRATOR: Migrator = sqlx::migrate!("./migrations");
 
 /// The SQLite file is resolved by the Tauri SQL plugin inside the app-local
 /// configuration directory. Runtime database files must never be committed.
@@ -41,11 +46,41 @@ pub fn migrations() -> Vec<Migration> {
     ]
 }
 
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum DatabaseBootstrapError {
+    #[error("не вдалося відкрити нову SQLite-базу: {0}")]
+    Database(#[from] sqlx::Error),
+    #[error("не вдалося застосувати вбудовані міграції EasyWAR: {0}")]
+    Migration(#[from] MigrateError),
+}
+
+/// Create a standalone EasyWAR database by running the authoritative embedded
+/// migration files. There is deliberately no copied schema or SQL dump here.
+/// Callers publish the file only after closing and validating the database.
+pub(crate) async fn create_migrated_database(
+    path: &Path,
+) -> Result<SqlitePool, DatabaseBootstrapError> {
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(
+            SqliteConnectOptions::new()
+                .filename(path)
+                .create_if_missing(true)
+                .foreign_keys(true),
+        )
+        .await?;
+    if let Err(error) = EMBEDDED_MIGRATOR.run(&pool).await {
+        pool.close().await;
+        return Err(error.into());
+    }
+    Ok(pool)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        migrations, DATABASE_URL, INITIAL_SCHEMA_SQL, LOCAL_PROFILES_SQL, WORKSPACE_TEMPLATES_SQL,
-        XLSX_DUPLICATE_LINKS_SQL,
+        migrations, DATABASE_URL, EMBEDDED_MIGRATOR, INITIAL_SCHEMA_SQL, LOCAL_PROFILES_SQL,
+        WORKSPACE_TEMPLATES_SQL, XLSX_DUPLICATE_LINKS_SQL,
     };
     use sqlx::{sqlite::SqlitePoolOptions, Row};
 
@@ -63,6 +98,16 @@ mod tests {
         assert_eq!(registered[2].description, "add_local_profiles");
         assert_eq!(registered[3].version, 4);
         assert_eq!(registered[3].description, "add_workspace_templates");
+        assert_eq!(
+            EMBEDDED_MIGRATOR
+                .iter()
+                .map(|migration| migration.version)
+                .collect::<Vec<_>>(),
+            registered
+                .iter()
+                .map(|migration| migration.version)
+                .collect::<Vec<_>>()
+        );
     }
 
     async fn migrated_pool() -> sqlx::SqlitePool {

@@ -80,7 +80,7 @@
 
 - [x] local profiles
 - [x] role-based workspace templates
-- [ ] position-specific empty database/template generation
+- [x] position-specific empty database/template generation
 - [ ] backup / restore
   - [x] user-selected, non-overwriting local SQLite backup with integrity check
   - [x] read-only compatibility preflight for a selected backup

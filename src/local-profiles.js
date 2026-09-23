@@ -2,6 +2,7 @@ import './local-profiles.css';
 import {
   activateLocalProfile,
   activeProfileLabel,
+  createPositionDatabaseTemplate,
   createLocalProfile,
   deleteLocalProfile,
   getLocalProfiles,
@@ -34,6 +35,7 @@ function initializeLocalProfiles() {
     <p>Профілі зберігаються лише в локальній базі цього пристрою. Це не облікові записи й не система авторизації.</p>
     <p class="ew-profile-note">Вибір профілю не змінює схвалені записи, рецензентів або журнал аудиту.</p>
     <p class="ew-profile-note">Рольовий шаблон змінює лише початковий розділ робочого простору. Він не надає і не обмежує доступ.</p>
+    <p class="ew-profile-note">Порожня база для позиції створюється окремим файлом і не копіює записи з поточної бази.</p>
     <p id="ew-profile-status" class="ew-profile-status" role="status" aria-live="polite"></p>
     <div id="ew-profile-list" class="ew-profile-list"></div>
     <form id="ew-profile-create" class="ew-profile-create">
@@ -140,9 +142,21 @@ function initializeLocalProfiles() {
         mutate(() => deleteLocalProfile(profile.id), 'Профіль видалено.');
       });
 
+      const createDatabaseButton = document.createElement('button');
+      createDatabaseButton.type = 'button';
+      createDatabaseButton.className = 'btn quiet';
+      createDatabaseButton.textContent = 'Створити порожню базу';
+      createDatabaseButton.disabled = !assignedTemplate;
+      createDatabaseButton.title = assignedTemplate
+        ? `Створити окрему порожню базу для позиції «${assignedTemplate.roleLabel}»`
+        : 'Спершу оберіть рольовий шаблон';
+      createDatabaseButton.addEventListener('click', () => {
+        if (assignedTemplate) createPositionDatabase(assignedTemplate);
+      });
+
       const actions = document.createElement('div');
       actions.className = 'ew-profile-actions';
-      actions.append(selectButton, saveButton, deleteButton);
+      actions.append(selectButton, saveButton, createDatabaseButton, deleteButton);
       row.append(input, badge, templateLabel, actions);
       list.append(row);
     }
@@ -174,6 +188,22 @@ function initializeLocalProfiles() {
       if (profileId === state.activeProfileId) applyActiveWorkspaceTemplate();
     } catch (error) {
       status.textContent = `Не вдалося змінити рольовий шаблон: ${String(error)}`;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createPositionDatabase(template) {
+    if (busy) return;
+    setBusy(true);
+    status.textContent = `Оберіть місце для порожньої бази позиції «${template.roleLabel}»…`;
+    try {
+      const result = await createPositionDatabaseTemplate(template.key);
+      status.textContent = result === null
+        ? 'Створення порожньої бази скасовано.'
+        : `Порожню базу для позиції «${result.roleLabel}» створено: ${result.path}`;
+    } catch (error) {
+      status.textContent = `Не вдалося створити порожню базу: ${String(error)}`;
     } finally {
       setBusy(false);
     }

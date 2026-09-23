@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  createPositionDatabaseTemplate,
   getWorkspaceTemplates,
   setProfileWorkspaceTemplate,
   workspaceTemplateForProfile,
@@ -45,6 +46,7 @@ test('workspace template helpers use dedicated desktop commands', async () => {
     'entry',
     invoke,
   );
+  await createPositionDatabaseTemplate('entry', invoke);
 
   assert.deepEqual(calls, [
     ['get_workspace_templates', undefined],
@@ -52,6 +54,7 @@ test('workspace template helpers use dedicated desktop commands', async () => {
       profileId: 'profile-000000000000000000000001',
       templateKey: 'entry',
     }],
+    ['create_position_database_template', { templateKey: 'entry' }],
   ]);
 });
 

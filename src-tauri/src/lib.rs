@@ -2,6 +2,7 @@ pub mod analytics;
 pub mod backup;
 mod database;
 pub mod local_profiles;
+pub mod position_templates;
 pub mod repository;
 pub mod restore;
 pub mod signal_commands;
@@ -18,6 +19,7 @@ pub mod xlsx_import;
 use backup::BackupStore;
 use chrono::{SecondsFormat, Utc};
 use local_profiles::{LocalProfileStore, LocalProfilesState};
+use position_templates::PositionDatabaseTemplate;
 use repository::{
     Repository, ReviewDecision, SettingsStore, SignalInboxItem, SignalParsePersistence,
     SignalReviewPersistence, SignalReviewSnapshot, XlsxStageResult,
@@ -121,6 +123,38 @@ async fn set_profile_workspace_template(
         .assign(&profile_id, &template_key, &now)
         .await
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn create_position_database_template(
+    app: tauri::AppHandle,
+    template_key: String,
+) -> Result<Option<PositionDatabaseTemplate>, String> {
+    let template = workspace_templates::workspace_template(&template_key)
+        .ok_or_else(|| "невідомий шаблон робочого простору".to_owned())?;
+    let suggested_name = format!("EasyWAR-порожня-база-{}.sqlite3", template.key);
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title("Створити порожню базу EasyWAR для позиції")
+            .set_file_name(&suggested_name)
+            .add_filter("База SQLite", &["sqlite3"])
+            .blocking_save_file()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let destination = selected.into_path().map_err(|error| error.to_string())?;
+    position_templates::create_position_database_template(
+        &destination,
+        &template_key,
+        &Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true),
+    )
+    .await
+    .map(Some)
+    .map_err(|error| error.to_string())
 }
 
 const MAX_XLSX_BYTES: u64 = 64 * 1024 * 1024;
@@ -592,6 +626,7 @@ pub fn run() {
             delete_local_profile,
             get_workspace_templates,
             set_profile_workspace_template,
+            create_position_database_template,
             get_signal_settings,
             save_signal_settings,
             discover_signal_accounts,
