@@ -3,7 +3,9 @@ import './backup.css';
 import {
   applyStagedRestoreAndRestart,
   cancelStagedRestore,
+  databaseStatusMessage,
   finalizeLocalRestore,
+  getDatabaseStatus,
   getRestoreStartupReport,
   restoreStartupMessage,
   stageLocalRestore,
@@ -33,6 +35,14 @@ function initializeBackup() {
     <p class="ew-backup-warning">Копія може містити чутливі дані. Оберіть захищене місце зберігання; хмарні папки використовуйте лише свідомо. Наявний файл не буде перезаписано.</p>
     <p id="ew-backup-status" class="ew-backup-status" role="status" aria-live="polite"></p>
     <p id="ew-backup-location" class="ew-backup-location" hidden></p>
+    <section class="ew-update-section" aria-labelledby="ew-update-title">
+      <h3 id="ew-update-title">Оновлення та міграції</h3>
+      <p id="ew-update-status">Перевіряємо локальну схему…</p>
+      <p class="ew-backup-warning">Перед встановленням нової версії EasyWAR створіть і перевірте локальну резервну копію.</p>
+      <div class="ew-backup-actions">
+        <button type="button" class="btn quiet" id="ew-update-refresh">Оновити стан</button>
+      </div>
+    </section>
     <section class="ew-restore-section" aria-labelledby="ew-restore-title">
       <h3 id="ew-restore-title">Відновлення з копії</h3>
       <p>Копія двічі перевіряється й готується окремо. Поточна база замінюється лише після явного підтвердження та контрольованого перезапуску.</p>
@@ -58,6 +68,8 @@ function initializeBackup() {
   const restoreCancelButton = dialog.querySelector('#ew-restore-cancel-stage');
   const restoreApplyButton = dialog.querySelector('#ew-restore-apply');
   const restoreFinalizeButton = dialog.querySelector('#ew-restore-finalize');
+  const updateStatus = dialog.querySelector('#ew-update-status');
+  const updateRefreshButton = dialog.querySelector('#ew-update-refresh');
   let restoreReport = {
     outcome: 'none',
     pendingRestoreAvailable: false,
@@ -71,6 +83,7 @@ function initializeBackup() {
     restoreCancelButton.disabled = value;
     restoreApplyButton.disabled = value;
     restoreFinalizeButton.disabled = value;
+    updateRefreshButton.disabled = value;
   }
 
   function renderRestoreState() {
@@ -83,6 +96,21 @@ function initializeBackup() {
     restoreReport = report;
     renderRestoreState();
   }).catch(() => {});
+
+  async function refreshDatabaseStatus() {
+    updateRefreshButton.disabled = true;
+    updateStatus.textContent = 'Перевіряємо локальну схему…';
+    try {
+      updateStatus.textContent = databaseStatusMessage(await getDatabaseStatus());
+    } catch (error) {
+      updateStatus.textContent = `Не вдалося підтвердити стан міграцій: ${String(error)}`;
+    } finally {
+      updateRefreshButton.disabled = false;
+    }
+  }
+
+  void refreshDatabaseStatus();
+  updateRefreshButton.addEventListener('click', () => { void refreshDatabaseStatus(); });
 
   function close() {
     dialog.close();

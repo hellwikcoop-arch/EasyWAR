@@ -1,9 +1,79 @@
+use serde::Serialize;
+use sha2::{Digest, Sha384};
 use sqlx::migrate::{MigrateError, Migrator};
 use sqlx::{sqlite::SqliteConnectOptions, sqlite::SqlitePoolOptions, SqlitePool};
 use std::path::Path;
 use tauri_plugin_sql::{Migration, MigrationKind};
 
 static EMBEDDED_MIGRATOR: Migrator = sqlx::migrate!("./migrations");
+
+#[derive(Clone)]
+pub struct DatabaseStatusStore {
+    pool: SqlitePool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DatabaseMigrationState {
+    Current,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DatabaseStatus {
+    pub app_version: String,
+    pub schema_version: i64,
+    pub supported_schema_version: i64,
+    pub migration_count: usize,
+    pub migration_state: DatabaseMigrationState,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum DatabaseStatusError {
+    #[error("не вдалося прочитати стан локальної SQLite-бази: {0}")]
+    Database(#[from] sqlx::Error),
+    #[error("у локальній базі відсутня повна історія міграцій EasyWAR")]
+    UnsupportedSchema,
+    #[error("контрольна сума застосованої міграції не відповідає EasyWAR")]
+    MigrationMismatch,
+}
+
+impl DatabaseStatusStore {
+    pub fn new(pool: SqlitePool) -> Self {
+        Self { pool }
+    }
+
+    pub async fn load(&self) -> Result<DatabaseStatus, DatabaseStatusError> {
+        let expected = migrations();
+        let applied: Vec<(i64, i64, Vec<u8>)> = sqlx::query_as(
+            "SELECT version, success, checksum FROM _sqlx_migrations ORDER BY version",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        if applied.len() != expected.len() {
+            return Err(DatabaseStatusError::UnsupportedSchema);
+        }
+        for (actual, known) in applied.iter().zip(&expected) {
+            if actual.0 != known.version || actual.1 != 1 {
+                return Err(DatabaseStatusError::UnsupportedSchema);
+            }
+            if actual.2 != Sha384::digest(known.sql.as_bytes()).as_slice() {
+                return Err(DatabaseStatusError::MigrationMismatch);
+            }
+        }
+        let supported_schema_version = expected
+            .last()
+            .map(|migration| migration.version)
+            .ok_or(DatabaseStatusError::UnsupportedSchema)?;
+        Ok(DatabaseStatus {
+            app_version: env!("CARGO_PKG_VERSION").to_owned(),
+            schema_version: supported_schema_version,
+            supported_schema_version,
+            migration_count: expected.len(),
+            migration_state: DatabaseMigrationState::Current,
+        })
+    }
+}
 
 /// The SQLite file is resolved by the Tauri SQL plugin inside the app-local
 /// configuration directory. Runtime database files must never be committed.
@@ -79,8 +149,9 @@ pub(crate) async fn create_migrated_database(
 #[cfg(test)]
 mod tests {
     use super::{
-        migrations, DATABASE_URL, EMBEDDED_MIGRATOR, INITIAL_SCHEMA_SQL, LOCAL_PROFILES_SQL,
-        WORKSPACE_TEMPLATES_SQL, XLSX_DUPLICATE_LINKS_SQL,
+        create_migrated_database, migrations, DatabaseMigrationState, DatabaseStatusError,
+        DatabaseStatusStore, DATABASE_URL, EMBEDDED_MIGRATOR, INITIAL_SCHEMA_SQL,
+        LOCAL_PROFILES_SQL, WORKSPACE_TEMPLATES_SQL, XLSX_DUPLICATE_LINKS_SQL,
     };
     use sqlx::{sqlite::SqlitePoolOptions, Row};
 
@@ -108,6 +179,34 @@ mod tests {
                 .map(|migration| migration.version)
                 .collect::<Vec<_>>()
         );
+    }
+
+    #[tokio::test]
+    async fn database_status_reports_the_verified_runtime_migration_state() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("status.sqlite3");
+        let pool = create_migrated_database(&path).await.unwrap();
+        assert_eq!(
+            DatabaseStatusStore::new(pool.clone()).load().await.unwrap(),
+            super::DatabaseStatus {
+                app_version: env!("CARGO_PKG_VERSION").to_owned(),
+                schema_version: 4,
+                supported_schema_version: 4,
+                migration_count: 4,
+                migration_state: DatabaseMigrationState::Current,
+            }
+        );
+
+        sqlx::query("UPDATE _sqlx_migrations SET checksum = ? WHERE version = 1")
+            .bind(vec![0_u8; 48])
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(matches!(
+            DatabaseStatusStore::new(pool.clone()).load().await,
+            Err(DatabaseStatusError::MigrationMismatch)
+        ));
+        pool.close().await;
     }
 
     async fn migrated_pool() -> sqlx::SqlitePool {

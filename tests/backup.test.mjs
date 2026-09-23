@@ -3,7 +3,9 @@ import test from 'node:test';
 import {
   applyStagedRestoreAndRestart,
   cancelStagedRestore,
+  databaseStatusMessage,
   finalizeLocalRestore,
+  getDatabaseStatus,
   getRestoreStartupReport,
   restoreStartupMessage,
   stageLocalRestore,
@@ -17,6 +19,7 @@ test('restore helpers call only the dedicated desktop commands', async () => {
   };
 
   await stageLocalRestore(invoke);
+  await getDatabaseStatus(invoke);
   await cancelStagedRestore(invoke);
   await applyStagedRestoreAndRestart(invoke);
   await getRestoreStartupReport(invoke);
@@ -24,11 +27,30 @@ test('restore helpers call only the dedicated desktop commands', async () => {
 
   assert.deepEqual(calls, [
     ['stage_local_restore', undefined],
+    ['get_database_status', undefined],
     ['cancel_staged_restore', undefined],
     ['apply_staged_restore_and_restart', undefined],
     ['get_restore_startup_report', undefined],
     ['finalize_local_restore', undefined],
   ]);
+});
+
+test('database status message exposes verified app and migration versions', () => {
+  assert.equal(databaseStatusMessage({
+    appVersion: '0.5.0',
+    schemaVersion: 4,
+    supportedSchemaVersion: 4,
+    migrationCount: 4,
+    migrationState: 'current',
+  }), 'EasyWAR 0.5.0. Схема SQLite 4 із 4; перевірено міграцій: 4. Стан актуальний.');
+  assert.throws(() => databaseStatusMessage({
+    appVersion: '0.5.0',
+    schemaVersion: 3,
+    supportedSchemaVersion: 4,
+    migrationCount: 3,
+    migrationState: 'current',
+  }), TypeError);
+  assert.throws(() => databaseStatusMessage({ migrationState: 'unknown' }), TypeError);
 });
 
 test('restore startup messages keep applied, rollback, pending and failure distinct', () => {

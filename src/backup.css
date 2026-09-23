@@ -46,16 +46,19 @@
   font: 12px/1.5 var(--mono);
 }
 
+.ew-update-section,
 .ew-restore-section {
   margin: 18px 0;
   padding: 14px 0;
   border-block: 1px solid var(--line);
 }
 
+.ew-update-section h3,
 .ew-restore-section h3 {
   margin: 0 0 8px;
 }
 
+.ew-update-section p,
 .ew-restore-section p {
   margin: 0 0 12px;
   color: var(--muted);

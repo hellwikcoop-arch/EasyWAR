@@ -210,6 +210,20 @@ gate.
 
 ## Migration workflow
 
+The backup dialog exposes a local **Оновлення та міграції** status. The
+`get_database_status` command reads the active `_sqlx_migrations` table through
+the existing native pool after startup migrations finish. It requires the exact
+registered version sequence, successful flags and SHA-384 checksums, then shows
+the application version, active schema version, latest supported schema version
+and migration count. The frontend has no fallback that can label an unknown,
+partial or checksum-mismatched state as current.
+
+The same panel explicitly tells the user to create and verify a local backup
+before installing a newer EasyWAR version. This is local migration UX, not a
+network updater: release discovery, download, signature verification and
+installation are not implemented. Cross-version data-preservation acceptance
+remains part of the separate stable-migration release gate.
+
 1. Add a numbered SQL file under `src-tauri/migrations/`.
 2. Register it in `src-tauri/src/database.rs` with the next integer version.
 3. Add a synthetic test that applies all migrations to an empty in-memory DB.

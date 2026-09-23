@@ -18,6 +18,7 @@ pub mod xlsx_import;
 
 use backup::BackupStore;
 use chrono::{SecondsFormat, Utc};
+use database::{DatabaseStatus, DatabaseStatusStore};
 use local_profiles::{LocalProfileStore, LocalProfilesState};
 use position_templates::PositionDatabaseTemplate;
 use repository::{
@@ -42,6 +43,13 @@ use workspace_templates::{WorkspaceTemplateStore, WorkspaceTemplatesState};
 use xlsx_export::XlsxExportResult;
 
 struct LiveDatabasePath(PathBuf);
+
+#[tauri::command]
+async fn get_database_status(
+    status: tauri::State<'_, DatabaseStatusStore>,
+) -> Result<DatabaseStatus, String> {
+    status.load().await.map_err(|error| error.to_string())
+}
 
 #[tauri::command]
 async fn get_dashboard_model(
@@ -694,6 +702,7 @@ pub fn run() {
             app.manage(LocalProfileStore::new(pool.clone()));
             app.manage(WorkspaceTemplateStore::new(pool.clone()));
             app.manage(SignalReceiveController::default());
+            app.manage(DatabaseStatusStore::new(pool.clone()));
             app.manage(BackupStore::new(pool));
             app.manage(LiveDatabasePath(setup_database_file));
             app.manage(instance_lock);
@@ -701,6 +710,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            get_database_status,
             get_dashboard_model,
             get_local_profiles,
             create_local_profile,

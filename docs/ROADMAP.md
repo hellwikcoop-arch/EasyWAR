@@ -90,7 +90,7 @@
   - [x] non-overwriting, revalidated staging primitive
   - [x] synthetic-tested offline swap and interrupted-swap rollback primitive
   - [x] in-app restore with preflight and controlled restart
-- [ ] update/migration UX
+- [x] update/migration UX (local verified schema/app status and pre-update backup guidance; no network updater)
 
 ## 1.0 — Production release
 
