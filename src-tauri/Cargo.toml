@@ -16,6 +16,8 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 calamine = { version = "=0.26.1", features = ["dates"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+quick-xml = "=0.31.0"
+regex = "=1.13.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.13.5", default-features = false, features = ["json"] }

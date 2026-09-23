@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { runXlsxExport, runXlsxInspection, runXlsxStage } from '../src/xlsx-inspection.js';
+import {
+  runXlsxExport,
+  runXlsxInspection,
+  runXlsxReferenceExport,
+  runXlsxStage,
+} from '../src/xlsx-inspection.js';
 
 function controls() {
   return [{ disabled: false }, { textContent: '' }];
@@ -103,4 +108,32 @@ test('approved XLSX export cancellation and errors make no completion claim', as
   await runXlsxExport(button, status, async () => { throw new Error('synthetic export failure'); });
   assert.match(status.textContent, /не виконано/);
   assert.match(status.textContent, /synthetic export failure/);
+});
+
+test('reference XLSX export reports preserved reference and a new file', async () => {
+  const [button, status] = controls();
+  const called = [];
+  await runXlsxReferenceExport(button, status, async command => {
+    called.push(command);
+    return { exported_rows: 2 };
+  });
+
+  assert.deepEqual(called, ['export_approved_xlsx_from_reference']);
+  assert.equal(button.disabled, false);
+  assert.match(status.textContent, /Схвалених записів: 2/);
+  assert.match(status.textContent, /еталонний/);
+  assert.match(status.textContent, /не перезаписуються/);
+});
+
+test('reference XLSX export cancellation and errors preserve the source claim', async () => {
+  const [button, status] = controls();
+  await runXlsxReferenceExport(button, status, async () => null);
+  assert.match(status.textContent, /скасовано/);
+  assert.match(status.textContent, /Еталонний XLSX і локальні дані не змінено/);
+
+  await runXlsxReferenceExport(button, status, async () => {
+    throw new Error('synthetic reference failure');
+  });
+  assert.match(status.textContent, /не виконано/);
+  assert.match(status.textContent, /synthetic reference failure/);
 });

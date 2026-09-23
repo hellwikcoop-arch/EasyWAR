@@ -393,6 +393,71 @@ async fn export_approved_xlsx(
     Ok(Some(XlsxExportResult { exported_rows }))
 }
 
+#[tauri::command]
+async fn export_approved_xlsx_from_reference(
+    app: tauri::AppHandle,
+    repository: tauri::State<'_, Repository>,
+) -> Result<Option<XlsxExportResult>, String> {
+    let snapshots = repository
+        .approved_revision_snapshots()
+        .await
+        .map_err(|error| error.to_string())?;
+    let records = xlsx_export::records_from_approved_snapshots(&snapshots)
+        .map_err(|error| error.to_string())?;
+    let exported_rows = records.len();
+    let reference_app = app.clone();
+    let selected_reference = tauri::async_runtime::spawn_blocking(move || {
+        reference_app
+            .dialog()
+            .file()
+            .set_title("Оберіть еталонний XLSX EasyWAR")
+            .add_filter("Таблиця XLSX", &["xlsx"])
+            .blocking_pick_file()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let Some(selected_reference) = selected_reference else {
+        return Ok(None);
+    };
+    let reference_path = selected_reference
+        .into_path()
+        .map_err(|error| error.to_string())?;
+    let bytes = tauri::async_runtime::spawn_blocking(move || {
+        let reference_bytes = read_selected_xlsx(&reference_path)?;
+        xlsx_export::build_compatible_xlsx_from_reference(&reference_bytes, &records)
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    let suggested_name = format!(
+        "EasyWAR-export-за-зразком-{}.xlsx",
+        Utc::now().format("%Y-%m-%d")
+    );
+    let selected_destination = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title("Зберегти новий XLSX за еталоном")
+            .set_file_name(&suggested_name)
+            .add_filter("Таблиця XLSX", &["xlsx"])
+            .blocking_save_file()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let Some(selected_destination) = selected_destination else {
+        return Ok(None);
+    };
+    let destination = selected_destination
+        .into_path()
+        .map_err(|error| error.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        xlsx_export::write_new_compatible_xlsx(&destination, &bytes)
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    Ok(Some(XlsxExportResult { exported_rows }))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -442,7 +507,8 @@ pub fn run() {
             inspect_local_backup,
             inspect_local_xlsx,
             stage_local_xlsx,
-            export_approved_xlsx
+            export_approved_xlsx,
+            export_approved_xlsx_from_reference
         ])
         .run(tauri::generate_context!())
         .expect("помилка запуску EasyWAR");

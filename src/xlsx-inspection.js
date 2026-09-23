@@ -77,18 +77,44 @@ export async function runXlsxExport(button, status, invokeCommand = invoke) {
   }
 }
 
+export async function runXlsxReferenceExport(button, status, invokeCommand = invoke) {
+  if (button.disabled || xlsxOperationPending) return;
+  xlsxOperationPending = true;
+  button.disabled = true;
+  status.textContent = 'Оберіть еталонний XLSX, а потім нову назву для результату…';
+
+  try {
+    const result = await invokeCommand('export_approved_xlsx_from_reference');
+    if (result === null) {
+      status.textContent = 'Експорт за зразком скасовано. Еталонний XLSX і локальні дані не змінено.';
+    } else {
+      if (!Number.isSafeInteger(result?.exported_rows) || result.exported_rows < 1) {
+        throw new Error('Некоректна відповідь локального експорту за зразком.');
+      }
+      status.textContent = `Експорт за зразком завершено. Схвалених записів: ${result.exported_rows}. Створено новий XLSX; еталонний і наявні файли не перезаписуються.`;
+    }
+  } catch (error) {
+    status.textContent = `Експорт за зразком не виконано: ${String(error)}`;
+  } finally {
+    button.disabled = false;
+    xlsxOperationPending = false;
+  }
+}
+
 function initializeXlsxInspection() {
   if (typeof window.__TAURI_INTERNALS__?.invoke !== 'function') return;
   const panel = document.querySelector('#xlsxInspectPanel');
   const button = document.querySelector('#xlsxInspectBtn');
   const stageButton = document.querySelector('#xlsxStageBtn');
   const exportButton = document.querySelector('#xlsxExportBtn');
+  const referenceExportButton = document.querySelector('#xlsxReferenceExportBtn');
   const status = document.querySelector('#xlsxInspectStatus');
-  if (!panel || !button || !stageButton || !exportButton || !status) return;
+  if (!panel || !button || !stageButton || !exportButton || !referenceExportButton || !status) return;
   panel.hidden = false;
   button.addEventListener('click', () => { void runXlsxInspection(button, status); });
   stageButton.addEventListener('click', () => { void runXlsxStage(stageButton, status); });
   exportButton.addEventListener('click', () => { void runXlsxExport(exportButton, status); });
+  referenceExportButton.addEventListener('click', () => { void runXlsxReferenceExport(referenceExportButton, status); });
 }
 
 if (typeof document !== 'undefined') {

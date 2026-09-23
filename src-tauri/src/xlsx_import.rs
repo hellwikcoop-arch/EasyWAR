@@ -75,6 +75,10 @@ pub(crate) const FIELD_SPECS: [FieldSpec; 15] = [
 ];
 
 impl FieldSpec {
+    pub(crate) const fn key(self) -> &'static str {
+        self.key
+    }
+
     pub(crate) const fn header(self) -> &'static str {
         self.header
     }

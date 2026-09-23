@@ -881,6 +881,8 @@ version = "0.5.0"
 dependencies = [
  "calamine",
  "chrono",
+ "quick-xml 0.31.0",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",
