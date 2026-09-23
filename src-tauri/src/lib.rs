@@ -24,18 +24,24 @@ use repository::{
     Repository, ReviewDecision, SettingsStore, SignalInboxItem, SignalParsePersistence,
     SignalReviewPersistence, SignalReviewSnapshot, XlsxStageResult,
 };
-use restore::BackupInspection;
+use restore::{BackupInspection, RestoreStartupReport};
 use serde_json::Value;
 use signal_daemon::{SignalAccountSummary, SignalGroupSummary, SignalLinkStart};
 use signal_policy::SignalAdapterConfig;
 use signal_session::{SignalReceiveController, SignalSessionStatus, SignalSessionSummary};
 use signal_settings::SignalSettingsStore;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
-use std::{io::Read, path::Path, time::Duration};
+use std::{
+    io::Read,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
 use workspace_templates::{WorkspaceTemplateStore, WorkspaceTemplatesState};
 use xlsx_export::XlsxExportResult;
+
+struct LiveDatabasePath(PathBuf);
 
 #[tauri::command]
 async fn get_dashboard_model(
@@ -395,6 +401,63 @@ async fn inspect_local_backup(app: tauri::AppHandle) -> Result<Option<BackupInsp
         .map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+async fn stage_local_restore(
+    app: tauri::AppHandle,
+    live_database: tauri::State<'_, LiveDatabasePath>,
+) -> Result<Option<BackupInspection>, String> {
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title("Обрати резервну копію для відновлення EasyWAR")
+            .add_filter("База SQLite", &["sqlite3"])
+            .blocking_pick_file()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let source = selected.into_path().map_err(|error| error.to_string())?;
+    restore::stage_backup(&source, &live_database.0)
+        .await
+        .map(Some)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn cancel_staged_restore(live_database: tauri::State<'_, LiveDatabasePath>) -> Result<(), String> {
+    restore::cancel_staged_restore(&live_database.0).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn apply_staged_restore_and_restart(
+    app: tauri::AppHandle,
+    live_database: tauri::State<'_, LiveDatabasePath>,
+) -> Result<(), String> {
+    restore::request_staged_restore(&live_database.0)
+        .await
+        .map_err(|error| error.to_string())?;
+    app.request_restart();
+    Ok(())
+}
+
+#[tauri::command]
+fn get_restore_startup_report(
+    report: tauri::State<'_, RestoreStartupReport>,
+) -> RestoreStartupReport {
+    report.inner().clone()
+}
+
+#[tauri::command]
+async fn finalize_local_restore(
+    live_database: tauri::State<'_, LiveDatabasePath>,
+) -> Result<(), String> {
+    restore::finalize_previous_backup(&live_database.0)
+        .await
+        .map_err(|error| error.to_string())
+}
+
 fn read_selected_xlsx(path: &Path) -> Result<Vec<u8>, String> {
     if !path
         .extension()
@@ -588,6 +651,21 @@ async fn export_approved_xlsx_from_reference(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let context = tauri::generate_context!();
+    let database_name = database::DATABASE_URL
+        .strip_prefix("sqlite:")
+        .expect("локальна база має використовувати SQLite");
+    let database_file = dirs::config_dir()
+        .expect("не вдалося визначити локальну директорію конфігурації")
+        .join(&context.config().identifier)
+        .join(database_name);
+    let instance_lock = restore::acquire_application_instance_lock(&database_file)
+        .expect("інший екземпляр EasyWAR уже працює або lock недоступний");
+    let restore_startup_report =
+        tauri::async_runtime::block_on(restore::process_requested_restore(&database_file))
+            .expect("не вдалося безпечно обробити підготовлене відновлення");
+    let setup_database_file = database_file.clone();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(
@@ -595,13 +673,15 @@ pub fn run() {
                 .add_migrations(database::DATABASE_URL, database::migrations())
                 .build(),
         )
-        .setup(|app| {
-            let database_name = database::DATABASE_URL
-                .strip_prefix("sqlite:")
-                .expect("локальна база має використовувати SQLite");
-            let database_file = app.path().app_config_dir()?.join(database_name);
+        .setup(move |app| {
+            let resolved_database_file = app.path().app_config_dir()?.join(database_name);
+            if resolved_database_file != setup_database_file {
+                return Err(
+                    "шлях локальної бази не збігається з перевіреним startup-шляхом".into(),
+                );
+            }
             let options = SqliteConnectOptions::new()
-                .filename(database_file)
+                .filename(&setup_database_file)
                 .foreign_keys(true)
                 .busy_timeout(Duration::from_secs(5));
             let pool = tauri::async_runtime::block_on(
@@ -615,6 +695,9 @@ pub fn run() {
             app.manage(WorkspaceTemplateStore::new(pool.clone()));
             app.manage(SignalReceiveController::default());
             app.manage(BackupStore::new(pool));
+            app.manage(LiveDatabasePath(setup_database_file));
+            app.manage(instance_lock);
+            app.manage(restore_startup_report);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -644,12 +727,17 @@ pub fn run() {
             get_signal_receive_status,
             create_local_backup,
             inspect_local_backup,
+            stage_local_restore,
+            cancel_staged_restore,
+            apply_staged_restore_and_restart,
+            get_restore_startup_report,
+            finalize_local_restore,
             inspect_local_xlsx,
             stage_local_xlsx,
             export_approved_xlsx,
             export_approved_xlsx_from_reference
         ])
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("помилка запуску EasyWAR");
 }
 

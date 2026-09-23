@@ -172,20 +172,29 @@ matches applied `_sqlx_migrations` versions and SHA-384 checksums to the
 registered EasyWAR migrations. It also requires the core tables and current
 state view. A missing, altered, newer, or unrelated database is rejected.
 Preflight also rejects SQLite files with companion WAL, SHM, or rollback-journal
-files. The separate staging primitive copies a validated file to a temporary
-file next to the live database, validates the copy again, and publishes it only
-if no pending candidate exists. It is not exposed in the desktop UI yet and
-does not replace or restart the running database. A future restore flow must
-serialize app instances and close SQLite connections before enabling restore
-in the UI. An offline-only swap primitive now rejects live WAL/SHM/journal
-sidecars, validates the staged database again, and moves the prior database to
-`easywar.db.restore-previous` before replacing the live file. If interrupted
-between renames, a separate recovery primitive moves the prior file back and
-leaves the staged candidate intact. After a completed swap, the prior file is
-retained and blocks another swap until explicitly handled. These primitives
-are tested only with temporary synthetic databases and are **not wired into
-application startup or any desktop command**: instance locking, controlled
-restart, recovery UX, and real-platform acceptance remain open.
+files. The in-app restore flow copies a validated file to a temporary file next
+to the live database, validates the copy again, and exposes separate cancel and
+confirm actions. Selection and staging never replace the running database.
+
+EasyWAR acquires an exclusive cross-process lock before Tauri or any SQLite pool
+starts. After explicit confirmation it writes a small local restore-request
+marker and asks Tauri for a controlled restart. On the next process start, while
+the lock is held and before the SQL plugin opens the database, the app validates
+the staged copy again, moves the current database to
+`easywar.db.restore-previous`, and atomically renames the staged copy into place.
+The request marker is never inferred from the presence of a staged file, so an
+unconfirmed candidate cannot be applied automatically. WAL/SHM/journal
+sidecars still block the swap.
+
+If the process was interrupted between the two renames, startup restores the
+previous database, leaves the candidate staged, clears the one-shot request and
+reports the rollback in the backup dialog. After a successful restart, the
+previous database remains available and blocks another restore until the user
+explicitly chooses **Видалити попередню базу**. That final action revalidates
+both the active and previous databases before deleting the previous file. All
+automated restore tests use temporary synthetic databases; acceptance of the
+full restart flow in packaged macOS and Windows applications remains a release
+gate.
 
 ## Invariants
 

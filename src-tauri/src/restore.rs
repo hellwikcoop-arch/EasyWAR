@@ -1,18 +1,44 @@
 use crate::database;
+use fs2::FileExt;
 use serde::Serialize;
 use sha2::{Digest, Sha384};
 use sqlx::{sqlite::SqliteConnectOptions, sqlite::SqlitePoolOptions};
 use std::{
     ffi::OsString,
-    fs::{self, File},
-    io,
+    fs::{self, File, OpenOptions},
+    io::{self, Write},
     path::{Path, PathBuf},
+    thread,
+    time::{Duration, Instant},
 };
 use tempfile::NamedTempFile;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct BackupInspection {
     pub schema_version: i64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RestoreStartupOutcome {
+    None,
+    Applied,
+    RolledBack,
+    Failed,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreStartupReport {
+    pub outcome: RestoreStartupOutcome,
+    pub schema_version: Option<i64>,
+    pub pending_restore_available: bool,
+    pub previous_backup_retained: bool,
+    pub detail: Option<String>,
+}
+
+pub struct ApplicationInstanceLock {
+    _file: File,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -23,10 +49,20 @@ pub enum RestoreInspectionError {
     InvalidTarget,
     #[error("підготовлена копія вже існує; спочатку заверште або скасуйте попереднє відновлення")]
     PendingAlreadyExists,
+    #[error("підготовленої копії для відновлення немає")]
+    PendingMissing,
+    #[error("відновлення вже підтверджено й очікує перезапуску")]
+    RestoreAlreadyRequested,
+    #[error("службовий файл відновлення має некоректний тип")]
+    InvalidRestoreControlFile,
+    #[error("EasyWAR уже запущено; відновлення в іншому екземплярі заборонено")]
+    AnotherInstanceRunning,
     #[error("поточна база відсутня або не є звичайним файлом")]
     InvalidLiveDatabase,
     #[error("попередня база вже збережена; нове відновлення заблоковано")]
     PreviousBackupExists,
+    #[error("попередньої бази для завершення відновлення немає")]
+    PreviousBackupMissing,
     #[error("поточна база має супровідні файли WAL/SHM/journal; заміна заборонена")]
     LiveSidecarsPresent,
     #[error("нова база не пройшла перевірку; попередню базу збережено: {0}")]
@@ -63,6 +99,14 @@ pub fn previous_backup_path(live_database: &Path) -> Result<PathBuf, RestoreInsp
     sibling_path(live_database, ".restore-previous")
 }
 
+pub fn restore_request_path(live_database: &Path) -> Result<PathBuf, RestoreInspectionError> {
+    sibling_path(live_database, ".restore-requested")
+}
+
+fn instance_lock_path(live_database: &Path) -> Result<PathBuf, RestoreInspectionError> {
+    sibling_path(live_database, ".instance-lock")
+}
+
 fn sibling_path(live_database: &Path, suffix: &str) -> Result<PathBuf, RestoreInspectionError> {
     if !live_database.is_absolute() || live_database.file_name().is_none() {
         return Err(RestoreInspectionError::InvalidTarget);
@@ -70,6 +114,47 @@ fn sibling_path(live_database: &Path, suffix: &str) -> Result<PathBuf, RestoreIn
     let mut name: OsString = live_database.file_name().unwrap().to_owned();
     name.push(suffix);
     Ok(live_database.with_file_name(name))
+}
+
+pub fn acquire_application_instance_lock(
+    live_database: &Path,
+) -> Result<ApplicationInstanceLock, RestoreInspectionError> {
+    acquire_application_instance_lock_with_timeout(live_database, Duration::from_secs(5))
+}
+
+fn acquire_application_instance_lock_with_timeout(
+    live_database: &Path,
+    timeout: Duration,
+) -> Result<ApplicationInstanceLock, RestoreInspectionError> {
+    let parent = live_database
+        .parent()
+        .ok_or(RestoreInspectionError::InvalidTarget)?;
+    fs::create_dir_all(parent)?;
+    let lock_path = instance_lock_path(live_database)?;
+    if let Ok(metadata) = fs::symlink_metadata(&lock_path) {
+        if !metadata.file_type().is_file() {
+            return Err(RestoreInspectionError::InvalidRestoreControlFile);
+        }
+    }
+    let file = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(lock_path)?;
+    let started = Instant::now();
+    loop {
+        match file.try_lock_exclusive() {
+            Ok(()) => return Ok(ApplicationInstanceLock { _file: file }),
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                if started.elapsed() >= timeout {
+                    return Err(RestoreInspectionError::AnotherInstanceRunning);
+                }
+                thread::sleep(Duration::from_millis(25));
+            }
+            Err(error) => return Err(RestoreInspectionError::Io(error)),
+        }
+    }
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -105,8 +190,9 @@ pub async fn recover_interrupted_swap(
 }
 
 /// Swap only after every SQLite connection is closed and one app instance has
-/// an exclusive lock. The desktop does NOT call this yet. Both renames are in
-/// the same directory; a previous database is retained for manual recovery.
+/// an exclusive lock. Desktop startup calls this only for an explicitly
+/// requested restore, before Tauri or any SQLite pool starts. Both renames are
+/// in the same directory; a previous database is retained for manual recovery.
 pub async fn swap_staged_backup_offline(
     live_database: &Path,
 ) -> Result<BackupInspection, RestoreInspectionError> {
@@ -132,6 +218,168 @@ pub async fn swap_staged_backup_offline(
     }
     sync_parent(live_database)?;
     Ok(inspection)
+}
+
+pub async fn request_staged_restore(
+    live_database: &Path,
+) -> Result<BackupInspection, RestoreInspectionError> {
+    let previous = previous_backup_path(live_database)?;
+    if path_exists(&previous)? {
+        return Err(RestoreInspectionError::PreviousBackupExists);
+    }
+    let staged = staged_backup_path(live_database)?;
+    if !fs::symlink_metadata(&staged).is_ok_and(|metadata| metadata.file_type().is_file()) {
+        return Err(RestoreInspectionError::PendingMissing);
+    }
+    let inspection = inspect_backup(&staged).await?;
+    let request = restore_request_path(live_database)?;
+    let parent = request
+        .parent()
+        .ok_or(RestoreInspectionError::InvalidTarget)?;
+    let mut marker = NamedTempFile::new_in(parent)?;
+    marker.write_all(b"easywar-restore-v1\n")?;
+    marker.as_file_mut().sync_all()?;
+    match marker.persist_noclobber(&request) {
+        Ok(_) => sync_parent(&request)?,
+        Err(error) if error.error.kind() == io::ErrorKind::AlreadyExists => {
+            return Err(RestoreInspectionError::RestoreAlreadyRequested)
+        }
+        Err(error) => return Err(error.error.into()),
+    }
+    Ok(inspection)
+}
+
+pub fn cancel_staged_restore(live_database: &Path) -> Result<(), RestoreInspectionError> {
+    if restore_requested(live_database)? {
+        return Err(RestoreInspectionError::RestoreAlreadyRequested);
+    }
+    let staged = staged_backup_path(live_database)?;
+    if !path_exists(&staged)? {
+        return Err(RestoreInspectionError::PendingMissing);
+    }
+    if !fs::symlink_metadata(&staged)?.file_type().is_file() {
+        return Err(RestoreInspectionError::InvalidRestoreControlFile);
+    }
+    fs::remove_file(&staged)?;
+    sync_parent(&staged)?;
+    Ok(())
+}
+
+pub async fn finalize_previous_backup(live_database: &Path) -> Result<(), RestoreInspectionError> {
+    let previous = previous_backup_path(live_database)?;
+    if !path_exists(&previous)? {
+        return Err(RestoreInspectionError::PreviousBackupMissing);
+    }
+    if !fs::symlink_metadata(&previous)?.file_type().is_file() {
+        return Err(RestoreInspectionError::InvalidRestoreControlFile);
+    }
+    inspect_backup(live_database).await?;
+    inspect_backup(&previous).await?;
+    fs::remove_file(&previous)?;
+    sync_parent(&previous)?;
+    Ok(())
+}
+
+pub async fn process_requested_restore(
+    live_database: &Path,
+) -> Result<RestoreStartupReport, RestoreInspectionError> {
+    let recovery = recover_interrupted_swap(live_database).await?;
+    if recovery == OfflineRestoreState::RolledBack {
+        remove_restore_request(live_database)?;
+        return Ok(RestoreStartupReport {
+            outcome: RestoreStartupOutcome::RolledBack,
+            schema_version: inspect_backup(live_database)
+                .await
+                .ok()
+                .map(|inspection| inspection.schema_version),
+            pending_restore_available: path_exists(&staged_backup_path(live_database)?)?,
+            previous_backup_retained: false,
+            detail: None,
+        });
+    }
+
+    if !restore_requested(live_database)? {
+        return Ok(RestoreStartupReport {
+            outcome: if recovery == OfflineRestoreState::AppliedWithPreviousCopy {
+                RestoreStartupOutcome::Applied
+            } else {
+                RestoreStartupOutcome::None
+            },
+            schema_version: if recovery == OfflineRestoreState::AppliedWithPreviousCopy {
+                Some(inspect_backup(live_database).await?.schema_version)
+            } else {
+                None
+            },
+            pending_restore_available: path_exists(&staged_backup_path(live_database)?)?,
+            previous_backup_retained: recovery == OfflineRestoreState::AppliedWithPreviousCopy,
+            detail: None,
+        });
+    }
+
+    if recovery == OfflineRestoreState::AppliedWithPreviousCopy {
+        remove_restore_request(live_database)?;
+        return Ok(RestoreStartupReport {
+            outcome: RestoreStartupOutcome::Applied,
+            schema_version: Some(inspect_backup(live_database).await?.schema_version),
+            pending_restore_available: false,
+            previous_backup_retained: true,
+            detail: None,
+        });
+    }
+
+    match swap_staged_backup_offline(live_database).await {
+        Ok(inspection) => {
+            remove_restore_request(live_database)?;
+            Ok(RestoreStartupReport {
+                outcome: RestoreStartupOutcome::Applied,
+                schema_version: Some(inspection.schema_version),
+                pending_restore_available: false,
+                previous_backup_retained: true,
+                detail: None,
+            })
+        }
+        Err(error) => {
+            remove_restore_request(live_database)?;
+            if let Ok(inspection) = inspect_backup(live_database).await {
+                Ok(RestoreStartupReport {
+                    outcome: RestoreStartupOutcome::Failed,
+                    schema_version: Some(inspection.schema_version),
+                    pending_restore_available: path_exists(&staged_backup_path(live_database)?)?,
+                    previous_backup_retained: path_exists(&previous_backup_path(live_database)?)?,
+                    detail: Some(error.to_string()),
+                })
+            } else {
+                Err(error)
+            }
+        }
+    }
+}
+
+fn restore_requested(live_database: &Path) -> Result<bool, RestoreInspectionError> {
+    let request = restore_request_path(live_database)?;
+    if !path_exists(&request)? {
+        return Ok(false);
+    }
+    if !fs::symlink_metadata(&request)?.file_type().is_file() {
+        return Err(RestoreInspectionError::InvalidRestoreControlFile);
+    }
+    if fs::read(&request)? != b"easywar-restore-v1\n" {
+        return Err(RestoreInspectionError::InvalidRestoreControlFile);
+    }
+    Ok(true)
+}
+
+fn remove_restore_request(live_database: &Path) -> Result<(), RestoreInspectionError> {
+    let request = restore_request_path(live_database)?;
+    if !path_exists(&request)? {
+        return Ok(());
+    }
+    if !fs::symlink_metadata(&request)?.file_type().is_file() {
+        return Err(RestoreInspectionError::InvalidRestoreControlFile);
+    }
+    fs::remove_file(&request)?;
+    sync_parent(&request)?;
+    Ok(())
 }
 
 fn rollback_rename<T>(
@@ -185,6 +433,12 @@ pub async fn stage_backup(
     source: &Path,
     live_database: &Path,
 ) -> Result<BackupInspection, RestoreInspectionError> {
+    if path_exists(&previous_backup_path(live_database)?)? {
+        return Err(RestoreInspectionError::PreviousBackupExists);
+    }
+    if restore_requested(live_database)? {
+        return Err(RestoreInspectionError::RestoreAlreadyRequested);
+    }
     let staged = staged_backup_path(live_database)?;
     if staged.symlink_metadata().is_ok() {
         return Err(RestoreInspectionError::PendingAlreadyExists);
@@ -704,5 +958,166 @@ mod tests {
         ));
         assert_eq!(fs::read(&previous).unwrap(), b"keep previous copy");
         assert_eq!(fs::read(&live).unwrap(), old_bytes);
+    }
+
+    #[tokio::test]
+    async fn staged_restore_requires_an_explicit_request_and_can_be_cancelled() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("synthetic-backup.sqlite3");
+        let source_pool = synthetic_database(&source).await;
+        source_pool.close().await;
+        let live = dir.path().join("easywar.db");
+        let live_pool = synthetic_database(&live).await;
+        live_pool.close().await;
+        let live_before = fs::read(&live).unwrap();
+
+        stage_backup(&source, &live).await.unwrap();
+        assert_eq!(
+            process_requested_restore(&live).await.unwrap(),
+            RestoreStartupReport {
+                outcome: RestoreStartupOutcome::None,
+                schema_version: None,
+                pending_restore_available: true,
+                previous_backup_retained: false,
+                detail: None,
+            }
+        );
+        assert_eq!(fs::read(&live).unwrap(), live_before);
+        assert!(staged_backup_path(&live).unwrap().exists());
+        assert!(!previous_backup_path(&live).unwrap().exists());
+
+        cancel_staged_restore(&live).unwrap();
+        assert!(!staged_backup_path(&live).unwrap().exists());
+    }
+
+    #[tokio::test]
+    async fn requested_restore_applies_offline_and_keeps_previous_until_finalized() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("synthetic-backup.sqlite3");
+        let source_pool = synthetic_database(&source).await;
+        sqlx::query(
+            "INSERT INTO settings (key, value_json, updated_at) VALUES ('version', '2', '2026-01-01')",
+        )
+        .execute(&source_pool)
+        .await
+        .unwrap();
+        source_pool.close().await;
+        let live = dir.path().join("easywar.db");
+        let live_pool = synthetic_database(&live).await;
+        sqlx::query(
+            "INSERT INTO settings (key, value_json, updated_at) VALUES ('version', '1', '2026-01-01')",
+        )
+        .execute(&live_pool)
+        .await
+        .unwrap();
+        live_pool.close().await;
+        let source_bytes = fs::read(&source).unwrap();
+        let live_bytes = fs::read(&live).unwrap();
+
+        stage_backup(&source, &live).await.unwrap();
+        assert_eq!(
+            request_staged_restore(&live).await.unwrap(),
+            BackupInspection { schema_version: 4 }
+        );
+        assert!(restore_request_path(&live).unwrap().exists());
+        assert_eq!(
+            process_requested_restore(&live).await.unwrap(),
+            RestoreStartupReport {
+                outcome: RestoreStartupOutcome::Applied,
+                schema_version: Some(4),
+                pending_restore_available: false,
+                previous_backup_retained: true,
+                detail: None,
+            }
+        );
+        assert_eq!(fs::read(&live).unwrap(), source_bytes);
+        assert_eq!(
+            fs::read(previous_backup_path(&live).unwrap()).unwrap(),
+            live_bytes
+        );
+        assert!(!restore_request_path(&live).unwrap().exists());
+
+        finalize_previous_backup(&live).await.unwrap();
+        assert!(!previous_backup_path(&live).unwrap().exists());
+        assert_eq!(fs::read(&live).unwrap(), source_bytes);
+    }
+
+    #[tokio::test]
+    async fn requested_restore_rolls_back_an_interrupted_rename_gap() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("synthetic-backup.sqlite3");
+        let source_pool = synthetic_database(&source).await;
+        source_pool.close().await;
+        let live = dir.path().join("easywar.db");
+        let live_pool = synthetic_database(&live).await;
+        live_pool.close().await;
+        let live_bytes = fs::read(&live).unwrap();
+
+        stage_backup(&source, &live).await.unwrap();
+        request_staged_restore(&live).await.unwrap();
+        fs::rename(&live, previous_backup_path(&live).unwrap()).unwrap();
+
+        assert_eq!(
+            process_requested_restore(&live).await.unwrap(),
+            RestoreStartupReport {
+                outcome: RestoreStartupOutcome::RolledBack,
+                schema_version: Some(4),
+                pending_restore_available: true,
+                previous_backup_retained: false,
+                detail: None,
+            }
+        );
+        assert_eq!(fs::read(&live).unwrap(), live_bytes);
+        assert!(staged_backup_path(&live).unwrap().exists());
+        assert!(!restore_request_path(&live).unwrap().exists());
+        assert!(!previous_backup_path(&live).unwrap().exists());
+    }
+
+    #[tokio::test]
+    async fn invalid_restore_marker_never_applies_the_staged_database() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("synthetic-backup.sqlite3");
+        let source_pool = synthetic_database(&source).await;
+        source_pool.close().await;
+        let live = dir.path().join("easywar.db");
+        let live_pool = synthetic_database(&live).await;
+        live_pool.close().await;
+        let live_bytes = fs::read(&live).unwrap();
+
+        stage_backup(&source, &live).await.unwrap();
+        fs::write(restore_request_path(&live).unwrap(), b"invalid marker").unwrap();
+        assert!(matches!(
+            process_requested_restore(&live).await,
+            Err(RestoreInspectionError::InvalidRestoreControlFile)
+        ));
+        assert_eq!(fs::read(&live).unwrap(), live_bytes);
+        assert!(staged_backup_path(&live).unwrap().exists());
+    }
+
+    #[test]
+    fn application_instance_lock_is_exclusive() {
+        let dir = tempfile::tempdir().unwrap();
+        let live = dir.path().join("easywar.db");
+        let first = acquire_application_instance_lock_with_timeout(&live, Duration::ZERO).unwrap();
+        assert!(matches!(
+            acquire_application_instance_lock_with_timeout(&live, Duration::ZERO),
+            Err(RestoreInspectionError::AnotherInstanceRunning)
+        ));
+        drop(first);
+        acquire_application_instance_lock_with_timeout(&live, Duration::ZERO).unwrap();
+    }
+
+    #[test]
+    fn restarting_instance_waits_for_the_previous_process_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let live = dir.path().join("easywar.db");
+        let first = acquire_application_instance_lock_with_timeout(&live, Duration::ZERO).unwrap();
+        let waiting_live = live.clone();
+        let waiter = thread::spawn(move || {
+            acquire_application_instance_lock_with_timeout(&waiting_live, Duration::from_secs(1))
+        });
+        thread::sleep(Duration::from_millis(75));
+        drop(first);
+        assert!(waiter.join().unwrap().is_ok());
     }
 }

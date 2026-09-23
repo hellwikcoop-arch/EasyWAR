@@ -1,5 +1,13 @@
 import { invoke } from '@tauri-apps/api/core';
 import './backup.css';
+import {
+  applyStagedRestoreAndRestart,
+  cancelStagedRestore,
+  finalizeLocalRestore,
+  getRestoreStartupReport,
+  restoreStartupMessage,
+  stageLocalRestore,
+} from './backup-core.js';
 
 function initializeBackup() {
   if (typeof window.__TAURI_INTERNALS__?.invoke !== 'function') return;
@@ -25,6 +33,16 @@ function initializeBackup() {
     <p class="ew-backup-warning">Копія може містити чутливі дані. Оберіть захищене місце зберігання; хмарні папки використовуйте лише свідомо. Наявний файл не буде перезаписано.</p>
     <p id="ew-backup-status" class="ew-backup-status" role="status" aria-live="polite"></p>
     <p id="ew-backup-location" class="ew-backup-location" hidden></p>
+    <section class="ew-restore-section" aria-labelledby="ew-restore-title">
+      <h3 id="ew-restore-title">Відновлення з копії</h3>
+      <p>Копія двічі перевіряється й готується окремо. Поточна база замінюється лише після явного підтвердження та контрольованого перезапуску.</p>
+      <div class="ew-backup-actions">
+        <button type="button" class="btn" id="ew-restore-select">Обрати й перевірити копію</button>
+        <button type="button" class="btn quiet" id="ew-restore-cancel-stage" hidden>Скасувати підготовку</button>
+        <button type="button" class="btn primary" id="ew-restore-apply" hidden>Відновити й перезапустити</button>
+        <button type="button" class="btn quiet" id="ew-restore-finalize" hidden>Видалити попередню базу</button>
+      </div>
+    </section>
     <div class="ew-backup-actions">
       <button type="button" class="btn" id="ew-backup-cancel">Скасувати</button>
       <button type="button" class="btn" id="ew-backup-inspect">Перевірити копію</button>
@@ -36,6 +54,35 @@ function initializeBackup() {
   const location = dialog.querySelector('#ew-backup-location');
   const createButton = dialog.querySelector('#ew-backup-create');
   const inspectButton = dialog.querySelector('#ew-backup-inspect');
+  const restoreSelectButton = dialog.querySelector('#ew-restore-select');
+  const restoreCancelButton = dialog.querySelector('#ew-restore-cancel-stage');
+  const restoreApplyButton = dialog.querySelector('#ew-restore-apply');
+  const restoreFinalizeButton = dialog.querySelector('#ew-restore-finalize');
+  let restoreReport = {
+    outcome: 'none',
+    pendingRestoreAvailable: false,
+    previousBackupRetained: false,
+  };
+
+  function setBusy(value) {
+    createButton.disabled = value;
+    inspectButton.disabled = value;
+    restoreSelectButton.disabled = value;
+    restoreCancelButton.disabled = value;
+    restoreApplyButton.disabled = value;
+    restoreFinalizeButton.disabled = value;
+  }
+
+  function renderRestoreState() {
+    restoreCancelButton.hidden = !restoreReport.pendingRestoreAvailable;
+    restoreApplyButton.hidden = !restoreReport.pendingRestoreAvailable;
+    restoreFinalizeButton.hidden = !restoreReport.previousBackupRetained;
+  }
+
+  void getRestoreStartupReport().then(report => {
+    restoreReport = report;
+    renderRestoreState();
+  }).catch(() => {});
 
   function close() {
     dialog.close();
@@ -46,15 +93,16 @@ function initializeBackup() {
     status.textContent = '';
     location.textContent = '';
     location.hidden = true;
-    createButton.disabled = false;
-    inspectButton.disabled = false;
+    setBusy(false);
+    renderRestoreState();
+    const startupMessage = restoreStartupMessage(restoreReport);
+    if (startupMessage) status.textContent = startupMessage;
     dialog.showModal();
   });
   dialog.querySelector('#ew-backup-close').addEventListener('click', close);
   dialog.querySelector('#ew-backup-cancel').addEventListener('click', close);
   inspectButton.addEventListener('click', async () => {
-    createButton.disabled = true;
-    inspectButton.disabled = true;
+    setBusy(true);
     status.textContent = 'Оберіть копію для перевірки…';
     location.hidden = true;
     location.textContent = '';
@@ -66,13 +114,11 @@ function initializeBackup() {
     } catch (error) {
       status.textContent = `Копія не пройшла перевірку: ${String(error)}`;
     } finally {
-      createButton.disabled = false;
-      inspectButton.disabled = false;
+      setBusy(false);
     }
   });
   createButton.addEventListener('click', async () => {
-    createButton.disabled = true;
-    inspectButton.disabled = true;
+    setBusy(true);
     status.textContent = 'Оберіть місце для резервної копії…';
     try {
       const path = await invoke('create_local_backup');
@@ -86,8 +132,72 @@ function initializeBackup() {
     } catch (error) {
       status.textContent = `Не вдалося створити копію: ${String(error)}`;
     } finally {
-      createButton.disabled = false;
-      inspectButton.disabled = false;
+      setBusy(false);
+    }
+  });
+
+  restoreSelectButton.addEventListener('click', async () => {
+    setBusy(true);
+    status.textContent = 'Оберіть резервну копію для перевірки й підготовки…';
+    location.hidden = true;
+    try {
+      const inspection = await stageLocalRestore();
+      if (inspection === null) {
+        status.textContent = 'Підготовку відновлення скасовано.';
+      } else {
+        restoreReport = {
+          outcome: 'none',
+          pendingRestoreAvailable: true,
+          previousBackupRetained: false,
+        };
+        status.textContent = `Копію підготовлено. Версія схеми: ${inspection.schema_version}. Поточна база ще не змінена.`;
+      }
+    } catch (error) {
+      status.textContent = `Не вдалося підготувати відновлення: ${String(error)}`;
+    } finally {
+      renderRestoreState();
+      setBusy(false);
+    }
+  });
+
+  restoreCancelButton.addEventListener('click', async () => {
+    setBusy(true);
+    try {
+      await cancelStagedRestore();
+      restoreReport.pendingRestoreAvailable = false;
+      status.textContent = 'Підготовлену копію видалено. Поточна база не змінена.';
+    } catch (error) {
+      status.textContent = `Не вдалося скасувати підготовку: ${String(error)}`;
+    } finally {
+      renderRestoreState();
+      setBusy(false);
+    }
+  });
+
+  restoreApplyButton.addEventListener('click', async () => {
+    if (!window.confirm('Замінити поточну локальну базу підготовленою копією та перезапустити EasyWAR? Попередню базу буде тимчасово збережено для ручного відновлення.')) return;
+    setBusy(true);
+    status.textContent = 'Підтвердження збережено. EasyWAR перезапускається для безпечної заміни бази…';
+    try {
+      await applyStagedRestoreAndRestart();
+    } catch (error) {
+      status.textContent = `Не вдалося запустити відновлення: ${String(error)}`;
+      setBusy(false);
+    }
+  });
+
+  restoreFinalizeButton.addEventListener('click', async () => {
+    if (!window.confirm('Видалити попередню базу після успішного відновлення? Цю резервну можливість відкату буде втрачено.')) return;
+    setBusy(true);
+    try {
+      await finalizeLocalRestore();
+      restoreReport.previousBackupRetained = false;
+      status.textContent = 'Відновлення завершено. Попередню базу видалено.';
+    } catch (error) {
+      status.textContent = `Не вдалося завершити відновлення: ${String(error)}`;
+    } finally {
+      renderRestoreState();
+      setBusy(false);
     }
   });
 }

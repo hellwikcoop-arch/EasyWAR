@@ -46,6 +46,21 @@
   font: 12px/1.5 var(--mono);
 }
 
+.ew-restore-section {
+  margin: 18px 0;
+  padding: 14px 0;
+  border-block: 1px solid var(--line);
+}
+
+.ew-restore-section h3 {
+  margin: 0 0 8px;
+}
+
+.ew-restore-section p {
+  margin: 0 0 12px;
+  color: var(--muted);
+}
+
 .ew-backup-actions {
   justify-content: flex-end;
   flex-wrap: wrap;
