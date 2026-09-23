@@ -86,6 +86,17 @@ or constitute an operational approval UI. The preview's JavaScript transition
 rules are regression-tested separately; the Rust review model remains the
 source contract for a future persistent implementation.
 
+The dialog also has a separate user-triggered, read-only local queue. Its
+backend returns at most 100 existing `SIGNAL` provenance records from the
+application SQLite database with the report identifier, source item key,
+source/capture times, derived status, and stored SHA-256. The UI renders the
+identifier, source item key, capture time, and status. The command does not
+return `raw_text` or `raw_payload_json`, and the UI has no action that changes
+a record. Synthetic repository tests verify source filtering, the `NEW` to
+`PARSED` derived status, the fixed list bound, and the absence of raw content
+in the serialized result. This list does not capture messages or prove that a
+live connector is running.
+
 ## Not implemented in this step
 
 - daemon process management;
@@ -94,7 +105,7 @@ source contract for a future persistent implementation.
 - account/group discovery over UNIX or raw TCP;
 - enabling or connecting a Signal account;
 - message ingestion and parsing;
-- Signal Inbox persistence or a UI for real messages.
+- live Signal Inbox capture, parsing, or review-state writes.
 
 All tests use synthetic configuration values only, including the disconnected
 UI-state regression tests.

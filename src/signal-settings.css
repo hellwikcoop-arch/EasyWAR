@@ -49,6 +49,7 @@
   font-size: 13px;
 }
 
+.ew-signal-inbox,
 .ew-signal-demo {
   padding: 10px 12px;
   border: 1px solid var(--line-strong);
@@ -126,16 +127,19 @@
   color: var(--muted);
 }
 
+.ew-signal-inbox summary,
 .ew-signal-demo summary {
   cursor: pointer;
   font-weight: 600;
 }
 
+.ew-signal-inbox p,
 .ew-signal-demo p {
   font-size: 13px;
   color: var(--muted);
 }
 
+.ew-signal-inbox-list,
 .ew-signal-demo-list {
   display: grid;
   gap: 10px;
@@ -143,12 +147,18 @@
   list-style: none;
 }
 
+.ew-signal-inbox-list li,
 .ew-signal-demo-list li {
   display: grid;
   gap: 5px;
   padding: 9px;
   border: 1px solid var(--line-strong);
   border-radius: 8px;
+}
+
+.ew-signal-inbox-list code {
+  overflow-wrap: anywhere;
+  color: var(--muted);
 }
 
 .ew-signal-demo-actions {

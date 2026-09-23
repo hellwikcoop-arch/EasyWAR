@@ -6,7 +6,7 @@ import {
   completeSignalLinkSession,
   createSignalLinkSession,
 } from './signal-link.js';
-import { describeSignalRuntime } from './signal-runtime.js';
+import { describePersistedSignalInbox, describeSignalRuntime } from './signal-runtime.js';
 import './signal-settings.css';
 
 function uniqueLines(value) {
@@ -70,6 +70,13 @@ function initializeSignalSettings() {
         <textarea id="ew-signal-groups" rows="4" spellcheck="false" autocomplete="off"></textarea>
       </label>
       <p class="ew-signal-note">Приймання повідомлень залишатиметься вимкненим. Схвалення записів виконується лише після перевірки.</p>
+      <details id="ew-signal-inbox" class="ew-signal-inbox">
+        <summary>Локальна черга Signal</summary>
+        <p>Показує лише метадані вже збережених записів походження. Текст і JSON повідомлень у цей список не передаються. Живе приймання вимкнене.</p>
+        <button type="button" class="btn quiet" id="ew-signal-inbox-refresh">Оновити локальну чергу</button>
+        <ul id="ew-signal-inbox-list" class="ew-signal-inbox-list"></ul>
+        <p id="ew-signal-inbox-status" class="ew-signal-status" role="status" aria-live="polite">Чергу ще не завантажено.</p>
+      </details>
       <details id="ew-signal-demo" class="ew-signal-demo">
         <summary>Черга Signal — демонстрація</summary>
         <p>Лише вигадані записи. Вони не надходять із Signal, не зберігаються й скидаються після закриття вікна. Не вводьте реальні дані.</p>
@@ -90,6 +97,10 @@ function initializeSignalSettings() {
   const status = dialog.querySelector('#ew-signal-status');
   const runtime = dialog.querySelector('#ew-signal-runtime');
   const saveButton = dialog.querySelector('#ew-signal-save');
+  const inbox = dialog.querySelector('#ew-signal-inbox');
+  const inboxRefresh = dialog.querySelector('#ew-signal-inbox-refresh');
+  const inboxList = dialog.querySelector('#ew-signal-inbox-list');
+  const inboxStatus = dialog.querySelector('#ew-signal-inbox-status');
   const demo = dialog.querySelector('#ew-signal-demo');
   const demoList = dialog.querySelector('#ew-signal-demo-list');
   const demoStatus = dialog.querySelector('#ew-signal-demo-status');
@@ -109,6 +120,7 @@ function initializeSignalSettings() {
   let discoveryEpoch = 0;
   let groupsEpoch = 0;
   let linkEpoch = 0;
+  let inboxEpoch = 0;
   let linkBusy = false;
   let linkSession = clearSignalLinkSession();
   const statusLabels = {
@@ -158,6 +170,40 @@ function initializeSignalSettings() {
     }
   }
 
+  function renderPersistedInbox(items) {
+    const described = describePersistedSignalInbox(items);
+    inboxList.replaceChildren();
+    for (const item of described.rows) {
+      const row = document.createElement('li');
+      const heading = document.createElement('strong');
+      heading.textContent = `Запис ${item.reportId}`;
+      const source = document.createElement('code');
+      source.textContent = item.sourceItemKey;
+      const details = document.createElement('span');
+      details.textContent = `${item.capturedAt} · ${item.statusLabel}`;
+      row.append(heading, source, details);
+      inboxList.append(row);
+    }
+    inboxStatus.textContent = described.message;
+  }
+
+  inboxRefresh.addEventListener('click', async () => {
+    const epoch = ++inboxEpoch;
+    inboxRefresh.disabled = true;
+    inboxStatus.textContent = 'Завантажуємо локальну чергу…';
+    try {
+      const items = await invoke('list_signal_inbox');
+      if (epoch !== inboxEpoch) return;
+      renderPersistedInbox(items);
+    } catch (error) {
+      if (epoch !== inboxEpoch) return;
+      inboxList.replaceChildren();
+      inboxStatus.textContent = `Не вдалося завантажити локальну чергу: ${String(error)}`;
+    } finally {
+      if (epoch === inboxEpoch) inboxRefresh.disabled = false;
+    }
+  });
+
   function close() {
     if (linkBusy) {
       linkStatus.textContent = 'Завершуємо прив’язку. Зачекайте на результат або завершення двохвилинного очікування.';
@@ -166,6 +212,7 @@ function initializeSignalSettings() {
     discoveryEpoch += 1;
     groupsEpoch += 1;
     linkEpoch += 1;
+    inboxEpoch += 1;
     dialog.close();
     openButton.focus();
   }
@@ -173,6 +220,7 @@ function initializeSignalSettings() {
     discoveryEpoch += 1;
     groupsEpoch += 1;
     linkEpoch += 1;
+    inboxEpoch += 1;
     resetLink();
   });
   dialog.addEventListener('cancel', event => {
@@ -324,6 +372,10 @@ function initializeSignalSettings() {
     resetLink();
     discoverButton.disabled = true;
     demoItems = createSyntheticInbox();
+    inbox.open = false;
+    inboxList.replaceChildren();
+    inboxStatus.textContent = 'Чергу ще не завантажено.';
+    inboxRefresh.disabled = false;
     demo.open = false;
     demoStatus.textContent = '';
     resetDiscovery();

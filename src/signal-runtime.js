@@ -10,3 +10,41 @@ export function describeSignalRuntime(config) {
       : 'EasyWAR не отримує повідомлень Signal. Одноразова перевірка демона не вмикає приймання.',
   };
 }
+
+const SIGNAL_INBOX_STATUS_LABELS = Object.freeze({
+  NEW: 'Нове',
+  PARSED: 'Розібрано',
+  NEEDS_REVIEW: 'Потребує перевірки',
+  APPROVED: 'Схвалено',
+  REJECTED: 'Відхилено',
+});
+
+function formatInboxTimestamp(value) {
+  const timestamp = new Date(value);
+  if (Number.isNaN(timestamp.getTime())) return 'час не визначено';
+  return new Intl.DateTimeFormat('uk-UA', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(timestamp);
+}
+
+export function describePersistedSignalInbox(items) {
+  const rows = Array.isArray(items)
+    ? items.map(item => ({
+      reportId: String(item?.report_id || ''),
+      sourceItemKey: String(item?.source_item_key || ''),
+      capturedAt: formatInboxTimestamp(item?.captured_at),
+      statusLabel: SIGNAL_INBOX_STATUS_LABELS[item?.current_status] || 'Невідомий стан',
+    })).filter(item => item.reportId && item.sourceItemKey)
+    : [];
+
+  return {
+    rows,
+    message: rows.length
+      ? `Записів у локальній черзі Signal: ${rows.length}.`
+      : 'Локальна черга Signal порожня.',
+  };
+}

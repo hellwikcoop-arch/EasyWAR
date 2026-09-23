@@ -40,6 +40,7 @@
 - [ ] Signal Inbox
   - [x] synthetic status transitions with a reviewer identifier
   - [x] clearly labelled synthetic-only UI preview (no persistence)
+  - [x] read-only provenance-backed local list and Ukrainian empty state (synthetic tests only)
   - [ ] persistence and UI
 - [x] status model: NEW / PARSED / NEEDS_REVIEW / APPROVED / REJECTED
 - [ ] import message into intake parser

@@ -9,7 +9,7 @@ pub mod signal_settings;
 pub mod xlsx_import;
 
 use backup::BackupStore;
-use repository::SettingsStore;
+use repository::{Repository, SettingsStore, SignalInboxItem};
 use restore::BackupInspection;
 use signal_daemon::{SignalAccountSummary, SignalGroupSummary, SignalLinkStart};
 use signal_policy::SignalAdapterConfig;
@@ -83,6 +83,16 @@ async fn finish_signal_link(
 ) -> Result<SignalAccountSummary, String> {
     let config = store.load().await.map_err(|error| error.to_string())?;
     signal_daemon::finish_link(&config.as_config().endpoint, &device_link_uri, &device_name)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn list_signal_inbox(
+    repository: tauri::State<'_, Repository>,
+) -> Result<Vec<SignalInboxItem>, String> {
+    repository
+        .list_signal_inbox(100)
         .await
         .map_err(|error| error.to_string())
 }
@@ -214,6 +224,7 @@ pub fn run() {
                     .connect_with(options),
             )?;
             app.manage(SignalSettingsStore::new(SettingsStore::new(pool.clone())));
+            app.manage(Repository::new(pool.clone()));
             app.manage(BackupStore::new(pool));
             Ok(())
         })
@@ -224,6 +235,7 @@ pub fn run() {
             discover_signal_groups,
             start_signal_link,
             finish_signal_link,
+            list_signal_inbox,
             create_local_backup,
             inspect_local_backup,
             inspect_local_xlsx

@@ -148,6 +148,16 @@ pub struct XlsxStageResult {
     pub already_present_rows: usize,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct SignalInboxItem {
+    pub report_id: String,
+    pub source_item_key: String,
+    pub source_timestamp: Option<String>,
+    pub captured_at: String,
+    pub current_status: String,
+    pub raw_sha256: String,
+}
+
 type ExistingXlsxRow = (String, Option<String>, Option<String>, Option<String>);
 
 #[derive(Debug, thiserror::Error)]
@@ -162,6 +172,8 @@ pub enum RepositoryError {
     XlsxIdentityConflict(String),
     #[error("Не вдалося серіалізувати розібраний рядок XLSX")]
     InvalidXlsxPayload(serde_json::Error),
+    #[error("Ліміт локальної черги Signal має бути від 1 до 100")]
+    InvalidSignalInboxLimit,
 }
 
 #[derive(Clone, Debug)]
@@ -604,6 +616,51 @@ impl Repository {
 
         Ok(status)
     }
+
+    pub async fn list_signal_inbox(
+        &self,
+        limit: u32,
+    ) -> Result<Vec<SignalInboxItem>, RepositoryError> {
+        if !(1..=100).contains(&limit) {
+            return Err(RepositoryError::InvalidSignalInboxLimit);
+        }
+
+        let rows = sqlx::query_as::<_, (String, String, Option<String>, String, String, String)>(
+            "SELECT reports.id, reports.source_item_key, raw_sources.source_timestamp,
+                    raw_sources.captured_at, report_current_state.current_status,
+                    raw_sources.raw_sha256
+             FROM reports
+             JOIN raw_sources ON raw_sources.id = reports.raw_source_id
+             JOIN report_current_state ON report_current_state.report_id = reports.id
+             WHERE raw_sources.source_type = 'SIGNAL'
+             ORDER BY raw_sources.captured_at DESC, reports.id DESC
+             LIMIT ?",
+        )
+        .bind(i64::from(limit))
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(
+                |(
+                    report_id,
+                    source_item_key,
+                    source_timestamp,
+                    captured_at,
+                    current_status,
+                    raw_sha256,
+                )| SignalInboxItem {
+                    report_id,
+                    source_item_key,
+                    source_timestamp,
+                    captured_at,
+                    current_status,
+                    raw_sha256,
+                },
+            )
+            .collect())
+    }
 }
 
 async fn insert_audit(
@@ -698,6 +755,71 @@ mod tests {
             parsed_at: NOW.to_owned(),
             audit: audit(audit_id),
         }
+    }
+
+    #[tokio::test]
+    async fn lists_only_signal_provenance_without_raw_content() {
+        let repository = repository().await;
+        let mut signal = capture("signal-source-1", "signal-report-1", "signal-audit-1");
+        signal.source_type = SourceType::Signal;
+        signal.source_timestamp = Some("2026-01-01T00:00:01Z".to_owned());
+        signal.raw_text = Some("SECRET-SYNTHETIC-MESSAGE".to_owned());
+        signal.raw_payload_json = Some(json!({ "message": "SECRET-SYNTHETIC-PAYLOAD" }));
+        signal.raw_sha256 = "b".repeat(64);
+
+        repository
+            .capture_report(&signal)
+            .await
+            .expect("synthetic Signal report capture must succeed");
+        repository
+            .capture_report(&capture(
+                "paste-source-1",
+                "paste-report-1",
+                "paste-audit-1",
+            ))
+            .await
+            .expect("synthetic paste capture must succeed");
+
+        let items = repository
+            .list_signal_inbox(100)
+            .await
+            .expect("synthetic Signal Inbox must query");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].report_id, "signal-report-1");
+        assert_eq!(items[0].current_status, "NEW");
+
+        let serialized = serde_json::to_string(&items).expect("Inbox item must serialize");
+        assert!(!serialized.contains("SECRET-SYNTHETIC-MESSAGE"));
+        assert!(!serialized.contains("SECRET-SYNTHETIC-PAYLOAD"));
+        assert!(!serialized.contains("raw_text"));
+        assert!(!serialized.contains("raw_payload_json"));
+
+        repository
+            .store_parse(&parse(
+                "signal-parse-1",
+                "signal-report-1",
+                "signal-audit-2",
+            ))
+            .await
+            .expect("synthetic Signal parse must succeed");
+        let parsed = repository
+            .list_signal_inbox(1)
+            .await
+            .expect("parsed Signal Inbox must query");
+        assert_eq!(parsed[0].current_status, "PARSED");
+    }
+
+    #[tokio::test]
+    async fn rejects_signal_inbox_limits_outside_the_read_only_bound() {
+        let repository = repository().await;
+        assert!(matches!(
+            repository.list_signal_inbox(0).await,
+            Err(RepositoryError::InvalidSignalInboxLimit)
+        ));
+        assert!(matches!(
+            repository.list_signal_inbox(101).await,
+            Err(RepositoryError::InvalidSignalInboxLimit)
+        ));
     }
 
     fn synthetic_xlsx_row(row_number: u32) -> XlsxImportRow {
