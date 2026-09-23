@@ -72,8 +72,8 @@ started from the desktop UI. It does not run continuously, apply the allowlist,
 or persist content. Tests use a temporary loopback HTTP server that verifies
 the order `events → subscribeReceive → receive → unsubscribeReceive`, including
 cleanup after a malformed synthetic event. A production connector still needs
-explicit user-controlled start/stop state, connected raw-source persistence,
-allowlist gating, and acceptance against an installed local `signal-cli`.
+acceptance against an installed local `signal-cli`; the repository currently
+proves the bounded lifecycle only against a synthetic loopback daemon.
 
 ## Provenance capture bridge
 
@@ -94,10 +94,33 @@ message and envelope remain in the local provenance store but are not returned
 by the read-only Inbox list. Synthetic tests cover allowed, denied, disabled,
 wrong-group, malformed, and duplicate cases.
 
-The bridge is not connected to `receive_bounded`, is not a Tauri command, and
-does not enable the saved desktop intake flag. A future user-controlled session
-must connect these boundaries without weakening cleanup, allowlist, or audit
-requirements.
+The bridge is not itself a Tauri command and does not enable the saved desktop
+intake flag. It is used only by the explicit bounded session described below.
+
+## Explicit desktop receive session
+
+After discovery, the settings dialog lets the user select one local account and
+press **Почати сеанс приймання**. This creates an in-memory, validated session
+policy from the saved allowlist without changing the persisted
+`intake_enabled: false` setting. Only one session can run at a time. It accepts
+at most 64 matching-account notifications for at most five minutes and persists
+each allowed notification immediately through the provenance bridge. Sources
+outside the allowlist are counted, not stored, and do not terminate the session.
+
+The user can press **Зупинити й відписатися**. Stop is delivered to the receive
+loop, which calls `unsubscribeReceive` before reporting completion. The same
+cleanup is required for the notification limit, timeout, decoder failure, or
+database error. The dialog cannot be dismissed while its session is active and
+shows an active receive state instead of the disconnected label. No session is
+started on application launch, account discovery, settings save, or Inbox
+refresh.
+
+Synthetic tests verify single-session ownership, explicit Stop cleanup, bounded
+timeout/limit behavior, ephemeral policy activation, allowlist-gated capture,
+and the complete loopback path from SSE notification to a `NEW` SQLite Inbox
+record, including a denied notification followed by an allowed one. The UI and
+backend are built, but real daemon/account acceptance remains unverified because
+`signal-cli` is not installed in the current environment.
 
 ## Inbox review model
 
@@ -125,7 +148,7 @@ live connector is running.
 
 - daemon process management;
 - a persistent RPC or event-stream receive connection;
-- a desktop-managed continuous receive session;
+- a long-running or automatically restarted receive service;
 - account/group discovery over UNIX or raw TCP;
 - enabling or connecting a Signal account;
 - live message ingestion and parsing;

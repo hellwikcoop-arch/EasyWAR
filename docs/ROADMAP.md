@@ -27,7 +27,8 @@
     - [x] bounded SSE framing and manual-receive notification decoder (synthetic only)
     - [x] bounded event-stream connection and subscribe/unsubscribe lifecycle (synthetic loopback)
     - [x] fail-closed allowlist-gated provenance capture bridge (synthetic only)
-    - [ ] desktop-managed continuous receive session with explicit user control
+    - [x] desktop-managed bounded receive session with explicit Start/Stop (synthetic loopback)
+    - [ ] acceptance of the receive session with an installed real signal-cli
 - [ ] linked-account setup UX
   - [x] short-lived local QR workflow with synthetic `startLink` / `finishLink` coverage
   - [ ] acceptance with an installed real signal-cli and primary phone

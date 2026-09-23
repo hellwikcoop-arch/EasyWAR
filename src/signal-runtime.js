@@ -1,6 +1,13 @@
 // One-shot discovery is not message intake. This describes the app's receive
 // capability, not the status of an external signal-cli process or account.
-export function describeSignalRuntime(config) {
+export function describeSignalRuntime(config, session = null) {
+  if (session?.active === true) {
+    return {
+      connected: true,
+      receiving: true,
+      message: 'Активний явний сеанс Signal. EasyWAR приймає лише дозволені джерела до ручної зупинки, межі 64 повідомлень або тайм-ауту 5 хвилин.',
+    };
+  }
   const savedEnabled = config?.intake_enabled === true;
   return {
     connected: false,

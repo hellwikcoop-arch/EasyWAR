@@ -58,6 +58,12 @@ function initializeSignalSettings() {
         <button type="button" class="btn quiet" id="ew-signal-groups-discover" disabled>Показати групи акаунта</button>
         <ul id="ew-signal-found-groups" class="ew-signal-found-groups"></ul>
         <p id="ew-signal-discovery-status" class="ew-signal-status" role="status" aria-live="polite"></p>
+        <div class="ew-signal-receive-actions">
+          <button type="button" class="btn primary" id="ew-signal-receive-start" disabled>Почати сеанс приймання</button>
+          <button type="button" class="btn" id="ew-signal-receive-stop" disabled>Зупинити й відписатися</button>
+        </div>
+        <p class="ew-signal-note">Явний сеанс працює до 5 хвилин або 64 повідомлень. У базу потрапляють лише джерела зі збереженого allowlist. Автоматичний запуск вимкнений.</p>
+        <p id="ew-signal-receive-status" class="ew-signal-status" role="status" aria-live="polite">Сеанс не запущено.</p>
       </section>
       <label class="ew-signal-field" for="ew-signal-senders">
         <span>Дозволені відправники</span>
@@ -69,10 +75,10 @@ function initializeSignalSettings() {
         <small>Один ідентифікатор на рядок. Для групи потрібен також дозволений відправник.</small>
         <textarea id="ew-signal-groups" rows="4" spellcheck="false" autocomplete="off"></textarea>
       </label>
-      <p class="ew-signal-note">Приймання повідомлень залишатиметься вимкненим. Схвалення записів виконується лише після перевірки.</p>
+      <p class="ew-signal-note">Автоматичне приймання залишатиметься вимкненим. Явний сеанс запускається окремо, а схвалення записів виконується лише після перевірки.</p>
       <details id="ew-signal-inbox" class="ew-signal-inbox">
         <summary>Локальна черга Signal</summary>
-        <p>Показує лише метадані вже збережених записів походження. Текст і JSON повідомлень у цей список не передаються. Живе приймання вимкнене.</p>
+        <p>Показує лише метадані вже збережених записів походження. Текст і JSON повідомлень у цей список не передаються. Оновлення списку не запускає приймання.</p>
         <button type="button" class="btn quiet" id="ew-signal-inbox-refresh">Оновити локальну чергу</button>
         <ul id="ew-signal-inbox-list" class="ew-signal-inbox-list"></ul>
         <p id="ew-signal-inbox-status" class="ew-signal-status" role="status" aria-live="polite">Чергу ще не завантажено.</p>
@@ -109,6 +115,9 @@ function initializeSignalSettings() {
   const groupsButton = dialog.querySelector('#ew-signal-groups-discover');
   const foundGroups = dialog.querySelector('#ew-signal-found-groups');
   const discoveryStatus = dialog.querySelector('#ew-signal-discovery-status');
+  const receiveStart = dialog.querySelector('#ew-signal-receive-start');
+  const receiveStop = dialog.querySelector('#ew-signal-receive-stop');
+  const receiveStatus = dialog.querySelector('#ew-signal-receive-status');
   const linkButton = dialog.querySelector('#ew-signal-link-start');
   const linkDeviceName = dialog.querySelector('#ew-signal-device-name');
   const linkCanvas = dialog.querySelector('#ew-signal-link-qr');
@@ -122,6 +131,7 @@ function initializeSignalSettings() {
   let linkEpoch = 0;
   let inboxEpoch = 0;
   let linkBusy = false;
+  let receiveBusy = false;
   let linkSession = clearSignalLinkSession();
   const statusLabels = {
     NEW: 'Нове', PARSED: 'Розібрано', NEEDS_REVIEW: 'Потребує перевірки',
@@ -187,7 +197,7 @@ function initializeSignalSettings() {
     inboxStatus.textContent = described.message;
   }
 
-  inboxRefresh.addEventListener('click', async () => {
+  async function refreshInbox() {
     const epoch = ++inboxEpoch;
     inboxRefresh.disabled = true;
     inboxStatus.textContent = 'Завантажуємо локальну чергу…';
@@ -200,13 +210,19 @@ function initializeSignalSettings() {
       inboxList.replaceChildren();
       inboxStatus.textContent = `Не вдалося завантажити локальну чергу: ${String(error)}`;
     } finally {
-      if (epoch === inboxEpoch) inboxRefresh.disabled = false;
+      if (epoch === inboxEpoch) inboxRefresh.disabled = linkBusy || receiveBusy;
     }
-  });
+  }
+
+  inboxRefresh.addEventListener('click', refreshInbox);
 
   function close() {
     if (linkBusy) {
       linkStatus.textContent = 'Завершуємо прив’язку. Зачекайте на результат або завершення двохвилинного очікування.';
+      return;
+    }
+    if (receiveBusy) {
+      receiveStatus.textContent = 'Спочатку натисніть «Зупинити й відписатися» та дочекайтеся завершення.';
       return;
     }
     discoveryEpoch += 1;
@@ -224,9 +240,13 @@ function initializeSignalSettings() {
     resetLink();
   });
   dialog.addEventListener('cancel', event => {
-    if (!linkBusy) return;
+    if (!linkBusy && !receiveBusy) return;
     event.preventDefault();
-    linkStatus.textContent = 'Завершуємо прив’язку. Зачекайте на результат або завершення двохвилинного очікування.';
+    if (linkBusy) {
+      linkStatus.textContent = 'Завершуємо прив’язку. Зачекайте на результат або завершення двохвилинного очікування.';
+    } else {
+      receiveStatus.textContent = 'Спочатку натисніть «Зупинити й відписатися» та дочекайтеся завершення.';
+    }
   });
 
   function clearLinkCanvas() {
@@ -235,14 +255,39 @@ function initializeSignalSettings() {
     linkCanvas.hidden = true;
   }
 
-  function setLinkBusy(busy) {
-    linkBusy = busy;
+  function updateBusyControls() {
+    const busy = linkBusy || receiveBusy;
     linkButton.disabled = busy || !currentConfig;
     linkDeviceName.disabled = busy;
     closeButton.disabled = busy;
     cancelButton.disabled = busy;
     saveButton.disabled = busy || !currentConfig;
     discoverButton.disabled = busy || !currentConfig;
+    accountSelect.disabled = busy || accountSelect.options.length <= 1;
+    groupsButton.disabled = busy || !accountSelect.value;
+    receiveStart.disabled = busy || !currentConfig || !accountSelect.value;
+    receiveStop.disabled = !receiveBusy;
+    inboxRefresh.disabled = busy;
+  }
+
+  function setLinkBusy(busy) {
+    linkBusy = busy;
+    updateBusyControls();
+  }
+
+  function setReceiveBusy(busy) {
+    receiveBusy = busy;
+    if (currentConfig) {
+      runtime.textContent = describeSignalRuntime(currentConfig, { active: busy }).message;
+    }
+    openButton.textContent = busy ? 'Signal: сеанс активний' : 'Signal: не підключено';
+    openButton.setAttribute(
+      'aria-label',
+      busy
+        ? 'Активний локальний сеанс Signal. Відкрити керування'
+        : 'Signal не підключено. Відкрити локальні налаштування',
+    );
+    updateBusyControls();
   }
 
   function resetLink() {
@@ -301,6 +346,7 @@ function initializeSignalSettings() {
     groupsButton.disabled = true;
     foundGroups.replaceChildren();
     discoveryStatus.textContent = '';
+    updateBusyControls();
   }
 
   discoverButton.addEventListener('click', async () => {
@@ -324,7 +370,7 @@ function initializeSignalSettings() {
       if (epoch !== discoveryEpoch) return;
       discoveryStatus.textContent = `Не вдалося перевірити локальний демон: ${String(error)}`;
     } finally {
-      if (epoch === discoveryEpoch) discoverButton.disabled = false;
+      if (epoch === discoveryEpoch) updateBusyControls();
     }
   });
 
@@ -332,6 +378,7 @@ function initializeSignalSettings() {
     groupsEpoch += 1;
     groupsButton.disabled = !accountSelect.value;
     foundGroups.replaceChildren();
+    updateBusyControls();
   });
 
   groupsButton.addEventListener('click', async () => {
@@ -360,7 +407,84 @@ function initializeSignalSettings() {
       if (epoch !== groupsEpoch) return;
       discoveryStatus.textContent = `Не вдалося отримати перелік груп: ${String(error)}`;
     } finally {
-      if (epoch === groupsEpoch) groupsButton.disabled = !accountSelect.value;
+      if (epoch === groupsEpoch) updateBusyControls();
+    }
+  });
+
+  receiveStart.addEventListener('click', async () => {
+    if (!currentConfig || !accountSelect.value || linkBusy || receiveBusy) return;
+    const account = accountSelect.value;
+    setReceiveBusy(true);
+    receiveStop.disabled = true;
+    receiveStatus.textContent = 'Сеанс активний. Очікуємо лише дозволені повідомлення…';
+    try {
+      let runSettled = false;
+      const runPromise = invoke('run_signal_receive_session', { account }).then(
+        value => {
+          runSettled = true;
+          return { value };
+        },
+        error => {
+          runSettled = true;
+          return { error };
+        },
+      );
+      for (let attempt = 0; attempt < 120 && !runSettled; attempt += 1) {
+        let state;
+        try {
+          state = await invoke('get_signal_receive_status');
+        } catch {
+          break;
+        }
+        if (state.active) {
+          receiveStop.disabled = false;
+          break;
+        }
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      const result = await runPromise;
+      if ('error' in result) throw result.error;
+      const summary = result.value;
+      const reasons = {
+        limit_reached: 'досягнуто межі 64 повідомлень',
+        stopped: 'зупинено користувачем і виконано відписку',
+        timed_out: 'минуло 5 хвилин і виконано відписку',
+      };
+      receiveStatus.textContent = `Сеанс завершено: ${reasons[summary.end] || 'невідомий результат'}. Збережено дозволених записів: ${summary.captured}; пропущено поза allowlist: ${summary.ignored}.`;
+      await refreshInbox();
+    } catch (error) {
+      receiveStatus.textContent = `Сеанс не завершено: ${String(error)}`;
+    } finally {
+      setReceiveBusy(false);
+    }
+  });
+
+  receiveStop.addEventListener('click', async () => {
+    if (!receiveBusy) return;
+    receiveStop.disabled = true;
+    receiveStatus.textContent = 'Зупиняємо сеанс і виконуємо unsubscribeReceive…';
+    try {
+      const requested = await invoke('stop_signal_receive_session');
+      receiveStatus.textContent = requested
+        ? 'Запит на зупинку прийнято. Очікуємо підтвердження відписки…'
+        : 'Активного сеансу вже немає.';
+      if (!requested) {
+        setReceiveBusy(false);
+      } else {
+        for (let attempt = 0; attempt < 40; attempt += 1) {
+          await new Promise(resolve => setTimeout(resolve, 250));
+          const state = await invoke('get_signal_receive_status');
+          if (!state.active) {
+            setReceiveBusy(false);
+            receiveStatus.textContent = 'Сеанс зупинено, unsubscribeReceive підтверджено.';
+            break;
+          }
+        }
+      }
+    } catch (error) {
+      receiveStatus.textContent = `Не вдалося надіслати запит на зупинку: ${String(error)}`;
+    } finally {
+      updateBusyControls();
     }
   });
 
@@ -376,6 +500,7 @@ function initializeSignalSettings() {
     inboxList.replaceChildren();
     inboxStatus.textContent = 'Чергу ще не завантажено.';
     inboxRefresh.disabled = false;
+    receiveStatus.textContent = 'Сеанс не запущено.';
     demo.open = false;
     demoStatus.textContent = '';
     resetDiscovery();
@@ -385,7 +510,10 @@ function initializeSignalSettings() {
     status.textContent = 'Завантаження локальних налаштувань…';
     dialog.showModal();
     try {
-      const config = await invoke('get_signal_settings');
+      const [config, receiveState] = await Promise.all([
+        invoke('get_signal_settings'),
+        invoke('get_signal_receive_status'),
+      ]);
       if (epoch !== discoveryEpoch) return;
       currentConfig = config;
       runtime.textContent = describeSignalRuntime(config).message;
@@ -393,10 +521,16 @@ function initializeSignalSettings() {
       groups.value = (config.allowlist?.allowed_groups || []).join('\n');
       status.textContent = config.intake_enabled
         ? 'Збережену політику знайдено. Збереження цієї форми вимкне приймання повідомлень.'
-        : 'Налаштування завантажено. Приймання повідомлень вимкнено.';
+        : 'Налаштування завантажено. Автоматичне приймання повідомлень вимкнено.';
       saveButton.disabled = false;
       discoverButton.disabled = false;
       linkButton.disabled = false;
+      if (receiveState.active) {
+        setReceiveBusy(true);
+        receiveStatus.textContent = `Активний сеанс для локального акаунта ${receiveState.account || 'без назви'}. Його можна лише зупинити й дочекатися відписки.`;
+      } else {
+        setReceiveBusy(false);
+      }
     } catch (error) {
       if (epoch !== discoveryEpoch) return;
       status.textContent = `Не вдалося відкрити налаштування: ${String(error)}`;
@@ -427,7 +561,7 @@ function initializeSignalSettings() {
       });
       currentConfig = config;
       runtime.textContent = describeSignalRuntime(config).message;
-      status.textContent = 'Збережено в локальній базі. Приймання повідомлень вимкнено.';
+      status.textContent = 'Збережено в локальній базі. Автоматичне приймання повідомлень вимкнено.';
     } catch (error) {
       status.textContent = `Не вдалося зберегти: ${String(error)}`;
     } finally {

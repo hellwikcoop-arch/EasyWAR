@@ -20,6 +20,18 @@ test('a saved enabled flag never claims that EasyWAR is connected', () => {
   assert.match(state.message, /не отримує повідомлень/);
 });
 
+test('an explicit active session is described as bounded receiving', () => {
+  const state = describeSignalRuntime(
+    { intake_enabled: false },
+    { active: true, account: 'synthetic-account' },
+  );
+  assert.equal(state.connected, true);
+  assert.equal(state.receiving, true);
+  assert.match(state.message, /явний сеанс/);
+  assert.match(state.message, /64 повідомлень/);
+  assert.match(state.message, /5 хвилин/);
+});
+
 test('persisted Signal Inbox describes an empty local queue', () => {
   const state = describePersistedSignalInbox(null);
   assert.deepEqual(state.rows, []);

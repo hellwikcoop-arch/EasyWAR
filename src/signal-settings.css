@@ -127,6 +127,12 @@
   color: var(--muted);
 }
 
+.ew-signal-receive-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .ew-signal-inbox summary,
 .ew-signal-demo summary {
   cursor: pointer;

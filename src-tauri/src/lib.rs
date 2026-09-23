@@ -6,6 +6,7 @@ pub mod signal_daemon;
 pub mod signal_inbox;
 pub mod signal_ingest;
 pub mod signal_policy;
+pub mod signal_session;
 pub mod signal_settings;
 pub mod xlsx_import;
 
@@ -14,6 +15,7 @@ use repository::{Repository, SettingsStore, SignalInboxItem};
 use restore::BackupInspection;
 use signal_daemon::{SignalAccountSummary, SignalGroupSummary, SignalLinkStart};
 use signal_policy::SignalAdapterConfig;
+use signal_session::{SignalReceiveController, SignalSessionStatus, SignalSessionSummary};
 use signal_settings::SignalSettingsStore;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use std::{io::Read, path::Path, time::Duration};
@@ -21,6 +23,8 @@ use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
 
 const MAX_XLSX_BYTES: u64 = 64 * 1024 * 1024;
+const SIGNAL_SESSION_MAX_NOTIFICATIONS: usize = 64;
+const SIGNAL_SESSION_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 #[tauri::command]
 async fn get_signal_settings(
@@ -96,6 +100,41 @@ async fn list_signal_inbox(
         .list_signal_inbox(100)
         .await
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn run_signal_receive_session(
+    controller: tauri::State<'_, SignalReceiveController>,
+    settings: tauri::State<'_, SignalSettingsStore>,
+    repository: tauri::State<'_, Repository>,
+    account: String,
+) -> Result<SignalSessionSummary, String> {
+    let config = settings
+        .load_for_explicit_session()
+        .await
+        .map_err(|error| error.to_string())?;
+    controller
+        .run(
+            &repository,
+            &config,
+            &account,
+            SIGNAL_SESSION_MAX_NOTIFICATIONS,
+            SIGNAL_SESSION_TIMEOUT,
+        )
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn stop_signal_receive_session(controller: tauri::State<'_, SignalReceiveController>) -> bool {
+    controller.stop()
+}
+
+#[tauri::command]
+fn get_signal_receive_status(
+    controller: tauri::State<'_, SignalReceiveController>,
+) -> SignalSessionStatus {
+    controller.status()
 }
 
 #[tauri::command]
@@ -226,6 +265,7 @@ pub fn run() {
             )?;
             app.manage(SignalSettingsStore::new(SettingsStore::new(pool.clone())));
             app.manage(Repository::new(pool.clone()));
+            app.manage(SignalReceiveController::default());
             app.manage(BackupStore::new(pool));
             Ok(())
         })
@@ -237,6 +277,9 @@ pub fn run() {
             start_signal_link,
             finish_signal_link,
             list_signal_inbox,
+            run_signal_receive_session,
+            stop_signal_receive_session,
+            get_signal_receive_status,
             create_local_backup,
             inspect_local_backup,
             inspect_local_xlsx

@@ -20,7 +20,7 @@ pub enum SignalSettingsError {
     InvalidStoredConfig,
     #[error("збережені налаштування Signal мають непідтримувану версію")]
     UnsupportedVersion,
-    #[error("приймання Signal ще не реалізовано; його не можна ввімкнути з вікна програми")]
+    #[error("автоматичне приймання Signal не можна ввімкнути з вікна програми; використайте явний обмежений сеанс")]
     DesktopIntakeUnavailable,
     #[error("налаштування Signal не пройшли перевірку: {0}")]
     Policy(#[from] SignalPolicyError),
@@ -84,6 +84,15 @@ impl SignalSettingsStore {
             return Err(SignalSettingsError::DesktopIntakeUnavailable);
         }
         self.save(config, updated_at).await
+    }
+
+    pub async fn load_for_explicit_session(
+        &self,
+    ) -> Result<ValidatedSignalAdapterConfig, SignalSettingsError> {
+        let loaded = self.load().await?;
+        let mut config = loaded.as_config().clone();
+        config.intake_enabled = true;
+        Ok(config.validate()?)
     }
 }
 
@@ -230,5 +239,34 @@ mod tests {
         let loaded = store.load().await.unwrap();
         assert!(!loaded.as_config().intake_enabled);
         assert!(!loaded.permits_source("sender-demo", None));
+    }
+
+    #[tokio::test]
+    async fn explicit_session_enables_only_a_saved_valid_allowlist_in_memory() {
+        let (store, settings) = stores().await;
+        assert!(matches!(
+            store.load_for_explicit_session().await,
+            Err(SignalSettingsError::Policy(
+                SignalPolicyError::AllowlistRequired
+            ))
+        ));
+
+        store
+            .save_from_desktop(
+                SignalAdapterConfig {
+                    allowlist: SignalAllowlist::new(["sender-demo".to_owned()], []).unwrap(),
+                    ..SignalAdapterConfig::default()
+                },
+                NOW,
+            )
+            .await
+            .unwrap();
+
+        let session = store.load_for_explicit_session().await.unwrap();
+        assert!(session.permits_source("sender-demo", None));
+        let persisted = store.load().await.unwrap();
+        assert!(!persisted.as_config().intake_enabled);
+        assert!(!persisted.permits_source("sender-demo", None));
+        assert!(settings.get(SIGNAL_SETTINGS_KEY).await.unwrap().is_some());
     }
 }

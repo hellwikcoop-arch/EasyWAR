@@ -1,0 +1,367 @@
+use crate::{
+    repository::Repository,
+    signal_daemon::{self, SignalDaemonError, SignalReceiveEnd},
+    signal_ingest::{persist_allowed_notification, SignalIngestError},
+    signal_policy::ValidatedSignalAdapterConfig,
+};
+use chrono::{SecondsFormat, Utc};
+use serde::Serialize;
+use std::{
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
+    },
+    time::Duration,
+};
+use tokio::sync::{mpsc, watch};
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct SignalSessionStatus {
+    pub active: bool,
+    pub account: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct SignalSessionSummary {
+    pub captured: usize,
+    pub ignored: usize,
+    pub end: SignalReceiveEnd,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum SignalSessionError {
+    #[error("сеанс приймання Signal уже активний")]
+    AlreadyActive,
+    #[error(transparent)]
+    Receive(#[from] SignalDaemonError),
+    #[error(transparent)]
+    Ingest(#[from] SignalIngestError),
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct SignalReceiveController {
+    state: Arc<Mutex<Option<ActiveSession>>>,
+    next_id: Arc<AtomicU64>,
+}
+
+#[derive(Debug)]
+struct ActiveSession {
+    id: u64,
+    account: String,
+    stop: watch::Sender<bool>,
+}
+
+#[derive(Debug)]
+struct SessionLease {
+    state: Arc<Mutex<Option<ActiveSession>>>,
+    id: u64,
+    stop: watch::Sender<bool>,
+}
+
+impl Drop for SessionLease {
+    fn drop(&mut self) {
+        let mut state = self.state.lock().expect("Signal session state poisoned");
+        if state.as_ref().is_some_and(|active| active.id == self.id) {
+            state.take();
+        }
+    }
+}
+
+impl SessionLease {
+    fn request_stop(&self) {
+        let _ = self.stop.send(true);
+    }
+}
+
+impl SignalReceiveController {
+    pub fn status(&self) -> SignalSessionStatus {
+        let state = self.state.lock().expect("Signal session state poisoned");
+        SignalSessionStatus {
+            active: state.is_some(),
+            account: state.as_ref().map(|active| active.account.clone()),
+        }
+    }
+
+    pub fn stop(&self) -> bool {
+        let state = self.state.lock().expect("Signal session state poisoned");
+        state
+            .as_ref()
+            .is_some_and(|active| active.stop.send(true).is_ok())
+    }
+
+    pub async fn run(
+        &self,
+        repository: &Repository,
+        config: &ValidatedSignalAdapterConfig,
+        account: &str,
+        max_notifications: usize,
+        wait_timeout: Duration,
+    ) -> Result<SignalSessionSummary, SignalSessionError> {
+        let (lease, stop_rx) = self.begin(account)?;
+        let (sender, mut receiver) = mpsc::unbounded_channel();
+        let mut receive = Box::pin(signal_daemon::receive_to_channel(
+            &config.as_config().endpoint,
+            account,
+            max_notifications,
+            wait_timeout,
+            stop_rx,
+            sender,
+        ));
+        let mut captured = 0_usize;
+        let mut ignored = 0_usize;
+
+        let end = loop {
+            tokio::select! {
+                biased;
+                Some(notification) = receiver.recv() => {
+                    let captured_at = Utc::now()
+                        .to_rfc3339_opts(SecondsFormat::Millis, true);
+                    let persist_result = persist_allowed_notification(
+                        repository,
+                        config,
+                        &notification,
+                        account,
+                        &captured_at,
+                    )
+                    .await;
+                    match persist_result {
+                        Ok(_) => captured += 1,
+                        Err(SignalIngestError::SourceDenied) => ignored += 1,
+                        Err(error) => {
+                            lease.request_stop();
+                            if let Err(cleanup_error) = receive.await {
+                                return Err(SignalSessionError::Receive(cleanup_error));
+                            }
+                            return Err(SignalSessionError::Ingest(error));
+                        }
+                    }
+                }
+                result = &mut receive => break result?,
+            }
+        };
+
+        Ok(SignalSessionSummary {
+            captured,
+            ignored,
+            end,
+        })
+    }
+
+    fn begin(
+        &self,
+        account: &str,
+    ) -> Result<(SessionLease, watch::Receiver<bool>), SignalSessionError> {
+        let mut state = self.state.lock().expect("Signal session state poisoned");
+        if state.is_some() {
+            return Err(SignalSessionError::AlreadyActive);
+        }
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed) + 1;
+        let (stop, stop_rx) = watch::channel(false);
+        *state = Some(ActiveSession {
+            id,
+            account: account.to_owned(),
+            stop: stop.clone(),
+        });
+        Ok((
+            SessionLease {
+                state: Arc::clone(&self.state),
+                id,
+                stop,
+            },
+            stop_rx,
+        ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        database::INITIAL_SCHEMA_SQL,
+        signal_policy::{SignalAdapterConfig, SignalAllowlist, SignalDaemonEndpoint},
+    };
+    use serde_json::{json, Value};
+    use sqlx::sqlite::SqlitePoolOptions;
+    use std::{
+        io::{Read, Write},
+        net::{Ipv4Addr, TcpListener, TcpStream},
+        thread::JoinHandle,
+    };
+
+    fn read_request(stream: &mut TcpStream) -> (String, Option<Value>) {
+        let mut bytes = Vec::new();
+        loop {
+            let mut chunk = [0_u8; 4096];
+            let count = stream.read(&mut chunk).expect("synthetic request read");
+            assert!(count > 0, "synthetic request ended before headers");
+            bytes.extend_from_slice(&chunk[..count]);
+            let Some(header_end) = bytes.windows(4).position(|part| part == b"\r\n\r\n") else {
+                continue;
+            };
+            let header = std::str::from_utf8(&bytes[..header_end]).expect("synthetic header");
+            let length = header
+                .lines()
+                .find_map(|line| {
+                    line.split_once(':').and_then(|(key, value)| {
+                        key.eq_ignore_ascii_case("content-length")
+                            .then(|| value.trim().parse::<usize>().ok())
+                            .flatten()
+                    })
+                })
+                .unwrap_or(0);
+            let body_start = header_end + 4;
+            if bytes.len() < body_start + length {
+                continue;
+            }
+            let request_line = header.lines().next().unwrap_or_default().to_owned();
+            let body = (length > 0).then(|| {
+                serde_json::from_slice(&bytes[body_start..body_start + length])
+                    .expect("synthetic request JSON")
+            });
+            return (request_line, body);
+        }
+    }
+
+    fn write_rpc(stream: &mut TcpStream, request: &Value, result: Value) {
+        let reply = json!({"jsonrpc":"2.0", "id":request["id"], "result":result}).to_string();
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            reply.len(),
+            reply
+        )
+        .expect("synthetic RPC reply");
+    }
+
+    fn synthetic_daemon() -> (SignalDaemonEndpoint, JoinHandle<()>) {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("synthetic listener");
+        let address = listener.local_addr().expect("synthetic address");
+        let handle = std::thread::spawn(move || {
+            let (mut events, _) = listener.accept().expect("synthetic SSE connection");
+            let (request, _) = read_request(&mut events);
+            assert_eq!(request, "GET /api/v1/events HTTP/1.1");
+            events
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: keep-alive\r\n\r\n")
+                .expect("synthetic SSE headers");
+            events.flush().expect("synthetic SSE flush");
+
+            let (mut subscribe, _) = listener.accept().expect("synthetic subscribe");
+            let (_, request) = read_request(&mut subscribe);
+            let request = request.expect("synthetic subscribe JSON");
+            assert_eq!(request["method"], "subscribeReceive");
+            write_rpc(&mut subscribe, &request, json!(42));
+
+            for (index, sender) in ["synthetic-denied", "synthetic-sender"]
+                .into_iter()
+                .enumerate()
+            {
+                let event = json!({
+                    "jsonrpc": "2.0",
+                    "method": "receive",
+                    "params": {
+                        "subscription": 42,
+                        "result": {
+                            "account": "synthetic-account",
+                            "envelope": {
+                                "sourceUuid": sender,
+                                "timestamp": 1_767_225_600_000_u64 + index as u64,
+                                "dataMessage": {
+                                    "message": "Синтетична доповідь без реальних даних"
+                                }
+                            }
+                        }
+                    }
+                });
+                write!(events, "data: {event}\n\n").expect("synthetic SSE event");
+            }
+            events.flush().expect("synthetic event flush");
+
+            let (mut unsubscribe, _) = listener.accept().expect("synthetic unsubscribe");
+            let (_, request) = read_request(&mut unsubscribe);
+            let request = request.expect("synthetic unsubscribe JSON");
+            assert_eq!(request["method"], "unsubscribeReceive");
+            write_rpc(&mut unsubscribe, &request, Value::Null);
+        });
+        (SignalDaemonEndpoint::Http { address }, handle)
+    }
+
+    async fn repository() -> Repository {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("synthetic database");
+        sqlx::raw_sql(INITIAL_SCHEMA_SQL)
+            .execute(&pool)
+            .await
+            .expect("synthetic migration");
+        Repository::new(pool)
+    }
+
+    #[test]
+    fn controller_allows_only_one_session_and_stop_is_explicit() {
+        let controller = SignalReceiveController::default();
+        let (lease, stop_rx) = controller.begin("synthetic-account").unwrap();
+        assert_eq!(
+            controller.status(),
+            SignalSessionStatus {
+                active: true,
+                account: Some("synthetic-account".to_owned()),
+            }
+        );
+        assert!(matches!(
+            controller.begin("synthetic-other"),
+            Err(SignalSessionError::AlreadyActive)
+        ));
+        assert!(controller.stop());
+        assert!(*stop_rx.borrow());
+        drop(lease);
+        assert_eq!(
+            controller.status(),
+            SignalSessionStatus {
+                active: false,
+                account: None,
+            }
+        );
+        assert!(!controller.stop());
+    }
+
+    #[tokio::test]
+    async fn bounded_session_persists_allowed_synthetic_notification() {
+        let repository = repository().await;
+        let (endpoint, server) = synthetic_daemon();
+        let config = SignalAdapterConfig {
+            endpoint,
+            intake_enabled: true,
+            allowlist: SignalAllowlist::new(["synthetic-sender".to_owned()], Vec::new()).unwrap(),
+            ..SignalAdapterConfig::default()
+        }
+        .validate()
+        .unwrap();
+        let controller = SignalReceiveController::default();
+
+        let summary = controller
+            .run(
+                &repository,
+                &config,
+                "synthetic-account",
+                2,
+                Duration::from_secs(5),
+            )
+            .await
+            .expect("synthetic session must succeed");
+        server.join().expect("synthetic daemon must stop");
+        assert_eq!(
+            summary,
+            SignalSessionSummary {
+                captured: 1,
+                ignored: 1,
+                end: SignalReceiveEnd::LimitReached,
+            }
+        );
+        assert!(!controller.status().active);
+        let inbox = repository.list_signal_inbox(100).await.unwrap();
+        assert_eq!(inbox.len(), 1);
+        assert_eq!(inbox[0].current_status, "NEW");
+    }
+}

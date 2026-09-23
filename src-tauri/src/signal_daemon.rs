@@ -10,6 +10,7 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
     time::Duration,
 };
+use tokio::sync::{mpsc, watch};
 
 const MAX_RPC_BYTES: usize = 1024 * 1024;
 const MAX_SSE_EVENT_BYTES: usize = 1024 * 1024;
@@ -46,6 +47,14 @@ pub struct SignalReceiveNotification {
     pub subscription: u64,
     pub account: String,
     pub envelope: Value,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SignalReceiveEnd {
+    LimitReached,
+    Stopped,
+    TimedOut,
 }
 
 #[derive(Debug, Default)]
@@ -86,6 +95,8 @@ pub enum SignalDaemonError {
     InvalidEventLimit,
     #[error("не вдалося гарантовано скасувати підписку signal-cli")]
     UnsubscribeFailed,
+    #[error("внутрішній споживач подій Signal завершив роботу")]
+    EventConsumerClosed,
 }
 
 fn http_url(endpoint: &SignalDaemonEndpoint, path: &str) -> Result<String, SignalDaemonError> {
@@ -247,6 +258,41 @@ pub async fn receive_bounded(
     max_notifications: usize,
     wait_timeout: Duration,
 ) -> Result<Vec<SignalReceiveNotification>, SignalDaemonError> {
+    let (_stop, stop_rx) = watch::channel(false);
+    let (sender, mut receiver) = mpsc::unbounded_channel();
+    match receive_to_channel(
+        endpoint,
+        account,
+        max_notifications,
+        wait_timeout,
+        stop_rx,
+        sender,
+    )
+    .await?
+    {
+        SignalReceiveEnd::LimitReached => {
+            let mut notifications = Vec::with_capacity(max_notifications);
+            while let Ok(notification) = receiver.try_recv() {
+                notifications.push(notification);
+            }
+            if notifications.len() != max_notifications {
+                return Err(SignalDaemonError::InvalidEventStream);
+            }
+            Ok(notifications)
+        }
+        SignalReceiveEnd::TimedOut => Err(SignalDaemonError::EventStreamTimeout),
+        SignalReceiveEnd::Stopped => Err(SignalDaemonError::EventStreamEnded),
+    }
+}
+
+pub async fn receive_to_channel(
+    endpoint: &SignalDaemonEndpoint,
+    account: &str,
+    max_notifications: usize,
+    wait_timeout: Duration,
+    mut stop: watch::Receiver<bool>,
+    sender: mpsc::UnboundedSender<SignalReceiveNotification>,
+) -> Result<SignalReceiveEnd, SignalDaemonError> {
     if !valid_account(account) {
         return Err(SignalDaemonError::MissingAccount);
     }
@@ -254,9 +300,16 @@ pub async fn receive_bounded(
         return Err(SignalDaemonError::InvalidEventLimit);
     }
 
+    if *stop.borrow() {
+        return Ok(SignalReceiveEnd::Stopped);
+    }
+
     // Open the SSE channel first so notifications cannot be emitted before the
     // client is ready to consume them.
     let mut response = open_event_stream(endpoint).await?;
+    if *stop.borrow() {
+        return Ok(SignalReceiveEnd::Stopped);
+    }
     let subscription = parse_subscription(
         rpc(
             endpoint,
@@ -266,28 +319,41 @@ pub async fn receive_bounded(
         .await?,
     )?;
 
-    let receive_result = tokio::time::timeout(wait_timeout, async {
+    let receive_result = async {
         let mut decoder = SignalSseDecoder::default();
-        let mut notifications = Vec::with_capacity(max_notifications);
+        let mut accepted = 0_usize;
+        let deadline = tokio::time::sleep(wait_timeout);
+        tokio::pin!(deadline);
         loop {
-            let chunk = response
-                .chunk()
-                .await
-                .map_err(|_| SignalDaemonError::Connection)?
-                .ok_or(SignalDaemonError::EventStreamEnded)?;
-            for notification in decoder.push(&chunk)? {
-                if notification.subscription == subscription && notification.account == account {
-                    notifications.push(notification);
-                    if notifications.len() == max_notifications {
-                        return Ok(notifications);
+            tokio::select! {
+                _ = &mut deadline => return Ok(SignalReceiveEnd::TimedOut),
+                changed = stop.changed() => {
+                    if changed.is_err() || *stop.borrow() {
+                        return Ok(SignalReceiveEnd::Stopped);
+                    }
+                }
+                chunk = response.chunk() => {
+                    let chunk = chunk
+                        .map_err(|_| SignalDaemonError::Connection)?
+                        .ok_or(SignalDaemonError::EventStreamEnded)?;
+                    for notification in decoder.push(&chunk)? {
+                        if notification.subscription == subscription
+                            && notification.account == account
+                        {
+                            sender
+                                .send(notification)
+                                .map_err(|_| SignalDaemonError::EventConsumerClosed)?;
+                            accepted += 1;
+                            if accepted == max_notifications {
+                                return Ok(SignalReceiveEnd::LimitReached);
+                            }
+                        }
                     }
                 }
             }
         }
-    })
-    .await
-    .map_err(|_| SignalDaemonError::EventStreamTimeout)
-    .and_then(|result| result);
+    }
+    .await;
 
     let unsubscribe_result = rpc(
         endpoint,
@@ -1013,5 +1079,30 @@ mod tests {
             Err(SignalDaemonError::EventStreamTimeout)
         ));
         server.join().expect("synthetic timeout server");
+    }
+
+    #[tokio::test]
+    async fn explicit_stop_unsubscribes_before_the_session_returns() {
+        let (endpoint, server) = synthetic_live_daemon(None);
+        let (stop, stop_rx) = watch::channel(false);
+        let (sender, _receiver) = mpsc::unbounded_channel();
+        let stop_task = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            stop.send(true).expect("synthetic stop receiver must exist");
+        });
+
+        let end = receive_to_channel(
+            &endpoint,
+            "synthetic-account",
+            64,
+            Duration::from_secs(5),
+            stop_rx,
+            sender,
+        )
+        .await
+        .expect("synthetic stopped session must clean up");
+        stop_task.await.expect("synthetic stop task");
+        server.join().expect("synthetic stop server");
+        assert_eq!(end, SignalReceiveEnd::Stopped);
     }
 }
