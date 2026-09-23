@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   mapDashboardRecord,
   mapDashboardRecords,
+  qualityIssueMessage,
 } from '../src/sqlite-dashboard-source-core.js';
 
 function dashboardRecord(overrides = {}) {
@@ -128,4 +129,20 @@ test('copies multiple quality issues with the exact legacy Ukrainian text', () =
     'Не вказано тип ЛА',
     'Не вказано тип БП',
   ]);
+});
+
+test('maps missing coordinates to the exact legacy quality message', () => {
+  const record = dashboardRecord({
+    coordinates: '',
+    qualityIssues: ['missing_coordinates'],
+  });
+
+  assert.equal(
+    qualityIssueMessage('missing_coordinates', record),
+    'Немає координат, які вдається розпізнати',
+  );
+  assert.deepEqual(
+    mapDashboardRecord(record, () => []).issues,
+    ['Немає координат, які вдається розпізнати'],
+  );
 });

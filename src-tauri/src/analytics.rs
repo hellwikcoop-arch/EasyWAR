@@ -262,6 +262,7 @@ pub enum DashboardQualityIssue {
     MissingTargetTypes,
     MissingAircraft,
     MissingMunition,
+    MissingCoordinates,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -755,6 +756,9 @@ fn normalize_record(
     if munition.is_empty() && !aborted {
         quality_issues.push(DashboardQualityIssue::MissingMunition);
     }
+    if coordinates.trim().is_empty() {
+        quality_issues.push(DashboardQualityIssue::MissingCoordinates);
+    }
 
     Ok(DashboardRecord {
         number,
@@ -1128,6 +1132,23 @@ mod tests {
     }
 
     #[test]
+    fn missing_coordinates_quality_flags_only_blank_coordinate_text() {
+        let blank = normalize_record(&json!({"dpi": "   "}), 1, 1).unwrap();
+        assert!(blank
+            .quality_issues
+            .contains(&DashboardQualityIssue::MissingCoordinates));
+        assert_eq!(
+            serde_json::to_value(DashboardQualityIssue::MissingCoordinates).unwrap(),
+            "missing_coordinates"
+        );
+
+        let unrecognized = normalize_record(&json!({"dpi": "не координати"}), 1, 2).unwrap();
+        assert!(!unrecognized
+            .quality_issues
+            .contains(&DashboardQualityIssue::MissingCoordinates));
+    }
+
+    #[test]
     fn map_abstraction_is_filtered_and_never_derives_display_geometry() {
         let model = dashboard_model_from_snapshots_for_period(
             &[snapshot(json!([
@@ -1323,7 +1344,7 @@ mod tests {
             "SYN-EXPORT-COORDINATE",
             "SYN-TARGET-42",
             "SYNTHETIC NOTE",
-            "coordinates",
+            "\"coordinates\":",
             "targetIds",
             "recordNumber",
             "dateRaw",
@@ -1432,8 +1453,8 @@ mod tests {
         assert_eq!(model.record_count, 1);
         assert_eq!(model.records[0].number, "Q-2");
         assert_eq!(model.quality.records_with_issues, 3);
-        assert_eq!(model.quality.issue_count, 12);
-        assert_eq!(model.quality.issue_counts.len(), 11);
+        assert_eq!(model.quality.issue_count, 15);
+        assert_eq!(model.quality.issue_counts.len(), 12);
         assert_eq!(
             model
                 .quality
@@ -1442,6 +1463,7 @@ mod tests {
                 .map(|item| item.issue)
                 .collect::<Vec<_>>(),
             [
+                DashboardQualityIssue::MissingCoordinates,
                 DashboardQualityIssue::InvalidDate,
                 DashboardQualityIssue::InvalidMunitionCount,
                 DashboardQualityIssue::MissingMunitionCount,
@@ -1455,8 +1477,9 @@ mod tests {
                 DashboardQualityIssue::MissingMunition,
             ]
         );
-        assert_eq!(model.quality.issue_counts[0].count, 2);
-        assert!(model.quality.issue_counts[1..]
+        assert_eq!(model.quality.issue_counts[0].count, 3);
+        assert_eq!(model.quality.issue_counts[1].count, 2);
+        assert!(model.quality.issue_counts[2..]
             .iter()
             .all(|item| item.count == 1));
         assert_eq!(
@@ -1478,6 +1501,7 @@ mod tests {
             [
                 DashboardQualityIssue::MissingMunitionCount,
                 DashboardQualityIssue::MissingResult,
+                DashboardQualityIssue::MissingCoordinates,
             ]
         );
         assert_eq!(model.quality.affected_records[2].record_number, "Q-3");
@@ -1485,9 +1509,9 @@ mod tests {
         let serialized = serde_json::to_value(&model).unwrap();
         assert_eq!(
             serialized["quality"]["issueCounts"][0]["issue"],
-            "invalid_date"
+            "missing_coordinates"
         );
-        assert_eq!(serialized["quality"]["issueCounts"][0]["count"], 2);
+        assert_eq!(serialized["quality"]["issueCounts"][0]["count"], 3);
         assert_eq!(
             serialized["quality"]["affectedRecords"][0]["recordNumber"],
             "Q-1"
@@ -1697,6 +1721,7 @@ mod tests {
                     "targets": "SYN-1",
                     "unit": "Синтетичний підрозділ",
                     "district": "Тестовий район",
+                    "dpi": "SYNTHETIC COORDINATE TEXT",
                     "types": ["Навчальна ціль"],
                     "aircraft": "Навчальний ЛА",
                     "munition": "Навчальний БП",
@@ -1709,6 +1734,7 @@ mod tests {
                     "targets": "SYN-2",
                     "unit": "Синтетичний підрозділ",
                     "district": "Тестовий район",
+                    "dpi": "SYNTHETIC COORDINATE TEXT",
                     "types": ["Навчальна ціль"],
                     "aircraft": "Навчальний ЛА",
                     "munition": "Навчальний БП",

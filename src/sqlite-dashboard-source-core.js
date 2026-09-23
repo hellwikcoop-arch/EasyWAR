@@ -11,7 +11,7 @@ function unknownResultMessage(resultRaw) {
   return `Результат не розпізнано: «${visible}»`;
 }
 
-function qualityIssueMessage(issue, record) {
+export function qualityIssueMessage(issue, record) {
   switch (issue) {
     case 'invalid_date':
       return `Дату не розпізнано: «${String(record.dateRaw ?? '')}»`;
@@ -35,6 +35,8 @@ function qualityIssueMessage(issue, record) {
       return 'Не вказано тип ЛА';
     case 'missing_munition':
       return 'Не вказано тип БП';
+    case 'missing_coordinates':
+      return 'Немає координат, які вдається розпізнати';
     default:
       throw new TypeError(`Невідомий код якості дашборда: ${String(issue)}`);
   }

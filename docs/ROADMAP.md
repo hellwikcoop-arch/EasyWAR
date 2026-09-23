@@ -76,6 +76,9 @@
 - [x] map abstraction (provider-neutral readiness, no geometry)
 - [x] export views (structured aggregate contract; no file writer or UI wiring)
 
+Примітка: SQLite-якість позначає порожній текст координат; непорожній текст,
+який не розпізнає клієнтський `parsePoints`, лишається відомою розбіжністю з XLSX.
+
 ## 0.9 — Roles and templates
 
 - [x] local profiles

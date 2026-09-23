@@ -145,7 +145,11 @@ invoke('get_dashboard_model', {
 Кожне правило зберігається окремим машинним кодом: `invalid_date`,
 `invalid_munition_count`, `missing_munition_count`, `missing_result`,
 `unknown_result`, `missing_unit`, `missing_district`, `missing_targets`,
-`missing_target_types`, `missing_aircraft`, `missing_munition`. Один запис може
+`missing_target_types`, `missing_aircraft`, `missing_munition`,
+`missing_coordinates`. Код `missing_coordinates` позначає лише порожній після
+`trim()` текст координат. Непорожній текст, який клієнтський `parsePoints` не
+може розпізнати як точки, цим кодом не позначається; це відома розбіжність між
+XLSX- і SQLite-джерелами дашборда до окремого рішення. Один запис може
 одночасно входити до кількох категорій; жодна «головна» проблема не приховує
 інші. Сума `issueCounts[].count` дорівнює `issueCount`, а довжина
 `affectedRecords` — `recordsWithIssues`.
