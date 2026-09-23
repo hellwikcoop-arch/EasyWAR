@@ -3,7 +3,7 @@ use chrono::{Duration as ChronoDuration, NaiveDate};
 use regex::Regex;
 use serde::Serialize;
 use serde_json::Value;
-use std::sync::OnceLock;
+use std::{collections::BTreeMap, sync::OnceLock};
 
 const DASHBOARD_SCHEMA_VERSION: u32 = 1;
 const DASHBOARD_SOURCE: &str = "approved_sqlite_revisions";
@@ -21,6 +21,7 @@ pub struct DashboardModel {
     pub date_range: DashboardDateRange,
     pub period: DashboardPeriod,
     pub effectiveness: DashboardEffectivenessSummary,
+    pub breakdowns: DashboardBreakdowns,
     pub quality: DashboardQualitySummary,
     pub records: Vec<DashboardRecord>,
 }
@@ -52,6 +53,23 @@ pub struct DashboardEffectivenessSummary {
     pub unknown_records: usize,
     pub overall_effect_percent: Option<f64>,
     pub dpi_effect_percent: Option<f64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DashboardBreakdowns {
+    pub aircraft: Vec<DashboardBreakdownGroup>,
+    pub munitions: Vec<DashboardBreakdownGroup>,
+    pub units: Vec<DashboardBreakdownGroup>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DashboardBreakdownGroup {
+    pub value: Option<String>,
+    pub record_count: usize,
+    pub munition_count: u64,
+    pub effectiveness: DashboardEffectivenessSummary,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -199,6 +217,7 @@ pub fn dashboard_model_from_snapshots_for_period(
         });
     }
     let effectiveness = calculate_effectiveness(&records);
+    let breakdowns = calculate_breakdowns(&records);
     let (period_from, period_to) = if is_filtered {
         (from, to)
     } else {
@@ -218,6 +237,7 @@ pub fn dashboard_model_from_snapshots_for_period(
             preset: "custom".to_owned(),
         },
         effectiveness,
+        breakdowns,
         quality: DashboardQualitySummary {
             records_with_issues,
             issue_count,
@@ -227,6 +247,13 @@ pub fn dashboard_model_from_snapshots_for_period(
 }
 
 fn calculate_effectiveness(records: &[DashboardRecord]) -> DashboardEffectivenessSummary {
+    calculate_effectiveness_from(records.iter())
+}
+
+fn calculate_effectiveness_from<'a>(
+    records: impl IntoIterator<Item = &'a DashboardRecord>,
+) -> DashboardEffectivenessSummary {
+    let mut total_records = 0;
     let mut aborted_records = 0;
     let mut hit_records = 0;
     let mut partial_records = 0;
@@ -234,6 +261,7 @@ fn calculate_effectiveness(records: &[DashboardRecord]) -> DashboardEffectivenes
     let mut unknown_records = 0;
 
     for record in records {
+        total_records += 1;
         if record.aborted {
             aborted_records += 1;
             continue;
@@ -246,11 +274,11 @@ fn calculate_effectiveness(records: &[DashboardRecord]) -> DashboardEffectivenes
         }
     }
 
-    let evaluated_records = records.len() - aborted_records;
+    let evaluated_records = total_records - aborted_records;
     let overall_score = (hit_records + partial_records) as f64;
     let dpi_score = hit_records as f64 + 0.75 * partial_records as f64;
     DashboardEffectivenessSummary {
-        total_records: records.len(),
+        total_records,
         aborted_records,
         evaluated_records,
         hit_records,
@@ -260,6 +288,63 @@ fn calculate_effectiveness(records: &[DashboardRecord]) -> DashboardEffectivenes
         overall_effect_percent: effectiveness_percent(overall_score, evaluated_records),
         dpi_effect_percent: effectiveness_percent(dpi_score, evaluated_records),
     }
+}
+
+#[derive(Clone, Copy)]
+enum BreakdownDimension {
+    Aircraft,
+    Munition,
+    Unit,
+}
+
+fn calculate_breakdowns(records: &[DashboardRecord]) -> DashboardBreakdowns {
+    DashboardBreakdowns {
+        aircraft: calculate_breakdown(records, BreakdownDimension::Aircraft),
+        munitions: calculate_breakdown(records, BreakdownDimension::Munition),
+        units: calculate_breakdown(records, BreakdownDimension::Unit),
+    }
+}
+
+fn calculate_breakdown(
+    records: &[DashboardRecord],
+    dimension: BreakdownDimension,
+) -> Vec<DashboardBreakdownGroup> {
+    let mut groups: BTreeMap<Option<&str>, Vec<&DashboardRecord>> = BTreeMap::new();
+    for record in records {
+        let value = match dimension {
+            BreakdownDimension::Aircraft => &record.aircraft,
+            BreakdownDimension::Munition => &record.munition,
+            BreakdownDimension::Unit => &record.unit,
+        };
+        let value = (!value.is_empty()).then_some(value.as_str());
+        groups.entry(value).or_default().push(record);
+    }
+
+    let mut breakdown = groups
+        .into_iter()
+        .map(|(value, records)| {
+            let munition_count = records.iter().fold(0_u64, |total, record| {
+                total.saturating_add(record.munition_count)
+            });
+            let effectiveness = calculate_effectiveness_from(records.iter().copied());
+            DashboardBreakdownGroup {
+                value: value.map(str::to_owned),
+                record_count: records.len(),
+                munition_count,
+                effectiveness,
+            }
+        })
+        .collect::<Vec<_>>();
+    breakdown.sort_by(|left, right| match (&left.value, &right.value) {
+        (Some(left_value), Some(right_value)) => right
+            .record_count
+            .cmp(&left.record_count)
+            .then_with(|| left_value.cmp(right_value)),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => std::cmp::Ordering::Equal,
+    });
+    breakdown
 }
 
 fn effectiveness_percent(score: f64, evaluated_records: usize) -> Option<f64> {
@@ -649,6 +734,9 @@ mod tests {
         assert_eq!(model.effectiveness.evaluated_records, 0);
         assert_eq!(model.effectiveness.overall_effect_percent, None);
         assert_eq!(model.effectiveness.dpi_effect_percent, None);
+        assert!(model.breakdowns.aircraft.is_empty());
+        assert!(model.breakdowns.munitions.is_empty());
+        assert!(model.breakdowns.units.is_empty());
         assert!(model.records.is_empty());
     }
 
@@ -778,6 +866,122 @@ mod tests {
     }
 
     #[test]
+    fn breakdowns_are_filtered_deterministic_and_keep_unspecified_groups() {
+        let model = dashboard_model_from_snapshots_for_period(
+            &[snapshot(json!([
+                {
+                    "date": "2026-01-01",
+                    "aircraft": "ЛА-А",
+                    "munition": "БП-1",
+                    "count": "2",
+                    "unit": "Підрозділ А",
+                    "result": "УРАЖЕНО"
+                },
+                {
+                    "date": "2026-01-02",
+                    "aircraft": "ЛА-А",
+                    "munition": "БП-1",
+                    "count": "3",
+                    "unit": "Підрозділ А",
+                    "result": "Частково уражено"
+                },
+                {
+                    "date": "2026-01-03",
+                    "aircraft": "ЛА-Б",
+                    "munition": "БП-2",
+                    "count": "4",
+                    "unit": "Підрозділ Б",
+                    "result": "НЕ УРАЖЕНО"
+                },
+                {
+                    "date": "2026-01-04",
+                    "aircraft": "ЛА-Б",
+                    "munition": "БП-2",
+                    "count": "5",
+                    "unit": "Підрозділ Б",
+                    "result": "Відбій"
+                },
+                {
+                    "date": "2026-01-05",
+                    "count": "1",
+                    "result": "Невідомо"
+                },
+                {
+                    "date": "2026-02-01",
+                    "aircraft": "ЛА-А",
+                    "munition": "БП-1",
+                    "count": "99",
+                    "unit": "Підрозділ А",
+                    "result": "УРАЖЕНО"
+                }
+            ]))],
+            Some("2026-01-01"),
+            Some("2026-01-31"),
+        )
+        .unwrap();
+
+        assert_eq!(model.record_count, 5);
+        assert_eq!(model.breakdowns.aircraft.len(), 3);
+        assert_eq!(model.breakdowns.munitions.len(), 3);
+        assert_eq!(model.breakdowns.units.len(), 3);
+
+        let aircraft_a = &model.breakdowns.aircraft[0];
+        assert_eq!(aircraft_a.value.as_deref(), Some("ЛА-А"));
+        assert_eq!(aircraft_a.record_count, 2);
+        assert_eq!(aircraft_a.munition_count, 5);
+        assert_eq!(aircraft_a.effectiveness.hit_records, 1);
+        assert_eq!(aircraft_a.effectiveness.partial_records, 1);
+        assert_eq!(aircraft_a.effectiveness.overall_effect_percent, Some(100.0));
+        assert_eq!(aircraft_a.effectiveness.dpi_effect_percent, Some(87.5));
+
+        let aircraft_b = &model.breakdowns.aircraft[1];
+        assert_eq!(aircraft_b.value.as_deref(), Some("ЛА-Б"));
+        assert_eq!(aircraft_b.record_count, 2);
+        assert_eq!(aircraft_b.munition_count, 9);
+        assert_eq!(aircraft_b.effectiveness.aborted_records, 1);
+        assert_eq!(aircraft_b.effectiveness.evaluated_records, 1);
+        assert_eq!(aircraft_b.effectiveness.miss_records, 1);
+        assert_eq!(aircraft_b.effectiveness.overall_effect_percent, Some(0.0));
+
+        let unspecified_aircraft = &model.breakdowns.aircraft[2];
+        assert_eq!(unspecified_aircraft.value, None);
+        assert_eq!(unspecified_aircraft.record_count, 1);
+        assert_eq!(unspecified_aircraft.munition_count, 1);
+        assert_eq!(unspecified_aircraft.effectiveness.unknown_records, 1);
+
+        assert_eq!(model.breakdowns.munitions[0].value.as_deref(), Some("БП-1"));
+        assert_eq!(model.breakdowns.munitions[0].munition_count, 5);
+        assert_eq!(model.breakdowns.munitions[1].value.as_deref(), Some("БП-2"));
+        assert_eq!(model.breakdowns.munitions[1].munition_count, 9);
+        assert_eq!(model.breakdowns.munitions[2].value, None);
+        assert_eq!(
+            model.breakdowns.units[0].value.as_deref(),
+            Some("Підрозділ А")
+        );
+        assert_eq!(
+            model.breakdowns.units[1].value.as_deref(),
+            Some("Підрозділ Б")
+        );
+        assert_eq!(model.breakdowns.units[2].value, None);
+
+        for groups in [
+            &model.breakdowns.aircraft,
+            &model.breakdowns.munitions,
+            &model.breakdowns.units,
+        ] {
+            assert_eq!(
+                groups.iter().map(|group| group.record_count).sum::<usize>(),
+                model.record_count
+            );
+        }
+
+        let serialized = serde_json::to_value(&model).unwrap();
+        assert_eq!(serialized["breakdowns"]["aircraft"][0]["recordCount"], 2);
+        assert_eq!(serialized["breakdowns"]["aircraft"][0]["munitionCount"], 5);
+        assert!(serialized["breakdowns"]["aircraft"][2]["value"].is_null());
+    }
+
+    #[test]
     fn period_filter_is_inclusive_and_reports_its_full_source_boundary() {
         let model = dashboard_model_from_snapshots_for_period(
             &[snapshot(json!([
@@ -894,6 +1098,9 @@ mod tests {
         assert_eq!(model.quality.records_with_issues, 1);
         assert_eq!(model.quality.issue_count, 1);
         assert_eq!(model.effectiveness.total_records, 0);
+        assert!(model.breakdowns.aircraft.is_empty());
+        assert!(model.breakdowns.munitions.is_empty());
+        assert!(model.breakdowns.units.is_empty());
     }
 
     #[test]

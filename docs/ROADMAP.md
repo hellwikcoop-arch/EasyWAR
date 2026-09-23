@@ -71,7 +71,7 @@
 - [x] dashboard model from SQLite
 - [x] period filters (direct `from`/`to`, inclusive bounds, global date/quality context)
 - [x] effectiveness calculations
-- [ ] aircraft / munitions / unit breakdowns
+- [x] aircraft / munitions / unit breakdowns
 - [ ] data-quality view
 - [ ] map abstraction
 - [ ] export views
