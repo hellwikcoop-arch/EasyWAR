@@ -13,8 +13,9 @@ Migration `0001_provenance_schema.sql` creates the first provenance layer.
 Migration `0002_xlsx_duplicate_links.sql` adds immutable XLSX parsed-payload
 fingerprints and optional links to prior exact matches. Migration
 `0003_local_profiles.sql` adds local profile identities and the singleton active
-profile selection. Migrations contain no operational fixtures and create no
-external integration.
+profile selection. Migration `0004_workspace_templates.sql` adds an optional
+local role-template assignment for each profile. Migrations contain no
+operational fixtures and create no external integration.
 
 ## Provenance layers
 
@@ -31,6 +32,7 @@ external integration.
 | XLSX duplicate provenance | `xlsx_row_fingerprints` | Immutable SHA-256 fingerprint plus an optional link to a previously stored exact parsed-payload match. |
 | Local profiles | `local_profiles` | Mutable local display names with stable opaque IDs; no credentials or roles. |
 | Active local profile | `local_profile_state` | Singleton local selection used by future workspace features. |
+| Workspace template assignments | `local_profile_workspace_templates` | Optional local presentation preset for a profile; no authorization semantics. |
 
 The `report_current_state` view derives `NEW`, `PARSED`, or the latest review
 decision without overwriting source or parser records.
@@ -124,7 +126,24 @@ Profiles are not accounts, authentication identities, roles or permissions.
 They contain no secrets and are not transmitted to a service. Profile changes
 do not rewrite immutable raw sources, parsed values, corrections, approved
 revisions, reviewer labels or audit events. Role binding and workspace
-templates are separate ROADMAP items.
+templates are stored separately from profile identity.
+
+## Role-based workspace templates
+
+`WorkspaceTemplateStore` binds an existing local profile to one of five
+built-in presentation presets: operational overview, analysis, data quality,
+registry work or report entry. The definitions live in application code; the
+database stores only the selected template key and update timestamp. A profile
+without an explicit assignment uses the overview template, so migration does
+not create rows or silently rewrite existing profiles.
+
+The active profile's template selects only the initial top-level section and,
+for dashboard templates, the initial dashboard focus. It does not hide data,
+grant permissions, authenticate a person, alter a reviewer identity or limit
+what the user can open afterward. Assignment replacement and cascade deletion
+are transactional and create no report audit events. Generating a distinct
+empty database or file template for a position remains a separate ROADMAP
+item.
 
 ## Local backup
 

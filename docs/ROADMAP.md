@@ -79,7 +79,7 @@
 ## 0.9 — Roles and templates
 
 - [x] local profiles
-- [ ] role-based workspace templates
+- [x] role-based workspace templates
 - [ ] position-specific empty database/template generation
 - [ ] backup / restore
   - [x] user-selected, non-overwriting local SQLite backup with integrity check

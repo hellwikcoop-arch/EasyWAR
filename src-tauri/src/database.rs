@@ -9,6 +9,8 @@ pub(crate) const INITIAL_SCHEMA_SQL: &str =
 pub(crate) const XLSX_DUPLICATE_LINKS_SQL: &str =
     include_str!("../migrations/0002_xlsx_duplicate_links.sql");
 pub(crate) const LOCAL_PROFILES_SQL: &str = include_str!("../migrations/0003_local_profiles.sql");
+pub(crate) const WORKSPACE_TEMPLATES_SQL: &str =
+    include_str!("../migrations/0004_workspace_templates.sql");
 
 pub fn migrations() -> Vec<Migration> {
     vec![
@@ -30,13 +32,20 @@ pub fn migrations() -> Vec<Migration> {
             sql: LOCAL_PROFILES_SQL,
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 4,
+            description: "add_workspace_templates",
+            sql: WORKSPACE_TEMPLATES_SQL,
+            kind: MigrationKind::Up,
+        },
     ]
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        migrations, DATABASE_URL, INITIAL_SCHEMA_SQL, LOCAL_PROFILES_SQL, XLSX_DUPLICATE_LINKS_SQL,
+        migrations, DATABASE_URL, INITIAL_SCHEMA_SQL, LOCAL_PROFILES_SQL, WORKSPACE_TEMPLATES_SQL,
+        XLSX_DUPLICATE_LINKS_SQL,
     };
     use sqlx::{sqlite::SqlitePoolOptions, Row};
 
@@ -45,13 +54,15 @@ mod tests {
         assert_eq!(DATABASE_URL, "sqlite:easywar.db");
         assert!(include_str!("../tauri.conf.json").contains(DATABASE_URL));
         let registered = migrations();
-        assert_eq!(registered.len(), 3);
+        assert_eq!(registered.len(), 4);
         assert_eq!(registered[0].version, 1);
         assert_eq!(registered[0].description, "create_provenance_schema");
         assert_eq!(registered[1].version, 2);
         assert_eq!(registered[1].description, "add_xlsx_duplicate_links");
         assert_eq!(registered[2].version, 3);
         assert_eq!(registered[2].description, "add_local_profiles");
+        assert_eq!(registered[3].version, 4);
+        assert_eq!(registered[3].description, "add_workspace_templates");
     }
 
     async fn migrated_pool() -> sqlx::SqlitePool {
@@ -73,6 +84,10 @@ mod tests {
             .execute(&pool)
             .await
             .expect("local profiles migration must apply");
+        sqlx::raw_sql(WORKSPACE_TEMPLATES_SQL)
+            .execute(&pool)
+            .await
+            .expect("workspace templates migration must apply");
 
         pool
     }
@@ -91,6 +106,12 @@ mod tests {
                 .unwrap();
         assert_eq!(profile_count, 0);
         assert_eq!(state, (1, None));
+        let template_count: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM local_profile_workspace_templates")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(template_count, 0);
     }
 
     #[tokio::test]

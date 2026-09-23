@@ -53,6 +53,7 @@
 }
 
 .ew-profile-row input,
+.ew-profile-row select,
 .ew-profile-create input {
   min-height: 38px;
   min-width: 0;
@@ -62,6 +63,23 @@
   border-radius: 8px;
   padding: 7px 10px;
   font: inherit;
+}
+
+.ew-profile-template {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 5px;
+}
+
+.ew-profile-template > span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ew-profile-template > small {
+  color: var(--muted);
+  line-height: 1.35;
 }
 
 .ew-profile-badge {
@@ -105,6 +123,10 @@
   }
 
   .ew-profile-actions {
+    grid-column: 1;
+  }
+
+  .ew-profile-template {
     grid-column: 1;
   }
 }

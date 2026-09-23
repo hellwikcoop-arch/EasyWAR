@@ -256,7 +256,7 @@ fn normalize_display_name(value: &str) -> Result<(String, String), LocalProfileE
     Ok((display_name, name_key))
 }
 
-fn validate_profile_id(id: &str) -> Result<(), LocalProfileError> {
+pub(crate) fn validate_profile_id(id: &str) -> Result<(), LocalProfileError> {
     let suffix = id
         .strip_prefix("profile-")
         .filter(|suffix| suffix.len() == 24)

@@ -11,6 +11,7 @@ pub mod signal_ingest;
 pub mod signal_policy;
 pub mod signal_session;
 pub mod signal_settings;
+pub mod workspace_templates;
 pub mod xlsx_export;
 pub mod xlsx_import;
 
@@ -31,6 +32,7 @@ use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use std::{io::Read, path::Path, time::Duration};
 use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
+use workspace_templates::{WorkspaceTemplateStore, WorkspaceTemplatesState};
 use xlsx_export::XlsxExportResult;
 
 #[tauri::command]
@@ -97,6 +99,26 @@ async fn delete_local_profile(
     let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
     profiles
         .delete(&profile_id, &now)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn get_workspace_templates(
+    templates: tauri::State<'_, WorkspaceTemplateStore>,
+) -> Result<WorkspaceTemplatesState, String> {
+    templates.list().await.map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn set_profile_workspace_template(
+    templates: tauri::State<'_, WorkspaceTemplateStore>,
+    profile_id: String,
+    template_key: String,
+) -> Result<WorkspaceTemplatesState, String> {
+    let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
+    templates
+        .assign(&profile_id, &template_key, &now)
         .await
         .map_err(|error| error.to_string())
 }
@@ -556,6 +578,7 @@ pub fn run() {
             app.manage(SignalSettingsStore::new(SettingsStore::new(pool.clone())));
             app.manage(Repository::new(pool.clone()));
             app.manage(LocalProfileStore::new(pool.clone()));
+            app.manage(WorkspaceTemplateStore::new(pool.clone()));
             app.manage(SignalReceiveController::default());
             app.manage(BackupStore::new(pool));
             Ok(())
@@ -567,6 +590,8 @@ pub fn run() {
             rename_local_profile,
             activate_local_profile,
             delete_local_profile,
+            get_workspace_templates,
+            set_profile_workspace_template,
             get_signal_settings,
             save_signal_settings,
             discover_signal_accounts,

@@ -333,6 +333,17 @@ async fn inspect_pool(pool: &sqlx::SqlitePool) -> Result<BackupInspection, Resto
             }
         }
     }
+    if applied.last().unwrap().0 >= 4 {
+        let found: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM sqlite_master
+             WHERE type = 'table' AND name = 'local_profile_workspace_templates'",
+        )
+        .fetch_one(pool)
+        .await?;
+        if found != 1 {
+            return Err(RestoreInspectionError::MissingSchemaObjects);
+        }
+    }
 
     Ok(BackupInspection {
         schema_version: applied.last().unwrap().0,
@@ -397,7 +408,7 @@ mod tests {
 
         assert_eq!(
             inspect_backup(&backup).await.unwrap(),
-            BackupInspection { schema_version: 3 }
+            BackupInspection { schema_version: 4 }
         );
         assert_eq!(std::fs::read(&backup).unwrap(), before);
     }
@@ -518,6 +529,18 @@ mod tests {
             inspect_backup(&fourth).await,
             Err(RestoreInspectionError::MissingSchemaObjects)
         ));
+
+        let fifth = dir.path().join("missing-v4-table.sqlite3");
+        let pool = synthetic_database(&fifth).await;
+        sqlx::query("DROP TABLE local_profile_workspace_templates")
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+        assert!(matches!(
+            inspect_backup(&fifth).await,
+            Err(RestoreInspectionError::MissingSchemaObjects)
+        ));
     }
 
     #[tokio::test]
@@ -548,7 +571,7 @@ mod tests {
 
         assert_eq!(
             stage_backup(&source, &live).await.unwrap(),
-            BackupInspection { schema_version: 3 }
+            BackupInspection { schema_version: 4 }
         );
         assert_eq!(std::fs::read(&source).unwrap(), before);
         assert_eq!(
@@ -616,7 +639,7 @@ mod tests {
         stage_backup(&source, &live).await.unwrap();
         assert_eq!(
             swap_staged_backup_offline(&live).await.unwrap(),
-            BackupInspection { schema_version: 3 }
+            BackupInspection { schema_version: 4 }
         );
         assert_eq!(fs::read(&live).unwrap(), new_bytes);
         assert_eq!(
