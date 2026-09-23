@@ -24,6 +24,7 @@ pub struct DashboardModel {
     pub breakdowns: DashboardBreakdowns,
     pub quality: DashboardQualitySummary,
     pub map: DashboardMapSummary,
+    pub export_views: DashboardExportViews,
     pub records: Vec<DashboardRecord>,
 }
 
@@ -134,6 +135,84 @@ pub enum DashboardMapGeometryPolicy {
 pub enum DashboardMapStatus {
     Missing,
     SourceTextUnverified,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DashboardExportViews {
+    pub overview: DashboardExportOverview,
+    pub breakdowns: Vec<DashboardExportBreakdownRow>,
+    pub quality: Vec<DashboardExportQualityRow>,
+    pub map_readiness: DashboardExportMapReadiness,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DashboardExportOverview {
+    pub scope: DashboardExportScope,
+    pub period: DashboardPeriod,
+    pub total_records: usize,
+    pub aborted_records: usize,
+    pub evaluated_records: usize,
+    pub hit_records: usize,
+    pub partial_records: usize,
+    pub miss_records: usize,
+    pub unknown_records: usize,
+    pub overall_effect_percent: Option<f64>,
+    pub dpi_effect_percent: Option<f64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DashboardExportBreakdownRow {
+    pub scope: DashboardExportScope,
+    pub dimension: DashboardExportDimension,
+    pub value: Option<String>,
+    pub record_count: usize,
+    pub munition_count: u64,
+    pub aborted_records: usize,
+    pub evaluated_records: usize,
+    pub hit_records: usize,
+    pub partial_records: usize,
+    pub miss_records: usize,
+    pub unknown_records: usize,
+    pub overall_effect_percent: Option<f64>,
+    pub dpi_effect_percent: Option<f64>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DashboardExportQualityRow {
+    pub scope: DashboardExportScope,
+    pub issue: DashboardQualityIssue,
+    pub count: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DashboardExportMapReadiness {
+    pub scope: DashboardExportScope,
+    pub provider: DashboardMapProvider,
+    pub geometry_policy: DashboardMapGeometryPolicy,
+    pub total_records: usize,
+    pub coordinate_text_records: usize,
+    pub missing_coordinate_records: usize,
+    pub display_ready_records: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DashboardExportScope {
+    CurrentPeriod,
+    AllApproved,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DashboardExportDimension {
+    Aircraft,
+    Munition,
+    Unit,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -274,6 +353,12 @@ pub fn dashboard_model_from_snapshots_for_period(
     } else {
         (date_range.from.clone(), date_range.to.clone())
     };
+    let period = DashboardPeriod {
+        from: period_from,
+        to: period_to,
+        preset: "custom".to_owned(),
+    };
+    let export_views = calculate_export_views(&period, &effectiveness, &breakdowns, &quality, &map);
 
     Ok(DashboardModel {
         schema_version: DASHBOARD_SCHEMA_VERSION,
@@ -282,15 +367,12 @@ pub fn dashboard_model_from_snapshots_for_period(
         source_record_count,
         record_count: records.len(),
         date_range,
-        period: DashboardPeriod {
-            from: period_from,
-            to: period_to,
-            preset: "custom".to_owned(),
-        },
+        period,
         effectiveness,
         breakdowns,
         quality,
         map,
+        export_views,
         records,
     })
 }
@@ -361,6 +443,88 @@ fn calculate_map(records: &[DashboardRecord]) -> DashboardMapSummary {
         display_ready_records: 0,
         items,
     }
+}
+
+fn calculate_export_views(
+    period: &DashboardPeriod,
+    effectiveness: &DashboardEffectivenessSummary,
+    breakdowns: &DashboardBreakdowns,
+    quality: &DashboardQualitySummary,
+    map: &DashboardMapSummary,
+) -> DashboardExportViews {
+    let mut breakdown_rows = Vec::new();
+    append_export_breakdown_rows(
+        &mut breakdown_rows,
+        DashboardExportDimension::Aircraft,
+        &breakdowns.aircraft,
+    );
+    append_export_breakdown_rows(
+        &mut breakdown_rows,
+        DashboardExportDimension::Munition,
+        &breakdowns.munitions,
+    );
+    append_export_breakdown_rows(
+        &mut breakdown_rows,
+        DashboardExportDimension::Unit,
+        &breakdowns.units,
+    );
+
+    DashboardExportViews {
+        overview: DashboardExportOverview {
+            scope: DashboardExportScope::CurrentPeriod,
+            period: period.clone(),
+            total_records: effectiveness.total_records,
+            aborted_records: effectiveness.aborted_records,
+            evaluated_records: effectiveness.evaluated_records,
+            hit_records: effectiveness.hit_records,
+            partial_records: effectiveness.partial_records,
+            miss_records: effectiveness.miss_records,
+            unknown_records: effectiveness.unknown_records,
+            overall_effect_percent: effectiveness.overall_effect_percent,
+            dpi_effect_percent: effectiveness.dpi_effect_percent,
+        },
+        breakdowns: breakdown_rows,
+        quality: quality
+            .issue_counts
+            .iter()
+            .map(|item| DashboardExportQualityRow {
+                scope: DashboardExportScope::AllApproved,
+                issue: item.issue,
+                count: item.count,
+            })
+            .collect(),
+        map_readiness: DashboardExportMapReadiness {
+            scope: DashboardExportScope::CurrentPeriod,
+            provider: map.provider,
+            geometry_policy: map.geometry_policy,
+            total_records: map.total_records,
+            coordinate_text_records: map.coordinate_text_records,
+            missing_coordinate_records: map.missing_coordinate_records,
+            display_ready_records: map.display_ready_records,
+        },
+    }
+}
+
+fn append_export_breakdown_rows(
+    rows: &mut Vec<DashboardExportBreakdownRow>,
+    dimension: DashboardExportDimension,
+    groups: &[DashboardBreakdownGroup],
+) {
+    rows.extend(groups.iter().map(|group| DashboardExportBreakdownRow {
+        scope: DashboardExportScope::CurrentPeriod,
+        dimension,
+        value: group.value.clone(),
+        record_count: group.record_count,
+        munition_count: group.munition_count,
+        aborted_records: group.effectiveness.aborted_records,
+        evaluated_records: group.effectiveness.evaluated_records,
+        hit_records: group.effectiveness.hit_records,
+        partial_records: group.effectiveness.partial_records,
+        miss_records: group.effectiveness.miss_records,
+        unknown_records: group.effectiveness.unknown_records,
+        overall_effect_percent: group.effectiveness.overall_effect_percent,
+        dpi_effect_percent: group.effectiveness.dpi_effect_percent,
+    }));
 }
 
 fn calculate_effectiveness(records: &[DashboardRecord]) -> DashboardEffectivenessSummary {
@@ -866,6 +1030,19 @@ mod tests {
         assert_eq!(model.map.missing_coordinate_records, 0);
         assert_eq!(model.map.display_ready_records, 0);
         assert!(model.map.items.is_empty());
+        assert_eq!(
+            model.export_views.overview.scope,
+            DashboardExportScope::CurrentPeriod
+        );
+        assert_eq!(model.export_views.overview.period, model.period);
+        assert_eq!(model.export_views.overview.total_records, 0);
+        assert!(model.export_views.breakdowns.is_empty());
+        assert!(model.export_views.quality.is_empty());
+        assert_eq!(
+            model.export_views.map_readiness.scope,
+            DashboardExportScope::CurrentPeriod
+        );
+        assert_eq!(model.export_views.map_readiness.total_records, 0);
         assert!(model.records.is_empty());
     }
 
@@ -938,6 +1115,14 @@ mod tests {
         assert_eq!(serialized["map"]["provider"], "none");
         assert_eq!(serialized["map"]["geometryPolicy"], "not_derived");
         assert_eq!(serialized["map"]["displayReadyRecords"], 0);
+        assert_eq!(
+            serialized["exportViews"]["overview"]["scope"],
+            "current_period"
+        );
+        assert_eq!(
+            serialized["exportViews"]["mapReadiness"]["scope"],
+            "current_period"
+        );
         assert_eq!(serialized["records"][0]["result"], "hit");
         assert!(serialized["records"][0].get("qualityIssues").is_some());
     }
@@ -1022,6 +1207,129 @@ mod tests {
             "result",
         ] {
             assert!(!map_json.contains(forbidden));
+        }
+    }
+
+    #[test]
+    fn export_views_are_flat_deterministic_and_keep_scopes_explicit() {
+        let model = dashboard_model_from_snapshots_for_period(
+            &[snapshot(json!([
+                {
+                    "num": "inside-a",
+                    "date": "2026-01-01",
+                    "targets": "SYN-TARGET-42",
+                    "unit": "Навчальний підрозділ",
+                    "district": "Тестовий район",
+                    "dpi": "SYN-EXPORT-COORDINATE",
+                    "types": ["Навчальна ціль"],
+                    "aircraft": "ЛА-А",
+                    "munition": "БП-1",
+                    "count": "2",
+                    "result": "УРАЖЕНО",
+                    "note": "SYNTHETIC NOTE"
+                },
+                {
+                    "num": "inside-b",
+                    "date": "2026-01-02",
+                    "targets": "SYN-TARGET-43",
+                    "unit": "Навчальний підрозділ",
+                    "district": "Тестовий район",
+                    "types": ["Навчальна ціль"],
+                    "aircraft": "ЛА-Б",
+                    "munition": "БП-1",
+                    "count": "1",
+                    "result": "НЕ УРАЖЕНО"
+                },
+                {
+                    "num": "outside",
+                    "date": "2026-02-01",
+                    "count": "1",
+                    "result": "Невідомо"
+                }
+            ]))],
+            Some("2026-01-01"),
+            Some("2026-01-31"),
+        )
+        .unwrap();
+
+        let exports = &model.export_views;
+        assert_eq!(exports.overview.scope, DashboardExportScope::CurrentPeriod);
+        assert_eq!(exports.overview.period, model.period);
+        assert_eq!(exports.overview.total_records, 2);
+        assert_eq!(exports.overview.evaluated_records, 2);
+        assert_eq!(exports.overview.hit_records, 1);
+        assert_eq!(exports.overview.miss_records, 1);
+        assert_eq!(exports.overview.overall_effect_percent, Some(50.0));
+        assert_eq!(exports.overview.dpi_effect_percent, Some(50.0));
+
+        assert_eq!(exports.breakdowns.len(), 4);
+        assert_eq!(
+            exports
+                .breakdowns
+                .iter()
+                .map(|row| (row.dimension, row.value.as_deref()))
+                .collect::<Vec<_>>(),
+            [
+                (DashboardExportDimension::Aircraft, Some("ЛА-А")),
+                (DashboardExportDimension::Aircraft, Some("ЛА-Б")),
+                (DashboardExportDimension::Munition, Some("БП-1")),
+                (DashboardExportDimension::Unit, Some("Навчальний підрозділ")),
+            ]
+        );
+        assert!(exports
+            .breakdowns
+            .iter()
+            .all(|row| row.scope == DashboardExportScope::CurrentPeriod));
+        assert_eq!(exports.breakdowns[2].record_count, 2);
+        assert_eq!(exports.breakdowns[2].munition_count, 3);
+        assert_eq!(exports.breakdowns[2].hit_records, 1);
+        assert_eq!(exports.breakdowns[2].miss_records, 1);
+
+        assert!(!exports.quality.is_empty());
+        assert!(exports
+            .quality
+            .iter()
+            .all(|row| row.scope == DashboardExportScope::AllApproved));
+        assert_eq!(
+            exports
+                .quality
+                .iter()
+                .map(|row| (row.issue, row.count))
+                .collect::<Vec<_>>(),
+            model
+                .quality
+                .issue_counts
+                .iter()
+                .map(|row| (row.issue, row.count))
+                .collect::<Vec<_>>()
+        );
+
+        assert_eq!(
+            exports.map_readiness.scope,
+            DashboardExportScope::CurrentPeriod
+        );
+        assert_eq!(exports.map_readiness.total_records, 2);
+        assert_eq!(exports.map_readiness.coordinate_text_records, 1);
+        assert_eq!(exports.map_readiness.missing_coordinate_records, 1);
+        assert_eq!(exports.map_readiness.display_ready_records, 0);
+
+        let serialized = serde_json::to_value(exports).unwrap();
+        assert_eq!(serialized["overview"]["scope"], "current_period");
+        assert_eq!(serialized["breakdowns"][0]["dimension"], "aircraft");
+        assert_eq!(serialized["quality"][0]["scope"], "all_approved");
+        assert_eq!(serialized["mapReadiness"]["provider"], "none");
+        let export_json = serde_json::to_string(&serialized).unwrap();
+        for forbidden in [
+            "SYN-EXPORT-COORDINATE",
+            "SYN-TARGET-42",
+            "SYNTHETIC NOTE",
+            "coordinates",
+            "targetIds",
+            "recordNumber",
+            "dateRaw",
+            "items",
+        ] {
+            assert!(!export_json.contains(forbidden));
         }
     }
 

@@ -74,7 +74,7 @@
 - [x] aircraft / munitions / unit breakdowns
 - [x] data-quality view
 - [x] map abstraction (provider-neutral readiness, no geometry)
-- [ ] export views
+- [x] export views (structured aggregate contract; no file writer or UI wiring)
 
 ## 0.9 — Roles and templates
 
