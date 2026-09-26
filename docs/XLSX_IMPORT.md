@@ -101,7 +101,7 @@ It deliberately does not:
 Those compatibility and persistence steps remain tracked under milestone 0.7.
 Tests generate minimal synthetic workbooks entirely in memory and do not use or
 commit real `.xlsx` files. The cross-runtime regression suite loads the
-unchanged legacy CORE script from `src/index.html`, creates four synthetic
+unchanged legacy CORE script from `src/air.html`, creates four synthetic
 workbooks in memory, and sends the exact same workbook bytes to the actual Rust
 importer through a bounded test runner. It compares the worksheet row number
 and all 15 serialized fields for every returned record.

@@ -64,7 +64,7 @@ function xmlRow(number, values, numericDate = false) {
 }
 
 async function legacyCore() {
-  const html = await readFile(new URL('../src/index.html', import.meta.url), 'utf8');
+  const html = await readFile(new URL('../src/air.html', import.meta.url), 'utf8');
   const marker = html.indexOf('CORE — робота з .xlsx');
   assert.notEqual(marker, -1, 'legacy CORE script must exist');
   const start = html.lastIndexOf('<script>', marker);
