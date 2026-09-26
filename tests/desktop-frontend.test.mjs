@@ -40,10 +40,11 @@ test('air module keeps desktop integrations and v3.1 isolation', async () => {
   assert.match(html, /id="easywar-volja-module-brand"/);
 });
 
-test('rocket module is the unmodified v3.1 branch module', async () => {
+test('rocket module is the v3.1 branch module plus the module editor only', async () => {
   const html = await read('rocket.html');
   assert.match(html, /const NS = 'easywar\.rocket::';/);
   assert.doesNotMatch(html, /easywar-desktop/);
+  assert.match(html, /window\.__EW_EDITOR_HOOKS__/);
 });
 
 test('desktop bridge reuses the parent Tauri IPC inside the iframe', async () => {

@@ -5,7 +5,7 @@
 //
 // - src/index.html  ← launcher, with base64 module payloads removed and the
 //                     iframes pointed at ./air.html and ./rocket.html;
-// - src/rocket.html ← Rocket Forces module, byte-for-byte;
+// - src/rocket.html ← Rocket Forces module plus the «Редактор модуля» hook and scripts;
 // - the Air Force module is written to --air-out (default: unified-air.html in
 //   the OS temp dir) only for review: src/air.html carries desktop integrations
 //   and must be merged by hand with narrow anchored patches (see AGENTS.md).
@@ -67,8 +67,16 @@ launcher = replaceOnce(
   '</head>',
 );
 
+// «Редактор модуля»: гачок у коді дашборду та підключення скриптів редактора.
+const editorHook = await readFile(new URL('./module-editor-hook.js', import.meta.url), 'utf8');
+function withModuleEditor(html) {
+  let out = replaceOnce(html, '\nwindow.__DASH = { buildModel,', '\n' + editorHook + 'window.__DASH = { buildModel,', 'window.__DASH');
+  out = replaceOnce(out, '</body>', '<script src="./module-editor-core.js"></script>\n<script src="./module-editor.js"></script>\n</body>', '</body>');
+  return out;
+}
+
 await writeFile(new URL('index.html', root), launcher);
-await writeFile(new URL('rocket.html', root), rocket.html);
+await writeFile(new URL('rocket.html', root), withModuleEditor(rocket.html.toString('utf8')));
 await writeFile(airOut, air.html);
 console.log('Оновлено src/index.html і src/rocket.html.');
 console.log(`Модуль «Повітряні Сили» збережено для ручного злиття: ${airOut}`);
