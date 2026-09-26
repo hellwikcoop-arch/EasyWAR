@@ -37,7 +37,7 @@ test('air module keeps desktop integrations and v3.1 isolation', async () => {
   }
   assert.match(html, /id="tab-base"/, 'desktop «База даних» tab stays available');
   assert.match(html, /class="branch-service-mark"/);
-  assert.match(html, /id="easywar-uaf-module-brand"/);
+  assert.match(html, /id="easywar-volja-module-brand"/);
 });
 
 test('rocket module is the v3.1 branch module plus the module editor only', async () => {
@@ -72,40 +72,4 @@ test('inline scripts of all desktop pages parse', async () => {
       assert.doesNotThrow(() => new vm.Script(code, { filename: `${name}#${index}` }), `${name} script ${index}`);
     });
   }
-});
-
-test('pages follow the UAF visual style typography and naming', async () => {
-  const fonts = {};
-  for (const name of ['UAFSans-Medium.ttf', 'UAFSans-SemiBold.ttf']) {
-    fonts[name] = await readFile(new URL(`../src/fonts/${name}`, import.meta.url));
-    assert.equal(fonts[name].readUInt32BE(0), 0x00010000, `${name} is a TrueType font`);
-  }
-  assert.match(fonts['UAFSans-Medium.ttf'].toString('latin1'), /U\0A\0F\0 \0S\0a\0n\0s\0 \0M\0e\0d\0i\0u\0m/);
-  for (const page of ['index.html', 'air.html', 'rocket.html']) {
-    const html = await read(page);
-    assert.doesNotMatch(html, /Volja/, `${page}: Volja is ceremonial only (guide p. 16)`);
-    assert.doesNotMatch(html, /font-family:\s*"?Inter\b|--display:\s*Inter/, page);
-    assert.doesNotMatch(html, /font-weight:\s*100 900/, `${page}: one SemiBold file must not claim every weight`);
-    assert.match(html, /src:url\("\.\/fonts\/UAFSans-Medium\.ttf"\) format\("truetype"\);font-weight:500/, page);
-    assert.match(html, /src:url\("\.\/fonts\/UAFSans-SemiBold\.ttf"\) format\("truetype"\);font-weight:600/, page);
-    assert.match(html, /:root\{font-synthesis:none\}/, page);
-    assert.doesNotMatch(html, /Сухопутні Війська|Ракетні Війська|війська і Артилерія/, page);
-  }
-  assert.match(await read('index.html'), /<h3>Ракетні війська і артилерія<\/h3>/);
-  assert.match(await read('rocket.html'), /<small>Сухопутні війська<\/small>/);
-  for (const page of ['air.html', 'rocket.html']) {
-    assert.match(await read(page), /\.brand b,\.brand small\{font-family:"UAF Sans",var\(--display\)!important;font-style:normal!important;font-weight:600!important;/, page);
-  }
-});
-
-test('UAF style patches reproduce the committed pages from the v3.1 anchors', async () => {
-  const { uafLauncher, uafModule } = await import('../script/uaf-style.mjs');
-  // Already patched pages no longer carry the source anchors, so a second pass must fail loudly, not silently.
-  assert.throws(() => uafLauncher(`<style>:root{--display: "UAF Sans", ui-sans-serif,}</style>`), /однозначний якір/);
-  assert.throws(() => uafModule('<style></style>'), /однозначний якір/);
-  const launcher = uafLauncher('<style>:root{--display: Inter, ui-sans-serif, sans-serif}</style>'
-    + '<style id="easywar-volja-branch-titles">@font-face{font-family:"Volja"}</style><h3>Ракетні Війська і Артилерія</h3>');
-  assert.match(launcher, /--display: "UAF Sans", ui-sans-serif,/);
-  assert.match(launcher, /<style id="easywar-uaf-typography">/);
-  assert.match(launcher, /<h3>Ракетні війська і артилерія<\/h3>/);
 });

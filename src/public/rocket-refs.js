@@ -1,4 +1,4 @@
-/* EasyWAR · «Ракетні війська і артилерія» — оформлення за макетами (вересень 2026).
+/* EasyWAR · «Ракетні Війська і Артилерія» — оформлення за макетами (вересень 2026).
    Фото типів цілей, банери M30A1 / M31A1 / ATACMS / M26, єдиний вигляд карток показників і банерів боєприпасів.
    Файл згенеровано script/rocket-refs/build.py; зображення вирізано з макетів. Код модуля v3.1 не змінюється.
    Будь-яке з цих зображень можна замінити через «Оформлення → Зображення». */
@@ -150,7 +150,7 @@ html.rocket-ref24 .tt-row.ewr-tt .tt-tx small{color:#e4e1cc!important;text-shado
 html.rocket-ref24 .tt-row.ewr-tt .tt-n{background:rgba(8,10,5,.62);border-radius:8px;padding:4px 8px;backdrop-filter:blur(2px)}
 html.rocket-ref24 .tt-row.ewr-tt:first-of-type,html.rocket-ref24 .tt-row.ewr-tt:hover,html.rocket-ref24 .tt-row.ewr-tt:focus-visible{border-color:#e8c33a!important;box-shadow:0 0 0 1px rgba(232,195,58,.55),0 0 18px rgba(232,195,58,.18)!important}
 /* --- Банери боєприпасів: плашка серії, підпис великими, «Точність · Дальність · Результат» (макети 4–5) --- */
-.mh-row.ewr-ban .ewr-chip{display:inline-block;align-self:flex-start;margin-bottom:6px;padding:3px 10px;border-radius:3px;background:rgba(214,178,52,.22);border:1px solid rgba(232,195,58,.5);color:#f0cf4a;font:700 12px/1.2 var(--display);letter-spacing:.24em}
+.mh-row.ewr-ban .ewr-chip{display:inline-block;align-self:flex-start;margin-bottom:6px;padding:3px 10px;border-radius:3px;background:rgba(214,178,52,.22);border:1px solid rgba(232,195,58,.5);color:#f0cf4a;font:800 12px/1.2 var(--display);letter-spacing:.24em}
 .mh-row.ewr-ban .mh-sub.ewr-series{display:none!important}
 .mh-row.ewr-ban{aspect-ratio:2130/380!important}
 .mh-row.ewr-ban .mh-sub{text-transform:uppercase;letter-spacing:.09em;font-size:clamp(12px,1vw,15px)!important;line-height:1.35;font-weight:600!important;color:#d9d6c3!important}
