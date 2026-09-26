@@ -248,7 +248,59 @@
   const TABS = [['units', 'Підрозділи'], ['weapons', 'Озброєння'], ['images', 'Зображення'], ['texts', 'Тексти'], ['colors', 'Кольори'], ['blocks', 'Блоки'], ['file', 'Файл']];
   const ui = { open: false, tab: 'units', root: null, body: null, form: null, paint() {} };
 
+  /* ------------------------------ доступ лише для власника ------------------------------ */
+  /* Кнопки немає, доки редактор не розблоковано: прихований виклик (комбінація клавіш або 5 клацань
+     по емблемі модуля) відкриває запит пароля власника. Розблокування діє до перезапуску модуля. */
+  let unlocked = false, failures = 0, gate = null;
+  const LOCK_KEY = 'ew-editor-lock-until';
+  const lockedUntil = () => { try { return +localStorage.getItem(LOCK_KEY) || 0; } catch (e) { return 0; } };
+  function requestAccess(tab) {
+    if (unlocked) { openEditor(tab); return; }
+    if (gate) { gate.querySelector('input').focus(); return; }
+    const access = window.EW_EDITOR_ACCESS, ready = core.accessValid(access) && window.crypto && window.crypto.subtle;
+    const msg = h('p', { class: 'ewx-gate-msg', role: 'status', 'aria-live': 'polite' });
+    const input = h('input', { type: 'password', class: 'ewx-in', autocomplete: 'off', 'aria-label': 'Пароль власника', placeholder: 'Пароль власника' });
+    const close = () => { if (gate) gate.remove(); gate = null; };
+    const submit = async () => {
+      const wait = lockedUntil() - Date.now();
+      if (wait > 0) { msg.textContent = 'Забагато спроб. Спробуйте через ' + Math.ceil(wait / 1000) + ' с.'; return; }
+      ok.disabled = true; msg.textContent = 'Перевірка…';
+      let good = false; try { good = await core.verifyPassword(input.value, access, window.crypto.subtle); } catch (e) { good = false; }
+      ok.disabled = false; input.value = '';
+      if (good) { failures = 0; unlocked = true; close(); mountButton(); openEditor(tab); return; }
+      failures++;
+      if (failures >= 5) { failures = 0; try { localStorage.setItem(LOCK_KEY, String(Date.now() + 60000)); } catch (e) {} msg.textContent = 'Невірний пароль. Доступ призупинено на 60 с.'; }
+      else msg.textContent = 'Невірний пароль.';
+      input.focus();
+    };
+    const ok = btn('Увійти', submit, 'ewx-primary');
+    gate = h('div', { class: 'ewx-root ewx-gate', onkeydown: e => { if (e.key === 'Escape') close(); if (e.key === 'Enter') submit(); } },
+      h('div', { class: 'ewx-back', onclick: close }),
+      h('section', { class: 'ewx-gate-box', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Доступ до редактора модуля' },
+        h('h2', { text: 'Редактор модуля' }),
+        ready ? h('p', { class: 'ewx-note', text: 'Доступ лише для власника застосунку.' }) : h('p', { class: 'ewx-note', text: 'Редактор вимкнено в цій збірці.' }),
+        ready ? h('div', { class: 'ewx-row' }, input, ok) : null, msg, h('div', { class: 'ewx-row' }, btn('Скасувати', close))));
+    document.body.append(gate);
+    if (ready) input.focus();
+  }
+  function lockEditor() {
+    unlocked = false; closeEditor();
+    const b = document.getElementById('ewx-open'); if (b) b.remove();
+  }
+  function secretTriggers() {
+    document.addEventListener('keydown', e => {
+      if (e.code === 'KeyE' && e.shiftKey && e.altKey && (e.ctrlKey || e.metaKey)) { e.preventDefault(); requestAccess(); }
+    }, true);
+    let clicks = [];
+    document.addEventListener('click', e => {
+      if (!e.target.closest || !e.target.closest('.brand')) return;
+      const now = Date.now(); clicks = clicks.filter(t => now - t < 2500).concat(now);
+      if (clicks.length >= 5) { clicks = []; requestAccess(); }
+    }, true);
+  }
+
   function openEditor(tab) {
+    if (!unlocked) { requestAccess(tab); return; }
     if (tab) ui.tab = tab;
     if (!ui.root) buildRoot();
     ui.root.hidden = false; ui.open = true; ui.paint();
@@ -263,7 +315,7 @@
     ui.root = h('div', { class: 'ewx-root', hidden: true, onkeydown: e => { if (e.key === 'Escape') closeEditor(); } },
       h('div', { class: 'ewx-back', onclick: closeEditor }),
       h('section', { class: 'ewx-panel', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Редактор модуля' },
-        h('header', { class: 'ewx-head' }, h('div', {}, h('h2', { text: 'Редактор модуля' }), h('p', { text: MODULE_TITLE + ' · зміни зберігаються лише на цьому комп’ютері' })), btn('Закрити', closeEditor, 'ewx-close')),
+        h('header', { class: 'ewx-head' }, h('div', {}, h('h2', { text: 'Редактор модуля' }), h('p', { text: MODULE_TITLE + ' · зміни зберігаються лише на цьому комп’ютері' })), h('div', { class: 'ewx-row ewx-close' }, btn('Заблокувати', lockEditor, '', 'Сховати кнопку «Оформлення» й закрити доступ до перезапуску'), btn('Закрити', closeEditor))),
         tabs, ui.body, h('footer', { class: 'ewx-foot' }, statusEl)));
     document.body.append(ui.root);
     ui.paint = () => {
@@ -542,6 +594,8 @@
 .ewx-gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px}
 .ewx-fig{margin:0;display:grid;gap:6px;padding:8px;background:#0b1520;border:1px solid #1f3046;border-radius:10px}.ewx-fig.on{border-color:#3d7dc4}
 .ewx-fig img{width:100%;height:96px;object-fit:contain;background:#060d15;border-radius:6px}.ewx-fig figcaption{font-size:11.5px;color:#8ea2b8;overflow-wrap:anywhere}
+.ewx-gate-box{position:relative;width:min(420px,calc(100vw - 32px));display:grid;gap:10px;padding:20px;background:#0f1824;border:1px solid #2a3b52;border-radius:14px;box-shadow:0 30px 80px rgba(0,0,0,.55)}
+.ewx-gate-box h2{margin:0;font-size:18px}.ewx-gate-msg{margin:0;min-height:18px;color:#ff8b80;font-size:13px}
 .ewx-pickbar{position:fixed;left:50%;top:12px;transform:translateX(-50%);z-index:2147483001;background:#1d4f86;color:#fff;font:600 14px/1.3 var(--sans,system-ui,sans-serif);padding:10px 16px;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.45)}
 html.ewx-picking *{cursor:crosshair!important}
 `;
@@ -549,13 +603,13 @@ html.ewx-picking *{cursor:crosshair!important}
 
   /* ------------------------------ старт ------------------------------ */
   function start() {
-    mountButton();
+    secretTriggers();
     observer.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['src'] });
     loadConfig().then(saved => {
       cfg = core.sanitize(saved);
       applyAll(true);
     });
   }
-  window.EWModuleEditor = { open: openEditor, get config() { return JSON.parse(JSON.stringify(cfg)); }, reload: () => loadConfig().then(s => { cfg = core.sanitize(s); applyAll(true); }) };
+  window.EWModuleEditor = { open: tab => requestAccess(tab), get config() { return JSON.parse(JSON.stringify(cfg)); }, reload: () => loadConfig().then(s => { cfg = core.sanitize(s); applyAll(true); }) };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true }); else start();
 })();

@@ -4,7 +4,7 @@ import test from 'node:test';
 import vm from 'node:vm';
 
 const read = (path) => readFile(new URL(path, import.meta.url), 'utf8');
-const context = vm.createContext({});
+const context = vm.createContext({ atob, TextEncoder, Uint8Array });
 vm.runInContext(await read('../src/public/module-editor-core.js'), context);
 const core = context.EWModuleEditorCore;
 const PNG = 'data:image/png;base64,iVBORw0KGgo=';
@@ -119,11 +119,41 @@ test('module hook exposes maps and lets the editor override weapon keys', async 
   assert.equal(hooks.origMunKey('PrSM'), '');
 });
 
+test('owner password check uses PBKDF2 and rejects wrong or malformed input', async () => {
+  const { pbkdf2Sync, webcrypto } = await import('node:crypto');
+  const salt = Buffer.from('0123456789abcdef');
+  const access = { v: 1, salt: salt.toString('base64'), iterations: 100000, hash: pbkdf2Sync('правильний-пароль', salt, 100000, 32, 'sha256').toString('base64') };
+  assert.equal(core.accessValid(access), true);
+  assert.equal(await core.verifyPassword('правильний-пароль', access, webcrypto.subtle), true);
+  assert.equal(await core.verifyPassword('неправильний', access, webcrypto.subtle), false);
+  assert.equal(await core.verifyPassword('', access, webcrypto.subtle), false);
+  assert.equal(await core.verifyPassword('правильний-пароль', { ...access, iterations: 10 }, webcrypto.subtle), false, 'weak settings are refused');
+  assert.equal(await core.verifyPassword('правильний-пароль', undefined, webcrypto.subtle), false);
+});
+
+test('the shipped access file holds only a strong salted hash', async () => {
+  const source = await read('../src/public/module-editor-access.js');
+  const sandbox = { window: {} };
+  vm.runInNewContext(source, sandbox);
+  const access = sandbox.window.EW_EDITOR_ACCESS;
+  assert.equal(core.accessValid(access), true);
+  assert.ok(access.iterations >= 600000);
+  assert.deepEqual(Object.keys(access).sort(), ['hash', 'iterations', 'salt', 'v']);
+});
+
+test('the editor has no visible entry point until unlocked', async () => {
+  const source = await read('../src/public/module-editor.js');
+  const start = source.slice(source.indexOf('function start() {'), source.indexOf('window.EWModuleEditor ='));
+  assert.doesNotMatch(start, /mountButton\(\)/, 'the button is mounted only after a successful password check');
+  assert.match(source, /window\.EWModuleEditor = \{ open: tab => requestAccess\(tab\)/);
+});
+
 test('both branch modules load the editor hook and scripts', async () => {
   const hook = await read('../script/module-editor-hook.js');
   for (const name of ['air.html', 'rocket.html']) {
     const html = await read(`../src/${name}`);
     assert.ok(html.includes(hook + 'window.__DASH = { buildModel,'), `${name}: hook inside the dashboard closure`);
     assert.ok(html.includes('<script src="./module-editor-core.js"></script>\n<script src="./module-editor.js"></script>\n</body>'), `${name}: editor scripts`);
+    assert.ok(html.includes('<script src="./module-editor-access.js"></script>'), `${name}: owner access file`);
   }
 });
