@@ -671,6 +671,11 @@ pub fn run() {
         .join(database_name);
     let instance_lock = restore::acquire_application_instance_lock(&database_file)
         .expect("інший екземпляр EasyWAR уже працює або lock недоступний");
+    tauri::async_runtime::block_on(restore::recover_live_sidecars(
+        &database_file,
+        &instance_lock,
+    ))
+    .expect("не вдалося безпечно завершити відновлення SQLite після попереднього запуску");
     let restore_startup_report =
         tauri::async_runtime::block_on(restore::process_requested_restore(&database_file))
             .expect("не вдалося безпечно обробити підготовлене відновлення");

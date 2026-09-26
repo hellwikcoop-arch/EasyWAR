@@ -122,6 +122,78 @@ pub fn acquire_application_instance_lock(
     acquire_application_instance_lock_with_timeout(live_database, Duration::from_secs(5))
 }
 
+/// Let SQLite finish its own crash recovery for the live database before the
+/// startup checks inspect it as a standalone file.
+///
+/// An EasyWAR process that quit or crashed in the middle of a write leaves an
+/// `-journal` (or `-wal`/`-shm`) file next to the database. SQLite applies
+/// that file when the database is next opened for writing: it rolls back an
+/// unfinished transaction or folds committed WAL frames into the file. The
+/// sidecar is then removed when the only connection closes.
+///
+/// The instance lock proves that no other EasyWAR process has the database
+/// open. Sidecars without a live database are never applied to a new file.
+pub async fn recover_live_sidecars(
+    live_database: &Path,
+    _instance: &ApplicationInstanceLock,
+) -> Result<bool, RestoreInspectionError> {
+    if !live_database.is_absolute() || live_database.file_name().is_none() {
+        return Err(RestoreInspectionError::InvalidTarget);
+    }
+    if !has_sidecars(live_database)? {
+        return Ok(false);
+    }
+    if !fs::symlink_metadata(live_database).is_ok_and(|metadata| metadata.file_type().is_file()) {
+        return Err(RestoreInspectionError::LiveSidecarsPresent);
+    }
+    for sidecar in sidecar_paths(live_database) {
+        if let Ok(metadata) = fs::symlink_metadata(&sidecar) {
+            if !metadata.file_type().is_file() {
+                return Err(RestoreInspectionError::InvalidRestoreControlFile);
+            }
+        }
+    }
+
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(SqliteConnectOptions::new().filename(live_database))
+        .await?;
+    let recovered = async {
+        // Reading the schema triggers hot-journal rollback / WAL recovery.
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM sqlite_master")
+            .fetch_one(&pool)
+            .await?;
+        let journal_mode: String = sqlx::query_scalar("PRAGMA journal_mode")
+            .fetch_one(&pool)
+            .await?;
+        if journal_mode.eq_ignore_ascii_case("wal") {
+            sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+                .execute(&pool)
+                .await?;
+        } else if has_sidecars(live_database)? {
+            // A journal whose header was never synced is not "hot": the
+            // database file was not written yet, so SQLite ignores it until
+            // the next write transaction replaces and deletes it. Run a no-op
+            // write (same user_version) so that happens now.
+            let version: i64 = sqlx::query_scalar("PRAGMA user_version")
+                .fetch_one(&pool)
+                .await?;
+            sqlx::query(&format!("PRAGMA user_version = {version}"))
+                .execute(&pool)
+                .await?;
+        }
+        Ok::<_, RestoreInspectionError>(())
+    }
+    .await;
+    pool.close().await;
+    recovered?;
+
+    if has_sidecars(live_database)? {
+        return Err(RestoreInspectionError::LiveSidecarsPresent);
+    }
+    Ok(true)
+}
+
 fn acquire_application_instance_lock_with_timeout(
     live_database: &Path,
     timeout: Duration,
@@ -407,11 +479,17 @@ fn path_exists(path: &Path) -> Result<bool, io::Error> {
     }
 }
 
-fn has_sidecars(path: &Path) -> Result<bool, io::Error> {
-    for suffix in ["-wal", "-shm", "-journal"] {
+fn sidecar_paths(path: &Path) -> impl Iterator<Item = PathBuf> + '_ {
+    ["-wal", "-shm", "-journal"].into_iter().map(move |suffix| {
         let mut sidecar: OsString = path.as_os_str().to_owned();
         sidecar.push(suffix);
-        if path_exists(Path::new(&sidecar))? {
+        PathBuf::from(sidecar)
+    })
+}
+
+fn has_sidecars(path: &Path) -> Result<bool, io::Error> {
+    for sidecar in sidecar_paths(path) {
+        if path_exists(&sidecar)? {
             return Ok(true);
         }
     }
@@ -1119,5 +1197,201 @@ mod tests {
         thread::sleep(Duration::from_millis(75));
         drop(first);
         assert!(waiter.join().unwrap().is_ok());
+    }
+
+    async fn fill_synthetic_rows(pool: &SqlitePool, rows: i64) {
+        sqlx::query("CREATE TABLE synthetic_rows (id INTEGER PRIMARY KEY, payload TEXT NOT NULL)")
+            .execute(pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < $1)
+             INSERT INTO synthetic_rows (id, payload) SELECT i, printf('%.300c', 'a') FROM n",
+        )
+        .bind(rows)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    fn copy_with_sidecars(from: &Path, to: &Path) {
+        std::fs::copy(from, to).unwrap();
+        for suffix in ["-wal", "-shm", "-journal"] {
+            let mut source = from.as_os_str().to_owned();
+            source.push(suffix);
+            if Path::new(&source).exists() {
+                let mut target = to.as_os_str().to_owned();
+                target.push(suffix);
+                std::fs::copy(&source, &target).unwrap();
+            }
+        }
+    }
+
+    async fn synthetic_payloads(path: &Path) -> (i64, i64) {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(SqliteConnectOptions::new().filename(path).read_only(true))
+            .await
+            .unwrap();
+        let counts = sqlx::query_as(
+            "SELECT count(*), sum(payload = printf('%.300c', 'a')) FROM synthetic_rows",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        pool.close().await;
+        counts
+    }
+
+    /// Snapshot the files mid-transaction, as a process killed during a write
+    /// leaves them. `synchronous = OFF` makes SQLite write the journal header
+    /// immediately, so the leftover journal is always "hot".
+    async fn crash_during_write(running: &Path, crashed: &Path) {
+        let pool = synthetic_database(running).await;
+        fill_synthetic_rows(&pool, 1500).await;
+        {
+            let mut connection = pool.acquire().await.unwrap();
+            for pragma in [
+                "PRAGMA synchronous = OFF",
+                "PRAGMA cache_size = 1",
+                "BEGIN IMMEDIATE",
+            ] {
+                sqlx::query(pragma).execute(&mut *connection).await.unwrap();
+            }
+            sqlx::query("UPDATE synthetic_rows SET payload = printf('%.300c', 'b')")
+                .execute(&mut *connection)
+                .await
+                .unwrap();
+            copy_with_sidecars(running, crashed);
+            sqlx::query("ROLLBACK")
+                .execute(&mut *connection)
+                .await
+                .unwrap();
+        }
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn rolls_back_a_write_interrupted_by_a_crash_before_startup_checks() {
+        let dir = tempfile::tempdir().unwrap();
+        let crashed = dir.path().join("easywar.db");
+        crash_during_write(&dir.path().join("running.db"), &crashed).await;
+        let journal = dir.path().join("easywar.db-journal");
+        const JOURNAL_MAGIC: [u8; 8] = [0xd9, 0xd5, 0x05, 0xf9, 0x20, 0xa1, 0x63, 0xd7];
+        assert_eq!(
+            std::fs::read(&journal).unwrap()[..8],
+            JOURNAL_MAGIC,
+            "hot journal"
+        );
+        assert!(matches!(
+            inspect_backup(&crashed).await,
+            Err(RestoreInspectionError::SidecarsPresent)
+        ));
+
+        let lock = acquire_application_instance_lock(&crashed).unwrap();
+        assert!(recover_live_sidecars(&crashed, &lock).await.unwrap());
+
+        assert!(!journal.exists());
+        assert_eq!(
+            inspect_backup(&crashed).await.unwrap(),
+            BackupInspection { schema_version: 4 }
+        );
+        assert_eq!(synthetic_payloads(&crashed).await, (1500, 1500));
+    }
+
+    #[tokio::test]
+    async fn clears_a_journal_that_was_never_synced() {
+        let dir = tempfile::tempdir().unwrap();
+        let live = dir.path().join("easywar.db");
+        let pool = synthetic_database(&live).await;
+        fill_synthetic_rows(&pool, 20).await;
+        pool.close().await;
+        // A killed process can leave a journal whose header is still zeroed:
+        // SQLite does not treat it as hot, and the database file is unchanged.
+        let journal = dir.path().join("easywar.db-journal");
+        let mut stale = vec![0_u8; 512];
+        stale.extend_from_slice(&[0x5a; 4096]);
+        std::fs::write(&journal, &stale).unwrap();
+
+        let lock = acquire_application_instance_lock(&live).unwrap();
+        assert!(recover_live_sidecars(&live, &lock).await.unwrap());
+
+        assert!(!journal.exists());
+        assert_eq!(
+            inspect_backup(&live).await.unwrap(),
+            BackupInspection { schema_version: 4 }
+        );
+        assert_eq!(synthetic_payloads(&live).await, (20, 20));
+    }
+
+    #[tokio::test]
+    async fn keeps_committed_wal_frames_before_startup_checks() {
+        let dir = tempfile::tempdir().unwrap();
+        let running = dir.path().join("running.db");
+        synthetic_database(&running).await.close().await;
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(&running)
+                    .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal),
+            )
+            .await
+            .unwrap();
+        sqlx::query("PRAGMA wal_autocheckpoint = 0")
+            .execute(&pool)
+            .await
+            .unwrap();
+        fill_synthetic_rows(&pool, 40).await;
+        let crashed = dir.path().join("easywar.db");
+        copy_with_sidecars(&running, &crashed);
+        pool.close().await;
+        assert!(dir.path().join("easywar.db-wal").exists());
+
+        let lock = acquire_application_instance_lock(&crashed).unwrap();
+        assert!(recover_live_sidecars(&crashed, &lock).await.unwrap());
+
+        for suffix in ["-wal", "-shm", "-journal"] {
+            assert!(
+                !dir.path().join(format!("easywar.db{suffix}")).exists(),
+                "{suffix}"
+            );
+        }
+        assert_eq!(
+            inspect_backup(&crashed).await.unwrap(),
+            BackupInspection { schema_version: 4 }
+        );
+        assert_eq!(synthetic_payloads(&crashed).await, (40, 40));
+    }
+
+    #[tokio::test]
+    async fn clean_live_database_needs_no_recovery() {
+        let dir = tempfile::tempdir().unwrap();
+        let live = dir.path().join("easywar.db");
+        synthetic_database(&live).await.close().await;
+        let before = std::fs::read(&live).unwrap();
+
+        let lock = acquire_application_instance_lock(&live).unwrap();
+        assert!(!recover_live_sidecars(&live, &lock).await.unwrap());
+        assert_eq!(std::fs::read(&live).unwrap(), before);
+    }
+
+    #[tokio::test]
+    async fn never_applies_sidecars_without_their_live_database() {
+        let dir = tempfile::tempdir().unwrap();
+        let live = dir.path().join("easywar.db");
+        let journal = dir.path().join("easywar.db-journal");
+        std::fs::write(&journal, b"synthetic orphaned journal").unwrap();
+
+        let lock = acquire_application_instance_lock(&live).unwrap();
+        assert!(matches!(
+            recover_live_sidecars(&live, &lock).await,
+            Err(RestoreInspectionError::LiveSidecarsPresent)
+        ));
+        assert!(!live.exists());
+        assert_eq!(
+            std::fs::read(&journal).unwrap(),
+            b"synthetic orphaned journal"
+        );
     }
 }
