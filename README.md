@@ -108,6 +108,10 @@ Technical macOS (universal DMG, ad-hoc signed) and Windows (MSI + NSIS,
 unsigned) installers are built by the `Desktop build` GitHub Actions workflow
 and published as workflow artifacts.
 
+Application icons are generated from the vector sources in
+`src-tauri/icons/source/` with `./script/generate_icons.sh` (full logo for large
+sizes, trident-only for 16–48 px, Apple grid variant for macOS).
+
 The Codex `Run` action calls the same script. Use
 `./script/build_and_run.sh --verify` for a debug build plus a process check.
 On Windows, use `npm run tauri dev` from a supported developer shell.
