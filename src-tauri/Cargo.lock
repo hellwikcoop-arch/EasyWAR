@@ -879,10 +879,13 @@ checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 name = "easywar"
 version = "0.5.0"
 dependencies = [
+ "block2",
  "calamine",
  "chrono",
  "dirs",
  "fs2",
+ "objc2",
+ "objc2-foundation",
  "quick-xml 0.31.0",
  "regex",
  "reqwest",

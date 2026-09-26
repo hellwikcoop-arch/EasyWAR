@@ -53,9 +53,13 @@ The original source must remain auditable and must not be silently overwritten b
 │   ├── ROADMAP.md
 │   ├── USER_GUIDE.md
 │   └── PROJECT_CONTEXT.md
+├── .github/workflows/desktop-build.yml
 ├── script/build_and_run.sh
+├── script/import_unified_html.mjs
 ├── src/
-│   └── index.html
+│   ├── index.html   # launcher: вибір роду військ
+│   ├── air.html     # Повітряні Сили + desktop-інтеграції
+│   └── rocket.html  # Ракетні Війська і Артилерія
 ├── src-tauri/
 │   ├── capabilities/default.json
 │   ├── migrations/README.md
@@ -67,9 +71,12 @@ The original source must remain auditable and must not be silently overwritten b
 └── README.md
 ```
 
-`src/index.html` is a byte-for-byte copy of the current single-file EasyWAR
-frontend. It is embedded as the first Tauri frontend without a wholesale
-rewrite. SQLite is registered with a versioned provenance schema; see
+The frontend is the unified EasyWAR v3.1 application split into three
+same-origin pages: the launcher (`src/index.html`) and the two branch modules
+it opens in iframes (`src/air.html`, `src/rocket.html`). The Rocket Forces
+module is byte-for-byte from the single-file HTML; the Air Force module keeps
+the desktop integrations (Signal, SQLite, XLSX, backup, profiles). See
+[`docs/UNIFIED_FRONTEND.md`](docs/UNIFIED_FRONTEND.md). SQLite is registered with a versioned provenance schema; see
 [`docs/DATABASE.md`](docs/DATABASE.md). No real data is stored in the repository.
 
 The Tauri content security policy is temporarily unset because the preserved
@@ -96,6 +103,10 @@ Install dependencies and run the desktop shell:
 npm ci
 ./script/build_and_run.sh
 ```
+
+Technical macOS (universal DMG, ad-hoc signed) and Windows (MSI + NSIS,
+unsigned) installers are built by the `Desktop build` GitHub Actions workflow
+and published as workflow artifacts.
 
 The Codex `Run` action calls the same script. Use
 `./script/build_and_run.sh --verify` for a debug build plus a process check.

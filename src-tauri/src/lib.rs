@@ -1,6 +1,7 @@
 pub mod analytics;
 pub mod backup;
 mod database;
+mod desktop_shell;
 pub mod local_profiles;
 mod migration_startup;
 pub mod position_templates;
@@ -710,6 +711,7 @@ pub fn run() {
             app.manage(LiveDatabasePath(setup_database_file));
             app.manage(instance_lock);
             app.manage(restore_startup_report);
+            desktop_shell::create_main_window(app)?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
