@@ -27,7 +27,16 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Install Tauri Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
       - run: npm ci
+      # The XLSX contract test runs a Rust example against the legacy parser.
       - run: npm run test:unit
       - run: npm run build
 
