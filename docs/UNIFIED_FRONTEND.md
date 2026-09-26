@@ -41,6 +41,28 @@ shim) and exported and imported as JSON. Imported files are sanitized: only
 `data:image/*` images, `#hex` colors and `p-*` block ids are accepted, and texts
 are inserted as text nodes only.
 
+### Owner-only access
+
+The editor has no visible entry point. A hidden trigger opens a password prompt;
+the password is checked with PBKDF2-SHA256 (600 000 iterations, WebCrypto)
+against `src/public/module-editor-access.js`, which holds only the salt and hash.
+Change the password with `node script/set_editor_password.mjs` and rebuild —
+older builds keep accepting the old password. Five wrong attempts pause input for
+60 s. Unlocking lasts until the module reloads.
+
+This protects the in-app UI; it is not a boundary against someone who can modify
+the installed application files or the local IndexedDB on that computer.
+
+## Rocket Forces reference styling
+
+`src/public/rocket-refs.js` (built by `script/rocket-refs/build.py` from
+`template.js` and the images in `script/rocket-refs/img/`, cut from the
+September 2026 mockups) adds target-type photos, the M30A1 / M31A1 / ATACMS / M26
+banners, a unified KPI card layout, and munition/target details to the selected-
+group strip. It only decorates the rendered DOM and module maps via the editor
+hook; the v3.1 source stays unchanged, and every image can be replaced in the
+editor.
+
 ## Importing a new unified HTML
 
 ```text

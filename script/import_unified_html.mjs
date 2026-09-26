@@ -71,12 +71,14 @@ launcher = replaceOnce(
 const editorHook = await readFile(new URL('./module-editor-hook.js', import.meta.url), 'utf8');
 function withModuleEditor(html) {
   let out = replaceOnce(html, '\nwindow.__DASH = { buildModel,', '\n' + editorHook + 'window.__DASH = { buildModel,', 'window.__DASH');
-  out = replaceOnce(out, '</body>', '<script src="./module-editor-core.js"></script>\n<script src="./module-editor.js"></script>\n</body>', '</body>');
+  out = replaceOnce(out, '</body>', '<script src="./module-editor-access.js"></script>\n<script src="./module-editor-core.js"></script>\n<script src="./module-editor.js"></script>\n</body>', '</body>');
   return out;
 }
 
 await writeFile(new URL('index.html', root), launcher);
-await writeFile(new URL('rocket.html', root), withModuleEditor(rocket.html.toString('utf8')));
+// Оформлення «Ракетних Військ» за макетами (src/public/rocket-refs.js) — перед редактором, щоб він бачив ці зображення.
+const rocketHtml = replaceOnce(withModuleEditor(rocket.html.toString('utf8')), '<script src="./module-editor-core.js">', '<script src="./rocket-refs.js"></script>\n<script src="./module-editor-core.js">', 'module-editor-core');
+await writeFile(new URL('rocket.html', root), rocketHtml);
 await writeFile(airOut, air.html);
 console.log('Оновлено src/index.html і src/rocket.html.');
 console.log(`Модуль «Повітряні Сили» збережено для ручного злиття: ${airOut}`);
