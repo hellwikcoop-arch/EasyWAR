@@ -6,12 +6,14 @@
 // - src/index.html  ← launcher, with base64 module payloads removed and the
 //                     iframes pointed at ./air.html and ./rocket.html;
 // - src/rocket.html ← Rocket Forces module plus the «Редактор модуля» hook and scripts;
+// - both get the UAF visual-style font and naming patches (script/uaf-style.mjs);
 // - the Air Force module is written to --air-out (default: unified-air.html in
 //   the OS temp dir) only for review: src/air.html carries desktop integrations
 //   and must be merged by hand with narrow anchored patches (see AGENTS.md).
 import { readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { replaceOnce, uafLauncher, uafModule } from './uaf-style.mjs';
 
 const args = process.argv.slice(2);
 const input = args.find((arg) => !arg.startsWith('--'));
@@ -24,14 +26,6 @@ if (!input || (airOutIndex >= 0 && !airOut)) {
 
 const root = new URL('../src/', import.meta.url);
 const unified = await readFile(input, 'utf8');
-
-function replaceOnce(source, search, replacement, label) {
-  const first = source.indexOf(search);
-  if (first < 0 || source.indexOf(search, first + 1) >= 0) {
-    throw new Error(`Не знайдено однозначний якір: ${label}`);
-  }
-  return source.slice(0, first) + replacement + source.slice(first + search.length);
-}
 
 function extractModule(id) {
   const pattern = new RegExp(`<script id="source-${id}" type="application/x-easywar-module">([\\s\\S]*?)</script>\\n`);
@@ -75,9 +69,9 @@ function withModuleEditor(html) {
   return out;
 }
 
-await writeFile(new URL('index.html', root), launcher);
+await writeFile(new URL('index.html', root), uafLauncher(launcher));
 // Оформлення «Ракетних Військ» за макетами (src/public/rocket-refs.js) — перед редактором, щоб він бачив ці зображення.
-const rocketHtml = replaceOnce(withModuleEditor(rocket.html.toString('utf8')), '<script src="./module-editor-core.js">', '<script src="./rocket-refs.js"></script>\n<script src="./module-editor-core.js">', 'module-editor-core');
+const rocketHtml = replaceOnce(withModuleEditor(uafModule(rocket.html.toString('utf8'))), '<script src="./module-editor-core.js">', '<script src="./rocket-refs.js"></script>\n<script src="./module-editor-core.js">', 'module-editor-core');
 await writeFile(new URL('rocket.html', root), rocketHtml);
 await writeFile(airOut, air.html);
 console.log('Оновлено src/index.html і src/rocket.html.');

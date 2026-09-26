@@ -7,7 +7,7 @@ application as three same-origin pages:
 | File | Source | Notes |
 | --- | --- | --- |
 | `src/index.html` | launcher from the unified HTML | payloads removed; iframes load `./air.html` / `./rocket.html`; Air controls aligned with the desktop toolbar |
-| `src/rocket.html` | «Ракетні Війська і Артилерія» module | v3.1 plus the module-editor hook and scripts |
+| `src/rocket.html` | «Ракетні війська і артилерія» module | v3.1 plus the module-editor hook and scripts |
 | `src/air.html` | previous desktop frontend + v3.1 Air changes | storage namespace `easywar.air::`, branch brand styles/mark, updated F-16 image; keeps «База даних», Signal, SQLite, XLSX, backup and profiles |
 
 Each module isolates its `localStorage` keys and IndexedDB names by prefix
@@ -63,6 +63,15 @@ group strip. It only decorates the rendered DOM and module maps via the editor
 hook; the v3.1 source stays unchanged, and every image can be replaced in the
 editor.
 
+## UAF visual style
+
+Typography and naming follow the ZSU visual-style guide (2023); the full audit and
+the items still waiting for approved assets are in `docs/UAF_VISUAL_STYLE.md`.
+`script/uaf-style.mjs` applies the patches: official UAF Sans files from
+`src/fonts/` (Medium, SemiBold) instead of one SemiBold declared for 100–900,
+no ceremonial Volja in the UI, UAF Sans instead of Inter on the launcher, and
+official spelling of branch names.
+
 ## Importing a new unified HTML
 
 ```text
@@ -70,6 +79,7 @@ node script/import_unified_html.mjs /path/to/EasyWAR_UNIFIED.html --air-out /tmp
 ```
 
 The script rewrites `src/index.html` and `src/rocket.html` (adding the module
-editor hook and scripts) and saves the Air module for review. `src/air.html` is **not** overwritten: port the Air changes
-by hand with narrow anchored patches (see `AGENTS.md`), then run
+editor hook and scripts and the UAF style patches) and saves the Air module for review. `src/air.html` is **not** overwritten: port the Air changes
+by hand with narrow anchored patches (see `AGENTS.md`; `uafModule()` from
+`script/uaf-style.mjs` applies the style patches), then run
 `npm run test:unit`.

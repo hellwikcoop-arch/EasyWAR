@@ -8,7 +8,7 @@
   window.__EW_MODULE_EDITOR__ = true;
 
   const MODULE = String(window.__EASYWAR_MODULE__ || 'module');
-  const MODULE_TITLE = MODULE === 'air' ? 'Повітряні Сили' : MODULE === 'rocket' ? 'Ракетні Війська і Артилерія' : 'Модуль';
+  const MODULE_TITLE = MODULE === 'air' ? 'Повітряні Сили' : MODULE === 'rocket' ? 'Ракетні війська і артилерія' : 'Модуль';
   const CARRIER_LABEL = MODULE === 'air' ? 'Літаки (носії)' : 'Пускові установки / засоби';
   /* Довідники модуля відкриває гачок усередині коду дашборду (window.__EW_EDITOR_HOOKS__). */
   const HOOKS = () => window.__EW_EDITOR_HOOKS__ || null;

@@ -52,14 +52,17 @@ The original source must remain auditable and must not be silently overwritten b
 │   ├── RELEASE_CHECKLIST.md
 │   ├── ROADMAP.md
 │   ├── USER_GUIDE.md
+│   ├── UAF_VISUAL_STYLE.md
 │   └── PROJECT_CONTEXT.md
 ├── .github/workflows/desktop-build.yml
 ├── script/build_and_run.sh
 ├── script/import_unified_html.mjs
+├── script/uaf-style.mjs   # графічний стиль ЗСУ: шрифти й назви
 ├── src/
+│   ├── fonts/       # офіційні UAF Sans Medium і SemiBold
 │   ├── index.html   # launcher: вибір роду військ
 │   ├── air.html     # Повітряні Сили + desktop-інтеграції
-│   └── rocket.html  # Ракетні Війська і Артилерія
+│   └── rocket.html  # Ракетні війська і артилерія
 ├── src-tauri/
 │   ├── capabilities/default.json
 │   ├── migrations/README.md
