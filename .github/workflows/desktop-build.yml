@@ -72,22 +72,25 @@ jobs:
             hdiutil verify "$dmg"
             shasum -a 256 "$dmg"
           done
-      - name: Smoke-test app launch
+      - name: Smoke-test app launch and restart
         run: |
-          APP=src-tauri/target/universal-apple-darwin/release/bundle/macos/EasyWAR.app
-          LOG="$RUNNER_TEMP/easywar-launch.log"
-          RUST_BACKTRACE=1 "$APP/Contents/MacOS/easywar" >"$LOG" 2>&1 &
-          PID=$!
-          sleep 20
-          if kill -0 "$PID" 2>/dev/null; then
-            echo "EasyWAR is still running after 20 s."
-            kill "$PID"
-            wait "$PID" 2>/dev/null || true
-            cat "$LOG"
-          else
+          BIN=src-tauri/target/universal-apple-darwin/release/bundle/macos/EasyWAR.app/Contents/MacOS/easywar
+          DATA="$HOME/Library/Application Support/com.hellwikcoop.easywar"
+          launch() {
+            LOG="$RUNNER_TEMP/easywar-$1.log"
+            RUST_BACKTRACE=1 "$BIN" >"$LOG" 2>&1 &
+            PID=$!
+            sleep 20
+            if kill -0 "$PID" 2>/dev/null; then
+              echo "$1: EasyWAR is still running after 20 s."
+              kill "$PID"
+              wait "$PID" 2>/dev/null || true
+              cat "$LOG"
+              return 0
+            fi
             STATUS=0
             wait "$PID" || STATUS=$?
-            echo "::error::EasyWAR exited during startup (status $STATUS)."
+            echo "::error::EasyWAR exited during startup ($1, status $STATUS)."
             cat "$LOG"
             for report in ~/Library/Logs/DiagnosticReports/easywar* ~/Library/Logs/DiagnosticReports/EasyWAR*; do
               if [ -f "$report" ]; then
@@ -95,8 +98,14 @@ jobs:
                 head -150 "$report"
               fi
             done
-            exit 1
-          fi
+            return 1
+          }
+          launch first-start
+          # A process killed mid-write leaves a journal next to the database;
+          # the next start must let SQLite recover it instead of refusing to open.
+          python3 -c 'import sys; open(sys.argv[1], "wb").write(bytes(512) + b"Z" * 4096)' "$DATA/easywar.db-journal"
+          launch after-interrupted-write
+          test ! -e "$DATA/easywar.db-journal"
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: EasyWAR-macOS
