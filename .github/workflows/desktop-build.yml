@@ -4,10 +4,10 @@ name: Desktop build
 # Production signing and notarization stay a separate, manual release gate —
 # see docs/RELEASE_CHECKLIST.md.
 #
-# A vX.Y.Z tag also builds signed in-app update packages and a draft release
-# with latest.json (see docs/UPDATES.md). It needs the TAURI_SIGNING_PRIVATE_KEY
-# and TAURI_SIGNING_PRIVATE_KEY_PASSWORD secrets and the EASYWAR_UPDATE_ENDPOINT
-# and EASYWAR_UPDATE_FILES_URL variables.
+# A vX.Y.Z tag also builds signed in-app update packages and publishes a
+# draft release with latest.json to the public installers-only repository
+# (see docs/UPDATES.md). It needs the TAURI_SIGNING_PRIVATE_KEY,
+# TAURI_SIGNING_PRIVATE_KEY_PASSWORD and EASYWAR_RELEASES_TOKEN secrets.
 
 on:
   push:
@@ -28,6 +28,8 @@ concurrency:
 
 env:
   RELEASE_BUILD: ${{ startsWith(github.ref, 'refs/tags/v') }}
+  # Installers and update packages only; the source stays in this private repo.
+  RELEASES_REPO: hellwikcoop-arch/easywar-releases
 
 jobs:
   checks:
@@ -56,19 +58,19 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          EASYWAR_UPDATE_ENDPOINT: ${{ vars.EASYWAR_UPDATE_ENDPOINT }}
-          EASYWAR_UPDATE_FILES_URL: ${{ vars.EASYWAR_UPDATE_FILES_URL }}
+          EASYWAR_RELEASES_TOKEN: ${{ secrets.EASYWAR_RELEASES_TOKEN }}
         run: |
           missing=0
-          for name in TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD EASYWAR_UPDATE_ENDPOINT EASYWAR_UPDATE_FILES_URL; do
+          for name in TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD EASYWAR_RELEASES_TOKEN; do
             if [ -z "${!name}" ]; then
-              echo "::error::Для випуску з оновленнями потрібен $name (Settings → Secrets and variables → Actions)."
+              echo "::error::Для випуску з оновленнями потрібен секрет $name (Settings → Secrets and variables → Actions)."
               missing=1
             fi
           done
-          case "$EASYWAR_UPDATE_ENDPOINT$EASYWAR_UPDATE_FILES_URL" in
-            *http://*) echo "::error::Адреси оновлень мають бути https://."; missing=1 ;;
-          esac
+          if [ -n "$EASYWAR_RELEASES_TOKEN" ] && ! GH_TOKEN="$EASYWAR_RELEASES_TOKEN" gh api "repos/$RELEASES_REPO" --jq '.private == false and .permissions.push == true' | grep -qx true; then
+            echo "::error::Репозиторій $RELEASES_REPO має бути публічним, а EASYWAR_RELEASES_TOKEN — мати в ньому право запису (Contents: Read and write)."
+            missing=1
+          fi
           exit $missing
       # The XLSX contract test runs a Rust example against the legacy parser.
       - run: npm run test:unit
@@ -95,7 +97,7 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ env.RELEASE_BUILD == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ env.RELEASE_BUILD == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
-          EASYWAR_UPDATE_ENDPOINT: ${{ env.RELEASE_BUILD == 'true' && vars.EASYWAR_UPDATE_ENDPOINT || '' }}
+          EASYWAR_UPDATE_ENDPOINT: ${{ env.RELEASE_BUILD == 'true' && format('https://github.com/{0}/releases/latest/download/latest.json', env.RELEASES_REPO) || '' }}
         run: |
           updater=()
           if [ "$RELEASE_BUILD" = true ]; then updater=(--config src-tauri/tauri.updater.conf.json); fi
@@ -178,7 +180,7 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ env.RELEASE_BUILD == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ env.RELEASE_BUILD == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
-          EASYWAR_UPDATE_ENDPOINT: ${{ env.RELEASE_BUILD == 'true' && vars.EASYWAR_UPDATE_ENDPOINT || '' }}
+          EASYWAR_UPDATE_ENDPOINT: ${{ env.RELEASE_BUILD == 'true' && format('https://github.com/{0}/releases/latest/download/latest.json', env.RELEASES_REPO) || '' }}
         run: |
           updater=()
           if [ "$RELEASE_BUILD" = true ]; then updater=(--config src-tauri/tauri.updater.conf.json); fi
@@ -204,7 +206,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       actions: read
-      contents: write
+      contents: read
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Collect installers and update packages
@@ -216,29 +218,29 @@ jobs:
           done
           find release -type f | sort
       - name: Build latest.json
-        env:
-          EASYWAR_UPDATE_FILES_URL: ${{ vars.EASYWAR_UPDATE_FILES_URL }}
         run: |
           shopt -s failglob
           notes=()
           if [ -f "docs/releases/$GITHUB_REF_NAME.md" ]; then notes=(--notes-file "docs/releases/$GITHUB_REF_NAME.md"); fi
           node script/update_manifest.mjs \
             --version "${GITHUB_REF_NAME#v}" \
-            --files-url "$EASYWAR_UPDATE_FILES_URL" \
+            --files-url "https://github.com/$RELEASES_REPO/releases/download/{tag}/" \
             --mac-archive release/EasyWAR-macOS-update/EasyWAR.app.tar.gz \
             --windows-nsis release/EasyWAR-Windows/nsis/*.exe \
             --windows-msi release/EasyWAR-Windows/msi/*.msi \
             "${notes[@]}" \
             --out release/latest.json
           cat release/latest.json
-      - name: Create draft release
+      # A draft is invisible to the updater; publishing it (one click on
+      # GitHub) is what makes installed copies offer the new version.
+      - name: Create draft release in the public installers repository
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.EASYWAR_RELEASES_TOKEN }}
         run: |
           shopt -s failglob
-          gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
+          gh release create "$GITHUB_REF_NAME" --repo "$RELEASES_REPO" --draft \
             --title "EasyWAR ${GITHUB_REF_NAME#v}" \
-            --notes "Чернетка. Перед публікацією пройдіть перевірку оновлення зі старої версії (docs/UPDATES.md)." \
+            --notes "Інсталятори EasyWAR ${GITHUB_REF_NAME#v} для macOS і Windows. Вже встановлені копії оновлюються через «Резервна копія» → «Перевірити оновлення»." \
             release/latest.json \
             release/EasyWAR-macOS/*.dmg \
             release/EasyWAR-macOS-update/EasyWAR.app.tar.gz \
