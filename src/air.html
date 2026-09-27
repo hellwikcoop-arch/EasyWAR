@@ -1049,7 +1049,7 @@ body.lay-sizing, body.lay-sizing * { -webkit-user-select: none !important; user-
 .kh-tr { width: 28px; height: 38px; color: color-mix(in srgb, var(--ink) 82%, var(--muted)); flex: none; }
 @media (max-width: 1180px) { .kh { grid-template-columns: minmax(0, 1fr) auto; } .kh-c { display: none; } }
 @media (max-width: 720px) { .kh { grid-template-columns: minmax(0, 1fr); } .kh-r { justify-content: flex-start; } .kh .kh-slogan { text-align: left; } }
-.kpipanel .kpi-grid { grid-template-columns: repeat(auto-fit, minmax(196px, 1fr)); gap: 12px; }
+.kpipanel .kpi-grid { grid-template-columns: repeat(auto-fit, minmax(232px, 1fr)); gap: 14px; }
 .kc { --tc: #4aa8ff; position: relative; overflow: hidden; display: flex; flex-direction: column; min-width: 0; padding: 14px 14px 12px; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--tc) 52%, var(--line)); background: linear-gradient(180deg, color-mix(in srgb, var(--tc) 9%, var(--surface)) 0, var(--surface) 58%); box-shadow: 0 0 22px color-mix(in srgb, var(--tc) 11%, transparent); transition: transform .35s var(--spring), box-shadow .35s; }
 .kc:hover { transform: translateY(-3px); box-shadow: 0 14px 34px rgba(0, 0, 0, .34), 0 0 26px color-mix(in srgb, var(--tc) 18%, transparent); }
 .kc-blue { --tc: #4aa8ff; } .kc-amber { --tc: #f2b544; } .kc-green { --tc: #33d17a; } .kc-orange { --tc: #f59a3b; } .kc-red { --tc: #f05a5a; } .kc-grey { --tc: #a3aec2; }
@@ -1075,6 +1075,40 @@ body.lay-sizing, body.lay-sizing * { -webkit-user-select: none !important; user-
 .kc-tv { font: 700 17px/1 var(--display); color: var(--ink); white-space: nowrap; }
 .kc-tl { grid-column: 1 / -1; font-size: 10px; line-height: 1.15; color: var(--muted); }
 .kc-t.amber .kc-tv { color: #f2b544; } .kc-t.green .kc-tv { color: var(--hit); } .kc-t.orange .kc-tv { color: var(--part); }
+/* ---- KPI-картки v2: підзаголовок, шеврон, дельта з розділювачем, стовпчики за місяцями, кільце частки ---- */
+.kc { padding: 16px 16px 14px; }
+.kc-top { margin-bottom: 10px; align-items: flex-start; }
+.kc-top .k-ic { width: 38px; height: 38px; color: var(--tc); }
+.kc-h { display: grid; gap: 4px; min-width: 0; flex: 1 1 auto; }
+.kc .k-l { font-size: 16px; }
+.kc-sub { font-size: 10.5px; line-height: 1.25; letter-spacing: .05em; text-transform: uppercase; color: color-mix(in srgb, var(--ink) 62%, var(--muted)); }
+.kc-art-mid .kc-smoke { opacity: .75; filter: blur(1.5px); }
+.kc-go { flex: none; display: grid; place-items: center; width: 26px; height: 26px; margin: 4px -4px 0 0; padding: 0; border: 0; border-radius: 7px; background: none; color: color-mix(in srgb, var(--ink) 70%, var(--muted)); cursor: pointer; transition: color .2s, background .2s, transform .2s; }
+.kc-go:hover, .kc-go:focus-visible { color: var(--tc); background: color-mix(in srgb, var(--tc) 12%, transparent); transform: translateX(2px); }
+.kc-go svg { width: 18px; height: 18px; }
+.kc-vr { position: relative; display: flex; align-items: center; gap: 14px; margin: 4px 0 8px; }
+.kc-vr .k-v { margin: 0; font-size: clamp(40px, 3.6vw, 60px); flex: none; text-shadow: 0 2px 14px rgba(0, 0, 0, .45); }
+.kc-vr .kc-dl { flex-direction: column; align-items: flex-start; gap: 3px; margin: 0; padding-left: 14px; border-left: 1px solid color-mix(in srgb, var(--ink) 22%, transparent); min-width: 0; }
+.kc-vr .kc-dt { font-size: 11.5px; line-height: 1.2; }
+.kc-art.kc-art-mid { top: 34%; right: 0; left: 0; width: 100%; height: 34%; -webkit-mask-image: radial-gradient(ellipse at 50% 50%, #000 45%, transparent 78%); mask-image: radial-gradient(ellipse at 50% 50%, #000 45%, transparent 78%); }
+.kc-art.kc-art-photo { top: 18%; width: 100%; height: 50%; -webkit-mask-image: linear-gradient(to bottom, transparent, #000 25%, #000 60%, transparent); mask-image: linear-gradient(to bottom, transparent, #000 25%, #000 60%, transparent); }
+.kc-art-photo .kc-photo { opacity: .38; }
+.kc-frame { position: absolute; inset: 0; width: 100%; height: 100%; }
+.kc-bars { position: relative; margin: auto 0 10px; padding-top: 40px; }
+.kc-bsvg { display: block; width: 100%; height: auto; overflow: visible; }
+.kc-bsvg text { font: 700 11.5px var(--display); fill: var(--ink); }
+.kc-bx { display: flex; justify-content: space-around; margin-top: 5px; font-size: 11.5px; color: color-mix(in srgb, var(--ink) 70%, var(--muted)); }
+.kc-bx span { flex: 1 1 0; text-align: center; }
+.kc-wide { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border: 1px solid color-mix(in srgb, var(--tc) 22%, var(--line)); border-radius: 10px; background: color-mix(in srgb, var(--surface-2) 55%, transparent); color: var(--tc); min-width: 0; }
+.kc-wide .kc-ti { width: 28px; height: 28px; flex: none; }
+.kc-wide span { display: grid; gap: 3px; min-width: 0; font-size: 12px; color: color-mix(in srgb, var(--ink) 75%, var(--muted)); }
+.kc-wide b { font: 700 14px/1.1 var(--sans); color: var(--ink); }
+.kc-ringrow { position: relative; margin-top: auto; display: flex; align-items: center; gap: 14px; padding-top: 12px; }
+.kc-ring { position: relative; flex: none; width: 88px; height: 88px; }
+.kc-ring svg { width: 100%; height: 100%; }
+.kc-ring b { position: absolute; inset: 0; display: grid; place-items: center; font: 700 22px/1 var(--display); color: var(--ink); }
+.kc-rl { font-size: 13px; line-height: 1.35; color: color-mix(in srgb, var(--ink) 82%, var(--muted)); }
+.kc-cap { position: relative; margin-top: 10px; font-size: 11.5px; color: color-mix(in srgb, var(--ink) 62%, var(--muted)); }
 </style>
 <style>
 /* ---- розгорнуті розділи: шапка, вкладки, таблиці, картки ЛА та БП ---- */
@@ -3544,11 +3578,28 @@ function kcSmoke(rgb, cross, seed) {
     '<radialGradient id="' + id + 'g" cx=".62" cy=".78" r=".62"><stop offset="0" stop-color="' + c + '" stop-opacity=".62"/><stop offset="1" stop-color="' + c + '" stop-opacity="0"/></radialGradient></defs><rect width="200" height="150" fill="url(#' + id + 'g)"/><rect width="200" height="150" filter="url(#' + id + 'f)"/>' + xh, 'kc-smoke', '0 0 200 150').cloneNode(true);
 }
 function kcArt(tone) {
-  const box = h('div', { class: 'kc-art', 'aria-hidden': 'true' });
+  const photo = tone === 'blue' || tone === 'amber', box = h('div', { class: 'kc-art ' + (photo ? 'kc-art-photo' : 'kc-art-mid'), 'aria-hidden': 'true' });
   if (tone === 'blue') box.append(h('img', { class: 'kc-photo', src: IMG.mig29, alt: '', draggable: 'false' }));
   else if (tone === 'amber') box.append(h('img', { class: 'kc-photo', src: IMG.gbu62, alt: '', draggable: 'false' }));
-  else box.append(kcSmoke({ green: '80,210,150', orange: '240,150,60', red: '235,90,90', grey: '170,180,200' }[tone], tone === 'green' || tone === 'grey', { green: 3, orange: 8, red: 5, grey: 11 }[tone]));
+  else box.append(kcSmoke({ green: '80,210,150', orange: '240,150,60', red: '235,90,90', grey: '170,180,200' }[tone], false, { green: 3, orange: 8, red: 5, grey: 11 }[tone]), kcFrame({ green: '#33d17a', orange: '#f2b544', red: '#f05a5a', grey: '#a3aec2' }[tone]));
   return box;
+}
+/** Рамка наведення: кутові скоби кольору картки + біле перехрестя. */
+function kcFrame(c) {
+  const k = 'fill="none" stroke="' + c + '" stroke-width="2.4"', w = 'stroke="rgba(235,245,255,.85)" stroke-width="1.6" fill="none"';
+  return svgFrom('<path d="M70 18h-14v14M130 18h14v14M70 82h-14v-14M130 82h14v-14" ' + k + '/><path d="M100 22v18M100 60v18M60 50h28M112 50h28" ' + w + '/><circle cx="100" cy="50" r="1.8" fill="rgba(235,245,255,.9)"/>', 'kc-frame', '0 0 200 100');
+}
+/** Стовпчики за місяцями зі значеннями над ними (останні до 6 місяців). */
+function kcBars(months, color) {
+  const n = months.length, W = 240, H = 56, gap = W / n, bw = Math.min(40, gap * .5), mx = Math.max(1, ...months.map(m => m.v)), id = 'kb' + (++KGID);
+  let m = '<defs><linearGradient id="' + id + '" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="' + color + '"/><stop offset="1" stop-color="' + color + '" stop-opacity=".55"/></linearGradient></defs>';
+  months.forEach((o, i) => { const bh = Math.max(2, o.v / mx * H), x = gap * i + (gap - bw) / 2; m += '<rect x="' + x.toFixed(1) + '" y="' + (H - bh).toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + bh.toFixed(1) + '" rx="1.5" fill="url(#' + id + ')"/><text x="' + (x + bw / 2).toFixed(1) + '" y="' + (H - bh - 6).toFixed(1) + '" text-anchor="middle">' + N0(o.v) + '</text>'; });
+  m += '<path d="M0 ' + (H + .5) + 'H' + W + '" stroke="rgba(160,190,235,.35)" stroke-width="1"/>';
+  return h('div', { class: 'kc-bars' }, svgFrom(m, 'kc-bsvg', '0 0 ' + W + ' ' + (H + 1)), h('div', { class: 'kc-bx' }, months.map(o => h('span', { text: o.t }))));
+}
+function kcRing(p, color) {
+  const v = Math.max(0, Math.min(100, p || 0));
+  return h('div', { class: 'kc-ring' }, svgFrom('<circle cx="44" cy="44" r="37" fill="none" stroke="rgba(160,190,235,.16)" stroke-width="8"/><circle cx="44" cy="44" r="37" fill="none" stroke="' + color + '" stroke-width="8" stroke-linecap="round" pathLength="100" stroke-dasharray="' + (v ? Math.max(1, v) : 0) + ' 100" transform="rotate(-90 44 44)" style="filter:drop-shadow(0 0 6px ' + color + ')"/>', '', '0 0 88 88'), h('b', { text: v + '%' }));
 }
 const KC_ARROW = { up: '<path d="M12 19V6M6.5 11.5L12 6l5.5 5.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>', down: '<path d="M12 5v13M6.5 12.5L12 18l5.5-5.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>', flat: '<path d="M5 12h14" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/>' };
 /** Відсоткова зміна й її «оцінка»: mode — up (зростання добре), down (спад добре), warn, neutral. */
@@ -3561,10 +3612,13 @@ function kpiCard(c) {
   const d = c.delta, tile = t => h('div', { class: 'kc-t' + (t.tone ? ' ' + t.tone : '') }, tileIcon(t.ic, t), h('b', { class: 'kc-tv', text: t.v }), h('span', { class: 'kc-tl', text: t.l }));
   return h('div', { class: 'kc kc-' + c.tone, title: c.title || null },
     kcArt(c.tone),
-    h('div', { class: 'kc-top' }, kIcon(c.ic), h('span', { class: 'k-l', text: c.label }), h('span', { class: 'kc-i', role: 'img', 'aria-label': c.info || c.label, title: c.info || '', text: 'i' })),
-    h('div', { class: 'k-v', text: c.val }),
-    h('div', { class: 'kc-dl' }, d ? h('span', { class: 'kc-d ' + d.cls }, svgFrom(KC_ARROW[d.dir], 'kc-ar', '0 0 24 24'), d.txt) : h('span', { class: 'kc-d flat', text: '—' }), h('span', { class: 'kc-dt', text: c.dlLabel })),
-    sparkLine(c.series, c.color, c.labels), h('div', { class: 'kc-tiles' }, tile(c.t1), tile(c.t2)));
+    h('div', { class: 'kc-top' }, kIcon(c.ic), h('div', { class: 'kc-h', title: c.info || null }, h('span', { class: 'k-l', text: c.label }), c.sub ? h('span', { class: 'kc-sub', text: c.sub }) : null),
+      c.go ? h('button', { type: 'button', class: 'kc-go', 'aria-label': 'Докладніше: ' + c.label, title: 'Докладніше', onclick: () => openView(c.go) }, svgFrom('<path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>', '', '0 0 24 24')) : null),
+    h('div', { class: 'kc-vr' }, h('div', { class: 'k-v', text: c.val }),
+      h('div', { class: 'kc-dl' }, d ? h('span', { class: 'kc-d ' + d.cls }, svgFrom(KC_ARROW[d.dir], 'kc-ar', '0 0 24 24'), d.txt) : h('span', { class: 'kc-d flat', text: '—' }), h('span', { class: 'kc-dt', text: c.dlLabel }))),
+    ...(c.bars ? [c.bars.length > 1 ? kcBars(c.bars, c.color) : sparkLine(c.series, c.color, c.labels), c.wide ? h('div', { class: 'kc-wide' }, tileIcon(c.wide.ic), h('span', {}, c.wide.l, h('b', { text: c.wide.v }))) : null]
+      : c.ring != null ? [h('div', { class: 'kc-ringrow' }, kcRing(c.ring, c.color), h('span', { class: 'kc-rl', text: c.ringL })), c.cap ? h('div', { class: 'kc-cap', text: c.cap }) : null]
+      : [sparkLine(c.series, c.color, c.labels), h('div', { class: 'kc-tiles' }, tile(c.t1), tile(c.t2))]));
 }
 function kpiHeadNode() {
   el.kpiEff = h('b', { class: 'kh-eff-v', text: '—' });
@@ -4615,15 +4669,19 @@ function renderAll() {
   const dn = k => P ? pd(A[k], P[k]) : H2 ? pd(H2[1][k], H2[0][k]) : null;
   const shr = x => A.n ? Math.round(x / A.n * 100) : 0;
   const CC = { blue: '#4aa8ff', amber: '#f2b544', green: '#33d17a', orange: '#f59a3b', red: '#f05a5a', grey: '#a3aec2' };
-  const card = (tone, ic, label, val, k, mode, series, t1, t2, info) => kpiCard({ tone, ic, label, val, delta: mkDelta(dn(k), mode), dlLabel, series, color: CC[tone], labels: axis, t1, t2, info });
+  const MB = new Map(); for (const r of cur) { if (!r.date) continue; const mk = r.date.slice(0, 7); let o = MB.get(mk); if (!o) MB.set(mk, o = { n: 0, mun: 0 }); o.n++; o.mun += r.count; }
+  const months = k => [...MB.keys()].sort().slice(-6).map(mk => ({ t: MON3[+mk.slice(5, 7) - 1], v: MB.get(mk)[k] }));
+  const perDay = N1(A.n / lenD), perSortie = A.n ? N1(A.mun / A.n) : '—';
+  const card = (tone, ic, label, sub, val, k, mode, go, x, info) => kpiCard(Object.assign({ tone, ic, label, sub, val, go, delta: mkDelta(dn(k), mode), dlLabel: P ? 'до попереднього періоду' : H2 ? 'друга половина до першої' : 'немає бази для порівняння', series: SR[k], color: CC[tone], labels: axis, info }, x));
+  const res = (tone, ic, label, sub, k, mode, cap, info) => card(tone, ic, label, sub, N0(A[k]), k, mode, 'ops', { ring: shr(A[k]), ringL: 'Частка ' + { hit: 'уражених', part: 'пошкоджених', miss: 'неуражених', unk: 'невідомих' }[k] + ' від усіх вильотів', cap }, info);
   el.kpiEff.textContent = e == null ? '—' : Math.round(e) + '%';
   el.kpiGrid.append(
-    card('blue', 'plane', 'Вильоти', N0(A.n), 'n', 'up', SR.n, { ic: 'avg', l: 'Сер. за добу', v: N1(A.n / lenD) }, { ic: 'max', l: 'Макс. за добу', v: N0(maxDay('n')) }, 'Один запис у таблиці — один виліт (паспорт цілі). Із застосуванням БП: ' + N0(A.applied) + '. З відбоєм: ' + A.abort),
-    card('amber', 'bomb', 'Використано БП', N0(A.mun), 'mun', 'up', SR.mun, { ic: 'bomb', l: 'Витрата на виліт', v: A.n ? N1(A.mun / A.n) : '—' }, { ic: 'max', l: 'Макс. за добу', v: N0(maxDay('mun')), tone: 'amber' }, munTop || 'Використано боєприпасів'),
-    card('green', 'tgtg', 'Уражено', N0(A.hit), 'hit', 'up', SR.hit, { ic: 'share', l: 'Від вильотів', v: shr(A.hit) + '%', ring: shr(A.hit) }, { ic: 'max', l: 'Макс. за добу', v: N0(maxDay('hit')), tone: 'green' }, 'Ціль уражено'),
-    card('orange', 'wrench', 'Пошкоджено', N0(A.part), 'part', 'warn', SR.part, { ic: 'share', l: 'Від вильотів', v: shr(A.part) + '%', ring: shr(A.part) }, { ic: 'warn', l: 'Макс. за добу', v: N0(maxDay('part')), tone: 'orange' }, 'У таблиці — «ЧАСТКОВО УРАЖЕНО»'),
-    card('red', 'miss', 'Не уражено', N0(A.miss), 'miss', 'down', SR.miss, { ic: 'share', l: 'Від вильотів', v: shr(A.miss) + '%', ring: shr(A.miss) }, { ic: 'down', l: 'Мін. за місяць', v: N0(minMonthMiss) }, 'Ціль не уражено'),
-    ...(A.unk ? [card('grey', 'unk', 'Не відомо', N0(A.unk), 'unk', 'neutral', SR.unk, { ic: 'share', l: 'Від вильотів', v: shr(A.unk) + '%', ring: shr(A.unk) }, { ic: 'list', l: 'Чекає перевірки', v: N0(A.unk) }, 'Результат у таблиці не підтверджено або не розпізнано')] : []));
+    card('blue', 'plane', 'Вильоти', 'Всього бойових вильотів', N0(A.n), 'n', 'up', 'ops', { bars: months('n'), wide: { ic: 'avg', l: 'Середній темп', v: perDay + ' ' + (A.n % lenD ? 'вильоту' : plural(A.n / lenD, ['виліт', 'вильоти', 'вильотів'])) + '/день' } }, 'Один запис у таблиці — один виліт (паспорт цілі). Із застосуванням БП: ' + N0(A.applied) + '. З відбоєм: ' + A.abort + '. Макс. за добу: ' + N0(maxDay('n'))),
+    card('amber', 'bomb', 'Використано БП', 'Усі типи боєприпасів', N0(A.mun), 'mun', 'up', 'mun', { bars: months('mun'), wide: { ic: 'bomb', l: 'Середня витрата', v: perSortie + ' БП на виліт' } }, (munTop ? munTop + '. ' : '') + 'Макс. за добу: ' + N0(maxDay('mun'))),
+    res('green', 'tgtg', 'Уражено', 'Підтверджені результати', 'hit', 'up', 'Ціль знищено / виведено з ладу', 'Макс. за добу: ' + N0(maxDay('hit'))),
+    res('orange', 'wrench', 'Пошкоджено', 'Часткове ураження', 'part', 'warn', 'Часткове ураження, потребує дорозвідки', 'У таблиці — «ЧАСТКОВО УРАЖЕНО». Макс. за добу: ' + N0(maxDay('part'))),
+    res('red', 'miss', 'Не уражено', 'Без підтвердженого ефекту', 'miss', 'down', 'Погодні умови, РЕБ, відмова АЗУ та ін.', 'Ціль не уражено. Мін. за місяць: ' + N0(minMonthMiss)),
+    ...(A.unk ? [res('grey', 'unk', 'Не відомо', 'Очікує перевірки', 'unk', 'neutral', 'Результат не підтверджено або не розпізнано', 'Чекає перевірки: ' + N0(A.unk))] : []));
 
   // карта
   M.pts = []; for (const r of cur) if (D.filter === 'all' || r.kind === D.filter) for (const p of r.pts) M.pts.push({ x: p.x, y: p.y, row: r });
