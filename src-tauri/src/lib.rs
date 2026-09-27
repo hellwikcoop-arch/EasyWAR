@@ -48,6 +48,39 @@ use xlsx_export::XlsxExportResult;
 
 struct LiveDatabasePath(PathBuf);
 
+/// Профіль, у який увійшли паролем у цьому запуску. Лише в пам'яті:
+/// після перезапуску захищений профіль знову потребує пароля.
+#[derive(Default)]
+struct ProfileSession(std::sync::Mutex<Option<String>>);
+
+impl ProfileSession {
+    fn get(&self) -> Option<String> {
+        self.0.lock().map(|guard| guard.clone()).unwrap_or(None)
+    }
+
+    fn set(&self, value: Option<String>) {
+        if let Ok(mut guard) = self.0.lock() {
+            *guard = value;
+        }
+    }
+}
+
+async fn ensure_profile_unlocked(
+    profiles: &LocalProfileStore,
+    session: &ProfileSession,
+    profile_id: &str,
+) -> Result<(), String> {
+    if profiles
+        .has_password(profile_id)
+        .await
+        .map_err(|error| error.to_string())?
+        && session.get().as_deref() != Some(profile_id)
+    {
+        return Err("Профіль захищено паролем: спершу увійдіть у нього".to_owned());
+    }
+    Ok(())
+}
+
 /// The updater plugin builds reqwest with rustls but leaves the crypto
 /// provider unset until its own first check. Any reqwest client created
 /// before that (the loopback Signal daemon client) panics without one.
@@ -98,9 +131,11 @@ async fn create_local_profile(
 #[tauri::command]
 async fn rename_local_profile(
     profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
     profile_id: String,
     display_name: String,
 ) -> Result<LocalProfilesState, String> {
+    ensure_profile_unlocked(&profiles, &session, &profile_id).await?;
     let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
     profiles
         .rename(&profile_id, &display_name, &now)
@@ -108,23 +143,206 @@ async fn rename_local_profile(
         .map_err(|error| error.to_string())
 }
 
+/// Вхід у профіль: для захищеного профілю потрібен пароль.
 #[tauri::command]
 async fn activate_local_profile(
     profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
     profile_id: String,
+    password: Option<String>,
 ) -> Result<LocalProfilesState, String> {
+    if !profiles
+        .verify_password(&profile_id, password.as_deref().unwrap_or(""))
+        .await
+        .map_err(|error| error.to_string())?
+    {
+        return Err(local_profiles::LocalProfileError::WrongPassword.to_string());
+    }
+    let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
+    let state = profiles
+        .activate(&profile_id, &now)
+        .await
+        .map_err(|error| error.to_string())?;
+    session.set(Some(profile_id));
+    Ok(state)
+}
+
+/// Профіль, у який увійшли в цьому запуску.
+#[tauri::command]
+fn get_profile_session(session: tauri::State<'_, ProfileSession>) -> Option<String> {
+    session.get()
+}
+
+#[tauri::command]
+fn lock_local_profile(session: tauri::State<'_, ProfileSession>) {
+    session.set(None);
+}
+
+#[tauri::command]
+async fn update_local_profile_details(
+    profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
+    profile_id: String,
+    position: String,
+    avatar_data_url: Option<String>,
+) -> Result<LocalProfilesState, String> {
+    ensure_profile_unlocked(&profiles, &session, &profile_id).await?;
     let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
     profiles
-        .activate(&profile_id, &now)
+        .update_details(&profile_id, &position, avatar_data_url.as_deref(), &now)
         .await
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-async fn delete_local_profile(
+async fn set_local_profile_password(
     profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
+    profile_id: String,
+    current_password: Option<String>,
+    new_password: Option<String>,
+) -> Result<LocalProfilesState, String> {
+    let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
+    let state = profiles
+        .set_password(
+            &profile_id,
+            current_password.as_deref(),
+            new_password.as_deref(),
+            &now,
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    // Пароль до активного профілю лишає користувача в ньому; пароль до іншого
+    // профілю не змінює поточну сесію.
+    if state.active_profile_id.as_deref() == Some(profile_id.as_str()) {
+        session.set(Some(profile_id));
+    }
+    Ok(state)
+}
+
+#[tauri::command]
+async fn choose_profile_database(
+    app: tauri::AppHandle,
+    profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
+    profile_id: String,
+) -> Result<Option<LocalProfilesState>, String> {
+    ensure_profile_unlocked(&profiles, &session, &profile_id).await?;
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title("Прив'язати таблицю до профілю")
+            .add_filter("Таблиця XLSX", &["xlsx"])
+            .blocking_pick_file()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let path = selected.into_path().map_err(|error| error.to_string())?;
+    read_selected_xlsx(&path)?;
+    let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
+    profiles
+        .set_database_path(&profile_id, Some(&path.to_string_lossy()), &now)
+        .await
+        .map(Some)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn clear_profile_database(
+    profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
     profile_id: String,
 ) -> Result<LocalProfilesState, String> {
+    ensure_profile_unlocked(&profiles, &session, &profile_id).await?;
+    let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
+    profiles
+        .set_database_path(&profile_id, None, &now)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+async fn bound_database_path(
+    profiles: &LocalProfileStore,
+    session: &ProfileSession,
+    profile_id: &str,
+) -> Result<PathBuf, String> {
+    ensure_profile_unlocked(profiles, session, profile_id).await?;
+    profiles
+        .database_path(profile_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .map(PathBuf::from)
+        .ok_or_else(|| "До профілю не прив'язано таблицю".to_owned())
+}
+
+/// Сирі байти прив'язаної таблиці (без JSON, щоб не роздувати великі файли).
+#[tauri::command]
+async fn read_profile_database(
+    profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
+    profile_id: String,
+) -> Result<tauri::ipc::Response, String> {
+    let path = bound_database_path(&profiles, &session, &profile_id).await?;
+    let bytes = tauri::async_runtime::spawn_blocking(move || read_selected_xlsx(&path))
+        .await
+        .map_err(|error| error.to_string())??;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// Записує таблицю назад у прив'язаний файл. Тіло запиту — сирі байти XLSX,
+/// ідентифікатор профілю — у заголовку `x-easywar-profile`.
+#[tauri::command]
+async fn write_profile_database(
+    request: tauri::ipc::Request<'_>,
+    profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
+) -> Result<(), String> {
+    let profile_id = request
+        .headers()
+        .get("x-easywar-profile")
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| "Не вказано профіль".to_owned())?
+        .to_owned();
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("Очікувано байти XLSX".to_owned());
+    };
+    if bytes.len() as u64 > MAX_XLSX_BYTES || !bytes.starts_with(b"PK") {
+        return Err("Некоректний файл XLSX".to_owned());
+    }
+    let bytes = bytes.clone();
+    let path = bound_database_path(&profiles, &session, &profile_id).await?;
+    tauri::async_runtime::spawn_blocking(move || write_file_atomically(&path, &bytes))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+fn write_file_atomically(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    use std::io::Write;
+    let directory = path
+        .parent()
+        .ok_or_else(|| "Некоректний шлях до таблиці".to_owned())?;
+    let mut temporary = tempfile::NamedTempFile::new_in(directory)
+        .map_err(|error| format!("Не вдалося записати таблицю: {error}"))?;
+    temporary
+        .write_all(bytes)
+        .and_then(|_| temporary.as_file().sync_all())
+        .map_err(|error| format!("Не вдалося записати таблицю: {error}"))?;
+    temporary
+        .persist(path)
+        .map_err(|error| format!("Не вдалося замінити таблицю: {}", error.error))?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn delete_local_profile(
+    profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
+    profile_id: String,
+) -> Result<LocalProfilesState, String> {
+    ensure_profile_unlocked(&profiles, &session, &profile_id).await?;
     let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
     profiles
         .delete(&profile_id, &now)
@@ -750,6 +968,7 @@ pub fn run() {
             app.manage(SignalSettingsStore::new(SettingsStore::new(pool.clone())));
             app.manage(Repository::new(pool.clone()));
             app.manage(LocalProfileStore::new(pool.clone()));
+            app.manage(ProfileSession::default());
             app.manage(WorkspaceTemplateStore::new(pool.clone()));
             app.manage(SignalReceiveController::default());
             app.manage(DatabaseStatusStore::new(pool.clone()));
@@ -769,6 +988,14 @@ pub fn run() {
             rename_local_profile,
             activate_local_profile,
             delete_local_profile,
+            get_profile_session,
+            lock_local_profile,
+            update_local_profile_details,
+            set_local_profile_password,
+            choose_profile_database,
+            clear_profile_database,
+            read_profile_database,
+            write_profile_database,
             get_workspace_templates,
             set_profile_workspace_template,
             create_position_database_template,

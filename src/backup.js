@@ -26,6 +26,13 @@ function initializeBackup() {
   openButton.textContent = 'Резервна копія';
   toolbar.prepend(openButton);
 
+  const headerUpdate = document.createElement('button');
+  headerUpdate.type = 'button';
+  headerUpdate.className = 'btn quiet ew-header-update';
+  headerUpdate.title = 'Оновлення та міграції EasyWAR';
+  headerUpdate.textContent = 'Оновлення';
+  openButton.after(headerUpdate);
+
   const dialog = document.createElement('dialog');
   dialog.className = 'ew-backup-dialog';
   dialog.setAttribute('aria-labelledby', 'ew-backup-title');
@@ -66,6 +73,34 @@ function initializeBackup() {
     </div>`;
   document.body.append(dialog);
 
+  // Блок оновлень живе на головній сторінці: випадна панель під кнопкою статусу в шапці.
+  const updatePanel = document.createElement('div');
+  updatePanel.className = 'ew-update-panel';
+  updatePanel.hidden = true;
+  updatePanel.append(dialog.querySelector('.ew-update-section'));
+  document.body.append(updatePanel);
+
+  function placeUpdatePanel() {
+    const r = headerUpdate.getBoundingClientRect();
+    updatePanel.style.top = `${Math.round(r.bottom + 6)}px`;
+    updatePanel.style.right = `${Math.max(12, Math.round(window.innerWidth - r.right))}px`;
+  }
+  function toggleUpdatePanel(show = updatePanel.hidden) {
+    updatePanel.hidden = !show;
+    headerUpdate.setAttribute('aria-expanded', String(show));
+    if (show) placeUpdatePanel();
+  }
+  headerUpdate.setAttribute('aria-haspopup', 'true');
+  headerUpdate.setAttribute('aria-expanded', 'false');
+  headerUpdate.addEventListener('click', () => { toggleUpdatePanel(); });
+  document.addEventListener('click', event => {
+    if (!updatePanel.hidden && !updatePanel.contains(event.target) && !headerUpdate.contains(event.target)) toggleUpdatePanel(false);
+  });
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && !updatePanel.hidden) { toggleUpdatePanel(false); headerUpdate.focus(); }
+  });
+  window.addEventListener('resize', () => { if (!updatePanel.hidden) placeUpdatePanel(); });
+
   const status = dialog.querySelector('#ew-backup-status');
   const location = dialog.querySelector('#ew-backup-location');
   const createButton = dialog.querySelector('#ew-backup-create');
@@ -74,12 +109,18 @@ function initializeBackup() {
   const restoreCancelButton = dialog.querySelector('#ew-restore-cancel-stage');
   const restoreApplyButton = dialog.querySelector('#ew-restore-apply');
   const restoreFinalizeButton = dialog.querySelector('#ew-restore-finalize');
-  const updateStatus = dialog.querySelector('#ew-update-status');
-  const updateRefreshButton = dialog.querySelector('#ew-update-refresh');
-  const appUpdateStatus = dialog.querySelector('#ew-app-update-status');
-  const appUpdateCheckButton = dialog.querySelector('#ew-app-update-check');
-  const appUpdateInstallButton = dialog.querySelector('#ew-app-update-install');
+  const updateStatus = updatePanel.querySelector('#ew-update-status');
+  const updateRefreshButton = updatePanel.querySelector('#ew-update-refresh');
+  const appUpdateStatus = updatePanel.querySelector('#ew-app-update-status');
+  const appUpdateCheckButton = updatePanel.querySelector('#ew-app-update-check');
+  const appUpdateInstallButton = updatePanel.querySelector('#ew-app-update-install');
   let availableUpdate = null;
+
+  function setHeaderUpdate(text, state, detail) {
+    headerUpdate.textContent = text;
+    headerUpdate.dataset.state = state;
+    headerUpdate.title = detail || text;
+  }
   let restoreReport = {
     outcome: 'none',
     pendingRestoreAvailable: false,
@@ -129,12 +170,18 @@ function initializeBackup() {
     appUpdateInstallButton.hidden = true;
     availableUpdate = null;
     appUpdateStatus.textContent = 'Перевіряємо наявність нової версії…';
+    setHeaderUpdate('Оновлення: перевірка…', 'busy');
     try {
       const result = await checkForAppUpdate();
       availableUpdate = result.available || null;
-      appUpdateStatus.textContent = appUpdateMessage(result);
+      const message = appUpdateMessage(result);
+      appUpdateStatus.textContent = message;
+      if (availableUpdate) setHeaderUpdate(`Оновлення: v${String(availableUpdate.version)}`, 'available', message);
+      else if (result.configured === false) setHeaderUpdate('Оновлення: вручну', 'off', message);
+      else setHeaderUpdate(`v${String(result.currentVersion)} актуальна`, 'ok', message);
     } catch (error) {
       appUpdateStatus.textContent = `Не вдалося перевірити оновлення: ${String(error)}`;
+      setHeaderUpdate('Оновлення: помилка', 'error', appUpdateStatus.textContent);
     } finally {
       appUpdateInstallButton.hidden = !availableUpdate;
       setBusy(false);
@@ -146,11 +193,13 @@ function initializeBackup() {
     if (!window.confirm(`Встановити EasyWAR ${String(availableUpdate.version)}? Спершу буде створено копію бази, потім завантажено й перевірено підписаний пакет, після чого EasyWAR перезапуститься.`)) return;
     setBusy(true);
     appUpdateStatus.textContent = 'Створюємо копію бази й завантажуємо оновлення…';
+    setHeaderUpdate('Оновлення: встановлення…', 'busy');
     try {
       const snapshot = await installAppUpdate();
       appUpdateStatus.textContent = `Оновлення встановлено. Копія бази: ${String(snapshot)}. EasyWAR перезапускається…`;
     } catch (error) {
       appUpdateStatus.textContent = `Оновлення не встановлено: ${String(error)}. Поточна версія працює далі; перевірте оновлення ще раз.`;
+      setHeaderUpdate('Оновлення: помилка', 'error', appUpdateStatus.textContent);
       availableUpdate = null;
       appUpdateInstallButton.hidden = true;
       setBusy(false);

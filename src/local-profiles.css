@@ -130,3 +130,121 @@
     grid-column: 1;
   }
 }
+
+/* ---- фото, посада, таблиця профілю ---- */
+.ew-avatar {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--accent-soft, var(--surface-2));
+  color: var(--ink);
+  font-weight: 700;
+  border: 1px solid var(--line-strong);
+}
+.ew-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.ew-avatar-sm { width: 26px; height: 26px; font-size: 11px; }
+.ew-avatar-lg { width: 64px; height: 64px; font-size: 22px; }
+.ew-avatar-xl { width: 96px; height: 96px; font-size: 32px; }
+
+.ew-profile-open { display: inline-flex; align-items: center; gap: 8px; }
+.ew-profile-open-text { display: grid; line-height: 1.15; text-align: left; }
+.ew-profile-open-name { color: var(--ink); font-weight: 650; }
+.ew-profile-open-position { color: var(--muted); font-size: 11px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.ew-profile-ident { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.ew-profile-fields { display: grid; gap: 6px; flex: 1; min-width: 0; }
+.ew-profile-fields label { display: grid; gap: 3px; }
+.ew-profile-field-caption { color: var(--muted); font-size: 12px; font-weight: 600; }
+.ew-profile-position-text { color: var(--muted); font-size: 13px; }
+
+.ew-avatar-button {
+  position: relative;
+  padding: 0;
+  border: 0;
+  background: none;
+  border-radius: 50%;
+  cursor: pointer;
+}
+.ew-avatar-edit {
+  position: absolute;
+  inset: auto 0 0;
+  padding: 2px 0;
+  background: rgb(0 0 0 / 60%);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  text-align: center;
+  border-radius: 0 0 32px 32px;
+  opacity: 0;
+  transition: opacity .15s;
+}
+.ew-avatar-button:hover .ew-avatar-edit,
+.ew-avatar-button:focus-visible .ew-avatar-edit { opacity: 1; }
+.ew-avatar-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.ew-profile-db { grid-column: 1 / -1; display: grid; gap: 5px; }
+.ew-profile-db-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ew-profile-db-name { font: 600 13px/1.3 var(--mono, monospace); overflow-wrap: anywhere; }
+.ew-profile-db-name.is-empty { color: var(--muted); font-family: inherit; font-weight: 500; }
+
+.ew-profile-row.is-locked { opacity: .92; }
+
+/* ---- вікно пароля ---- */
+.ew-password-dialog {
+  width: min(380px, calc(100vw - 32px));
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  padding: 18px;
+}
+.ew-password-dialog::backdrop { background: rgb(3 9 18 / 72%); }
+.ew-password-dialog form { display: grid; gap: 10px; }
+.ew-password-dialog h3 { margin: 0 0 4px; }
+.ew-password-dialog label { display: grid; gap: 4px; color: var(--muted); font-size: 13px; font-weight: 600; }
+.ew-password-dialog input,
+.ew-lock-card input {
+  min-height: 38px;
+  color: var(--ink);
+  background: var(--surface-2, var(--surface));
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font: inherit;
+}
+.ew-password-error, .ew-lock-message { min-height: 1.2em; margin: 0; color: var(--bad); font-weight: 600; }
+
+/* ---- екран входу ---- */
+html.ew-locked, html.ew-locked body { overflow: hidden; }
+.ew-lock {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 24px 16px;
+  overflow: auto;
+  background: var(--bg, #0b1220);
+}
+.ew-lock[hidden] { display: none; }
+.ew-lock-inner { width: min(900px, 100%); display: grid; gap: 14px; justify-items: center; text-align: center; }
+.ew-lock-inner h2 { margin: 0; }
+.ew-lock-note { margin: 0; color: var(--muted); }
+.ew-lock-cards { display: flex; flex-wrap: wrap; justify-content: center; gap: 14px; width: 100%; }
+.ew-lock-card {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  width: 220px;
+  padding: 18px 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+}
+.ew-lock-card.is-active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.ew-lock-card strong { font-size: 16px; }
+.ew-lock-position { color: var(--muted); font-size: 13px; min-height: 1.2em; }
+.ew-lock-db { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.ew-lock-card input, .ew-lock-card button { width: 100%; }

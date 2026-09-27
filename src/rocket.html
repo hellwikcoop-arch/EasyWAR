@@ -954,6 +954,8 @@ html[data-motion="off"] .k-spark rect { animation: none; }
 
 .bars.types .nm.unit .tx { white-space: normal; overflow: visible; text-overflow: clip; line-height: 1.2; }
 .act-leg .al-n { color: var(--muted); opacity: .85; }
+/* картка зв'язку з розробником у бічній панелі (як у Повітряних силах) */
+.rocket-ref24 .side-foot .flip{margin:12px auto 0!important;width:min(calc(100% - 16px),calc((100vh - 96px - 452px) * .5629))!important}
 </style>
 <style>/* Scoped to the existing developer card. The back and QR remain intact. */
 .flip { transform: none !important; }
@@ -7155,19 +7157,7 @@ document.addEventListener('DOMContentLoaded', init);
       more.onclick=function(ev){ev.stopPropagation();var old=document.querySelector('.ref-more-menu');if(old){old.remove();return;}var r=more.getBoundingClientRect(),m=document.createElement('div');m.className='ref-more-menu';m.style.left=Math.max(8,r.left-60)+'px';m.style.top=(r.bottom+4)+'px';[['Підрозділи','units'],['Цілі','types'],['Перевірка даних','quality']].forEach(function(a){var x=document.createElement('button');x.type='button';x.textContent=a[0];x.onclick=function(){m.remove();goDash(a[1])};m.appendChild(x)});document.body.appendChild(m);};
       tabs.append(more); document.addEventListener('click',function(){var m=document.querySelector('.ref-more-menu');if(m)m.remove()});
     }
-    var side=document.querySelector('.side-foot');
-    if(side && !side.querySelector('.rocket-side-promo')){
-      side.textContent='';
-      var p=document.createElement('div');p.className='rocket-side-promo';
-      var img=document.createElement('img'); try{img.src=ROCKET_KPI_M142;}catch(e){}
-      var copy=document.createElement('div');copy.className='rsp-copy';
-      var logo=document.createElement('div');logo.className='rsp-logo';
-      var tr=document.querySelector('.brand .dsh-mark'); if(tr){var c=tr.cloneNode(true);c.classList.remove('dsh-mark');c.classList.add('rsp-tr');logo.appendChild(c)}
-      var st=document.createElement('strong');st.innerHTML='РАКЕТНІ<br>ВІЙСЬКА';logo.appendChild(st);copy.appendChild(logo);
-      var k=document.createElement('span');k.className='rsp-kicker';k.innerHTML='ТОЧНІСТЬ<br>ДАЛЬНІСТЬ<br>РЕЗУЛЬТАТ';copy.appendChild(k);
-      var plat=document.createElement('div');plat.className='rsp-platform';plat.innerHTML='HIMARS<br><span style="font-size:11px;color:#c7b985">M142</span>';
-      p.append(img,copy,plat);side.appendChild(p);
-    }
+    // .side-foot лишаємо як є: там картка-перевертень (постер → Signal QR), як у Повітряних силах.
     var ops=document.querySelector('[data-t="p-ops"] span:not(.nb)'); if(ops) ops.textContent='Пуски';
   }
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',decorate); else decorate();

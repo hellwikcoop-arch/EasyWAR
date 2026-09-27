@@ -1,9 +1,17 @@
+use argon2::{
+    password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
+    Argon2,
+};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use sqlx::{Sqlite, SqlitePool, Transaction};
 
 pub const MAX_LOCAL_PROFILES: i64 = 32;
 const MAX_PROFILE_NAME_CHARS: usize = 80;
+const MAX_POSITION_CHARS: usize = 120;
+const MAX_AVATAR_BYTES: usize = 400_000;
+const MIN_PASSWORD_CHARS: usize = 4;
+const MAX_PASSWORD_CHARS: usize = 128;
 
 #[derive(Clone, Debug)]
 pub struct LocalProfileStore {
@@ -15,6 +23,10 @@ pub struct LocalProfileStore {
 pub struct LocalProfile {
     pub id: String,
     pub display_name: String,
+    pub position: String,
+    pub avatar_data_url: Option<String>,
+    pub has_password: bool,
+    pub database_path: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -40,6 +52,16 @@ pub enum LocalProfileError {
     ProfileNotFound,
     #[error("некоректний локальний ідентифікатор профілю")]
     InvalidProfileId,
+    #[error("посада має містити не більше 120 символів")]
+    InvalidPosition,
+    #[error("фото профілю має бути зображенням до 400 КБ")]
+    InvalidAvatar,
+    #[error("пароль має містити від 4 до 128 символів")]
+    InvalidPassword,
+    #[error("неправильний пароль профілю")]
+    WrongPassword,
+    #[error("не вдалося обробити пароль профілю")]
+    PasswordHash,
 }
 
 impl LocalProfileStore {
@@ -175,6 +197,182 @@ impl LocalProfileStore {
         transaction.commit().await?;
         self.list().await
     }
+
+    pub async fn update_details(
+        &self,
+        id: &str,
+        position: &str,
+        avatar_data_url: Option<&str>,
+        now: &str,
+    ) -> Result<LocalProfilesState, LocalProfileError> {
+        validate_profile_id(id)?;
+        let position = position.split_whitespace().collect::<Vec<_>>().join(" ");
+        if position.chars().count() > MAX_POSITION_CHARS {
+            return Err(LocalProfileError::InvalidPosition);
+        }
+        if let Some(avatar) = avatar_data_url {
+            validate_avatar(avatar)?;
+        }
+        let mut transaction = self.pool.begin().await?;
+        ensure_profile_exists(&mut transaction, id).await?;
+        ensure_details_row(&mut transaction, id, now).await?;
+        sqlx::query(
+            "UPDATE local_profile_details
+             SET position = ?, avatar_data_url = ?, updated_at = ?
+             WHERE profile_id = ?",
+        )
+        .bind(&position)
+        .bind(avatar_data_url)
+        .bind(now)
+        .bind(id)
+        .execute(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        self.list().await
+    }
+
+    /// Встановлює, змінює (`new_password = Some`) або знімає (`None`) пароль.
+    /// Якщо пароль уже є, потрібен чинний пароль.
+    pub async fn set_password(
+        &self,
+        id: &str,
+        current_password: Option<&str>,
+        new_password: Option<&str>,
+        now: &str,
+    ) -> Result<LocalProfilesState, LocalProfileError> {
+        validate_profile_id(id)?;
+        if !self.verify_password(id, current_password.unwrap_or("")).await? {
+            return Err(LocalProfileError::WrongPassword);
+        }
+        let hash = match new_password {
+            Some(password) => Some(hash_password(password)?),
+            None => None,
+        };
+        let mut transaction = self.pool.begin().await?;
+        ensure_profile_exists(&mut transaction, id).await?;
+        ensure_details_row(&mut transaction, id, now).await?;
+        sqlx::query(
+            "UPDATE local_profile_details SET password_hash = ?, updated_at = ? WHERE profile_id = ?",
+        )
+        .bind(hash)
+        .bind(now)
+        .bind(id)
+        .execute(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        self.list().await
+    }
+
+    /// `true`, якщо профіль без пароля або пароль правильний.
+    pub async fn verify_password(
+        &self,
+        id: &str,
+        password: &str,
+    ) -> Result<bool, LocalProfileError> {
+        validate_profile_id(id)?;
+        match self.password_hash(id).await? {
+            None => Ok(true),
+            Some(stored) => {
+                let parsed =
+                    PasswordHash::new(&stored).map_err(|_| LocalProfileError::PasswordHash)?;
+                Ok(Argon2::default()
+                    .verify_password(password.as_bytes(), &parsed)
+                    .is_ok())
+            }
+        }
+    }
+
+    pub async fn has_password(&self, id: &str) -> Result<bool, LocalProfileError> {
+        Ok(self.password_hash(id).await?.is_some())
+    }
+
+    async fn password_hash(&self, id: &str) -> Result<Option<String>, LocalProfileError> {
+        let exists: i64 = sqlx::query_scalar("SELECT count(*) FROM local_profiles WHERE id = ?")
+            .bind(id)
+            .fetch_one(&self.pool)
+            .await?;
+        if exists != 1 {
+            return Err(LocalProfileError::ProfileNotFound);
+        }
+        let hash: Option<Option<String>> = sqlx::query_scalar(
+            "SELECT password_hash FROM local_profile_details WHERE profile_id = ?",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(hash.flatten())
+    }
+
+    pub async fn set_database_path(
+        &self,
+        id: &str,
+        database_path: Option<&str>,
+        now: &str,
+    ) -> Result<LocalProfilesState, LocalProfileError> {
+        validate_profile_id(id)?;
+        let mut transaction = self.pool.begin().await?;
+        ensure_profile_exists(&mut transaction, id).await?;
+        ensure_details_row(&mut transaction, id, now).await?;
+        sqlx::query(
+            "UPDATE local_profile_details SET database_path = ?, updated_at = ? WHERE profile_id = ?",
+        )
+        .bind(database_path)
+        .bind(now)
+        .bind(id)
+        .execute(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        self.list().await
+    }
+
+    pub async fn database_path(&self, id: &str) -> Result<Option<String>, LocalProfileError> {
+        validate_profile_id(id)?;
+        let path: Option<Option<String>> = sqlx::query_scalar(
+            "SELECT database_path FROM local_profile_details WHERE profile_id = ?",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(path.flatten())
+    }
+}
+
+fn hash_password(password: &str) -> Result<String, LocalProfileError> {
+    let count = password.chars().count();
+    if !(MIN_PASSWORD_CHARS..=MAX_PASSWORD_CHARS).contains(&count) {
+        return Err(LocalProfileError::InvalidPassword);
+    }
+    let salt = SaltString::generate(&mut OsRng);
+    Argon2::default()
+        .hash_password(password.as_bytes(), &salt)
+        .map(|hash| hash.to_string())
+        .map_err(|_| LocalProfileError::PasswordHash)
+}
+
+fn validate_avatar(avatar: &str) -> Result<(), LocalProfileError> {
+    let allowed = [
+        "data:image/jpeg;base64,",
+        "data:image/png;base64,",
+        "data:image/webp;base64,",
+    ];
+    if avatar.len() > MAX_AVATAR_BYTES || !allowed.iter().any(|prefix| avatar.starts_with(prefix))
+    {
+        return Err(LocalProfileError::InvalidAvatar);
+    }
+    Ok(())
+}
+
+async fn ensure_details_row(
+    transaction: &mut Transaction<'_, Sqlite>,
+    id: &str,
+    now: &str,
+) -> Result<(), LocalProfileError> {
+    sqlx::query("INSERT OR IGNORE INTO local_profile_details (profile_id, updated_at) VALUES (?, ?)")
+        .bind(id)
+        .bind(now)
+        .execute(&mut **transaction)
+        .await?;
+    Ok(())
 }
 
 pub fn generate_profile_id(display_name: &str, created_at: &str) -> String {
@@ -187,25 +385,54 @@ pub fn generate_profile_id(display_name: &str, created_at: &str) -> String {
     format!("profile-{}", &digest[..24])
 }
 
+type ProfileRow = (
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<bool>,
+    Option<String>,
+    String,
+    String,
+);
+
 async fn load_state(pool: &SqlitePool) -> Result<LocalProfilesState, LocalProfileError> {
     let active_profile_id: Option<String> =
         sqlx::query_scalar("SELECT active_profile_id FROM local_profile_state WHERE singleton = 1")
             .fetch_one(pool)
             .await?;
-    let profiles = sqlx::query_as::<_, (String, String, String, String)>(
-        "SELECT id, display_name, created_at, updated_at
-         FROM local_profiles
-         ORDER BY name_key, id",
+    let rows: Vec<ProfileRow> = sqlx::query_as(
+        "SELECT p.id, p.display_name, d.position, d.avatar_data_url,
+                d.password_hash IS NOT NULL, d.database_path, p.created_at, p.updated_at
+         FROM local_profiles p
+         LEFT JOIN local_profile_details d ON d.profile_id = p.id
+         ORDER BY p.name_key, p.id",
     )
     .fetch_all(pool)
-    .await?
-    .into_iter()
-    .map(|(id, display_name, created_at, updated_at)| LocalProfile {
-        id,
-        display_name,
-        created_at,
-        updated_at,
-    })
+    .await?;
+    let profiles = rows
+        .into_iter()
+        .map(
+            |(
+                id,
+                display_name,
+                position,
+                avatar_data_url,
+                has_password,
+                database_path,
+                created_at,
+                updated_at,
+            )| LocalProfile {
+                id,
+                display_name,
+                position: position.unwrap_or_default(),
+                avatar_data_url,
+                has_password: has_password.unwrap_or(false),
+                database_path,
+                created_at,
+                updated_at,
+            },
+        )
     .collect();
     Ok(LocalProfilesState {
         active_profile_id,
@@ -274,7 +501,9 @@ pub(crate) fn validate_profile_id(id: &str) -> Result<(), LocalProfileError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::database::{INITIAL_SCHEMA_SQL, LOCAL_PROFILES_SQL, XLSX_DUPLICATE_LINKS_SQL};
+    use crate::database::{
+        INITIAL_SCHEMA_SQL, LOCAL_PROFILES_SQL, PROFILE_DETAILS_SQL, XLSX_DUPLICATE_LINKS_SQL,
+    };
     use sqlx::sqlite::SqlitePoolOptions;
 
     const NOW_1: &str = "2026-01-01T00:00:00Z";
@@ -295,6 +524,10 @@ mod tests {
             .await
             .unwrap();
         sqlx::raw_sql(LOCAL_PROFILES_SQL)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::raw_sql(PROFILE_DETAILS_SQL)
             .execute(&pool)
             .await
             .unwrap();
@@ -425,5 +658,88 @@ mod tests {
         assert_eq!(generated, generate_profile_id("Синтетичний", NOW_1));
         assert_ne!(generated, generate_profile_id("Інший", NOW_1));
         validate_profile_id(&generated).unwrap();
+    }
+
+    #[tokio::test]
+    async fn password_protects_profile_and_can_be_changed_or_removed() {
+        let store = store().await;
+        let profile = id("Пароль");
+        store.create(&profile, "Пароль", NOW_1).await.unwrap();
+        assert!(store.verify_password(&profile, "").await.unwrap());
+
+        assert!(matches!(
+            store.set_password(&profile, None, Some("123"), NOW_2).await,
+            Err(LocalProfileError::InvalidPassword)
+        ));
+        let state = store
+            .set_password(&profile, None, Some("секрет"), NOW_2)
+            .await
+            .unwrap();
+        assert!(state.profiles[0].has_password);
+        assert!(store.verify_password(&profile, "секрет").await.unwrap());
+        assert!(!store.verify_password(&profile, "інший").await.unwrap());
+        let stored: String = sqlx::query_scalar("SELECT password_hash FROM local_profile_details")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        assert!(stored.starts_with("$argon2id$") && !stored.contains("секрет"));
+
+        assert!(matches!(
+            store.set_password(&profile, Some("інший"), None, NOW_2).await,
+            Err(LocalProfileError::WrongPassword)
+        ));
+        let state = store
+            .set_password(&profile, Some("секрет"), None, NOW_2)
+            .await
+            .unwrap();
+        assert!(!state.profiles[0].has_password);
+    }
+
+    #[tokio::test]
+    async fn details_and_database_binding_are_stored_and_validated() {
+        let store = store().await;
+        let profile = id("Деталі");
+        store.create(&profile, "Деталі", NOW_1).await.unwrap();
+        let avatar = "data:image/jpeg;base64,AAAA";
+        let state = store
+            .update_details(&profile, "  Начальник   штабу ", Some(avatar), NOW_2)
+            .await
+            .unwrap();
+        assert_eq!(state.profiles[0].position, "Начальник штабу");
+        assert_eq!(state.profiles[0].avatar_data_url.as_deref(), Some(avatar));
+        assert!(matches!(
+            store
+                .update_details(&profile, "", Some("javascript:alert(1)"), NOW_2)
+                .await,
+            Err(LocalProfileError::InvalidAvatar)
+        ));
+        assert!(matches!(
+            store
+                .update_details(&profile, &"я".repeat(121), None, NOW_2)
+                .await,
+            Err(LocalProfileError::InvalidPosition)
+        ));
+
+        let state = store
+            .set_database_path(&profile, Some("/tmp/AVIA_BASE.xlsx"), NOW_2)
+            .await
+            .unwrap();
+        assert_eq!(
+            state.profiles[0].database_path.as_deref(),
+            Some("/tmp/AVIA_BASE.xlsx")
+        );
+        assert_eq!(
+            store.database_path(&profile).await.unwrap().as_deref(),
+            Some("/tmp/AVIA_BASE.xlsx")
+        );
+        store.set_database_path(&profile, None, NOW_2).await.unwrap();
+        assert_eq!(store.database_path(&profile).await.unwrap(), None);
+
+        store.delete(&profile, NOW_2).await.unwrap();
+        let orphaned: i64 = sqlx::query_scalar("SELECT count(*) FROM local_profile_details")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        assert_eq!(orphaned, 0);
     }
 }
