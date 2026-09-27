@@ -50,3 +50,90 @@ export function workspaceTemplateLabel(template) {
   if (!template) return 'Шаблон не вибрано';
   return `${template.roleLabel} — ${template.title}`;
 }
+
+export function signInLocalProfile(profileId, password, invokeCommand = invoke) {
+  return invokeCommand('activate_local_profile', { profileId, password });
+}
+
+export function getProfileSession(invokeCommand = invoke) {
+  return invokeCommand('get_profile_session');
+}
+
+export function lockLocalProfile(invokeCommand = invoke) {
+  return invokeCommand('lock_local_profile');
+}
+
+export function updateLocalProfileDetails(profileId, position, avatarDataUrl, invokeCommand = invoke) {
+  return invokeCommand('update_local_profile_details', {
+    profileId,
+    position,
+    avatarDataUrl: avatarDataUrl || null,
+  });
+}
+
+export function setLocalProfilePassword(profileId, currentPassword, newPassword, invokeCommand = invoke) {
+  return invokeCommand('set_local_profile_password', {
+    profileId,
+    currentPassword: currentPassword || null,
+    newPassword: newPassword || null,
+  });
+}
+
+export function chooseProfileDatabase(profileId, invokeCommand = invoke) {
+  return invokeCommand('choose_profile_database', { profileId });
+}
+
+export function clearProfileDatabase(profileId, invokeCommand = invoke) {
+  return invokeCommand('clear_profile_database', { profileId });
+}
+
+export async function readProfileDatabase(profileId, invokeCommand = invoke) {
+  return new Uint8Array(await invokeCommand('read_profile_database', { profileId }));
+}
+
+export function writeProfileDatabase(profileId, bytes, invokeCommand = invoke) {
+  return invokeCommand('write_profile_database', bytes, {
+    headers: { 'x-easywar-profile': profileId },
+  });
+}
+
+/** Профіль заблоковано, доки в нього не увійшли паролем у цьому запуску. */
+export function isProfileLocked(profile, sessionProfileId) {
+  return Boolean(profile?.hasPassword) && profile.id !== sessionProfileId;
+}
+
+export function databaseFileName(path) {
+  if (!path) return '';
+  return String(path).split(/[\\/]/).pop();
+}
+
+/**
+ * Обгортка у форматі FileSystemFileHandle для дашборда: читає й записує
+ * прив'язану таблицю через команди застосунку, тож «Оновити» та запис
+ * доповідей працюють прямо з файлом профілю.
+ */
+export function profileDatabaseHandle(profileId, name, invokeCommand = invoke) {
+  return {
+    kind: 'file',
+    name,
+    async getFile() {
+      const bytes = await readProfileDatabase(profileId, invokeCommand);
+      return new File([bytes], name, {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+    },
+    async createWritable() {
+      let data = null;
+      return {
+        async write(chunk) {
+          data = chunk instanceof Uint8Array ? chunk : new Uint8Array(await new Blob([chunk]).arrayBuffer());
+        },
+        async close() {
+          if (data) await writeProfileDatabase(profileId, data, invokeCommand);
+        },
+      };
+    },
+    async queryPermission() { return 'granted'; },
+    async requestPermission() { return 'granted'; },
+  };
+}

@@ -13,3 +13,8 @@ payload. It does not delete, merge, hide or approve either report.
 
 New migrations must be append-only, registered in `src/database.rs`, and
 covered by a migration test. Never put operational fixtures in this directory.
+
+`0005_profile_details.sql` adds optional per-profile details in a separate
+table: position, a small avatar image (data URL), an Argon2id password hash and
+the path of the XLSX table that opens after sign-in. The password gates sign-in
+on this device only; it does not encrypt the database or the bound table.
