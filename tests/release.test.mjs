@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readVersions, versionProblems } from '../script/release_version.mjs';
-import { buildManifest, checkedSignature, releaseFilesUrl } from '../script/update_manifest.mjs';
+import { readFileSync } from 'node:fs';
+import { buildManifest, checkedSignature, releaseFilesUrl, verifySignedFile } from '../script/update_manifest.mjs';
 
-// Signature of a synthetic file made with a throwaway test key.
+// A throwaway test key pair (the private half was discarded) and its
+// signature of the synthetic file content 'hello\n'.
+const SYNTHETIC_PUBLIC_KEY = 'dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhFRDUyNjYwNkY5NzVERkQKUldUOVhaZHZZQ2JWanNpMUhZT3VGcnBvNG8xUUNDbDNDSFRFU1NPZHpNRWdkWFJJOGR4OHFOSC8K';
+const SYNTHETIC_CONTENT = Buffer.from('hello\n');
 const SYNTHETIC_SIGNATURE = 'dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUOVhaZHZZQ2JWanBSdlc1b1dOSVZDT1VIMURzMG9UVkIvZGlxS0VwZjArRGxMNzM5ZWQ1WFo5V1l5R3N3MFJqMHlOYWpZRUs0Z2creFNRTjdpTEo2VEFDQTFPVTZRZWcwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNDk2NjI5CWZpbGU6Zi5iaW4KcnJKZzZZNTdHQXNMZm1RQWwvYmJtMnlLVitlZmpnTkFPeTgvZDBPMkdPSG9WYnJLTW5FeVg5K3laYVVFOVBCV1JkUmtzN1dwMUpOVEFqSEVmT1MyQlE9PQo=';
 
 test('repository version files agree', () => {
@@ -53,4 +57,20 @@ test('update manifest refuses plain http, bad versions and non-signature files',
   assert.throws(() => buildManifest({ version: 'v0.6', filesUrl: 'https://x.invalid/', mac: { file: 'a', signature: SYNTHETIC_SIGNATURE } }), /версія/);
   assert.throws(() => checkedSignature(Buffer.from('not a signature').toString('base64'), 'a'), /minisign/);
   assert.throws(() => buildManifest({ version: '0.6.0', filesUrl: 'https://x.invalid/' }), /жодного/);
+});
+
+test('signatures are verified against the public key, not just their format', () => {
+  assert.match(verifySignedFile(SYNTHETIC_CONTENT, SYNTHETIC_SIGNATURE, SYNTHETIC_PUBLIC_KEY), /file:f\.bin/);
+  assert.throws(
+    () => verifySignedFile(Buffer.from('hellO\n'), SYNTHETIC_SIGNATURE, SYNTHETIC_PUBLIC_KEY),
+    /не збігається/,
+  );
+  const ownerKey = JSON.parse(readFileSync(new URL('../src-tauri/tauri.conf.json', import.meta.url), 'utf8')).plugins.updater.pubkey;
+  assert.throws(() => verifySignedFile(SYNTHETIC_CONTENT, SYNTHETIC_SIGNATURE, ownerKey), /іншим ключем/);
+
+  // Editing the trusted comment breaks the global signature.
+  const lines = Buffer.from(SYNTHETIC_SIGNATURE, 'base64').toString('utf8').split('\n');
+  lines[2] = lines[2].replace('file:f.bin', 'file:other.bin');
+  const forged = Buffer.from(lines.join('\n')).toString('base64');
+  assert.throws(() => verifySignedFile(SYNTHETIC_CONTENT, forged, SYNTHETIC_PUBLIC_KEY), /не збігається/);
 });

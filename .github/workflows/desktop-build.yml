@@ -98,6 +98,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ env.RELEASE_BUILD == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ env.RELEASE_BUILD == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
           EASYWAR_UPDATE_ENDPOINT: ${{ env.RELEASE_BUILD == 'true' && format('https://github.com/{0}/releases/latest/download/latest.json', env.RELEASES_REPO) || '' }}
+        # `tauri build` accepts --config more than once and merges the files in order.
         run: |
           updater=()
           if [ "$RELEASE_BUILD" = true ]; then updater=(--config src-tauri/tauri.updater.conf.json); fi
@@ -261,7 +262,7 @@ jobs:
           shopt -s failglob
           gh release create "$GITHUB_REF_NAME" --repo "$RELEASES_REPO" --draft \
             --title "EasyWAR ${GITHUB_REF_NAME#v}" \
-            --notes "Інсталятори EasyWAR ${GITHUB_REF_NAME#v} для macOS і Windows. Вже встановлені копії оновлюються через «Резервна копія» → «Перевірити оновлення»." \
+            --notes "Технічна збірка EasyWAR ${GITHUB_REF_NAME#v}: macOS з ad-hoc підписом (без Developer ID і нотаризації), Windows без підпису Authenticode. Перше встановлення покаже попередження Gatekeeper/SmartScreen. Пакети оновлення підписані ключем EasyWAR і перевіряються застосунком. Встановлені копії оновлюються через «Резервна копія» → «Перевірити оновлення». Публікація — лише за письмовим рішенням-винятком (docs/UPDATES.md)." \
             release/latest.json \
             release/EasyWAR-macOS/*.dmg \
             release/EasyWAR-macOS-update/EasyWAR.app.tar.gz \
