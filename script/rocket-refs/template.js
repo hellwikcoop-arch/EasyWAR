@@ -159,6 +159,44 @@ html.rocket-ref24 .tt-row.ewr-tt:first-of-type,html.rocket-ref24 .tt-row.ewr-tt:
 .dsel.ewr-ds .ewr-ds-spec b{font:700 14px/1.25 var(--display);color:#f4f2e6}
 .dsel.ewr-ds-type .ewr-ds-photo{align-self:stretch;width:100%;min-height:64px;max-height:96px;object-fit:cover;border-radius:8px;-webkit-mask-image:linear-gradient(90deg,transparent 0,#000 30%,#000 80%,transparent);mask-image:linear-gradient(90deg,transparent 0,#000 30%,#000 80%,transparent)}
 html.rocket-ref24 #p-kpis .kpi-grid > .kc.ewr-kc:nth-child(n+3):nth-child(-n+6) .kc-top{padding:0!important;min-height:26px!important;border:0!important;background:none!important;box-shadow:none!important}
+/* --- «Тип РСЗВ»: розміри від ширини картки, а не вікна; на вузькій картці — стовпчиком --- */
+.achero{container-type:inline-size}
+.achero .ah-name{font-size:clamp(56px,14cqi,128px)}
+.achero .ah-role{font-size:clamp(11px,2.1cqi,19px)}
+.achero .ah-motto{font-size:clamp(12px,2.3cqi,21px)}
+.achero .ah-r b{font-size:clamp(52px,12cqi,108px)}
+.achero .ah-r span{font-size:clamp(15px,2.9cqi,24px)}
+.achero .ah-foot em{overflow:hidden;text-overflow:ellipsis}
+@container (max-width:700px){
+  .achero .ah-h{flex-wrap:wrap;min-height:0;padding-left:16px}
+  .achero .ah-h h2{flex:1 1 auto;min-height:52px;font-size:clamp(20px,6.4cqi,30px);white-space:nowrap}
+  .achero .ah-i{width:24px;height:24px;font-size:13px}
+  .achero .ah-more{min-width:0;padding:0 16px;font-size:11px;letter-spacing:.08em;gap:8px}
+  .achero .ah-sel{display:flex;order:3;flex:1 0 100%;margin:0;padding:8px 16px;border-top:1px solid color-mix(in srgb,var(--accent) 24%,var(--line))}
+  .achero .ah-b{aspect-ratio:auto;display:flex;flex-direction:column;padding:22px 18px 18px}
+  .achero .ah-photo{object-position:62% 40%;opacity:.62}
+  .achero .ah-b::before{background:linear-gradient(180deg,rgba(3,10,7,.62) 0%,rgba(3,10,7,.78) 42%,rgba(3,10,7,.94) 100%)}
+  .achero .ah-b::after{display:none}
+  .achero .ah-l{display:contents}
+  .achero .ah-l>*{position:relative;z-index:2}
+  .achero .ah-name{order:1}.achero .ah-role{order:2}.achero .ah-motto{order:3}.achero .ah-r{order:4}.achero .ah-foot{order:5}
+  .achero .ah-name{font-size:clamp(44px,19cqi,96px);line-height:.9}
+  .achero .ah-role{font-size:clamp(10px,3.1cqi,14px);letter-spacing:.14em;margin-top:10px;max-width:none}
+  .achero .ah-role::after{width:56px;height:2px;margin-top:12px}
+  .achero .ah-motto{display:flex;flex-wrap:wrap;gap:0 .45em;margin-top:12px;font-size:clamp(12px,3.6cqi,15px)}
+  .achero .ah-mapmark{display:none}
+  .achero .ah-foot{width:auto;margin-top:18px;padding-top:14px;flex-wrap:wrap;gap:6px 10px;white-space:normal;font-size:10px;letter-spacing:.1em;border-top:1px solid rgba(255,255,255,.14)}
+  .achero .ah-foot .ah-tr{width:18px;height:25px}
+  .achero .ah-foot i{display:none}
+  .achero .ah-foot em{letter-spacing:.1em}
+  .achero .ah-r{position:relative;inset:auto;z-index:2;width:auto;margin-top:20px;padding:4px 0 4px 16px;border-left:2px solid var(--accent);display:grid;grid-template-columns:auto 1fr;column-gap:14px;align-items:center}
+  .achero .ah-r b{grid-row:1/3;font-size:clamp(44px,17cqi,84px);line-height:.9}
+  .achero .ah-r span{font-size:clamp(14px,4.4cqi,20px);overflow-wrap:anywhere}
+  .achero .ah-r small{margin-top:2px;font-size:12px;line-height:1.35}
+}
+@container (max-width:320px){
+  .achero .ah-more{flex:1 0 100%;min-height:38px;justify-content:flex-end;border-left:0;border-top:1px solid color-mix(in srgb,var(--accent) 24%,var(--line))}
+}
 `;
   document.head.append(css);
 })();

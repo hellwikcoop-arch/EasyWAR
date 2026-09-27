@@ -52,3 +52,25 @@ export function databaseStatusMessage(status) {
   }
   return `EasyWAR ${String(status.appVersion)}. Схема SQLite ${status.schemaVersion} із ${status.supportedSchemaVersion}; перевірено міграцій: ${status.migrationCount}. Стан актуальний.`;
 }
+
+export function checkForAppUpdate(invokeCommand = invoke) {
+  return invokeCommand('check_for_app_update');
+}
+
+export function installAppUpdate(invokeCommand = invoke) {
+  return invokeCommand('install_app_update');
+}
+
+export function appUpdateMessage(status) {
+  if (status?.configured === false) {
+    return `EasyWAR ${String(status.currentVersion)}. У цій збірці автоматичні оновлення не налаштовано — нову версію встановлюйте вручну.`;
+  }
+  if (status?.configured !== true) {
+    throw new TypeError('Некоректна відповідь перевірки оновлень EasyWAR');
+  }
+  if (!status.available) {
+    return `Встановлено актуальну версію EasyWAR ${String(status.currentVersion)}.`;
+  }
+  const notes = status.available.notes ? ` Що нового: ${String(status.available.notes)}` : '';
+  return `Доступна версія ${String(status.available.version)} (зараз ${String(status.currentVersion)}).${notes}`;
+}

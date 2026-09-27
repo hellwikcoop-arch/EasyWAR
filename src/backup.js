@@ -1,12 +1,15 @@
 import { invoke } from '@tauri-apps/api/core';
 import './backup.css';
 import {
+  appUpdateMessage,
   applyStagedRestoreAndRestart,
   cancelStagedRestore,
+  checkForAppUpdate,
   databaseStatusMessage,
   finalizeLocalRestore,
   getDatabaseStatus,
   getRestoreStartupReport,
+  installAppUpdate,
   restoreStartupMessage,
   stageLocalRestore,
 } from './backup-core.js';
@@ -38,9 +41,12 @@ function initializeBackup() {
     <section class="ew-update-section" aria-labelledby="ew-update-title">
       <h3 id="ew-update-title">Оновлення та міграції</h3>
       <p id="ew-update-status">Перевіряємо локальну схему…</p>
-      <p class="ew-backup-warning">Перед встановленням нової версії EasyWAR створіть і перевірте локальну резервну копію.</p>
+      <p id="ew-app-update-status" role="status" aria-live="polite"></p>
+      <p class="ew-backup-warning">Під час оновлення кнопкою нижче копія бази створюється автоматично поруч із базою, у папці «backups». Якщо встановлюєте нову версію вручну, спершу створіть і перевірте резервну копію.</p>
       <div class="ew-backup-actions">
         <button type="button" class="btn quiet" id="ew-update-refresh">Оновити стан</button>
+        <button type="button" class="btn" id="ew-app-update-check">Перевірити оновлення</button>
+        <button type="button" class="btn primary" id="ew-app-update-install" hidden>Встановити й перезапустити</button>
       </div>
     </section>
     <section class="ew-restore-section" aria-labelledby="ew-restore-title">
@@ -70,6 +76,10 @@ function initializeBackup() {
   const restoreFinalizeButton = dialog.querySelector('#ew-restore-finalize');
   const updateStatus = dialog.querySelector('#ew-update-status');
   const updateRefreshButton = dialog.querySelector('#ew-update-refresh');
+  const appUpdateStatus = dialog.querySelector('#ew-app-update-status');
+  const appUpdateCheckButton = dialog.querySelector('#ew-app-update-check');
+  const appUpdateInstallButton = dialog.querySelector('#ew-app-update-install');
+  let availableUpdate = null;
   let restoreReport = {
     outcome: 'none',
     pendingRestoreAvailable: false,
@@ -84,6 +94,8 @@ function initializeBackup() {
     restoreApplyButton.disabled = value;
     restoreFinalizeButton.disabled = value;
     updateRefreshButton.disabled = value;
+    appUpdateCheckButton.disabled = value;
+    appUpdateInstallButton.disabled = value;
   }
 
   function renderRestoreState() {
@@ -111,6 +123,39 @@ function initializeBackup() {
 
   void refreshDatabaseStatus();
   updateRefreshButton.addEventListener('click', () => { void refreshDatabaseStatus(); });
+
+  appUpdateCheckButton.addEventListener('click', async () => {
+    setBusy(true);
+    appUpdateInstallButton.hidden = true;
+    availableUpdate = null;
+    appUpdateStatus.textContent = 'Перевіряємо наявність нової версії…';
+    try {
+      const result = await checkForAppUpdate();
+      availableUpdate = result.available || null;
+      appUpdateStatus.textContent = appUpdateMessage(result);
+    } catch (error) {
+      appUpdateStatus.textContent = `Не вдалося перевірити оновлення: ${String(error)}`;
+    } finally {
+      appUpdateInstallButton.hidden = !availableUpdate;
+      setBusy(false);
+    }
+  });
+
+  appUpdateInstallButton.addEventListener('click', async () => {
+    if (!availableUpdate) return;
+    if (!window.confirm(`Встановити EasyWAR ${String(availableUpdate.version)}? Спершу буде створено копію бази, потім завантажено й перевірено підписаний пакет, після чого EasyWAR перезапуститься.`)) return;
+    setBusy(true);
+    appUpdateStatus.textContent = 'Створюємо копію бази й завантажуємо оновлення…';
+    try {
+      const snapshot = await installAppUpdate();
+      appUpdateStatus.textContent = `Оновлення встановлено. Копія бази: ${String(snapshot)}. EasyWAR перезапускається…`;
+    } catch (error) {
+      appUpdateStatus.textContent = `Оновлення не встановлено: ${String(error)}. Поточна версія працює далі; перевірте оновлення ще раз.`;
+      availableUpdate = null;
+      appUpdateInstallButton.hidden = true;
+      setBusy(false);
+    }
+  });
 
   function close() {
     dialog.close();

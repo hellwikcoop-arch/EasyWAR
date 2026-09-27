@@ -1,12 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  appUpdateMessage,
   applyStagedRestoreAndRestart,
   cancelStagedRestore,
+  checkForAppUpdate,
   databaseStatusMessage,
   finalizeLocalRestore,
   getDatabaseStatus,
   getRestoreStartupReport,
+  installAppUpdate,
   restoreStartupMessage,
   stageLocalRestore,
 } from '../src/backup-core.js';
@@ -66,4 +69,40 @@ test('restore startup messages keep applied, rollback, pending and failure disti
     /synthetic failure/,
   );
   assert.throws(() => restoreStartupMessage({ outcome: 'unexpected' }), TypeError);
+});
+
+test('app update helpers call only the dedicated desktop commands', async () => {
+  const calls = [];
+  const invoke = async (command, payload) => {
+    calls.push([command, payload]);
+    return null;
+  };
+
+  await checkForAppUpdate(invoke);
+  await installAppUpdate(invoke);
+
+  assert.deepEqual(calls, [
+    ['check_for_app_update', undefined],
+    ['install_app_update', undefined],
+  ]);
+});
+
+test('app update message separates unconfigured, current and available builds', () => {
+  assert.match(
+    appUpdateMessage({ configured: false, currentVersion: '0.5.0', available: null }),
+    /не налаштовано/,
+  );
+  assert.equal(
+    appUpdateMessage({ configured: true, currentVersion: '0.5.0', available: null }),
+    'Встановлено актуальну версію EasyWAR 0.5.0.',
+  );
+  assert.equal(
+    appUpdateMessage({
+      configured: true,
+      currentVersion: '0.5.0',
+      available: { version: '0.6.0', notes: 'Синтетичний опис змін.' },
+    }),
+    'Доступна версія 0.6.0 (зараз 0.5.0). Що нового: Синтетичний опис змін.',
+  );
+  assert.throws(() => appUpdateMessage(null), TypeError);
 });

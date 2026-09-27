@@ -186,6 +186,17 @@ The request marker is never inferred from the presence of a staged file, so an
 unconfirmed candidate cannot be applied automatically. WAL/SHM/journal
 sidecars still block the swap.
 
+A process that quits or crashes during a write leaves an `easywar.db-journal`
+(or `-wal`/`-shm`) file next to the live database. Right after taking the
+instance lock, and before any other startup check, EasyWAR opens the live
+database once so SQLite performs its own crash recovery:
+- a hot journal is rolled back;
+- committed WAL frames are checkpointed;
+- a journal that was never synced is replaced by a no-op write.
+
+Startup continues only when no sidecar remains. Sidecars without a live
+database are never applied to a new file and stop the start.
+
 If the process was interrupted between the two renames, startup restores the
 previous database, leaves the candidate staged, clears the one-shot request and
 reports the rollback in the backup dialog. After a successful restart, the

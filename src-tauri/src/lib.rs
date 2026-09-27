@@ -1,4 +1,5 @@
 pub mod analytics;
+mod app_update;
 pub mod backup;
 mod database;
 mod desktop_shell;
@@ -18,6 +19,7 @@ pub mod workspace_templates;
 pub mod xlsx_export;
 pub mod xlsx_import;
 
+use app_update::{AppUpdateStatus, PendingUpdate};
 use backup::BackupStore;
 use chrono::{SecondsFormat, Utc};
 use database::{DatabaseStatus, DatabaseStatusStore};
@@ -45,6 +47,15 @@ use workspace_templates::{WorkspaceTemplateStore, WorkspaceTemplatesState};
 use xlsx_export::XlsxExportResult;
 
 struct LiveDatabasePath(PathBuf);
+
+/// The updater plugin builds reqwest with rustls but leaves the crypto
+/// provider unset until its own first check. Any reqwest client created
+/// before that (the loopback Signal daemon client) panics without one.
+pub(crate) fn install_tls_provider() {
+    if rustls::crypto::CryptoProvider::get_default().is_none() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    }
+}
 
 #[tauri::command]
 async fn get_database_status(
@@ -453,6 +464,35 @@ async fn apply_staged_restore_and_restart(
 }
 
 #[tauri::command]
+async fn check_for_app_update(
+    app: tauri::AppHandle,
+    pending: tauri::State<'_, PendingUpdate>,
+) -> Result<AppUpdateStatus, String> {
+    app_update::check(&app, &pending)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn install_app_update(
+    app: tauri::AppHandle,
+    pending: tauri::State<'_, PendingUpdate>,
+    backup: tauri::State<'_, BackupStore>,
+    live_database: tauri::State<'_, LiveDatabasePath>,
+) -> Result<String, String> {
+    let backups_dir = live_database
+        .0
+        .parent()
+        .ok_or("не вдалося визначити папку локальної бази")?
+        .join("backups");
+    let snapshot = app_update::install(&pending, &backup, &backups_dir)
+        .await
+        .map_err(|error| error.to_string())?;
+    app.request_restart();
+    Ok(snapshot.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
 fn get_restore_startup_report(
     report: tauri::State<'_, RestoreStartupReport>,
 ) -> RestoreStartupReport {
@@ -671,6 +711,11 @@ pub fn run() {
         .join(database_name);
     let instance_lock = restore::acquire_application_instance_lock(&database_file)
         .expect("інший екземпляр EasyWAR уже працює або lock недоступний");
+    tauri::async_runtime::block_on(restore::recover_live_sidecars(
+        &database_file,
+        &instance_lock,
+    ))
+    .expect("не вдалося безпечно завершити відновлення SQLite після попереднього запуску");
     let restore_startup_report =
         tauri::async_runtime::block_on(restore::process_requested_restore(&database_file))
             .expect("не вдалося безпечно обробити підготовлене відновлення");
@@ -680,6 +725,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(
             tauri_plugin_sql::Builder::default()
                 .add_migrations(database::DATABASE_URL, database::migrations())
@@ -711,6 +757,7 @@ pub fn run() {
             app.manage(LiveDatabasePath(setup_database_file));
             app.manage(instance_lock);
             app.manage(restore_startup_report);
+            app.manage(PendingUpdate::default());
             desktop_shell::create_main_window(app)?;
             Ok(())
         })
@@ -747,6 +794,8 @@ pub fn run() {
             apply_staged_restore_and_restart,
             get_restore_startup_report,
             finalize_local_restore,
+            check_for_app_update,
+            install_app_update,
             inspect_local_xlsx,
             stage_local_xlsx,
             export_approved_xlsx,
