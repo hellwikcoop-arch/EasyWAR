@@ -106,7 +106,10 @@ npm ci
 
 Technical macOS (universal DMG, ad-hoc signed) and Windows (MSI + NSIS,
 unsigned) installers are built by the `Desktop build` GitHub Actions workflow
-and published as workflow artifacts.
+and published as workflow artifacts. To save Actions minutes, pull requests and
+`main` run only the Linux checks. The installers are built for `vX.Y.Z` release
+tags (see `docs/UPDATES.md`) and on demand via **Actions → Desktop build → Run
+workflow**.
 
 Application icons are generated from the vector sources in
 `src-tauri/icons/source/` with `./script/generate_icons.sh` (full logo for large
