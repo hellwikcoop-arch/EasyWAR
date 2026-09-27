@@ -3,6 +3,11 @@ name: Desktop build
 # Technical (unsigned / ad-hoc signed) installers for macOS and Windows.
 # Production signing and notarization stay a separate, manual release gate —
 # see docs/RELEASE_CHECKLIST.md.
+#
+# A vX.Y.Z tag also builds signed in-app update packages and a draft release
+# with latest.json (see docs/UPDATES.md). It needs the TAURI_SIGNING_PRIVATE_KEY
+# and TAURI_SIGNING_PRIVATE_KEY_PASSWORD secrets and the EASYWAR_UPDATE_ENDPOINT
+# and EASYWAR_UPDATE_FILES_URL variables.
 
 on:
   push:
@@ -20,6 +25,9 @@ permissions:
 concurrency:
   group: desktop-build-${{ github.ref }}
   cancel-in-progress: true
+
+env:
+  RELEASE_BUILD: ${{ startsWith(github.ref, 'refs/tags/v') }}
 
 jobs:
   checks:
@@ -41,6 +49,27 @@ jobs:
         with:
           workspaces: src-tauri
       - run: npm ci
+      - name: Check version numbers
+        run: node script/release_version.mjs
+      - name: Check update signing configuration
+        if: env.RELEASE_BUILD == 'true'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          EASYWAR_UPDATE_ENDPOINT: ${{ vars.EASYWAR_UPDATE_ENDPOINT }}
+          EASYWAR_UPDATE_FILES_URL: ${{ vars.EASYWAR_UPDATE_FILES_URL }}
+        run: |
+          missing=0
+          for name in TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD EASYWAR_UPDATE_ENDPOINT EASYWAR_UPDATE_FILES_URL; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Для випуску з оновленнями потрібен $name (Settings → Secrets and variables → Actions)."
+              missing=1
+            fi
+          done
+          case "$EASYWAR_UPDATE_ENDPOINT$EASYWAR_UPDATE_FILES_URL" in
+            *http://*) echo "::error::Адреси оновлень мають бути https://."; missing=1 ;;
+          esac
+          exit $missing
       # The XLSX contract test runs a Rust example against the legacy parser.
       - run: npm run test:unit
       - run: npm run build
@@ -63,7 +92,14 @@ jobs:
           workspaces: src-tauri
       - run: npm ci
       - name: Build universal app and DMG (ad-hoc signature)
-        run: npm run tauri build -- --target universal-apple-darwin --config src-tauri/tauri.adhoc.conf.json
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ env.RELEASE_BUILD == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ env.RELEASE_BUILD == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+          EASYWAR_UPDATE_ENDPOINT: ${{ env.RELEASE_BUILD == 'true' && vars.EASYWAR_UPDATE_ENDPOINT || '' }}
+        run: |
+          updater=()
+          if [ "$RELEASE_BUILD" = true ]; then updater=(--config src-tauri/tauri.updater.conf.json); fi
+          npm run tauri build -- --target universal-apple-darwin --config src-tauri/tauri.adhoc.conf.json "${updater[@]}"
       - name: Verify bundle
         run: |
           APP=src-tauri/target/universal-apple-darwin/release/bundle/macos/EasyWAR.app
@@ -111,6 +147,15 @@ jobs:
           name: EasyWAR-macOS
           path: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
           if-no-files-found: error
+      - name: Upload signed update package
+        if: env.RELEASE_BUILD == 'true'
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: EasyWAR-macOS-update
+          path: |
+            src-tauri/target/universal-apple-darwin/release/bundle/macos/EasyWAR.app.tar.gz
+            src-tauri/target/universal-apple-darwin/release/bundle/macos/EasyWAR.app.tar.gz.sig
+          if-no-files-found: error
 
   windows:
     needs: checks
@@ -129,7 +174,15 @@ jobs:
           workspaces: src-tauri
       - run: npm ci
       - name: Build MSI and NSIS installers (unsigned)
-        run: npm run tauri build
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ env.RELEASE_BUILD == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ env.RELEASE_BUILD == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+          EASYWAR_UPDATE_ENDPOINT: ${{ env.RELEASE_BUILD == 'true' && vars.EASYWAR_UPDATE_ENDPOINT || '' }}
+        run: |
+          updater=()
+          if [ "$RELEASE_BUILD" = true ]; then updater=(--config src-tauri/tauri.updater.conf.json); fi
+          npm run tauri build -- "${updater[@]}"
       - name: Checksums
         shell: pwsh
         run: |
@@ -140,5 +193,55 @@ jobs:
           name: EasyWAR-Windows
           path: |
             src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/msi/*.msi.sig
             src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/nsis/*.exe.sig
           if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Collect installers and update packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for name in EasyWAR-macOS EasyWAR-macOS-update EasyWAR-Windows; do
+            gh run download "$GITHUB_RUN_ID" --name "$name" --dir "release/$name"
+          done
+          find release -type f | sort
+      - name: Build latest.json
+        env:
+          EASYWAR_UPDATE_FILES_URL: ${{ vars.EASYWAR_UPDATE_FILES_URL }}
+        run: |
+          shopt -s failglob
+          notes=()
+          if [ -f "docs/releases/$GITHUB_REF_NAME.md" ]; then notes=(--notes-file "docs/releases/$GITHUB_REF_NAME.md"); fi
+          node script/update_manifest.mjs \
+            --version "${GITHUB_REF_NAME#v}" \
+            --files-url "$EASYWAR_UPDATE_FILES_URL" \
+            --mac-archive release/EasyWAR-macOS-update/EasyWAR.app.tar.gz \
+            --windows-nsis release/EasyWAR-Windows/nsis/*.exe \
+            --windows-msi release/EasyWAR-Windows/msi/*.msi \
+            "${notes[@]}" \
+            --out release/latest.json
+          cat release/latest.json
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s failglob
+          gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
+            --title "EasyWAR ${GITHUB_REF_NAME#v}" \
+            --notes "Чернетка. Перед публікацією пройдіть перевірку оновлення зі старої версії (docs/UPDATES.md)." \
+            release/latest.json \
+            release/EasyWAR-macOS/*.dmg \
+            release/EasyWAR-macOS-update/EasyWAR.app.tar.gz \
+            release/EasyWAR-macOS-update/EasyWAR.app.tar.gz.sig \
+            release/EasyWAR-Windows/nsis/* \
+            release/EasyWAR-Windows/msi/*

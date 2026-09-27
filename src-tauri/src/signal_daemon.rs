@@ -230,6 +230,7 @@ fn parse_subscription(result: Value) -> Result<u64, SignalDaemonError> {
 async fn open_event_stream(
     endpoint: &SignalDaemonEndpoint,
 ) -> Result<reqwest::Response, SignalDaemonError> {
+    crate::install_tls_provider();
     let client = Client::builder()
         .connect_timeout(EVENT_CONNECT_TIMEOUT)
         .redirect(Policy::none())
@@ -389,6 +390,7 @@ async fn rpc_with_timeout(
     timeout: Duration,
 ) -> Result<Value, SignalDaemonError> {
     let url = rpc_url(endpoint)?;
+    crate::install_tls_provider();
     let client = Client::builder()
         .timeout(timeout)
         .redirect(Policy::none())

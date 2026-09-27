@@ -18,8 +18,11 @@
 ## 1. Ідентичність релізу
 
 - [ ] Визначено номер версії та release commit/tag.
-- [ ] Версії збігаються в `package.json`, `src-tauri/Cargo.toml` і
-  `src-tauri/tauri.conf.json`.
+- [ ] Версії збігаються в `package.json`, `package-lock.json`,
+  `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock` і `src-tauri/tauri.conf.json`
+  (`node script/release_version.mjs`).
+- [ ] Оновлення зі старої версії на нову через застосунок перевірене на
+  синтетичних даних для macOS і Windows; див. [`UPDATES.md`](UPDATES.md).
 - [ ] `HEAD` збігається з потрібним remote ref; робоче дерево не містить
   неврахованих release-змін.
 - [ ] Release notes перелічують зміни, відомі обмеження, несумісності та кроки
