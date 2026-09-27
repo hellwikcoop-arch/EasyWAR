@@ -231,6 +231,27 @@ jobs:
             "${notes[@]}" \
             --out release/latest.json
           cat release/latest.json
+      # A release needs a commit to point at; give an empty repository one.
+      - name: Initialise the installers repository if it is empty
+        env:
+          GH_TOKEN: ${{ secrets.EASYWAR_RELEASES_TOKEN }}
+        run: |
+          if gh api "repos/$RELEASES_REPO/commits?per_page=1" --silent 2>/dev/null; then
+            exit 0
+          fi
+          printf '%s\n' \
+            '# EasyWAR — інсталятори' \
+            '' \
+            'Тут лише готові інсталятори та пакети оновлення EasyWAR для macOS і Windows.' \
+            'Коду й даних у цьому репозиторії немає.' \
+            '' \
+            'Остання версія: [Releases → Latest](../../releases/latest).' \
+            '' \
+            'Встановлені копії оновлюються з самого застосунку: «Резервна копія» →' \
+            '«Перевірити оновлення». Кожен пакет підписаний ключем EasyWAR і' \
+            'перевіряється перед встановленням.' > README.md
+          gh api -X PUT "repos/$RELEASES_REPO/contents/README.md" \
+            -f message="Add README" -f content="$(base64 -w0 README.md)" --silent
       # A draft is invisible to the updater; publishing it (one click on
       # GitHub) is what makes installed copies offer the new version.
       - name: Create draft release in the public installers repository
