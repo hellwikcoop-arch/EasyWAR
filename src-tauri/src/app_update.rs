@@ -2,9 +2,11 @@
 //!
 //! The update manifest URL is compiled in from `EASYWAR_UPDATE_ENDPOINT` by the
 //! release build. Builds without it (local and pull-request builds) never
-//! contact the network. The app checks only when the user asks, verifies every
-//! package against the public key in `tauri.conf.json`, and snapshots the live
-//! database next to it before installing.
+//! contact the network. The app checks when the user asks, or once a day at
+//! start-up if the user turned on the automatic check (`update_settings`, off
+//! by default); it verifies every package against the public key in
+//! `tauri.conf.json`, snapshots the live database next to it before installing,
+//! and installs only after the user confirms.
 
 use std::{
     fs,

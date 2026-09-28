@@ -1,15 +1,19 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {
   appUpdateMessage,
   applyStagedRestoreAndRestart,
   cancelStagedRestore,
+  autoCheckForAppUpdate,
   checkForAppUpdate,
   databaseStatusMessage,
   finalizeLocalRestore,
   getDatabaseStatus,
   getRestoreStartupReport,
+  getAppUpdateSettings,
   installAppUpdate,
+  setAppUpdateAutoCheck,
   restoreStartupMessage,
   stageLocalRestore,
 } from '../src/backup-core.js';
@@ -80,10 +84,16 @@ test('app update helpers call only the dedicated desktop commands', async () => 
 
   await checkForAppUpdate(invoke);
   await installAppUpdate(invoke);
+  await getAppUpdateSettings(invoke);
+  await setAppUpdateAutoCheck(1, invoke);
+  await autoCheckForAppUpdate(invoke);
 
   assert.deepEqual(calls, [
     ['check_for_app_update', undefined],
     ['install_app_update', undefined],
+    ['get_app_update_settings', undefined],
+    ['set_app_update_auto_check', { enabled: true }],
+    ['auto_check_for_app_update', undefined],
   ]);
 });
 
@@ -105,4 +115,14 @@ test('app update message separates unconfigured, current and available builds', 
     'Доступна версія 0.6.0 (зараз 0.5.0). Що нового: Синтетичний опис змін.',
   );
   assert.throws(() => appUpdateMessage(null), TypeError);
+});
+
+test('the automatic update check runs only after the user turns it on', async () => {
+  const source = await readFile(new URL('../src/backup.js', import.meta.url), 'utf8');
+  assert.match(source, /<input type="checkbox" id="ew-app-update-auto">/, 'unchecked by default');
+  assert.equal(source.match(/autoCheckForAppUpdate\(\)/g).length, 1, 'one call site, inside autoCheck');
+  const starts = source.match(/void autoCheck\(\)|await autoCheck\(\)/g);
+  assert.equal(starts.length, 2);
+  assert.match(source, /if \(settings\?\.enabled\) void autoCheck\(\);/, 'at start-up only when turned on');
+  assert.match(source, /if \(settings\?\.enabled\) await autoCheck\(\);/, 'right after the user turns it on');
 });
