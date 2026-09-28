@@ -11,5 +11,28 @@
         ]
       }
     ]
+  },
+  "permissions": {
+    "allow": [
+      "mcp__github__pull_request_read",
+      "mcp__github__actions_list",
+      "Bash(npm run test:unit)",
+      "Bash(identify *)",
+      "mcp__github__get_job_logs",
+      "Bash(node script/release_version.mjs)",
+      "Bash(node script/release_version.mjs *)",
+      "mcp__github__actions_get",
+      "Bash(cargo fmt --check)",
+      "Bash(cargo fmt --check *)",
+      "Bash(rustfmt --edition 2021 --check *)",
+      "Bash(cargo test)",
+      "Bash(cargo clippy --all-targets)",
+      "Bash(cargo test --locked)",
+      "mcp__github__get_check_run",
+      "Bash(pkg-config --modversion *)",
+      "Bash(dpkg -l)",
+      "Bash(dpkg -l *)",
+      "Bash(npm ls *)"
+    ]
   }
 }
