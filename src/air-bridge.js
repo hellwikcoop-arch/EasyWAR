@@ -1,26 +1,27 @@
 // Profiles, backup, updates and Signal live on the launcher (index.html), next
-// to the choice of branch. The Air Force module, which shows the dashboard and
-// the report intake, runs in a same-origin iframe; these helpers reach into it.
+// to the choice of branch. Each branch module (Air Force, Rocket Forces and
+// Artillery) runs in its own same-origin iframe; these helpers reach into it.
 
-const AIR_FRAME_ID = 'frame-air';
+export const BRANCHES = ['air', 'rocket'];
 
-/** The window hosting the Air Force module: this one, or the launcher's iframe. */
-export function airWindow() {
-  if (window.__AV) return window;
+const FRAME_IDS = { air: 'frame-air', rocket: 'frame-rocket' };
+
+/** The window hosting a branch module (the launcher's iframe), or null. */
+export function moduleWindow(branch) {
   try {
-    return document.getElementById(AIR_FRAME_ID)?.contentWindow ?? null;
+    return document.getElementById(FRAME_IDS[branch])?.contentWindow ?? null;
   } catch {
     return null;
   }
 }
 
-export function airDashboard() {
-  return airWindow()?.__AV ?? null;
+export function moduleDashboard(branch) {
+  return moduleWindow(branch)?.__AV ?? null;
 }
 
-async function pollAirDashboard(attempts = 150) {
+async function pollModuleDashboard(branch, attempts = 150) {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const dashboard = airDashboard();
+    const dashboard = moduleDashboard(branch);
     if (dashboard?.connect) return dashboard;
     await new Promise(resolve => setTimeout(resolve, 100));
   }
@@ -28,39 +29,46 @@ async function pollAirDashboard(attempts = 150) {
 }
 
 /**
- * Resolves with the Air Force dashboard once the module is ready. With `open`
- * the launcher switches to the module first; otherwise this waits until the
- * user opens it. Resolves null if the module does not become ready.
+ * Resolves with a branch module's dashboard once it is ready. With `open` the
+ * launcher switches to the module first; otherwise this waits until the user
+ * opens it. Resolves null if the module does not become ready.
  */
-export function whenAirDashboard({ open = false } = {}) {
+export function whenModuleDashboard(branch, { open = false } = {}) {
   const launcher = window.EW_LAUNCHER;
   // Show the module even when it is already loaded behind the start screen.
-  if (open) launcher?.openBranch('air');
-  const ready = airDashboard();
+  if (open) launcher?.openBranch(branch);
+  const ready = moduleDashboard(branch);
   if (ready?.connect) return Promise.resolve(ready);
-  if (!launcher || launcher.isLoaded('air')) return pollAirDashboard();
+  if (!launcher || launcher.isLoaded(branch)) return pollModuleDashboard(branch);
   return new Promise(resolve => {
     const onOpen = event => {
-      if (event.detail?.branch !== 'air') return;
+      if (event.detail?.branch !== branch) return;
       window.removeEventListener('ew:branch-open', onOpen);
-      pollAirDashboard().then(resolve);
+      pollModuleDashboard(branch).then(resolve);
     };
     window.addEventListener('ew:branch-open', onOpen);
   });
 }
 
-let pendingAirWork = Promise.resolve();
+const pendingWork = Object.fromEntries(BRANCHES.map(branch => [branch, Promise.resolve()]));
 
 /**
- * Registers work that prepares the Air Force module (the profile's table, its
+ * Registers work that prepares a branch module (the profile's table, its
  * workspace template), so a later action there can wait for it to finish.
  */
-export function trackAirWork(work) {
-  pendingAirWork = Promise.allSettled([pendingAirWork, work]);
+export function trackModuleWork(branch, work) {
+  pendingWork[branch] = Promise.allSettled([pendingWork[branch], work]);
   return work;
 }
 
 /** Resolves once every tracked preparation of the module has finished. */
-export function airWorkSettled() {
-  return pendingAirWork;
+export function moduleWorkSettled(branch) {
+  return pendingWork[branch];
 }
+
+// The Air Force module also takes Signal reports for review.
+export const airWindow = () => moduleWindow('air');
+export const airDashboard = () => moduleDashboard('air');
+export const whenAirDashboard = options => whenModuleDashboard('air', options);
+export const trackAirWork = work => trackModuleWork('air', work);
+export const airWorkSettled = () => moduleWorkSettled('air');

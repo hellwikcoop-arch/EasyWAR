@@ -26,6 +26,18 @@ test('launcher opens both branch modules as same-origin pages', async () => {
   assert.doesNotMatch(html, /\.srcdoc\s*=/);
 });
 
+test('army aviation is a dimmed branch block that does not open a module yet', async () => {
+  const html = await read('index.html');
+  const card = html.match(/<div class="branch-card branch-card-soon"[^>]*>[\s\S]*?<\/h3>\s*<span class="bc-soon">([^<]+)<\/span>/);
+  assert.ok(card, 'army aviation card is on the start screen');
+  assert.match(card[0], /aria-disabled="true"/);
+  assert.match(card[0], /<h3>Армійська Авіація<\/h3>/);
+  assert.equal(card[1], 'У розробці');
+  assert.doesNotMatch(card[0], /data-branch=/, 'no module behind it yet');
+  assert.match(html, /querySelectorAll\('\.branch-card\[data-branch\]'\)/, 'only real branches get a click handler');
+  assert.match(html, /\.branch-card\.branch-card-soon\{[^}]*opacity:\.42[^}]*pointer-events:none/);
+});
+
 test('air module keeps desktop integrations and v3.1 isolation', async () => {
   const html = await read('air.html');
   const bridge = html.indexOf('id="easywar-desktop-frame-bridge"');

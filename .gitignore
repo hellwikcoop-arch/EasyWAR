@@ -27,6 +27,8 @@ data/
 # Operational/user data — never commit
 *.xlsx
 *.xls
+# Empty base tables shipped with the app (structure only, see script/make_base_tables.py)
+!src-tauri/resources/base-tables/*.xlsx
 *.csv
 *.kml
 *.kmz

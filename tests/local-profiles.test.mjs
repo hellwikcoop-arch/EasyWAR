@@ -63,36 +63,56 @@ test('profile details, password and database helpers use dedicated commands', as
   const {
     signInLocalProfile, updateLocalProfileDetails, setLocalProfilePassword,
     chooseProfileDatabase, clearProfileDatabase, readProfileDatabase, writeProfileDatabase,
+    createProfileBaseTable,
   } = await import('../src/local-profiles-core.js');
 
   await signInLocalProfile(id, 'секрет', invoke);
   await updateLocalProfileDetails(id, 'Начальник штабу', '', invoke);
   await setLocalProfilePassword(id, '', 'новий-пароль', invoke);
-  await chooseProfileDatabase(id, invoke);
-  await clearProfileDatabase(id, invoke);
-  assert.deepEqual(await readProfileDatabase(id, invoke), new Uint8Array([80, 75]));
-  await writeProfileDatabase(id, new Uint8Array([1]), invoke);
+  await chooseProfileDatabase(id, 'air', invoke);
+  await clearProfileDatabase(id, 'rocket', invoke);
+  assert.deepEqual(await readProfileDatabase(id, 'rocket', invoke), new Uint8Array([80, 75]));
+  await writeProfileDatabase(id, 'rocket', new Uint8Array([1]), invoke);
+  await createProfileBaseTable(id, 'rvia', invoke);
 
   assert.deepEqual(calls, [
     ['activate_local_profile', { profileId: id, password: 'секрет' }, undefined],
     ['update_local_profile_details', { profileId: id, position: 'Начальник штабу', avatarDataUrl: null }, undefined],
     ['set_local_profile_password', { profileId: id, currentPassword: null, newPassword: 'новий-пароль' }, undefined],
-    ['choose_profile_database', { profileId: id }, undefined],
-    ['clear_profile_database', { profileId: id }, undefined],
-    ['read_profile_database', { profileId: id }, undefined],
-    ['write_profile_database', new Uint8Array([1]), { headers: { 'x-easywar-profile': id } }],
+    ['choose_profile_database', { profileId: id, branch: 'air' }, undefined],
+    ['clear_profile_database', { profileId: id, branch: 'rocket' }, undefined],
+    ['read_profile_database', { profileId: id, branch: 'rocket' }, undefined],
+    ['write_profile_database', new Uint8Array([1]), { headers: { 'x-easywar-profile': id, 'x-easywar-branch': 'rocket' } }],
+    ['create_profile_base_table', { profileId: id, table: 'rvia' }, undefined],
   ]);
+});
+
+test('each branch has its own table slot and base tables open in their module', async () => {
+  const { BASE_TABLES, PROFILE_BRANCHES, profileTablePath } = await import('../src/local-profiles-core.js');
+  const profile = { tables: { air: '/synthetic/air.xlsx', rocket: null } };
+  assert.equal(profileTablePath(profile, 'air'), '/synthetic/air.xlsx');
+  assert.equal(profileTablePath(profile, 'rocket'), null);
+  assert.equal(profileTablePath({}, 'air'), null);
+  assert.deepEqual(PROFILE_BRANCHES.map(item => item.branch), ['air', 'rocket']);
+  assert.deepEqual(
+    Object.fromEntries(BASE_TABLES.map(table => [table.key, table.branch])),
+    { air: 'air', pvk: 'air', rvia: 'rocket' },
+  );
 });
 
 test('profile database handle reads and writes through the bound file', async () => {
   const { profileDatabaseHandle } = await import('../src/local-profiles-core.js');
   const written = [];
-  const invoke = async (command, payload) => {
-    if (command === 'read_profile_database') return new Uint8Array([80, 75, 3]).buffer;
+  const invoke = async (command, payload, options) => {
+    if (command === 'read_profile_database') {
+      assert.equal(payload.branch, 'rocket');
+      return new Uint8Array([80, 75, 3]).buffer;
+    }
+    assert.equal(options.headers['x-easywar-branch'], 'rocket');
     written.push(payload);
     return null;
   };
-  const handle = profileDatabaseHandle('profile-000000000000000000000000', 'AVIA_BASE.xlsx', invoke);
+  const handle = profileDatabaseHandle('profile-000000000000000000000000', 'rocket', 'AVIA_BASE.xlsx', invoke);
   const file = await handle.getFile();
   assert.equal(file.name, 'AVIA_BASE.xlsx');
   assert.deepEqual(new Uint8Array(await file.arrayBuffer()), new Uint8Array([80, 75, 3]));
@@ -119,14 +139,14 @@ test('profile database bytes are copied into this realm', async () => {
   const foreign = vm.runInNewContext('new Uint8Array([80, 75, 3, 4]).buffer');
   assert.equal(foreign instanceof ArrayBuffer, false);
 
-  const bytes = await readProfileDatabase('synthetic', async () => foreign);
+  const bytes = await readProfileDatabase('synthetic', 'air', async () => foreign);
 
   assert.equal(bytes.buffer instanceof ArrayBuffer, true);
   assert.deepEqual([...bytes], [80, 75, 3, 4]);
 
-  // From the launcher the bytes go to the Air Force frame: they must belong to that window.
+  // From the launcher the bytes go to the module frame: they must belong to that window.
   const frame = vm.runInNewContext('({ Uint8Array, ArrayBuffer })');
-  const framed = await readProfileDatabase('synthetic', async () => new Uint8Array([80, 75]).buffer, frame);
+  const framed = await readProfileDatabase('synthetic', 'rocket', async () => new Uint8Array([80, 75]).buffer, frame);
   assert.equal(framed.buffer instanceof frame.ArrayBuffer, true);
   assert.equal(framed.buffer instanceof ArrayBuffer, false);
   assert.deepEqual([...framed], [80, 75]);

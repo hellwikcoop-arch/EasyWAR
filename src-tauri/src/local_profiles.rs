@@ -2,7 +2,7 @@ use argon2::{
     password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::{Sqlite, SqlitePool, Transaction};
 
@@ -18,6 +18,56 @@ pub struct LocalProfileStore {
     pool: SqlitePool,
 }
 
+/// Рід військ, для якого профіль тримає окрему таблицю. Кожна відкривається у
+/// своєму модулі й записується у свій файл.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Branch {
+    Air,
+    Rocket,
+}
+
+impl Branch {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Branch::Air => "air",
+            Branch::Rocket => "rocket",
+        }
+    }
+
+    /// Назва в родовому відмінку: «таблиця Повітряних Сил».
+    pub fn genitive(self) -> &'static str {
+        match self {
+            Branch::Air => "Повітряних Сил",
+            Branch::Rocket => "Ракетних військ і артилерії",
+        }
+    }
+
+    pub fn parse(value: &str) -> Result<Self, LocalProfileError> {
+        match value {
+            "air" => Ok(Branch::Air),
+            "rocket" => Ok(Branch::Rocket),
+            _ => Err(LocalProfileError::InvalidBranch),
+        }
+    }
+}
+
+/// Шляхи таблиць профілю за родами військ.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
+pub struct ProfileTables {
+    pub air: Option<String>,
+    pub rocket: Option<String>,
+}
+
+impl ProfileTables {
+    fn slot(&mut self, branch: Branch) -> &mut Option<String> {
+        match branch {
+            Branch::Air => &mut self.air,
+            Branch::Rocket => &mut self.rocket,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalProfile {
@@ -26,7 +76,7 @@ pub struct LocalProfile {
     pub position: String,
     pub avatar_data_url: Option<String>,
     pub has_password: bool,
-    pub database_path: Option<String>,
+    pub tables: ProfileTables,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -62,6 +112,10 @@ pub enum LocalProfileError {
     WrongPassword,
     #[error("не вдалося обробити пароль профілю")]
     PasswordHash,
+    #[error("невідомий рід військ для таблиці профілю")]
+    InvalidBranch,
+    #[error("шлях до таблиці має містити від 1 до 4096 символів")]
+    InvalidTablePath,
 }
 
 impl LocalProfileStore {
@@ -241,7 +295,10 @@ impl LocalProfileStore {
         now: &str,
     ) -> Result<LocalProfilesState, LocalProfileError> {
         validate_profile_id(id)?;
-        if !self.verify_password(id, current_password.unwrap_or("")).await? {
+        if !self
+            .verify_password(id, current_password.unwrap_or(""))
+            .await?
+        {
             return Err(LocalProfileError::WrongPassword);
         }
         let hash = match new_password {
@@ -303,37 +360,60 @@ impl LocalProfileStore {
         Ok(hash.flatten())
     }
 
-    pub async fn set_database_path(
+    /// Прив'язує (`Some`) або відв'язує (`None`) таблицю роду військ.
+    pub async fn set_table_path(
         &self,
         id: &str,
-        database_path: Option<&str>,
+        branch: Branch,
+        path: Option<&str>,
         now: &str,
     ) -> Result<LocalProfilesState, LocalProfileError> {
         validate_profile_id(id)?;
+        if path.is_some_and(|path| path.is_empty() || path.chars().count() > 4096) {
+            return Err(LocalProfileError::InvalidTablePath);
+        }
         let mut transaction = self.pool.begin().await?;
         ensure_profile_exists(&mut transaction, id).await?;
-        ensure_details_row(&mut transaction, id, now).await?;
-        sqlx::query(
-            "UPDATE local_profile_details SET database_path = ?, updated_at = ? WHERE profile_id = ?",
-        )
-        .bind(database_path)
-        .bind(now)
-        .bind(id)
-        .execute(&mut *transaction)
-        .await?;
+        match path {
+            Some(path) => {
+                sqlx::query(
+                    "INSERT INTO local_profile_tables (profile_id, branch, path, updated_at)
+                     VALUES (?, ?, ?, ?)
+                     ON CONFLICT (profile_id, branch)
+                     DO UPDATE SET path = excluded.path, updated_at = excluded.updated_at",
+                )
+                .bind(id)
+                .bind(branch.as_str())
+                .bind(path)
+                .bind(now)
+                .execute(&mut *transaction)
+                .await?;
+            }
+            None => {
+                sqlx::query("DELETE FROM local_profile_tables WHERE profile_id = ? AND branch = ?")
+                    .bind(id)
+                    .bind(branch.as_str())
+                    .execute(&mut *transaction)
+                    .await?;
+            }
+        }
         transaction.commit().await?;
         self.list().await
     }
 
-    pub async fn database_path(&self, id: &str) -> Result<Option<String>, LocalProfileError> {
+    pub async fn table_path(
+        &self,
+        id: &str,
+        branch: Branch,
+    ) -> Result<Option<String>, LocalProfileError> {
         validate_profile_id(id)?;
-        let path: Option<Option<String>> = sqlx::query_scalar(
-            "SELECT database_path FROM local_profile_details WHERE profile_id = ?",
+        Ok(sqlx::query_scalar(
+            "SELECT path FROM local_profile_tables WHERE profile_id = ? AND branch = ?",
         )
         .bind(id)
+        .bind(branch.as_str())
         .fetch_optional(&self.pool)
-        .await?;
-        Ok(path.flatten())
+        .await?)
     }
 }
 
@@ -355,8 +435,7 @@ fn validate_avatar(avatar: &str) -> Result<(), LocalProfileError> {
         "data:image/png;base64,",
         "data:image/webp;base64,",
     ];
-    if avatar.len() > MAX_AVATAR_BYTES || !allowed.iter().any(|prefix| avatar.starts_with(prefix))
-    {
+    if avatar.len() > MAX_AVATAR_BYTES || !allowed.iter().any(|prefix| avatar.starts_with(prefix)) {
         return Err(LocalProfileError::InvalidAvatar);
     }
     Ok(())
@@ -367,11 +446,13 @@ async fn ensure_details_row(
     id: &str,
     now: &str,
 ) -> Result<(), LocalProfileError> {
-    sqlx::query("INSERT OR IGNORE INTO local_profile_details (profile_id, updated_at) VALUES (?, ?)")
-        .bind(id)
-        .bind(now)
-        .execute(&mut **transaction)
-        .await?;
+    sqlx::query(
+        "INSERT OR IGNORE INTO local_profile_details (profile_id, updated_at) VALUES (?, ?)",
+    )
+    .bind(id)
+    .bind(now)
+    .execute(&mut **transaction)
+    .await?;
     Ok(())
 }
 
@@ -391,7 +472,6 @@ type ProfileRow = (
     Option<String>,
     Option<String>,
     Option<bool>,
-    Option<String>,
     String,
     String,
 );
@@ -403,13 +483,24 @@ async fn load_state(pool: &SqlitePool) -> Result<LocalProfilesState, LocalProfil
             .await?;
     let rows: Vec<ProfileRow> = sqlx::query_as(
         "SELECT p.id, p.display_name, d.position, d.avatar_data_url,
-                d.password_hash IS NOT NULL, d.database_path, p.created_at, p.updated_at
+                d.password_hash IS NOT NULL, p.created_at, p.updated_at
          FROM local_profiles p
          LEFT JOIN local_profile_details d ON d.profile_id = p.id
          ORDER BY p.name_key, p.id",
     )
     .fetch_all(pool)
     .await?;
+    let table_rows: Vec<(String, String, String)> =
+        sqlx::query_as("SELECT profile_id, branch, path FROM local_profile_tables")
+            .fetch_all(pool)
+            .await?;
+    let mut tables = std::collections::HashMap::<String, ProfileTables>::new();
+    for (profile_id, branch, path) in table_rows {
+        // The schema only admits known branches.
+        if let Ok(branch) = Branch::parse(&branch) {
+            *tables.entry(profile_id).or_default().slot(branch) = Some(path);
+        }
+    }
     let profiles = rows
         .into_iter()
         .map(
@@ -419,21 +510,20 @@ async fn load_state(pool: &SqlitePool) -> Result<LocalProfilesState, LocalProfil
                 position,
                 avatar_data_url,
                 has_password,
-                database_path,
                 created_at,
                 updated_at,
             )| LocalProfile {
+                tables: tables.remove(&id).unwrap_or_default(),
                 id,
                 display_name,
                 position: position.unwrap_or_default(),
                 avatar_data_url,
                 has_password: has_password.unwrap_or(false),
-                database_path,
                 created_at,
                 updated_at,
             },
         )
-    .collect();
+        .collect();
     Ok(LocalProfilesState {
         active_profile_id,
         profiles,
@@ -502,7 +592,8 @@ pub(crate) fn validate_profile_id(id: &str) -> Result<(), LocalProfileError> {
 mod tests {
     use super::*;
     use crate::database::{
-        INITIAL_SCHEMA_SQL, LOCAL_PROFILES_SQL, PROFILE_DETAILS_SQL, XLSX_DUPLICATE_LINKS_SQL,
+        INITIAL_SCHEMA_SQL, LOCAL_PROFILES_SQL, PROFILE_BRANCH_TABLES_SQL, PROFILE_DETAILS_SQL,
+        XLSX_DUPLICATE_LINKS_SQL,
     };
     use sqlx::sqlite::SqlitePoolOptions;
 
@@ -528,6 +619,10 @@ mod tests {
             .await
             .unwrap();
         sqlx::raw_sql(PROFILE_DETAILS_SQL)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::raw_sql(PROFILE_BRANCH_TABLES_SQL)
             .execute(&pool)
             .await
             .unwrap();
@@ -685,7 +780,9 @@ mod tests {
         assert!(stored.starts_with("$argon2id$") && !stored.contains("секрет"));
 
         assert!(matches!(
-            store.set_password(&profile, Some("інший"), None, NOW_2).await,
+            store
+                .set_password(&profile, Some("інший"), None, NOW_2)
+                .await,
             Err(LocalProfileError::WrongPassword)
         ));
         let state = store
@@ -720,26 +817,178 @@ mod tests {
             Err(LocalProfileError::InvalidPosition)
         ));
 
-        let state = store
-            .set_database_path(&profile, Some("/tmp/AVIA_BASE.xlsx"), NOW_2)
+        store
+            .update_details(&profile, "", None, NOW_2)
             .await
             .unwrap();
-        assert_eq!(
-            state.profiles[0].database_path.as_deref(),
-            Some("/tmp/AVIA_BASE.xlsx")
-        );
-        assert_eq!(
-            store.database_path(&profile).await.unwrap().as_deref(),
-            Some("/tmp/AVIA_BASE.xlsx")
-        );
-        store.set_database_path(&profile, None, NOW_2).await.unwrap();
-        assert_eq!(store.database_path(&profile).await.unwrap(), None);
-
+        let orphaned: i64 = sqlx::query_scalar("SELECT count(*) FROM local_profile_details")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        assert_eq!(orphaned, 1);
         store.delete(&profile, NOW_2).await.unwrap();
         let orphaned: i64 = sqlx::query_scalar("SELECT count(*) FROM local_profile_details")
             .fetch_one(&store.pool)
             .await
             .unwrap();
         assert_eq!(orphaned, 0);
+    }
+
+    #[tokio::test]
+    async fn air_and_rocket_tables_are_bound_separately() {
+        let store = store().await;
+        let profile = id("Роди військ");
+        store.create(&profile, "Роди військ", NOW_1).await.unwrap();
+        assert_eq!(
+            store.list().await.unwrap().profiles[0].tables,
+            ProfileTables::default()
+        );
+
+        store
+            .set_table_path(&profile, Branch::Air, Some("/synthetic/air.xlsx"), NOW_2)
+            .await
+            .unwrap();
+        let state = store
+            .set_table_path(
+                &profile,
+                Branch::Rocket,
+                Some("/synthetic/rocket.xlsx"),
+                NOW_2,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            state.profiles[0].tables,
+            ProfileTables {
+                air: Some("/synthetic/air.xlsx".to_owned()),
+                rocket: Some("/synthetic/rocket.xlsx".to_owned()),
+            }
+        );
+        assert_eq!(
+            serde_json::to_value(&state.profiles[0]).unwrap()["tables"],
+            serde_json::json!({ "air": "/synthetic/air.xlsx", "rocket": "/synthetic/rocket.xlsx" })
+        );
+
+        store
+            .set_table_path(
+                &profile,
+                Branch::Rocket,
+                Some("/synthetic/rocket-2.xlsx"),
+                NOW_2,
+            )
+            .await
+            .unwrap();
+        let state = store
+            .set_table_path(&profile, Branch::Air, None, NOW_2)
+            .await
+            .unwrap();
+        assert_eq!(state.profiles[0].tables.air, None);
+        assert_eq!(
+            store
+                .table_path(&profile, Branch::Rocket)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("/synthetic/rocket-2.xlsx")
+        );
+        assert!(matches!(
+            store
+                .set_table_path(&profile, Branch::Air, Some(""), NOW_2)
+                .await,
+            Err(LocalProfileError::InvalidTablePath)
+        ));
+        assert!(matches!(
+            store
+                .set_table_path(
+                    &id("missing"),
+                    Branch::Air,
+                    Some("/synthetic/x.xlsx"),
+                    NOW_2
+                )
+                .await,
+            Err(LocalProfileError::ProfileNotFound)
+        ));
+        assert_eq!(Branch::parse("rocket").unwrap(), Branch::Rocket);
+        assert!(matches!(
+            Branch::parse("army"),
+            Err(LocalProfileError::InvalidBranch)
+        ));
+
+        store.delete(&profile, NOW_2).await.unwrap();
+        let orphaned: i64 = sqlx::query_scalar("SELECT count(*) FROM local_profile_tables")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        assert_eq!(orphaned, 0);
+    }
+
+    #[tokio::test]
+    async fn a_table_bound_before_branches_becomes_the_air_force_table() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        for sql in [
+            INITIAL_SCHEMA_SQL,
+            XLSX_DUPLICATE_LINKS_SQL,
+            LOCAL_PROFILES_SQL,
+            PROFILE_DETAILS_SQL,
+        ] {
+            sqlx::raw_sql(sql).execute(&pool).await.unwrap();
+        }
+        let bound = id("bound");
+        let empty = id("empty");
+        for (profile, name) in [(&bound, "Прив'язаний"), (&empty, "Без таблиці")]
+        {
+            sqlx::query(
+                "INSERT INTO local_profiles (id, display_name, name_key, created_at, updated_at)
+                 VALUES (?, ?, lower(?), ?, ?)",
+            )
+            .bind(profile)
+            .bind(name)
+            .bind(name)
+            .bind(NOW_1)
+            .bind(NOW_1)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        sqlx::query(
+            "INSERT INTO local_profile_details (profile_id, position, database_path, updated_at)
+             VALUES (?, 'Аналітик', '/synthetic/AVIA_BASE.xlsx', ?), (?, '', NULL, ?)",
+        )
+        .bind(&bound)
+        .bind(NOW_1)
+        .bind(&empty)
+        .bind(NOW_1)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::raw_sql(PROFILE_BRANCH_TABLES_SQL)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let store = LocalProfileStore::new(pool);
+        let state = store.list().await.unwrap();
+        let tables = |profile: &str| {
+            state
+                .profiles
+                .iter()
+                .find(|candidate| candidate.id == profile)
+                .unwrap()
+                .clone()
+        };
+        assert_eq!(
+            tables(&bound).tables,
+            ProfileTables {
+                air: Some("/synthetic/AVIA_BASE.xlsx".to_owned()),
+                rocket: None,
+            }
+        );
+        assert_eq!(tables(&bound).position, "Аналітик");
+        assert_eq!(tables(&empty).tables, ProfileTables::default());
     }
 }
