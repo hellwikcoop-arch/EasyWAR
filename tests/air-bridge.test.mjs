@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-const { airDashboard, airWindow, whenAirDashboard } = await import('../src/air-bridge.js');
+const { airDashboard, airWindow, airWorkSettled, trackAirWork, whenAirDashboard } = await import('../src/air-bridge.js');
 
 function launcher({ loaded = false } = {}) {
   const frameWindow = {};
@@ -43,4 +43,38 @@ test('an explicit request opens the Air Force module', async () => {
   setTimeout(() => { frameWindow.__AV = { connect() {} }; }, 20);
   assert.equal(await whenAirDashboard({ open: true }), frameWindow.__AV);
   assert.deepEqual(opened, ['air']);
+});
+
+test('an explicit request shows a module that is already ready', async () => {
+  const { frameWindow, opened } = launcher({ loaded: true });
+  frameWindow.__AV = { connect() {} };
+  assert.equal(await whenAirDashboard({ open: true }), frameWindow.__AV);
+  assert.deepEqual(opened, ['air'], 'the hidden module is brought to the front');
+});
+
+test('actions in the module wait for tracked preparation', async () => {
+  const events = [];
+  let finish;
+  trackAirWork(new Promise(resolve => { finish = resolve; }).then(() => events.push('profile table loaded')));
+  trackAirWork(Promise.reject(new Error('synthetic failure')));
+  const waiting = airWorkSettled().then(() => events.push('signal review'));
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.deepEqual(events, []);
+  finish();
+  await waiting;
+  assert.deepEqual(events, ['profile table loaded', 'signal review']);
+});
+
+test('profile table writes keep the IPC body in the calling realm', async () => {
+  const vm = await import('node:vm');
+  const { profileDatabaseHandle } = await import('../src/local-profiles-core.js');
+  const calls = [];
+  const handle = profileDatabaseHandle('synthetic', 'synthetic.xlsx', async (...args) => { calls.push(args); });
+  const writable = await handle.createWritable();
+  const frameBytes = vm.runInNewContext('new Uint8Array([9, 8, 7, 6]).subarray(1, 3)');
+  await writable.write(frameBytes);
+  await writable.close();
+  const [, body] = calls[0];
+  assert.equal(body instanceof Uint8Array, true);
+  assert.deepEqual([...body], [8, 7]);
 });

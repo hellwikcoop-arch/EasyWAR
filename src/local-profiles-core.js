@@ -136,7 +136,12 @@ export function profileDatabaseHandle(profileId, name, invokeCommand = invoke, r
       let data = null;
       return {
         async write(chunk) {
-          data = ArrayBuffer.isView(chunk) ? chunk : new Uint8Array(await new Blob([chunk]).arrayBuffer());
+          // The module writes from its own frame; keep the IPC body in this window's realm.
+          const view = ArrayBuffer.isView(chunk)
+            ? new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength)
+            : new Uint8Array(await new Blob([chunk]).arrayBuffer());
+          data = new Uint8Array(view.byteLength);
+          data.set(view);
         },
         async close() {
           if (data) await writeProfileDatabase(profileId, data, invokeCommand);

@@ -33,12 +33,12 @@ async function pollAirDashboard(attempts = 150) {
  * user opens it. Resolves null if the module does not become ready.
  */
 export function whenAirDashboard({ open = false } = {}) {
+  const launcher = window.EW_LAUNCHER;
+  // Show the module even when it is already loaded behind the start screen.
+  if (open) launcher?.openBranch('air');
   const ready = airDashboard();
   if (ready?.connect) return Promise.resolve(ready);
-  const launcher = window.EW_LAUNCHER;
-  if (!launcher) return pollAirDashboard();
-  if (open) launcher.openBranch('air');
-  if (launcher.isLoaded('air')) return pollAirDashboard();
+  if (!launcher || launcher.isLoaded('air')) return pollAirDashboard();
   return new Promise(resolve => {
     const onOpen = event => {
       if (event.detail?.branch !== 'air') return;
@@ -47,4 +47,20 @@ export function whenAirDashboard({ open = false } = {}) {
     };
     window.addEventListener('ew:branch-open', onOpen);
   });
+}
+
+let pendingAirWork = Promise.resolve();
+
+/**
+ * Registers work that prepares the Air Force module (the profile's table, its
+ * workspace template), so a later action there can wait for it to finish.
+ */
+export function trackAirWork(work) {
+  pendingAirWork = Promise.allSettled([pendingAirWork, work]);
+  return work;
+}
+
+/** Resolves once every tracked preparation of the module has finished. */
+export function airWorkSettled() {
+  return pendingAirWork;
 }

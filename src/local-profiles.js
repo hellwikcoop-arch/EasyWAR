@@ -23,7 +23,7 @@ import {
   workspaceTemplateForProfile,
   workspaceTemplateLabel,
 } from './local-profiles-core.js';
-import { airWindow, whenAirDashboard } from './air-bridge.js';
+import { airWindow, trackAirWork, whenAirDashboard } from './air-bridge.js';
 
 const AVATAR_SIZE = 256;
 
@@ -178,6 +178,7 @@ function initializeLocalProfiles() {
   let workspaceState = { defaultTemplateKey: null, templates: [], assignments: [] };
   let sessionProfileId = null;
   let loadedDatabaseFor = null;
+  let loadingDatabaseFor = null;
   let pendingDashboardSection = null;
   let busy = false;
 
@@ -519,15 +520,27 @@ function initializeLocalProfiles() {
   }
 
   // The table opens in the Air Force module. On an explicit request the
-  // launcher switches to it; otherwise it loads when the user opens it.
-  async function loadProfileDatabase(profile, manual) {
+  // launcher switches to it; otherwise it loads when the user opens it. Other
+  // actions in the module (Signal review) wait for this through trackAirWork.
+  function loadProfileDatabase(profile, manual) {
+    return trackAirWork(openProfileDatabase(profile, manual));
+  }
+
+  async function openProfileDatabase(profile, manual) {
     if (!profile?.databasePath || isProfileLocked(profile, sessionProfileId)) return;
     if (!manual && loadedDatabaseFor === profile.id) return;
     if (manual && dialog.open) dialog.close();
     const dashboard = await whenAirDashboard({ open: manual });
     if (!dashboard || profile.id !== state.activeProfileId) return;
     if (!manual && loadedDatabaseFor === profile.id) return;
-    if (dashboard.S?.dirty && !window.confirm('У відкритій таблиці є незбережені записи. Відкрити таблицю профілю замість неї?')) return;
+    // A deferred automatic load and a click on «Відкрити зараз» can both wake
+    // when the module opens; only one of them may replace the open table.
+    if (loadingDatabaseFor === profile.id) return;
+    loadingDatabaseFor = profile.id;
+    if (dashboard.S?.dirty && !window.confirm('У відкритій таблиці є незбережені записи. Відкрити таблицю профілю замість неї?')) {
+      loadingDatabaseFor = null;
+      return;
+    }
     const name = databaseFileName(profile.databasePath);
     const frame = airWindow();
     try {
@@ -539,6 +552,8 @@ function initializeLocalProfiles() {
       const message = `Не вдалося відкрити таблицю профілю «${name}»: ${String(error)}`;
       status.textContent = message;
       dashboard.showError?.(message);
+    } finally {
+      loadingDatabaseFor = null;
     }
   }
 
@@ -600,7 +615,11 @@ function initializeLocalProfiles() {
     button.click();
   }
 
-  async function applyActiveWorkspaceTemplate() {
+  function applyActiveWorkspaceTemplate() {
+    return trackAirWork(applyWorkspaceTemplateWhenReady());
+  }
+
+  async function applyWorkspaceTemplateWhenReady() {
     const profileId = state.activeProfileId;
     if (!workspaceTemplateForProfile(workspaceState, profileId)) return;
     if (!(await whenAirDashboard()) || profileId !== state.activeProfileId) return;
