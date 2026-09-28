@@ -1871,6 +1871,23 @@ dialog.pass::backdrop{
   .pass-grid,.pass-mods,.pass-low{grid-template-columns:1fr !important}
 }
 </style>
+<style id="rocket-layout-fixes">
+/* «Ефективність» — звичайний розріз на всю ширину, як в інших видах і в модулі «Повітряні Сили».
+   Макет «Аналітика як на референсі» вище накладав панелі огляду на розріз і стискав його в першу з трьох колонок. */
+.dmain-in[data-view="eff"]{grid-template-columns:minmax(0,1fr) !important}
+.dmain-in[data-view="eff"] > .lrow{display:none !important}
+/* У детальних видах власний колонтитул розрізу вже є — другий, від огляду, не показуємо. */
+.dmain-in[data-view]:not([data-view="overview"]) > .ref-footer{display:none !important}
+/* «Тип цілі» займає всю висоту блоку: коли блок вищий за 250 px списку, нижче не лишається порожнього місця. */
+.rocket-ref24 #p-types{display:flex;flex-direction:column}
+.rocket-ref24 #p-types .tt2{flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
+.rocket-ref24 #p-types .tt-list{flex:1 1 0px;height:0;min-height:250px;max-height:none}
+/* «Використані боєприпаси»: кнопки інших боєприпасів переносяться на новий рядок; у блоці вужчому за 640 px
+   три картки знизу не вміщаються — дві малі стають одна під одною замість обрізання справа. */
+#p-mun .mx-info{min-width:0}#p-mun .mx-chips{flex-wrap:wrap}
+@container (max-width: 640px){#p-mun .mx-bot{grid-template-columns:minmax(0,1fr) minmax(150px,190px)}#p-mun .mx-info{grid-row:span 2}}
+@container (max-width: 480px){#p-mun .mx-bot{grid-template-columns:1fr 1fr}#p-mun .mx-info{grid-column:1/3;grid-row:auto}}
+</style>
 
 
 <style id="easywar-volja-module-brand">
