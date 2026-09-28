@@ -88,7 +88,15 @@ export function clearProfileDatabase(profileId, invokeCommand = invoke) {
 }
 
 export async function readProfileDatabase(profileId, invokeCommand = invoke) {
-  return new Uint8Array(await invokeCommand('read_profile_database', { profileId }));
+  // Module frames reach Tauri through the launcher's __TAURI_INTERNALS__, so the
+  // returned ArrayBuffer belongs to the launcher's realm. WebKit (macOS) rejects
+  // a view over a foreign-realm buffer in DecompressionStream with "Invalid type
+  // should be ArrayBuffer", which broke opening the profile's XLSX. Copy the
+  // bytes into a buffer owned by this realm.
+  const received = new Uint8Array(await invokeCommand('read_profile_database', { profileId }));
+  const bytes = new Uint8Array(received.byteLength);
+  bytes.set(received);
+  return bytes;
 }
 
 export function writeProfileDatabase(profileId, bytes, invokeCommand = invoke) {

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import vm from 'node:vm';
 import {
   activateLocalProfile,
   activeProfileLabel,
@@ -110,4 +111,16 @@ test('only password-protected profiles outside the session are locked', async ()
   assert.equal(isProfileLocked({ id, hasPassword: true }, id), false);
   assert.equal(databaseFileName('/Users/x/AVIA_BASE.xlsx'), 'AVIA_BASE.xlsx');
   assert.equal(databaseFileName('C:\\bases\\ROCKET.xlsx'), 'ROCKET.xlsx');
+});
+
+test('profile database bytes are copied into this realm', async () => {
+  const { readProfileDatabase } = await import('../src/local-profiles-core.js');
+  // An ArrayBuffer from another realm, as the launcher window hands it to a module frame.
+  const foreign = vm.runInNewContext('new Uint8Array([80, 75, 3, 4]).buffer');
+  assert.equal(foreign instanceof ArrayBuffer, false);
+
+  const bytes = await readProfileDatabase('synthetic', async () => foreign);
+
+  assert.equal(bytes.buffer instanceof ArrayBuffer, true);
+  assert.deepEqual([...bytes], [80, 75, 3, 4]);
 });
