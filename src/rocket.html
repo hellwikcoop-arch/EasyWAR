@@ -2934,6 +2934,7 @@ html[data-theme="light"] .kh{background:#151a0f!important}
 <style id="kpi-tiles-equal">.kc-blue .kc-t,.kc-amber .kc-t{min-height:0!important;padding:revert-layer}.kc-blue .kc-mb,.kc-amber .kc-mb{position:absolute;top:10px!important;right:10px!important;bottom:auto!important;width:30%!important;height:22px!important;gap:3px}.kc-blue .kc-tl,.kc-amber .kc-tl{position:relative;z-index:1}</style>
 <style id="kpi-merge">.k-l2{display:flex;flex-direction:column;line-height:1.1}.k-l2 .k-sub{display:block;margin-top:3px;font-size:.72em;font-weight:700;letter-spacing:.08em;opacity:.75}</style>
 <style id="kpi-5col">html.rocket-ref24 body .kpipanel .kpi-grid:not(:has(.kc-grey)){grid-template-columns:repeat(5,minmax(0,1fr))!important}@media (max-width:1100px){html.rocket-ref24 body .kpipanel .kpi-grid:not(:has(.kc-grey)){grid-template-columns:repeat(3,minmax(0,1fr))!important}}@media (max-width:640px){html.rocket-ref24 body .kpipanel .kpi-grid:not(:has(.kc-grey)){grid-template-columns:repeat(2,minmax(0,1fr))!important}}</style>
+<link rel="stylesheet" href="./udshv-dashboard.css">
 </head>
 <body>
 <header class="appbar">
@@ -2949,6 +2950,7 @@ html[data-theme="light"] .kh{background:#151a0f!important}
 </header>
 <div id="error" class="error app-error" role="alert" hidden></div>
 <main id="view-dash" class="dash" role="tabpanel" aria-labelledby="tab-dash"></main>
+<main id="view-udshv" aria-label="Дашборд УДШВ" hidden></main>
 <main id="view-entry" class="wrap" role="tabpanel" aria-labelledby="tab-entry" hidden>
   <header class="top">
     <h1>Внесення доповідей у таблицю</h1>
@@ -3942,7 +3944,36 @@ function findDuplicate(rec, records) {
   return null;
 }
 
-const api = { readZip, writeZip, entryBytes, openWorkbook, appendRows, fixDates, normDate, parseReport, toRow, buildContext, findDuplicate, FIELD_HEADERS, FIELD_ORDER, MONTHS_NOM, crc32 };
+/** Читає всі аркуші книги як є (для дашборда УДШВ); сирий XLSX не змінюється. */
+async function readAllSheets(u8) {
+  const entries = readZip(u8);
+  const byName = new Map(entries.map(e => [e.name, e]));
+  const text = async n => { const e = byName.get(n); if (!e) return null; return dec.decode(await entryBytes(e)).replace(/^\uFEFF/, ''); };
+  let wbPath = 'xl/workbook.xml';
+  const rootRels = await text('_rels/.rels');
+  if (rootRels) {
+    const re = /<Relationship\b([^>]*?)\/?>/g; let m;
+    while ((m = re.exec(rootRels))) { const a = attrs(m[1]); if (/\/officeDocument$/.test(a.Type || '')) wbPath = resolvePath('', a.Target); }
+  }
+  const wbXml = await text(wbPath);
+  if (!wbXml) throw new Error('У файлі немає xl/workbook.xml — це не Excel-таблиця.');
+  const wbDir = wbPath.replace(/[^/]*$/, '');
+  const relsXml = await text(wbDir + '_rels/' + wbPath.split('/').pop() + '.rels') || '';
+  const rels = {}; let sharedPath = null;
+  { const re = /<Relationship\b([^>]*?)\/?>/g; let m;
+    while ((m = re.exec(relsXml))) { const a = attrs(m[1]); rels[a.Id] = resolvePath(wbDir, a.Target || ''); if (/\/sharedStrings$/.test(a.Type || '')) sharedPath = rels[a.Id]; } }
+  const shared = parseSharedStrings(sharedPath ? await text(sharedPath) : (await text('xl/sharedStrings.xml')));
+  const out = [];
+  const re = /<(?:\w+:)?sheet\b([^>]*?)\/?>/g; let m;
+  while ((m = re.exec(wbXml))) {
+    const a = attrs(m[1]); const path = rels[attrLocal(a, 'id')];
+    const xml = path ? await text(path) : null;
+    if (xml != null) out.push({ name: a.name, rows: parseSheet(xml, shared) });
+  }
+  return out;
+}
+
+const api = { readZip, writeZip, entryBytes, openWorkbook, readAllSheets, appendRows, fixDates, normDate, parseReport, toRow, buildContext, findDuplicate, FIELD_HEADERS, FIELD_ORDER, MONTHS_NOM, crc32 };
 if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.AVCORE = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
 </script>
@@ -4011,10 +4042,50 @@ function idb() { return new Promise((res, rej) => { const r = indexedDB.open('av
 async function idbSet(k, v) { const db = await idb(); return new Promise((res, rej) => { const tx = db.transaction('kv', 'readwrite'); tx.objectStore('kv').put(v, k); tx.oncomplete = res; tx.onerror = () => rej(tx.error); }); }
 async function idbGet(k) { const db = await idb(); return new Promise((res, rej) => { const tx = db.transaction('kv'); const q = tx.objectStore('kv').get(k); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); }); }
 
+/* ---------------- Дашборд УДШВ: таблицю розпізнано за вмістом ---------------- */
+function udshvApi() {
+  if (window.UDSHVDashboard) return Promise.resolve(window.UDSHVDashboard);
+  return new Promise(resolve => {
+    const done = () => resolve(window.UDSHVDashboard || null);
+    document.addEventListener('udshv:ready', done, { once: true });
+    setTimeout(done, 5000);
+  });
+}
+async function openUdshv(u8, name) {
+  const ud = await udshvApi();
+  if (!ud) return null;
+  try { return ud.parse(await C.readAllSheets(u8), name); }
+  catch (e) { if (e && e.code === 'NOT_UDSHV') return null; throw e; }
+}
+function renderUdshv() {
+  const host = $('#view-udshv'); const ud = window.UDSHVDashboard;
+  if (!host || !ud || !S.udshv) return;
+  ud.render(host, S.udshv, { canRefresh: true, refresh: () => S.handle ? refreshFromDisk(true) : pickFile() });
+}
+function leaveUdshv() {
+  if (!S.udshv) return;
+  S.udshv = null; document.body.classList.remove('udshv-open');
+  const host = $('#view-udshv'); if (host) { host.hidden = true; window.UDSHVDashboard?.unmount(host); }
+}
+function showUdshv(wb, u8, name, handle) {
+  S.bytes = u8; S.name = name; S.handle = handle || null; S.wb = null; S.ctx = null; S.udshv = wb;
+  S.dirty = false; S.undo = []; S.session = []; S.parsed = [];
+  document.body.classList.add('udshv-open'); $('#view-udshv').hidden = false;
+  renderAll(); renderUdshv();
+}
+
 async function connect(u8, name, handle) {
   showError('');
   try {
-    const wb = await C.openWorkbook(u8);
+    let wb;
+    try { wb = await C.openWorkbook(u8); }
+    catch (standardError) {
+      const ud = await openUdshv(u8, name);
+      if (!ud) throw standardError;
+      showUdshv(ud, u8, name, handle);
+      return;
+    }
+    leaveUdshv();
     S.bytes = u8; S.name = name; S.handle = handle || null; S.wb = wb; S.ctx = C.buildContext(wb);
     S.dirty = false; S.undo = []; S.session = []; S.parsed = [];
     $('#paste').value = '';
@@ -4353,7 +4424,7 @@ function init() {
 
 /** Перечитує таблицю з диска, якщо її змінили поза інструментом (наприклад, виправили в Excel). */
 async function refreshFromDisk(manual) {
-  if (!S.wb || S.busy) return false;
+  if ((!S.wb && !S.udshv) || S.busy) return false;
   if (!S.handle) {
     if (manual) { toast('Оберіть збережений файл ще раз — цей режим не бачить змін на диску', ''); pickFile(); }
     return false;
@@ -5916,6 +5987,14 @@ function drawMap() {
 /* ------------------------------ відмальовування ------------------------------ */
 function renderChip() {
   const S = AV.S, box = $('#fileChip'); box.textContent = '';
+  if (!S.wb && S.udshv) {
+    const n = S.udshv.records.length;
+    box.className = 'filechip'; box.title = 'Таблиця УДШВ: лише читання';
+    box.append(h('span', { class: 'dot' }), h('span', { class: 'nm', text: S.name }), h('span', { class: 'cnt', text: N0(n) + ' ' + plural(n, ['рядок', 'рядки', 'рядків']) }));
+    box.append(h('button', { class: 'btn quiet', type: 'button', title: 'Відкрити іншу таблицю', onclick: () => AV.pickFile() }, 'Інша…'));
+    box.append(h('button', { class: 'btn quiet', type: 'button', title: 'Перечитати файл із диска', onclick: () => AV.refresh(true) }, 'Оновити'));
+    return;
+  }
   if (!S.wb) { box.className = ''; box.append(h('button', { class: 'btn', type: 'button', onclick: () => AV.pickFile() }, 'Відкрити таблицю…')); return; }
   const inPlace = !!S.handle, unsaved = S.dirty || (!inPlace && S.undo.length > 0), n = S.wb.records.length;
   box.className = 'filechip'; box.title = inPlace ? (S.dirty ? 'Зміни ще не записано у файл' : 'Записує прямо у файл') : 'Файл відкрито без прямого запису: після додавання завантажте його';
@@ -7182,6 +7261,7 @@ document.addEventListener('DOMContentLoaded', init);
   var tries=0,t=setInterval(function(){decorate();if(++tries>50)clearInterval(t)},120);
 })();
 </script>
+<script type="module" src="./udshv-dashboard.js"></script>
 <script src="./module-editor-access.js"></script>
 <script src="./rocket-refs.js"></script>
 <script src="./module-editor-core.js"></script>
