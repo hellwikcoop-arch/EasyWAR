@@ -12,6 +12,7 @@ const plain = (value) => JSON.parse(JSON.stringify(value));
 
 test('sanitize keeps valid settings and drops unsafe or malformed values', () => {
   const cfg = plain(core.sanitize({
+    version: 2,
     units: [{ name: ' 44 ОАБр ', logo: PNG }, { name: '44 оабр', logo: PNG }, { name: 'Bad', logo: 'javascript:alert(1)' }],
     weapons: [
       { id: 'abc', kind: 'munition', name: 'PrSM', aliases: 'PRSM, Precision Strike', range: 'до 500 км', icon: PNG, photo: 'http://example.org/x.png' },
@@ -31,6 +32,44 @@ test('sanitize keeps valid settings and drops unsafe or malformed values', () =>
   assert.deepEqual(cfg.colors, { '--accent': '#ffaa00' });
   assert.deepEqual(cfg.blocks, { 'p-units': { hidden: true, order: null }, 'p-mun': { hidden: false, order: 20 } });
   assert.deepEqual(plain(core.sanitize(null)), plain(core.empty()));
+});
+
+test('entries keep the owner mark; settings from the owner-only editor are all the owner\'s', () => {
+  const entries = {
+    units: [{ name: 'A', logo: PNG }, { name: 'B', logo: PNG, owner: true }, { name: 'C', logo: PNG, owner: 'yes' }],
+    weapons: [{ id: 'a', kind: 'munition', name: 'X' }, { id: 'b', kind: 'carrier', name: 'Y', owner: true }],
+  };
+  const current = plain(core.sanitize({ version: 2, ...entries }));
+  assert.deepEqual(current.units.map(u => [u.name, u.owner === true]), [['A', false], ['B', true], ['C', false]]);
+  assert.deepEqual(current.weapons.map(w => [w.name, w.owner === true]), [['X', false], ['Y', true]]);
+  assert.equal(current.version, 2);
+  // Before version 2 only the owner could open the editor.
+  for (const legacy of [{ version: 1, ...entries }, entries]) {
+    const cfg = plain(core.sanitize(legacy));
+    assert.ok(cfg.units.every(u => u.owner === true) && cfg.weapons.every(w => w.owner === true));
+  }
+});
+
+test('an entry added by another user never replaces a built-in or the owner\'s entry', () => {
+  const weapons = [
+    { id: 'o', kind: 'munition', name: 'M30A2', aliases: [], owner: true },
+    { id: 'u', kind: 'munition', name: 'M30', aliases: ['PrSM'] },
+  ];
+  const builtin = value => (/M3[01]/i.test(value) ? 'm30' : '');
+  assert.equal(core.resolveWeapon(weapons, 'munition', 'M30A2 GMLRS', builtin).id, 'o', 'the owner overrides a built-in');
+  assert.equal(core.resolveWeapon(weapons, 'munition', 'M30A1', builtin), null, 'the built-in stays');
+  assert.equal(core.resolveWeapon(weapons, 'munition', 'PrSM Inc 1', builtin).id, 'u', 'new names are added');
+  assert.equal(core.resolveWeapon(weapons, 'carrier', 'PrSM', builtin), null);
+});
+
+test('importing the owner\'s file keeps entries added on this computer', () => {
+  const current = { version: 2, units: [{ name: '44 ОАБр', logo: PNG }, { name: 'Old', logo: PNG, owner: true }, { name: '12 ОБр', logo: PNG }],
+    weapons: [{ id: 'u1', kind: 'munition', name: 'PrSM' }, { id: 'u2', kind: 'carrier', name: 'Rafale' }], colors: { '--accent': '#112233' } };
+  const imported = { app: 'EasyWAR', version: 1, units: [{ name: '12 обр', logo: PNG }], weapons: [{ id: 'i1', kind: 'carrier', name: 'RAFALE' }], colors: { '--bg': '#000000' } };
+  const cfg = plain(core.mergeImported(current, imported));
+  assert.deepEqual(cfg.units.map(u => [u.name, u.owner === true]), [['12 обр', true], ['44 ОАБр', false]], 'the owner\'s old entries are replaced, same names go to the file');
+  assert.deepEqual(cfg.weapons.map(w => [w.name, w.owner === true]), [['RAFALE', true], ['PrSM', false]]);
+  assert.deepEqual(cfg.colors, { '--bg': '#000000' });
 });
 
 test('matchWeapon finds custom entries by name or alias, longest match wins', () => {
@@ -141,11 +180,17 @@ test('the shipped access file holds only a strong salted hash', async () => {
   assert.deepEqual(Object.keys(access).sort(), ['hash', 'iterations', 'salt', 'v']);
 });
 
-test('the editor has no visible entry point until unlocked', async () => {
+test('everyone can add units and weapons; the rest of the editor needs the owner password', async () => {
   const source = await read('../src/public/module-editor.js');
   const start = source.slice(source.indexOf('function start() {'), source.indexOf('window.EWModuleEditor ='));
-  assert.doesNotMatch(start, /mountButton\(\)/, 'the button is mounted only after a successful password check');
-  assert.match(source, /window\.EWModuleEditor = \{ open: tab => requestAccess\(tab\)/);
+  assert.match(start, /mountButton\(\)/, 'the public button is there from the start');
+  assert.match(source, /const PUBLIC_TABS = \['units', 'weapons'\];/);
+  assert.match(source, /const allowedTab = id => unlocked \|\| PUBLIC_TABS\.includes\(id\);/);
+  assert.match(source, /if \(tab && !allowedTab\(tab\)\) \{ requestAccess\(tab\); return; \}/, 'owner tabs ask for the password');
+  assert.match(source, /TABS\.filter\(\(\[id\]\) => allowedTab\(id\)\)/, 'only allowed tabs are shown');
+  assert.match(source, /window\.EWModuleEditor = \{ open: tab => openEditor\(tab\)/);
+  // Import, export and reset stay in the owner-only «Файл» tab.
+  assert.ok(!['file', 'images', 'texts', 'colors', 'blocks'].some(id => /const PUBLIC_TABS = \[[^\]]*'/.exec(source)[0].includes(`'${id}'`)));
 });
 
 test('both branch modules load the editor hook and scripts', async () => {

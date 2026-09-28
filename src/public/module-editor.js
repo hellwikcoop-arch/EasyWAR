@@ -1,6 +1,8 @@
 /* EasyWAR — «Редактор модуля»: самостійне спрощене налаштування модуля без програміста.
    Логотипи підрозділів, нове озброєння й засоби, заміна зображень і текстів, кольори, набір і порядок блоків.
-   Зберігається локально (IndexedDB модуля) та експортується/імпортується файлом .json. Код модуля не змінюється. */
+   Зберігається локально (IndexedDB модуля) та експортується/імпортується файлом .json. Код модуля не змінюється.
+   Нові підрозділи й озброєння з логотипами може додати кожен (кнопка «Підрозділи й озброєння»); вбудовані
+   записи, записи власника та решту розділів змінює лише власник після входу паролем. */
 (function () {
   'use strict';
   const core = window.EWModuleEditorCore;
@@ -50,15 +52,17 @@
   }
 
   /* ------------------------------ перехоплення ключів озброєння ------------------------------ */
-  const hk0 = HOOKS();
-  if (hk0) {
-    hk0.munKey = value => { const w = core.matchWeapon(cfg.weapons, 'munition', value); return w ? core.weaponKey(w) : ''; };
-    hk0.carrierKey = value => { const w = core.matchWeapon(cfg.weapons, 'carrier', value); return w ? core.weaponKey(w) : ''; };
-  }
   const origKey = (kind, name) => {
     const hk = HOOKS(), f = hk && (kind === 'munition' ? hk.origMunKey : hk.origCarrierKey);
     try { return typeof f === 'function' ? f(name) || '' : ''; } catch (e) { return ''; }
   };
+  /* Записи інших користувачів не перекривають вбудований довідник: вони лише додають нове. */
+  const keyFor = kind => value => { const w = core.resolveWeapon(cfg.weapons, kind, value, v => origKey(kind, v)); return w ? core.weaponKey(w) : ''; };
+  const hk0 = HOOKS();
+  if (hk0) {
+    hk0.munKey = keyFor('munition');
+    hk0.carrierKey = keyFor('carrier');
+  }
 
   /* ------------------------------ довідники модуля: знімок і застосування ------------------------------ */
   const MAPS = ['EMB', 'EMBK', 'IMG', 'MUN_IMG', 'MUN_W', 'MUN_INFO', 'MUN_SPEC', 'MUN_BANNER', 'WEAPONS', 'CARRIERS', 'AC_IMG', 'ROCKET_PLATFORM_MEDIA'];
@@ -78,12 +82,20 @@
     }
   }
   const unitKeyFn = () => { const hk = HOOKS(); return hk && typeof hk.unitKey === 'function' ? hk.unitKey : null; };
+  /** Вбудований логотип підрозділу (зі знімка довідників до застосування налаштувань). */
+  function builtinUnitLogo(name) {
+    const EMB = snapshot.get('EMB'), EMBK = snapshot.get('EMBK'), unitKey = unitKeyFn();
+    return (EMBK && typeof unitKey === 'function' && EMBK[unitKey(name)]) || (EMB && EMB[name]) || '';
+  }
   function applyUnits() {
     const EMB = G('EMB'), EMBK = G('EMBK'), unitKey = unitKeyFn();
-    for (const u of cfg.units) {
+    const put = u => {
       if (EMB && typeof EMB === 'object') EMB[u.name] = u.logo;
       if (EMBK && typeof EMBK === 'object' && typeof unitKey === 'function') EMBK[unitKey(u.name)] = u.logo;
-    }
+    };
+    // Логотип іншого користувача не замінює вбудований; логотип власника замінює будь-який.
+    for (const u of cfg.units) if (u.owner !== true && !builtinUnitLogo(u.name)) put(u);
+    for (const u of cfg.units) if (u.owner === true) put(u);
   }
   function unitLogo(name) {
     const own = cfg.units.find(u => core.norm(u.name) === core.norm(name)); if (own) return own.logo;
@@ -246,12 +258,19 @@
   function status(text, bad) { if (statusEl) { statusEl.textContent = text; statusEl.classList.toggle('bad', !!bad); } }
 
   const TABS = [['units', 'Підрозділи'], ['weapons', 'Озброєння'], ['images', 'Зображення'], ['texts', 'Тексти'], ['colors', 'Кольори'], ['blocks', 'Блоки'], ['file', 'Файл']];
+  /* Розділи, доступні всім: нові підрозділи й озброєння з логотипами. Решта — лише власнику. */
+  const PUBLIC_TABS = ['units', 'weapons'];
   const ui = { open: false, tab: 'units', root: null, body: null, form: null, paint() {} };
 
-  /* ------------------------------ доступ лише для власника ------------------------------ */
-  /* Кнопки немає, доки редактор не розблоковано: прихований виклик (комбінація клавіш або 5 клацань
-     по емблемі модуля) відкриває запит пароля власника. Розблокування діє до перезапуску модуля. */
+  /* ------------------------------ доступ власника ------------------------------ */
+  /* Кнопка «Підрозділи й озброєння» відкриває загальнодоступні розділи. Повний редактор («Оформлення»)
+     відкривається прихованим викликом (комбінація клавіш або 5 клацань по емблемі модуля) і паролем
+     власника. Розблокування діє до перезапуску модуля. */
   let unlocked = false, failures = 0, gate = null;
+  const allowedTab = id => unlocked || PUBLIC_TABS.includes(id);
+  /** Чи може поточний користувач змінити запис: власник — будь-який, інші — лише не власницькі. */
+  const canEdit = entry => unlocked || !(entry && entry.owner === true);
+  const ownerMark = entry => entry && entry.owner === true && !unlocked ? h('small', { class: 'ewx-muted', text: 'додано власником' }) : null;
   const LOCK_KEY = 'ew-editor-lock-until';
   const lockedUntil = () => { try { return +localStorage.getItem(LOCK_KEY) || 0; } catch (e) { return 0; } };
   function requestAccess(tab) {
@@ -267,7 +286,7 @@
       ok.disabled = true; msg.textContent = 'Перевірка…';
       let good = false; try { good = await core.verifyPassword(input.value, access, window.crypto.subtle); } catch (e) { good = false; }
       ok.disabled = false; input.value = '';
-      if (good) { failures = 0; unlocked = true; close(); mountButton(); openEditor(tab); return; }
+      if (good) { failures = 0; unlocked = true; close(); mountButton(); if (ui.open) ui.paint(); openEditor(tab); return; }
       failures++;
       if (failures >= 5) { failures = 0; try { localStorage.setItem(LOCK_KEY, String(Date.now() + 60000)); } catch (e) {} msg.textContent = 'Невірний пароль. Доступ призупинено на 60 с.'; }
       else msg.textContent = 'Невірний пароль.';
@@ -284,8 +303,7 @@
     if (ready) input.focus();
   }
   function lockEditor() {
-    unlocked = false; closeEditor();
-    const b = document.getElementById('ewx-open'); if (b) b.remove();
+    unlocked = false; closeEditor(); mountButton();
   }
   function secretTriggers() {
     document.addEventListener('keydown', e => {
@@ -300,8 +318,9 @@
   }
 
   function openEditor(tab) {
-    if (!unlocked) { requestAccess(tab); return; }
+    if (tab && !allowedTab(tab)) { requestAccess(tab); return; }
     if (tab) ui.tab = tab;
+    if (!allowedTab(ui.tab)) { ui.tab = PUBLIC_TABS[0]; ui.form = null; }
     if (!ui.root) buildRoot();
     ui.root.hidden = false; ui.open = true; ui.paint();
     const first = ui.root.querySelector('.ewx-tab[aria-selected="true"]'); if (first) first.focus();
@@ -312,15 +331,20 @@
     const tabs = h('div', { class: 'ewx-tabs', role: 'tablist', 'aria-label': 'Розділи редактора' });
     ui.body = h('div', { class: 'ewx-body' });
     statusEl = h('p', { class: 'ewx-status', role: 'status', 'aria-live': 'polite' });
+    const title = h('h2'), panel = h('section', { class: 'ewx-panel', role: 'dialog', 'aria-modal': 'true' });
+    const lock = btn('Заблокувати', lockEditor, '', 'Закрити доступ власника до перезапуску модуля');
+    panel.append(
+      h('header', { class: 'ewx-head' }, h('div', {}, title, h('p', { text: MODULE_TITLE + ' · зміни зберігаються лише на цьому комп’ютері' })), h('div', { class: 'ewx-row ewx-close' }, lock, btn('Закрити', closeEditor))),
+      tabs, ui.body, h('footer', { class: 'ewx-foot' }, statusEl));
     ui.root = h('div', { class: 'ewx-root', hidden: true, onkeydown: e => { if (e.key === 'Escape') closeEditor(); } },
-      h('div', { class: 'ewx-back', onclick: closeEditor }),
-      h('section', { class: 'ewx-panel', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Редактор модуля' },
-        h('header', { class: 'ewx-head' }, h('div', {}, h('h2', { text: 'Редактор модуля' }), h('p', { text: MODULE_TITLE + ' · зміни зберігаються лише на цьому комп’ютері' })), h('div', { class: 'ewx-row ewx-close' }, btn('Заблокувати', lockEditor, '', 'Сховати кнопку «Оформлення» й закрити доступ до перезапуску'), btn('Закрити', closeEditor))),
-        tabs, ui.body, h('footer', { class: 'ewx-foot' }, statusEl)));
+      h('div', { class: 'ewx-back', onclick: closeEditor }), panel);
     document.body.append(ui.root);
     ui.paint = () => {
+      const name = unlocked ? 'Редактор модуля' : 'Підрозділи й озброєння';
+      title.textContent = name; panel.setAttribute('aria-label', name); lock.hidden = !unlocked;
+      if (!allowedTab(ui.tab)) { ui.tab = PUBLIC_TABS[0]; ui.form = null; }
       tabs.textContent = '';
-      for (const [id, label] of TABS) tabs.append(h('button', { type: 'button', role: 'tab', class: 'ewx-tab', 'aria-selected': String(ui.tab === id), onclick: () => { ui.tab = id; ui.form = null; ui.paint(); } }, label));
+      for (const [id, label] of TABS.filter(([id]) => allowedTab(id))) tabs.append(h('button', { type: 'button', role: 'tab', class: 'ewx-tab', 'aria-selected': String(ui.tab === id), onclick: () => { ui.tab = id; ui.form = null; ui.paint(); } }, label));
       ui.body.textContent = '';
       const render = { units: tabUnits, weapons: tabWeapons, images: tabImages, texts: tabTexts, colors: tabColors, blocks: tabBlocks, file: tabFile }[ui.tab];
       try { render(ui.body); } catch (e) { console.error(e); ui.body.append(h('p', { class: 'ewx-note bad', text: 'Помилка розділу: ' + (e && e.message || e) })); }
@@ -329,21 +353,24 @@
 
   /* --- Підрозділи --- */
   function tabUnits(box) {
-    box.append(h('p', { class: 'ewx-note', text: 'Логотип показується біля назви підрозділу в дашборді, таблицях і картках. Назва має збігатися з назвою в таблиці (регістр, пробіли та дефіси не важливі).' }));
+    box.append(h('p', { class: 'ewx-note', text: 'Логотип показується біля назви підрозділу в дашборді, таблицях і картках. Назва має збігатися з назвою в таблиці (регістр, пробіли та дефіси не важливі).' + (unlocked ? '' : ' Вбудовані логотипи й логотипи, додані власником, змінює лише власник.') }));
     const name = h('input', { type: 'text', class: 'ewx-in', placeholder: 'Назва підрозділу, напр. 44 ОАБр', list: 'ewx-units-dl', 'aria-label': 'Назва підрозділу' });
     const dl = h('datalist', { id: 'ewx-units-dl' }, tableValues('unit').map(v => h('option', { value: v })));
     box.append(h('div', { class: 'ewx-row' }, name, dl, btn('Додати логотип…', async () => {
       const n = name.value.trim(); if (!n) { status('Вкажіть назву підрозділу.', true); name.focus(); return; }
+      const same = cfg.units.find(u => core.norm(u.name) === core.norm(n));
+      if (!canEdit(same)) { status('Логотип «' + same.name + '» додав власник — змінити його може лише він.', true); return; }
+      if (!unlocked && builtinUnitLogo(n)) { status('Для «' + n + '» уже є вбудований логотип — змінити його може лише власник.', true); return; }
       const logo = await chooseImage('logo'); if (!logo) return;
-      cfg.units = cfg.units.filter(u => core.norm(u.name) !== core.norm(n)).concat([{ name: n, logo }]);
+      cfg.units = cfg.units.filter(u => core.norm(u.name) !== core.norm(n)).concat([Object.assign({ name: n, logo }, unlocked ? { owner: true } : null)]);
       commit('Логотип «' + n + '» збережено.');
     }, 'ewx-primary')));
     const list = h('div', { class: 'ewx-list' });
     if (!cfg.units.length) list.append(h('p', { class: 'ewx-empty', text: 'Власних логотипів ще немає.' }));
-    for (const u of cfg.units) list.append(h('div', { class: 'ewx-item' }, thumb(u.logo, 'logo'), h('b', { text: u.name }),
-      btn('Замінити…', async () => { const logo = await chooseImage('logo'); if (logo) { u.logo = logo; commit('Логотип оновлено.'); } }),
-      btn('Видалити', () => { cfg.units = cfg.units.filter(x => x !== u); commit('Логотип видалено.'); }, 'ewx-danger')));
-    box.append(h('h3', { text: 'Власні логотипи' }), list);
+    for (const u of cfg.units) list.append(h('div', { class: 'ewx-item' }, thumb(u.logo, 'logo'), h('div', { class: 'ewx-grow' }, h('b', { text: u.name }), ownerMark(u)),
+      canEdit(u) ? btn('Замінити…', async () => { const logo = await chooseImage('logo'); if (logo) { u.logo = logo; if (unlocked) u.owner = true; commit('Логотип оновлено.'); } }) : null,
+      canEdit(u) ? btn('Видалити', () => { cfg.units = cfg.units.filter(x => x !== u); commit('Логотип видалено.'); }, 'ewx-danger') : null));
+    box.append(h('h3', { text: 'Додані логотипи' }), list);
     const missing = tableValues('unit').filter(v => !unitLogo(v));
     if (missing.length) box.append(h('h3', { text: 'Підрозділи з таблиці без логотипа' }), h('div', { class: 'ewx-chips' }, missing.slice(0, 60).map(v => btn(v, () => { name.value = v; name.focus(); }, 'ewx-chip'))));
   }
@@ -351,20 +378,24 @@
   /* --- Озброєння --- */
   function tabWeapons(box) {
     if (ui.form) { weaponForm(box, ui.form); return; }
-    box.append(h('p', { class: 'ewx-note', text: 'Додайте нове озброєння або засіб, або перевизначте вбудований (вкажіть ту саму назву). Модуль розпізнає запис у таблиці за назвою чи синонімом — найдовший збіг. Порожні поля беруться з вбудованого довідника.' }),
+    box.append(h('p', { class: 'ewx-note', text: unlocked
+      ? 'Додайте нове озброєння або засіб, або перевизначте вбудований (вкажіть ту саму назву). Модуль розпізнає запис у таблиці за назвою чи синонімом — найдовший збіг. Порожні поля беруться з вбудованого довідника.'
+      : 'Додайте нове озброєння або засіб із зображенням. Модуль розпізнає запис у таблиці за назвою чи синонімом. Вбудоване озброєння модуля та записи, додані власником, змінює лише власник.' }),
       h('div', { class: 'ewx-row' }, btn('+ Боєприпас', () => { ui.form = { kind: 'munition' }; ui.paint(); }, 'ewx-primary'), btn('+ ' + CARRIER_LABEL, () => { ui.form = { kind: 'carrier' }; ui.paint(); }, 'ewx-primary')));
     for (const [kind, title, field] of [['munition', 'Боєприпаси', 'munition'], ['carrier', CARRIER_LABEL, 'aircraft']]) {
       const own = cfg.weapons.filter(w => w.kind === kind);
       const list = h('div', { class: 'ewx-list' });
       if (!own.length) list.append(h('p', { class: 'ewx-empty', text: 'Власних записів немає.' }));
-      for (const w of own) list.append(h('div', { class: 'ewx-item' }, thumb(w.icon || w.photo || w.banner), h('div', { class: 'ewx-grow' }, h('b', { text: w.name }), h('small', { text: [w.aliases.join(', '), w.title, w.range].filter(Boolean).join(' · ') || 'без додаткових даних' })),
-        btn('Змінити', () => { ui.form = Object.assign({}, w, { aliases: w.aliases.join(', ') }); ui.paint(); }),
-        btn('Видалити', () => { cfg.weapons = cfg.weapons.filter(x => x !== w); commit('Запис «' + w.name + '» видалено.'); }, 'ewx-danger')));
+      for (const w of own) list.append(h('div', { class: 'ewx-item' }, thumb(w.icon || w.photo || w.banner), h('div', { class: 'ewx-grow' }, h('b', { text: w.name }), h('small', { text: [w.aliases.join(', '), w.title, w.range].filter(Boolean).join(' · ') || 'без додаткових даних' }), ownerMark(w)),
+        canEdit(w) ? btn('Змінити', () => { ui.form = Object.assign({}, w, { aliases: w.aliases.join(', ') }); ui.paint(); }) : null,
+        canEdit(w) ? btn('Видалити', () => { cfg.weapons = cfg.weapons.filter(x => x !== w); commit('Запис «' + w.name + '» видалено.'); }, 'ewx-danger') : null));
       box.append(h('h3', { text: title }), list);
       const inTable = tableValues(field);
       if (inTable.length) box.append(h('div', { class: 'ewx-chips' }, h('span', { class: 'ewx-muted', text: 'У таблиці:' }), inTable.slice(0, 40).map(v => {
-        const own = core.matchWeapon(cfg.weapons, kind, v), builtin = origKey(kind, v);
-        return btn(v + (own ? ' ✓' : builtin ? '' : ' ?'), () => { ui.form = own ? Object.assign({}, own, { aliases: own.aliases.join(', ') }) : { kind, name: v }; ui.paint(); }, 'ewx-chip' + (!own && !builtin ? ' warn' : ''), own ? 'Власний запис' : builtin ? 'Вбудований — натисніть, щоб перевизначити' : 'Невідомий модулю — натисніть, щоб додати');
+        const own = core.resolveWeapon(cfg.weapons, kind, v, x => origKey(kind, x)), builtin = origKey(kind, v);
+        const open = own ? canEdit(own) : (unlocked || !builtin);
+        const hint = own ? (canEdit(own) ? 'Доданий запис' : 'Запис власника') : builtin ? (unlocked ? 'Вбудований — натисніть, щоб перевизначити' : 'Вбудований запис модуля') : 'Невідомий модулю — натисніть, щоб додати';
+        return btn(v + (own ? ' ✓' : builtin ? '' : ' ?'), open ? () => { ui.form = own ? Object.assign({}, own, { aliases: own.aliases.join(', ') }) : { kind, name: v }; ui.paint(); } : null, 'ewx-chip' + (!own && !builtin ? ' warn' : '') + (open ? '' : ' ewx-static'), hint);
       })));
     }
   }
@@ -375,7 +406,7 @@
       btn('Вибрати…', async () => { const src = await chooseImage(preset); if (src) { f[key] = src; ui.paint(); } }), f[key] ? btn('Прибрати', () => { f[key] = ''; ui.paint(); }) : null));
     const base = f.name ? origKey(f.kind, f.name) : '';
     box.append(h('h3', { text: (f.id ? 'Змінити: ' : 'Новий запис: ') + (mun ? 'боєприпас' : CARRIER_LABEL.toLowerCase()) }));
-    if (base) box.append(h('p', { class: 'ewx-note', text: 'Назва відповідає вбудованому запису модуля — незаповнені поля та зображення буде взято з нього.' }));
+    if (base) box.append(h('p', { class: 'ewx-note', text: unlocked ? 'Назва відповідає вбудованому запису модуля — незаповнені поля та зображення буде взято з нього.' : 'Назва відповідає вбудованому запису модуля. Змінити його може лише власник — вкажіть іншу назву.' }));
     box.append(
       h('div', { class: 'ewx-grid' },
         field('name', 'Назва (як у таблиці)', mun ? 'напр. PrSM' : 'напр. M142 HIMARS'),
@@ -390,8 +421,14 @@
         imgField('photo', 'Фото / картка', 'photo'),
         imgField('banner', 'Широкий банер', 'banner')),
       h('div', { class: 'ewx-row' }, btn('Зберегти', () => {
-        if (!String(f.name || '').trim()) { status('Вкажіть назву.', true); return; }
+        const n = String(f.name || '').trim(); if (!n) { status('Вкажіть назву.', true); return; }
+        if (!unlocked) {
+          const taken = cfg.weapons.find(w => w.kind === f.kind && w.id !== f.id && core.norm(w.name) === core.norm(n));
+          if (origKey(f.kind, n)) { status('«' + n + '» — вбудований запис модуля. Змінити його може лише власник.', true); return; }
+          if (taken && !canEdit(taken)) { status('Запис «' + taken.name + '» додав власник — змінити його може лише він.', true); return; }
+        }
         const entry = Object.assign({}, f, { id: f.id || core.newId(), aliases: String(f.aliases || '').split(',') });
+        if (unlocked) entry.owner = true;
         cfg.weapons = cfg.weapons.filter(w => w.id !== entry.id).concat([entry]);
         ui.form = null; commit('Запис «' + entry.name + '» збережено.');
       }, 'ewx-primary'), btn('Скасувати', () => { ui.form = null; ui.paint(); })));
@@ -519,7 +556,7 @@
             const data = JSON.parse(await file.text());
             if (!data || data.app !== 'EasyWAR') throw new Error('Це не файл оформлення EasyWAR.');
             if (data.module && data.module !== MODULE && !window.confirm('Файл створено для іншого модуля. Все одно імпортувати?')) return;
-            cfg = core.sanitize(data); commit('Оформлення імпортовано.');
+            cfg = core.mergeImported(cfg, data); commit('Оформлення імпортовано. Підрозділи й озброєння, додані на цьому комп’ютері, збережено.');
           } catch (e) { status('Не вдалося імпортувати: ' + (e && e.message || e), true); }
         }),
         btn('Скинути все', () => { if (window.confirm('Скинути всі налаштування редактора для цього модуля?')) { cfg = core.empty(); commit('Налаштування скинуто.'); } }, 'ewx-danger')));
@@ -552,11 +589,16 @@
   }
 
   /* --- кнопка відкриття --- */
+  /* Кнопка доступна всім: «Підрозділи й озброєння»; після входу власника — «Оформлення». */
   function mountButton() {
-    if (document.getElementById('ewx-open')) return;
-    const b = h('button', { type: 'button', id: 'ewx-open', class: 'ewx-open', title: 'Редактор модуля: логотипи, озброєння, зображення, тексти, кольори, блоки', onclick: () => openEditor() }, 'Оформлення');
-    const host = document.querySelector('.appbar-right');
-    if (host) host.prepend(b); else { b.classList.add('ewx-float'); document.body.append(b); }
+    let b = document.getElementById('ewx-open');
+    if (!b) {
+      b = h('button', { type: 'button', id: 'ewx-open', class: 'ewx-open', onclick: () => openEditor() });
+      const host = document.querySelector('.appbar-right');
+      if (host) host.prepend(b); else { b.classList.add('ewx-float'); document.body.append(b); }
+    }
+    b.textContent = unlocked ? 'Оформлення' : 'Підрозділи й озброєння';
+    b.title = unlocked ? 'Редактор модуля: логотипи, озброєння, зображення, тексти, кольори, блоки' : 'Додати підрозділ чи озброєння з логотипом';
   }
 
   /* ------------------------------ стилі редактора ------------------------------ */
@@ -589,7 +631,7 @@
 .ewx-item .ewx-in{flex:1 1 180px}.ewx-grow{flex:1;min-width:0;display:grid}.ewx-grow small{color:#8193a8}.ewx-from{color:#c9d6e4;overflow-wrap:anywhere}
 .ewx-thumb{width:44px;height:44px;object-fit:contain;border-radius:8px;background:#060d15;border:1px solid #1f3046;flex:none}
 .ewx-thumb.logo{width:40px;height:40px}.ewx-thumb.wide{width:150px;height:44px;object-fit:cover}.ewx-none{display:grid;place-items:center;color:#56687e}
-.ewx-chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:6px 0}.ewx-chip{font-weight:500;padding:4px 9px;border-radius:999px}.ewx-chip.warn{border-color:#8a6420;color:#ffd48a}
+.ewx-chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:6px 0}.ewx-chip{font-weight:500;padding:4px 9px;border-radius:999px}.ewx-chip.warn{border-color:#8a6420;color:#ffd48a}.ewx-chip.ewx-static{cursor:default;opacity:.72}.ewx-chip.ewx-static:hover{border-color:#2c4262}
 .ewx-empty{margin:0;color:#7d8fa5;font-size:13px}
 .ewx-gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px}
 .ewx-fig{margin:0;display:grid;gap:6px;padding:8px;background:#0b1520;border:1px solid #1f3046;border-radius:10px}.ewx-fig.on{border-color:#3d7dc4}
@@ -604,12 +646,13 @@ html.ewx-picking *{cursor:crosshair!important}
   /* ------------------------------ старт ------------------------------ */
   function start() {
     secretTriggers();
+    mountButton();
     observer.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['src'] });
     loadConfig().then(saved => {
       cfg = core.sanitize(saved);
       applyAll(true);
     });
   }
-  window.EWModuleEditor = { open: tab => requestAccess(tab), get config() { return JSON.parse(JSON.stringify(cfg)); }, reload: () => loadConfig().then(s => { cfg = core.sanitize(s); applyAll(true); }) };
+  window.EWModuleEditor = { open: tab => openEditor(tab), get config() { return JSON.parse(JSON.stringify(cfg)); }, reload: () => loadConfig().then(s => { cfg = core.sanitize(s); applyAll(true); }) };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true }); else start();
 })();
