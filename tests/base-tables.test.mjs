@@ -62,9 +62,17 @@ test('the РВіА base table opens in the rocket module and takes a record', as
   assert.equal(reopened.records[0].targets, 'SYN-1');
 });
 
+test('the ПВК base table opens read-only in the Air Force module', async () => {
+  const air = await moduleCore('air.html');
+  const workbook = await air.openPvkWorkbook(await baseTable('pvk-base.xlsx'));
+
+  assert.equal(workbook.kind, 'pvk');
+  assert.equal(workbook.readOnly, true);
+  assert.deepEqual(Array.from(workbook.sheets, sheet => sheet.name), ['АА', 'ПС', "Об'єкти"]);
+  assert.equal(workbook.sheets.reduce((sum, sheet) => sum + sheet.headers.length - 1, 0), 57);
+});
+
 test('each base table is refused by the module it is not meant for', async () => {
   const air = await moduleCore('air.html');
-  // The ПВК table has its own sheets; the Air Force dashboard for it is in development.
-  await assert.rejects(air.openWorkbook(await baseTable('pvk-base.xlsx')), /аркуша «Зведена»/);
   await assert.rejects(air.openWorkbook(await baseTable('rvia-base.xlsx')), /не знайдено стовпців/);
 });

@@ -273,7 +273,12 @@ test('legacy CORE keeps numeric and ambiguous synthetic date semantics', async (
   }
 });
 
-test('legacy CORE and Rust importer match on identical synthetic XLSX variants', async () => {
+test('legacy CORE and Rust importer match on identical synthetic XLSX variants', async (t) => {
+  const cargoCheck = spawnSync('cargo', ['--version']);
+  if (cargoCheck.error && cargoCheck.error.code === 'ENOENT') {
+    t.skip('cargo toolchain not installed in this environment');
+    return;
+  }
   const core = await legacyCore();
   const dateCases = JSON.parse(await readFile(new URL('./fixtures/xlsx-date-cases.json', import.meta.url), 'utf8'));
   const fieldKeys = Object.keys(LEGACY_FIELDS);
