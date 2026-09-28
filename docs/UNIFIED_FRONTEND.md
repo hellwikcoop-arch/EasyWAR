@@ -41,14 +41,27 @@ shim) and exported and imported as JSON. Imported files are sanitized: only
 `data:image/*` images, `#hex` colors and `p-*` block ids are accepted, and texts
 are inserted as text nodes only.
 
-### Owner-only access
+### Public units and weapons, owner-only rest
 
-The editor has no visible entry point. A hidden trigger opens a password prompt;
+Every module shows a **Підрозділи й озброєння** button. It opens only the
+`units` and `weapons` tabs (`PUBLIC_TABS`), so anyone can add a unit logo or a
+new weapon or carrier with images. Entries carry `owner: true` when the owner
+made them; others see those read-only. An entry added by someone else never
+replaces a built-in one: a unit logo is applied only where the module has no
+built-in emblem, and `resolveWeapon` tries the owner's entries, then the
+module's built-in keys, then the rest. Settings from config version 1, when the
+editor was owner-only, are treated as the owner's. Importing a file (owner-only)
+keeps the units and weapons added on that computer unless the file has the same
+name.
+
+The other tabs (images, texts, colours, blocks, file) need the owner password.
+A hidden trigger opens a password prompt;
 the password is checked with PBKDF2-SHA256 (600 000 iterations, WebCrypto)
 against `src/public/module-editor-access.js`, which holds only the salt and hash.
 Change the password with `node script/set_editor_password.mjs` and rebuild —
 older builds keep accepting the old password. Five wrong attempts pause input for
-60 s. Unlocking lasts until the module reloads.
+60 s. Unlocking lasts until the module reloads; the button then reads
+**Оформлення** and **Заблокувати** returns it to the public mode.
 
 This protects the in-app UI; it is not a boundary against someone who can modify
 the installed application files or the local IndexedDB on that computer.

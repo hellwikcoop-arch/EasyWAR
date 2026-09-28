@@ -3,7 +3,8 @@
 (function (root) {
   'use strict';
 
-  const VERSION = 1;
+  /* 2: підрозділи й озброєння мають позначку власника. У версії 1 редактор був доступний лише власнику. */
+  const VERSION = 2;
   const MAX_TEXT = 400;
   const MAX_ITEMS = 500;
   const IMAGE_RE = /^data:image\/(?:png|jpeg|webp|gif|svg\+xml);base64,[A-Za-z0-9+/]+=*$/;
@@ -33,14 +34,20 @@
     return { version: VERSION, units: [], weapons: [], images: {}, texts: [], colors: {}, blocks: {} };
   }
 
-  /** Перевіряє та нормалізує конфігурацію (зокрема з імпортованого файлу). Невалідні елементи відкидаються. */
+  /**
+   * Перевіряє та нормалізує конфігурацію (зокрема з імпортованого файлу). Невалідні елементи відкидаються.
+   * Підрозділи й озброєння, додані власником, мають owner: true; інші користувачі їх не змінюють.
+   * У налаштуваннях версії 1 усі записи створив власник, тож вони отримують цю позначку.
+   */
   function sanitize(input) {
     const out = empty();
     if (!input || typeof input !== 'object') return out;
+    const legacy = !(Number(input.version) >= 2);
+    const byOwner = entry => legacy || entry.owner === true;
     const units = Array.isArray(input.units) ? input.units.slice(0, MAX_ITEMS) : [];
     for (const u of units) {
       const name = str(u && u.name, 120), logo = img(u && u.logo);
-      if (name && logo && !out.units.some(x => norm(x.name) === norm(name))) out.units.push({ name, logo });
+      if (name && logo && !out.units.some(x => norm(x.name) === norm(name))) out.units.push(Object.assign({ name, logo }, byOwner(u) ? { owner: true } : null));
     }
     const weapons = Array.isArray(input.weapons) ? input.weapons.slice(0, MAX_ITEMS) : [];
     for (const w of weapons) {
@@ -50,12 +57,12 @@
       while (out.weapons.some(x => x.id === id)) id = newId();
       const aliases = (Array.isArray(w.aliases) ? w.aliases : String(w.aliases || '').split(','))
         .map(a => str(a, 60)).filter(Boolean).slice(0, 20);
-      out.weapons.push({
+      out.weapons.push(Object.assign({
         id, kind: w.kind, name, aliases,
         title: str(w.title, 80), desc: str(w.desc, 200),
         range: str(w.range, 60), guidance: str(w.guidance, 60), warhead: str(w.warhead, 60),
         icon: img(w.icon), photo: img(w.photo), banner: img(w.banner),
-      });
+      }, byOwner(w) ? { owner: true } : null));
     }
     if (input.images && typeof input.images === 'object') {
       for (const [fp, src] of Object.entries(input.images).slice(0, MAX_ITEMS)) if (FP_RE.test(fp) && img(src)) out.images[fp] = src;
@@ -108,6 +115,32 @@
     return best;
   }
   const weaponKey = w => 'ew' + w.id;
+
+  /**
+   * Запис озброєння для назви з таблиці. Записи власника мають пріоритет, далі вбудований довідник модуля
+   * (builtinKey(value) не порожній), і лише потім записи інших користувачів: вони додають нове, а не
+   * перевизначають наявне.
+   */
+  function resolveWeapon(weapons, kind, value, builtinKey) {
+    const list = weapons || [];
+    const own = matchWeapon(list.filter(w => w.owner === true), kind, value);
+    if (own) return own;
+    if (builtinKey && builtinKey(value)) return null;
+    return matchWeapon(list.filter(w => w.owner !== true), kind, value);
+  }
+
+  /**
+   * Імпорт файлу оформлення власником: імпортовані підрозділи й озброєння стають записами власника,
+   * а додані на цьому комп'ютері записи інших користувачів лишаються, якщо не збігаються за назвою.
+   */
+  function mergeImported(current, imported) {
+    const now = sanitize(current), next = sanitize(imported);
+    for (const u of next.units) u.owner = true;
+    for (const w of next.weapons) w.owner = true;
+    for (const u of now.units) if (u.owner !== true && !next.units.some(x => norm(x.name) === norm(u.name))) next.units.push(u);
+    for (const w of now.weapons) if (w.owner !== true && !next.weapons.some(x => x.kind === w.kind && norm(x.name) === norm(w.name))) next.weapons.push(w);
+    return sanitize(next);
+  }
 
   /** Точна заміна тексту вузла з урахуванням пробілів навколо. */
   function replaceText(data, map) {
@@ -194,5 +227,5 @@
     return diff === 0;
   }
 
-  root.EWModuleEditorCore = { accessValid, verifyPassword, VERSION, norm, sanitize, empty, newId, fingerprint, matchWeapon, weaponKey, replaceText, cloneComposite, applyWeapons, blocksCss, IMAGE_RE, COLOR_RE };
+  root.EWModuleEditorCore = { accessValid, verifyPassword, VERSION, norm, sanitize, empty, newId, fingerprint, matchWeapon, resolveWeapon, mergeImported, weaponKey, replaceText, cloneComposite, applyWeapons, blocksCss, IMAGE_RE, COLOR_RE };
 })(typeof globalThis !== 'undefined' ? globalThis : this);
