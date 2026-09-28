@@ -23,6 +23,7 @@ import {
   workspaceTemplateForProfile,
   workspaceTemplateLabel,
 } from './local-profiles-core.js';
+import { airWindow, trackAirWork, whenAirDashboard } from './air-bridge.js';
 
 const AVATAR_SIZE = 256;
 
@@ -177,6 +178,7 @@ function initializeLocalProfiles() {
   let workspaceState = { defaultTemplateKey: null, templates: [], assignments: [] };
   let sessionProfileId = null;
   let loadedDatabaseFor = null;
+  let loadingDatabaseFor = null;
   let pendingDashboardSection = null;
   let busy = false;
 
@@ -512,34 +514,46 @@ function initializeLocalProfiles() {
     hideLockScreen();
     applyActiveWorkspaceTemplate();
     loadedDatabaseFor = null;
-    await loadProfileDatabase(activeProfile(), false);
+    // Resolves when the user opens the Air Force module; sign-in does not wait for it.
+    loadProfileDatabase(activeProfile(), false);
     return true;
   }
 
-  async function waitForDashboard() {
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if (window.__AV?.connect) return window.__AV;
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
-    return null;
+  // The table opens in the Air Force module. On an explicit request the
+  // launcher switches to it; otherwise it loads when the user opens it. Other
+  // actions in the module (Signal review) wait for this through trackAirWork.
+  function loadProfileDatabase(profile, manual) {
+    return trackAirWork(openProfileDatabase(profile, manual));
   }
 
-  async function loadProfileDatabase(profile, manual) {
+  async function openProfileDatabase(profile, manual) {
     if (!profile?.databasePath || isProfileLocked(profile, sessionProfileId)) return;
     if (!manual && loadedDatabaseFor === profile.id) return;
-    const dashboard = await waitForDashboard();
-    if (!dashboard) return;
-    if (dashboard.S?.dirty && !window.confirm('У відкритій таблиці є незбережені записи. Відкрити таблицю профілю замість неї?')) return;
+    if (manual && dialog.open) dialog.close();
+    const dashboard = await whenAirDashboard({ open: manual });
+    if (!dashboard || profile.id !== state.activeProfileId) return;
+    if (!manual && loadedDatabaseFor === profile.id) return;
+    // A deferred automatic load and a click on «Відкрити зараз» can both wake
+    // when the module opens; only one of them may replace the open table.
+    if (loadingDatabaseFor === profile.id) return;
+    loadingDatabaseFor = profile.id;
+    if (dashboard.S?.dirty && !window.confirm('У відкритій таблиці є незбережені записи. Відкрити таблицю профілю замість неї?')) {
+      loadingDatabaseFor = null;
+      return;
+    }
     const name = databaseFileName(profile.databasePath);
+    const frame = airWindow();
     try {
-      const bytes = await readProfileDatabase(profile.id);
-      await dashboard.connect(bytes, name, profileDatabaseHandle(profile.id, name), true);
+      const bytes = await readProfileDatabase(profile.id, undefined, frame);
+      await dashboard.connect(bytes, name, profileDatabaseHandle(profile.id, name, undefined, frame), true);
       loadedDatabaseFor = profile.id;
       dashboard.toast?.(`Відкрито таблицю профілю: ${name}`, 'ok');
     } catch (error) {
       const message = `Не вдалося відкрити таблицю профілю «${name}»: ${String(error)}`;
       status.textContent = message;
       dashboard.showError?.(message);
+    } finally {
+      loadingDatabaseFor = null;
     }
   }
 
@@ -593,7 +607,7 @@ function initializeLocalProfiles() {
 
   function applyPendingDashboardSection() {
     if (!pendingDashboardSection) return;
-    const button = [...document.querySelectorAll('.snav-b[data-t]')]
+    const button = [...(airWindow()?.document.querySelectorAll('.snav-b[data-t]') ?? [])]
       .find(candidate => candidate.dataset.t === pendingDashboardSection);
     const sidebar = button?.closest('.side');
     if (!button || sidebar?.hidden) return;
@@ -602,11 +616,19 @@ function initializeLocalProfiles() {
   }
 
   function applyActiveWorkspaceTemplate() {
-    const template = workspaceTemplateForProfile(workspaceState, state.activeProfileId);
+    return trackAirWork(applyWorkspaceTemplateWhenReady());
+  }
+
+  async function applyWorkspaceTemplateWhenReady() {
+    const profileId = state.activeProfileId;
+    if (!workspaceTemplateForProfile(workspaceState, profileId)) return;
+    if (!(await whenAirDashboard()) || profileId !== state.activeProfileId) return;
+    const template = workspaceTemplateForProfile(workspaceState, profileId);
     if (!template) return;
+    const frame = airWindow();
     pendingDashboardSection = template.dashboardSection || null;
-    document.querySelector(`#tab-${template.landingView}`)?.click();
-    window.requestAnimationFrame(applyPendingDashboardSection);
+    frame.document.querySelector(`#tab-${template.landingView}`)?.click();
+    frame.requestAnimationFrame(applyPendingDashboardSection);
   }
 
   async function refresh(silent = false) {
@@ -635,7 +657,7 @@ function initializeLocalProfiles() {
       return;
     }
     applyActiveWorkspaceTemplate();
-    await loadProfileDatabase(profile, false);
+    loadProfileDatabase(profile, false);
   }
 
   function close() {
@@ -653,7 +675,9 @@ function initializeLocalProfiles() {
     event.preventDefault();
     close();
   });
-  document.addEventListener('av:data', applyPendingDashboardSection);
+  whenAirDashboard().then(dashboard => {
+    if (dashboard) airWindow().document.addEventListener('av:data', applyPendingDashboardSection);
+  });
   createForm.addEventListener('submit', event => {
     event.preventDefault();
     const displayName = nameInput.value;

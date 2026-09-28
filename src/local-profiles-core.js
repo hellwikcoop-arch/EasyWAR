@@ -87,8 +87,18 @@ export function clearProfileDatabase(profileId, invokeCommand = invoke) {
   return invokeCommand('clear_profile_database', { profileId });
 }
 
-export async function readProfileDatabase(profileId, invokeCommand = invoke) {
-  return new Uint8Array(await invokeCommand('read_profile_database', { profileId }));
+/**
+ * Reads the profile's bound table as bytes owned by `realm`, the window of the
+ * module that will parse them (the Air Force iframe when called from the
+ * launcher). WebKit (macOS) rejects a view over another window's ArrayBuffer in
+ * DecompressionStream with "Invalid type should be ArrayBuffer", which broke
+ * opening the profile's XLSX, so the bytes are copied into that window's buffer.
+ */
+export async function readProfileDatabase(profileId, invokeCommand = invoke, realm = globalThis) {
+  const received = new Uint8Array(await invokeCommand('read_profile_database', { profileId }));
+  const bytes = new realm.Uint8Array(received.byteLength);
+  bytes.set(received);
+  return bytes;
 }
 
 export function writeProfileDatabase(profileId, bytes, invokeCommand = invoke) {
@@ -112,13 +122,13 @@ export function databaseFileName(path) {
  * прив'язану таблицю через команди застосунку, тож «Оновити» та запис
  * доповідей працюють прямо з файлом профілю.
  */
-export function profileDatabaseHandle(profileId, name, invokeCommand = invoke) {
+export function profileDatabaseHandle(profileId, name, invokeCommand = invoke, realm = globalThis) {
   return {
     kind: 'file',
     name,
     async getFile() {
-      const bytes = await readProfileDatabase(profileId, invokeCommand);
-      return new File([bytes], name, {
+      const bytes = await readProfileDatabase(profileId, invokeCommand, realm);
+      return new realm.File([bytes], name, {
         type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       });
     },
@@ -126,7 +136,12 @@ export function profileDatabaseHandle(profileId, name, invokeCommand = invoke) {
       let data = null;
       return {
         async write(chunk) {
-          data = chunk instanceof Uint8Array ? chunk : new Uint8Array(await new Blob([chunk]).arrayBuffer());
+          // The module writes from its own frame; keep the IPC body in this window's realm.
+          const view = ArrayBuffer.isView(chunk)
+            ? new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength)
+            : new Uint8Array(await new Blob([chunk]).arrayBuffer());
+          data = new Uint8Array(view.byteLength);
+          data.set(view);
         },
         async close() {
           if (data) await writeProfileDatabase(profileId, data, invokeCommand);

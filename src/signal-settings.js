@@ -7,6 +7,7 @@ import {
   createSignalLinkSession,
 } from './signal-link.js';
 import { describePersistedSignalInbox, describeSignalRuntime } from './signal-runtime.js';
+import { airWindow, airWorkSettled, whenAirDashboard } from './air-bridge.js';
 import './signal-settings.css';
 
 function uniqueLines(value) {
@@ -232,7 +233,10 @@ function initializeSignalSettings() {
   }
 
   async function openInboxItemForReview(item, button) {
-    const intake = window.__AV;
+    // Review happens in the Air Force module's «Внесення доповідей» tab. Opening
+    // it may also load the profile's table; wait for that before checking.
+    const intake = await whenAirDashboard({ open: true });
+    await airWorkSettled();
     if (!intake?.S?.wb) {
       inboxStatus.textContent = 'Спочатку відкрийте робочу таблицю у вкладці «Внесення доповідей».';
       return;
@@ -245,7 +249,7 @@ function initializeSignalSettings() {
       if (typeof rawText !== 'string' || !rawText.trim()) {
         throw new Error('Текст цього запису Signal недоступний.');
       }
-      document.querySelector('#tab-entry')?.click();
+      airWindow().document.querySelector('#tab-entry')?.click();
       if (['NEEDS_REVIEW', 'APPROVED', 'REJECTED'].includes(item.currentStatus)) {
         const stored = await invoke('get_signal_review_snapshot', { reportId: item.reportId });
         const persistedPayload = intake.importPersistedReview(rawText, stored.snapshot_json);
@@ -260,7 +264,7 @@ function initializeSignalSettings() {
       }
       dialog.close();
       intake.toast('Запис Signal розібрано й відкрито для ручної перевірки.', 'ok');
-      document.querySelector('#paste')?.focus();
+      airWindow().document.querySelector('#paste')?.focus();
     } catch (error) {
       inboxStatus.textContent = `Не вдалося відкрити запис для перевірки: ${String(error)}`;
       button.disabled = false;
