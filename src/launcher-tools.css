@@ -1,0 +1,57 @@
+/* Start-screen tools: profile, backup, updates and Signal. Their dialogs share
+   the Air Force module's dark palette and button styles, scoped here so the
+   launcher's own look stays unchanged. */
+.ew-start-tools,
+.ew-backup-dialog,
+.ew-update-panel,
+.ew-profile-dialog,
+.ew-signal-dialog,
+.ew-lock {
+  color-scheme: dark;
+  --bg: #08111f; --surface: #0e1a2e; --surface-2: #122340; --ink: #e6edf7; --muted: #8fa3bf;
+  --line: #1b2c47; --line-strong: #2c4468;
+  --accent: #3d9bff; --accent-ink: #04111f; --accent-soft: #10284a;
+  --ok: #37c77a; --warn: #f4b04a; --bad: #f2645a;
+  --mono: ui-monospace, "Cascadia Mono", Consolas, "SFMono-Regular", Menlo, monospace;
+  font: 15px/1.45 var(--display);
+}
+
+:is(.ew-start-tools, .ew-backup-dialog, .ew-update-panel, .ew-profile-dialog, .ew-signal-dialog, .ew-lock) .btn {
+  font: inherit; font-weight: 600; color: var(--ink); background: var(--surface);
+  border: 1px solid var(--line-strong); border-radius: 8px; padding: 8px 14px; cursor: pointer; min-height: 38px;
+}
+:is(.ew-start-tools, .ew-backup-dialog, .ew-update-panel, .ew-profile-dialog, .ew-signal-dialog, .ew-lock) .btn:hover { border-color: var(--accent); }
+:is(.ew-start-tools, .ew-backup-dialog, .ew-update-panel, .ew-profile-dialog, .ew-signal-dialog, .ew-lock) .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+:is(.ew-start-tools, .ew-backup-dialog, .ew-update-panel, .ew-profile-dialog, .ew-signal-dialog, .ew-lock) .btn.quiet { border-color: transparent; color: var(--muted); background: transparent; }
+:is(.ew-start-tools, .ew-backup-dialog, .ew-update-panel, .ew-profile-dialog, .ew-signal-dialog, .ew-lock) .btn.quiet:hover { color: var(--ink); background: var(--accent-soft); }
+:is(.ew-start-tools, .ew-backup-dialog, .ew-update-panel, .ew-profile-dialog, .ew-signal-dialog, .ew-lock) .btn:disabled { opacity: .5; cursor: not-allowed; }
+
+.ew-start-tools {
+  position: absolute;
+  top: max(14px, env(safe-area-inset-top));
+  right: 16px;
+  left: 16px;
+  z-index: 6;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+}
+.ew-start-tools .btn,
+.ew-start-tools .btn.quiet {
+  min-height: 36px;
+  padding: 6px 13px;
+  font-size: 13px;
+  color: var(--ink);
+  background: rgba(6, 16, 26, .72);
+  border: 1px solid rgba(255, 255, 255, .16);
+  border-radius: 10px;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+.ew-start-tools .btn:hover,
+.ew-start-tools .btn.quiet:hover { border-color: var(--accent); background: rgba(16, 40, 74, .86); }
+
+/* The sign-in screen covers the launcher and any open module. */
+.ew-lock { z-index: 2000; }

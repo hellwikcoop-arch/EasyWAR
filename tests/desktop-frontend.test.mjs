@@ -32,8 +32,12 @@ test('air module keeps desktop integrations and v3.1 isolation', async () => {
   const namespace = html.indexOf("const NS = 'easywar.air::';");
   assert.ok(bridge > 0 && namespace > bridge, 'IPC bridge must run before module code');
   assert.ok(html.indexOf('<meta charset="utf-8">') > namespace);
-  for (const script of ['signal-settings', 'backup', 'xlsx-inspection', 'local-profiles', 'sqlite-dashboard-source']) {
+  for (const script of ['xlsx-inspection', 'sqlite-dashboard-source']) {
     assert.match(html, new RegExp(`<script type="module" src="\\./${script}\\.js"></script>`));
+  }
+  // Profile, backup/updates and Signal moved to the start screen.
+  for (const script of ['signal-settings', 'backup', 'local-profiles']) {
+    assert.doesNotMatch(html, new RegExp(`src="\\./${script}\\.js"`));
   }
   assert.match(html, /id="tab-base"/, 'desktop «База даних» tab stays available');
   assert.match(html, /class="branch-service-mark"/);
@@ -72,4 +76,19 @@ test('inline scripts of all desktop pages parse', async () => {
       assert.doesNotThrow(() => new vm.Script(code, { filename: `${name}#${index}` }), `${name} script ${index}`);
     });
   }
+});
+
+test('start screen hosts profile, backup, updates and Signal', async () => {
+  const html = await read('index.html');
+  const start = html.indexOf('<main class="start-screen" id="view-start">');
+  const toolbar = html.indexOf('class="appbar-right ew-start-tools"');
+  assert.ok(start > 0 && toolbar > start && toolbar < html.indexOf('</main>', start), 'toolbar sits on the start screen');
+  assert.match(html, /<script type="module" src="\.\/launcher-tools\.js"><\/script>/);
+  assert.match(html, /window\.EW_LAUNCHER = \{ openBranch, isLoaded: /);
+  assert.match(html, /new CustomEvent\('ew:branch-open', \{ detail: \{ branch \} \}\)/);
+
+  const tools = await read('launcher-tools.js');
+  const order = ['signal-settings', 'backup', 'local-profiles'].map(name => tools.indexOf(`import './${name}.js';`));
+  assert.ok(order.every(index => index > 0), 'all three tools are loaded');
+  assert.deepEqual([...order].sort((a, b) => a - b), order, 'prepend order gives Профіль, Резервна копія, Оновлення, Signal');
 });

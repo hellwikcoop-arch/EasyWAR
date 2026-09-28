@@ -123,4 +123,11 @@ test('profile database bytes are copied into this realm', async () => {
 
   assert.equal(bytes.buffer instanceof ArrayBuffer, true);
   assert.deepEqual([...bytes], [80, 75, 3, 4]);
+
+  // From the launcher the bytes go to the Air Force frame: they must belong to that window.
+  const frame = vm.runInNewContext('({ Uint8Array, ArrayBuffer })');
+  const framed = await readProfileDatabase('synthetic', async () => new Uint8Array([80, 75]).buffer, frame);
+  assert.equal(framed.buffer instanceof frame.ArrayBuffer, true);
+  assert.equal(framed.buffer instanceof ArrayBuffer, false);
+  assert.deepEqual([...framed], [80, 75]);
 });
