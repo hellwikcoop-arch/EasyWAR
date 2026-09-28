@@ -16,7 +16,8 @@
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-sql": "^2.4.1",
-    "qrcode": "1.5.4"
+    "qrcode": "1.5.4",
+    "three": "^0.186.1"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.5",
