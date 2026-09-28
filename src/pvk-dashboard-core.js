@@ -254,8 +254,8 @@ export function createDashboardModel(workbook, range = {}) {
   };
 }
 
-function issue(sheet, type, level, message, row = null, metric = '') {
-  return { sheet, type, level, message, row, metric };
+function issue(sheet, type, level, message, row = null, metric = '', extra = null) {
+  return Object.assign({ sheet, type, level, message, row, metric }, extra);
 }
 
 function missingDates(sheet, rows, range) {
@@ -268,7 +268,7 @@ function missingDates(sheet, rows, range) {
   const missing = [];
   for (let day = start; day <= end; day++) {
     const date = isoFromDay(day);
-    if (!dates.has(date)) missing.push(issue(sheet.name, 'missing-date', 'warning', `Пропущено дату ${date}.`));
+    if (!dates.has(date)) missing.push(issue(sheet.name, 'missing-date', 'warning', `Пропущено дату ${date}.`, null, '', { date }));
   }
   return missing;
 }
@@ -291,11 +291,11 @@ export function validateSheet(sheet, range = {}) {
         'number-without-date': 'Є числові значення без дати.',
         'invalid-date': `Не вдалося прочитати дату «${item.raw}».`,
       };
-      issues.push(issue(sheet.name, item.type, item.type === 'missing-value' ? 'warning' : 'error', labels[item.type] || item.message || item.type, row.rowNumber, item.metric || ''));
+      issues.push(issue(sheet.name, item.type, item.type === 'missing-value' ? 'warning' : 'error', labels[item.type] || item.message || item.type, row.rowNumber, item.metric || '', { raw: item.raw ?? '', date: row.date || '' }));
     }
   }
   for (const [date, rowNumbers] of dates) {
-    if (rowNumbers.length > 1) issues.push(issue(sheet.name, 'duplicate-date', 'error', `Дата ${date} повторюється у рядках ${rowNumbers.join(', ')}.`));
+    if (rowNumbers.length > 1) issues.push(issue(sheet.name, 'duplicate-date', 'error', `Дата ${date} повторюється у рядках ${rowNumbers.join(', ')}.`, null, '', { date, rows: rowNumbers }));
   }
   issues.push(...missingDates(sheet, rows, range));
 
@@ -307,7 +307,7 @@ export function validateSheet(sheet, range = {}) {
       if (!row.date) continue;
       const strikes = Number(row.values?.[au]) || 0;
       const assetTotal = assets.reduce((sum, metric) => sum + (Number(row.values?.[metric]) || 0), 0);
-      if (strikes !== assetTotal) issues.push(issue(sheet.name, 'au-assets-mismatch', 'info', `АУ (${strikes}) не дорівнює сумі типів засобів (${assetTotal}) за ${row.date}.`, row.rowNumber, au));
+      if (strikes !== assetTotal) issues.push(issue(sheet.name, 'au-assets-mismatch', 'info', `АУ (${strikes}) не дорівнює сумі типів засобів (${assetTotal}) за ${row.date}.`, row.rowNumber, au, { date: row.date, strikes, assetTotal }));
     }
   }
   return issues;
@@ -315,6 +315,71 @@ export function validateSheet(sheet, range = {}) {
 
 export function validateWorkbook(workbook, range = {}) {
   return (workbook?.sheets || []).flatMap(sheet => validateSheet(sheet, range));
+}
+
+const LEVEL_ORDER = { error: 0, warning: 1, info: 2 };
+const GROUP_TITLES = {
+  'text-in-numeric': metric => `Текст у числовому стовпці «${metric}»`,
+  negative: metric => `Від’ємні значення у стовпці «${metric}»`,
+  'missing-value': metric => `Не внесено значення у стовпці «${metric}»`,
+  'number-without-date': () => 'Числові значення без дати',
+  'invalid-date': () => 'Дату не вдалося прочитати',
+  'duplicate-date': () => 'Дати повторюються',
+  'missing-date': () => 'Пропущені дати',
+  'au-assets-mismatch': () => 'АУ не дорівнює сумі типів засобів',
+};
+const GROUP_HINTS = {
+  'missing-value': 'Клітинка порожня. Якщо за добу було 0, впишіть 0.',
+  'au-assets-mismatch': 'Лише для інформації: АУ й типи засобів можуть рахуватися по-різному.',
+};
+const dayLabel = value => value ? `${value.slice(8, 10)}.${value.slice(5, 7)}.${value.slice(0, 4)}` : '';
+
+/** Суміжні дати зводяться в діапазони: «01.01.2026–03.01.2026». */
+function dateRanges(dates) {
+  const days = [...new Set(dates.filter(Boolean))].sort().map(date => [date, dayNumber(date)]);
+  const out = [];
+  for (const [date, day] of days) {
+    const last = out[out.length - 1];
+    if (last && day === last.endDay + 1) { last.end = date; last.endDay = day; } else out.push({ start: date, end: date, endDay: day });
+  }
+  return out.map(item => item.start === item.end ? dayLabel(item.start) : `${dayLabel(item.start)}–${dayLabel(item.end)}`);
+}
+
+function groupDetail(item) {
+  switch (item.type) {
+    case 'text-in-numeric': return `рядок ${item.row}: «${item.raw}»`;
+    case 'invalid-date': return `рядок ${item.row}: «${item.raw}»`;
+    case 'duplicate-date': return `${dayLabel(item.date)}: рядки ${(item.rows || []).join(', ')}`;
+    case 'au-assets-mismatch': return `${dayLabel(item.date)}: АУ ${item.strikes}, засобів ${item.assetTotal}`;
+    default: return item.row ? `рядок ${item.row}` : '';
+  }
+}
+
+/**
+ * Зводить однакові повідомлення (аркуш + тип + стовпець) в одну групу з кількістю й прикладами,
+ * щоб тисячі порожніх клітинок чи пропущених днів не ховали помилки.
+ */
+export function groupIssues(issues, sampleSize = 12) {
+  const groups = new Map();
+  for (const item of issues || []) {
+    const key = [item.sheet, item.type, item.metric || ''].join('\u0000');
+    let group = groups.get(key);
+    if (!group) {
+      const title = (GROUP_TITLES[item.type] || (() => item.message || item.type))(item.metric);
+      group = { sheet: item.sheet, type: item.type, level: item.level, metric: item.metric || '', title, hint: GROUP_HINTS[item.type] || '', count: 0, items: [] };
+      groups.set(key, group);
+    }
+    group.count += 1;
+    group.items.push(item);
+  }
+  return [...groups.values()].map(group => {
+    const details = group.type === 'missing-date'
+      ? dateRanges(group.items.map(item => item.date))
+      : group.items.map(groupDetail).filter(Boolean);
+    const { items, ...rest } = group;
+    return Object.assign(rest, { details: details.slice(0, sampleSize), more: Math.max(0, details.length - sampleSize) });
+  }).sort((a, b) => (LEVEL_ORDER[a.level] ?? 3) - (LEVEL_ORDER[b.level] ?? 3)
+    || SHEET_ORDER.indexOf(a.sheet) - SHEET_ORDER.indexOf(b.sheet) || b.count - a.count);
 }
 
 export function aggregateSheet(sheet, range = {}) {

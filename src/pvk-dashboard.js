@@ -4,6 +4,7 @@ import {
   allDateRange,
   createDashboardModel,
   csvRowsForSheet,
+  groupIssues,
 } from './pvk-dashboard-core.js';
 
 const state = {
@@ -29,7 +30,8 @@ function h(tag, attrs = {}, ...children) {
     : document.createElement(tag);
   for (const [key, value] of Object.entries(attrs)) {
     if (value == null || value === false) continue;
-    if (key === 'class') node.className = value;
+    // SVG elements expose className as a read-only SVGAnimatedString.
+    if (key === 'class') node.setAttribute('class', value);
     else if (key === 'text') node.textContent = value;
     else if (key.startsWith('on')) node.addEventListener(key.slice(2), value);
     else if (key === 'style' && typeof value === 'object') Object.assign(node.style, value);
@@ -258,10 +260,17 @@ function tablePage(model, options) {
 
 function qualityPage(model) {
   const byLevel = level => model.issues.filter(item => item.level === level).length;
+  const groups = groupIssues(model.issues);
+  const levelLabel = level => level === 'info' ? 'Інформаційно' : level === 'warning' ? 'Попередження' : 'Помилка';
   return h('div', { class: 'pvk-page' },
-    h('header', { class: 'pvk-page-head' }, h('div', {}, h('span', { class: 'pvk-eyebrow', text: 'Лише читання · файл не змінюється' }), h('h2', { text: 'Перевірка даних' })), h('strong', { text: `${model.issues.length} повідомлень` })),
-    h('div', { class: 'pvk-quality-kpis' }, kpi('Помилки', number(byLevel('error')), 'Потребують перевірки', 'red'), kpi('Попередження', number(byLevel('warning')), 'Пропуски в періоді', 'amber'), kpi('Інформаційно', number(byLevel('info')), 'Не блокує звіт', 'blue')),
-    model.issues.length ? h('div', { class: 'pvk-issues' }, model.issues.map(item => h('article', { class: `pvk-issue ${item.level}` }, h('span', { text: item.level === 'info' ? 'Інформаційно' : item.level === 'warning' ? 'Попередження' : 'Помилка' }), h('strong', { text: item.sheet }), h('p', { text: item.message }), item.row ? h('small', { text: `Рядок ${item.row}${item.metric ? ` · ${item.metric}` : ''}` }) : null))) : h('section', { class: 'pvk-section pvk-empty', text: 'За обраний період помилок не виявлено.' }));
+    h('header', { class: 'pvk-page-head' }, h('div', {}, h('span', { class: 'pvk-eyebrow', text: 'Лише читання · файл не змінюється' }), h('h2', { text: 'Перевірка даних' })), h('strong', { text: `${number(model.issues.length)} повідомлень у ${number(groups.length)} групах` })),
+    h('div', { class: 'pvk-quality-kpis' }, kpi('Помилки', number(byLevel('error')), 'Потребують перевірки', 'red'), kpi('Попередження', number(byLevel('warning')), 'Порожні клітинки й пропущені дати', 'amber'), kpi('Інформаційно', number(byLevel('info')), 'Не блокує звіт', 'blue')),
+    groups.length ? h('div', { class: 'pvk-issues' }, groups.map(group => h('article', { class: `pvk-issue ${group.level}` },
+      h('span', { text: levelLabel(group.level) }),
+      h('strong', { text: group.sheet }),
+      h('p', {}, group.title, h('b', { class: 'pvk-issue-count', text: ` · ${number(group.count)}` })),
+      h('small', { text: [group.details.join('; ') + (group.more ? `; ще ${number(group.more)}` : ''), group.hint].filter(Boolean).join(' · ') }))))
+      : h('section', { class: 'pvk-section pvk-empty', text: 'За обраний період помилок не виявлено.' }));
 }
 
 function periodControls(workbook, rerender) {
@@ -323,7 +332,7 @@ export function renderBase(host, workbook) {
   host.textContent = '';
   host.append(
     h('section', { class: 'pvk-base-hero' }, h('span', { class: 'pvk-eyebrow', text: 'Лише читання' }), h('h1', { text: 'Таблиця ПВК' }), h('p', { text: 'Аркуші показано без можливості змінити сирий XLSX. Дані редагуються в Excel, після чого натисніть «Оновити».' })),
-    workbook.sheets.map(sheet => h('section', { class: 'pvk-section' },
+    ...workbook.sheets.map(sheet => h('section', { class: 'pvk-section' },
       h('header', {}, h('h2', { text: sheet.name }), h('span', { text: `${sheet.rows.length} рядків даних · ${sheet.headers.length - 1} показників` })),
       h('div', { class: 'pvk-table-scroll' }, h('table', { class: 'pvk-table' },
         h('thead', {}, h('tr', {}, sheet.headers.map(header => h('th', { text: header })))),

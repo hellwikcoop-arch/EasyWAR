@@ -163,3 +163,87 @@ test('% уражених uses the documented formula and handles a zero denomina
   assert.equal(percentageAffected(3, 1), 75);
   assert.equal(percentageAffected(0, 0), null);
 });
+
+test('data check groups identical messages instead of listing every empty cell', async () => {
+  const { groupIssues } = await import('../src/pvk-dashboard-core.js');
+  // 40 days from 01.01.2026 without 11–13 January.
+  const rows = Array.from({ length: 40 }, (_, index) => index)
+    .filter(index => index < 10 || index > 12)
+    .map((index, position) => ({
+      rowNumber: position + 2,
+      date: new Date(Date.UTC(2026, 0, 1 + index)).toISOString().slice(0, 10),
+      values: { АУ: 1, 'Mi-8': null },
+      issues: [{ type: 'missing-value', metric: 'Mi-8', raw: '' }],
+    }));
+  rows[3].issues.push({ type: 'text-in-numeric', metric: 'АУ', raw: 'два' });
+  const issues = validateWorkbook({ sheets: [{ name: 'АА', headers: ['Дата', 'АУ', 'Mi-8'], rows }] }, { from: '2026-01-01', to: '2026-02-09' });
+  const groups = groupIssues(issues);
+
+  assert.equal(groups[0].level, 'error', 'errors come first');
+  assert.equal(groups[0].title, 'Текст у числовому стовпці «АУ»');
+  assert.deepEqual(groups[0].details, ['рядок 5: «два»']);
+  const missing = groups.find(group => group.type === 'missing-value');
+  assert.equal(missing.count, 37);
+  assert.equal(missing.details.length, 12);
+  assert.equal(missing.more, 25);
+  assert.match(missing.hint, /впишіть 0/);
+  const gaps = groups.find(group => group.type === 'missing-date');
+  assert.deepEqual(gaps.details, ['11.01.2026–13.01.2026'], 'consecutive missing days collapse into a range');
+  assert.ok(groups.length < 10);
+});
+
+/* A tiny DOM, strict like the browser where it matters: SVG className is read-only and
+   append() takes nodes, not arrays. */
+function fakeDocument() {
+  class Node {
+    constructor(tag, svg) {
+      this.tagName = tag; this.children = []; this.attributes = {}; this.style = {}; this.listeners = {};
+      this.classList = { add: name => { this.attributes.class = `${this.attributes.class || ''} ${name}`.trim(); }, remove: () => {} };
+      if (svg) Object.defineProperty(this, 'className', { get: () => ({ baseVal: this.attributes.class || '' }) });
+    }
+    get nodeType() { return 1; }
+    setAttribute(name, value) { this.attributes[name] = String(value); }
+    addEventListener(type, listener) { this.listeners[type] = listener; }
+    append(...nodes) {
+      for (const node of nodes) {
+        if (node == null || typeof node !== 'object' || !node.nodeType) throw new TypeError(`append() got ${Array.isArray(node) ? 'an array' : typeof node}`);
+        this.children.push(node);
+      }
+    }
+    set textContent(value) { this.children = value === '' ? [] : [{ nodeType: 3, text: String(value) }]; }
+    get textContent() { return this.children.map(node => node.nodeType === 3 ? node.text : node.textContent).join(''); }
+    querySelector(selector) {
+      const id = /#([\w-]+)$/.exec(selector)?.[1];
+      return this.children.find(node => node.attributes?.id === id) || null;
+    }
+    all() { return [this, ...this.children.flatMap(node => node.all ? node.all() : [])]; }
+  }
+  return {
+    Node,
+    createElement: tag => new Node(tag, false),
+    createElementNS: (ns, tag) => new Node(tag, true),
+    createTextNode: text => ({ nodeType: 3, text }),
+  };
+}
+
+test('the dashboard renders every page of a table with data', async () => {
+  const core = await airCore();
+  const workbook = await core.openPvkWorkbook(await syntheticPvkWorkbook(core));
+  const document = fakeDocument();
+  Object.assign(globalThis, { window: globalThis, document });
+  const dashboard = await import('../src/pvk-dashboard.js');
+  const host = document.createElement('section');
+  dashboard.render(host, workbook, { downloadCSV: () => {} });
+  const root = host.children[0];
+  assert.match(root.textContent, /Дашборд ПВК/);
+  assert.ok(root.all().some(node => node.tagName === 'svg'), 'charts are drawn for a table with data');
+
+  const buttons = () => root.all().filter(node => node.tagName === 'button');
+  for (const view of ['АА', 'ПС', 'Об’єкти', 'Зведена таблиця', 'Перевірка даних', 'Зведення ПВК']) {
+    buttons().find(node => node.textContent === view).listeners.click();
+    assert.ok(root.textContent.length > 100, view);
+  }
+  const base = document.createElement('section');
+  dashboard.renderBase(base, workbook);
+  assert.equal(base.all().filter(node => node.tagName === 'table').length, 3);
+});

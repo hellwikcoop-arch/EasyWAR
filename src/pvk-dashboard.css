@@ -1,6 +1,8 @@
 #view-dash.pvk-mode > :not(#pvk-dashboard-root) { display: none !important; }
 
-#pvk-dashboard-root {
+/* «База даних» таблиці ПВК (#view-base) використовує ті самі кольори, що й дашборд. */
+#pvk-dashboard-root,
+#view-base {
   --pvk-blue: #2a8cff;
   --pvk-amber: #e8af35;
   --pvk-green: #35c57c;
@@ -9,12 +11,16 @@
   --pvk-panel: color-mix(in srgb, var(--panel, #121d2d) 92%, transparent);
   --pvk-border: color-mix(in srgb, var(--line, #536278) 72%, transparent);
   --pvk-track: color-mix(in srgb, var(--muted, #8391a6) 20%, transparent);
+}
+
+#pvk-dashboard-root {
   display: grid;
   gap: 16px;
   width: min(1700px, calc(100vw - 36px));
   margin: 0 auto;
   padding: 18px 0 56px;
-  color: var(--text, #edf3ff);
+  /* The Air Force module names its text colour --ink (dark and light theme). */
+  color: var(--ink, var(--text, #edf3ff));
 }
 
 .pvk-hero,
@@ -214,10 +220,12 @@
 .pvk-issue.info { border-left-color: var(--pvk-blue); }
 .pvk-issue > span { color: var(--muted, #9ba8ba); font-size: 11px; font-weight: 800; text-transform: uppercase; }
 .pvk-issue p { margin: 0; }
-.pvk-issue small { color: var(--muted, #9ba8ba); }
+.pvk-issue small { grid-column: 1 / -1; color: var(--muted, #9ba8ba); overflow-wrap: anywhere; }
+.pvk-issue-count { font-weight: 800; }
 .pvk-empty { padding: 18px; color: var(--muted, #9ba8ba); text-align: center; }
 
-html[data-theme="light"] #pvk-dashboard-root {
+html[data-theme="light"] #pvk-dashboard-root,
+html[data-theme="light"] #view-base {
   --pvk-panel: rgba(255, 255, 255, .96);
   --pvk-border: rgba(54, 76, 105, .22);
   --pvk-track: rgba(59, 79, 107, .09);

@@ -4551,9 +4551,10 @@ function drawMap() {
 function renderChip() {
   const S = AV.S, box = $('#fileChip'); box.textContent = '';
   if (!S.wb) { box.className = ''; box.append(h('button', { class: 'btn', type: 'button', onclick: () => AV.pickFile() }, 'Відкрити таблицю…')); return; }
-  const inPlace = !!S.handle, unsaved = S.dirty || (!inPlace && S.undo.length > 0), n = S.wb.records.length;
-  box.className = 'filechip'; box.title = inPlace ? (S.dirty ? 'Зміни ще не записано у файл' : 'Записує прямо у файл') : 'Файл відкрито без прямого запису: після додавання завантажте його';
-  box.append(h('span', { class: 'dot' + (inPlace && !unsaved ? '' : ' warn') }), h('span', { class: 'nm', text: S.name }), h('span', { class: 'cnt', text: N0(n) + ' ' + plural(n, ['запис', 'записи', 'записів']) }));
+  const pvk = S.wb.kind === 'pvk', inPlace = !!S.handle, unsaved = S.dirty || (!inPlace && S.undo.length > 0);
+  const n = pvk ? S.wb.sheets.reduce((sum, sheet) => sum + sheet.rows.length, 0) : S.wb.records.length;
+  box.className = 'filechip'; box.title = pvk ? 'Таблиця ПВК: лише читання' : inPlace ? (S.dirty ? 'Зміни ще не записано у файл' : 'Записує прямо у файл') : 'Файл відкрито без прямого запису: після додавання завантажте його';
+  box.append(h('span', { class: 'dot' + (inPlace && !unsaved ? '' : ' warn') }), h('span', { class: 'nm', text: S.name }), h('span', { class: 'cnt', text: N0(n) + ' ' + plural(n, pvk ? ['рядок', 'рядки', 'рядків'] : ['запис', 'записи', 'записів']) }));
   if (unsaved) box.append(h('button', { class: 'btn primary', type: 'button', onclick: () => AV.downloadCurrent() }, 'Завантажити'));
   box.append(h('button', { class: 'btn quiet', type: 'button', title: 'Перечитати файл із диска', onclick: () => AV.refresh(true) }, 'Оновити'));
 }
