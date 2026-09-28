@@ -88,3 +88,6 @@
 }
 .ew-update-panel .ew-update-section { margin: 0; border: 0; }
 .ew-update-panel .ew-backup-actions { flex-wrap: wrap; justify-content: flex-start; }
+.ew-auto-update { display: flex; align-items: flex-start; gap: 8px; margin-top: 10px; cursor: pointer; font-weight: 600; }
+.ew-auto-update input { margin-top: 3px; }
+.ew-auto-update small { display: block; margin-top: 2px; color: var(--muted); font-weight: 400; line-height: 1.35; }

@@ -16,6 +16,7 @@ pub mod signal_ingest;
 pub mod signal_policy;
 pub mod signal_session;
 pub mod signal_settings;
+pub mod update_settings;
 pub mod workspace_templates;
 pub mod xlsx_export;
 pub mod xlsx_import;
@@ -45,6 +46,7 @@ use std::{
 };
 use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
+use update_settings::{AutoUpdateSettings, AutoUpdateStore};
 use workspace_templates::{WorkspaceTemplateStore, WorkspaceTemplatesState};
 use xlsx_export::XlsxExportResult;
 
@@ -757,6 +759,45 @@ async fn check_for_app_update(
 }
 
 #[tauri::command]
+async fn get_app_update_settings(
+    store: tauri::State<'_, AutoUpdateStore>,
+) -> Result<AutoUpdateSettings, String> {
+    store.load().await.map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn set_app_update_auto_check(
+    store: tauri::State<'_, AutoUpdateStore>,
+    enabled: bool,
+) -> Result<AutoUpdateSettings, String> {
+    store
+        .set_enabled(enabled, Utc::now())
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// Runs the optional automatic check when the user turned it on and a day has
+/// passed since the last one; otherwise returns None without any network access.
+#[tauri::command]
+async fn auto_check_for_app_update(
+    app: tauri::AppHandle,
+    pending: tauri::State<'_, PendingUpdate>,
+    store: tauri::State<'_, AutoUpdateStore>,
+) -> Result<Option<AppUpdateStatus>, String> {
+    if !store
+        .claim_due_check(Utc::now())
+        .await
+        .map_err(|error| error.to_string())?
+    {
+        return Ok(None);
+    }
+    app_update::check(&app, &pending)
+        .await
+        .map(Some)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn install_app_update(
     app: tauri::AppHandle,
     pending: tauri::State<'_, PendingUpdate>,
@@ -1031,6 +1072,7 @@ pub fn run() {
                     .connect_with(options),
             )?;
             app.manage(SignalSettingsStore::new(SettingsStore::new(pool.clone())));
+            app.manage(AutoUpdateStore::new(SettingsStore::new(pool.clone())));
             app.manage(Repository::new(pool.clone()));
             app.manage(LocalProfileStore::new(pool.clone()));
             app.manage(ProfileSession::default());
@@ -1088,6 +1130,9 @@ pub fn run() {
             get_restore_startup_report,
             finalize_local_restore,
             check_for_app_update,
+            auto_check_for_app_update,
+            get_app_update_settings,
+            set_app_update_auto_check,
             install_app_update,
             inspect_local_xlsx,
             stage_local_xlsx,

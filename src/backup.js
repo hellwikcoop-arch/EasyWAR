@@ -3,14 +3,17 @@ import './backup.css';
 import {
   appUpdateMessage,
   applyStagedRestoreAndRestart,
+  autoCheckForAppUpdate,
   cancelStagedRestore,
   checkForAppUpdate,
   databaseStatusMessage,
   finalizeLocalRestore,
+  getAppUpdateSettings,
   getDatabaseStatus,
   getRestoreStartupReport,
   installAppUpdate,
   restoreStartupMessage,
+  setAppUpdateAutoCheck,
   stageLocalRestore,
 } from './backup-core.js';
 
@@ -55,6 +58,12 @@ function initializeBackup() {
         <button type="button" class="btn" id="ew-app-update-check">Перевірити оновлення</button>
         <button type="button" class="btn primary" id="ew-app-update-install" hidden>Встановити й перезапустити</button>
       </div>
+      <label class="ew-auto-update">
+        <input type="checkbox" id="ew-app-update-auto">
+        <span>Перевіряти оновлення автоматично
+          <small>Раз на добу під час запуску EasyWAR звертається лише до сторінки випусків EasyWAR на GitHub. Встановлення — тільки після вашого підтвердження.</small>
+        </span>
+      </label>
     </section>
     <section class="ew-restore-section" aria-labelledby="ew-restore-title">
       <h3 id="ew-restore-title">Відновлення з копії</h3>
@@ -114,6 +123,7 @@ function initializeBackup() {
   const appUpdateStatus = updatePanel.querySelector('#ew-app-update-status');
   const appUpdateCheckButton = updatePanel.querySelector('#ew-app-update-check');
   const appUpdateInstallButton = updatePanel.querySelector('#ew-app-update-install');
+  const appUpdateAutoToggle = updatePanel.querySelector('#ew-app-update-auto');
   let availableUpdate = null;
 
   function setHeaderUpdate(text, state, detail) {
@@ -137,6 +147,7 @@ function initializeBackup() {
     updateRefreshButton.disabled = value;
     appUpdateCheckButton.disabled = value;
     appUpdateInstallButton.disabled = value;
+    appUpdateAutoToggle.disabled = value;
   }
 
   function renderRestoreState() {
@@ -165,6 +176,16 @@ function initializeBackup() {
   void refreshDatabaseStatus();
   updateRefreshButton.addEventListener('click', () => { void refreshDatabaseStatus(); });
 
+  function showUpdateResult(result) {
+    availableUpdate = result.available || null;
+    const message = appUpdateMessage(result);
+    appUpdateStatus.textContent = message;
+    if (availableUpdate) setHeaderUpdate(`Оновлення: v${String(availableUpdate.version)}`, 'available', message);
+    else if (result.configured === false) setHeaderUpdate('Оновлення: вручну', 'off', message);
+    else setHeaderUpdate(`v${String(result.currentVersion)} актуальна`, 'ok', message);
+    appUpdateInstallButton.hidden = !availableUpdate;
+  }
+
   appUpdateCheckButton.addEventListener('click', async () => {
     setBusy(true);
     appUpdateInstallButton.hidden = true;
@@ -172,19 +193,47 @@ function initializeBackup() {
     appUpdateStatus.textContent = 'Перевіряємо наявність нової версії…';
     setHeaderUpdate('Оновлення: перевірка…', 'busy');
     try {
-      const result = await checkForAppUpdate();
-      availableUpdate = result.available || null;
-      const message = appUpdateMessage(result);
-      appUpdateStatus.textContent = message;
-      if (availableUpdate) setHeaderUpdate(`Оновлення: v${String(availableUpdate.version)}`, 'available', message);
-      else if (result.configured === false) setHeaderUpdate('Оновлення: вручну', 'off', message);
-      else setHeaderUpdate(`v${String(result.currentVersion)} актуальна`, 'ok', message);
+      showUpdateResult(await checkForAppUpdate());
     } catch (error) {
       appUpdateStatus.textContent = `Не вдалося перевірити оновлення: ${String(error)}`;
       setHeaderUpdate('Оновлення: помилка', 'error', appUpdateStatus.textContent);
     } finally {
       appUpdateInstallButton.hidden = !availableUpdate;
       setBusy(false);
+    }
+  });
+
+  // Автоматична перевірка, лише якщо користувач її ввімкнув: застосунок сам
+  // пропускає її, якщо від попередньої не минула доба. Помилка не заважає роботі.
+  async function autoCheck() {
+    try {
+      const result = await autoCheckForAppUpdate();
+      if (result && !availableUpdate) showUpdateResult(result);
+    } catch (error) {
+      appUpdateStatus.textContent = `Автоматична перевірка оновлень не вдалася: ${String(error)}. Можна перевірити вручну.`;
+    }
+  }
+
+  void getAppUpdateSettings().then(settings => {
+    appUpdateAutoToggle.checked = Boolean(settings?.enabled);
+    if (settings?.enabled) void autoCheck();
+  }).catch(() => {});
+
+  appUpdateAutoToggle.addEventListener('change', async () => {
+    const enabled = appUpdateAutoToggle.checked;
+    appUpdateAutoToggle.disabled = true;
+    try {
+      const settings = await setAppUpdateAutoCheck(enabled);
+      appUpdateAutoToggle.checked = Boolean(settings?.enabled);
+      appUpdateStatus.textContent = settings?.enabled
+        ? 'Автоматична перевірка ввімкнена: раз на добу під час запуску.'
+        : 'Автоматична перевірка вимкнена. Оновлення перевіряються лише кнопкою.';
+      if (settings?.enabled) await autoCheck();
+    } catch (error) {
+      appUpdateAutoToggle.checked = !enabled;
+      appUpdateStatus.textContent = `Не вдалося змінити налаштування: ${String(error)}`;
+    } finally {
+      appUpdateAutoToggle.disabled = false;
     }
   });
 

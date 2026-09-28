@@ -61,6 +61,23 @@ export function installAppUpdate(invokeCommand = invoke) {
   return invokeCommand('install_app_update');
 }
 
+/** Налаштування автоматичної перевірки: { enabled, lastCheckAt }. За замовчуванням вимкнена. */
+export function getAppUpdateSettings(invokeCommand = invoke) {
+  return invokeCommand('get_app_update_settings');
+}
+
+export function setAppUpdateAutoCheck(enabled, invokeCommand = invoke) {
+  return invokeCommand('set_app_update_auto_check', { enabled: Boolean(enabled) });
+}
+
+/**
+ * Автоматична перевірка: застосунок сам вирішує, чи вона ввімкнена й чи минула доба
+ * від попередньої. Повертає null без звернення до мережі, якщо перевіряти не треба.
+ */
+export function autoCheckForAppUpdate(invokeCommand = invoke) {
+  return invokeCommand('auto_check_for_app_update');
+}
+
 export function appUpdateMessage(status) {
   if (status?.configured === false) {
     return `EasyWAR ${String(status.currentVersion)}. У цій збірці автоматичні оновлення не налаштовано — нову версію встановлюйте вручну.`;
