@@ -229,7 +229,8 @@ test('data check groups identical messages instead of listing every empty cell',
 function fakeDocument() {
   class Node {
     constructor(tag, svg) {
-      this.tagName = tag; this.children = []; this.attributes = {}; this.style = {}; this.listeners = {};
+      this.tagName = tag; this.children = []; this.attributes = {}; this.listeners = {};
+      this.style = { setProperty(name, value) { this[name] = String(value); } };
       this.classList = { add: name => { this.attributes.class = `${this.attributes.class || ''} ${name}`.trim(); }, remove: () => {} };
       if (svg) Object.defineProperty(this, 'className', { get: () => ({ baseVal: this.attributes.class || '' }) });
     }
@@ -269,6 +270,10 @@ test('the dashboard renders every page of a table with data', async () => {
   const root = host.children[0];
   assert.match(root.textContent, /Дашборд ПВК/);
   assert.ok(root.all().some(node => node.tagName === 'svg'), 'charts are drawn for a table with data');
+  const days = root.all().filter(node => /\bpvk-day\b/.test(node.attributes?.class || ''));
+  assert.ok(days.length, 'the activity calendar has days');
+  assert.ok(days.every(node => node.style['--level'] !== undefined && node.style['grid-column']), 'each day carries its colour level and column');
+  assert.ok(days.some(node => node.style['--level'] === '1'), 'the busiest day is fully coloured');
 
   const buttons = () => root.all().filter(node => node.tagName === 'button');
   for (const view of ['Таблиця 1', 'АА', 'ПС', 'Об’єкти', 'Зведена таблиця', 'Перевірка даних', 'Зведення ПВК']) {
@@ -291,6 +296,9 @@ test('«Таблиця 1» is read from the ПВК table: month rows skipped, Ex
     [3, '2026-10-01', '10:15'], [4, '2026-10-01', '12:00'], [5, '2026-10-02', '06:30'], [6, '', ''],
   ], 'the month row and a row with only a number are not records');
   assert.deepEqual(plain(journal.rows[3].issues), [{ type: 'no-date' }]);
+  assert.deepEqual([journal.rows[0].values['Дата'], journal.rows[0].values['Час удару']], ['01.10.2026', '10:15'],
+    'records, search and CSV show the date and time as in the report, not as Excel numbers');
+  assert.equal(journal.rows[0].dateRaw, '46296', 'the raw cell stays for data-check messages');
   assert.equal(workbook.sheets.length, 3);
   assert.match(workbook.sheetName, /^Таблиця 1 \/ АА/);
 });

@@ -5987,7 +5987,7 @@ function renderExtras(cur) {
       return h('tr', { class: 'clk', tabindex: '0', title: 'Відкрити останню операцію по цілі ' + id, onclick: () => openPassport(lastR), onkeydown: ev => { if (ev.key === 'Enter') openPassport(lastR); } },
         h('td', {}, h('span', { class: 'code', text: id })), h('td', { text: lastR.types[0] || '—' }), h('td', { class: 't r', text: N0(a.length) }),
         h('td', {}, h('span', { class: 'rmini' }, ['hit', 'part', 'miss', 'unk'].filter(k => kc[k]).map(k => h('span', { class: 'rm ' + k, title: KLABEL[k] + ': ' + kc[k], text: kc[k] })))), h('td', { class: 't', text: dmy(lastR.date) })); })))),
-    rep.length > 8 ? h('p', { class: 'sub dp-note', text: 'Показано 8 із ' + N0(rep.length) + ' цілей; порядок — за кількістю пусків.' }) : null);
+    rep.length > 8 ? h('p', { class: 'sub dp-note', text: 'Показано 8 із ' + N0(rep.length) + ' цілей; порядок — за кількістю пусків.' }) : '');
   // час доби
   const hc = Array.from({ length: 24 }, () => ({ hit: 0, part: 0, miss: 0, unk: 0, tot: 0 })); let noT = 0;
   for (const r of cur) { const m = /(\d{1,2}):(\d{2})/.exec(r.time || ''); if (!m) { noT++; continue; } const hr = Math.min(23, +m[1]); hc[hr][r.kind]++; hc[hr].tot++; }
@@ -6207,6 +6207,7 @@ function renderActivity(cur) {
 
 
 function renderAll() {
+  if (!el.content) return; // дані прийшли раніше, ніж збудовано дашборд: init() покаже їх сам
   const has = !!AV.S.wb;
   el.empty.hidden = has; el.toolbar.hidden = !has || !ROWS.length; el.content.hidden = !has; el.side.hidden = !has || !ROWS.length;
   if (!has) { refAfterRender(); return; }

@@ -188,9 +188,15 @@
 .pvk-result-rates strong { font-size: 28px; }
 .pvk-result-rates small { color: var(--muted, #9ba8ba); }
 
-.pvk-calendar { display: grid; grid-template-columns: repeat(auto-fill, minmax(46px, 1fr)); gap: 5px; }
-.pvk-day { display: grid; gap: 3px; place-items: center; min-height: 48px; border: 1px solid color-mix(in srgb, var(--pvk-blue) calc(var(--level) * 70%), var(--pvk-border)); border-radius: 8px; background: color-mix(in srgb, var(--pvk-blue) calc(var(--level) * 80%), var(--pvk-track)); }
-.pvk-day small { font-size: 9px; color: var(--muted, #9ba8ba); }
+.pvk-calendar { display: grid; gap: 4px; overflow-x: auto; padding-bottom: 2px; }
+.pvk-cal-month { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 8px; align-items: center; min-width: 860px; }
+.pvk-cal-label { font-size: 12px; font-weight: 700; color: var(--muted, #9ba8ba); }
+.pvk-cal-days { display: grid; grid-template-columns: repeat(31, minmax(0, 1fr)); gap: 3px; }
+.pvk-day { --level: 0; display: grid; gap: 1px; place-items: center; min-height: 36px; border: 1px solid color-mix(in srgb, var(--pvk-blue) calc(var(--level) * 70%), var(--pvk-border)); border-radius: 6px; background: color-mix(in srgb, var(--pvk-blue) calc(var(--level) * 85%), var(--pvk-track)); font-size: 11px; }
+.pvk-day b { font-weight: 600; opacity: .75; }
+.pvk-day small { font-size: 10px; font-weight: 700; }
+.pvk-day.is-empty { opacity: .45; }
+.pvk-day.is-empty small { visibility: hidden; }
 .pvk-lines-wrap { min-width: 0; }
 .pvk-lines { display: block; width: 100%; min-height: 220px; }
 .pvk-gridline { stroke: var(--pvk-border); stroke-width: 1; }
