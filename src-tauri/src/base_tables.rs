@@ -19,7 +19,7 @@ pub enum BaseTable {
     Air,
     /// Ракетні війська і артилерія: аркуш «Зведена» з довідниками.
     Rvia,
-    /// Повітряні Сили рівня ПВК (ТАБЛ 2-3): аркуші «АА», «ПС», «Об'єкти».
+    /// Повітряні Сили рівня ПВК: журнал ударів «Таблиця 1» і ТАБЛ 2-3 (аркуші «АА», «ПС», «Об'єкти»).
     Pvk,
 }
 
@@ -210,18 +210,56 @@ mod tests {
     }
 
     #[test]
-    fn pvk_base_has_three_empty_tables_with_total_rows() {
+    fn pvk_base_has_the_strike_journal_and_three_empty_tables_with_total_rows() {
         let mut book = workbook(BaseTable::Pvk);
-        assert_eq!(book.sheet_names(), ["АА", "ПС", "Об'єкти"]);
+        assert_eq!(book.sheet_names(), ["Таблиця 1", "АА", "ПС", "Об'єкти"]);
+        let journal = book.worksheet_range("Таблиця 1").unwrap();
+        assert_eq!(journal.height(), 1, "Таблиця 1: only the header row");
+        let journal_headers = journal
+            .rows()
+            .next()
+            .unwrap()
+            .iter()
+            .map(|cell| cell.to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            journal_headers,
+            [
+                "№ з/п",
+                "Дата",
+                "Час удару",
+                "Номер цілі",
+                "Характер цілі",
+                "Координати цілі",
+                "Населений пункт",
+                "Фактичні приходи",
+                "Сили та засоби",
+                "Тип АЗУ",
+                "Витрата АЗУ",
+                "Результат",
+            ]
+        );
         for (sheet, first_header, last_header) in [
             ("АА", "Дата", "НЕ уражено"),
             ("ПС", "Дата", "Дорозвідується"),
             ("Об'єкти", "Дата", "Витрата"),
         ] {
             let range = book.worksheet_range(sheet).unwrap();
-            // Header, a month of plain rows and the totals: nothing is left of
-            // the working rows or of cells beside the table.
-            assert_eq!(range.height(), 33, "{sheet}");
+            // Header, two years of daily rows computed from «Таблиця 1» and the
+            // totals: nothing is left of the working rows or of cells beside
+            // the table.
+            assert_eq!(range.height(), 733, "{sheet}");
+            let formulas = book.worksheet_formula(sheet).unwrap();
+            let first_day = formulas.get_value((1, 0)).unwrap();
+            assert!(
+                first_day.contains("MIN('Таблиця 1'!$B:$B)"),
+                "{sheet}: {first_day}"
+            );
+            let first_metric = formulas.get_value((1, 1)).unwrap();
+            assert!(
+                first_metric.contains("'Таблиця 1'!"),
+                "{sheet}: {first_metric}"
+            );
             assert_eq!(range.start(), Some((0, 0)), "{sheet}");
             let rows = range.rows().collect::<Vec<_>>();
             let header = rows[0]
@@ -234,9 +272,10 @@ mod tests {
             assert_eq!(header.last().map(String::as_str), Some(last_header));
             let totals = rows.last().unwrap();
             assert_eq!(text(totals.first()), "Підсумок", "{sheet}");
+            // Formulas carry no computed values until Excel opens the file.
             for row in &rows[1..rows.len() - 1] {
                 assert!(
-                    row.iter().all(|cell| matches!(cell, Data::Empty)),
+                    row.iter().all(|cell| cell.to_string().is_empty()),
                     "{sheet}: data rows must be empty"
                 );
             }

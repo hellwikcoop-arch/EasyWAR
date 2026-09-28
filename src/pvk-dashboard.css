@@ -224,6 +224,23 @@
 .pvk-issue-count { font-weight: 800; }
 .pvk-empty { padding: 18px; color: var(--muted, #9ba8ba); text-align: center; }
 
+/* «Таблиця 1»: журнал ударів */
+.pvk-daybars { display: block; width: 100%; min-height: 120px; }
+.pvk-hours { display: grid; grid-template-columns: repeat(24, minmax(0, 1fr)); gap: 4px; align-items: end; height: 140px; }
+.pvk-hours > span { display: grid; grid-template-rows: 1fr auto; height: 100%; gap: 4px; text-align: center; }
+.pvk-hours b { align-self: end; display: block; min-height: 2px; border-radius: 4px 4px 0 0; background: linear-gradient(180deg, #68b7ff, var(--pvk-blue)); }
+.pvk-hours small { color: var(--muted, #9ba8ba); font-size: 10px; }
+.pvk-journal-grid { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+.pvk-journal-card.pvk-wide { grid-column: span 2; }
+.pvk-journal-card h5 { margin: 10px 0 4px; font-size: 12px; color: var(--muted, #9ba8ba); text-transform: uppercase; letter-spacing: .06em; }
+.pvk-journal-card .pvk-ranking { gap: 6px; }
+.pvk-journal-card .pvk-rank-row { grid-template-columns: minmax(90px, 240px) minmax(60px, 1fr) max-content; }
+.pvk-more { margin: 6px 0 0; color: var(--muted, #9ba8ba); font-size: 12px; }
+.pvk-journal-tools { flex-wrap: wrap; margin-bottom: 10px; }
+.pvk-journal-tools input[type="search"] { flex: 1 1 280px; min-width: 0; padding: 8px 10px; border: 1px solid var(--pvk-border); border-radius: 9px; background: var(--pvk-panel); color: inherit; font: inherit; }
+.pvk-journal-scroll { max-height: 70vh; }
+.pvk-journal-table td { white-space: pre-line; vertical-align: top; }
+
 html[data-theme="light"] #pvk-dashboard-root,
 html[data-theme="light"] #view-base {
   --pvk-panel: rgba(255, 255, 255, .96);
@@ -247,6 +264,7 @@ html[data-theme="light"] #view-base {
   .pvk-period label { width: 100%; }
   .pvk-period input { flex: 1; }
   .pvk-metric-grid { grid-template-columns: 1fr; }
+  .pvk-journal-card.pvk-wide { grid-column: auto; }
   .pvk-composition { grid-template-columns: 1fr; justify-items: center; }
   .pvk-table-actions { width: 100%; align-items: stretch; flex-direction: column; }
 }

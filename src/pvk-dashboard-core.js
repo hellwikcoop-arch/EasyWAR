@@ -61,6 +61,7 @@ export function percentageAffected(affected, notAffected) {
 export function allDateRange(workbook) {
   const dates = (workbook?.sheets || [])
     .flatMap(sheet => sheet.rows || [])
+    .concat(workbook?.journal?.rows || [])
     .map(row => isoDay(row.date))
     .filter(Boolean)
     .sort();
@@ -243,15 +244,153 @@ export function createDashboardModel(workbook, range = {}) {
     objects: mergeDaily(sheets, sheet => sheet.name === "Об'єкти" ? (sheet.groups.find(group => group.name === 'Уражені об’єкти')?.metrics || []) : []),
     expenditure: mergeDaily(sheets, sheet => sheet.name === "Об'єкти" ? ['Витрата'] : []),
   };
+  const journal = createJournalModel(workbook?.journal, resolvedRange);
+  summary.journalRecords = journal ? journal.total : null;
   return {
     kind: 'pvk-dashboard',
     range: resolvedRange,
     previousRange: previous,
     sheets,
+    journal,
     summary,
     widgets: sheets.flatMap(sheet => sheet.widgets),
     issues: validateWorkbook(workbook, resolvedRange),
   };
+}
+
+/* ------------------------- «Таблиця 1»: журнал ударів ------------------------- */
+
+const JOURNAL_KINDS = [
+  [header => /^№/.test(header), 'index'],
+  [header => header === 'дата', 'date'],
+  [header => /^час/.test(header), 'time'],
+  [header => /номер ціл/.test(header), 'target'],
+  [header => /координат/.test(header), 'coords'],
+];
+const isNumeric = value => /^[-+]?\d+(?:[.,]\d+)?$/.test(String(value).trim());
+const toNumber = value => Number(String(value).trim().replace(',', '.'));
+
+/**
+ * Як показувати стовпець журналу: за назвою (номер, дата, час, ціль, координати),
+ * інакше за значеннями — числовий, якщо чисел щонайменше 80 %, або категорійний.
+ */
+export function journalColumnKind(header, values) {
+  const name = normalize(header);
+  for (const [test, kind] of JOURNAL_KINDS) if (test(name)) return kind;
+  const filled = (values || []).map(value => String(value ?? '').trim()).filter(Boolean);
+  return filled.length && filled.filter(isNumeric).length / filled.length >= 0.8 ? 'numeric' : 'category';
+}
+
+function countValues(values) {
+  const counts = new Map();
+  for (const value of values) counts.set(value, (counts.get(value) || 0) + 1);
+  return [...counts.entries()]
+    .map(([value, count]) => ({ value, count }))
+    .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value, 'uk'));
+}
+
+/** Модель сторінки «Таблиця 1» за період: кожен стовпець журналу — окремий віджет. */
+export function createJournalModel(journal, range = {}) {
+  if (!journal) return null;
+  const rows = rowsInRange(journal.rows, range);
+  const perDay = new Map();
+  for (const row of rows) perDay.set(row.date, (perDay.get(row.date) || 0) + 1);
+  const series = [...perDay.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([date, value]) => ({ date, value }));
+  const hours = Array(24).fill(0);
+  for (const row of rows) if (row.time) hours[Number(row.time.slice(0, 2))] += 1;
+  const columns = (journal.headers || []).map(header => {
+    const values = rows.map(row => String(row.values?.[header] ?? '').trim());
+    const filled = values.filter(Boolean);
+    const kind = journalColumnKind(header, journal.rows.map(row => row.values?.[header]));
+    const base = { id: `${journal.name}:${header}`, header, kind, filled: filled.length, empty: values.length - filled.length };
+    if (kind === 'index' || kind === 'coords') return base;
+    if (kind === 'date') return Object.assign(base, { days: series.length, first: series[0]?.date || '', last: series.at(-1)?.date || '' });
+    if (kind === 'time') return Object.assign(base, { hours, withTime: rows.filter(row => row.time).length });
+    if (kind === 'numeric') {
+      const byDay = new Map();
+      let sum = 0, max = 0;
+      for (const row of rows) {
+        const raw = String(row.values?.[header] ?? '').trim();
+        if (!isNumeric(raw)) continue;
+        const value = toNumber(raw);
+        sum += value; max = Math.max(max, value);
+        byDay.set(row.date, (byDay.get(row.date) || 0) + value);
+      }
+      return Object.assign(base, {
+        sum, max, average: filled.length ? sum / filled.length : 0,
+        series: [...byDay.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([date, value]) => ({ date, value })),
+      });
+    }
+    const counts = countValues(filled);
+    if (kind === 'target') return Object.assign(base, { distinct: counts.length, repeated: counts.filter(item => item.count > 1) });
+    return Object.assign(base, { distinct: counts.length, values: counts });
+  });
+  const column = kind => columns.find(item => item.kind === kind) || null;
+  const named = name => columns.find(item => item.kind === 'numeric' && normalize(item.header) === normalize(name)) || null;
+  const reported = named('Витрата АЗУ'), counted = named('Фактичні приходи');
+  return {
+    name: journal.name,
+    headers: [...(journal.headers || [])],
+    rows,
+    total: rows.length,
+    days: series.length,
+    series,
+    hours,
+    columns,
+    targets: column('target')?.distinct ?? null,
+    withCoordinates: column('coords')?.filled ?? null,
+    // «Витрата АЗУ» — скільки в доповіді, «Фактичні приходи» — скільки пораховано на відео.
+    confirmed: reported && counted ? { reported: reported.sum, counted: counted.sum, percent: reported.sum ? counted.sum / reported.sum * 100 : null } : null,
+    widgets: columns.map(item => item.id),
+  };
+}
+
+/** Рядки журналу, що містять запит у будь-якому стовпці, від найновіших. */
+export function searchJournal(journalModel, query = '') {
+  const needle = normalize(query);
+  const rows = (journalModel?.rows || []).filter(row => !needle
+    || Object.values(row.values || {}).some(value => normalize(value).includes(needle)));
+  return rows.sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.time || '').localeCompare(a.time || '') || b.rowNumber - a.rowNumber);
+}
+
+export function csvRowsForJournal(journalModel, rows) {
+  const headers = journalModel?.headers || [];
+  return [headers, ...(rows || []).map(row => headers.map(header => row.values?.[header] ?? ''))];
+}
+
+/**
+ * Записи журналу, які формули ТАБЛ 2-3 не зможуть врахувати: носій, тип АЗУ,
+ * категорія цілі чи результат, для яких на аркушах немає стовпця.
+ */
+function journalCoverageIssues(journal, row, sheets) {
+  const value = name => String(row.values?.[journal.headers.find(header => normalize(header) === normalize(name))] ?? '').trim();
+  const has = (sheet, name) => metricHeaders(sheet).some(header => normalize(header) === normalize(name));
+  const out = [];
+  const carrier = value('Сили та засоби'), munition = value('Тип АЗУ'), category = value('Характер цілі'), result = value('Результат');
+  const carrierSheet = sheets.find(sheet => ['Вертольоти', 'Літаки'].some(group => classifyMetric(sheet.name, carrier).group === group) && has(sheet, carrier));
+  const air = sheets.filter(sheet => sheet.name === 'АА' || sheet.name === 'ПС');
+  if (carrier && air.length && !carrierSheet) {
+    out.push(issue(journal.name, 'unknown-carrier', 'warning', `«${carrier}» немає на аркушах «АА» і «ПС».`, row.rowNumber, 'Сили та засоби', { raw: carrier }));
+  } else if (carrierSheet && munition && !has(carrierSheet, munition)) {
+    out.push(issue(journal.name, 'munition-not-on-sheet', 'warning', `«${munition}» немає на аркуші «${carrierSheet.name}» (носій ${carrier}).`, row.rowNumber, 'Тип АЗУ', { raw: `${munition} · ${carrier}` }));
+  }
+  const objects = sheets.find(sheet => sheet.name === "Об'єкти");
+  if (objects && category && !has(objects, category)) {
+    out.push(issue(journal.name, 'unknown-category', 'warning', `«${category}» немає на аркуші «Об'єкти».`, row.rowNumber, 'Характер цілі', { raw: category }));
+  }
+  if (air.length && result && !['Уражено', 'НЕ уражено', 'Дорозвідується'].some(name => normalize(name) === normalize(result))) {
+    out.push(issue(journal.name, 'unknown-result', 'warning', `Результат «${result}» не з переліку.`, row.rowNumber, 'Результат', { raw: result }));
+  }
+  return out;
+}
+
+function validateJournal(journal, range = {}, sheets = []) {
+  if (!journal) return [];
+  const rows = (journal.rows || []).filter(row => !row.date || !range?.from || !range?.to || (row.date >= range.from && row.date <= range.to));
+  return rows.flatMap(row => (row.issues || []).map(item => item.type === 'invalid-date'
+    ? issue(journal.name, 'invalid-date', 'error', `Не вдалося прочитати дату «${item.raw}».`, row.rowNumber, '', { raw: item.raw })
+    : issue(journal.name, item.type, 'warning', 'Запис без дати.', row.rowNumber))
+    .concat(journalCoverageIssues(journal, row, sheets)));
 }
 
 function issue(sheet, type, level, message, row = null, metric = '', extra = null) {
@@ -314,7 +453,8 @@ export function validateSheet(sheet, range = {}) {
 }
 
 export function validateWorkbook(workbook, range = {}) {
-  return (workbook?.sheets || []).flatMap(sheet => validateSheet(sheet, range));
+  return validateJournal(workbook?.journal, range, workbook?.sheets || [])
+    .concat((workbook?.sheets || []).flatMap(sheet => validateSheet(sheet, range)));
 }
 
 const LEVEL_ORDER = { error: 0, warning: 1, info: 2 };
@@ -326,11 +466,20 @@ const GROUP_TITLES = {
   'invalid-date': () => 'Дату не вдалося прочитати',
   'duplicate-date': () => 'Дати повторюються',
   'missing-date': () => 'Пропущені дати',
+  'no-date': () => 'Записи без дати',
+  'unknown-carrier': () => 'Носій не з аркушів «АА» і «ПС»',
+  'munition-not-on-sheet': () => 'Тип АЗУ без стовпця на аркуші носія',
+  'unknown-category': () => 'Характер цілі не з аркуша «Об\'єкти»',
+  'unknown-result': () => 'Результат не з переліку',
   'au-assets-mismatch': () => 'АУ не дорівнює сумі типів засобів',
 };
 const GROUP_HINTS = {
   'missing-value': 'Клітинка порожня. Якщо за добу було 0, впишіть 0.',
   'au-assets-mismatch': 'Лише для інформації: АУ й типи засобів можуть рахуватися по-різному.',
+  'unknown-carrier': 'Такі удари не потрапляють у ТАБЛ 2-3. Оберіть носія зі списку або додайте стовпець.',
+  'munition-not-on-sheet': 'Витрата цього АЗУ не потрапляє в ТАБЛ 2-3.',
+  'unknown-category': 'Такі удари не рахуються на аркуші «Об\'єкти».',
+  'unknown-result': 'Оберіть «Уражено», «НЕ уражено» чи «Дорозвідується».',
 };
 const dayLabel = value => value ? `${value.slice(8, 10)}.${value.slice(5, 7)}.${value.slice(0, 4)}` : '';
 
@@ -349,6 +498,10 @@ function groupDetail(item) {
   switch (item.type) {
     case 'text-in-numeric': return `рядок ${item.row}: «${item.raw}»`;
     case 'invalid-date': return `рядок ${item.row}: «${item.raw}»`;
+    case 'unknown-carrier':
+    case 'munition-not-on-sheet':
+    case 'unknown-category':
+    case 'unknown-result': return `рядок ${item.row}: «${item.raw}»`;
     case 'duplicate-date': return `${dayLabel(item.date)}: рядки ${(item.rows || []).join(', ')}`;
     case 'au-assets-mismatch': return `${dayLabel(item.date)}: АУ ${item.strikes}, засобів ${item.assetTotal}`;
     default: return item.row ? `рядок ${item.row}` : '';

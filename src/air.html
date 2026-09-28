@@ -1855,11 +1855,14 @@ async function openPvkWorkbook(u8) {
   const listed = [];
   { const re = /<(?:\w+:)?sheet\b([^>]*?)\/?>/g; let m;
     while ((m = re.exec(wbXml))) { const a = attrs(m[1]); listed.push({ name: a.name, path: rels[attrLocal(a, 'id')] }); } }
-  const selected = PVK_SHEETS.map(name => listed.find(sheet => pvkNorm(sheet.name) === pvkNorm(name)));
-  if (selected.some(sheet => !sheet) || listed.some(sheet => pvkNorm(sheet.name) === pvkNorm('Зведена'))) {
-    throw pvkError('Це не таблиця ПВК: потрібні аркуші «АА», «ПС», «Об’єкти» без аркуша «Зведена».', 'NOT_PVK');
-  }
+  const hasSummary = listed.some(sheet => pvkNorm(sheet.name) === pvkNorm('Зведена'));
+  const selected = PVK_SHEETS.map(name => listed.find(sheet => pvkNorm(sheet.name) === pvkNorm(name))).filter(Boolean);
   const shared = parseSharedStrings(sharedPath ? await text(sharedPath) : await text('xl/sharedStrings.xml'));
+  // «Таблиця 1» (журнал ударів) може бути аркушем таблиці ПВК або окремим файлом.
+  const journal = hasSummary ? null : await readPvkJournal(listed.filter(sheet => !selected.includes(sheet)), text, shared);
+  if (hasSummary || (selected.length < PVK_SHEETS.length && !journal)) {
+    throw pvkError('Це не таблиця ПВК: потрібні аркуші «АА», «ПС», «Об’єкти» або журнал «Таблиця 1», без аркуша «Зведена».', 'NOT_PVK');
+  }
   const sheets = [];
   for (const sheet of selected) {
     const xml = await text(sheet.path);
@@ -1936,7 +1939,69 @@ async function openPvkWorkbook(u8) {
       issues: rows.flatMap(row => row.issues.map(item => Object.assign({ rowNumber: row.rowNumber }, item))),
     });
   }
-  return { kind: 'pvk', readOnly: true, sheets, records: [], sheetName: 'АА / ПС / Об’єкти' };
+  const sheetName = [journal && journal.name].concat(sheets.map(sheet => sheet.name)).filter(Boolean).join(' / ');
+  return { kind: 'pvk', readOnly: true, sheets, journal, records: [], sheetName };
+}
+
+/* «Таблиця 1» — журнал ударів ПВК: один рядок на удар, між місяцями — рядки-розділювачі («СІЧЕНЬ»). */
+const PVK_JOURNAL_HEADERS = ['№ з/п', 'Дата', 'Час удару', 'Номер цілі', 'Характер цілі', 'Координати цілі', 'Населений пункт', 'Фактичні приходи', 'Сили та засоби', 'Тип АЗУ', 'Витрата АЗУ', 'Результат'];
+const PVK_JOURNAL_NAME = /^(?:табл(?:иця|\.)?\s*№?\s*1|журнал)/;
+function journalDate(raw) {
+  const v = String(raw || '').trim(); const m = /^(\d{1,2})[./](\d{1,2})[./](\d{2})$/.exec(v);
+  const iso = m ? '20' + m[3] + '-' + m[2].padStart(2, '0') + '-' + m[1].padStart(2, '0') : normDate(v);
+  return /^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso : '';
+}
+function journalTime(raw) {
+  const v = String(raw || '').trim(); let m;
+  if ((m = /^(\d{1,2})[:.](\d{2})(?::\d{2})?$/.exec(v)) && +m[1] < 24 && +m[2] < 60) return m[1].padStart(2, '0') + ':' + m[2];
+  if (/^\d{1,2}$/.test(v) && +v < 24) return v.padStart(2, '0') + ':00';
+  if (/^\d*\.\d+$/.test(v)) { // час Excel — частка доби (або дата з часом)
+    const minutes = Math.round((+v - Math.floor(+v)) * 1440) % 1440;
+    return String(Math.floor(minutes / 60)).padStart(2, '0') + ':' + String(minutes % 60).padStart(2, '0');
+  }
+  return '';
+}
+async function readPvkJournal(candidates, text, shared) {
+  const known = new Set(PVK_JOURNAL_HEADERS.map(pvkNorm));
+  const byName = sheet => PVK_JOURNAL_NAME.test(pvkNorm(sheet.name)) ? 0 : 1;
+  for (const sheet of [...candidates].sort((a, b) => byName(a) - byName(b))) {
+    const xml = await text(sheet.path); if (xml == null) continue;
+    const rows = parseSheet(xml, shared);
+    const headerRow = rows.slice(0, 5).find(row => Object.values(row.cells).filter(cell => known.has(pvkNorm(cell.v))).length >= 4);
+    if (headerRow) return parseJournalRows(sheet.name, headerRow, rows);
+  }
+  return null;
+}
+function parseJournalRows(name, headerRow, rows) {
+  const columns = Object.keys(headerRow.cells).sort((a, b) => colNum(a) - colNum(b))
+    .map(letter => ({ letter, header: String(headerRow.cells[letter].v || '').replace(/\s+/g, ' ').trim() })).filter(column => column.header);
+  const find = test => columns.find(column => test(pvkNorm(column.header)));
+  const dateColumn = find(h => h === 'дата'), timeColumn = find(h => /^час/.test(h)), indexColumn = find(h => /^№/.test(h));
+  const out = [];
+  for (const row of rows) {
+    if (row.r <= headerRow.r) continue;
+    const values = {}; const filled = [];
+    for (const column of columns) {
+      const value = String((row.cells[column.letter] || {}).v == null ? '' : row.cells[column.letter].v).trim();
+      values[column.header] = value;
+      if (value) filled.push(column);
+    }
+    if (!filled.some(column => column !== indexColumn)) {
+      // Порожній рядок, рядок лише з номером або розділювач місяця («СІЧЕНЬ»).
+      continue;
+    }
+    if (filled.length === 1 && filled[0] === columns[0] && !/\d/.test(values[columns[0].header])) continue;
+    const dateRaw = dateColumn ? values[dateColumn.header] : '';
+    const date = journalDate(dateRaw);
+    const issues = [];
+    if (dateRaw && !date) issues.push({ type: 'invalid-date', raw: dateRaw });
+    if (!dateRaw) issues.push({ type: 'no-date' });
+    out.push({ rowNumber: row.r, date, dateRaw, time: timeColumn ? journalTime(values[timeColumn.header]) : '', values, issues });
+  }
+  return {
+    name, headers: columns.map(column => column.header), rows: out,
+    issues: out.flatMap(row => row.issues.map(item => Object.assign({ rowNumber: row.rowNumber }, item))),
+  };
 }
 
 async function isPvkWorkbook(u8) { try { await openPvkWorkbook(u8); return true; } catch (error) { return false; } }
@@ -2832,10 +2897,10 @@ function renderFile() {
     return;
   }
   if (pvk) {
-    const rowCount = S.wb.sheets.reduce((sum, sheet) => sum + sheet.rows.length, 0);
+    const rowCount = S.wb.sheets.reduce((sum, sheet) => sum + sheet.rows.length, S.wb.journal ? S.wb.journal.rows.length : 0);
     put(box,
       h('div', { class: 'file-row' },
-        h('div', { class: 'file-main' }, h('strong', { class: 'file-name' }, S.name), h('span', { class: 'muted' }, '«АА», «ПС», «Об’єкти» · ' + rowCount + ' рядків даних')),
+        h('div', { class: 'file-main' }, h('strong', { class: 'file-name' }, S.name), h('span', { class: 'muted' }, S.wb.sheetName + ' · ' + rowCount + ' рядків даних')),
         h('div', { class: 'file-actions' }, h('span', { class: 'mode ok' }, 'Лише читання'), S.handle ? h('button', { class: 'btn quiet', onclick: () => refreshFromDisk(true) }, 'Оновити') : null, h('button', { class: 'btn quiet', onclick: pickFile }, 'Інший файл'))),
       h('div', { class: 'notice' }, h('p', { class: 'msg' }, 'Для таблиці ПВК внесення доповідей і Signal-перегляд вимкнені. Вносьте дані в Excel, збережіть файл і натисніть «Оновити». Сирий XLSX модуль не змінює.')));
     return;
@@ -4552,7 +4617,7 @@ function renderChip() {
   const S = AV.S, box = $('#fileChip'); box.textContent = '';
   if (!S.wb) { box.className = ''; box.append(h('button', { class: 'btn', type: 'button', onclick: () => AV.pickFile() }, 'Відкрити таблицю…')); return; }
   const pvk = S.wb.kind === 'pvk', inPlace = !!S.handle, unsaved = S.dirty || (!inPlace && S.undo.length > 0);
-  const n = pvk ? S.wb.sheets.reduce((sum, sheet) => sum + sheet.rows.length, 0) : S.wb.records.length;
+  const n = pvk ? S.wb.sheets.reduce((sum, sheet) => sum + sheet.rows.length, S.wb.journal ? S.wb.journal.rows.length : 0) : S.wb.records.length;
   box.className = 'filechip'; box.title = pvk ? 'Таблиця ПВК: лише читання' : inPlace ? (S.dirty ? 'Зміни ще не записано у файл' : 'Записує прямо у файл') : 'Файл відкрито без прямого запису: після додавання завантажте його';
   box.append(h('span', { class: 'dot' + (inPlace && !unsaved ? '' : ' warn') }), h('span', { class: 'nm', text: S.name }), h('span', { class: 'cnt', text: N0(n) + ' ' + plural(n, pvk ? ['рядок', 'рядки', 'рядків'] : ['запис', 'записи', 'записів']) }));
   if (unsaved) box.append(h('button', { class: 'btn primary', type: 'button', onclick: () => AV.downloadCurrent() }, 'Завантажити'));

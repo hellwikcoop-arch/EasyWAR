@@ -3,8 +3,10 @@ import {
   aggregateSheet,
   allDateRange,
   createDashboardModel,
+  csvRowsForJournal,
   csvRowsForSheet,
   groupIssues,
+  searchJournal,
 } from './pvk-dashboard-core.js';
 
 const state = {
@@ -14,7 +16,10 @@ const state = {
   from: '',
   to: '',
   tableSheet: 'АА',
+  journalQuery: '',
+  journalLimit: 300,
 };
+const JOURNAL_PAGE_SIZE = 300;
 
 const number = value => Math.round(Number(value) || 0).toLocaleString('uk-UA');
 const decimal = value => (Number(value) || 0).toLocaleString('uk-UA', { maximumFractionDigits: 1 });
@@ -49,7 +54,8 @@ function ensureState(workbook) {
   if (state.workbook === workbook) return;
   state.workbook = workbook;
   const range = allDateRange(workbook);
-  Object.assign(state, { view: 'summary', preset: 'all', from: range.from, to: range.to, tableSheet: 'АА' });
+  const view = workbook?.sheets?.length ? 'summary' : 'journal';
+  Object.assign(state, { view, preset: 'all', from: range.from, to: range.to, tableSheet: 'АА', journalQuery: '', journalLimit: JOURNAL_PAGE_SIZE });
 }
 
 function setPreset(workbook, preset) {
@@ -238,9 +244,126 @@ function summaryPage(model) {
       kpi('Дорозвідується', number(summary.reconnaissance), 'Окремий результат ПС', 'violet'),
       kpi('% уражених', percent(summary.affectedPercent), 'Уражено / (Уражено + НЕ уражено)', 'green'),
       kpi('Уражені об’єкти', number(summary.objects), 'Без показника «Витрата»', 'blue'),
-      kpi('Витрата', number(summary.expenditure), 'Окремо від об’єктів', 'red')),
+      kpi('Витрата', number(summary.expenditure), 'Окремо від об’єктів', 'red'),
+      summary.journalRecords == null ? null : kpi('Таблиця 1', number(summary.journalRecords), 'Записів у журналі ударів', 'violet')),
     h('section', { class: 'pvk-section' }, h('header', {}, h('h3', { text: 'Календар активності' }), h('span', { text: 'Сума АУ за днями' })), activityCalendar(summary.activity, model.range)),
     h('section', { class: 'pvk-section' }, h('header', {}, h('h3', { text: 'Загальна динаміка' }), h('span', { text: 'Обраний період' })), multiLine(summary.dynamics)));
+}
+
+/* ------------------------- «Таблиця 1»: журнал ударів ------------------------- */
+
+function dayBars(series, range) {
+  if (!series.length) return h('p', { class: 'pvk-empty', text: 'За період немає записів із датою.' });
+  const values = new Map(series.map(item => [item.date, item.value]));
+  const first = dayNumber(range.from || series[0].date), last = dayNumber(range.to || series.at(-1).date);
+  const days = []; for (let day = first; day <= last; day++) days.push(isoFromDay(day));
+  const width = 920, height = 150, maximum = Math.max(1, ...series.map(item => item.value));
+  const step = (width - 16) / Math.max(1, days.length);
+  const chart = h('svg:svg', { class: 'pvk-daybars', viewBox: `0 0 ${width} ${height}`, role: 'img', 'aria-label': 'Кількість ударів за днями' });
+  days.forEach((date, index) => {
+    const value = values.get(date) || 0; if (!value) return;
+    const barHeight = value / maximum * (height - 20);
+    chart.append(h('svg:rect', { x: (8 + index * step).toFixed(1), y: (height - 10 - barHeight).toFixed(1), width: Math.max(1, step - 1).toFixed(1), height: barHeight.toFixed(1), rx: 1, fill: 'var(--pvk-blue)' },
+      h('svg:title', { text: `${dateLabel(date)}: ${value}` })));
+  });
+  return h('div', { class: 'pvk-lines-wrap' }, chart,
+    h('div', { class: 'pvk-lines-legend' }, h('span', { text: `${dateLabel(days[0])} – ${dateLabel(days.at(-1))}` }), h('span', { text: `максимум ${number(maximum)} за добу` })));
+}
+
+function hourBars(hours) {
+  const maximum = Math.max(1, ...hours);
+  return h('div', { class: 'pvk-hours', role: 'img', 'aria-label': 'Розподіл ударів за годинами доби' }, hours.map((value, hour) =>
+    h('span', { title: `${String(hour).padStart(2, '0')}:00–${String(hour).padStart(2, '0')}:59 · ${value}` },
+      h('b', { style: { height: `${Math.round(value / maximum * 100)}%` } }),
+      h('small', { text: String(hour).padStart(2, '0') }))));
+}
+
+function valueRanking(items, total, limit = 12) {
+  if (!items.length) return h('p', { class: 'pvk-empty', text: 'Значень за період немає.' });
+  const maximum = Math.max(1, ...items.map(item => item.count));
+  return h('div', {},
+    h('div', { class: 'pvk-ranking' }, items.slice(0, limit).map(item => h('div', { class: 'pvk-rank-row' },
+      h('span', { text: item.value, title: item.value }),
+      h('i', {}, h('b', { style: { width: `${item.count / maximum * 100}%` } })),
+      h('strong', { text: total ? `${number(item.count)} · ${decimal(item.count / total * 100)}%` : number(item.count) })))),
+    items.length > limit ? h('p', { class: 'pvk-more', text: `Ще ${number(items.length - limit)} значень — див. таблицю записів нижче.` }) : null);
+}
+
+function journalColumnCard(column, journal) {
+  const filledNote = `заповнено ${number(column.filled)} з ${number(journal.total)}`;
+  let body;
+  switch (column.kind) {
+    case 'index': body = [h('strong', { class: 'pvk-value', text: number(journal.total) }), h('span', { class: 'pvk-delta', text: 'записів за період' })]; break;
+    case 'date': body = [h('strong', { class: 'pvk-value', text: number(column.days) }), h('span', { class: 'pvk-delta', text: `днів з ударами · ${dateLabel(column.first)} – ${dateLabel(column.last)}` })]; break;
+    case 'time': body = [h('strong', { class: 'pvk-value', text: number(column.withTime) }), h('span', { class: 'pvk-delta', text: `записів із часом · розподіл за годинами вище` })]; break;
+    case 'coords': body = [h('strong', { class: 'pvk-value', text: number(column.filled) }), h('span', { class: 'pvk-delta', text: `записів із координатами · без координат ${number(column.empty)}` })]; break;
+    case 'target': body = [
+      h('strong', { class: 'pvk-value', text: number(column.distinct) }), h('span', { class: 'pvk-delta', text: `унікальних цілей · ${filledNote}` }),
+      column.repeated.length ? [h('h5', { text: 'Повторні цілі' }), valueRanking(column.repeated, 0, 10)] : h('p', { class: 'pvk-empty', text: 'Повторних цілей немає.' })]; break;
+    case 'numeric': body = [
+      h('strong', { class: 'pvk-value', text: decimal(column.sum) }), h('span', { class: 'pvk-delta', text: `разом · ${filledNote}` }),
+      sparkline(column.series),
+      h('dl', { class: 'pvk-stats' },
+        h('div', {}, h('dt', { text: 'Середнє на запис' }), h('dd', { text: decimal(column.average) })),
+        h('div', {}, h('dt', { text: 'Максимум' }), h('dd', { text: decimal(column.max) })))]; break;
+    default: body = [h('span', { class: 'pvk-delta', text: `${number(column.distinct)} різних значень · ${filledNote}` }), valueRanking(column.values, column.filled)];
+  }
+  const wide = column.kind === 'category' || column.kind === 'target';
+  return h('article', { class: `pvk-metric pvk-journal-card${wide ? ' pvk-wide' : ''}`, 'data-column': column.header },
+    h('div', { class: 'pvk-metric-head' }, h('h4', { text: column.header })), body);
+}
+
+function journalRecords(journal, options) {
+  const count = h('span');
+  const tbody = h('tbody');
+  const more = h('div', { class: 'pvk-table-actions' });
+  const paint = () => {
+    const rows = searchJournal(journal, state.journalQuery);
+    count.textContent = state.journalQuery ? `знайдено ${number(rows.length)} з ${number(journal.total)}` : `${number(rows.length)} записів`;
+    tbody.textContent = '';
+    tbody.append(...rows.slice(0, state.journalLimit).map(row => h('tr', {},
+      journal.headers.map(header => h('td', { text: row.values?.[header] ?? '' })))));
+    if (!rows.length) tbody.append(h('tr', {}, h('td', { colspan: journal.headers.length, class: 'pvk-empty', text: 'Записів не знайдено.' })));
+    more.textContent = '';
+    if (rows.length > state.journalLimit) {
+      more.append(h('button', { class: 'btn quiet', type: 'button', onclick: () => { state.journalLimit += JOURNAL_PAGE_SIZE; paint(); } }, `Показати ще (${number(rows.length - state.journalLimit)})`));
+    }
+    return rows;
+  };
+  const search = h('input', { type: 'search', value: state.journalQuery, placeholder: 'Пошук: ціль, населений пункт, засоби…', 'aria-label': 'Пошук у Таблиці 1',
+    oninput: event => { state.journalQuery = event.target.value; state.journalLimit = JOURNAL_PAGE_SIZE; paint(); } });
+  const exportButton = h('button', { class: 'btn primary', type: 'button', onclick: () => {
+    const range = [journal.rows[0]?.date, journal.rows.at(-1)?.date].filter(Boolean).sort();
+    options.downloadCSV(`EasyWAR_PVK_Таблиця1_${range[0] || 'all'}_${range.at(-1) || 'all'}.csv`, csvRowsForJournal(journal, searchJournal(journal, state.journalQuery)));
+  } }, 'Завантажити CSV');
+  paint();
+  return h('section', { class: 'pvk-section' },
+    h('header', {}, h('h3', { text: 'Записи' }), count),
+    h('div', { class: 'pvk-table-actions pvk-journal-tools' }, search, exportButton),
+    h('div', { class: 'pvk-table-scroll pvk-journal-scroll' }, h('table', { class: 'pvk-table pvk-journal-table' },
+      h('thead', {}, h('tr', {}, journal.headers.map(header => h('th', { text: header })))), tbody)),
+    more);
+}
+
+function journalPage(model, options) {
+  const journal = model.journal;
+  return h('div', { class: 'pvk-page' },
+    h('header', { class: 'pvk-page-head' },
+      h('div', {}, h('span', { class: 'pvk-eyebrow', text: 'Журнал ударів' }), h('h2', { text: journal.name })),
+      h('strong', { text: `${journal.headers.length} стовпців` })),
+    h('div', { class: 'pvk-kpis' },
+      kpi('Записів', number(journal.total), 'Ударів за період', 'blue'),
+      kpi('Днів з ударами', number(journal.days), `${dateLabel(model.range.from)} – ${dateLabel(model.range.to)}`, 'amber'),
+      journal.targets == null ? null : kpi('Унікальних цілей', number(journal.targets), 'За «Номер цілі»', 'green'),
+      journal.withCoordinates == null ? null : kpi('Із координатами', number(journal.withCoordinates), `Без координат ${number(journal.total - journal.withCoordinates)}`, 'violet'),
+      journal.confirmed ? kpi('Підтверджено відео', percent(journal.confirmed.percent), `Фактичні приходи ${decimal(journal.confirmed.counted)} з витрати АЗУ ${decimal(journal.confirmed.reported)}`, 'green') : null),
+    h('section', { class: 'pvk-section' }, h('header', {}, h('h3', { text: 'Удари за днями' }), h('span', { text: 'Кількість записів' })), dayBars(journal.series, model.range)),
+    journal.columns.some(column => column.kind === 'time')
+      ? h('section', { class: 'pvk-section' }, h('header', {}, h('h3', { text: 'Час удару' }), h('span', { text: 'Розподіл за годинами доби' })), hourBars(journal.hours))
+      : null,
+    h('section', { class: 'pvk-section' }, h('header', {}, h('h3', { text: 'Усі стовпці журналу' }), h('span', { text: 'Кожен стовпець — окремий блок' })),
+      h('div', { class: 'pvk-metric-grid pvk-journal-grid' }, journal.columns.map(column => journalColumnCard(column, journal)))),
+    journalRecords(journal, options));
 }
 
 function tablePage(model, options) {
@@ -304,22 +427,24 @@ export function render(host, workbook, options = {}) {
   const rerender = () => render(host, workbook, options);
   const model = createDashboardModel(workbook, { from: state.from, to: state.to });
   const runtime = { rerender, downloadCSV: options.downloadCSV || defaultDownload };
+  const hasSheets = model.sheets.length > 0;
   const nav = [
-    ['summary', 'Зведення ПВК'],
-    ['АА', 'АА'],
-    ['ПС', 'ПС'],
-    ["Об'єкти", 'Об’єкти'],
-    ['table', 'Зведена таблиця'],
+    hasSheets && ['summary', 'Зведення ПВК'],
+    model.journal && ['journal', model.journal.name],
+    ...(hasSheets ? model.sheets.map(sheet => [sheet.name, sheet.name === "Об'єкти" ? 'Об’єкти' : sheet.name]) : []),
+    hasSheets && ['table', 'Зведена таблиця'],
     ['quality', 'Перевірка даних'],
-  ];
-  const page = state.view === 'summary' ? summaryPage(model)
+  ].filter(Boolean);
+  if (!nav.some(([key]) => key === state.view)) state.view = nav[0][0];
+  const page = state.view === 'journal' ? journalPage(model, runtime)
+    : state.view === 'summary' ? summaryPage(model)
     : state.view === 'table' ? tablePage(model, runtime)
       : state.view === 'quality' ? qualityPage(model)
         : sheetPage(model.sheets.find(sheet => sheet.name === state.view) || model.sheets[0]);
   root.textContent = '';
   root.append(
     h('header', { class: 'pvk-hero' },
-      h('div', {}, h('span', { class: 'pvk-eyebrow', text: 'ТАБЛ 2-3 · локальна аналітика' }), h('h1', { text: 'Дашборд ПВК' }), h('p', { text: 'Усі підпорядковані підрозділи · файл відкрито лише для читання' })),
+      h('div', {}, h('span', { class: 'pvk-eyebrow', text: `${[model.journal && model.journal.name, hasSheets && 'ТАБЛ 2-3'].filter(Boolean).join(' і ')} · локальна аналітика` }), h('h1', { text: 'Дашборд ПВК' }), h('p', { text: 'Усі підпорядковані підрозділи · файл відкрито лише для читання' })),
       options.canRefresh ? h('button', { class: 'btn quiet', type: 'button', onclick: () => options.refresh?.() }, 'Оновити з файлу') : null),
     periodControls(workbook, rerender),
     h('nav', { class: 'pvk-nav', 'aria-label': 'Розділи дашборда ПВК' }, nav.map(([key, label]) => h('button', { type: 'button', 'aria-pressed': String(state.view === key), onclick: () => { state.view = key; rerender(); } }, label))),
@@ -330,15 +455,22 @@ export function render(host, workbook, options = {}) {
 export function renderBase(host, workbook) {
   if (!host || workbook?.kind !== 'pvk') return;
   host.textContent = '';
-  host.append(
+  host.append(...[
     h('section', { class: 'pvk-base-hero' }, h('span', { class: 'pvk-eyebrow', text: 'Лише читання' }), h('h1', { text: 'Таблиця ПВК' }), h('p', { text: 'Аркуші показано без можливості змінити сирий XLSX. Дані редагуються в Excel, після чого натисніть «Оновити».' })),
+    workbook.journal ? h('section', { class: 'pvk-section' },
+      h('header', {}, h('h2', { text: workbook.journal.name }), h('span', { text: `${workbook.journal.rows.length} записів · ${workbook.journal.headers.length} стовпців` })),
+      h('div', { class: 'pvk-table-scroll' }, h('table', { class: 'pvk-table' },
+        h('thead', {}, h('tr', {}, workbook.journal.headers.map(header => h('th', { text: header })))),
+        h('tbody', {}, workbook.journal.rows.length
+          ? workbook.journal.rows.map(row => h('tr', {}, workbook.journal.headers.map(header => h('td', { text: row.values?.[header] ?? '' }))))
+          : h('tr', {}, h('td', { colspan: workbook.journal.headers.length, class: 'pvk-empty', text: 'Записів немає.' })))))) : null,
     ...workbook.sheets.map(sheet => h('section', { class: 'pvk-section' },
       h('header', {}, h('h2', { text: sheet.name }), h('span', { text: `${sheet.rows.length} рядків даних · ${sheet.headers.length - 1} показників` })),
       h('div', { class: 'pvk-table-scroll' }, h('table', { class: 'pvk-table' },
         h('thead', {}, h('tr', {}, sheet.headers.map(header => h('th', { text: header })))),
         h('tbody', {}, sheet.rows.length ? sheet.rows.map(row => h('tr', {},
           h('td', { text: dateLabel(row.date) }),
-          sheet.headers.slice(1).map(metric => h('td', { text: row.raw?.[metric] === '' || row.raw?.[metric] == null ? '' : String(row.raw[metric]) })))) : h('tr', {}, h('td', { colspan: sheet.headers.length, class: 'pvk-empty', text: 'Рядків із даними немає.' }))))))));
+          sheet.headers.slice(1).map(metric => h('td', { text: row.raw?.[metric] === '' || row.raw?.[metric] == null ? '' : String(row.raw[metric]) })))) : h('tr', {}, h('td', { colspan: sheet.headers.length, class: 'pvk-empty', text: 'Рядків із даними немає.' })))))))].filter(Boolean));
 }
 
 export function unmount(host) {
