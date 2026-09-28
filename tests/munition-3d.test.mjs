@@ -44,8 +44,20 @@ test('only GBU-39/53/62/64 unfold wings, and unfolded wings widen the model', ()
     const folded = size(group).z;
     for (const [mesh, angle] of wings) mesh.rotation.y = angle;
     group.updateMatrixWorld(true);
-    assert.ok(size(group).z > folded + 1.5, `${kind}: wings spread sideways`);
+    assert.ok(size(group).z > folded + 1, `${kind}: wings spread sideways`);
   }
+});
+
+test('GBU-62 wings open into the narrow scissor of the drawing, GBU-39 wings open wide', () => {
+  const span = kind => {
+    const { group, wings } = buildModel(kind);
+    for (const [mesh, angle] of wings) mesh.rotation.y = angle;
+    group.updateMatrixWorld(true);
+    return size(group).z / size(group).x;
+  };
+  // На кресленні JDAM-ER розмах крил — близько 0,43 довжини бомби, у GBU-39 — понад 0,75.
+  assert.ok(span('62') > .38 && span('62') < .48, `GBU-62 span ${span('62').toFixed(2)}`);
+  assert.ok(span('39') > .75, `GBU-39 span ${span('39').toFixed(2)}`);
 });
 
 test('unknown kinds fall back to the plain bomb', () => {
