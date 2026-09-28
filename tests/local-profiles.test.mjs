@@ -98,6 +98,7 @@ test('each branch has its own table slot and base tables open in their module', 
     Object.fromEntries(BASE_TABLES.map(table => [table.key, table.branch])),
     { air: 'air', pvk: 'air', rvia: 'rocket' },
   );
+  assert.equal(BASE_TABLES.find(table => table.key === 'pvk').note, undefined);
 });
 
 test('profile database handle reads and writes through the bound file', async () => {

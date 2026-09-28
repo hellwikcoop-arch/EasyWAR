@@ -88,7 +88,7 @@ export const PROFILE_BRANCHES = [
 /** Порожні базові таблиці, з яких можна почати. `branch` — модуль, що їх відкриває. */
 export const BASE_TABLES = [
   { key: 'air', branch: 'air', label: 'ПС — базова таблиця' },
-  { key: 'pvk', branch: 'air', label: 'ПС рівня ПВК (ТАБЛ 2-3)', note: 'дашборд під неї ще в розробці' },
+  { key: 'pvk', branch: 'air', label: 'ПС рівня ПВК (ТАБЛ 2-3)' },
   { key: 'rvia', branch: 'rocket', label: 'РВіА — базова таблиця' },
 ];
 
