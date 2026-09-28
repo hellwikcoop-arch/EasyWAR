@@ -1996,7 +1996,11 @@ function parseJournalRows(name, headerRow, rows) {
     const issues = [];
     if (dateRaw && !date) issues.push({ type: 'invalid-date', raw: dateRaw });
     if (!dateRaw) issues.push({ type: 'no-date' });
-    out.push({ rowNumber: row.r, date, dateRaw, time: timeColumn ? journalTime(values[timeColumn.header]) : '', values, issues });
+    const time = timeColumn ? journalTime(values[timeColumn.header]) : '';
+    // Excel зберігає дату й час числами (46295, 0.729…): у записах, пошуку й CSV — так, як у звіті.
+    if (date) values[dateColumn.header] = date.slice(8, 10) + '.' + date.slice(5, 7) + '.' + date.slice(0, 4);
+    if (time) values[timeColumn.header] = time;
+    out.push({ rowNumber: row.r, date, dateRaw, time, values, issues });
   }
   return {
     name, headers: columns.map(column => column.header), rows: out,
@@ -4704,7 +4708,7 @@ function renderExtras(cur) {
       return h('tr', { class: 'clk', tabindex: '0', title: 'Відкрити останній виліт по цілі ' + id, onclick: () => openPassport(lastR), onkeydown: ev => { if (ev.key === 'Enter') openPassport(lastR); } },
         h('td', {}, h('span', { class: 'code', text: id })), h('td', { text: lastR.types[0] || '—' }), h('td', { class: 't r', text: N0(a.length) }),
         h('td', {}, h('span', { class: 'rmini' }, ['hit', 'part', 'miss', 'unk'].filter(k => kc[k]).map(k => h('span', { class: 'rm ' + k, title: KLABEL[k] + ': ' + kc[k], text: kc[k] })))), h('td', { class: 't', text: dmy(lastR.date) })); })))),
-    rep.length > 8 ? h('p', { class: 'sub dp-note', text: 'Показано 8 із ' + N0(rep.length) + ' цілей; порядок — за кількістю вильотів.' }) : null);
+    rep.length > 8 ? h('p', { class: 'sub dp-note', text: 'Показано 8 із ' + N0(rep.length) + ' цілей; порядок — за кількістю вильотів.' }) : '');
   // час доби
   const hc = Array.from({ length: 24 }, () => ({ hit: 0, part: 0, miss: 0, unk: 0, tot: 0 })); let noT = 0;
   for (const r of cur) { const m = /(\d{1,2}):(\d{2})/.exec(r.time || ''); if (!m) { noT++; continue; } const hr = Math.min(23, +m[1]); hc[hr][r.kind]++; hc[hr].tot++; }
@@ -4856,6 +4860,7 @@ function renderActivity(cur) {
 
 
 function renderAll() {
+  if (!el.content) return; // дані прийшли раніше, ніж збудовано дашборд: init() покаже їх сам
   if (AV.S.wb && AV.S.wb.kind === 'pvk') {
     el.empty.hidden = true; el.toolbar.hidden = true; el.content.hidden = true; el.side.hidden = true;
     window.PVKDashboard?.render(root, AV.S.wb, { downloadCSV, refresh: () => AV.refresh(true), canRefresh: !!AV.S.handle });

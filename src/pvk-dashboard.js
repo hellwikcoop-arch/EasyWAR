@@ -39,7 +39,8 @@ function h(tag, attrs = {}, ...children) {
     if (key === 'class') node.setAttribute('class', value);
     else if (key === 'text') node.textContent = value;
     else if (key.startsWith('on')) node.addEventListener(key.slice(2), value);
-    else if (key === 'style' && typeof value === 'object') Object.assign(node.style, value);
+    // CSS custom properties (--level) are set only through setProperty.
+    else if (key === 'style' && typeof value === 'object') for (const [name, css] of Object.entries(value)) node.style.setProperty(name.replace(/[A-Z]/g, c => `-${c.toLowerCase()}`), css);
     else if (value === true) node.setAttribute(key, '');
     else node.setAttribute(key, String(value));
   }
@@ -193,22 +194,29 @@ function kpi(label, value, detail, tone = '') {
   return h('article', { class: `pvk-kpi ${tone}` }, h('span', { text: label }), h('strong', { text: value }), h('small', { text: detail }));
 }
 
+const MONTHS = ['Січ', 'Лют', 'Бер', 'Кві', 'Тра', 'Чер', 'Лип', 'Сер', 'Вер', 'Жов', 'Лис', 'Гру'];
+
+/** Рядок на місяць, стовпець на число місяця; колір дня — частка від найактивнішого дня. */
 function activityCalendar(series, range) {
   if (!range.from || !range.to) return h('p', { class: 'pvk-empty', text: 'У таблиці ще немає дат.' });
   const values = new Map(series.map(item => [item.date, item.value]));
   const maximum = Math.max(1, ...values.values());
-  const days = [];
+  const months = new Map();
   for (let day = dayNumber(range.from); day <= dayNumber(range.to); day++) {
     const date = isoFromDay(day);
     const value = values.get(date) || 0;
-    days.push(h('span', {
-      class: 'pvk-day',
+    const month = date.slice(0, 7);
+    if (!months.has(month)) months.set(month, []);
+    months.get(month).push(h('span', {
+      class: value ? 'pvk-day' : 'pvk-day is-empty',
       title: `${dateLabel(date)} · АУ: ${value}`,
       'aria-label': `${dateLabel(date)}, АУ ${value}`,
-      style: { '--level': String(value / maximum) },
-    }, h('b', { text: String(new Date(`${date}T00:00:00Z`).getUTCDate()) }), h('small', { text: number(value) })));
+      style: { '--level': String(value / maximum), gridColumn: String(Number(date.slice(8, 10))) },
+    }, h('b', { text: String(Number(date.slice(8, 10))) }), h('small', { text: number(value) })));
   }
-  return h('div', { class: 'pvk-calendar' }, days);
+  return h('div', { class: 'pvk-calendar' }, [...months].map(([month, days]) => h('div', { class: 'pvk-cal-month' },
+    h('span', { class: 'pvk-cal-label', text: `${MONTHS[Number(month.slice(5, 7)) - 1]} ${month.slice(0, 4)}` }),
+    h('div', { class: 'pvk-cal-days' }, days))));
 }
 
 function multiLine(dynamics) {
