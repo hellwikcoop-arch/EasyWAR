@@ -1,27 +1,52 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-const { airDashboard, airWindow, airWorkSettled, trackAirWork, whenAirDashboard } = await import('../src/air-bridge.js');
+const {
+  airDashboard, airWindow, airWorkSettled, moduleWindow, moduleWorkSettled, trackAirWork,
+  trackModuleWork, whenAirDashboard, whenModuleDashboard,
+} = await import('../src/air-bridge.js');
 
 function launcher({ loaded = false } = {}) {
   const frameWindow = {};
+  const rocketWindow = {};
   const listeners = new Set();
   const opened = [];
-  globalThis.document = { getElementById: id => (id === 'frame-air' ? { contentWindow: frameWindow } : null) };
+  const frames = { 'frame-air': frameWindow, 'frame-rocket': rocketWindow };
+  globalThis.document = { getElementById: id => (frames[id] ? { contentWindow: frames[id] } : null) };
   globalThis.window = {
     EW_LAUNCHER: { openBranch: branch => opened.push(branch), isLoaded: () => loaded },
     addEventListener: (type, listener) => type === 'ew:branch-open' && listeners.add(listener),
     removeEventListener: (type, listener) => listeners.delete(listener),
   };
   const open = branch => listeners.forEach(listener => listener({ detail: { branch } }));
-  return { frameWindow, opened, open, listeners };
+  return { frameWindow, rocketWindow, opened, open, listeners };
 }
 
-test('inside the Air Force module the bridge uses the module window', async () => {
-  const dashboard = { connect() {} };
-  globalThis.window = { __AV: dashboard };
-  assert.equal(airWindow(), globalThis.window);
-  assert.equal(await whenAirDashboard(), dashboard);
+test('each branch module is reached through its own frame', async () => {
+  const { frameWindow, rocketWindow, opened, open } = launcher();
+  assert.equal(moduleWindow('air'), frameWindow);
+  assert.equal(moduleWindow('rocket'), rocketWindow);
+  assert.equal(moduleWindow('army'), null);
+
+  const pending = whenModuleDashboard('rocket');
+  rocketWindow.__AV = { connect() {} };
+  open('air');
+  open('rocket');
+  assert.equal(await pending, rocketWindow.__AV);
+  assert.deepEqual(opened, []);
+});
+
+test('work on one branch does not hold up the other', async () => {
+  let finish;
+  trackModuleWork('rocket', new Promise(resolve => { finish = resolve; }));
+  const events = [];
+  const air = moduleWorkSettled('air').then(() => events.push('air'));
+  const rocket = moduleWorkSettled('rocket').then(() => events.push('rocket'));
+  await air;
+  assert.deepEqual(events, ['air']);
+  finish();
+  await rocket;
+  assert.deepEqual(events, ['air', 'rocket']);
 });
 
 test('from the launcher it waits until the Air Force module is opened', async () => {
@@ -69,7 +94,7 @@ test('profile table writes keep the IPC body in the calling realm', async () => 
   const vm = await import('node:vm');
   const { profileDatabaseHandle } = await import('../src/local-profiles-core.js');
   const calls = [];
-  const handle = profileDatabaseHandle('synthetic', 'synthetic.xlsx', async (...args) => { calls.push(args); });
+  const handle = profileDatabaseHandle('synthetic', 'air', 'synthetic.xlsx', async (...args) => { calls.push(args); });
   const writable = await handle.createWritable();
   const frameBytes = vm.runInNewContext('new Uint8Array([9, 8, 7, 6]).subarray(1, 3)');
   await writable.write(frameBytes);

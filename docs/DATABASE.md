@@ -14,7 +14,11 @@ Migration `0002_xlsx_duplicate_links.sql` adds immutable XLSX parsed-payload
 fingerprints and optional links to prior exact matches. Migration
 `0003_local_profiles.sql` adds local profile identities and the singleton active
 profile selection. Migration `0004_workspace_templates.sql` adds an optional
-local role-template assignment for each profile. Migrations contain no
+local role-template assignment for each profile. Migration
+`0005_profile_details.sql` adds a profile's position, avatar and optional
+sign-in password hash. Migration `0006_profile_branch_tables.sql` binds a
+separate XLSX table per branch module (`air`, `rocket`) to a profile and moves
+an earlier single binding to the Air Force slot. Migrations contain no
 operational fixtures and create no external integration.
 
 ## Provenance layers
@@ -33,6 +37,8 @@ operational fixtures and create no external integration.
 | Local profiles | `local_profiles` | Mutable local display names with stable opaque IDs; no credentials or roles. |
 | Active local profile | `local_profile_state` | Singleton local selection used by future workspace features. |
 | Workspace template assignments | `local_profile_workspace_templates` | Optional local presentation preset for a profile; no authorization semantics. |
+| Profile details | `local_profile_details` | Position, small avatar and optional Argon2id sign-in hash; gates sign-in on this device only. |
+| Profile tables | `local_profile_tables` | One XLSX path per profile and branch module (`air`, `rocket`); the file itself is never stored or changed by binding. |
 
 The `report_current_state` view derives `NEW`, `PARSED`, or the latest review
 decision without overwriting source or parser records.

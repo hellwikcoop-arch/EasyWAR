@@ -188,6 +188,10 @@
 .ew-profile-db-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .ew-profile-db-name { font: 600 13px/1.3 var(--mono, monospace); overflow-wrap: anywhere; }
 .ew-profile-db-name.is-empty { color: var(--muted); font-family: inherit; font-weight: 500; }
+.ew-profile-db-branch { flex: 0 0 210px; color: var(--muted); font-size: 12.5px; font-weight: 600; }
+.ew-profile-db-create { margin-top: 4px; }
+.ew-profile-db-create select { flex: 1 1 260px; min-width: 0; }
+@media (max-width: 640px) { .ew-profile-db-branch { flex-basis: 100%; } }
 
 .ew-profile-row.is-locked { opacity: .92; }
 

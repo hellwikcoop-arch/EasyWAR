@@ -172,8 +172,8 @@ mod tests {
     use super::*;
     use crate::{
         database::{
-            INITIAL_SCHEMA_SQL, LOCAL_PROFILES_SQL, PROFILE_DETAILS_SQL, WORKSPACE_TEMPLATES_SQL,
-            XLSX_DUPLICATE_LINKS_SQL,
+            INITIAL_SCHEMA_SQL, LOCAL_PROFILES_SQL, PROFILE_BRANCH_TABLES_SQL, PROFILE_DETAILS_SQL,
+            WORKSPACE_TEMPLATES_SQL, XLSX_DUPLICATE_LINKS_SQL,
         },
         local_profiles::{generate_profile_id, LocalProfileStore},
     };
@@ -195,6 +195,7 @@ mod tests {
             LOCAL_PROFILES_SQL,
             WORKSPACE_TEMPLATES_SQL,
             PROFILE_DETAILS_SQL,
+            PROFILE_BRANCH_TABLES_SQL,
         ] {
             sqlx::raw_sql(migration).execute(&pool).await.unwrap();
         }

@@ -18,3 +18,11 @@ covered by a migration test. Never put operational fixtures in this directory.
 table: position, a small avatar image (data URL), an Argon2id password hash and
 the path of the XLSX table that opens after sign-in. The password gates sign-in
 on this device only; it does not encrypt the database or the bound table.
+
+`0006_profile_branch_tables.sql` lets one profile bind a separate table for each
+branch module: `local_profile_tables` holds one path per `(profile_id, branch)`,
+where `branch` is `air` (Повітряні Сили) or `rocket` (Ракетні війська і
+артилерія). A table bound before this migration becomes the Air Force table,
+because that was the only module that opened it, and the old
+`local_profile_details.database_path` column is dropped. Unbinding or deleting a
+profile never touches the file on disk.

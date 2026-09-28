@@ -79,31 +79,54 @@ export function setLocalProfilePassword(profileId, currentPassword, newPassword,
   });
 }
 
-export function chooseProfileDatabase(profileId, invokeCommand = invoke) {
-  return invokeCommand('choose_profile_database', { profileId });
+/** Роди військ, для яких профіль тримає окрему таблицю. */
+export const PROFILE_BRANCHES = [
+  { branch: 'air', short: 'ПС', title: 'Повітряні Сили', table: 'Таблиця Повітряних Сил' },
+  { branch: 'rocket', short: 'РВіА', title: 'Ракетні війська і артилерія', table: 'Таблиця Ракетних військ і артилерії' },
+];
+
+/** Порожні базові таблиці, з яких можна почати. `branch` — модуль, що їх відкриває. */
+export const BASE_TABLES = [
+  { key: 'air', branch: 'air', label: 'ПС — базова таблиця' },
+  { key: 'pvk', branch: 'air', label: 'ПС рівня ПВК (ТАБЛ 2-3)', note: 'дашборд під неї ще в розробці' },
+  { key: 'rvia', branch: 'rocket', label: 'РВіА — базова таблиця' },
+];
+
+/** Шлях таблиці профілю для роду військ або null. */
+export function profileTablePath(profile, branch) {
+  return profile?.tables?.[branch] || null;
 }
 
-export function clearProfileDatabase(profileId, invokeCommand = invoke) {
-  return invokeCommand('clear_profile_database', { profileId });
+export function chooseProfileDatabase(profileId, branch, invokeCommand = invoke) {
+  return invokeCommand('choose_profile_database', { profileId, branch });
+}
+
+export function clearProfileDatabase(profileId, branch, invokeCommand = invoke) {
+  return invokeCommand('clear_profile_database', { profileId, branch });
+}
+
+/** Зберігає порожню базову таблицю в новий файл і прив'язує її; null — якщо скасовано. */
+export function createProfileBaseTable(profileId, table, invokeCommand = invoke) {
+  return invokeCommand('create_profile_base_table', { profileId, table });
 }
 
 /**
- * Reads the profile's bound table as bytes owned by `realm`, the window of the
- * module that will parse them (the Air Force iframe when called from the
+ * Reads the profile's table for `branch` as bytes owned by `realm`, the window
+ * of the module that will parse them (the branch iframe when called from the
  * launcher). WebKit (macOS) rejects a view over another window's ArrayBuffer in
  * DecompressionStream with "Invalid type should be ArrayBuffer", which broke
  * opening the profile's XLSX, so the bytes are copied into that window's buffer.
  */
-export async function readProfileDatabase(profileId, invokeCommand = invoke, realm = globalThis) {
-  const received = new Uint8Array(await invokeCommand('read_profile_database', { profileId }));
+export async function readProfileDatabase(profileId, branch, invokeCommand = invoke, realm = globalThis) {
+  const received = new Uint8Array(await invokeCommand('read_profile_database', { profileId, branch }));
   const bytes = new realm.Uint8Array(received.byteLength);
   bytes.set(received);
   return bytes;
 }
 
-export function writeProfileDatabase(profileId, bytes, invokeCommand = invoke) {
+export function writeProfileDatabase(profileId, branch, bytes, invokeCommand = invoke) {
   return invokeCommand('write_profile_database', bytes, {
-    headers: { 'x-easywar-profile': profileId },
+    headers: { 'x-easywar-profile': profileId, 'x-easywar-branch': branch },
   });
 }
 
@@ -118,16 +141,16 @@ export function databaseFileName(path) {
 }
 
 /**
- * Обгортка у форматі FileSystemFileHandle для дашборда: читає й записує
- * прив'язану таблицю через команди застосунку, тож «Оновити» та запис
- * доповідей працюють прямо з файлом профілю.
+ * Обгортка у форматі FileSystemFileHandle для модуля роду військ: читає й
+ * записує таблицю профілю для `branch` через команди застосунку, тож
+ * «Оновити» та запис доповідей працюють прямо з її файлом.
  */
-export function profileDatabaseHandle(profileId, name, invokeCommand = invoke, realm = globalThis) {
+export function profileDatabaseHandle(profileId, branch, name, invokeCommand = invoke, realm = globalThis) {
   return {
     kind: 'file',
     name,
     async getFile() {
-      const bytes = await readProfileDatabase(profileId, invokeCommand, realm);
+      const bytes = await readProfileDatabase(profileId, branch, invokeCommand, realm);
       return new realm.File([bytes], name, {
         type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       });
@@ -144,7 +167,7 @@ export function profileDatabaseHandle(profileId, name, invokeCommand = invoke, r
           data.set(view);
         },
         async close() {
-          if (data) await writeProfileDatabase(profileId, data, invokeCommand);
+          if (data) await writeProfileDatabase(profileId, branch, data, invokeCommand);
         },
       };
     },

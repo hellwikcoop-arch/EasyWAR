@@ -2,10 +2,12 @@ import './local-profiles.css';
 import {
   activateLocalProfile,
   activeProfileLabel,
+  BASE_TABLES,
   chooseProfileDatabase,
   clearProfileDatabase,
   createPositionDatabaseTemplate,
   createLocalProfile,
+  createProfileBaseTable,
   databaseFileName,
   deleteLocalProfile,
   getLocalProfiles,
@@ -13,7 +15,9 @@ import {
   getWorkspaceTemplates,
   isProfileLocked,
   lockLocalProfile,
+  PROFILE_BRANCHES,
   profileDatabaseHandle,
+  profileTablePath,
   readProfileDatabase,
   renameLocalProfile,
   setLocalProfilePassword,
@@ -23,7 +27,7 @@ import {
   workspaceTemplateForProfile,
   workspaceTemplateLabel,
 } from './local-profiles-core.js';
-import { airWindow, trackAirWork, whenAirDashboard } from './air-bridge.js';
+import { airWindow, moduleWindow, trackAirWork, trackModuleWork, whenAirDashboard, whenModuleDashboard } from './air-bridge.js';
 
 const AVATAR_SIZE = 256;
 
@@ -154,7 +158,7 @@ function initializeLocalProfiles() {
     </div>
     <p>Профілі зберігаються лише в локальній базі цього пристрою.</p>
     <p class="ew-profile-note">Пароль закриває вхід у профіль на цьому пристрої. Файли таблиць на диску він не шифрує.</p>
-    <p class="ew-profile-note">Прив'язана таблиця відкривається одразу після входу в профіль і записується прямо у свій файл.</p>
+    <p class="ew-profile-note">До профілю можна прив'язати окремо таблицю Повітряних Сил і таблицю Ракетних військ і артилерії. Кожна відкривається у своєму модулі після входу в профіль і записується прямо у свій файл.</p>
     <p class="ew-profile-note">Рольовий шаблон змінює лише початковий розділ робочого простору. Він не надає і не обмежує доступ.</p>
     <p id="ew-profile-status" class="ew-profile-status" role="status" aria-live="polite"></p>
     <div id="ew-profile-list" class="ew-profile-list"></div>
@@ -177,8 +181,9 @@ function initializeLocalProfiles() {
   let state = { activeProfileId: null, profiles: [] };
   let workspaceState = { defaultTemplateKey: null, templates: [], assignments: [] };
   let sessionProfileId = null;
-  let loadedDatabaseFor = null;
-  let loadingDatabaseFor = null;
+  // Per branch: the profile whose table the module has open, and the one being opened.
+  const loadedDatabaseFor = { air: null, rocket: null };
+  const loadingDatabaseFor = { air: null, rocket: null };
   let pendingDashboardSection = null;
   let busy = false;
 
@@ -269,14 +274,19 @@ function initializeLocalProfiles() {
 
     const templateSection = renderTemplateSelect(profile);
 
-    const dbName = databaseFileName(profile.databasePath);
     const database = el('div', { class: 'ew-profile-db' },
-      el('span', { class: 'ew-profile-field-caption', text: 'Таблиця профілю' }),
-      el('div', { class: 'ew-profile-db-line' },
-        el('span', { class: `ew-profile-db-name${dbName ? '' : ' is-empty'}`, title: profile.databasePath || '', text: dbName || 'не прив’язано' }),
-        el('button', { type: 'button', class: 'btn', text: dbName ? 'Змінити…' : 'Прив’язати таблицю…', onclick: () => bindDatabase(profile) }),
-        dbName ? el('button', { type: 'button', class: 'btn quiet', text: 'Відкрити зараз', disabled: !isActive, title: isActive ? '' : 'Спершу оберіть цей профіль', onclick: () => loadProfileDatabase(profile, true) }) : null,
-        dbName ? el('button', { type: 'button', class: 'btn quiet', text: 'Відв’язати', onclick: () => unbindDatabase(profile) }) : null));
+      el('span', { class: 'ew-profile-field-caption', text: 'Таблиці профілю' }),
+      PROFILE_BRANCHES.map(({ branch, title }) => {
+        const path = profileTablePath(profile, branch);
+        const dbName = databaseFileName(path);
+        return el('div', { class: 'ew-profile-db-line', 'data-branch': branch },
+          el('span', { class: 'ew-profile-db-branch', text: title }),
+          el('span', { class: `ew-profile-db-name${dbName ? '' : ' is-empty'}`, title: path || '', text: dbName || 'не прив’язано' }),
+          el('button', { type: 'button', class: 'btn', text: dbName ? 'Змінити…' : 'Прив’язати таблицю…', onclick: () => bindDatabase(profile, branch) }),
+          dbName ? el('button', { type: 'button', class: 'btn quiet', text: 'Відкрити зараз', disabled: !isActive, title: isActive ? '' : 'Спершу оберіть цей профіль', onclick: () => loadProfileDatabase(profile, branch, true) }) : null,
+          dbName ? el('button', { type: 'button', class: 'btn quiet', text: 'Відв’язати', onclick: () => unbindDatabase(profile, branch) }) : null);
+      }),
+      renderBaseTableCreate(profile));
 
     const passwordButtons = profile.hasPassword
       ? [
@@ -296,7 +306,7 @@ function initializeLocalProfiles() {
         class: 'btn quiet ew-profile-delete',
         text: 'Видалити',
         onclick: () => {
-          if (!window.confirm(`Видалити локальний профіль «${profile.displayName}»? Файл прив’язаної таблиці залишиться на диску.`)) return;
+          if (!window.confirm(`Видалити локальний профіль «${profile.displayName}»? Файли прив’язаних таблиць залишаться на диску.`)) return;
           mutate(() => deleteLocalProfile(profile.id), 'Профіль видалено.');
         },
       }));
@@ -312,6 +322,19 @@ function initializeLocalProfiles() {
       actions,
     );
     return row;
+  }
+
+  /** Нова порожня базова таблиця: зберігається в новий файл і прив’язується до свого роду військ. */
+  function renderBaseTableCreate(profile) {
+    const select = el('select', { 'aria-label': `Базова таблиця для профілю ${profile.displayName}` },
+      BASE_TABLES.map(table => el('option', {
+        value: table.key,
+        text: table.note ? `${table.label} — ${table.note}` : table.label,
+      })));
+    return el('div', { class: 'ew-profile-db-line ew-profile-db-create' },
+      el('span', { class: 'ew-profile-db-branch', text: 'Нова порожня таблиця' }),
+      select,
+      el('button', { type: 'button', class: 'btn quiet', text: 'Створити…', onclick: () => createBaseTable(profile, select.value) }));
   }
 
   function renderTemplateSelect(profile) {
@@ -435,21 +458,49 @@ function initializeLocalProfiles() {
     await run(() => setLocalProfilePassword(profile.id, values[0], null), 'Пароль знято.');
   }
 
-  async function bindDatabase(profile) {
+  const branchInfo = branch => PROFILE_BRANCHES.find(entry => entry.branch === branch);
+
+  async function bindDatabase(profile, branch) {
+    const { table } = branchInfo(branch);
     const ok = await run(async () => {
-      status.textContent = 'Оберіть таблицю .xlsx для профілю…';
-      const next = await chooseProfileDatabase(profile.id);
+      status.textContent = `Оберіть файл .xlsx: ${table.toLowerCase()}…`;
+      const next = await chooseProfileDatabase(profile.id, branch);
       if (next === null) throw new Error('вибір скасовано');
       return next;
-    }, 'Таблицю прив’язано до профілю.', 'Таблицю не прив’язано');
+    }, `${table} прив’язана до профілю.`, 'Таблицю не прив’язано');
     if (ok && profile.id === state.activeProfileId) {
-      loadedDatabaseFor = null;
-      await loadProfileDatabase(activeProfile(), true);
+      loadedDatabaseFor[branch] = null;
+      await loadProfileDatabase(activeProfile(), branch, true);
     }
   }
 
-  function unbindDatabase(profile) {
-    return run(() => clearProfileDatabase(profile.id), 'Таблицю відв’язано. Файл на диску не змінено.');
+  function unbindDatabase(profile, branch) {
+    return run(
+      () => clearProfileDatabase(profile.id, branch),
+      `${branchInfo(branch).table} відв’язана. Файл на диску не змінено.`,
+    );
+  }
+
+  async function createBaseTable(profile, key) {
+    const base = BASE_TABLES.find(entry => entry.key === key);
+    if (!base || busy) return;
+    const { table } = branchInfo(base.branch);
+    const current = profileTablePath(profile, base.branch);
+    if (current && !window.confirm(`${table} уже прив’язана: «${databaseFileName(current)}». Прив’язати натомість нову порожню таблицю? Наявний файл залишиться на диску без змін.`)) return;
+    let created = null;
+    const ok = await run(async () => {
+      status.textContent = `Оберіть, куди зберегти нову таблицю «${base.label}»…`;
+      created = await createProfileBaseTable(profile.id, key);
+      if (created === null) throw new Error('створення скасовано');
+      return created.state;
+    }, '', 'Таблицю не створено');
+    if (!ok) return;
+    status.textContent = `Створено «${base.label}»: ${created.path}. ${table} прив’язана до профілю.`
+      + (base.note ? ` ${base.note[0].toUpperCase()}${base.note.slice(1)}: поки що вносьте дані в Excel.` : '');
+    if (profile.id === state.activeProfileId && !base.note) {
+      loadedDatabaseFor[base.branch] = null;
+      await loadProfileDatabase(activeProfile(), base.branch, true);
+    }
   }
 
   async function createPositionDatabase(template) {
@@ -513,47 +564,59 @@ function initializeLocalProfiles() {
     render();
     hideLockScreen();
     applyActiveWorkspaceTemplate();
-    loadedDatabaseFor = null;
-    // Resolves when the user opens the Air Force module; sign-in does not wait for it.
-    loadProfileDatabase(activeProfile(), false);
+    loadProfileDatabases(activeProfile(), { reload: true });
     return true;
   }
 
-  // The table opens in the Air Force module. On an explicit request the
-  // launcher switches to it; otherwise it loads when the user opens it. Other
-  // actions in the module (Signal review) wait for this through trackAirWork.
-  function loadProfileDatabase(profile, manual) {
-    return trackAirWork(openProfileDatabase(profile, manual));
+  // Each table opens in its branch module. Automatically it loads when the user
+  // opens that module (sign-in does not wait for it); on an explicit request the
+  // launcher switches to the module. Other actions in a module (Signal review)
+  // wait for this through trackModuleWork.
+  function loadProfileDatabases(profile, { reload = false } = {}) {
+    for (const branch of Object.keys(loadedDatabaseFor)) {
+      if (reload) loadedDatabaseFor[branch] = null;
+      loadProfileDatabase(profile, branch, false);
+    }
   }
 
-  async function openProfileDatabase(profile, manual) {
-    if (!profile?.databasePath || isProfileLocked(profile, sessionProfileId)) return;
-    if (!manual && loadedDatabaseFor === profile.id) return;
+  function loadProfileDatabase(profile, branch, manual) {
+    return trackModuleWork(branch, openProfileDatabase(profile, branch, manual));
+  }
+
+  async function openProfileDatabase(profile, branch, manual) {
+    const path = profileTablePath(profile, branch);
+    if (!path || isProfileLocked(profile, sessionProfileId)) return;
+    if (!manual && loadedDatabaseFor[branch] === profile.id) return;
     if (manual && dialog.open) dialog.close();
-    const dashboard = await whenAirDashboard({ open: manual });
+    const dashboard = await whenModuleDashboard(branch, { open: manual });
     if (!dashboard || profile.id !== state.activeProfileId) return;
-    if (!manual && loadedDatabaseFor === profile.id) return;
+    if (!manual && loadedDatabaseFor[branch] === profile.id) return;
     // A deferred automatic load and a click on «Відкрити зараз» can both wake
     // when the module opens; only one of them may replace the open table.
-    if (loadingDatabaseFor === profile.id) return;
-    loadingDatabaseFor = profile.id;
+    if (loadingDatabaseFor[branch] === profile.id) return;
+    loadingDatabaseFor[branch] = profile.id;
     if (dashboard.S?.dirty && !window.confirm('У відкритій таблиці є незбережені записи. Відкрити таблицю профілю замість неї?')) {
-      loadingDatabaseFor = null;
+      loadingDatabaseFor[branch] = null;
       return;
     }
-    const name = databaseFileName(profile.databasePath);
-    const frame = airWindow();
+    const name = databaseFileName(path);
+    const frame = moduleWindow(branch);
     try {
-      const bytes = await readProfileDatabase(profile.id, undefined, frame);
-      await dashboard.connect(bytes, name, profileDatabaseHandle(profile.id, name, undefined, frame), true);
-      loadedDatabaseFor = profile.id;
+      const bytes = await readProfileDatabase(profile.id, branch, undefined, frame);
+      // The module reports a table it cannot read itself and keeps the open one.
+      await dashboard.connect(bytes, name, profileDatabaseHandle(profile.id, branch, name, undefined, frame), true);
+      if (dashboard.S && dashboard.S.bytes !== bytes) {
+        status.textContent = `Модуль не відкрив таблицю профілю «${name}»; причину показано в модулі.`;
+        return;
+      }
+      loadedDatabaseFor[branch] = profile.id;
       dashboard.toast?.(`Відкрито таблицю профілю: ${name}`, 'ok');
     } catch (error) {
       const message = `Не вдалося відкрити таблицю профілю «${name}»: ${String(error)}`;
       status.textContent = message;
       dashboard.showError?.(message);
     } finally {
-      loadingDatabaseFor = null;
+      loadingDatabaseFor[branch] = null;
     }
   }
 
@@ -588,7 +651,11 @@ function initializeLocalProfiles() {
       avatar(profile, 'xl'),
       el('strong', { text: profile.displayName }),
       el('span', { class: 'ew-lock-position', text: profile.position || ' ' }),
-      el('span', { class: 'ew-lock-db', text: profile.databasePath ? `Таблиця: ${databaseFileName(profile.databasePath)}` : 'Таблицю не прив’язано' }),
+      PROFILE_BRANCHES.map(({ branch, short }) => {
+        const path = profileTablePath(profile, branch);
+        return path ? el('span', { class: 'ew-lock-db', text: `${short}: ${databaseFileName(path)}` }) : null;
+      }),
+      PROFILE_BRANCHES.some(({ branch }) => profileTablePath(profile, branch)) ? null : el('span', { class: 'ew-lock-db', text: 'Таблиць не прив’язано' }),
       password,
       submit);
       return form;
@@ -657,7 +724,7 @@ function initializeLocalProfiles() {
       return;
     }
     applyActiveWorkspaceTemplate();
-    loadProfileDatabase(profile, false);
+    loadProfileDatabases(profile);
   }
 
   function close() {

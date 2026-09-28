@@ -1,6 +1,7 @@
 pub mod analytics;
 mod app_update;
 pub mod backup;
+pub mod base_tables;
 mod database;
 mod desktop_shell;
 pub mod local_profiles;
@@ -21,9 +22,10 @@ pub mod xlsx_import;
 
 use app_update::{AppUpdateStatus, PendingUpdate};
 use backup::BackupStore;
+use base_tables::BaseTable;
 use chrono::{SecondsFormat, Utc};
 use database::{DatabaseStatus, DatabaseStatusStore};
-use local_profiles::{LocalProfileStore, LocalProfilesState};
+use local_profiles::{Branch, LocalProfileStore, LocalProfilesState};
 use position_templates::PositionDatabaseTemplate;
 use repository::{
     Repository, ReviewDecision, SettingsStore, SignalInboxItem, SignalParsePersistence,
@@ -226,12 +228,16 @@ async fn choose_profile_database(
     profiles: tauri::State<'_, LocalProfileStore>,
     session: tauri::State<'_, ProfileSession>,
     profile_id: String,
+    branch: Branch,
 ) -> Result<Option<LocalProfilesState>, String> {
     ensure_profile_unlocked(&profiles, &session, &profile_id).await?;
     let selected = tauri::async_runtime::spawn_blocking(move || {
         app.dialog()
             .file()
-            .set_title("Прив'язати таблицю до профілю")
+            .set_title(format!(
+                "Прив'язати таблицю {} до профілю",
+                branch.genitive()
+            ))
             .add_filter("Таблиця XLSX", &["xlsx"])
             .blocking_pick_file()
     })
@@ -244,7 +250,7 @@ async fn choose_profile_database(
     read_selected_xlsx(&path)?;
     let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
     profiles
-        .set_database_path(&profile_id, Some(&path.to_string_lossy()), &now)
+        .set_table_path(&profile_id, branch, Some(&path.to_string_lossy()), &now)
         .await
         .map(Some)
         .map_err(|error| error.to_string())
@@ -255,27 +261,80 @@ async fn clear_profile_database(
     profiles: tauri::State<'_, LocalProfileStore>,
     session: tauri::State<'_, ProfileSession>,
     profile_id: String,
+    branch: Branch,
 ) -> Result<LocalProfilesState, String> {
     ensure_profile_unlocked(&profiles, &session, &profile_id).await?;
     let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
     profiles
-        .set_database_path(&profile_id, None, &now)
+        .set_table_path(&profile_id, branch, None, &now)
         .await
         .map_err(|error| error.to_string())
+}
+
+#[derive(serde::Serialize)]
+struct CreatedBaseTable {
+    state: LocalProfilesState,
+    path: String,
+}
+
+/// Зберігає порожню базову таблицю в новий файл і прив'язує її до профілю
+/// для того роду військ, чий модуль її відкриває.
+#[tauri::command]
+async fn create_profile_base_table(
+    app: tauri::AppHandle,
+    profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
+    profile_id: String,
+    table: BaseTable,
+) -> Result<Option<CreatedBaseTable>, String> {
+    ensure_profile_unlocked(&profiles, &session, &profile_id).await?;
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title(format!("Зберегти порожню базову таблицю {}", table.title()))
+            .set_file_name(table.file_name())
+            .add_filter("Таблиця XLSX", &["xlsx"])
+            .blocking_save_file()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let mut path = selected.into_path().map_err(|error| error.to_string())?;
+    if !path
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("xlsx"))
+    {
+        path.as_mut_os_string().push(".xlsx");
+    }
+    let target = path.clone();
+    tauri::async_runtime::spawn_blocking(move || base_tables::write_new(&target, table))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())?;
+    let path = path.to_string_lossy().into_owned();
+    let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
+    let state = profiles
+        .set_table_path(&profile_id, table.branch(), Some(&path), &now)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(Some(CreatedBaseTable { state, path }))
 }
 
 async fn bound_database_path(
     profiles: &LocalProfileStore,
     session: &ProfileSession,
     profile_id: &str,
+    branch: Branch,
 ) -> Result<PathBuf, String> {
     ensure_profile_unlocked(profiles, session, profile_id).await?;
     profiles
-        .database_path(profile_id)
+        .table_path(profile_id, branch)
         .await
         .map_err(|error| error.to_string())?
         .map(PathBuf::from)
-        .ok_or_else(|| "До профілю не прив'язано таблицю".to_owned())
+        .ok_or_else(|| format!("До профілю не прив'язано таблицю {}", branch.genitive()))
 }
 
 /// Сирі байти прив'язаної таблиці (без JSON, щоб не роздувати великі файли).
@@ -284,8 +343,9 @@ async fn read_profile_database(
     profiles: tauri::State<'_, LocalProfileStore>,
     session: tauri::State<'_, ProfileSession>,
     profile_id: String,
+    branch: Branch,
 ) -> Result<tauri::ipc::Response, String> {
-    let path = bound_database_path(&profiles, &session, &profile_id).await?;
+    let path = bound_database_path(&profiles, &session, &profile_id, branch).await?;
     let bytes = tauri::async_runtime::spawn_blocking(move || read_selected_xlsx(&path))
         .await
         .map_err(|error| error.to_string())??;
@@ -293,19 +353,24 @@ async fn read_profile_database(
 }
 
 /// Записує таблицю назад у прив'язаний файл. Тіло запиту — сирі байти XLSX,
-/// ідентифікатор профілю — у заголовку `x-easywar-profile`.
+/// профіль і рід військ — у заголовках `x-easywar-profile` і `x-easywar-branch`.
 #[tauri::command]
 async fn write_profile_database(
     request: tauri::ipc::Request<'_>,
     profiles: tauri::State<'_, LocalProfileStore>,
     session: tauri::State<'_, ProfileSession>,
 ) -> Result<(), String> {
-    let profile_id = request
-        .headers()
-        .get("x-easywar-profile")
-        .and_then(|value| value.to_str().ok())
-        .ok_or_else(|| "Не вказано профіль".to_owned())?
-        .to_owned();
+    let header = |name: &str| {
+        request
+            .headers()
+            .get(name)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned)
+    };
+    let profile_id = header("x-easywar-profile").ok_or_else(|| "Не вказано профіль".to_owned())?;
+    let branch = header("x-easywar-branch")
+        .ok_or_else(|| "Не вказано рід військ".to_owned())
+        .and_then(|value| Branch::parse(&value).map_err(|error| error.to_string()))?;
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
         return Err("Очікувано байти XLSX".to_owned());
     };
@@ -313,7 +378,7 @@ async fn write_profile_database(
         return Err("Некоректний файл XLSX".to_owned());
     }
     let bytes = bytes.clone();
-    let path = bound_database_path(&profiles, &session, &profile_id).await?;
+    let path = bound_database_path(&profiles, &session, &profile_id, branch).await?;
     tauri::async_runtime::spawn_blocking(move || write_file_atomically(&path, &bytes))
         .await
         .map_err(|error| error.to_string())?
@@ -993,6 +1058,7 @@ pub fn run() {
             update_local_profile_details,
             set_local_profile_password,
             choose_profile_database,
+            create_profile_base_table,
             clear_profile_database,
             read_profile_database,
             write_profile_database,

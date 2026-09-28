@@ -86,8 +86,9 @@ pub(crate) const XLSX_DUPLICATE_LINKS_SQL: &str =
 pub(crate) const LOCAL_PROFILES_SQL: &str = include_str!("../migrations/0003_local_profiles.sql");
 pub(crate) const WORKSPACE_TEMPLATES_SQL: &str =
     include_str!("../migrations/0004_workspace_templates.sql");
-pub(crate) const PROFILE_DETAILS_SQL: &str =
-    include_str!("../migrations/0005_profile_details.sql");
+pub(crate) const PROFILE_DETAILS_SQL: &str = include_str!("../migrations/0005_profile_details.sql");
+pub(crate) const PROFILE_BRANCH_TABLES_SQL: &str =
+    include_str!("../migrations/0006_profile_branch_tables.sql");
 
 pub fn migrations() -> Vec<Migration> {
     vec![
@@ -119,6 +120,12 @@ pub fn migrations() -> Vec<Migration> {
             version: 5,
             description: "add_profile_details",
             sql: PROFILE_DETAILS_SQL,
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 6,
+            description: "add_profile_branch_tables",
+            sql: PROFILE_BRANCH_TABLES_SQL,
             kind: MigrationKind::Up,
         },
     ]
@@ -177,7 +184,8 @@ mod tests {
     use super::{
         create_migrated_database, migrations, DatabaseMigrationState, DatabaseStatusError,
         DatabaseStatusStore, DATABASE_URL, EMBEDDED_MIGRATOR, INITIAL_SCHEMA_SQL,
-        LOCAL_PROFILES_SQL, PROFILE_DETAILS_SQL, WORKSPACE_TEMPLATES_SQL, XLSX_DUPLICATE_LINKS_SQL,
+        LOCAL_PROFILES_SQL, PROFILE_BRANCH_TABLES_SQL, PROFILE_DETAILS_SQL,
+        WORKSPACE_TEMPLATES_SQL, XLSX_DUPLICATE_LINKS_SQL,
     };
     use sqlx::{sqlite::SqlitePoolOptions, Row};
 
@@ -186,7 +194,7 @@ mod tests {
         assert_eq!(DATABASE_URL, "sqlite:easywar.db");
         assert!(include_str!("../tauri.conf.json").contains(DATABASE_URL));
         let registered = migrations();
-        assert_eq!(registered.len(), 5);
+        assert_eq!(registered.len(), 6);
         assert_eq!(registered[0].version, 1);
         assert_eq!(registered[0].description, "create_provenance_schema");
         assert_eq!(registered[1].version, 2);
@@ -197,6 +205,8 @@ mod tests {
         assert_eq!(registered[3].description, "add_workspace_templates");
         assert_eq!(registered[4].version, 5);
         assert_eq!(registered[4].description, "add_profile_details");
+        assert_eq!(registered[5].version, 6);
+        assert_eq!(registered[5].description, "add_profile_branch_tables");
         assert_eq!(
             EMBEDDED_MIGRATOR
                 .iter()
@@ -217,7 +227,7 @@ mod tests {
                 .map(|migration| migration.sql)
                 .collect::<Vec<_>>()
         );
-        assert_eq!(super::latest_schema_version(), Some(5));
+        assert_eq!(super::latest_schema_version(), Some(6));
     }
 
     #[tokio::test]
@@ -229,9 +239,9 @@ mod tests {
             DatabaseStatusStore::new(pool.clone()).load().await.unwrap(),
             super::DatabaseStatus {
                 app_version: env!("CARGO_PKG_VERSION").to_owned(),
-                schema_version: 5,
-                supported_schema_version: 5,
-                migration_count: 5,
+                schema_version: 6,
+                supported_schema_version: 6,
+                migration_count: 6,
                 migration_state: DatabaseMigrationState::Current,
             }
         );
@@ -275,6 +285,10 @@ mod tests {
             .execute(&pool)
             .await
             .expect("profile details migration must apply");
+        sqlx::raw_sql(PROFILE_BRANCH_TABLES_SQL)
+            .execute(&pool)
+            .await
+            .expect("profile branch tables migration must apply");
 
         pool
     }
