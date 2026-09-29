@@ -4,12 +4,12 @@
 // Решта боєприпасів складена з простих тіл обертання й пластин.
 // Сцена одна на весь модуль: канва переноситься в нову картку, щоб не плодити контексти WebGL.
 import {
-  ACESFilmicToneMapping, BoxGeometry, BufferGeometry, CanvasTexture, CircleGeometry, Color, CylinderGeometry,
-  DirectionalLight, DoubleSide, ExtrudeGeometry, Float32BufferAttribute, Group, LatheGeometry, Line, LineDashedMaterial, Mesh,
-  MeshBasicMaterial, MeshStandardMaterial, Object3D, Path, PerspectiveCamera, PlaneGeometry, PMREMGenerator, PolarGridHelper, RepeatWrapping, Scene,
-  ShadowMaterial, Shape, SphereGeometry, SRGBColorSpace, TorusGeometry, Vector2, Vector3, WebGLRenderer,
+  BoxGeometry, BufferGeometry, CanvasTexture, CircleGeometry, CylinderGeometry,
+  DoubleSide, ExtrudeGeometry, Float32BufferAttribute, Group, LatheGeometry, Line, LineDashedMaterial, Mesh,
+  MeshStandardMaterial, Object3D, Path, PerspectiveCamera, PlaneGeometry, RepeatWrapping, Scene,
+  Shape, SphereGeometry, SRGBColorSpace, TorusGeometry, Vector2, Vector3,
 } from 'three';
-import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import { addStageEnvironment, createRenderer } from './stage-3d.js';
 
 const LENGTH = 4; // довжина кожної моделі в умовних одиницях сцени
 const HAS_DOM = typeof document !== 'undefined'; // модульні тести будують моделі в Node без канви
@@ -813,69 +813,76 @@ function gbu39() {
 }
 
 // ------------------------------------------------------------------ AASM 250 HAMMER
-// За рендерами AASM 250 HAMMER: сіро-зелений корпус Mk 82 з білими трафаретами впоперек, дві мідні петлі підвіски,
-// сталеві бандажі й чорна стрічка кабелю, чорне перехідне кільце, носовий модуль із оптичним вікном і чотирма
-// розрізними стабілізаторами «Х», хвостовий модуль із двома великими плоскими стабілізаторами, соплом у мідному
-// кільці й чотирма чорними лопатями. Лопаті лежать уздовж хвостового модуля й розкриваються назовні хрестом.
-// Бомба складається з чотирьох модулів (ніс, кільце, корпус, хвіст): explode(k) розсуває їх уздовж осі, як на
-// розібраному рендері, а вушка з кабельною стрічкою піднімає над корпусом окремими деталями.
-const HM_R = .255, HM_RG = .185, HM_RC = .207, HM_RT = .2;
-const HM_BODY = [-1.06, .44], HM_GUIDE = [.8, 1.66], HM_TAIL = [-2.02, -1.02];
-const HM_PIVOT = -1.04, HM_BLADE = .94, HM_OPEN = 1.15;
-const HM_APART = { nose: .58, collar: .22, body: 0, tail: -.54 }, HM_LIFT = .5;
-const HM_GREEN = { color: '#465a48', mat: [.52, .12], height: .5 };
+// Розміри зняті з ортогонального листа (вигляд збоку, зверху, лопаті розкриті) і з розібраних рендерів: довжина
+// 4,02 = 1150 пікселів листа, HM_X переводить частку довжини від носа в координату x моделі. Бомба струнка: діаметр
+// корпусу ≈ 0,087 довжини. Складається з чотирьох модулів: носовий модуль наведення з розрізними стабілізаторами «Х»,
+// чорне перехідне кільце, корпус Mk 82 з мідними вушками, стальними бандажами й чорною стрічкою кабелю та хвостовий
+// модуль: циліндр із двома широкими плоскими пластинами й чотирма чорними лопатями, що лежать уздовж нього й
+// розкриваються назовні хрестом. explode(k) розсуває модулі вздовж осі, як на розібраному рендері.
+const HM_X = f => 2 - 4.02 * f;
+const HM_RN = .14, HM_R = .1745, HM_RT = .1556, HM_RP = .336, HM_RF = .297;
+const HM_NOSE = [HM_X(.235), 2], HM_COLLAR = [HM_X(.308), HM_X(.235)], HM_BODY = [HM_X(.735), HM_X(.308)], HM_TAIL = [-2.02, HM_X(.735)];
+const HM_PIVOT = -1.09, HM_BLADE = .667, HM_BLADE_W = .147, HM_OPEN = 1.056;
+const HM_LUGS = [HM_X(.45), HM_X(.565)], HM_DISC = HM_X(.483), HM_BANDS = [HM_X(.322), HM_X(.51), HM_X(.653)];
+const HM_APART = { nose: .62, collar: .24, body: 0, tail: -.56 }, HM_LIFT = { loose: .4, small: .22 };
+const HM_GREEN = { color: '#4b5f4b', mat: [.52, .12], height: .5 };
 const HM_COPPER = { color: '#b8733a', mat: [.34, .85], height: .5 };
 const HM_STENCIL = '#e8ebe6';
 
-// Корпус Mk 82: від чорного кільця (x .42) розширюється до максимуму, тримає його й звужується до хвостового модуля.
+// Профіль корпусу Mk 82 [x, радіус]: шийка під кільцем, розширення до максимуму, спад до хвостового модуля.
+const HM_PROFILE = [[.762, .1416], [.6935, .1416], [.633, .1486], [.553, .159], [.472, .1626], [.392, .1705], [.352, .1745],
+  [-.452, .1745], [-.492, .1705], [-.573, .1626], [-.653, .159], [-.734, .152], [-.814, .1486], [-.955, .1486]];
 function hmRadius(x) {
-  if (x > .44) return HM_RC;
-  if (x > -.2) return HM_RC + (HM_R - HM_RC) * Math.sin((.44 - x) / .64 * Math.PI / 2);
-  if (x > -.45) return HM_R;
-  const t = Math.min((-.45 - x) / .6, 1);
-  return HM_R - (HM_R - .19) * t * t * (3 - 2 * t);
+  const p = HM_PROFILE;
+  if (x >= p[0][0]) return p[0][1];
+  for (let i = 1; i < p.length; i++) if (x >= p[i][0]) {
+    const t = (p[i - 1][0] - x) / (p[i - 1][0] - p[i][0]);
+    return p[i - 1][1] + (p[i][1] - p[i - 1][1]) * t;
+  }
+  return p[p.length - 1][1];
 }
-const hmProfile = x => x > .8 ? HM_RG : x > .42 ? HM_RC : hmRadius(x);
+// Поверхня під стрічкою й бандажами: корпус, а перед ним чорне кільце.
+const hmSurface = x => x > HM_BODY[1] ? HM_RN : hmRadius(x);
 
 function hmBodySkin() {
   const s = new Skin(HM_BODY, HM_R, 252);
-  s.rect(-1.1, .5, 0, 1, HM_GREEN);
-  s.weather(-1.04, .42, { dark: '30,42,28', light: '132,98,62', count: 260, alpha: .07, mat: HM_GREEN.mat });
-  s.seam(.42); s.seam(-1.04);
+  s.rect(HM_BODY[0] - .05, HM_BODY[1] + .05, 0, 1, HM_GREEN);
+  s.weather(HM_BODY[0], HM_BODY[1], { dark: '30,42,28', light: '132,98,62', count: 260, alpha: .07, mat: HM_GREEN.mat });
+  s.seam(HM_BODY[1] - .008); s.seam(HM_BODY[0] + .008);
   // Трафарет: рядки впоперек корпусу між вушками підвіски, читаються знизу вгору з кожного боку.
   const block = ['S SAMP 19', '250 KG', 'MK 82', 'EXPL'];
-  s.text(block, -.42, NEAR, .05, HM_STENCIL, false, -Math.PI / 2);
-  s.text(block, -.42, FAR, .05, HM_STENCIL, true, -Math.PI / 2);
-  s.dot(-.34, .5, .05, { color: '#d8cf78', mat: [.5, .1], height: .55 });
+  s.text(block, HM_X(.505), NEAR, .042, HM_STENCIL, false, -Math.PI / 2);
+  s.text(block, HM_X(.505), FAR, .042, HM_STENCIL, true, -Math.PI / 2);
+  // Гнізда під вушка й заглушку: видно, коли їх зняти.
+  const hole = { color: '#101214', mat: [.7, .2], height: .12 };
+  for (const [x, r] of [[HM_LUGS[0], .02], [HM_DISC, .028], [HM_LUGS[1], .02], [HM_X(.4), .009], [HM_X(.6), .009]]) s.dot(x, .5, r, hole);
   return s.material({ bumpScale: 1.1 });
 }
 
-function hmGuideSkin() {
-  const s = new Skin(HM_GUIDE, HM_RG, 251);
-  s.rect(.7, 1.7, 0, 1, HM_GREEN);
-  s.weather(.8, 1.66, { dark: '30,42,30', light: '160,176,156', count: 70, alpha: .06, mat: HM_GREEN.mat });
-  for (const x of [.86, 1.3, 1.64]) s.seam(x);
-  s.rivets(.87, 0, 1, 26, .005); s.rivets(1.632, 0, 1, 26, .005);
-  // Овальна панель зверху з чотирма болтами й ряд отворів по боках.
-  s.panel(.98, 1.2, .44, .56, .05);
-  for (const dx of [-.06, .06]) for (const dv of [-.03, .03]) s.dot(1.09 + dx, .5 + dv, .012, { color: '#c8ccd0', mat: [.3, .85], height: .8 });
-  for (const v of [NEAR, FAR]) for (let i = 0; i < 6; i++) s.dot(1.12 + i * .05, v + .02, .007, { color: '#121415', height: .1 });
+function hmNoseSkin() {
+  const s = new Skin(HM_NOSE, HM_RN, 251);
+  s.rect(HM_NOSE[0] - .05, 2.05, 0, 1, HM_GREEN);
+  s.weather(HM_NOSE[0], 2, { dark: '30,42,30', light: '160,176,156', count: 90, alpha: .06, mat: HM_GREEN.mat });
+  s.seam(HM_X(.226)); s.seam(HM_X(.118));
+  s.rivets(HM_X(.229), 0, 1, 22, .004);
+  // Ряд отворів по боках нижче осі й кругла сталева заглушка.
+  for (const v of [.184, .816]) for (let i = 0; i < 7; i++) s.dot(HM_X(.105 + i * .0195), v, .008, { color: '#101214', height: .1 });
+  for (const v of [.735, .265]) s.dot(HM_X(.056), v, .022, { color: '#c8ccd0', mat: [.3, .85], height: .8 });
   return s.material({ bumpScale: 1.2 });
 }
 
 function hmTailSkin() {
   const s = new Skin(HM_TAIL, HM_RT, 250);
-  s.rect(-2.1, -1.0, 0, 1, HM_GREEN);
-  s.rect(-2.03, -1.95, 0, 1, HM_COPPER);
-  s.weather(-2.02, -1.02, { dark: '34,46,32', light: '150,110,70', count: 80, alpha: .07, mat: HM_GREEN.mat });
-  for (const x of [-1.24, -1.56, -1.95]) s.seam(x);
-  s.rivets(-1.235, 0, 1, 26); s.rivets(-1.945, 0, 1, 26);
-  for (const v of [NEAR, FAR]) { s.panel(-1.5, -1.3, v - .08, v + .08, .05); s.panel(-1.85, -1.65, v - .07, v + .07, .05); }
-  for (let i = 0; i < 4; i++) s.dot(-1.38 + i * .045, .5, .008, { color: '#c8ccd0', mat: [.3, .85], height: .8 });
+  s.rect(HM_TAIL[0] - .05, HM_TAIL[1] + .05, 0, 1, HM_GREEN);
+  s.rect(-1.98, -1.92, 0, 1, HM_COPPER);
+  s.weather(HM_TAIL[0], HM_TAIL[1], { dark: '34,46,32', light: '150,110,70', count: 80, alpha: .07, mat: HM_GREEN.mat });
+  for (const x of [-1.2, -1.56, -1.8]) s.seam(x);
+  s.rivets(-1.195, 0, 1, 22, .004); s.rivets(-1.795, 0, 1, 22, .004);
+  for (const v of [NEAR, FAR]) s.panel(-1.5, -1.25, v - .06, v + .06, .03);
   return s.material({ bumpScale: 1.2 });
 }
 
-// Розгортка плоского стабілізатора: край накладки, лючок, болти по контуру.
+// Розгортка плоскої пластини: край накладки, лючок, болти по контуру.
 function hmFinSkin(base, seed) {
   const w = 512, c = canvas(w, w), x = c.getContext('2d'), rnd = random(seed), b = canvas(w, w).getContext('2d');
   x.fillStyle = base; x.fillRect(0, 0, w, w);
@@ -913,109 +920,110 @@ function hmMate(x, radius, dir, { face, rim, hub, bolt, bolts = 0, slots = 0, co
   m.position.x = x;
   const disc = new Mesh(new CircleGeometry(radius, 48), face);
   disc.rotation.y = dir * Math.PI / 2;
-  m.add(disc, ring(dir * .002, radius - .01, .011, rim));
-  m.add(at(shaft(new Mesh(new CylinderGeometry(radius * .3, radius * .3, .026, 32), hub)), dir * .013, 0, 0));
-  if (connector) m.add(at(shaft(new Mesh(new CylinderGeometry(.022, .022, .024, 20), connector)), dir * .03, 0, 0));
+  m.add(disc, ring(dir * .002, radius - .007, .008, rim));
+  m.add(at(shaft(new Mesh(new CylinderGeometry(radius * .3, radius * .3, .02, 32), hub)), dir * .01, 0, 0));
+  if (connector) m.add(at(shaft(new Mesh(new CylinderGeometry(.016, .016, .018, 20), connector)), dir * .022, 0, 0));
   for (let i = 0; i < bolts; i++) {
     const a = i * 2 * Math.PI / bolts;
-    m.add(at(shaft(new Mesh(new CylinderGeometry(.009, .009, .014, 12), bolt)), dir * .007, radius * .74 * Math.cos(a), radius * .74 * Math.sin(a)));
+    m.add(at(shaft(new Mesh(new CylinderGeometry(.0065, .0065, .012, 12), bolt)), dir * .006, radius * .74 * Math.cos(a), radius * .74 * Math.sin(a)));
   }
   for (let i = 0; i < slots; i++) {
-    const a = i * 2 * Math.PI / slots, rib = new Mesh(new BoxGeometry(.012, radius * .34, .02), rim);
+    const a = i * 2 * Math.PI / slots, rib = new Mesh(new BoxGeometry(.01, radius * .34, .016), rim);
     rib.rotation.x = a;
-    m.add(at(rib, dir * .006, radius * .6 * Math.cos(a), radius * .6 * Math.sin(a)));
+    m.add(at(rib, dir * .005, radius * .6 * Math.cos(a), radius * .6 * Math.sin(a)));
   }
   return m;
 }
 
 function aasm250() {
-  const g = new Group(), nose = new Group(), collar = new Group(), body = new Group(), tail = new Group(), loose = new Group();
+  const g = new Group(), nose = new Group(), collar = new Group(), body = new Group(), tail = new Group();
+  // Що піднімається при розкладанні: бандажі зі стрічкою й роз'ємом; вушка із заглушкою.
+  const loose = new Group(), small = new Group();
   g.add(nose, collar, body, tail);
-  body.add(loose);
+  body.add(loose, small);
   const bodyMat = skin('hm-body', hmBodySkin, paint(HM_GREEN.color, .52, .12));
-  const guideMat = skin('hm-guide', hmGuideSkin, paint(HM_GREEN.color, .5, .15));
+  const noseMat = skin('hm-nose', hmNoseSkin, paint(HM_GREEN.color, .5, .15));
   const tailMat = skin('hm-tail', hmTailSkin, paint(HM_GREEN.color, .52, .12));
-  const noseFinMat = skin('hm-nose-fin', () => hmFinSkin('#7d907e', 5), paint('#7d907e', .5, .18));
-  const tailFinMat = skin('hm-tail-fin', () => hmFinSkin('#55694f', 6), paint('#55694f', .52, .15));
-  const capMat = paint('#3f5344', .28, .25);
+  const noseFinMat = skin('hm-nose-fin', () => hmFinSkin('#6f826c', 5), paint('#6f826c', .5, .18));
+  const plateMat = skin('hm-plate', () => hmFinSkin('#697c66', 6), paint('#697c66', .52, .15));
   const black = paint('#1b1e20', .3, .5), steel = paint('#c4c9cc', .32, .9), copper = paint(HM_COPPER.color, .34, .85);
-  const dark = paint('#25292c', .6, .3, { side: DoubleSide }), bladeMat = paint('#232628', .42, .4);
-  const red = paint('#b3262a', .4, .1), face = paint('#15181a', .5, .35);
+  const yellow = paint('#e0b820', .45, .15), dark = paint('#25292c', .6, .3, { side: DoubleSide }), bladeMat = paint('#232628', .42, .4);
+  const red = paint('#b3262a', .4, .1), face = paint('#15181a', .5, .35), mirror = paint('#c9ced2', .22, .95);
 
-  // Корпус Mk 82 із торцями: спереду гніздо підривника, ззаду мідне кільце стику з хвостовим модулем.
-  body.add(lathe(sample(hmRadius, -1.04, .42, .02), bodyMat, { span: HM_BODY, segments: 64 }));
-  body.add(hmMate(.42, HM_RC, 1, { face, rim: steel, hub: steel, bolt: steel, bolts: 10 }));
-  body.add(hmMate(-1.04, .19, -1, { face, rim: copper, hub: copper, bolt: copper, bolts: 8 }));
+  // Корпус Mk 82: спереду гніздо підривника в жовтому кільці, ззаду мідне кільце стику з хвостовим модулем.
+  body.add(lathe(sample(hmRadius, HM_BODY[0], HM_BODY[1], .02), bodyMat, { span: HM_BODY, segments: 64 }));
+  body.add(hmMate(HM_BODY[1], .1416, 1, { face, rim: yellow, hub: copper, bolt: steel }));
+  body.add(hmMate(HM_BODY[0], .1486, -1, { face, rim: copper, hub: copper, bolt: copper, bolts: 8 }));
   // Чорне перехідне кільце: порожній стакан, спереду з радіальними пазами, мідною ступицею й червоним роз'ємом.
-  collar.add(lathe([[HM_RC, .42], [HM_RC + .002, .43], [HM_RC + .002, .79], [HM_RC, .8], [HM_RG, .8]], black, { segments: 64 }));
-  collar.add(hmMate(.8, HM_RG, 1, { face, rim: paint('#3b4144', .4, .6), hub: copper, bolt: steel, slots: 12, connector: red }));
-  collar.add(hmMate(.42, HM_RC, -1, { face, rim: steel, hub: black, bolt: steel }));
-  // Носовий модуль: корпус наведення, колпак з оптичним вікном, задній фланець стику.
-  nose.add(lathe([[HM_RG, .8], [HM_RG, 1.66]], guideMat, { span: HM_GUIDE, segments: 64 }));
-  nose.add(hmMate(.8, HM_RG, -1, { face, rim: steel, hub: steel, bolt: steel, bolts: 10 }));
-  const cap = Array.from({ length: 17 }, (_, i) => {
-    const x = 1.66 + .34 * i / 16, t = (x - 1.66) / .372;
-    return [HM_RG * Math.sqrt(Math.max(1 - t * t, 0)), x];
-  });
-  nose.add(lathe([...cap, [0, 2]], capMat, { segments: 64 }));
-  nose.add(ring(2, .07, .012, steel));
-  const glass = new Mesh(new SphereGeometry(.068, 24, 10, 0, Math.PI * 2, 0, Math.PI / 2), new MeshStandardMaterial({ color: '#1a1418', roughness: .06, metalness: .3 }));
+  collar.add(lathe([[HM_RN, HM_COLLAR[0]], [HM_RN, HM_COLLAR[1]]], black, { segments: 64 }));
+  collar.add(hmMate(HM_COLLAR[1], HM_RN, 1, { face, rim: paint('#3b4144', .4, .6), hub: copper, bolt: steel, slots: 12, connector: red }));
+  collar.add(hmMate(HM_COLLAR[0], HM_RN, -1, { face, rim: steel, hub: black, bolt: steel }));
+  // Носовий модуль: обтічник-еліпсоїд із круглим оптичним вікном, задній фланець стику.
+  const ogive = [];
+  for (let i = 0; i <= 24; i++) {
+    const a = Math.min(i / 24, 1) * Math.acos(.06 / HM_RN);   // до радіуса вікна
+    ogive.push([HM_RN * Math.cos(a), 1.538 + .5073 * Math.sin(a)]);
+  }
+  nose.add(lathe([[HM_RN, HM_NOSE[0]], [HM_RN + .007, HM_NOSE[0] + .002], [HM_RN + .007, HM_NOSE[0] + .045], [HM_RN, HM_NOSE[0] + .05],
+    ...ogive.map(([r, x]) => [r, Math.min(x, 2)])], noseMat, { span: HM_NOSE, segments: 64 }));
+  nose.add(hmMate(HM_NOSE[0], HM_RN, -1, { face, rim: steel, hub: steel, bolt: steel, bolts: 10 }));
+  nose.add(ring(2, .058, .008, steel));
+  const glass = new Mesh(new SphereGeometry(.052, 24, 10, 0, Math.PI * 2, 0, Math.PI / 2), new MeshStandardMaterial({ color: '#1a1418', roughness: .06, metalness: .3 }));
   glass.scale.set(1, .4, 1); glass.rotation.z = -Math.PI / 2; glass.position.x = 1.998;
   nose.add(glass);
   for (let i = 0; i < 8; i++) {
     const a = i * Math.PI / 4;
-    nose.add(at(new Mesh(new SphereGeometry(.0075, 8, 6), steel), 2.008, .07 * Math.cos(a), .07 * Math.sin(a)));
+    nose.add(at(new Mesh(new SphereGeometry(.0055, 8, 6), steel), 2.006, .058 * Math.cos(a), .058 * Math.sin(a)));
   }
-  const noseCork = new Mesh(new CylinderGeometry(.04, .04, .014, 24), steel);
-  noseCork.rotation.x = Math.PI / 2; noseCork.position.set(1.42, 0, HM_RG + .001);
-  nose.add(noseCork);
-  // Носові стабілізатори «Х»: вузька нерухома смуга по передній кромці й рухома панель із зазором.
-  const r0 = HM_RG - .012, r1 = HM_RG + .3;
-  nose.add(finSet([[1.36, r0], [1.02, r1], [.95, r1], [1.29, r0]], .022, noseFinMat));
-  nose.add(finSet([[1.262, r0], [.922, r1], [.84, r1], [.84, r0]], .022, noseFinMat));
+  // Носові стабілізатори «Х»: два розрізні ряди, задній із вертикальною кромкою біля фланця.
+  const rf = HM_RN - .008;
+  nose.add(finSet([[HM_X(.072), rf], [HM_X(.1246), HM_RF], [HM_X(.1768), HM_RF], [HM_X(.157), rf]], .016, noseFinMat));
+  nose.add(finSet([[HM_X(.158), rf], [HM_X(.188), HM_RF], [HM_X(.223), HM_RF], [HM_X(.223), rf]], .016, noseFinMat));
 
-  // Мідні петлі підвіски, бандажі й чорна стрічка кабелю. Вушка й стрічка при розкладанні піднімаються окремо.
-  for (const x of [-.22, -.66]) {
-    loose.add(at(new Mesh(new BoxGeometry(.13, .014, .07), copper), x, hmRadius(x) + .002, 0));
-    loose.add(at(dRing(copper, .11, .11, .024, .028), x, hmRadius(x) - .008, 0));
+  // Мідні вушка й жовта заглушка на верху корпусу; три сталеві бандажі й чорна стрічка кабелю з роз'ємом.
+  for (const x of HM_LUGS) {
+    small.add(at(new Mesh(new BoxGeometry(.09, .01, .05), copper), x, hmRadius(x) + .002, 0));
+    small.add(at(dRing(copper, .07, .062, .016, .018), x, hmRadius(x) - .004, 0));
   }
-  body.add(at(new Mesh(new CylinderGeometry(.045, .045, .012, 24), paint('#d8cf78', .5, .1)), -.34, hmRadius(-.34) + .001, 0));
-  for (const [a, b] of [[.36, .4], [-.44, -.4], [-.9, -.865]]) {
-    body.add(band(hmRadius, a, b, steel, .006));
-    body.add(at(new Mesh(new BoxGeometry(.05, .016, .026), black), (a + b) / 2, hmRadius((a + b) / 2) + .012, 0));
+  small.add(at(new Mesh(new CylinderGeometry(.036, .036, .01, 24), yellow), HM_DISC, hmRadius(HM_DISC) + .001, 0));
+  for (const x of HM_BANDS) {
+    loose.add(band(hmSurface, x - .011, x + .011, steel, .005));
+    loose.add(at(new Mesh(new BoxGeometry(.04, .012, .02), black), x, hmSurface(x) + .009, 0));
   }
-  const strip = xs => loft(xs, x => [-.014, 0, .014].map(z => [z, Math.sqrt(Math.max(hmProfile(x) ** 2 - z * z, 0)) + .004]),
+  const strip = xs => loft(xs, x => [-.02, 0, .02].map(z => [z, Math.sqrt(Math.max(hmSurface(x) ** 2 - z * z, 0)) + .007]),
     paint('#141618', .55, .1, { side: DoubleSide }), { capStart: false });
-  loose.add(strip(Array.from({ length: 40 }, (_, i) => -1.12 + i * .04)));
+  loose.add(strip(Array.from({ length: 91 }, (_, i) => -.9 + i * .02)));
+  loose.add(at(new Mesh(new CylinderGeometry(.014, .014, .012, 20), red), -.9, hmRadius(-.9) + .008, 0));
+  // Плата роз'єму на початку хвостового модуля: чорна, на чотирьох болтах.
+  loose.add(at(new Mesh(new BoxGeometry(.19, .012, .06), black), -1.12, HM_RT + .004, 0));
+  for (const dx of [-.07, .07]) for (const dz of [-.02, .02])
+    loose.add(at(new Mesh(new CylinderGeometry(.005, .005, .006, 12), steel), -1.12 + dx, HM_RT + .012, dz));
 
-  // Хвостовий модуль: оболонка, торець стику з мідним кільцем, сопло, заглушка, роз'єм і два великі плоскі стабілізатори.
-  tail.add(lathe([[HM_RT * .985, -2], [HM_RT, -1.97], [HM_RT, -1.06], [.19, -1.04]], tailMat, { span: HM_TAIL, segments: 64 }));
-  tail.add(hmMate(-1.04, .19, 1, { face, rim: copper, hub: copper, bolt: steel, bolts: 8 }));
-  tail.add(lathe([[0, -1.96], [.166, -1.96], [.172, -2], [HM_RT * .985, -2]], dark, { segments: 64 }));
-  const nozzle = new Mesh(new CylinderGeometry(.078, .078, .07, 32, 1, true), dark);
-  nozzle.rotation.z = Math.PI / 2; nozzle.position.x = -1.985;
-  tail.add(nozzle, ring(-2.02, .078, .009, steel));
-  const plug = new Mesh(new CylinderGeometry(.05, .05, .02, 24), paint('#4e6049', .5, .2));
-  plug.rotation.z = Math.PI / 2; plug.position.set(-1.965, -.1, .105);
-  const plugDisc = new Mesh(new CylinderGeometry(.028, .028, .006, 20), steel);
-  plugDisc.rotation.z = Math.PI / 2; plugDisc.position.set(-1.978, -.1, .105);
-  tail.add(plug, plugDisc);
-  // Роз'єм кабелю з червоним штекером лежить на кінці стрічки й піднімається разом із нею.
-  loose.add(at(new Mesh(new BoxGeometry(.16, .014, .1), paint('#4a5c47', .5, .2)), -1.2, HM_RT + .004, 0));
-  loose.add(at(new Mesh(new CylinderGeometry(.022, .022, .02, 20), red), -1.17, HM_RT + .018, 0));
-  const tf = [[-1.72, HM_RT - .012], [-1.12, HM_RT - .012], [-1.14, HM_RT + .42], [-1.7, HM_RT + .42]];
-  tail.add(finSet(tf, .03, tailFinMat, { count: 2, offset: Math.PI / 2 }));
+  // Хвостовий модуль: оболонка, дзеркальний торець стику, сопло, дві широкі пластини й чотири лопаті.
+  tail.add(lathe([[.13, HM_TAIL[0]], [.138, -1.98], [.1486, -1.94], [HM_RT, -1.8], [HM_RT, -1], [.1486, HM_TAIL[1]]], tailMat, { span: HM_TAIL, segments: 64 }));
+  tail.add(hmMate(HM_TAIL[1], .1486, 1, { face: mirror, rim: black, hub: steel, bolt: steel, bolts: 8 }));
+  tail.add(lathe([[0, -1.99], [.11, -1.99], [.13, HM_TAIL[0]]], dark, { segments: 64 }));
+  const nozzle = new Mesh(new CylinderGeometry(.045, .045, .06, 32, 1, true), dark);
+  nozzle.rotation.z = Math.PI / 2; nozzle.position.x = -1.99;
+  tail.add(nozzle, ring(-2.02, .045, .006, steel));
+  // Пластини лежать у площині 45°/225°: із боку й зверху вони виглядають однаково, як на ортогональному листі.
+  const plate = [[HM_X(.735), .12], [HM_X(.735), .19], [HM_X(.745), HM_RP], [HM_X(.925), HM_RP], [HM_X(.95), .22], [HM_X(.95), .12]];
+  tail.add(finSet(plate, .016, plateMat, { count: 2, offset: Math.PI / 4 }));
 
-  // Чотири чорні лопаті «Х»: шарнір на початку хвостового модуля, у складеному вигляді лежать у пазах уздовж нього.
+  // Чотири чорні лопаті «Х»: шарнір на початку хвостового модуля, у складеному вигляді стоять ребрами вздовж нього.
+  // На діагоналях 135°/315° лопаті лежать у ребристих кожухах із чорним пазом.
   const wings = [];
-  const planform = [[0, 0], [-HM_BLADE, 0], [-HM_BLADE, .075], [-HM_BLADE + .07, .13], [-.02, .13], [.085, .065]];
+  const planform = [[0, 0], [-HM_BLADE, 0], [-HM_BLADE, HM_BLADE_W * .55], [-HM_BLADE + .1, HM_BLADE_W], [-.03, HM_BLADE_W], [.03, HM_BLADE_W * .6]];
   for (let k = 0; k < 4; k++) {
     const holder = new Group();
     holder.position.set(HM_PIVOT, 0, 0);
     holder.rotation.x = (k * 2 + 1) * Math.PI / 4 - Math.PI / 2;
-    holder.add(at(new Mesh(new BoxGeometry(.19, .07, .03), black), 0, 0, HM_RT + .004));
-    holder.add(at(new Mesh(new BoxGeometry(HM_BLADE * .92, .06, .024), black), -HM_BLADE * .5, 0, HM_RT + .002));
-    const blade = wingPlate(planform, .02, bladeMat);
+    holder.add(at(new Mesh(new BoxGeometry(.13, .05, .022), black), 0, 0, HM_RT + .004));
+    if (k % 2) {
+      holder.add(at(new Mesh(new BoxGeometry(.62, .05, .02), paint('#4a5c47', .5, .2)), -.31, 0, HM_RT + .006));
+      holder.add(at(new Mesh(new BoxGeometry(.5, .012, .006), black), -.29, 0, HM_RT + .017));
+    }
+    const blade = wingPlate(planform, .016, bladeMat);
     blade.position.set(0, 0, HM_RT - .004);
     holder.add(blade);
     tail.add(holder);
@@ -1034,19 +1042,21 @@ function aasm250() {
     return { text, anchor, side };
   };
   const labels = [
-    tag(nose, 'Носовий модуль наведення', 1.4, HM_RG + .36, 'up'),
-    tag(collar, 'Перехідне кільце', .61, -HM_RC, 'down'),
-    tag(body, 'Бойова частина Mk 82', -.3, -HM_R, 'down'),
-    tag(tail, 'Хвостовий модуль', -1.5, -HM_RT, 'down'),
+    tag(nose, 'Носовий модуль наведення', 1.5, .3, 'up'),
+    tag(collar, 'Перехідне кільце', .9, -HM_RN, 'down'),
+    tag(body, 'Бойова частина Mk 82', -.1, -HM_R, 'down'),
+    tag(tail, 'Хвостовий модуль', -1.4, -.24, 'down'),
+    tag(loose, 'Кабель і бандажі', -.3, hmSurface(-.3) + .03, 'up'),
   ];
   // k = 0 — бомба зібрана, k = 1 — модулі розсунуто. Лопаті розкриваються окремо й не залежать від k.
   const parts = { nose, collar, body, tail };
   const explode = k => {
     for (const name of Object.keys(parts)) parts[name].position.x = HM_APART[name] * k;
-    loose.position.y = HM_LIFT * k;
+    loose.position.y = HM_LIFT.loose * k;
+    small.position.y = HM_LIFT.small * k;
     axis.material.opacity = .55 * k;
     axis.scale.x = 2 + (HM_APART.nose - HM_APART.tail) * .5 * k;
-    g.userData.tips = [1.95 + HM_APART.nose * k, -1.95 + HM_APART.tail * k];
+    g.userData.tips = [1.95 + HM_APART.nose * k, -1.97 + HM_APART.tail * k];
   };
   explode(0);
   return { group: castShadows(g), wings, explode, labels };
@@ -1118,43 +1128,23 @@ export function explodeCycle(t) {
   return 0;
 }
 
-function contactTexture() {
-  const c = canvas(128, 128), x = c.getContext('2d'), g = x.createRadialGradient(64, 64, 4, 64, 64, 64);
-  g.addColorStop(0, 'rgba(0,0,0,.5)'); g.addColorStop(1, 'rgba(0,0,0,0)');
-  x.fillStyle = g; x.fillRect(0, 0, 128, 128);
-  return new CanvasTexture(c);
+// Підписи модулів розкладеної бомби: якщо два підписи накладаються, той, що правіше, відсувається далі від деталі
+// (вниз або вгору залежно від боку). Кожен елемент: { x, y, half, side }; додає йому extra — зайвий відступ у пікселях.
+export function spreadLabels(boxes, height = 20, gap = 6) {
+  const top = b => b.side === 'down' ? b.y + 12 + b.extra : b.y - 12 - b.extra - height;
+  const placed = [];
+  for (const b of [...boxes].sort((p, q) => p.x - q.x)) {
+    b.extra = 0;
+    for (let n = 0; n < 8 && placed.some(o => Math.abs(o.x - b.x) < o.half + b.half + gap && Math.abs(top(o) - top(b)) < height + gap); n++) b.extra += height + gap;
+    placed.push(b);
+  }
+  return boxes;
 }
 
-const FLOOR_Y = -1.05;
-
 function createStage() {
-  const renderer = new WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'low-power' });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-  renderer.outputColorSpace = SRGBColorSpace;
-  renderer.toneMapping = ACESFilmicToneMapping;
-  renderer.toneMappingExposure = .88;
-  renderer.setClearColor(0x000000, 0);
-  renderer.shadowMap.enabled = true;
+  const renderer = createRenderer();
   const scene = new Scene();
-  scene.environment = new PMREMGenerator(renderer).fromScene(new RoomEnvironment(), .04).texture;
-  scene.environmentIntensity = .65;
-  const key = new DirectionalLight('#fff6ea', 2);
-  key.position.set(1.8, 7, 3.2);
-  key.castShadow = true;
-  key.shadow.mapSize.set(2048, 2048);
-  Object.assign(key.shadow.camera, { left: -3.4, right: 3.4, top: 3.4, bottom: -3.4, near: 1, far: 16 });
-  key.shadow.bias = -.0004; key.shadow.normalBias = .015; key.shadow.radius = 5;
-  scene.add(key);
-  const rim = new DirectionalLight('#8fc2c2', 1.1); rim.position.set(-5, 2.5, -4); scene.add(rim);
-  const fill = new DirectionalLight('#dfe8f2', .35); fill.position.set(-3, -1, 5); scene.add(fill);
-  const grid = new PolarGridHelper(6.5, 16, 7, 96, new Color('#5c8a8a'), new Color('#5c8a8a'));
-  grid.material.transparent = true; grid.material.opacity = .22; grid.position.y = FLOOR_Y; scene.add(grid);
-  const floor = new Mesh(new CircleGeometry(6.5, 64), new MeshBasicMaterial({ color: '#07090b', transparent: true, opacity: .55 }));
-  floor.rotation.x = -Math.PI / 2; floor.position.y = FLOOR_Y - .01; scene.add(floor);
-  const catcher = new Mesh(new CircleGeometry(6.5, 64), new ShadowMaterial({ color: '#000000', opacity: .5 }));
-  catcher.rotation.x = -Math.PI / 2; catcher.position.y = FLOOR_Y + .002; catcher.receiveShadow = true; scene.add(catcher);
-  const contact = new Mesh(new CircleGeometry(1, 48), new MeshBasicMaterial({ map: contactTexture(), transparent: true, depthWrite: false }));
-  contact.rotation.x = -Math.PI / 2; contact.position.y = FLOOR_Y + .004; contact.scale.set(2.6, 1, 1); scene.add(contact);
+  addStageEnvironment(renderer, scene);
   const camera = new PerspectiveCamera(26, 2, .1, 60);
   const holder = new Group(); scene.add(holder);
   renderer.domElement.className = 'mw-canvas';
@@ -1219,10 +1209,19 @@ export function mount(el, kind, { motion = true } = {}) {
     // Вздовж осі модулі накладаються, тож підписи гаснуть, коли бомба повернута до глядача носом чи хвостом.
     const ramp = (v, from, span) => Math.min(Math.max((v - from) / span, 0), 1);
     const shown = ramp(Math.abs(Math.cos(group.rotation.y)), .4, .3) * ramp(apart, .4, .5);
-    labels.forEach(({ anchor }, i) => {
-      anchor.getWorldPosition(spot); put(tags[i], spot, w, h);
-      tags[i].style.opacity = shown.toFixed(2);
+    // Підпис не виходить за краї сцени, виносна лінія лишається на деталі, а сусідні підписи розводяться по вертикалі.
+    const boxes = labels.map(({ anchor, side }, i) => {
+      anchor.getWorldPosition(spot); spot.project(s.camera);
+      const tag = tags[i], half = tag.offsetWidth / 2, px = (spot.x + 1) / 2 * w;
+      return { tag, side, half, px, x: Math.min(Math.max(px, half + 4), Math.max(w - half - 4, half + 4)), y: (1 - spot.y) / 2 * h };
     });
+    spreadLabels(boxes, tags[0]?.offsetHeight);
+    for (const b of boxes) {
+      b.tag.style.left = b.x.toFixed(1) + 'px'; b.tag.style.top = b.y.toFixed(1) + 'px';
+      b.tag.style.setProperty('--lead', (b.px - b.x).toFixed(1) + 'px');
+      b.tag.style.setProperty('--drop', b.extra + 'px');
+      b.tag.style.opacity = shown.toFixed(2);
+    }
   };
   let spin = 0;
   const pose = (t) => {

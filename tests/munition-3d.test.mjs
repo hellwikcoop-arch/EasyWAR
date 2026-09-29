@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
 import { Box3, Vector3 } from 'three';
-import { KINDS, buildModel, explodeCycle } from '../src/munition-3d.js';
+import { KINDS, buildModel, explodeCycle, spreadLabels } from '../src/munition-3d.js';
 
 // The 3D models in the «Повітряні Сили» mission card are built from primitives.
 // Every kind the card can ask for must build, have the common length, and only
@@ -49,7 +49,9 @@ test('only GBU-39/53/62/64 and AASM unfold wings, and unfolded wings widen the m
     const open = size(group);
     // Пари крил розходяться вбік (z), лопаті AASM — хрестом, тож ширшає найперше висота (у складеному вигляді
     // сама модель дорівнює лише корпусу з хвостовими стабілізаторами).
-    assert.ok(Math.max(open.y - folded.y, open.z - folded.z) > .8, `${kind}: wings spread sideways`);
+    // У струнку AASM (діаметр корпусу ≈ 0,09 довжини) лопаті додають вдвічі менше, ніж крила GBU.
+    const min = kind === 'aasm' ? .5 : .8;
+    assert.ok(Math.max(open.y - folded.y, open.z - folded.z) > min, `${kind}: wings spread sideways`);
   }
 });
 
@@ -75,15 +77,21 @@ test('AASM blades fold along the tail module and open as an X', () => {
   for (const [mesh, angle] of wings) mesh.rotation.y = angle;
   group.updateMatrixWorld(true);
   const open = size(group);
-  // Чотири лопаті під 45° від площини стабілізаторів: розмах однаковий по висоті й по ширині, ≈ 0,39 довжини.
+  // Чотири лопаті на діагоналях: розмах однаковий по висоті й по ширині. За ортогональним листом кінець лопаті
+  // лежить за ≈ 0,78 одиниці від осі, тобто розмах по висоті ≈ 0,27 довжини.
   assert.ok(Math.abs(open.y - open.z) < .02, `open ${open.y.toFixed(2)} x ${open.z.toFixed(2)}`);
-  assert.ok(open.y / open.x > .33 && open.y / open.x < .45, `AASM span ${(open.y / open.x).toFixed(2)}`);
+  assert.ok(open.y / open.x > .24 && open.y / open.x < .32, `AASM span ${(open.y / open.x).toFixed(2)}`);
+  // Струнка бомба: діаметр корпусу ≈ 0,087 довжини (а не 0,13, як у GBU).
+  const { group: bare } = buildModel('aasm');
+  bare.updateMatrixWorld(true);
+  const ratio = new Box3().setFromObject(bare.children[2]).getSize(new Vector3()).y / size(bare).x;
+  assert.ok(ratio > .08 && ratio < .13, `body height ${ratio.toFixed(3)} of the length`);
 });
 
 test('AASM splits into four modules along the axis and closes back', () => {
   const { group, explode, labels } = buildModel('aasm');
   assert.equal(typeof explode, 'function');
-  assert.equal(labels.length, 4);
+  assert.equal(labels.length, 5);
   const anchors = () => { group.updateMatrixWorld(true); return labels.map(l => l.anchor.getWorldPosition(new Vector3()).x); };
   const assembled = size(group).x, before = anchors();
   explode(1);
@@ -95,6 +103,7 @@ test('AASM splits into four modules along the axis and closes back', () => {
   assert.ok(after[1] - before[1] > .1, 'collar moves forward');
   assert.ok(Math.abs(after[2] - before[2]) < 1e-9, 'body stays');
   assert.ok(before[3] - after[3] > .5, 'tail module moves back');
+  assert.ok(labels[4].anchor.getWorldPosition(new Vector3()).y > .5, 'the cable and bands float above the body');
   const [noseTip, tailTip] = group.userData.tips;
   assert.ok(noseTip > 2.4 && tailTip < -2.4, `lock markers follow the ends ${noseTip.toFixed(2)} / ${tailTip.toFixed(2)}`);
   explode(0);
@@ -112,6 +121,20 @@ test('the explode cycle starts assembled, holds apart and closes again', () => {
   assert.ok(explodeCycle(9.4) > 0 && explodeCycle(9.4) < 1, 'closing');
   assert.equal(explodeCycle(11), 0);
   assert.ok(explodeCycle(15.4) > 0, 'the cycle repeats');
+});
+
+test('module labels that overlap are spread apart, distant ones stay put', () => {
+  const near = { x: 100, y: 100, half: 60, side: 'down' }, next = { x: 150, y: 104, half: 60, side: 'down' };
+  const far = { x: 400, y: 100, half: 50, side: 'down' }, up = { x: 100, y: 100, half: 60, side: 'up' };
+  spreadLabels([near, next, far]);
+  assert.equal(near.extra, 0);
+  assert.ok(next.extra > 0, 'the right-hand neighbour moves away');
+  assert.equal(far.extra, 0);
+  // Підпис, що стоїть над деталлю, при накладанні відсувається вгору, а не вниз.
+  const upper = { x: 130, y: 100, half: 60, side: 'up' };
+  spreadLabels([up, upper]);
+  assert.equal(up.extra, 0);
+  assert.ok(upper.extra > 0);
 });
 
 test('GBU-39 struts slide along the housing and stay attached to the wings', () => {

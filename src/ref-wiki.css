@@ -1,0 +1,104 @@
+/* Вкладка «Довідник» модуля «Повітряні Сили»: вікі по засобах і боєприпасах (див. ref-wiki.js). */
+.rw { grid-template-columns: 300px minmax(0, 1fr); align-items: start; gap: 16px; }
+
+/* --- список статей --- */
+.rw-nav { position: sticky; top: calc(var(--ab, 56px) + 12px); display: grid; gap: 10px; padding: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); max-height: calc(100vh - var(--ab, 56px) - 28px); overflow: auto; min-width: 0; }
+.rw-search { font: inherit; color: var(--ink); background: var(--surface-2); border: 1px solid var(--line-strong); border-radius: 8px; padding: 8px 11px; min-height: 38px; width: 100%; }
+.rw-search:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.rw-seg { display: flex; }
+.rw-seg button { flex: 1; padding-inline: 6px; }
+.rw-list { display: grid; gap: 4px; }
+.rw-grp { margin: 10px 2px 2px; font-size: 11.5px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); }
+.rw-item { display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; align-items: center; gap: 10px; width: 100%; text-align: left; font: inherit; color: var(--ink); background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 6px 8px; cursor: pointer; }
+.rw-item:hover { background: var(--accent-soft); }
+.rw-item[aria-current="true"] { background: var(--accent-soft); border-color: var(--accent); }
+.rw-item img, .rw-mono { width: 52px; height: 36px; border-radius: 6px; background: var(--surface-2); object-fit: contain; }
+.rw-mono { display: grid; place-items: center; font: 700 10.5px/1 var(--mono); letter-spacing: -.02em; color: var(--muted); border: 1px solid var(--line); }
+.rw-it { display: grid; min-width: 0; }
+.rw-it b { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rw-it small { color: var(--muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rw-3d { font: 700 10.5px/1 var(--mono); letter-spacing: .06em; color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 3px 5px; }
+.rw-empty { margin: 8px 2px; }
+
+/* --- стаття --- */
+.rw-article { min-width: 0; scroll-margin-top: 84px; outline: none; }
+.rw-head { margin: 0 0 12px; }
+.rw-eyebrow { margin: 0 0 4px; font-size: 12px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); }
+.rw-head h2 { margin: 0; font: 700 clamp(26px, 3.4vw, 38px)/1.08 var(--display); letter-spacing: .01em; }
+.rw-alias { margin: 4px 0 0; color: var(--muted); }
+.rw-body { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; align-items: start; }
+.rw-main { display: grid; gap: 14px; min-width: 0; }
+.rw-summary { margin: 0; font-size: 16px; line-height: 1.55; max-width: 72ch; }
+.rw-sec { display: grid; gap: 6px; }
+.rw-sec h3, .rw-info h3 { margin: 0; font: 650 17px/1.2 var(--display); letter-spacing: .01em; }
+.rw-sec p, .rw-sec ul { margin: 0; max-width: 72ch; line-height: 1.55; }
+.rw-sec ul { padding-left: 20px; display: grid; gap: 4px; }
+.rw-fine, .rw-note { margin: 0; color: var(--muted); font-size: 13.5px; max-width: 72ch; }
+.rw-note { padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); }
+.rw-credit { margin: 0; padding-top: 10px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; max-width: 86ch; }
+.rw-credit a { color: var(--accent); }
+.rw-src { overflow-wrap: anywhere; }
+
+/* картка з основними даними, як у вікі праворуч */
+.rw-info { display: grid; gap: 8px; padding: 14px 16px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); position: sticky; top: calc(var(--ab, 56px) + 12px); }
+.rw-role { margin: -4px 0 2px; color: var(--muted); font-size: 13.5px; }
+.rw-facts { margin: 0; display: grid; }
+.rw-facts > div { display: grid; grid-template-columns: minmax(0, 40%) minmax(0, 1fr); gap: 10px; padding: 7px 0; border-top: 1px solid var(--line); }
+.rw-facts dt { color: var(--muted); font-size: 13px; }
+.rw-facts dd { margin: 0; font-size: 13.5px; font-weight: 600; overflow-wrap: anywhere; }
+.rw-photo { display: block; max-width: 100%; border-radius: 8px; background: var(--surface-2); }
+.rw-photo-wide { max-height: 280px; margin: 0 auto; }
+
+/* 3D-сцена: та сама темна панель, що й у картці вильоту */
+.rw-stagebox { --mw-hi: #8fc2c2; display: grid; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: #0d0d0f; }
+.rw-stage { position: relative; height: clamp(300px, 48vh, 500px); cursor: grab; background: radial-gradient(120% 90% at 50% 38%, #172026 0%, #0d0d0f 70%); outline: none; }
+.rw-stage.is-grab { cursor: grabbing; }
+.rw-stage:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+.rw-canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+.rw-status { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; padding: 20px; text-align: center; color: #b7c6c6; font-size: 14px; pointer-events: none; }
+.rw-hint { position: absolute; left: 12px; bottom: 8px; margin: 0; font-size: 12px; color: #8ea1a1; pointer-events: none; }
+.rw-part { position: absolute; padding: 2px 7px; border: 1px solid var(--mw-hi); border-radius: 2px; background: rgba(9, 18, 24, .78); color: #fff; font: 600 10.5px/1.3 var(--mono); letter-spacing: .05em; white-space: nowrap; opacity: 0; pointer-events: none; }
+.rw-part::before { content: ''; position: absolute; left: calc(50% + var(--lead, 0px)); width: 1px; height: calc(12px + var(--drop, 0px)); background: var(--mw-hi); }
+.rw-part-up { transform: translate(-50%, calc(-100% - 12px - var(--drop, 0px))); } .rw-part-up::before { top: 100%; }
+.rw-part-down { transform: translate(-50%, calc(12px + var(--drop, 0px))); } .rw-part-down::before { bottom: 100%; }
+
+.rw-tools { display: grid; gap: 8px; padding: 10px 12px 12px; background: var(--surface); border-top: 1px solid var(--line); }
+.rw-toolrow { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }
+.rw-slider { display: grid; grid-template-columns: 64px minmax(0, 1fr) 46px auto auto; gap: 8px; align-items: center; }
+.rw-slider label { font-size: 13px; font-weight: 600; }
+.rw-slider input[type=range] { width: 100%; accent-color: var(--accent); }
+.rw-val { font: 12px var(--mono); color: var(--muted); text-align: right; }
+.rw-slider .btn { min-height: 32px; padding: 4px 10px; font-size: 13px; }
+
+/* пов’язані статті */
+.rw-rel { display: flex; flex-wrap: wrap; gap: 10px; }
+.rw-relcard { display: grid; gap: 6px; justify-items: center; width: 156px; padding: 8px; font: inherit; font-weight: 600; color: var(--ink); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 10px; cursor: pointer; }
+.rw-relcard:hover { border-color: var(--accent); }
+.rw-relcard img { width: 100%; height: 92px; object-fit: contain; border-radius: 6px; background: var(--surface-2); }
+
+/* підсумок по завантаженій таблиці */
+.rw-usage { padding: 14px 16px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); }
+.rw-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+.rw-tile { display: grid; gap: 2px; padding: 10px 12px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; }
+.rw-tile b { font: 700 22px/1.1 var(--display); font-variant-numeric: tabular-nums; }
+.rw-tile.long b { font-size: 16px; }
+.rw-tile span { color: var(--muted); font-size: 12.5px; }
+.rw-bar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; gap: 2px; background: var(--surface-2); }
+.rw-bar i { display: block; min-width: 4px; }
+.rw-legend { margin: 0; display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12.5px; color: var(--muted); }
+.rw-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
+.rw-partners { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.rw-partners .chip { cursor: default; }
+.rw-partners button.chip { cursor: pointer; }
+
+@media (max-width: 1100px) {
+  .rw-body { grid-template-columns: minmax(0, 1fr); }
+  .rw-info { position: static; order: -1; }
+}
+@media (max-width: 860px) {
+  .rw { grid-template-columns: minmax(0, 1fr); }
+  .rw-nav { position: static; max-height: 320px; }
+  .rw-stage { height: clamp(260px, 42vh, 380px); }
+  .rw-slider { grid-template-columns: 56px minmax(0, 1fr) 42px; }
+  .rw-slider .btn { grid-column: span 1; }
+}
