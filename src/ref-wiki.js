@@ -174,13 +174,14 @@ export function mount(host, options = {}) {
       entry.sections.map(s => h('section', { class: 'rw-sec' }, h('h3', { text: s.title }),
         s.text ? h('p', { text: s.text }) : null, s.list ? h('ul', {}, s.list.map(t => h('li', { text: t }))) : null)),
       relatedBlock(entry), usageEl,
-      entry.credit ? h('p', { class: 'rw-credit' }, 'Модель: «' + entry.credit.title + '», автор ',
+      entry.credit && entry.credit.generated ? h('p', { class: 'rw-credit', text: entry.credit.note }) : null,
+      entry.credit && !entry.credit.generated ? h('p', { class: 'rw-credit' }, 'Модель: «' + entry.credit.title + '», автор ',
         h('a', { href: entry.credit.authorUrl, target: '_blank', rel: 'noopener noreferrer', text: entry.credit.author }),
         ', ліцензія ', h('a', { href: entry.credit.licenseUrl, target: '_blank', rel: 'noopener noreferrer', text: entry.credit.license }),
-        '. Джерело: ', h('span', { class: 'rw-src', text: entry.credit.url.replace(/^https?:\/\//, '') }), '. Файл стиснуто для застосунку, форму моделі не змінено.') : null);
+        '. Джерело: ', h('span', { class: 'rw-src', text: entry.credit.url.replace(/^https?:\/\//, '') }), '. Файл стиснуто для застосунку, форму моделі не змінено.' + (entry.credit.note ? ' ' + entry.credit.note : '')) : null);
     article.replaceChildren(
       h('header', { class: 'rw-head' }, h('p', { class: 'rw-eyebrow', text: groupTitle(entry.group) + ' · ' + entry.origin }),
-        h('h2', { text: entry.name }), h('p', { class: 'rw-alias', text: entry.alias })),
+        h('h2', { text: entry.name }, entry.status ? h('span', { class: 'rw-badge', text: entry.status }) : null), h('p', { class: 'rw-alias', text: entry.alias })),
       h('div', { class: 'rw-body' }, main, info));
     slot.replaceChildren();
     renderUsage(entry);
@@ -201,7 +202,7 @@ export function mount(host, options = {}) {
         list.append(h('button', { type: 'button', class: 'rw-item', role: 'listitem', 'data-id': e.id, 'aria-current': String(e.id === state.id),
           onclick: () => select(e.id, true) },
           thumb ? h('img', { src: thumb, alt: '', draggable: 'false' }) : h('span', { class: 'rw-mono', 'aria-hidden': 'true', text: e.short || e.name }),
-          h('span', { class: 'rw-it' }, h('b', { text: e.name }), h('small', { text: e.role })),
+          h('span', { class: 'rw-it' }, h('b', { text: e.name }), h('small', { text: e.status ? e.status + ' · ' + e.role : e.role })),
           e.model ? h('span', { class: 'rw-3d', text: '3D', title: 'Є тривимірна модель' }) : null));
       }
     }
