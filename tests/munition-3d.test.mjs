@@ -49,7 +49,9 @@ test('only GBU-39/53/62/64 and AASM unfold wings, and unfolded wings widen the m
     const open = size(group);
     // Пари крил розходяться вбік (z), лопаті AASM — хрестом, тож ширшає найперше висота (у складеному вигляді
     // сама модель дорівнює лише корпусу з хвостовими стабілізаторами).
-    assert.ok(Math.max(open.y - folded.y, open.z - folded.z) > .8, `${kind}: wings spread sideways`);
+    // У струнку AASM (діаметр корпусу ≈ 0,09 довжини) лопаті додають вдвічі менше, ніж крила GBU.
+    const min = kind === 'aasm' ? .5 : .8;
+    assert.ok(Math.max(open.y - folded.y, open.z - folded.z) > min, `${kind}: wings spread sideways`);
   }
 });
 
@@ -75,9 +77,15 @@ test('AASM blades fold along the tail module and open as an X', () => {
   for (const [mesh, angle] of wings) mesh.rotation.y = angle;
   group.updateMatrixWorld(true);
   const open = size(group);
-  // Чотири лопаті під 45° від площини стабілізаторів: розмах однаковий по висоті й по ширині, ≈ 0,39 довжини.
+  // Чотири лопаті на діагоналях: розмах однаковий по висоті й по ширині. За ортогональним листом кінець лопаті
+  // лежить за ≈ 0,78 одиниці від осі, тобто розмах по висоті ≈ 0,27 довжини.
   assert.ok(Math.abs(open.y - open.z) < .02, `open ${open.y.toFixed(2)} x ${open.z.toFixed(2)}`);
-  assert.ok(open.y / open.x > .33 && open.y / open.x < .45, `AASM span ${(open.y / open.x).toFixed(2)}`);
+  assert.ok(open.y / open.x > .24 && open.y / open.x < .32, `AASM span ${(open.y / open.x).toFixed(2)}`);
+  // Струнка бомба: діаметр корпусу ≈ 0,087 довжини (а не 0,13, як у GBU).
+  const { group: bare } = buildModel('aasm');
+  bare.updateMatrixWorld(true);
+  const ratio = new Box3().setFromObject(bare.children[2]).getSize(new Vector3()).y / size(bare).x;
+  assert.ok(ratio > .08 && ratio < .13, `body height ${ratio.toFixed(3)} of the length`);
 });
 
 test('AASM splits into four modules along the axis and closes back', () => {
