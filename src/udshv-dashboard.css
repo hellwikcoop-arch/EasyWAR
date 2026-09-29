@@ -41,7 +41,23 @@ body.udshv-open #view-entry { display: none !important; }
 .ud-hero {
   display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;
   padding: 22px 24px; border: 1px solid var(--ud-line); border-radius: 18px;
-  background: radial-gradient(circle at 90% 10%, color-mix(in srgb, var(--ud-green) 22%, transparent), transparent 40%), var(--ud-panel);
+  background:
+    radial-gradient(circle at 92% 0%, color-mix(in srgb, var(--ud-green) 26%, transparent), transparent 45%),
+    var(--ud-panel);
+  align-items: center; overflow: hidden;
+}
+/* Емблема ДШВ зліва від заголовка. */
+.ud-hero::before {
+  content: ''; flex: none; width: 88px; aspect-ratio: 491 / 472; border-radius: 14px;
+  background: url('./udshv-art/emblem.webp') center / cover no-repeat;
+  box-shadow: 0 0 0 1px rgba(232, 220, 203, .18), 0 8px 22px rgba(0, 0, 0, .45);
+}
+.ud-hero > div { margin-right: auto; }
+/* Банер «ДШВ × Повітряні Сили» над шапкою. */
+.ud-banner {
+  height: clamp(170px, 22vw, 340px); border-radius: 18px; border: 1px solid var(--ud-line);
+  background: linear-gradient(180deg, transparent 55%, rgba(20, 8, 16, .55)), url('./udshv-art/banner.webp') center 9% / cover no-repeat;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .35);
 }
 .ud-hero h1 { margin: 4px 0 0; font-size: clamp(24px, 2.4vw, 34px); }
 .ud-hero p { margin: 6px 0 0; color: var(--ud-muted); }
@@ -84,7 +100,15 @@ body.udshv-open #view-entry { display: none !important; }
 @media (max-width: 1400px) { .ud-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 640px) { .ud-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .ud-kpis-3 { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
-.ud-kpi { position: relative; display: grid; gap: 3px; padding: 14px 14px 10px; border: 1px solid var(--ud-line); border-top: 3px solid var(--tone); border-radius: 14px; background: var(--ud-panel); overflow: hidden; }
+.ud-kpi {
+  position: relative; display: grid; gap: 3px; padding: 14px 14px 10px; overflow: hidden; border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--tone) 60%, transparent);
+  background: linear-gradient(160deg, color-mix(in srgb, var(--tone) 18%, transparent), color-mix(in srgb, var(--ud-panel) 92%, transparent) 62%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .07), 0 8px 22px rgba(0, 0, 0, .28);
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+}
+.ud-kpi-icon { position: absolute; top: 12px; right: 12px; color: var(--tone); opacity: .95; }
+.ud-kpi-label { padding-right: 30px; }
 .ud-kpi[role="button"] { cursor: pointer; }
 .ud-kpi[role="button"]:hover { border-color: var(--tone); }
 .ud-kpi-label { font-weight: 800; color: var(--ud-muted); font-size: 13px; }
@@ -161,6 +185,8 @@ body.udshv-open .appbar .tabs { visibility: hidden; }
 /* Фон дашборда УДШВ: градієнт від синього (Повітряні Сили) до «Марун» (ДШВ). */
 html:has(body.udshv-open) {
   background:
+    linear-gradient(180deg, rgba(20, 8, 16, .30), rgba(20, 8, 16, .72)),
+    url('./udshv-art/descent.webp') center / cover no-repeat fixed,
     radial-gradient(70% 60% at 8% 0%, rgba(38, 66, 112, .75), transparent 70%),
     radial-gradient(70% 70% at 100% 0%, rgba(122, 20, 34, .8), transparent 70%),
     linear-gradient(115deg, #0a1730 0%, #170f24 45%, #2a0a12 100%) fixed !important;

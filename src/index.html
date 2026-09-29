@@ -584,6 +584,17 @@ body[data-active-branch="air"] #branch-controls,body[data-active-branch="pvk"] #
 .ct-actions button:focus-visible{outline:2px solid var(--ct-accent);outline-offset:2px}
 .ct-actions button[hidden]{display:none}
 @media(max-width:640px){#view-start .branch-col{gap:8px}}
+/* Фон екрана вибору роду військ: ДШВ ліворуч, Повітряні Сили праворуч, спокійний центр під логотип і картки. */
+#view-start{
+  background:
+    linear-gradient(180deg,#06101c 0,rgba(6,16,28,0) 9%,rgba(6,16,28,0) 90%,#06101c 100%),
+    radial-gradient(60% 55% at 50% 42%,rgba(6,12,22,.38),transparent 75%),
+    linear-gradient(180deg,rgba(6,12,22,.12),rgba(6,12,22,.34)),
+    url('./launcher-bg.webp') center 42%/contain no-repeat,
+    #06101c !important;
+}
+@media(max-aspect-ratio:1/1){#view-start{background-size:auto,auto,auto,cover,auto !important}}
+#view-start::before{opacity:0 !important}
 </style>
 </head>
 <body>
