@@ -178,7 +178,7 @@ export function mount(host, options = {}) {
       entry.credit && !entry.credit.generated ? h('p', { class: 'rw-credit' }, 'Модель: «' + entry.credit.title + '», автор ',
         h('a', { href: entry.credit.authorUrl, target: '_blank', rel: 'noopener noreferrer', text: entry.credit.author }),
         ', ліцензія ', h('a', { href: entry.credit.licenseUrl, target: '_blank', rel: 'noopener noreferrer', text: entry.credit.license }),
-        '. Джерело: ', h('span', { class: 'rw-src', text: entry.credit.url.replace(/^https?:\/\//, '') }), '. Файл стиснуто для застосунку, форму моделі не змінено.') : null);
+        '. Джерело: ', h('span', { class: 'rw-src', text: entry.credit.url.replace(/^https?:\/\//, '') }), '. Файл стиснуто для застосунку, форму моделі не змінено.' + (entry.credit.note ? ' ' + entry.credit.note : '')) : null);
     article.replaceChildren(
       h('header', { class: 'rw-head' }, h('p', { class: 'rw-eyebrow', text: groupTitle(entry.group) + ' · ' + entry.origin }),
         h('h2', { text: entry.name }), h('p', { class: 'rw-alias', text: entry.alias })),

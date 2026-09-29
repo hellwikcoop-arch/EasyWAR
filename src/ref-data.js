@@ -44,6 +44,25 @@ const CREDIT_SU24 = {
   licenseUrl: 'http://creativecommons.org/licenses/by/4.0/',
 };
 
+const CREDIT_F16 = {
+  title: 'Lockheed Martin F-16e/f "Fighting Falcon"',
+  author: 'andertan',
+  authorUrl: 'https://sketchfab.com/andertan',
+  url: 'https://sketchfab.com/3d-models/lockheed-martin-f-16ef-fighting-falcon-d54c72e055a647ad9173e01548e50db3',
+  license: 'CC BY 4.0',
+  licenseUrl: 'http://creativecommons.org/licenses/by/4.0/',
+  note: 'Модель — двомісний F-16E/F в іноземній розмальовці, а не літак ПС ЗСУ.',
+};
+
+const CREDIT_SU25 = {
+  title: 'Ukrainian Su-25M (pixel)',
+  author: '42manako',
+  authorUrl: 'https://sketchfab.com/42manako',
+  url: 'https://sketchfab.com/3d-models/ukrainian-su-25m-pixel-c96f73960f124ab7a22184008c33ea7c',
+  license: 'CC BY 4.0',
+  licenseUrl: 'http://creativecommons.org/licenses/by/4.0/',
+};
+
 export const ENTRIES = [
   // ---------- Засоби ----------
   {
@@ -81,6 +100,7 @@ export const ENTRIES = [
   {
     id: 'f16', short: 'F-16', group: 'aircraft', name: 'F-16', alias: 'F-16 Fighting Falcon',
     role: 'Багатоцільовий винищувач', origin: 'США', tags: ['f16', 'ф16', 'falcon', 'fighting falcon'],
+    model: { file: 'f-16', nose: '+x' }, credit: CREDIT_F16,
     summary: 'Одномоторний легкий багатоцільовий винищувач (General Dynamics, нині Lockheed Martin). Надійшов до ПС ЗСУ від європейських партнерів і несе, зокрема, керовані бомби GBU.',
     facts: [
       ['Екіпаж', '1 особа'], ['Довжина', '≈ 15,1 м'], ['Розмах крила', '≈ 10,0 м'], ['Висота', '≈ 4,9 м'],
@@ -110,6 +130,7 @@ export const ENTRIES = [
   {
     id: 'su25', short: 'Су-25', group: 'aircraft', name: 'Су-25', alias: 'Su-25, за кодифікацією НАТО — Frogfoot',
     role: 'Штурмовик', origin: 'СРСР', tags: ['su25', 'су25', 'frogfoot', 'грач', 'штурмовик'],
+    model: { file: 'su-25', nose: '+z' }, credit: CREDIT_SU25,
     summary: 'Броньований дозвуковий штурмовик безпосередньої підтримки військ (ОКБ Сухого). Працює з малих висот некерованими ракетами, бомбами й гарматою.',
     facts: [
       ['Екіпаж', '1 особа'], ['Довжина', '≈ 15,5 м'], ['Розмах крила', '≈ 14,4 м'], ['Висота', '≈ 4,8 м'],
