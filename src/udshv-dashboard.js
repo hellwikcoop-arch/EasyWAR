@@ -154,6 +154,26 @@ function weekdayBars(items) {
 
 /* ------------------------------ сторінки ------------------------------ */
 
+/** Лінійні піктограми показників у стилі макета: людина, аптечка, група, техніка, БК, снаряд, радар. */
+const TANK = ['M4 15h16l-2 4H6z', 'M8 15v-3h7v3', 'M15 13.5h6'];
+const ICONS = {
+  kia: ['M9.5 5a2 2 0 1 0 4 0a2 2 0 1 0-4 0', 'M11.5 21v-6l-2.5-3 2.5-2 3 2v4', 'M19 8v6', 'M17 12l2 2 2-2'],
+  wia: ['M4 8h16v11H4z', 'M9 8V6h6v2', 'M12 11v5', 'M9.5 13.5h5'],
+  personnel: ['M9 8a2.5 2.5 0 1 0 5 0a2.5 2.5 0 1 0-5 0', 'M4 20c0-3.5 2.5-6 5.5-6s5.5 2.5 5.5 6', 'M16 6a2.2 2.2 0 1 1 0 4.4', 'M18 20c0-2.8 1.5-4.5 3-5'],
+  destroyed: [...TANK, 'M4 5l4 4', 'M8 5l-4 4'],
+  damaged: [...TANK, 'M5 4.5v3', 'M5 9.6v.4'],
+  suppressed: [...TANK, 'M4 8.5a5 5 0 0 1 5-3.5', 'M4 5a8 8 0 0 1 8-3'],
+  ammo: ['M4 6h16v13H4z', 'M4 10h16', 'M9 14h6'],
+  vgz: ['M8 20V10c0-3 1.5-5.5 4-7 2.5 1.5 4 4 4 7v10z', 'M8 15h8'],
+  kbb: ['M12 20v-6', 'M8 20h8', 'M5 13a7 7 0 0 1 14 0', 'M8 13a4 4 0 0 1 8 0', 'M11 13a1 1 0 1 0 2 0a1 1 0 1 0-2 0'],
+};
+function kpiIcon(key) {
+  const paths = ICONS[key];
+  if (!paths) return null;
+  return h('svg:svg', { class: 'ud-kpi-icon', viewBox: '0 0 24 24', width: 24, height: 24, fill: 'none', stroke: 'currentColor', 'stroke-width': 1.7, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' },
+    paths.map(d => h('svg:path', { d })));
+}
+
 function kpiCard(k, onClick) {
   const tone = TONE[k.tone] || 'var(--ud-blue)';
   let delta = 'немає попереднього періоду';
@@ -164,6 +184,7 @@ function kpiCard(k, onClick) {
     cls = k.delta > 0 ? ' up' : k.delta < 0 ? ' down' : '';
   }
   return h('article', { class: 'ud-kpi', style: { '--tone': tone }, onclick: onClick, role: onClick ? 'button' : null, tabindex: onClick ? 0 : null },
+    kpiIcon(k.key),
     h('span', { class: 'ud-kpi-label', text: k.label }),
     h('strong', { text: number(k.total) }),
     h('span', { class: `ud-delta${cls}`, text: delta }),
@@ -380,6 +401,7 @@ export function render(host, workbook, options = {}) {
   const compare = model.hasPrevious ? `порівняння з ${dateLabel(model.previousRange.from)} – ${dateLabel(model.previousRange.to)}` : 'попереднього періоду в таблиці немає';
   root.textContent = '';
   root.append(
+    h('div', { class: 'ud-banner', role: 'img', 'aria-label': 'ДШВ і Повітряні Сили — разом ближче до перемоги' }),
     h('header', { class: 'ud-hero' },
       h('div', {},
         h('span', { class: 'ud-eyebrow', text: 'Угруповання ДШВ · локальна аналітика' }),
