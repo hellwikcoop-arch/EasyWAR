@@ -174,7 +174,8 @@ export function mount(host, options = {}) {
       entry.sections.map(s => h('section', { class: 'rw-sec' }, h('h3', { text: s.title }),
         s.text ? h('p', { text: s.text }) : null, s.list ? h('ul', {}, s.list.map(t => h('li', { text: t }))) : null)),
       relatedBlock(entry), usageEl,
-      entry.credit ? h('p', { class: 'rw-credit' }, 'Модель: «' + entry.credit.title + '», автор ',
+      entry.credit && entry.credit.generated ? h('p', { class: 'rw-credit', text: entry.credit.note }) : null,
+      entry.credit && !entry.credit.generated ? h('p', { class: 'rw-credit' }, 'Модель: «' + entry.credit.title + '», автор ',
         h('a', { href: entry.credit.authorUrl, target: '_blank', rel: 'noopener noreferrer', text: entry.credit.author }),
         ', ліцензія ', h('a', { href: entry.credit.licenseUrl, target: '_blank', rel: 'noopener noreferrer', text: entry.credit.license }),
         '. Джерело: ', h('span', { class: 'rw-src', text: entry.credit.url.replace(/^https?:\/\//, '') }), '. Файл стиснуто для застосунку, форму моделі не змінено.') : null);

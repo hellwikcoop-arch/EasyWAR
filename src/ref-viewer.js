@@ -11,6 +11,8 @@ import { buildModel, spreadLabels } from './munition-3d.js';
 export const MODEL_FILES = {
   'mig-29': new URL('./models/mig-29.glb', import.meta.url).href,
   'su-27': new URL('./models/su-27.glb', import.meta.url).href,
+  'storm-shadow': new URL('./models/storm-shadow.glb', import.meta.url).href,
+  'gmlrs-m31': new URL('./models/gmlrs-m31.glb', import.meta.url).href,
 };
 
 // Куди в файлі дивиться ніс літака: модель повертається так, щоб ніс дивився в +X, як у боєприпасів.
@@ -27,7 +29,7 @@ export const VIEWS = {
 
 // Відстань для літака: горизонтальний круг радіуса r (слід моделі) видно як еліпс, тож по висоті кадру він займає
 // r·sin(нахил) + піввисота·cos(нахил), а по ширині — r. Поворот моделі навколо вертикалі відстань не міняє.
-export function aircraftDistance({ r, hh }, pitch, fovDeg, aspect, margin = 1.08) {
+export function aircraftDistance({ r, hh }, pitch, fovDeg, aspect, margin = 1.18) {
   const tv = Math.tan((fovDeg * Math.PI) / 360), th = tv * aspect;
   return margin * Math.max(r / th, (r * Math.sin(pitch) + hh * Math.cos(pitch)) / tv);
 }
@@ -40,14 +42,14 @@ function gltfLoader() {
   return loader;
 }
 
-// Ставить літак у стандартну позу: ніс у +X, центр у нулі, довжина AIRCRAFT_LENGTH.
-export function normalizeAircraft(scene, nose = '+x') {
+// Ставить модель з .glb у стандартну позу: ніс у +X, центр у нулі, задана довжина (літак — AIRCRAFT_LENGTH, боєприпас — 4).
+export function normalizeAircraft(scene, nose = '+x', length = AIRCRAFT_LENGTH) {
   const inner = new Group();
   inner.add(scene);
   inner.rotation.y = NOSE_TURN[nose] ?? 0;
   inner.updateMatrixWorld(true);
   const box = new Box3().setFromObject(inner), size = box.getSize(new Vector3()), c = box.getCenter(new Vector3());
-  const k = AIRCRAFT_LENGTH / size.x;
+  const k = length / size.x;
   const root = new Group();
   root.add(inner);
   inner.position.set(-c.x, -c.y, -c.z);
@@ -98,7 +100,7 @@ export class RefViewer {
       let entry = this.cache.get(model.file);
       if (!entry) {
         const gltf = await gltfLoader().loadAsync(url, e => { if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total); });
-        entry = normalizeAircraft(gltf.scene, model.nose);
+        entry = normalizeAircraft(gltf.scene, model.nose, model.length);
         const aniso = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
         entry.group.traverse(o => {
           if (!o.isMesh) return;

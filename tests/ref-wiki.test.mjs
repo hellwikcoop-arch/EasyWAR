@@ -29,6 +29,12 @@ test('glb models exist, are registered and carry the CC BY credit', async () => 
   for (const e of ENTRIES.filter(x => x.model && x.model.file)) {
     assert.ok(MODEL_FILES[e.model.file], `${e.id}: file registered`);
     assert.ok(e.model.nose in NOSE_TURN, `${e.id}: nose axis`);
+    if (e.credit.generated) {
+      // Процедурні моделі без сторонніх матеріалів: без ліцензійних вимог, але з поясненням у статті.
+      assert.ok(e.credit.note, `${e.id}: note`);
+      assert.ok((await stat(new URL(`../src/models/${e.model.file}.glb`, import.meta.url))).size < 1e6, `${e.id}: tiny`);
+      continue;
+    }
     assert.equal(e.credit.license, 'CC BY 4.0');
     assert.ok(e.credit.author && e.credit.url && e.credit.authorUrl);
     const file = new URL(`../src/models/${e.model.file}.glb`, import.meta.url);
@@ -41,7 +47,8 @@ test('glb models exist, are registered and carry the CC BY credit', async () => 
     assert.match(json.asset.extras.license, /CC-BY-4\.0/);
   }
   const credits = await readFile(new URL('../src/models/CREDITS.md', import.meta.url), 'utf8');
-  for (const e of ENTRIES.filter(x => x.credit)) assert.ok(credits.includes(e.credit.url), `${e.id} in CREDITS.md`);
+  for (const e of ENTRIES.filter(x => x.credit && !x.credit.generated)) assert.ok(credits.includes(e.credit.url), `${e.id} in CREDITS.md`);
+  for (const e of ENTRIES.filter(x => x.credit && x.credit.generated)) assert.ok(credits.includes(`${e.model.file}.glb`), `${e.id} in CREDITS.md`);
 });
 
 test('carrier and munition ids agree with the recognisers of the module', () => {
@@ -53,6 +60,9 @@ test('carrier and munition ids agree with the recognisers of the module', () => 
   assert.equal(aircraftId('Mirage 2000-5'), 'mirage');
   assert.equal(aircraftId('Су-25'), 'su25');
   assert.equal(aircraftId('невідомий'), '');
+  assert.equal(munitionId('Storm Shadow'), 'storm');
+  assert.equal(munitionId('SCALP-EG'), 'storm');
+  assert.equal(munitionId('GMLRS M31'), 'gmlrs');
 });
 
 test('pairs link existing carriers and munitions both ways', () => {

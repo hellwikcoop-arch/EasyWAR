@@ -16,3 +16,7 @@
 - Ліцензія: Creative Commons Attribution 4.0 (CC BY 4.0), <http://creativecommons.org/licenses/by/4.0/>
 
 Змінено: стиснуто так само, як mig-29.glb (з 27,6 до 9,2 МБ), форма моделі не змінювалася.
+
+## storm-shadow.glb і gmlrs-m31.glb — згенеровані моделі
+
+Спрощені процедурні моделі Storm Shadow / SCALP-EG і ракети GMLRS M31, побудовані за відкритими габаритами скриптом `viewer/scripts/build-munitions.py` з репозиторію CLOUDE (гілка `claude/new-session-5hrrc1`). Не є скануванням чи копією чужих моделей, сторонніх текстур немає, ліцензійних вимог немає. Призначені для перегляду, а не для впізнавання чи розрахунків.
