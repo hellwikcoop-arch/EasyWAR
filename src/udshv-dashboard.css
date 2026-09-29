@@ -41,8 +41,19 @@ body.udshv-open #view-entry { display: none !important; }
 .ud-hero {
   display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;
   padding: 22px 24px; border: 1px solid var(--ud-line); border-radius: 18px;
-  background: radial-gradient(circle at 90% 10%, color-mix(in srgb, var(--ud-green) 22%, transparent), transparent 40%), var(--ud-panel);
+  background:
+    linear-gradient(90deg, rgba(22, 14, 26, .98) 40%, rgba(22, 14, 26, .55) 68%, rgba(22, 14, 26, .2) 100%),
+    url('./udshv-art/hero.webp') right 40% / 58% auto no-repeat,
+    var(--ud-panel);
+  align-items: center; overflow: hidden;
 }
+/* Емблема ДШВ зліва від заголовка. */
+.ud-hero::before {
+  content: ''; flex: none; width: 88px; aspect-ratio: 491 / 472; border-radius: 14px;
+  background: url('./udshv-art/emblem.webp') center / cover no-repeat;
+  box-shadow: 0 0 0 1px rgba(232, 220, 203, .18), 0 8px 22px rgba(0, 0, 0, .45);
+}
+.ud-hero > div { margin-right: auto; }
 .ud-hero h1 { margin: 4px 0 0; font-size: clamp(24px, 2.4vw, 34px); }
 .ud-hero p { margin: 6px 0 0; color: var(--ud-muted); }
 .ud-eyebrow { color: var(--ud-green); font-size: 12px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
@@ -161,6 +172,8 @@ body.udshv-open .appbar .tabs { visibility: hidden; }
 /* Фон дашборда УДШВ: градієнт від синього (Повітряні Сили) до «Марун» (ДШВ). */
 html:has(body.udshv-open) {
   background:
+    linear-gradient(180deg, rgba(20, 8, 16, .30), rgba(20, 8, 16, .72)),
+    url('./udshv-art/descent.webp') center / cover no-repeat fixed,
     radial-gradient(70% 60% at 8% 0%, rgba(38, 66, 112, .75), transparent 70%),
     radial-gradient(70% 70% at 100% 0%, rgba(122, 20, 34, .8), transparent 70%),
     linear-gradient(115deg, #0a1730 0%, #170f24 45%, #2a0a12 100%) fixed !important;
