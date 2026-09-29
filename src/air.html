@@ -662,6 +662,12 @@ dialog.pass:focus, dialog.pass:focus-visible { outline: none; }
 .mw-lock { position: absolute; width: 24px; height: 24px; margin: -12px 0 0 -12px; border: 1px solid var(--mw-hi); border-radius: 50%; opacity: .8; pointer-events: none; }
 .mw-lock::before, .mw-lock::after { content: ''; position: absolute; background: var(--mw-hi); }
 .mw-lock::before { left: 11px; top: -5px; bottom: -5px; width: 1px; } .mw-lock::after { top: 11px; left: -5px; right: -5px; height: 1px; }
+/* Підписи модулів розкладеної бомби: їздять за модулями, з виносною лінією до деталі. Видимість веде скрипт. */
+.mw-part { position: absolute; padding: 2px 7px; border: 1px solid var(--mw-hi); border-radius: 2px; background: rgba(9, 18, 24, .78);
+  color: #fff; font: 600 10px/1.3 var(--mono); letter-spacing: .05em; white-space: nowrap; opacity: 0; pointer-events: none; }
+.mw-part::before { content: ''; position: absolute; left: 50%; width: 1px; height: 12px; background: var(--mw-hi); }
+.mw-part-up { transform: translate(-50%, calc(-100% - 12px)); } .mw-part-up::before { top: 100%; }
+.mw-part-down { transform: translate(-50%, 12px); } .mw-part-down::before { bottom: 100%; }
 .mw-svg { display: block; width: 100%; height: 100%; overflow: visible; }
 .mw-body path, .mw-body rect { fill: rgba(92, 138, 138, .14); stroke: var(--mw-hi); stroke-width: 1.4; stroke-linejoin: round; }
 .mw-seam { stroke: var(--mw-line); stroke-width: 1; opacity: .7; }
@@ -5502,7 +5508,7 @@ const MW_SPEC = {
   '62': { x0: 20, x1: 350, r: 15, nose: 70, taper: 42, fin: [306, 44, 18], band: 76, kit: [150, 146] },
   '64': { x0: 16, x1: 352, r: 17, nose: 78, taper: 44, fin: [308, 44, 19], band: 84, kit: [154, 150] },
   agm88: { x0: 14, x1: 372, r: 9, nose: 64, fin: [338, 30, 14], mid: [150, 52, 16] },
-  aasm: { x0: 24, x1: 350, r: 15, nose: 56, taper: 30, fin: [310, 36, 16], mid: [76, 18, 8] },
+  aasm: { x0: 24, x1: 350, r: 15, nose: 56, taper: 30, fin: [310, 36, 16], mid: [76, 18, 8], wing: [272, 76, 40] },
   blu140: { x0: 24, x1: 342, r: 13, nose: 74, taper: 20, fin: [302, 36, 15] },
   c13: { blunt: 1, x0: 40, x1: 352, r: 11, nose: 34, fin: [322, 28, 12] },
   bomb: { x0: 30, x1: 342, r: 14, nose: 62, taper: 30, fin: [300, 38, 17] },

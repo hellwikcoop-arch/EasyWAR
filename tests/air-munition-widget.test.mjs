@@ -53,7 +53,7 @@ test('munition names pick the right schematic', () => {
 test('only munitions with deployable wings animate wings', () => {
   const { MW_SPEC } = widget();
   const winged = Object.entries(MW_SPEC).filter(([, s]) => s.wing || s.kit).map(([k]) => k).sort();
-  assert.deepEqual(winged, ['39', '53', '62', '64']);
+  assert.deepEqual(winged, ['39', '53', '62', '64', 'aasm']);
 });
 
 test('the mission card shows the widget and the motion switch can stop it', () => {
