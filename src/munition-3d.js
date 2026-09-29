@@ -546,7 +546,8 @@ function jdamEr(k, label, filler) {
     g.add(railMesh);
   }
   for (const z of [.09, -.09]) g.add(at(new Mesh(new CylinderGeometry(.024 * k, .024 * k, .012, 20), dark), .786, -deep - .002, z * k));
-  // Крила складено «ножицями» під рейками; вісь повороту в носку обтічника, розкриваються на ~19°.
+  // Крила складено «ножицями» під рейками; вісь повороту в носку обтічника, розкриваються на ~52° від осі
+  // (розмах ≈ 0,86 довжини, як на рендері з білим підривником).
   const L = 2.076, cl = .12 * k, root = .34 * k, tipC = .19 * k;
   const planform = side => [[.05, cl], [-L + .12, cl], [-L, cl - tipC], [-.03, cl - root], [.05, cl - root + .06]].map(([x, z]) => [x, z * side]);
   const wingSkinMat = skin('jdam-wing', () => wingSkin('#c6cacd'), kit);
@@ -554,7 +555,7 @@ function jdamEr(k, label, filler) {
     const mesh = wingPlate(planform(side), .02, wingSkinMat);
     mesh.position.set(.786, -.235 * k - .013 - i * .024, side * .09 * k);
     g.add(mesh);
-    return [mesh, side * .33];
+    return [mesh, side * .9];
   });
   return { group: castShadows(g), wings };
 }
@@ -677,7 +678,7 @@ function gbu62() {
     const mesh = wingPlate(planform(side), .022, wingMat);
     mesh.position.set(.37, plateY - .027 - i * .025, side * .14);
     g.add(mesh);
-    return [mesh, side * .47];
+    return [mesh, side * 1.1];
   });
   return { group: castShadows(g), wings };
 }

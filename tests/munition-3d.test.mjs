@@ -56,10 +56,10 @@ test('unfolded wing spans follow the reference drawings', () => {
     group.updateMatrixWorld(true);
     return size(group).z / size(group).x;
   };
-  // Розмах відносно довжини: GBU-62 (короткі широкі крила) ≈ 0,37, GBU-64 (довгі «ножиці») ≈ 0,43,
-  // GBU-39 (Diamond Back) — як у справжньої бомби, близько 0,77.
-  assert.ok(span('62') > .32 && span('62') < .42, `GBU-62 span ${span('62').toFixed(2)}`);
-  assert.ok(span('64') > .38 && span('64') < .48, `GBU-64 span ${span('64').toFixed(2)}`);
+  // Розмах відносно довжини за рендерами з розкритими крилами: GBU-62 (короткі широкі крила) ≈ 0,60,
+  // GBU-64 (довгі «ножиці») ≈ 0,86, GBU-39 (Diamond Back) — як у справжньої бомби, близько 0,77.
+  assert.ok(span('62') > .54 && span('62') < .68, `GBU-62 span ${span('62').toFixed(2)}`);
+  assert.ok(span('64') > .78 && span('64') < .94, `GBU-64 span ${span('64').toFixed(2)}`);
   assert.ok(span('39') > .72 && span('39') < .86, `GBU-39 span ${span('39').toFixed(2)}`);
 });
 
