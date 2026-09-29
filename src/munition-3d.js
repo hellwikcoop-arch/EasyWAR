@@ -1046,6 +1046,7 @@ function aasm250() {
     tag(collar, 'Перехідне кільце', .9, -HM_RN, 'down'),
     tag(body, 'Бойова частина Mk 82', -.1, -HM_R, 'down'),
     tag(tail, 'Хвостовий модуль', -1.4, -.24, 'down'),
+    tag(loose, 'Кабель і бандажі', -.3, hmSurface(-.3) + .03, 'up'),
   ];
   // k = 0 — бомба зібрана, k = 1 — модулі розсунуто. Лопаті розкриваються окремо й не залежать від k.
   const parts = { nose, collar, body, tail };
@@ -1125,6 +1126,19 @@ export function explodeCycle(t) {
   if (c < EXPLODE.hold) return 1;
   if (c < EXPLODE.close) return 1 - easeInOut((c - EXPLODE.hold) / (EXPLODE.close - EXPLODE.hold));
   return 0;
+}
+
+// Підписи модулів розкладеної бомби: якщо два підписи накладаються, той, що правіше, відсувається далі від деталі
+// (вниз або вгору залежно від боку). Кожен елемент: { x, y, half, side }; додає йому extra — зайвий відступ у пікселях.
+export function spreadLabels(boxes, height = 20, gap = 6) {
+  const top = b => b.side === 'down' ? b.y + 12 + b.extra : b.y - 12 - b.extra - height;
+  const placed = [];
+  for (const b of [...boxes].sort((p, q) => p.x - q.x)) {
+    b.extra = 0;
+    for (let n = 0; n < 8 && placed.some(o => Math.abs(o.x - b.x) < o.half + b.half + gap && Math.abs(top(o) - top(b)) < height + gap); n++) b.extra += height + gap;
+    placed.push(b);
+  }
+  return boxes;
 }
 
 function contactTexture() {
@@ -1228,10 +1242,19 @@ export function mount(el, kind, { motion = true } = {}) {
     // Вздовж осі модулі накладаються, тож підписи гаснуть, коли бомба повернута до глядача носом чи хвостом.
     const ramp = (v, from, span) => Math.min(Math.max((v - from) / span, 0), 1);
     const shown = ramp(Math.abs(Math.cos(group.rotation.y)), .4, .3) * ramp(apart, .4, .5);
-    labels.forEach(({ anchor }, i) => {
-      anchor.getWorldPosition(spot); put(tags[i], spot, w, h);
-      tags[i].style.opacity = shown.toFixed(2);
+    // Підпис не виходить за краї сцени, виносна лінія лишається на деталі, а сусідні підписи розводяться по вертикалі.
+    const boxes = labels.map(({ anchor, side }, i) => {
+      anchor.getWorldPosition(spot); spot.project(s.camera);
+      const tag = tags[i], half = tag.offsetWidth / 2, px = (spot.x + 1) / 2 * w;
+      return { tag, side, half, px, x: Math.min(Math.max(px, half + 4), Math.max(w - half - 4, half + 4)), y: (1 - spot.y) / 2 * h };
     });
+    spreadLabels(boxes, tags[0]?.offsetHeight);
+    for (const b of boxes) {
+      b.tag.style.left = b.x.toFixed(1) + 'px'; b.tag.style.top = b.y.toFixed(1) + 'px';
+      b.tag.style.setProperty('--lead', (b.px - b.x).toFixed(1) + 'px');
+      b.tag.style.setProperty('--drop', b.extra + 'px');
+      b.tag.style.opacity = shown.toFixed(2);
+    }
   };
   let spin = 0;
   const pose = (t) => {

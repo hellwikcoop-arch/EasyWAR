@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
 import { Box3, Vector3 } from 'three';
-import { KINDS, buildModel, explodeCycle } from '../src/munition-3d.js';
+import { KINDS, buildModel, explodeCycle, spreadLabels } from '../src/munition-3d.js';
 
 // The 3D models in the «Повітряні Сили» mission card are built from primitives.
 // Every kind the card can ask for must build, have the common length, and only
@@ -91,7 +91,7 @@ test('AASM blades fold along the tail module and open as an X', () => {
 test('AASM splits into four modules along the axis and closes back', () => {
   const { group, explode, labels } = buildModel('aasm');
   assert.equal(typeof explode, 'function');
-  assert.equal(labels.length, 4);
+  assert.equal(labels.length, 5);
   const anchors = () => { group.updateMatrixWorld(true); return labels.map(l => l.anchor.getWorldPosition(new Vector3()).x); };
   const assembled = size(group).x, before = anchors();
   explode(1);
@@ -103,6 +103,7 @@ test('AASM splits into four modules along the axis and closes back', () => {
   assert.ok(after[1] - before[1] > .1, 'collar moves forward');
   assert.ok(Math.abs(after[2] - before[2]) < 1e-9, 'body stays');
   assert.ok(before[3] - after[3] > .5, 'tail module moves back');
+  assert.ok(labels[4].anchor.getWorldPosition(new Vector3()).y > .5, 'the cable and bands float above the body');
   const [noseTip, tailTip] = group.userData.tips;
   assert.ok(noseTip > 2.4 && tailTip < -2.4, `lock markers follow the ends ${noseTip.toFixed(2)} / ${tailTip.toFixed(2)}`);
   explode(0);
@@ -120,6 +121,20 @@ test('the explode cycle starts assembled, holds apart and closes again', () => {
   assert.ok(explodeCycle(9.4) > 0 && explodeCycle(9.4) < 1, 'closing');
   assert.equal(explodeCycle(11), 0);
   assert.ok(explodeCycle(15.4) > 0, 'the cycle repeats');
+});
+
+test('module labels that overlap are spread apart, distant ones stay put', () => {
+  const near = { x: 100, y: 100, half: 60, side: 'down' }, next = { x: 150, y: 104, half: 60, side: 'down' };
+  const far = { x: 400, y: 100, half: 50, side: 'down' }, up = { x: 100, y: 100, half: 60, side: 'up' };
+  spreadLabels([near, next, far]);
+  assert.equal(near.extra, 0);
+  assert.ok(next.extra > 0, 'the right-hand neighbour moves away');
+  assert.equal(far.extra, 0);
+  // Підпис, що стоїть над деталлю, при накладанні відсувається вгору, а не вниз.
+  const upper = { x: 130, y: 100, half: 60, side: 'up' };
+  spreadLabels([up, upper]);
+  assert.equal(up.extra, 0);
+  assert.ok(upper.extra > 0);
 });
 
 test('GBU-39 struts slide along the housing and stay attached to the wings', () => {

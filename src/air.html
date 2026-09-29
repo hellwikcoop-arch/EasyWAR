@@ -665,9 +665,9 @@ dialog.pass:focus, dialog.pass:focus-visible { outline: none; }
 /* Підписи модулів розкладеної бомби: їздять за модулями, з виносною лінією до деталі. Видимість веде скрипт. */
 .mw-part { position: absolute; padding: 2px 7px; border: 1px solid var(--mw-hi); border-radius: 2px; background: rgba(9, 18, 24, .78);
   color: #fff; font: 600 10px/1.3 var(--mono); letter-spacing: .05em; white-space: nowrap; opacity: 0; pointer-events: none; }
-.mw-part::before { content: ''; position: absolute; left: 50%; width: 1px; height: 12px; background: var(--mw-hi); }
-.mw-part-up { transform: translate(-50%, calc(-100% - 12px)); } .mw-part-up::before { top: 100%; }
-.mw-part-down { transform: translate(-50%, 12px); } .mw-part-down::before { bottom: 100%; }
+.mw-part::before { content: ''; position: absolute; left: calc(50% + var(--lead, 0px)); width: 1px; height: calc(12px + var(--drop, 0px)); background: var(--mw-hi); }
+.mw-part-up { transform: translate(-50%, calc(-100% - 12px - var(--drop, 0px))); } .mw-part-up::before { top: 100%; }
+.mw-part-down { transform: translate(-50%, calc(12px + var(--drop, 0px))); } .mw-part-down::before { bottom: 100%; }
 .mw-svg { display: block; width: 100%; height: 100%; overflow: visible; }
 .mw-body path, .mw-body rect { fill: rgba(92, 138, 138, .14); stroke: var(--mw-hi); stroke-width: 1.4; stroke-linejoin: round; }
 .mw-seam { stroke: var(--mw-line); stroke-width: 1; opacity: .7; }
