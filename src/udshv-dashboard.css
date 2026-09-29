@@ -6,12 +6,12 @@ body.udshv-open #view-entry { display: none !important; }
 #udshv-dashboard-root {
   --ud-red: #ef5b5b;
   --ud-amber: #e7a83a;
-  --ud-green: #5fbf6a;
+  --ud-green: #c2384a; /* акцент: «Марун» ДШВ (назва змінної лишилась від зеленої схеми) */
   --ud-blue: #3d9be9;
   --ud-violet: #a17dff;
   --ud-ink: var(--ink, var(--text, #edf1e6));
   --ud-muted: var(--muted, #9aa396);
-  --ud-panel: color-mix(in srgb, var(--panel, #161b12) 94%, transparent);
+  --ud-panel: rgba(22, 14, 26, .82);
   --ud-line: color-mix(in srgb, var(--line, #4c5645) 70%, transparent);
   --ud-track: color-mix(in srgb, var(--ud-muted) 18%, transparent);
   display: grid;
@@ -29,7 +29,7 @@ body.udshv-open #view-entry { display: none !important; }
   --ud-line: color-mix(in srgb, #7c8574 40%, transparent);
   --ud-red: #d23f3f;
   --ud-amber: #c9861a;
-  --ud-green: #3f9a4b;
+  --ud-green: #8f1d2c;
   --ud-blue: #2479c4;
   --ud-violet: #7a55e0;
 }
@@ -62,6 +62,16 @@ body.udshv-open #view-entry { display: none !important; }
 .ud-step { display: inline-flex; align-items: center; gap: 8px; }
 .ud-custom { display: inline-flex; gap: 10px; color: var(--ud-muted); }
 .ud-unit { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; color: var(--ud-muted); }
+.ud-multi { position: relative; }
+.ud-multi-btn { list-style: none; cursor: pointer; min-width: 190px; max-width: 320px; padding: 8px 32px 8px 12px; border: 1px solid var(--ud-line); border-radius: 10px; background: var(--ud-panel); color: var(--ud-ink); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; position: relative; }
+.ud-multi-btn::-webkit-details-marker { display: none; }
+.ud-multi-btn::after { content: '▾'; position: absolute; right: 12px; top: 50%; transform: translateY(-50%); color: var(--ud-muted); }
+.ud-multi[open] .ud-multi-btn { border-color: var(--ud-green); }
+.ud-multi-pop { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; min-width: 100%; width: max-content; max-width: min(360px, calc(100vw - 32px)); max-height: 340px; overflow: auto; display: grid; gap: 2px; padding: 8px; border: 1px solid var(--ud-line); border-radius: 12px; background: var(--ud-panel); box-shadow: 0 12px 32px rgba(0, 0, 0, .28); }
+.ud-multi-actions { display: flex; justify-content: space-between; gap: 12px; padding: 2px 4px 6px; border-bottom: 1px solid var(--ud-line); margin-bottom: 4px; }
+.ud-multi-row { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 8px; color: var(--ud-ink); cursor: pointer; }
+.ud-multi-row:hover { background: color-mix(in srgb, var(--ud-green) 16%, transparent); }
+.ud-multi-row input { accent-color: var(--ud-green); width: 16px; height: 16px; }
 
 .ud-context { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--ud-muted); font-size: 13px; padding: 0 4px; }
 .ud-context span:first-child { color: var(--ud-ink); font-weight: 700; }
@@ -142,7 +152,21 @@ body.udshv-open #view-entry { display: none !important; }
 @media (max-width: 640px) {
   #udshv-dashboard-root { width: calc(100vw - 32px); }
   .ud-unit { margin-left: 0; }
+  .ud-multi-pop { right: auto; left: 0; }
   .ud-rank-row { grid-template-columns: minmax(80px, 40%) minmax(0, 1fr) auto; }
   .ud-rank-row small { display: none; }
 }
 body.udshv-open .appbar .tabs { visibility: hidden; }
+
+/* Фон дашборда УДШВ: градієнт від синього (Повітряні Сили) до «Марун» (ДШВ). */
+html:has(body.udshv-open) {
+  background:
+    radial-gradient(70% 60% at 8% 0%, rgba(38, 66, 112, .75), transparent 70%),
+    radial-gradient(70% 70% at 100% 0%, rgba(122, 20, 34, .8), transparent 70%),
+    linear-gradient(115deg, #0a1730 0%, #170f24 45%, #2a0a12 100%) fixed !important;
+}
+:root[data-theme="light"] html:has(body.udshv-open) {
+  background: linear-gradient(115deg, #e9eef8 0%, #f3e9ee 55%, #f1dde1 100%) fixed !important;
+}
+html body.udshv-open, html.rocket-ref24 body.udshv-open, html:root body.udshv-open { background: transparent !important; }
+html:root:has(body.udshv-open) { background-color: #12091a !important; }

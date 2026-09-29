@@ -26,3 +26,10 @@ where `branch` is `air` (Повітряні Сили) or `rocket` (Ракетн�
 because that was the only module that opened it, and the old
 `local_profile_details.database_path` column is dropped. Unbinding or deleting a
 profile never touches the file on disk.
+
+`0007_command_tables.sql` widens `local_profile_tables.branch` to `pvk` and
+`dshv`: the dashboards of the Air Command (ПВК) and the Airborne Assault Forces
+Command (УДШВ) bind their own tables, apart from the tables of the Air Force
+and Rocket Forces modules. SQLite cannot change a CHECK in place, so the table
+is rebuilt and existing bindings are copied unchanged. A PVK table that was
+bound to `air` earlier stays there and still opens in the Air Force module.

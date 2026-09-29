@@ -6,6 +6,7 @@ import {
   csvRows,
   groupIssues,
   lastActiveDate,
+  normalizeUnits,
   parseUdshvWorkbook,
   periodRange,
   pivotRows,
@@ -14,7 +15,7 @@ import {
   validateWorkbook,
 } from './udshv-dashboard-core.js';
 
-const state = { workbook: null, view: 'summary', preset: 'week', anchor: '', from: '', to: '', unit: '', ovt: 'destroyed', sort: 'personnel' };
+const state = { workbook: null, view: 'summary', preset: 'week', anchor: '', from: '', to: '', units: [], unitsOpen: false, focusUnit: null, ovt: 'destroyed', sort: 'personnel' };
 
 const number = value => Math.round(Number(value) || 0).toLocaleString('uk-UA');
 const decimal = value => (Number(value) || 0).toLocaleString('uk-UA', { maximumFractionDigits: 1 });
@@ -49,7 +50,7 @@ function ensureState(workbook) {
   if (state.workbook === workbook) return;
   const keep = state.workbook && state.workbook.sourceName === workbook.sourceName;
   state.workbook = workbook;
-  if (!keep) Object.assign(state, { view: 'summary', preset: 'week', unit: '' });
+  if (!keep) Object.assign(state, { view: 'summary', preset: 'week', units: [] });
   state.anchor = lastActiveDate(workbook);
   const all = allDateRange(workbook);
   state.from = state.from || all.from;
@@ -208,7 +209,7 @@ function unitsPage(model, go) {
     h('div', { class: 'ud-scroll' }, h('table', { class: 'ud-table' },
       h('thead', {}, h('tr', {}, h('th', { text: 'Підрозділ' }), cols.map(([k, label]) => h('th', { class: state.sort === k ? 'sorted' : '' }, h('button', { type: 'button', onclick: () => { state.sort = k; go(); }, text: label }))))),
       h('tbody', {}, rows.map(r => h('tr', {},
-        h('th', {}, h('button', { type: 'button', class: 'ud-link', onclick: () => { state.unit = r.unit; state.view = 'summary'; go(); }, text: r.unit })),
+        h('th', {}, h('button', { type: 'button', class: 'ud-link', onclick: () => { state.units = [r.unit]; state.view = 'summary'; go(); }, text: r.unit })),
         cols.map(([k]) => h('td', { class: 'ud-num' }, h('span', { class: 'ud-cellbar', style: { width: `${(r[k] || 0) / max[k] * 100}%` } }), h('span', { text: k === 'days' ? `${r[k]}` : number(r[k]) })))))),
       h('tfoot', {}, h('tr', {}, h('th', { text: 'Разом' }), cols.map(([k]) => h('td', { class: 'ud-num', text: k === 'days' ? `${model.activeDays}` : number(totals[k]) }))))))));
 }
@@ -240,7 +241,7 @@ function ovtPage(model, go) {
     h('div', { class: 'ud-grid-2' },
       section(`${groupInfo(key).name}: типи ОВТ`, null, rankBars(model.groups[key], color, 24)),
       section('Динаміка', null, stackedBars(model.ovtSeries.map(s => ({ ...s, value: { [key]: s.value[key] } })), OVT_KEYS.filter(k => k.key === key), model.bucket))),
-    section(`${groupInfo(key).name}: підрозділ × тип`, null, heatmap(model.matrix[key], color, unit => { state.unit = unit; go(); })));
+    section(`${groupInfo(key).name}: підрозділ × тип`, null, heatmap(model.matrix[key], color, unit => { state.units = [unit]; go(); })));
 }
 
 function ammoPage(model, go) {
@@ -250,7 +251,7 @@ function ammoPage(model, go) {
     h('div', { class: 'ud-grid-2' },
       section('Витрата за типами боєприпасів', null, rankBars(items, 'var(--ud-green)', 20)),
       section('Втрати за категоріями', null, rankBars(model.groups.categories, 'var(--ud-violet)', 20))),
-    section('Витрата БК: підрозділ × тип', null, heatmap(model.matrix.ammo, 'var(--ud-green)', unit => { state.unit = unit; go(); })));
+    section('Витрата БК: підрозділ × тип', null, heatmap(model.matrix.ammo, 'var(--ud-green)', unit => { state.units = [unit]; go(); })));
 }
 
 function download(name, rows) {
@@ -261,11 +262,11 @@ function download(name, rows) {
 }
 
 function tablePage(model) {
-  const pivot = pivotRows(state.workbook, model.range, state.unit);
+  const pivot = pivotRows(state.workbook, model.range, state.units);
   const groups = GROUPS.map(g => ({ ...g, metrics: pivot.metrics.filter(m => m.group === g.key) })).filter(g => g.metrics.length);
-  const file = `УДШВ_${model.range.from}_${model.range.to}${state.unit ? '_' + state.unit.replace(/[^\p{L}\p{N}]+/gu, '-') : ''}.csv`;
+  const file = `УДШВ_${model.range.from}_${model.range.to}${unitsSuffix()}.csv`;
   return h('div', { class: 'ud-page' }, section('Зведена таблиця за період', `${pivot.metrics.length} показників із даними`,
-    h('button', { class: 'ud-btn', type: 'button', onclick: () => download(file, csvRows(state.workbook, model.range, state.unit)), text: 'Вивантажити CSV' }),
+    h('button', { class: 'ud-btn', type: 'button', onclick: () => download(file, csvRows(state.workbook, model.range, state.units)), text: 'Вивантажити CSV' }),
     h('div', { class: 'ud-scroll ud-scroll-tall' }, h('table', { class: 'ud-table ud-pivot' },
       h('thead', {},
         h('tr', {}, h('th', { rowspan: 2, text: 'Підрозділ' }), groups.map(g => h('th', { colspan: g.metrics.length, class: 'ud-group', text: g.name }))),
@@ -309,11 +310,54 @@ function periodControls(range, go) {
       h('label', {}, 'з ', h('input', { type: 'date', value: state.from, min: all.from, max: all.to, onchange: e => { state.from = e.target.value; go(); } })),
       h('label', {}, 'по ', h('input', { type: 'date', value: state.to, min: all.from, max: all.to, onchange: e => { state.to = e.target.value; go(); } }))) : null,
     state.preset === 'all' ? h('strong', { text: periodTitle(range) }) : null,
-    h('label', { class: 'ud-unit' }, 'Підрозділ ',
-      h('select', { onchange: e => { state.unit = e.target.value; go(); } },
-        h('option', { value: '', text: 'Усі підрозділи' }),
-        state.workbook.units.map(u => h('option', { value: u, selected: state.unit === u, text: u })))));
+    unitPicker(go));
 }
+
+// Підпис вибраних підрозділів: один — назва, кілька — кількість і перелік у підказці.
+function unitsLabel(units, prefix = '') {
+  const list = normalizeUnits(units);
+  if (!list.length) return '';
+  return prefix + (list.length === 1 ? list[0] : `${list.length} підрозділи: ${list.join(', ')}`);
+}
+
+function unitsSuffix() {
+  return state.units.length ? '_' + (state.units.length === 1 ? state.units[0] : `${state.units.length}-підрозділи`).replace(/[^\p{L}\p{N}]+/gu, '-') : '';
+}
+
+// Випадаючий список із прапорцями: можна обрати кілька підрозділів. Відкритий стан і фокус переживають перемальовування.
+function unitPicker(go) {
+  const all = state.workbook.units;
+  const chosen = new Set(state.units);
+  const summary = !chosen.size ? 'Усі підрозділи' : chosen.size === 1 ? [...chosen][0] : `Обрано: ${chosen.size} з ${all.length}`;
+  const details = h('details', { class: 'ud-multi', open: state.unitsOpen, ontoggle: e => { state.unitsOpen = e.target.open; } },
+    h('summary', { class: 'ud-multi-btn', title: chosen.size > 1 ? [...chosen].join(', ') : null, text: summary }),
+    h('div', { class: 'ud-multi-pop', role: 'group', 'aria-label': 'Підрозділи' },
+      h('div', { class: 'ud-multi-actions' },
+        h('button', { type: 'button', class: 'ud-link', onclick: () => { state.units = []; state.focusUnit = null; go(); }, text: 'Усі підрозділи' }),
+        h('button', { type: 'button', class: 'ud-link', onclick: () => { state.units = [...all]; state.focusUnit = null; go(); }, text: 'Обрати всі' })),
+      all.map(u => h('label', { class: 'ud-multi-row' },
+        h('input', { type: 'checkbox', value: u, checked: !chosen.size || chosen.has(u), onchange: e => {
+          const next = new Set(state.units.length ? state.units : all);
+          if (e.target.checked) next.add(u); else next.delete(u);
+          // Позначено все або нічого — це «усі підрозділи» (у списку всі прапорці тоді стоять).
+          state.units = !next.size || next.size === all.length ? [] : all.filter(x => next.has(x));
+          state.focusUnit = u;
+          go();
+        } }),
+        h('span', { text: u })))));
+  if (state.focusUnit) {
+    const target = state.focusUnit;
+    queueMicrotask(() => { state.focusUnit = null; [...details.querySelectorAll('input')].find(i => i.value === target)?.focus(); });
+  }
+  return h('div', { class: 'ud-unit' }, h('span', { text: 'Підрозділ' }), details);
+}
+
+// Клік поза списком підрозділів закриває його.
+document.addEventListener('click', e => {
+  if (!state.unitsOpen) return;
+  const open = document.querySelector('.ud-multi[open]');
+  if (open && !open.contains(e.target)) { open.open = false; state.unitsOpen = false; }
+});
 
 export function render(host, workbook, options = {}) {
   if (!host || workbook?.kind !== 'udshv') return;
@@ -323,7 +367,7 @@ export function render(host, workbook, options = {}) {
   if (!root) { root = h('div', { id: 'udshv-dashboard-root' }); host.append(root); }
   const go = () => render(host, workbook, options);
   const range = currentRange();
-  const model = createDashboardModel(workbook, { range, unit: state.unit, preset: state.preset });
+  const model = createDashboardModel(workbook, { range, unit: state.units, preset: state.preset });
   const nav = [['summary', 'Зведення УДШВ'], ['units', 'Підрозділи'], ['personnel', 'Втрати о/с'], ['ovt', 'ОВТ'], ['ammo', 'Витрата БК'], ['table', 'Зведена таблиця'], ['quality', 'Перевірка даних']];
   if (!nav.some(([k]) => k === state.view)) state.view = 'summary';
   const page = state.view === 'units' ? unitsPage(model, go)
@@ -344,9 +388,9 @@ export function render(host, workbook, options = {}) {
       options.canRefresh ? h('button', { class: 'ud-btn', type: 'button', onclick: () => options.refresh?.(), text: 'Оновити з файлу' }) : null),
     periodControls(range, go),
     h('div', { class: 'ud-context' },
-      h('span', { text: `${periodTitle(range)}${state.unit ? ` · ${state.unit}` : ''}` }),
+      h('span', { text: `${periodTitle(range)}${unitsLabel(state.units, ' · ')}` }),
       h('span', { text: `${model.activeDays} з ${model.days} днів із даними · ${compare}` }),
-      state.unit ? h('button', { type: 'button', class: 'ud-link', onclick: () => { state.unit = ''; go(); }, text: '× усі підрозділи' }) : null),
+      state.units.length ? h('button', { type: 'button', class: 'ud-link', onclick: () => { state.units = []; go(); }, text: '× усі підрозділи' }) : null),
     h('nav', { class: 'ud-nav', 'aria-label': 'Розділи дашборда УДШВ' }, nav.map(([key, label]) => h('button', { type: 'button', 'aria-pressed': String(state.view === key), onclick: () => { state.view = key; go(); }, text: label }))),
     page);
 }

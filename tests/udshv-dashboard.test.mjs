@@ -7,6 +7,7 @@ import {
   lastActiveDate,
   metricName,
   monthRange,
+  normalizeUnits,
   parseUdshvWorkbook,
   periodRange,
   shiftAnchor,
@@ -107,6 +108,29 @@ test('builds week, month and whole-period analytics with comparison to the previ
 
   const oneUnit = createDashboardModel(wb, { range: periodRange(wb, 'all'), unit: 'РУК 148 оабр' });
   assert.equal(oneUnit.kpis.find(k => k.key === 'kia').total, 1);
+});
+
+test('filters by several units at once', () => {
+  const wb = parseUdshvWorkbook(WORKBOOK);
+  const range = periodRange(wb, 'all');
+  const kia = model => model.kpis.find(k => k.key === 'kia').total;
+  const one = createDashboardModel(wb, { range, unit: ['РУК 148 оабр'] });
+  assert.equal(kia(one), 1);
+  assert.equal(one.unit, 'РУК 148 оабр');
+  assert.deepEqual(one.selectedUnits, ['РУК 148 оабр']);
+
+  const both = createDashboardModel(wb, { range, unit: ['АГ 148 оабр', 'РУК 148 оабр', 'АГ 148 оабр'] });
+  assert.equal(kia(both), 11);
+  assert.deepEqual(both.selectedUnits, ['АГ 148 оабр', 'РУК 148 оабр']);
+  assert.equal(both.unit, '');
+
+  assert.equal(kia(createDashboardModel(wb, { range, unit: [] })), 11);
+  assert.deepEqual(normalizeUnits(['', 'A', 'A', null, 'B']), ['A', 'B']);
+  assert.deepEqual(normalizeUnits('A'), ['A']);
+  assert.deepEqual(normalizeUnits(''), []);
+
+  const rows = csvRows(wb, range, ['РУК 148 оабр']);
+  assert.deepEqual(rows.slice(1, -1).map(r => r[0]), ['РУК 148 оабр']);
 });
 
 test('exports a pivot CSV and reports data problems', () => {

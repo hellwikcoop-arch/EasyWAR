@@ -182,8 +182,8 @@ function initializeLocalProfiles() {
   let workspaceState = { defaultTemplateKey: null, templates: [], assignments: [] };
   let sessionProfileId = null;
   // Per branch: the profile whose table the module has open, and the one being opened.
-  const loadedDatabaseFor = { air: null, rocket: null };
-  const loadingDatabaseFor = { air: null, rocket: null };
+  const loadedDatabaseFor = Object.fromEntries(PROFILE_BRANCHES.map(({ branch }) => [branch, null]));
+  const loadingDatabaseFor = Object.fromEntries(PROFILE_BRANCHES.map(({ branch }) => [branch, null]));
   let pendingDashboardSection = null;
   let busy = false;
 
@@ -220,8 +220,39 @@ function initializeLocalProfiles() {
       : 'Створити або вибрати локальний профіль';
   }
 
+  // Мінівіконця командувань на стартовому екрані (index.html): ПВК над «Повітряними Силами»,
+  // УДШВ над РВіА. Кожне показує свою прив'язану таблицю; кнопка «Відкрити дашборд» — у лончері.
+  function renderCommandTiles() {
+    const profile = activeProfile();
+    const visible = profile && !isProfileLocked(profile, sessionProfileId);
+    for (const tile of document.querySelectorAll('.command-tile[data-command]')) {
+      const path = visible ? profileTablePath(profile, tile.dataset.command) : null;
+      const line = tile.querySelector('[data-role="table"]');
+      line.textContent = path ? databaseFileName(path) : (profile ? 'Таблицю не прив’язано' : 'Профіль не обрано');
+      line.title = path || '';
+      line.classList.toggle('is-bound', Boolean(path));
+      const bind = tile.querySelector('[data-act="bind"]');
+      bind.hidden = false;
+      bind.textContent = path ? 'Змінити таблицю…' : 'Прив’язати таблицю…';
+    }
+  }
+
+  for (const button of document.querySelectorAll('.command-tile [data-act="bind"]')) {
+    button.addEventListener('click', () => {
+      const profile = activeProfile();
+      if (!profile || isProfileLocked(profile, sessionProfileId)) {
+        // Таблиця прив'язується до профілю: спершу потрібен активний профіль.
+        openButton.click();
+        status.textContent = 'Створіть або оберіть профіль, щоб прив’язати до нього таблицю.';
+        return;
+      }
+      bindDatabase(profile, button.closest('.command-tile').dataset.command);
+    });
+  }
+
   function render() {
     renderHeaderButton();
+    renderCommandTiles();
     list.textContent = '';
     if (!state.profiles.length) {
       list.append(el('p', { class: 'ew-profile-empty', text: 'Локальних профілів ще немає.' }));

@@ -11,7 +11,9 @@ function launcher({ loaded = false } = {}) {
   const rocketWindow = {};
   const listeners = new Set();
   const opened = [];
-  const frames = { 'frame-air': frameWindow, 'frame-rocket': rocketWindow };
+  const pvkWindow = {};
+  const dshvWindow = {};
+  const frames = { 'frame-air': frameWindow, 'frame-rocket': rocketWindow, 'frame-pvk': pvkWindow, 'frame-dshv': dshvWindow };
   globalThis.document = { getElementById: id => (frames[id] ? { contentWindow: frames[id] } : null) };
   globalThis.window = {
     EW_LAUNCHER: { openBranch: branch => opened.push(branch), isLoaded: () => loaded },
@@ -19,7 +21,7 @@ function launcher({ loaded = false } = {}) {
     removeEventListener: (type, listener) => listeners.delete(listener),
   };
   const open = branch => listeners.forEach(listener => listener({ detail: { branch } }));
-  return { frameWindow, rocketWindow, opened, open, listeners };
+  return { frameWindow, rocketWindow, pvkWindow, dshvWindow, opened, open, listeners };
 }
 
 test('each branch module is reached through its own frame', async () => {
@@ -34,6 +36,21 @@ test('each branch module is reached through its own frame', async () => {
   open('rocket');
   assert.equal(await pending, rocketWindow.__AV);
   assert.deepEqual(opened, []);
+});
+
+test('the command dashboards have their own frames and wait for their own opening', async () => {
+  const { frameWindow, pvkWindow, dshvWindow, open } = launcher();
+  assert.equal(moduleWindow('pvk'), pvkWindow);
+  assert.equal(moduleWindow('dshv'), dshvWindow);
+  assert.notEqual(moduleWindow('pvk'), frameWindow);
+
+  const pending = whenModuleDashboard('pvk');
+  pvkWindow.__AV = { connect() {} };
+  open('air');
+  open('dshv');
+  open('pvk');
+  assert.equal(await pending, pvkWindow.__AV);
+  assert.equal(moduleWindow('army'), null);
 });
 
 test('work on one branch does not hold up the other', async () => {

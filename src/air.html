@@ -1,6 +1,16 @@
 <!doctype html>
 <html lang="uk">
 <head>
+<script id="easywar-command-mode">
+/* Командний режим: лончер відкриває цю сторінку як окреме вікно дашборда (?command=pvk) з власною прив'язкою таблиці. */
+(function () {
+  try { if (new URLSearchParams(location.search).get('command') === 'pvk') document.documentElement.dataset.command = 'pvk'; } catch (e) {}
+})();
+</script>
+<style id="easywar-command-mode-css">
+/* У командному режимі є лише дашборд: внесення доповідей і довідник ховаємо. */
+html[data-command="pvk"] #tab-entry, html[data-command="pvk"] #tab-ref, html[data-command="pvk"] .snav-entry2 { display: none !important; }
+</style>
 <script id="easywar-desktop-frame-bridge">
 (function(){
   'use strict';
@@ -2703,6 +2713,8 @@ function toast(msg, kind) {
 function showError(msg) { const b = $('#error'); if (!msg) { b.hidden = true; b.textContent = ''; return; } b.hidden = false; b.textContent = msg; }
 
 /* ------------------------------ файл ------------------------------ */
+// Окреме вікно командування не чіпає файл, який запам'ятав основний модуль.
+const HANDLE_KEY = document.documentElement.dataset.command ? 'handle-' + document.documentElement.dataset.command : 'handle';
 function idb() { return new Promise((res, rej) => { const r = indexedDB.open('avtovvid', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
 async function idbSet(k, v) { const db = await idb(); return new Promise((res, rej) => { const tx = db.transaction('kv', 'readwrite'); tx.objectStore('kv').put(v, k); tx.oncomplete = res; tx.onerror = () => rej(tx.error); }); }
 async function idbGet(k) { const db = await idb(); return new Promise((res, rej) => { const tx = db.transaction('kv'); const q = tx.objectStore('kv').get(k); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); }); }
@@ -2719,6 +2731,7 @@ async function connect(u8, name, handle, fresh) {
   showError('');
   try {
     const wb = await openAnyWorkbook(u8);
+    if (document.documentElement.dataset.command === 'pvk' && wb.kind !== 'pvk') throw new Error('Це не таблиця ПВК: у вікні Повітряного командування відкриваються лише таблиці з аркушами «АА», «ПС», «Об’єкти» або журналом «Таблиця 1».');
     S.bytes = u8; S.name = name; S.handle = handle || null; S.wb = wb; S.ctx = wb.kind === 'pvk' ? null : C.buildContext(wb);
     S.dirty = false; S.undo = []; S.session = []; S.parsed = []; S.signalReview = null;
     $('#paste').value = '';
@@ -2734,7 +2747,7 @@ async function pickFile() {
       let perm = 'denied'; try { perm = await fh.requestPermission({ mode: 'readwrite' }); } catch (e) {}
       const f = await fh.getFile();
       await connect(new Uint8Array(await f.arrayBuffer()), f.name, perm === 'granted' ? fh : null, true);
-      if (perm === 'granted') idbSet('handle', fh).catch(() => {});
+      if (perm === 'granted') idbSet(HANDLE_KEY, fh).catch(() => {});
       else showError('Дозволу на запис не надано — зміни зберігатимуться через кнопку «Завантажити».');
     } catch (e) {
       if (!e || e.name === 'AbortError') return;
@@ -3139,10 +3152,10 @@ function init() {
       const f = await fh.getFile();
       if (!/\.xlsx$/i.test(f.name)) { showError('Потрібен файл .xlsx.'); return; }
       await connect(new Uint8Array(await f.arrayBuffer()), f.name, perm === 'granted' ? fh : null, true);
-      if (perm === 'granted') idbSet('handle', fh).catch(() => {});
+      if (perm === 'granted') idbSet(HANDLE_KEY, fh).catch(() => {});
     } else if (e.dataTransfer.files[0]) fromFileObject(e.dataTransfer.files[0]);
   });
-  if (window.showOpenFilePicker && window.indexedDB) idbGet('handle').then(fh => { if (fh && fh.kind === 'file') { S.storedHandle = fh; if (!S.wb) renderFile(); } }).catch(() => {});
+  if (window.showOpenFilePicker && window.indexedDB) idbGet(HANDLE_KEY).then(fh => { if (fh && fh.kind === 'file') { S.storedHandle = fh; if (!S.wb) renderFile(); } }).catch(() => {});
   renderAll();
 }
 

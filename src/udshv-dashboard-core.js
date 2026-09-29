@@ -372,10 +372,17 @@ export function weekdayProfile(records, value) {
   return names.map((name, i) => ({ name, value: value(buckets[i]) }));
 }
 
+// Фільтр за підрозділами: порожньо — усі; рядок — один підрозділ; масив — кілька. Повертає масив без дублікатів.
+export function normalizeUnits(unit) {
+  const list = Array.isArray(unit) ? unit : unit ? [unit] : [];
+  return [...new Set(list.filter(Boolean))];
+}
+
 export function createDashboardModel(workbook, options = {}) {
   const range = options.range || allDateRange(workbook);
-  const unit = options.unit || '';
-  const scoped = (workbook?.records || []).filter(r => !unit || r.unit === unit);
+  const selected = normalizeUnits(options.unit);
+  const unit = selected.length === 1 ? selected[0] : '';
+  const scoped = (workbook?.records || []).filter(r => !selected.length || selected.includes(r.unit));
   const current = scoped.filter(r => inRange(r, range));
   const prevRange = previousPeriod(options.preset, range);
   const previous = prevRange.from ? scoped.filter(r => inRange(r, prevRange)) : [];
@@ -391,9 +398,9 @@ export function createDashboardModel(workbook, options = {}) {
       series: seriesFor(current, range, k.value, bucket),
     };
   });
-  const units = unit ? [unit] : workbook.units;
+  const units = selected.length ? workbook.units.filter(u => selected.includes(u)) : workbook.units;
   return {
-    range, previousRange: prevRange, hasPrevious, bucket, unit,
+    range, previousRange: prevRange, hasPrevious, bucket, unit, selectedUnits: selected,
     days: daysOf(range).length,
     activeDays: new Set(current.filter(hasData).map(r => r.date)).size,
     records: current,
@@ -410,8 +417,9 @@ export function createDashboardModel(workbook, options = {}) {
 /* ------------------------------ таблиця й CSV ------------------------------ */
 
 export function pivotRows(workbook, range, unit = '') {
-  const records = workbook.records.filter(r => inRange(r, range) && (!unit || r.unit === unit));
-  const units = unit ? [unit] : workbook.units;
+  const selected = normalizeUnits(unit);
+  const records = workbook.records.filter(r => inRange(r, range) && (!selected.length || selected.includes(r.unit)));
+  const units = selected.length ? workbook.units.filter(u => selected.includes(u)) : workbook.units;
   const metrics = workbook.metrics.filter(m => records.some(r => r.values[m.id]));
   const rows = units.map(u => {
     const cells = {};
