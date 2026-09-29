@@ -44,20 +44,41 @@ test('only GBU-39/53/62/64 unfold wings, and unfolded wings widen the model', ()
     const folded = size(group).z;
     for (const [mesh, angle] of wings) mesh.rotation.y = angle;
     group.updateMatrixWorld(true);
-    assert.ok(size(group).z > folded + 1, `${kind}: wings spread sideways`);
+    assert.ok(size(group).z > folded + .8, `${kind}: wings spread sideways`);
   }
 });
 
-test('GBU-62 wings open into the narrow scissor of the drawing, GBU-39 wings open wide', () => {
+test('unfolded wing spans follow the reference drawings', () => {
   const span = kind => {
-    const { group, wings } = buildModel(kind);
+    const { group, wings, update } = buildModel(kind);
     for (const [mesh, angle] of wings) mesh.rotation.y = angle;
+    if (update) update();
     group.updateMatrixWorld(true);
     return size(group).z / size(group).x;
   };
-  // На кресленні JDAM-ER розмах крил — близько 0,43 довжини бомби, у GBU-39 — понад 0,75.
-  assert.ok(span('62') > .38 && span('62') < .48, `GBU-62 span ${span('62').toFixed(2)}`);
-  assert.ok(span('39') > .75, `GBU-39 span ${span('39').toFixed(2)}`);
+  // Розмах відносно довжини: GBU-62 (короткі широкі крила) ≈ 0,37, GBU-64 (довгі «ножиці») ≈ 0,43,
+  // GBU-39 (Diamond Back) — як у справжньої бомби, близько 0,77.
+  assert.ok(span('62') > .32 && span('62') < .42, `GBU-62 span ${span('62').toFixed(2)}`);
+  assert.ok(span('64') > .38 && span('64') < .48, `GBU-64 span ${span('64').toFixed(2)}`);
+  assert.ok(span('39') > .72 && span('39') < .86, `GBU-39 span ${span('39').toFixed(2)}`);
+});
+
+test('GBU-39 struts slide along the housing and stay attached to the wings', () => {
+  const { group, wings, update } = buildModel('39');
+  const struts = [];
+  group.traverse(o => { if (o.name === 'strut') struts.push(o); });
+  assert.equal(struts.length, 2);
+  for (const open of [0, .5, 1, 1.1]) {
+    for (const [mesh, angle] of wings) mesh.rotation.y = angle * open;
+    update();
+    group.updateMatrixWorld(true);
+    for (const strut of struts) {
+      const end = strut.localToWorld(new Vector3(strut.geometry.parameters.width, 0, 0));
+      const mount = strut.userData.wing.getObjectByName('strut-mount').getWorldPosition(new Vector3());
+      assert.ok(Math.hypot(end.x - mount.x, end.z - mount.z) < .01, `open ${open}: strut reaches the wing`);
+      assert.ok(strut.position.x > -.95 && strut.position.x < .75, `open ${open}: slider stays in the housing rail`);
+    }
+  }
 });
 
 test('unknown kinds fall back to the plain bomb', () => {

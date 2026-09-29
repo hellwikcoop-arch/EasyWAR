@@ -6,8 +6,8 @@
 import {
   ACESFilmicToneMapping, BoxGeometry, BufferGeometry, CanvasTexture, CircleGeometry, Color, CylinderGeometry,
   DirectionalLight, ExtrudeGeometry, Float32BufferAttribute, Group, LatheGeometry, Mesh, MeshBasicMaterial,
-  MeshStandardMaterial, PerspectiveCamera, PMREMGenerator, PolarGridHelper, RepeatWrapping, Scene, ShadowMaterial,
-  Shape, SphereGeometry, SRGBColorSpace, TorusGeometry, Vector2, Vector3, WebGLRenderer,
+  MeshStandardMaterial, Path, PerspectiveCamera, PlaneGeometry, PMREMGenerator, PolarGridHelper, RepeatWrapping, Scene,
+  ShadowMaterial, Shape, SphereGeometry, SRGBColorSpace, TorusGeometry, Vector2, Vector3, WebGLRenderer,
 } from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 
@@ -35,9 +35,9 @@ function canvas(w, h) {
   return c;
 }
 
-function texture(source, { srgb = false, repeat = false } = {}) {
+function texture(source, { srgb = false, repeat = false, flipY = false } = {}) {
   const t = new CanvasTexture(source);
-  t.flipY = false;
+  t.flipY = flipY;
   if (srgb) t.colorSpace = SRGBColorSpace;
   if (repeat) t.wrapS = t.wrapT = RepeatWrapping;
   t.anisotropy = 8;
@@ -146,8 +146,8 @@ class Skin {
   }
 
   // Прямокутна панель зі скругленими кутами: контур-шов і заклепки по кутах.
-  panel(x0, x1, v0, v1) {
-    const r = this.size(.018), w = this.size(.005);
+  panel(x0, x1, v0, v1, corner = .018) {
+    const r = this.size(corner), w = this.size(.005);
     const outline = (c, style, lw) => {
       c.strokeStyle = style; c.lineWidth = lw; c.beginPath();
       c.roundRect(this.px(x0), v0 * this.h, this.px(x1) - this.px(x0), (v1 - v0) * this.h, [r, r * this.aspect, r, r * this.aspect]);
@@ -191,10 +191,10 @@ class Skin {
   }
 
   // Шліфований алюміній: тонкі смуги вздовж осі.
-  streaks(x0, x1, count) {
+  streaks(x0, x1, count, strength = 1) {
     for (let i = 0; i < count; i++) {
       const v = this.rnd(), len = .1 + this.rnd() * .6, x = x0 + this.rnd() * (x1 - x0 - len);
-      const light = this.rnd() < .5, a = .04 + this.rnd() * .06;
+      const light = this.rnd() < .5, a = (.04 + this.rnd() * .06) * strength;
       this.rect(x, x + len, v, v + (1 + this.rnd() * 2) / this.h, { color: light ? `rgba(255,255,255,${a})` : `rgba(60,64,70,${a})` });
     }
   }
@@ -344,8 +344,56 @@ function at(object, x, y, z) {
 }
 
 function castShadows(group) {
-  group.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  group.traverse(o => { if (o.isMesh && !o.userData.decal) { o.castShadow = true; o.receiveShadow = true; } });
   return group;
+}
+
+// Стрижень між двома точками.
+function rod(a, b, radius, mat) {
+  const p0 = new Vector3(...a), dir = new Vector3(...b).sub(p0), len = dir.length();
+  const mesh = new Mesh(new CylinderGeometry(radius, radius, len, 10), mat);
+  mesh.position.copy(p0).addScaledVector(dir, .5);
+  mesh.quaternion.setFromUnitVectors(new Vector3(0, 1, 0), dir.normalize());
+  return mesh;
+}
+
+// Табличка з написом: площина з прозорим тлом, лицем до +z. Без DOM — порожня група.
+function decal(lines, w, h, { color = '#e6e8ea', bg = null, size = .72 } = {}) {
+  if (!HAS_DOM) return new Group();
+  const c = canvas(512, Math.max(16, Math.round(512 * h / w))), x = c.getContext('2d');
+  if (bg) { x.fillStyle = bg; x.fillRect(0, 0, c.width, c.height); }
+  const fs = c.height * size / lines.length;
+  x.fillStyle = color; x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.font = `700 ${fs.toFixed(1)}px "Arial Narrow", "Roboto Condensed", "Liberation Sans Narrow", Arial, sans-serif`;
+  lines.forEach((line, i) => x.fillText(line, c.width / 2, c.height * (i + .5) / lines.length, c.width * .94));
+  const mat = new MeshStandardMaterial({ map: texture(c, { srgb: true, flipY: true }), transparent: true, roughness: .6, metalness: 0,
+    depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
+  const mesh = new Mesh(new PlaneGeometry(w, h), mat);
+  mesh.userData.decal = true;
+  return mesh;
+}
+
+// D-подібне вушко підвіски: петля з отвором, стоїть уздовж осі.
+function dRing(mat, w = .075, h = .075, bar = .013, t = .014) {
+  const r = w / 2, ri = r - bar, outer = new Shape(), hole = new Path();
+  outer.moveTo(-r, 0); outer.lineTo(r, 0); outer.lineTo(r, h - r); outer.absarc(0, h - r, r, 0, Math.PI, false); outer.lineTo(-r, 0);
+  hole.moveTo(-ri, bar); hole.lineTo(ri, bar); hole.lineTo(ri, h - r); hole.absarc(0, h - r, ri, 0, Math.PI, false); hole.lineTo(-ri, bar);
+  outer.holes.push(hole);
+  const geometry = new ExtrudeGeometry(outer, { depth: t, bevelEnabled: true, bevelThickness: .002, bevelSize: .002, bevelSegments: 1, curveSegments: 10 });
+  geometry.translate(0, 0, -t / 2);
+  return new Mesh(geometry, mat);
+}
+
+// Переріз обтічника під корпусом: від точки всередині корпусу назовні до півширини a, далі заокруглене «U»
+// до глибини bottom. round < .5 дає майже прямокутний переріз, ближче до 1 — овальний.
+function podSection(rb, top, a, bottom, x, round = .4, steps = 20) {
+  const zb = Math.max(Math.sqrt(Math.max(rb(x) ** 2 - top * top, 0)) - .004, 0), b = bottom + top, pts = [[zb, top]];
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps * Math.PI, c = Math.cos(t), s = Math.sin(t);
+    pts.push([a * Math.sign(c) * Math.pow(Math.abs(c), round), top - b * Math.pow(s, round)]);
+  }
+  pts.push([-zb, top]);
+  return pts;
 }
 
 // Крило, що розкривається: пластина від осі повороту назад по корпусу.
@@ -403,9 +451,9 @@ function slenderBody({ r, noseLen, tailTaper = .1, color = 'grey', nose = 'ogive
   return g;
 }
 
-// ------------------------------------------------------------------ GBU-62/64: JDAM-ER
-// Мірки зняті з ортогонального креслення GBU-62 (корпус Mk 82, радіус .23 при довжині 4).
-// Для GBU-64 (корпус Mk 84) усе поперечне масштабується коефіцієнтом k.
+// ------------------------------------------------------------------ GBU-64: JDAM-ER з білим підривником
+// Мірки зняті з ортогонального креслення (радіус .23 при довжині 4); для GBU-64 (корпус Mk 84)
+// усе поперечне масштабується коефіцієнтом k.
 const ALU = { color: '#b7bbbf', mat: [.46, .78], height: .5 };
 const OLIVE = { color: '#3d4320', mat: [.64, .05], height: .5 };
 const STRAP = { color: '#a9aeb3', mat: [.38, .85], height: .72 };
@@ -423,6 +471,16 @@ function jdamRadius(k) {
   };
 }
 
+// Сідло підвіски: рамка з вікном згори, з обох боків звужується в одну стрічку донизу, до обтічника.
+// v: [де боки починають сходитися, де починається стрічка, кінець стрічки, низ вікна, вістря вирізу].
+function paintSaddle(s, { x: [x0, x1], win: [w0, w1], strap: [s0, s1], v: [frame, neck, end, winEnd, notch] }) {
+  const mid = (s0 + s1) / 2;
+  for (const m of [v => v, v => 1 - v]) {
+    s.poly([[x0, m(.5)], [x1, m(.5)], [x1, m(frame)], [s1, m(neck)], [s1, m(end)], [s0, m(end)], [s0, m(neck)], [x0, m(frame)]], STRAP);
+    s.poly([[w0, m(.5)], [w1, m(.5)], [w1, m(winEnd)], [mid, m(notch)], [w0, m(winEnd)]], OLIVE);
+  }
+}
+
 function jdamSkin(k, label, filler) {
   const R = .23 * k, s = new Skin(JDAM_SPAN, R, 62);
   s.rect(-2.1, -.67, 0, 1, ALU);
@@ -437,11 +495,7 @@ function jdamSkin(k, label, filler) {
   for (const x of [-1.786, -1.45, -1.14, -.714, -.67]) s.seam(x);
   s.rivets(-1.463, 0, 1, 22); s.rivets(-1.437, 0, 1, 22); s.rivets(-1.14, 0, 1, 28); s.rivets(-.727, 0, 1, 34); s.rivets(-.7, 0, 1, 34);
   s.panel(-1.05, -.73, FAR - .07, FAR + .07);
-  // Сідло підвіски: рамка згори, що з боків сходиться в одну стрічку донизу, до обтічника.
-  for (const m of [v => v, v => 1 - v]) {
-    s.poly([[.357, m(.5)], [.692, m(.5)], [.692, m(.655)], [.625, m(.72)], [.625, m(.845)], [.513, m(.845)], [.513, m(.72)], [.357, m(.655)]], STRAP);
-    s.poly([[.413, m(.5)], [.636, m(.5)], [.636, m(.6)], [.569, m(.69)], [.413, m(.6)]], OLIVE);
-  }
+  paintSaddle(s, { x: [.357, .692], win: [.413, .636], strap: [.513, .625], v: [.655, .72, .845, .6, .69] });
   for (const x of [.1, .385, .664]) s.dot(x, .5, .009, { color: '#8e9398', mat: [.3, .9], height: .8 });
   // Трафарети: блок написів між першим бандажем і сідлом та позначення біля носа з обох боків.
   const block = ['BOMB, GUIDED', label, filler, 'EXPLOSIVE: H-6', 'KIT: JDAM-ER', 'LOT  ____ - ____', 'CAUTION: HIGH EXPLOSIVE'];
@@ -481,19 +535,10 @@ function jdamEr(k, label, filler) {
   // Обтічник механізму крил: дві бічні рейки ззаду й глибший носок спереду.
   const top = -.094 * k, deep = .34 * k, half = .227 * k;
   const nose = x => Math.min(Math.max((x - .95) / .52, 0), 1);
-  const sectionAt = (a, bottom, x) => {
-    const zb = Math.max(Math.sqrt(Math.max(rb(x) ** 2 - top * top, 0)) - .004, 0), b = bottom + top, pts = [[zb, top]];
-    for (let i = 0; i <= 20; i++) {
-      const t = i / 20 * Math.PI, c = Math.cos(t), s = Math.sin(t);
-      pts.push([a * Math.sign(c) * Math.pow(Math.abs(c), .4), top - b * Math.pow(s, .4)]);
-    }
-    pts.push([-zb, top]);
-    return pts;
-  };
   const xs = sample(() => 0, .6, 1.47, .03).map(p => p[1]);
   g.add(loft(xs, x => {
     const s = nose(x), a = Math.min(half, rb(x) - .003) * Math.sqrt(Math.max(1 - Math.pow(s, 1.8), 0));
-    return sectionAt(a, deep - (deep - .15 * k) * Math.pow(s, 2.2), x);
+    return podSection(rb, top, a, deep - (deep - .15 * k) * Math.pow(s, 2.2), x);
   }, kit));
   for (const side of [1, -1]) {
     const railMesh = plate([[-.41, -.235 * k], [.64, -.235 * k], [.64, top], [-.35, top], [-.41, -.16 * k]], .1 * k, kit);
@@ -547,62 +592,227 @@ function wingSkin(base) {
   return new MeshStandardMaterial({ color: '#ffffff', roughness: .52, metalness: .3, map: texture(c, { srgb: true }), bumpMap: texture(b.canvas), bumpScale: 1 });
 }
 
+// ------------------------------------------------------------------ GBU-62: JDAM-ER з чорним ковпаком
+// За кресленнями GBU-62: корпус Mk 82 (радіус .205), світлий хвостовий відсік з овальними лючками й роз'ємом,
+// сідло з вікном, жовтий пояс і тонкий бандаж на носі, чорний ковпак. Знизу обтічник-«лінза» з широкою
+// плитою повороту; короткі широкі крила розходяться від плити назад приблизно на 27°.
+const G62_R = .205, G62_SPAN = [-2.02, 2.03];
+const PAINTED_ALU = { color: '#c3c7cb', mat: [.5, .55], height: .5 };
+
+function g62Radius(x) {
+  const R = G62_R;
+  if (x < -1.45) return .1;
+  if (x < -.45) return .1 + (R - .1) * (1 - Math.pow(-.45 - x, 1.25));
+  if (x < .84) return R;
+  return R * (1 - .454 * Math.pow(Math.min((x - .84) / .93, 1), 1.2));
+}
+
+function g62Skin() {
+  const s = new Skin(G62_SPAN, G62_R, 162);
+  s.rect(-2.1, -.45, 0, 1, PAINTED_ALU);
+  s.rect(-.45, 2.1, 0, 1, OLIVE);
+  s.rect(1.38, 1.45, 0, 1, YELLOW);
+  s.streaks(-2.02, -.45, 160);
+  s.weather(-2.02, -.45, { dark: '96,100,104', light: '250,250,250', count: 80, alpha: .1, mat: PAINTED_ALU.mat });
+  s.weather(-.45, 1.77, { dark: '26,28,14', light: '86,90,54', count: 240, alpha: .12, mat: OLIVE.mat });
+  // Хвостовий відсік: стики з заклепками й по два овальні лючки з кожного боку.
+  for (const x of [-1.84, -1.45, -.45]) s.seam(x);
+  s.rivets(-1.465, 0, 1, 20); s.rivets(-1.435, 0, 1, 20); s.rivets(-.51, 0, 1, 32);
+  for (const v of [NEAR, FAR]) { s.panel(-1.1, -.96, v - .1, v + .1, .06); s.panel(-.66, -.53, v - .09, v + .09, .06); }
+  paintSaddle(s, { x: [.02, .54], win: [.12, .45], strap: [.2, .32], v: [.64, .8, .86, .62, .73] });
+  for (const x of [-.1, .62]) {
+    s.dot(x, .5, .02, { color: '#9aa0a5', mat: [.32, .85], height: .7 });
+    s.rect(x - .013, x + .013, .497, .503, { color: 'rgba(30,32,34,.7)', height: .4 });
+  }
+  const block = ['BOMB, GUIDED  GBU-62/B', 'MK 82  500 LB', 'EXPLOSIVE: H-6', 'KIT: JDAM-ER', 'LOT  ____ - ____', 'CAUTION: HIGH EXPLOSIVE'];
+  s.text(block, .9, .69, .022, '#d9b830');
+  s.text(block, .9, .31, .022, '#d9b830', true);
+  return s.material({ bumpScale: 1.4 });
+}
+
+function gbu62() {
+  const g = new Group(), R = G62_R, rb = g62Radius;
+  const skinMat = skin('g62', g62Skin, paint(OLIVE.color, .64, .05));
+  const alu = paint('#c4c8cc', .5, .55), kit = paint('#cdd0d3', .55, .25), strap = paint(STRAP.color, .38, .85);
+  const black = paint('#17191b', .3, .15), dark = paint('#2c2f33', .5, .5);
+  // Чорне кільце на хвості, штанга стабілізаторів, конус хвостового відсіку, корпус.
+  g.add(lathe([[0, -2.02], [.08, -2.02], [.093, -2.012], [.093, -1.97], [.097, -1.965]], black, { segments: 40 }));
+  g.add(lathe([[.093, -1.965], [.1, -1.96], [.1, -1.45], ...sample(rb, -1.44, -.46, .03), [R * 1.01, -.455], [R * 1.01, -.448], [R, -.445], [R, .84], ...sample(rb, .86, 1.77, .025)], skinMat, { span: G62_SPAN, segments: 64 }));
+  // Ніс: сріблясте кільце й чорний ковпак.
+  const rn = rb(1.77), d = .1;
+  g.add(lathe([[rn - .002, 1.77], [rn + .006, 1.775], [rn + .006, 1.822], [rn - .004, 1.83]], strap, { segments: 48 }));
+  g.add(lathe([[rn - .004, 1.83], [d, 1.835], [d, 1.93], ...Array.from({ length: 10 }, (_, i) => {
+    const a = (i + 1) / 10 * Math.PI / 2;
+    return [d * Math.cos(a), 1.93 + d * Math.sin(a)];
+  })], black, { segments: 48 }));
+  // Стабілізатори «іксом» з темними накладками приводу.
+  const finGroup = finSet([[-1.86, .07], [-1.86, .31], [-1.72, .31], [-1.45, .105], [-1.45, .07]], .018, alu);
+  for (const fin of finGroup.children) fin.add(at(new Mesh(new BoxGeometry(.06, .05, .026), dark), -1.64, .15, 0));
+  g.add(finGroup);
+  // Роз'єм зверху на стику, штир знизу.
+  g.add(at(new Mesh(new BoxGeometry(.2, .03, .08), alu), -.56, rb(-.56) + .01, 0));
+  g.add(at(new Mesh(new CylinderGeometry(.022, .024, .03, 16), paint('#6b2a22', .45, .2)), -.48, rb(-.48) + .035, 0));
+  g.add(at(new Mesh(new CylinderGeometry(.011, .011, .07, 10), alu), -1.2, -rb(-1.2) - .03, 0));
+  // Бандажі, пряжки, вушка.
+  g.add(band(rb, .54, .6, strap), band(rb, 1.2, 1.245, strap, .005));
+  g.add(lug(.21, R, strap), lug(.75, R, strap));
+  for (const psi of [.55, Math.PI - .55]) for (const x of [.26, .57]) g.add(patch(x, R, psi, [.07, .075, .012], strap));
+  g.add(patch(1.222, rb(1.222), -.35, [.04, .035, .016], strap));
+  // Обтічник-«лінза»: найглибший посередині, на кінцях ховається в корпус.
+  const top = -.3 * R, x0 = -.75, x1 = 1.12;
+  const lens = x => Math.sin(Math.PI * Math.min(Math.max((x - x0) / (x1 - x0), 0), 1));
+  g.add(loft(sample(() => 0, x0, x1, .03).map(p => p[1]), x => {
+    const k = lens(x);
+    return podSection(rb, top, Math.min(.94 * R, rb(x) - .004) * Math.pow(k, .35), R * (.5 + .72 * Math.pow(k, .5)), x, .7);
+  }, kit, { capStart: false }));
+  g.add(rod([.92, -rb(.92) - .02, 0], [1.72, -rb(1.72) - .018, 0], .018, kit));
+  // Плита повороту крил ширша за корпус, на ній два болти-осі.
+  const plateY = -1.17 * R - .015;
+  g.add(at(new Mesh(new BoxGeometry(.35, .03, .5), kit), .335, plateY, 0));
+  for (const z of [.14, -.14]) g.add(at(new Mesh(new CylinderGeometry(.03, .03, .01, 20), dark), .37, plateY - .017, z));
+  const L = 1.2, cl = .08, c = .27;
+  const planform = side => [[.07, cl], [-L + .03, cl], [-L, cl - .05], [-L + .02, cl - c], [-.02, cl - c], [.07, cl - c + .08]].map(([x, z]) => [x, z * side]);
+  const wingMat = skin('g62-wing', () => wingSkin('#cdd0d3'), kit);
+  const wings = [1, -1].map((side, i) => {
+    const mesh = wingPlate(planform(side), .022, wingMat);
+    mesh.position.set(.37, plateY - .027 - i * .025, side * .14);
+    g.add(mesh);
+    return [mesh, side * .47];
+  });
+  return { group: castShadows(g), wings };
+}
+
 // ------------------------------------------------------------------ GBU-39 SDB
-const SDB_SPAN = [-2, 2];
+// За рендерами GBU-39: темний корпус, чорний короб механізму знизу з табличками «NO LIFT ON WINGS»,
+// крила Diamond Back з розкосами під корпусом, світлий гранований хвостовий відсік із вузькими
+// стабілізаторами й тягами, D-подібні вушки згори, жовтий пояс і бронзовий наконечник.
+const SDB_R = .205, SDB_BODY = [-.95, 2], SDB_TAIL = [-2.03, -.95];
+const CHARCOAL = { color: '#3d4145', mat: [.56, .3], height: .5 };
+const TAIL_GREY = { color: '#8f959a', mat: [.46, .68], height: .5 };
+
 function sdbRadius(x) {
-  const R = .215;
-  if (x < -1.15) return R - .105 * Math.pow(1 - Math.min(Math.max((x + 1.97) / .82, 0), 1), 1.6);
+  const R = SDB_R;
   if (x < 1) return R;
   const rho = (R * R + 1) / (2 * R), d = Math.min(x - 1, 1);
   return Math.max(Math.sqrt(rho * rho - d * d) - (rho - R), 0);
 }
 
+// Гранований конус хвоста від стику (-1.25) до маточини (-1.9).
+function sdbTailRadius(x) {
+  return SDB_R * (.5 + .5 * Math.pow(1 - Math.min(Math.max((-1.25 - x) / .65, 0), 1), .8));
+}
+
 function sdbSkin() {
-  const s = new Skin(SDB_SPAN, .215, 39), GREY = { color: '#7a8187', mat: [.5, .42], height: .5 };
-  s.rect(-2.1, 2.1, 0, 1, GREY);
-  s.streaks(-2, 1.87, 120);
-  s.weather(-2, 1.87, { dark: '52,56,60', light: '190,196,202', count: 230, alpha: .12, mat: GREY.mat });
-  s.rect(1.44, 1.58, 0, 1, YELLOW);
-  s.rect(1.87, 2.1, 0, 1, { color: '#a87a40', mat: [.3, .92], height: .5 });
-  for (const x of [-1.15, -.32, .38, 1]) s.seam(x);
-  s.rivets(-1.165, 0, 1, 30); s.rivets(-1.135, 0, 1, 30); s.rivets(1.012, 0, 1, 30);
-  s.seamAlong(-1.15, 1, .5 + .16); s.seamAlong(-1.15, 1, .5 - .16);
-  for (const v of [NEAR, FAR]) { s.panel(-.95, -.5, v - .06, v + .06); s.panel(.55, .85, v - .05, v + .05); }
-  const lines = ['BOMB, GUIDED', 'GBU-39/B  SDB', '250 LB CLASS', 'LOT  ____ - ____'];
-  s.text(lines, -.1, .79, .022, '#2a2f34');
-  s.text(lines, -.1, .21, .022, '#2a2f34', true);
-  s.text(['GBU-39/B'], 1.18, .7, .05, '#e2d59a');
-  s.text(['GBU-39/B'], 1.18, .3, .05, '#e2d59a', true);
-  return s.material({ bumpScale: 1.3 });
+  const s = new Skin(SDB_BODY, SDB_R, 39);
+  s.rect(-1, 2.1, 0, 1, CHARCOAL);
+  s.streaks(-.95, 1.9, 140, .35);
+  s.weather(-.95, 1.9, { dark: '22,24,26', light: '96,102,108', count: 200, alpha: .07, mat: CHARCOAL.mat });
+  s.rect(1.1, 1.24, 0, 1, YELLOW);
+  s.rect(1.9, 2.1, 0, 1, { color: '#b08a4e', mat: [.3, .92], height: .5 });
+  s.seam(-.95);
+  // Наліпка, «DO NOT ADJUST» біля переднього вушка, «NO LIFT» на носі.
+  s.rect(-.62, -.4, .6, .7, { color: '#484d52', mat: [.6, .15], height: .52 });
+  s.panel(-.62, -.4, .6, .7, .01);
+  s.text(['DO NOT ADJUST'], .45, .62, .02, '#d4d7da');
+  s.text(['DO NOT ADJUST'], .45, .38, .02, '#d4d7da', true);
+  s.rect(1.46, 1.66, .71, .79, { color: '#8e9499', mat: [.5, .2], height: .52 });
+  s.text(['NO LIFT'], 1.56, .75, .024, '#1d2023');
+  return s.material({ bumpScale: 1.2 });
+}
+
+function sdbTailSkin() {
+  const s = new Skin(SDB_TAIL, SDB_R, 391);
+  s.rect(-2.1, -.9, 0, 1, TAIL_GREY);
+  s.streaks(-2.03, -.95, 90);
+  s.weather(-2.03, -.95, { dark: '70,74,78', light: '220,224,228', count: 70, alpha: .1, mat: TAIL_GREY.mat });
+  for (const x of [-1.25, -1.9]) s.seam(x);
+  for (let i = 0; i < 8; i++) s.dot(-1.0, (i + .5) / 8, .008, { color: '#5d6166', mat: [.4, .8], height: .75 });
+  // Напис на верхній ближній грані конуса (центр грані — v = 5.5/8) і дзеркально з дальнього боку.
+  s.text(['NO LIFT', 'ON FINS'], -1.55, .6875, .028, '#2a2d30');
+  s.text(['NO LIFT', 'ON FINS'], -1.55, .3125, .028, '#2a2d30', true);
+  return s.material({ bumpScale: 1 });
 }
 
 function gbu39() {
-  const g = new Group(), R = .215, rb = sdbRadius;
-  const skinMat = skin('sdb', sdbSkin, paint('#7a8187', .5, .42));
-  const grey = paint('#7e858b', .5, .42), housing = paint('#6f767c', .5, .42), steel = paint('#aeb3b8', .38, .85);
-  g.add(lathe([[0, -2], [.07, -2], [.095, -1.995], [.105, -1.985], ...sample(rb, -1.97, -1.16, .03), [R + .002, -1.155], [R + .002, -1.145], [R, -1.14], [R, 1], ...sample(rb, 1.02, 2, .02)], skinMat, { span: SDB_SPAN, segments: 64 }));
-  g.add(finSet([[-1.99, .06], [-1.99, .4], [-1.78, .4], [-1.44, .15], [-1.44, .06]], .016, grey));
-  const strakes = finSet([[-.77, R - .01], [1.11, R - .01], [1.02, R + .032], [-.7, R + .032]], .01, grey, { count: 2, offset: Math.PI / 2 });
-  g.add(strakes);
-  // Корпус механізму Diamond Back зверху; на ньому складені крила й вушка підвіски.
-  const hs = plate([[-1.11, .15], [1.17, .15], [1.17, .175], [1, .252], [-.98, .252], [-1.11, .196]], .2, housing);
-  g.add(hs);
-  g.add(lug(.42, .252, steel, .07), lug(-.2, .252, steel, .07));
-  const L = 1.95, c = .075;
-  const planform = side => [[.05, c], [-L + .12, c], [-L, -c], [.05, -c]].map(([x, z]) => [x, z * side]);
-  const wingMat = skin('sdb-wing', () => wingSkin('#858c92'), grey);
+  const g = new Group(), R = SDB_R, rb = sdbRadius;
+  const skinMat = skin('sdb', sdbSkin, paint(CHARCOAL.color, .56, .3));
+  const tailMat = skin('sdb-tail', sdbTailSkin, paint(TAIL_GREY.color, .46, .68));
+  const facetMat = skin('sdb-tail-facets', () => { const m = tailMat.clone(); m.flatShading = true; return m; }, tailMat);
+  const housingMat = paint('#1f2225', .55, .35), fin = paint('#9aa0a5', .45, .6), black = paint('#18191b', .35, .5);
+  const dark = paint('#2b2e31', .5, .5), wingGrey = paint('#6e7479', .5, .35);
+  // Корпус, світлий циліндричний пояс хвоста, гранований конус, маточина.
+  g.add(lathe([[R * 1.01, -.95], [R, -.945], [R, 1], ...sample(rb, 1.02, 2, .02)], skinMat, { span: SDB_BODY, segments: 64 }));
+  g.add(lathe([[R * .99, -1.25], [R, -1.24], [R, -.965], [R * 1.012, -.96], [R * 1.012, -.95]], tailMat, { span: SDB_TAIL, segments: 64 }));
+  g.add(lathe(sample(sdbTailRadius, -1.9, -1.25, .05), facetMat, { span: SDB_TAIL, segments: 8 }));
+  g.add(lathe([[0, -2], [.26 * R, -2], [.3 * R, -1.985], [.3 * R, -1.965], [.46 * R, -1.96], [.46 * R, -1.905], [.5 * R, -1.9]], dark, { segments: 32 }));
+  // Приливи на стику й тяги стабілізаторів уздовж ребер конуса.
+  for (let i = 0; i < 4; i++) {
+    const turn = new Group();
+    turn.rotation.x = Math.PI / 4 + i * Math.PI / 2;
+    turn.add(at(new Mesh(new BoxGeometry(.1, .04, .07), fin), -1.215, R + .012, 0));
+    turn.add(at(new Mesh(new CylinderGeometry(.011, .011, .012, 10), dark), -1.215, R + .036, 0));
+    turn.add(rod([-1.24, R * .96 + .012, 0], [-1.88, R * .5 + .012, 0], .011, dark));
+    g.add(turn);
+  }
+  g.add(at(new Mesh(new BoxGeometry(.2, .014, .15), paint('#8a5326', .45, .3)), -1.1, -R - .004, 0));
+  g.add(finSet([[-1.975, .06], [-1.835, .06], [-1.885, .42], [-2.03, .42]], .012, fin));
+  // Вушка підвіски.
+  for (const x of [-.08, .72]) g.add(at(dRing(black), x, R - .006, 0), at(new Mesh(new BoxGeometry(.1, .01, .04), black), x, R, 0));
+  // Короб механізму крил знизу: плоскі боки, спереду загинається під ніс.
+  const top = -.15 * R, frontX = .85, endX = 1.42, deep = 1.3 * R;
+  const front = x => Math.min(Math.max((x - frontX) / (endX - frontX), 0), 1);
+  const depth = x => deep - (deep - .5 * R) * Math.pow(front(x), 1.4);
+  g.add(loft(sample(() => 0, -.95, endX, .03).map(p => p[1]), x => {
+    const a = Math.min(.98 * R, rb(x) - .004) * Math.sqrt(Math.max(1 - Math.pow(front(x), 3), 0));
+    return podSection(rb, top, a, depth(x), x, .25);
+  }, housingMat));
+  for (const z of [.55 * R, -.55 * R]) g.add(at(new Mesh(new BoxGeometry(1.7, .008, .03), dark), -.08, -deep - .004, z));
+  const blister = at(new Mesh(new SphereGeometry(1, 24, 12), black), 1.2, -depth(1.2), 0);
+  blister.scale.set(.12, .05, .07);
+  g.add(blister);
+  for (const side of [1, -1]) {
+    const sign = decal(['NO LIFT ON WINGS'], .36, .05);
+    sign.position.set(.18, -.7 * R, side * (.98 * R + .002));
+    if (side < 0) sign.rotation.y = Math.PI;
+    g.add(sign);
+  }
+  // Крила з віссю в передній частині короба. Розкіс іде від повзуна в рейці короба до крила біля кінця:
+  // довжина розкосу стала, тож повзун їде назад, поки крило розкривається.
+  const PX = .75, PZ = .03, L = 1.95, c = .15, aL = .82 * L, Ls = 1.36, wingY = -deep - .013;
+  const planform = side => [[.07, c / 2], [-L + .06, c / 2], [-L + .01, c / 2 - .03], [-L, 0], [-L, -c / 2], [.07, -c / 2]].map(([x, z]) => [x, z * side]);
+  const wingMat = skin('sdb-wing', () => wingSkin('#6e7479'), wingGrey);
+  const strutGeo = new BoxGeometry(Ls, .014, .08).translate(Ls / 2, 0, 0);
+  const links = [];
   const wings = [1, -1].map((side, i) => {
-    const mesh = wingPlate(planform(side), .014, wingMat);
-    mesh.position.set(1.02, .261 + i * .016, 0);
-    g.add(mesh);
-    return [mesh, side * .95];
+    const mesh = wingPlate(planform(side), .02, wingMat);
+    mesh.position.set(PX, wingY - i * .024, side * PZ);
+    const mount = at(new Mesh(new BoxGeometry(.1, .04, .09), fin), -aL, -.03, 0);
+    mount.name = 'strut-mount';
+    mesh.add(mount);
+    const strut = new Mesh(strutGeo, wingGrey);
+    strut.name = 'strut';
+    strut.position.y = wingY - .045 - i * .017;
+    strut.userData.wing = mesh;
+    strut.add(new Mesh(new BoxGeometry(.07, .02, .05), dark));
+    g.add(mesh, strut);
+    links.push({ wing: mesh, strut, side });
+    return [mesh, side * .9];
   });
-  return { group: castShadows(g), wings };
+  const update = () => {
+    for (const { wing, strut, side } of links) {
+      const th = wing.rotation.y * side, wx = PX - aL * Math.cos(th), wz = side * (PZ + aL * Math.sin(th)), sz = side * PZ;
+      const sx = wx + Math.sqrt(Math.max(Ls * Ls - (wz - sz) ** 2, 0));
+      strut.position.set(sx, strut.position.y, sz);
+      strut.rotation.y = Math.atan2(-(wz - sz), wx - sx);
+    }
+  };
+  update();
+  return { group: castShadows(g), wings, update };
 }
 
-// Кожна модель повертає групу і список крил [меш, кут розкриття].
+// Кожна модель повертає групу, список крил [меш, кут розкриття] і, якщо треба, update() для розкосів.
 const MODELS = {
-  '62': () => jdamEr(1, 'GBU-62/B', 'MK 82  500 LB'),
+  '62': gbu62,
   '64': () => jdamEr(1.17, 'GBU-64/B', 'MK 84  2000 LB'),
   '39': gbu39,
   '53': () => {
@@ -715,7 +925,7 @@ export function mount(el, kind, { motion = true } = {}) {
   const s = stage, run = ++s.run, canvasEl = s.renderer.domElement;
   cancelAnimationFrame(s.frame);
   for (const old of [...s.holder.children]) { s.holder.remove(old); disposeGroup(old); }
-  const { group, wings } = buildModel(kind);
+  const { group, wings, update } = buildModel(kind);
   s.holder.add(group);
   el.prepend(canvasEl);
   const marks = ['nose', 'tail'].map(n => {
@@ -756,6 +966,7 @@ export function mount(el, kind, { motion = true } = {}) {
     const k = motion ? Math.min(Math.max((t - 1.2) / 1.4, 0), 1) : 1;
     const open = k === 0 ? 0 : backOut(k);
     for (const [mesh, angle] of wings) mesh.rotation.y = angle * open;
+    if (update) update();
     group.updateMatrixWorld(true);
   };
   // Перетягування: горизонтальний рух повертає модель; вертикальний лишаємо прокрутці сторінки.
