@@ -62,6 +62,16 @@ body.udshv-open #view-entry { display: none !important; }
 .ud-step { display: inline-flex; align-items: center; gap: 8px; }
 .ud-custom { display: inline-flex; gap: 10px; color: var(--ud-muted); }
 .ud-unit { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; color: var(--ud-muted); }
+.ud-multi { position: relative; }
+.ud-multi-btn { list-style: none; cursor: pointer; min-width: 190px; max-width: 320px; padding: 8px 32px 8px 12px; border: 1px solid var(--ud-line); border-radius: 10px; background: var(--ud-panel); color: var(--ud-ink); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; position: relative; }
+.ud-multi-btn::-webkit-details-marker { display: none; }
+.ud-multi-btn::after { content: '▾'; position: absolute; right: 12px; top: 50%; transform: translateY(-50%); color: var(--ud-muted); }
+.ud-multi[open] .ud-multi-btn { border-color: var(--ud-green); }
+.ud-multi-pop { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; min-width: 100%; width: max-content; max-width: min(360px, calc(100vw - 32px)); max-height: 340px; overflow: auto; display: grid; gap: 2px; padding: 8px; border: 1px solid var(--ud-line); border-radius: 12px; background: var(--ud-panel); box-shadow: 0 12px 32px rgba(0, 0, 0, .28); }
+.ud-multi-actions { display: flex; justify-content: space-between; gap: 12px; padding: 2px 4px 6px; border-bottom: 1px solid var(--ud-line); margin-bottom: 4px; }
+.ud-multi-row { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 8px; color: var(--ud-ink); cursor: pointer; }
+.ud-multi-row:hover { background: color-mix(in srgb, var(--ud-green) 16%, transparent); }
+.ud-multi-row input { accent-color: var(--ud-green); width: 16px; height: 16px; }
 
 .ud-context { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--ud-muted); font-size: 13px; padding: 0 4px; }
 .ud-context span:first-child { color: var(--ud-ink); font-weight: 700; }
@@ -142,6 +152,7 @@ body.udshv-open #view-entry { display: none !important; }
 @media (max-width: 640px) {
   #udshv-dashboard-root { width: calc(100vw - 32px); }
   .ud-unit { margin-left: 0; }
+  .ud-multi-pop { right: auto; left: 0; }
   .ud-rank-row { grid-template-columns: minmax(80px, 40%) minmax(0, 1fr) auto; }
   .ud-rank-row small { display: none; }
 }
