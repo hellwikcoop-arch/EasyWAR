@@ -18,13 +18,17 @@ pub struct LocalProfileStore {
     pool: SqlitePool,
 }
 
-/// Рід військ, для якого профіль тримає окрему таблицю. Кожна відкривається у
-/// своєму модулі й записується у свій файл.
+/// Рід військ (або командний рівень), для якого профіль тримає окрему таблицю.
+/// Кожна відкривається у своєму модулі й записується у свій файл. `Pvk` і `Dshv` —
+/// таблиці командувань (Повітряне командування, Командування ДШВ): вони мають
+/// власні прив'язки й відкриваються в окремих вікнах над модулями ПС і РВіА.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Branch {
     Air,
     Rocket,
+    Pvk,
+    Dshv,
 }
 
 impl Branch {
@@ -32,6 +36,8 @@ impl Branch {
         match self {
             Branch::Air => "air",
             Branch::Rocket => "rocket",
+            Branch::Pvk => "pvk",
+            Branch::Dshv => "dshv",
         }
     }
 
@@ -40,6 +46,8 @@ impl Branch {
         match self {
             Branch::Air => "Повітряних Сил",
             Branch::Rocket => "Ракетних військ і артилерії",
+            Branch::Pvk => "Повітряного командування (ПВК)",
+            Branch::Dshv => "Командування ДШВ (УДШВ)",
         }
     }
 
@@ -47,6 +55,8 @@ impl Branch {
         match value {
             "air" => Ok(Branch::Air),
             "rocket" => Ok(Branch::Rocket),
+            "pvk" => Ok(Branch::Pvk),
+            "dshv" => Ok(Branch::Dshv),
             _ => Err(LocalProfileError::InvalidBranch),
         }
     }
@@ -57,6 +67,8 @@ impl Branch {
 pub struct ProfileTables {
     pub air: Option<String>,
     pub rocket: Option<String>,
+    pub pvk: Option<String>,
+    pub dshv: Option<String>,
 }
 
 impl ProfileTables {
@@ -64,6 +76,8 @@ impl ProfileTables {
         match branch {
             Branch::Air => &mut self.air,
             Branch::Rocket => &mut self.rocket,
+            Branch::Pvk => &mut self.pvk,
+            Branch::Dshv => &mut self.dshv,
         }
     }
 }
@@ -592,8 +606,8 @@ pub(crate) fn validate_profile_id(id: &str) -> Result<(), LocalProfileError> {
 mod tests {
     use super::*;
     use crate::database::{
-        INITIAL_SCHEMA_SQL, LOCAL_PROFILES_SQL, PROFILE_BRANCH_TABLES_SQL, PROFILE_DETAILS_SQL,
-        XLSX_DUPLICATE_LINKS_SQL,
+        COMMAND_TABLES_SQL, INITIAL_SCHEMA_SQL, LOCAL_PROFILES_SQL, PROFILE_BRANCH_TABLES_SQL,
+        PROFILE_DETAILS_SQL, XLSX_DUPLICATE_LINKS_SQL,
     };
     use sqlx::sqlite::SqlitePoolOptions;
 
@@ -623,6 +637,10 @@ mod tests {
             .await
             .unwrap();
         sqlx::raw_sql(PROFILE_BRANCH_TABLES_SQL)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::raw_sql(COMMAND_TABLES_SQL)
             .execute(&pool)
             .await
             .unwrap();
@@ -862,11 +880,17 @@ mod tests {
             ProfileTables {
                 air: Some("/synthetic/air.xlsx".to_owned()),
                 rocket: Some("/synthetic/rocket.xlsx".to_owned()),
+                ..ProfileTables::default()
             }
         );
         assert_eq!(
             serde_json::to_value(&state.profiles[0]).unwrap()["tables"],
-            serde_json::json!({ "air": "/synthetic/air.xlsx", "rocket": "/synthetic/rocket.xlsx" })
+            serde_json::json!({
+                "air": "/synthetic/air.xlsx",
+                "rocket": "/synthetic/rocket.xlsx",
+                "pvk": null,
+                "dshv": null
+            })
         );
 
         store
@@ -909,6 +933,8 @@ mod tests {
             Err(LocalProfileError::ProfileNotFound)
         ));
         assert_eq!(Branch::parse("rocket").unwrap(), Branch::Rocket);
+        assert_eq!(Branch::parse("pvk").unwrap(), Branch::Pvk);
+        assert_eq!(Branch::parse("dshv").unwrap(), Branch::Dshv);
         assert!(matches!(
             Branch::parse("army"),
             Err(LocalProfileError::InvalidBranch)
@@ -920,6 +946,107 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(orphaned, 0);
+    }
+
+    #[tokio::test]
+    async fn command_tables_are_bound_apart_from_the_branch_tables() {
+        let store = store().await;
+        let profile = id("Командування");
+        store.create(&profile, "Командування", NOW_1).await.unwrap();
+        store
+            .set_table_path(&profile, Branch::Air, Some("/synthetic/air.xlsx"), NOW_2)
+            .await
+            .unwrap();
+        store
+            .set_table_path(&profile, Branch::Pvk, Some("/synthetic/pvk.xlsx"), NOW_2)
+            .await
+            .unwrap();
+        let state = store
+            .set_table_path(&profile, Branch::Dshv, Some("/synthetic/dshv.xlsx"), NOW_2)
+            .await
+            .unwrap();
+        assert_eq!(
+            state.profiles[0].tables,
+            ProfileTables {
+                air: Some("/synthetic/air.xlsx".to_owned()),
+                rocket: None,
+                pvk: Some("/synthetic/pvk.xlsx".to_owned()),
+                dshv: Some("/synthetic/dshv.xlsx".to_owned()),
+            }
+        );
+        // Відв'язання командної таблиці не чіпає таблицю модуля.
+        let state = store
+            .set_table_path(&profile, Branch::Pvk, None, NOW_2)
+            .await
+            .unwrap();
+        assert_eq!(state.profiles[0].tables.pvk, None);
+        assert_eq!(
+            state.profiles[0].tables.air.as_deref(),
+            Some("/synthetic/air.xlsx")
+        );
+        assert_eq!(
+            store
+                .table_path(&profile, Branch::Dshv)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("/synthetic/dshv.xlsx")
+        );
+    }
+
+    #[tokio::test]
+    async fn the_command_migration_keeps_existing_bindings() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        for migration in [
+            INITIAL_SCHEMA_SQL,
+            XLSX_DUPLICATE_LINKS_SQL,
+            LOCAL_PROFILES_SQL,
+            PROFILE_DETAILS_SQL,
+            PROFILE_BRANCH_TABLES_SQL,
+        ] {
+            sqlx::raw_sql(migration).execute(&pool).await.unwrap();
+        }
+        let profile = id("Перенесення");
+        LocalProfileStore::new(pool.clone())
+            .create(&profile, "Перенесення", NOW_1)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO local_profile_tables (profile_id, branch, path, updated_at)
+             VALUES (?, 'air', '/synthetic/air.xlsx', ?), (?, 'rocket', '/synthetic/rocket.xlsx', ?)",
+        )
+        .bind(&profile)
+        .bind(NOW_1)
+        .bind(&profile)
+        .bind(NOW_1)
+        .execute(&pool)
+        .await
+        .unwrap();
+        // Стара схема ще не знає командних прив'язок.
+        assert!(sqlx::query(
+            "INSERT INTO local_profile_tables (profile_id, branch, path, updated_at)
+             VALUES (?, 'pvk', '/synthetic/pvk.xlsx', ?)",
+        )
+        .bind(&profile)
+        .bind(NOW_1)
+        .execute(&pool)
+        .await
+        .is_err());
+
+        sqlx::raw_sql(COMMAND_TABLES_SQL).execute(&pool).await.unwrap();
+        let state = LocalProfileStore::new(pool).list().await.unwrap();
+        assert_eq!(
+            state.profiles[0].tables,
+            ProfileTables {
+                air: Some("/synthetic/air.xlsx".to_owned()),
+                rocket: Some("/synthetic/rocket.xlsx".to_owned()),
+                ..ProfileTables::default()
+            }
+        );
     }
 
     #[tokio::test]
@@ -986,6 +1113,7 @@ mod tests {
             ProfileTables {
                 air: Some("/synthetic/AVIA_BASE.xlsx".to_owned()),
                 rocket: None,
+                ..ProfileTables::default()
             }
         );
         assert_eq!(tables(&bound).position, "Аналітик");

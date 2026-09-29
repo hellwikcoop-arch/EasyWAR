@@ -79,16 +79,21 @@ export function setLocalProfilePassword(profileId, currentPassword, newPassword,
   });
 }
 
-/** Роди військ, для яких профіль тримає окрему таблицю. */
+/**
+ * Роди військ і командування, для яких профіль тримає окрему таблицю. ПВК і УДШВ —
+ * дашборди командувань: вони відкриваються у власних вікнах над модулями ПС і РВіА.
+ */
 export const PROFILE_BRANCHES = [
   { branch: 'air', short: 'ПС', title: 'Повітряні Сили', table: 'Таблиця Повітряних Сил' },
+  { branch: 'pvk', short: 'ПВК', title: 'Повітряне командування (дашборд ПВК)', table: 'Таблиця ПВК' },
   { branch: 'rocket', short: 'РВіА', title: 'Ракетні війська і артилерія', table: 'Таблиця Ракетних військ і артилерії' },
+  { branch: 'dshv', short: 'УДШВ', title: 'Командування ДШВ (дашборд УДШВ)', table: 'Таблиця УДШВ' },
 ];
 
 /** Порожні базові таблиці, з яких можна почати. `branch` — модуль, що їх відкриває. */
 export const BASE_TABLES = [
   { key: 'air', branch: 'air', label: 'ПС — базова таблиця' },
-  { key: 'pvk', branch: 'air', label: 'ПС рівня ПВК (ТАБЛ 2-3)' },
+  { key: 'pvk', branch: 'pvk', label: 'ПС рівня ПВК (ТАБЛ 2-3)' },
   { key: 'rvia', branch: 'rocket', label: 'РВіА — базова таблиця' },
 ];
 

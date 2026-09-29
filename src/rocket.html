@@ -1,6 +1,16 @@
 <!doctype html>
 <html lang="uk">
 <head>
+<script id="easywar-command-mode">
+/* Командний режим: лончер відкриває цю сторінку як окреме вікно дашборда (?command=dshv) з власною прив'язкою таблиці. */
+(function () {
+  try { if (new URLSearchParams(location.search).get('command') === 'dshv') document.documentElement.dataset.command = 'dshv'; } catch (e) {}
+})();
+</script>
+<style id="easywar-command-mode-css">
+/* У командному режимі є лише дашборд: внесення доповідей і довідник ховаємо. */
+html[data-command="dshv"] #tab-entry, html[data-command="dshv"] .snav-entry { display: none !important; }
+</style>
 <script>
 (function(){
   'use strict';
@@ -4038,6 +4048,8 @@ function toast(msg, kind) {
 function showError(msg) { const b = $('#error'); if (!msg) { b.hidden = true; b.textContent = ''; return; } b.hidden = false; b.textContent = msg; }
 
 /* ------------------------------ файл ------------------------------ */
+// Окреме вікно командування не чіпає файл, який запам'ятав основний модуль.
+const HANDLE_KEY = document.documentElement.dataset.command ? 'handle-' + document.documentElement.dataset.command : 'handle';
 function idb() { return new Promise((res, rej) => { const r = indexedDB.open('avtovvid', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
 async function idbSet(k, v) { const db = await idb(); return new Promise((res, rej) => { const tx = db.transaction('kv', 'readwrite'); tx.objectStore('kv').put(v, k); tx.oncomplete = res; tx.onerror = () => rej(tx.error); }); }
 async function idbGet(k) { const db = await idb(); return new Promise((res, rej) => { const tx = db.transaction('kv'); const q = tx.objectStore('kv').get(k); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); }); }
@@ -4078,8 +4090,12 @@ async function connect(u8, name, handle) {
   showError('');
   try {
     let wb;
-    try { wb = await C.openWorkbook(u8); }
+    try {
+      wb = await C.openWorkbook(u8);
+      if (document.documentElement.dataset.command === 'dshv') throw Object.assign(new Error('Це не таблиця УДШВ: у вікні Командування ДШВ відкриваються лише таблиці «Втрати о/с та ОВТ противника за угруповання ДШВ».'), { notUdshv: true });
+    }
     catch (standardError) {
+      if (standardError.notUdshv) throw standardError;
       const ud = await openUdshv(u8, name);
       if (!ud) throw standardError;
       showUdshv(ud, u8, name, handle);
@@ -4100,7 +4116,7 @@ async function pickFile() {
       let perm = 'denied'; try { perm = await fh.requestPermission({ mode: 'readwrite' }); } catch (e) {}
       const f = await fh.getFile();
       await connect(new Uint8Array(await f.arrayBuffer()), f.name, perm === 'granted' ? fh : null);
-      if (perm === 'granted') idbSet('handle', fh).catch(() => {});
+      if (perm === 'granted') idbSet(HANDLE_KEY, fh).catch(() => {});
       else showError('Дозволу на запис не надано — зміни зберігатимуться через кнопку «Завантажити».');
     } catch (e) {
       if (!e || e.name === 'AbortError') return;
@@ -4415,10 +4431,10 @@ function init() {
       const f = await fh.getFile();
       if (!/\.xlsx$/i.test(f.name)) { showError('Потрібен файл .xlsx.'); return; }
       await connect(new Uint8Array(await f.arrayBuffer()), f.name, perm === 'granted' ? fh : null);
-      if (perm === 'granted') idbSet('handle', fh).catch(() => {});
+      if (perm === 'granted') idbSet(HANDLE_KEY, fh).catch(() => {});
     } else if (e.dataTransfer.files[0]) fromFileObject(e.dataTransfer.files[0]);
   });
-  if (window.showOpenFilePicker && window.indexedDB) idbGet('handle').then(fh => { if (fh && fh.kind === 'file') { S.storedHandle = fh; if (!S.wb) renderFile(); } }).catch(() => {});
+  if (window.showOpenFilePicker && window.indexedDB) idbGet(HANDLE_KEY).then(fh => { if (fh && fh.kind === 'file') { S.storedHandle = fh; if (!S.wb) renderFile(); } }).catch(() => {});
   renderAll();
 }
 

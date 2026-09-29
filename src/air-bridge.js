@@ -1,10 +1,13 @@
 // Profiles, backup, updates and Signal live on the launcher (index.html), next
 // to the choice of branch. Each branch module (Air Force, Rocket Forces and
 // Artillery) runs in its own same-origin iframe; these helpers reach into it.
+// The command dashboards (ПВК of the Air Command, УДШВ of the Airborne Assault
+// Forces Command) run in their own frames too: the same pages in command mode,
+// each with its own bound table.
 
-export const BRANCHES = ['air', 'rocket'];
+export const BRANCHES = ['air', 'rocket', 'pvk', 'dshv'];
 
-const FRAME_IDS = { air: 'frame-air', rocket: 'frame-rocket' };
+const FRAME_IDS = { air: 'frame-air', rocket: 'frame-rocket', pvk: 'frame-pvk', dshv: 'frame-dshv' };
 
 /** The window hosting a branch module (the launcher's iframe), or null. */
 export function moduleWindow(branch) {

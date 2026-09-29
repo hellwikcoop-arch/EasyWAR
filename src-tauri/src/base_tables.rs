@@ -36,7 +36,8 @@ impl BaseTable {
     pub fn branch(self) -> Branch {
         match self {
             BaseTable::Rvia => Branch::Rocket,
-            BaseTable::Air | BaseTable::Pvk => Branch::Air,
+            BaseTable::Air => Branch::Air,
+            BaseTable::Pvk => Branch::Pvk,
         }
     }
 
@@ -280,7 +281,7 @@ mod tests {
                 );
             }
         }
-        assert_eq!(BaseTable::Pvk.branch(), Branch::Air);
+        assert_eq!(BaseTable::Pvk.branch(), Branch::Pvk);
     }
 
     #[test]
