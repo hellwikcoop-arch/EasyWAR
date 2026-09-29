@@ -20,3 +20,19 @@
 ## storm-shadow.glb і gmlrs-m31.glb — згенеровані моделі
 
 Спрощені процедурні моделі Storm Shadow / SCALP-EG і ракети GMLRS M31, побудовані за відкритими габаритами скриптом `viewer/scripts/build-munitions.py` з репозиторію CLOUDE (гілка `claude/new-session-5hrrc1`). Не є скануванням чи копією чужих моделей, сторонніх текстур немає, ліцензійних вимог немає. Призначені для перегляду, а не для впізнавання чи розрахунків.
+
+## mirage-2000-5f.glb — Mirage 2000-5F (Ukrainian Mirage 2000-5F)
+
+- Автор: 42manako (<https://sketchfab.com/42manako>)
+- Джерело: <https://sketchfab.com/3d-models/ukrainian-mirage-2000-5f-808fc97e2cc640ea90b8401348e82c5e>
+- Ліцензія: Creative Commons Attribution 4.0 (CC BY 4.0), <http://creativecommons.org/licenses/by/4.0/>
+
+Змінено: стиснуто так само, як mig-29.glb (з 28,2 до 9,5 МБ), форма моделі не змінювалася.
+
+## su-24.glb — Су-24 зі Storm Shadow (Ukrainian Su-24 with Storm Shadow AGMs)
+
+- Автор: 42manako (<https://sketchfab.com/42manako>)
+- Джерело: <https://sketchfab.com/3d-models/ukrainian-su-24-with-storm-shadow-agms-277154c4744c4313baab1d4011e3b872>
+- Ліцензія: Creative Commons Attribution 4.0 (CC BY 4.0), <http://creativecommons.org/licenses/by/4.0/>
+
+Змінено: стиснуто так само, як mig-29.glb (з 5,2 до 2,2 МБ), форма моделі не змінювалася.

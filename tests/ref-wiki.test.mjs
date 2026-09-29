@@ -59,6 +59,7 @@ test('carrier and munition ids agree with the recognisers of the module', () => 
   for (const m of ['GBU-39', 'GBU-62/B', 'GBU-64', 'AASM-250', 'AGM-88', 'BLU-140', 'С-13', 'C13', 'GBU-53']) assert.equal(munitionId(m), ctx.munKey(m), m);
   assert.equal(aircraftId('Mirage 2000-5'), 'mirage');
   assert.equal(aircraftId('Су-25'), 'su25');
+  assert.equal(aircraftId('Су-24М'), 'su24');
   assert.equal(aircraftId('невідомий'), '');
   assert.equal(munitionId('Storm Shadow'), 'storm');
   assert.equal(munitionId('SCALP-EG'), 'storm');

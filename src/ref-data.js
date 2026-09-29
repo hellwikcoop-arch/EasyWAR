@@ -26,6 +26,24 @@ const CREDIT_SU27 = {
   licenseUrl: 'http://creativecommons.org/licenses/by/4.0/',
 };
 
+const CREDIT_MIRAGE = {
+  title: 'Ukrainian Mirage 2000-5F',
+  author: '42manako',
+  authorUrl: 'https://sketchfab.com/42manako',
+  url: 'https://sketchfab.com/3d-models/ukrainian-mirage-2000-5f-808fc97e2cc640ea90b8401348e82c5e',
+  license: 'CC BY 4.0',
+  licenseUrl: 'http://creativecommons.org/licenses/by/4.0/',
+};
+
+const CREDIT_SU24 = {
+  title: 'Ukrainian Su-24 with Storm Shadow AGMs',
+  author: '42manako',
+  authorUrl: 'https://sketchfab.com/42manako',
+  url: 'https://sketchfab.com/3d-models/ukrainian-su-24-with-storm-shadow-agms-277154c4744c4313baab1d4011e3b872',
+  license: 'CC BY 4.0',
+  licenseUrl: 'http://creativecommons.org/licenses/by/4.0/',
+};
+
 export const ENTRIES = [
   // ---------- Засоби ----------
   {
@@ -77,6 +95,7 @@ export const ENTRIES = [
   {
     id: 'mirage', short: 'M2000', group: 'aircraft', name: 'Mirage 2000', alias: 'Mirage 2000-5F',
     role: 'Багатоцільовий винищувач', origin: 'Франція', tags: ['mirage', 'міраж', 'мираж', 'mirage2000', 'м2000', 'dassault'],
+    model: { file: 'mirage-2000-5f', nose: '-z' }, credit: CREDIT_MIRAGE,
     summary: 'Французький одномоторний багатоцільовий винищувач із дельтоподібним крилом (Dassault Aviation). Надійшов до ПС ЗСУ від Франції; поруч із ним у довіднику — французька модульна бомба AASM Hammer.',
     facts: [
       ['Екіпаж', '1 особа'], ['Довжина', '≈ 14,4 м'], ['Розмах крила', '≈ 9,1 м'], ['Висота', '≈ 5,2 м'],
@@ -99,6 +118,21 @@ export const ENTRIES = [
     ],
     sections: [
       { title: 'Призначення', text: 'Підтримка наземних військ на малих висотах. Типовий боєприпас — некеровані ракети С-13 у блоках Б-13Л.' },
+    ],
+  },
+  {
+    id: 'su24', short: 'Су-24', group: 'aircraft', name: 'Су-24', alias: 'Су-24М, за кодифікацією НАТО — Fencer',
+    role: 'Фронтовий бомбардувальник', origin: 'СРСР', tags: ['su24', 'су24', 'fencer', 'су-24м', 'сухой', 'сухого', 'storm shadow'],
+    model: { file: 'su-24', nose: '+z' }, credit: CREDIT_SU24,
+    summary: 'Двомісний фронтовий бомбардувальник із крилом змінної стрілоподібності (ОКБ Сухого), розрахований на польоти на малих висотах. Найвідоміший як носій ракет Storm Shadow / SCALP-EG. Модель показано з двома такими ракетами під фюзеляжем.',
+    facts: [
+      ['Екіпаж', '2 особи'], ['Довжина', '≈ 22,6 м'], ['Розмах крила', '≈ 10,4 м зі стрілою 68° і ≈ 17,6 м із розправленим'], ['Висота', '≈ 5,0 м'],
+      ['Злітна маса', 'до ≈ 39 700 кг'], ['Двигуни', '2 × АЛ-21Ф-3, по ≈ 110 кН на форсажі'],
+      ['Максимальна швидкість', '≈ 1 700 км/год на висоті (≈ 1,35 М)'], ['Гармата', 'ГШ-6-23, 23 мм'], ['Вузли підвіски', '9'],
+      ['Бойове навантаження', 'до ≈ 8 000 кг'],
+    ],
+    sections: [
+      { title: 'Призначення', text: 'Удари по наземних цілях день і ніч з малих висот, у тому числі крилатими ракетами великої дальності.' },
     ],
   },
 
@@ -252,6 +286,7 @@ export const PAIRS = [
   ['mig29', '39'], ['mig29', '62'],
   ['f16', '39'], ['f16', '62'], ['f16', '64'],
   ['su27', '39'], ['su27', '62'], ['su27', '64'],
+  ['su24', 'storm'],
 ];
 
 const BY_ID = new Map(ENTRIES.map(e => [e.id, e]));
@@ -266,6 +301,7 @@ export function aircraftId(text) {
   if (/^F16/.test(s)) return 'f16';
   if (/^[SСC][UУY]27/.test(s)) return 'su27';
   if (/^[SСC][UУY]25/.test(s)) return 'su25';
+  if (/^[SСC][UУY]24/.test(s)) return 'su24';
   if (/^(MIRAGE|МІРАЖ|МИРАЖ|M2000)/.test(s)) return 'mirage';
   return '';
 }

@@ -11,6 +11,8 @@ import { buildModel, spreadLabels } from './munition-3d.js';
 export const MODEL_FILES = {
   'mig-29': new URL('./models/mig-29.glb', import.meta.url).href,
   'su-27': new URL('./models/su-27.glb', import.meta.url).href,
+  'mirage-2000-5f': new URL('./models/mirage-2000-5f.glb', import.meta.url).href,
+  'su-24': new URL('./models/su-24.glb', import.meta.url).href,
   'storm-shadow': new URL('./models/storm-shadow.glb', import.meta.url).href,
   'gmlrs-m31': new URL('./models/gmlrs-m31.glb', import.meta.url).href,
 };
