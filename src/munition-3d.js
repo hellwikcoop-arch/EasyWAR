@@ -4,12 +4,12 @@
 // Решта боєприпасів складена з простих тіл обертання й пластин.
 // Сцена одна на весь модуль: канва переноситься в нову картку, щоб не плодити контексти WebGL.
 import {
-  ACESFilmicToneMapping, BoxGeometry, BufferGeometry, CanvasTexture, CircleGeometry, Color, CylinderGeometry,
-  DirectionalLight, DoubleSide, ExtrudeGeometry, Float32BufferAttribute, Group, LatheGeometry, Line, LineDashedMaterial, Mesh,
-  MeshBasicMaterial, MeshStandardMaterial, Object3D, Path, PerspectiveCamera, PlaneGeometry, PMREMGenerator, PolarGridHelper, RepeatWrapping, Scene,
-  ShadowMaterial, Shape, SphereGeometry, SRGBColorSpace, TorusGeometry, Vector2, Vector3, WebGLRenderer,
+  BoxGeometry, BufferGeometry, CanvasTexture, CircleGeometry, CylinderGeometry,
+  DoubleSide, ExtrudeGeometry, Float32BufferAttribute, Group, LatheGeometry, Line, LineDashedMaterial, Mesh,
+  MeshStandardMaterial, Object3D, Path, PerspectiveCamera, PlaneGeometry, RepeatWrapping, Scene,
+  Shape, SphereGeometry, SRGBColorSpace, TorusGeometry, Vector2, Vector3,
 } from 'three';
-import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import { addStageEnvironment, createRenderer } from './stage-3d.js';
 
 const LENGTH = 4; // довжина кожної моделі в умовних одиницях сцени
 const HAS_DOM = typeof document !== 'undefined'; // модульні тести будують моделі в Node без канви
@@ -1141,43 +1141,10 @@ export function spreadLabels(boxes, height = 20, gap = 6) {
   return boxes;
 }
 
-function contactTexture() {
-  const c = canvas(128, 128), x = c.getContext('2d'), g = x.createRadialGradient(64, 64, 4, 64, 64, 64);
-  g.addColorStop(0, 'rgba(0,0,0,.5)'); g.addColorStop(1, 'rgba(0,0,0,0)');
-  x.fillStyle = g; x.fillRect(0, 0, 128, 128);
-  return new CanvasTexture(c);
-}
-
-const FLOOR_Y = -1.05;
-
 function createStage() {
-  const renderer = new WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'low-power' });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-  renderer.outputColorSpace = SRGBColorSpace;
-  renderer.toneMapping = ACESFilmicToneMapping;
-  renderer.toneMappingExposure = .88;
-  renderer.setClearColor(0x000000, 0);
-  renderer.shadowMap.enabled = true;
+  const renderer = createRenderer();
   const scene = new Scene();
-  scene.environment = new PMREMGenerator(renderer).fromScene(new RoomEnvironment(), .04).texture;
-  scene.environmentIntensity = .65;
-  const key = new DirectionalLight('#fff6ea', 2);
-  key.position.set(1.8, 7, 3.2);
-  key.castShadow = true;
-  key.shadow.mapSize.set(2048, 2048);
-  Object.assign(key.shadow.camera, { left: -3.4, right: 3.4, top: 3.4, bottom: -3.4, near: 1, far: 16 });
-  key.shadow.bias = -.0004; key.shadow.normalBias = .015; key.shadow.radius = 5;
-  scene.add(key);
-  const rim = new DirectionalLight('#8fc2c2', 1.1); rim.position.set(-5, 2.5, -4); scene.add(rim);
-  const fill = new DirectionalLight('#dfe8f2', .35); fill.position.set(-3, -1, 5); scene.add(fill);
-  const grid = new PolarGridHelper(6.5, 16, 7, 96, new Color('#5c8a8a'), new Color('#5c8a8a'));
-  grid.material.transparent = true; grid.material.opacity = .22; grid.position.y = FLOOR_Y; scene.add(grid);
-  const floor = new Mesh(new CircleGeometry(6.5, 64), new MeshBasicMaterial({ color: '#07090b', transparent: true, opacity: .55 }));
-  floor.rotation.x = -Math.PI / 2; floor.position.y = FLOOR_Y - .01; scene.add(floor);
-  const catcher = new Mesh(new CircleGeometry(6.5, 64), new ShadowMaterial({ color: '#000000', opacity: .5 }));
-  catcher.rotation.x = -Math.PI / 2; catcher.position.y = FLOOR_Y + .002; catcher.receiveShadow = true; scene.add(catcher);
-  const contact = new Mesh(new CircleGeometry(1, 48), new MeshBasicMaterial({ map: contactTexture(), transparent: true, depthWrite: false }));
-  contact.rotation.x = -Math.PI / 2; contact.position.y = FLOOR_Y + .004; contact.scale.set(2.6, 1, 1); scene.add(contact);
+  addStageEnvironment(renderer, scene);
   const camera = new PerspectiveCamera(26, 2, .1, 60);
   const holder = new Group(); scene.add(holder);
   renderer.domElement.className = 'mw-canvas';
