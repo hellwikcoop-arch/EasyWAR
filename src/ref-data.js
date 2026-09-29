@@ -63,6 +63,15 @@ const CREDIT_SU25 = {
   licenseUrl: 'http://creativecommons.org/licenses/by/4.0/',
 };
 
+const CREDIT_GRIPEN = {
+  title: 'Ukrainian JAS 39 Gripen',
+  author: '42manako',
+  authorUrl: 'https://sketchfab.com/42manako',
+  url: 'https://sketchfab.com/3d-models/ukrainian-jas-39-gripen-f2e45df51c4043f99c41403959e589f3',
+  license: 'CC BY 4.0',
+  licenseUrl: 'http://creativecommons.org/licenses/by/4.0/',
+};
+
 export const ENTRIES = [
   // ---------- Засоби ----------
   {
@@ -163,6 +172,22 @@ export const ENTRIES = [
     ],
     sections: [
       { title: 'Призначення', text: 'Удари по наземних цілях день і ніч з малих висот, у тому числі крилатими ракетами великої дальності.' },
+    ],
+  },
+  {
+    id: 'gripen', short: 'Gripen', group: 'aircraft', name: 'JAS 39 Gripen', alias: 'Saab Gripen C/D та E/F',
+    role: 'Багатоцільовий винищувач', origin: 'Швеція', tags: ['gripen', 'грипен', 'jas39', 'jas 39', 'saab', 'сааб'],
+    status: 'Очікується', model: { file: 'gripen', nose: '+z' }, credit: CREDIT_GRIPEN,
+    summary: 'Шведський одномоторний багатоцільовий винищувач четвертого покоління (Saab), спроєктований для польотів із коротких і розосереджених ділянок доріг. У ПС ЗСУ ще не надійшов: Україна й Швеція домовилися про поставки, але літаки очікуються. Стаття попередня і показує, чого чекати.',
+    facts: [
+      ['Статус в Україні', 'Очікується: C/D — з початку 2027 року, E/F — з 2029 року'], ['Екіпаж', '1 особа (C, E), 2 особи (D, F)'],
+      ['Довжина', '≈ 14,1 м (C/D), ≈ 15,2 м (E)'], ['Розмах крила', '≈ 8,4 м (C/D), ≈ 8,6 м (E)'], ['Висота', '≈ 4,5 м'],
+      ['Двигун', 'Volvo RM12 (C/D), GE F414G (E/F)'], ['Максимальна швидкість', '≈ 2 М'],
+      ['Гармата', 'Mauser BK-27, 27 мм'], ['Вузли підвіски', '8 (C/D), 10 (E/F)'],
+    ],
+    sections: [
+      { title: 'Що очікується', text: 'Швеція має передати 16 літаків Gripen C/D з власних ВПС, поставки заплановано з початку 2027 року. Нові Gripen E/F Україна купує за окремою угодою, поставки заплановано з 2029 року. Пілоти вже проходять навчання в Швеції.' },
+      { title: 'Чому це важливо для бази', text: 'Поки літак не в строю, у таблиці вильотів він не з’явиться, а розділ «У вашій базі» лишиться порожнім. Статтю оновимо, коли з’являться перші вильоти та відомості про озброєння.' },
     ],
   },
 
@@ -332,6 +357,7 @@ export function aircraftId(text) {
   if (/^[SСC][UУY]27/.test(s)) return 'su27';
   if (/^[SСC][UУY]25/.test(s)) return 'su25';
   if (/^[SСC][UУY]24/.test(s)) return 'su24';
+  if (/^(JAS39|GRIPEN|ГРИПЕН)/.test(s)) return 'gripen';
   if (/^(MIRAGE|МІРАЖ|МИРАЖ|M2000)/.test(s)) return 'mirage';
   return '';
 }

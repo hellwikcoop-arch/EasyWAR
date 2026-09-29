@@ -15,6 +15,7 @@ export const MODEL_FILES = {
   'su-24': new URL('./models/su-24.glb', import.meta.url).href,
   'f-16': new URL('./models/f-16.glb', import.meta.url).href,
   'su-25': new URL('./models/su-25.glb', import.meta.url).href,
+  'gripen': new URL('./models/gripen.glb', import.meta.url).href,
   'storm-shadow': new URL('./models/storm-shadow.glb', import.meta.url).href,
   'gmlrs-m31': new URL('./models/gmlrs-m31.glb', import.meta.url).href,
 };

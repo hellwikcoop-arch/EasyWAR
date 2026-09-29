@@ -60,10 +60,18 @@ test('carrier and munition ids agree with the recognisers of the module', () => 
   assert.equal(aircraftId('Mirage 2000-5'), 'mirage');
   assert.equal(aircraftId('Су-25'), 'su25');
   assert.equal(aircraftId('Су-24М'), 'su24');
+  assert.equal(aircraftId('JAS 39C Gripen'), 'gripen');
   assert.equal(aircraftId('невідомий'), '');
   assert.equal(munitionId('Storm Shadow'), 'storm');
   assert.equal(munitionId('SCALP-EG'), 'storm');
   assert.equal(munitionId('GMLRS M31'), 'gmlrs');
+});
+
+test('an aircraft that is not in service yet is marked as expected', () => {
+  const gripen = entryById('gripen');
+  assert.equal(gripen.status, 'Очікується');
+  assert.ok(gripen.facts.some(([k, v]) => k === 'Статус в Україні' && /Очікується/.test(v)));
+  assert.equal(ENTRIES.filter(e => e.status).length, 1, 'only the Gripen is marked');
 });
 
 test('pairs link existing carriers and munitions both ways', () => {

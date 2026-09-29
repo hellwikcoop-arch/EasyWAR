@@ -52,3 +52,11 @@
 - Ліцензія: Creative Commons Attribution 4.0 (CC BY 4.0), <http://creativecommons.org/licenses/by/4.0/>
 
 Змінено: матеріали переведено з specular-glossiness у metallic-roughness, стиснуто так само, як mig-29.glb (з 25,9 до 9,4 МБ), форма моделі не змінювалася.
+
+## gripen.glb — JAS 39 Gripen (Ukrainian JAS 39 Gripen)
+
+- Автор: 42manako (<https://sketchfab.com/42manako>)
+- Джерело: <https://sketchfab.com/3d-models/ukrainian-jas-39-gripen-f2e45df51c4043f99c41403959e589f3>
+- Ліцензія: Creative Commons Attribution 4.0 (CC BY 4.0), <http://creativecommons.org/licenses/by/4.0/>
+
+Змінено: стиснуто так само, як mig-29.glb (з 2,0 до 0,7 МБ), форма моделі не змінювалася.

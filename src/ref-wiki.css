@@ -25,6 +25,7 @@
 .rw-head { margin: 0 0 12px; }
 .rw-eyebrow { margin: 0 0 4px; font-size: 12px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); }
 .rw-head h2 { margin: 0; font: 700 clamp(26px, 3.4vw, 38px)/1.08 var(--display); letter-spacing: .01em; }
+.rw-badge { display: inline-block; margin-left: 12px; padding: 4px 10px; vertical-align: middle; border: 1px solid var(--warn-line); border-radius: 999px; background: var(--warn-soft); color: var(--warn); font: 700 13px/1 var(--sans); letter-spacing: .04em; text-transform: uppercase; }
 .rw-alias { margin: 4px 0 0; color: var(--muted); }
 .rw-body { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; align-items: start; }
 .rw-main { display: grid; gap: 14px; min-width: 0; }
