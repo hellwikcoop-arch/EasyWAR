@@ -1,0 +1,11 @@
+# Maroon Descent
+
+**Maroon Descent** is a movement about gravity made deliberate: the moment a body leaves the aircraft and the world reorganises itself into vertical lines. Its language is the canopy — a half-circle, a fall line, a field of repetition — rendered as if by a cartographer of falling. Nothing is dramatic; everything is measured. The work is meticulously crafted, the product of deep expertise and countless hours of patient refinement, where every arc has been placed, checked and placed again.
+
+**Colour** is a single deep maroon, worn like felt: dense, matte, slightly warm. Value does the work that hue would do elsewhere — a field of near-black burgundy at the depths, a lifted claret where light gathers, and one restrained pale tone (bone, never white) for the marks that must be read. No second hue competes. The palette is painstakingly calibrated so that the darkest areas still hold detail and the lightest never glare.
+
+**Space and form** obey a strict grid that is then gently disobeyed. Canopies — perfect semicircles with a scalloped hem and hairline suspension lines — descend in ordered rows, and each row drifts a fraction further from true, as wind would move it. Scale changes are few and exact: a great canopy dissolves into the field as tonal architecture, a thousand small ones accumulate into texture. Negative space is generous and load-bearing; the eye rests in it before it is pulled downward again.
+
+**Rhythm and hierarchy** come from repetition with variation, never from ornament. Marks are systematic, like plates in an imaginary atlas of descent: fine registration ticks, altitude scales, coordinates set in a thin monospaced hand. Typography is sparse and clinical — a few words at whisper scale, anchored to the margin like survey annotations — and always contained, never touching, never crowding the field.
+
+**Finish** is the whole point. The composition should feel like an artefact from a discipline that does not exist yet, produced by someone at the very top of their craft: edges crisp, alignments exact, texture subtle enough to be felt rather than seen. Restraint is the highest form of pride here; the piece should reward sustained looking, and never announce what it honours.
