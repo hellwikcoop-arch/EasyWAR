@@ -6,6 +6,7 @@ mod database;
 mod desktop_shell;
 pub mod local_profiles;
 mod migration_startup;
+pub mod phone_export;
 pub mod position_templates;
 pub mod repository;
 pub mod restore;
@@ -27,6 +28,7 @@ use base_tables::BaseTable;
 use chrono::{SecondsFormat, Utc};
 use database::{DatabaseStatus, DatabaseStatusStore};
 use local_profiles::{Branch, LocalProfileStore, LocalProfilesState};
+use phone_export::PhoneDashboard;
 use position_templates::PositionDatabaseTemplate;
 use repository::{
     Repository, ReviewDecision, SettingsStore, SignalInboxItem, SignalParsePersistence,
@@ -322,6 +324,47 @@ async fn create_profile_base_table(
         .await
         .map_err(|error| error.to_string())?;
     Ok(Some(CreatedBaseTable { state, path }))
+}
+
+/// Зберігає автономний HTML-файл дашборда для телефона або планшета. Файл уже зібраний
+/// разом із застосунком (`script/build_standalone.mjs`), тут його лише віддають зі
+/// вбудованих ресурсів у місце, яке обрав користувач. Повертає шлях або `None`, якщо
+/// вікно вибору закрито.
+#[tauri::command]
+async fn export_phone_file(
+    app: tauri::AppHandle,
+    dashboard: PhoneDashboard,
+) -> Result<Option<String>, String> {
+    let bytes = app
+        .asset_resolver()
+        .get(dashboard.asset_path().to_string())
+        .map(|asset| asset.bytes)
+        .filter(|bytes| phone_export::is_standalone_html(bytes))
+        .ok_or_else(|| {
+            "Файл для телефона є лише у зібраній версії застосунку (у режимі розробки його немає)."
+                .to_string()
+        })?;
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title(dashboard.dialog_title())
+            .set_file_name(dashboard.file_name())
+            .add_filter("Сторінка HTML", &["html"])
+            .blocking_save_file()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let path =
+        phone_export::with_html_extension(selected.into_path().map_err(|error| error.to_string())?);
+    let target = path.clone();
+    tauri::async_runtime::spawn_blocking(move || phone_export::write_file(&target, &bytes))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| format!("Не вдалося зберегти файл: {error}"))?;
+    Ok(Some(path.to_string_lossy().into_owned()))
 }
 
 async fn bound_database_path(
@@ -1101,6 +1144,7 @@ pub fn run() {
             set_local_profile_password,
             choose_profile_database,
             create_profile_base_table,
+            export_phone_file,
             clear_profile_database,
             read_profile_database,
             write_profile_database,

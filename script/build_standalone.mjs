@@ -8,12 +8,13 @@
 // command dashboards do not use them. The .xlsx table is picked on the device and
 // is read in the browser; nothing is sent anywhere.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { build } from 'vite';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const src = (path) => fileURLToPath(new URL(`../src/${path}`, import.meta.url));
-const outDir = fileURLToPath(new URL('../dist-standalone/', import.meta.url));
+const defaultOutDir = fileURLToPath(new URL('../dist-standalone/', import.meta.url));
 
 export const PAGES = [
   { page: 'air', command: 'pvk', file: 'EasyWAR-PVK.html' },
@@ -54,7 +55,7 @@ export function leftoverReferences(html) {
   return [...found];
 }
 
-async function buildPage({ page, command, file }) {
+async function buildPage({ page, command, file }, outDir) {
   const result = await build({
     root: src(''),
     configFile: false,
@@ -88,24 +89,35 @@ async function buildPage({ page, command, file }) {
   };
   let single = inlinePage(html, files, publicText, command);
   const version = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
-  single = single.replace(/^(\s*<!doctype html>)/i, `$1\n<!-- EasyWAR ${version}: автономний файл, працює без інтернету -->`);
+  single = single.replace(/^(\s*<!doctype html>)/i, `$1\n<!-- EasyWAR ${version} standalone: автономний файл, працює без інтернету -->`);
   const left = leftoverReferences(single);
   const allowed = left.filter((ref) => !ref.endsWith('.glb'));
   if (allowed.length) throw new Error(`${file} still points at external files: ${allowed.join(', ')}`);
   mkdirSync(outDir, { recursive: true });
-  const target = `${outDir}${file}`;
+  const target = resolve(outDir, file);
   writeFileSync(target, single);
   return { file, target, bytes: Buffer.byteLength(single) };
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
   process.chdir(root);
-  // Optional filter: `npm run build:standalone -- dshv` builds only the УДШВ file.
-  const wanted = process.argv.slice(2);
+  // `npm run build:standalone -- dshv` builds only the УДШВ file;
+  // `--out dist/standalone` puts the files where the desktop app embeds them
+  // (`npm run build:app`, used by `tauri build`).
+  const args = process.argv.slice(2);
+  const wanted = [];
+  let outDir = defaultOutDir;
+  for (let i = 0; i < args.length; i += 1) {
+    if (args[i] === '--out') {
+      if (!args[i + 1]) throw new Error('--out needs a folder');
+      outDir = resolve(root, args[i + 1]);
+      i += 1;
+    } else wanted.push(args[i]);
+  }
   const pages = wanted.length ? PAGES.filter((entry) => wanted.includes(entry.command)) : PAGES;
   if (!pages.length) throw new Error(`Unknown target: ${wanted.join(', ')} (use pvk or dshv)`);
   for (const entry of pages) {
-    const { file, bytes } = await buildPage(entry);
+    const { file, bytes } = await buildPage(entry, outDir);
     console.log(`${file}  ${(bytes / 1e6).toFixed(2)} MB`);
   }
 }

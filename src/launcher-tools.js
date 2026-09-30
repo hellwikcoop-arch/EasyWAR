@@ -5,3 +5,4 @@ import './launcher-tools.css';
 import './signal-settings.js';
 import './backup.js';
 import './local-profiles.js';
+import './phone-export.js';
