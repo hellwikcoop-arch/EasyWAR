@@ -519,6 +519,13 @@ export function buildDeck(workbook, options = {}) {
   });
   const periods = deckPeriods(workbook, { anchor, custom: options.custom, dataRange: all });
   const slides = periods.map(period => windowSlide(workbook, period, units, anchor, config, issues, all));
+  // Зарезервоване місце під слайд власних втрат: у таблиці УДШВ їх немає (вона про втрати противника).
+  if (options.reserveOwnLosses) {
+    slides.push({
+      id: 'own-losses', title: 'Власні втрати', status: 'no_source',
+      message: 'Місце зарезервовано. Джерело даних про власні втрати ще не підключено.',
+    });
+  }
   // Окремі слайди груп (ПС, РВіА тощо): останні 30 діб, підрозділи задає виклик, не код.
   const warnings = [];
   if (!options.custom) {

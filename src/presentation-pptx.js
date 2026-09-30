@@ -109,6 +109,15 @@ function periodSlide(pptx, theme, deck, data, number) {
   footer(slide, theme, deck, number, `${deck.slides[0].owner || 'EasyWAR'} · ${deck.focusLabel}`);
 }
 
+function reservedSlide(pptx, theme, deck, data, number) {
+  const slide = pptx.addSlide();
+  slide.background = { color: theme.bg };
+  slide.addText(data.title, { x: M, y: 0.35, w: 8.3, h: 0.6, fontFace: FONT, fontSize: 28, bold: true, color: theme.text, margin: 0 });
+  slide.addShape('roundRect', { x: M, y: 1.4, w: W - 2 * M, h: 5.2, rectRadius: 0.08, fill: { color: theme.panel }, line: { color: theme.line, width: 1, dashType: 'dash' } });
+  slide.addText(data.message, { x: M + 0.5, y: 1.4, w: W - 2 * M - 1, h: 5.2, fontFace: FONT, fontSize: 20, color: theme.muted, align: 'center', valign: 'middle', margin: 0 });
+  footer(slide, theme, deck, number, `${deck.slides[0].owner || 'EasyWAR'} · ${deck.focusLabel}`);
+}
+
 function titleSlide(pptx, theme, deck, data) {
   const slide = pptx.addSlide();
   slide.background = { color: theme.bg };
@@ -141,7 +150,7 @@ export function renderDeck(deck, options = {}) {
   pptx.title = `Аналітика: ${deck.slides[0].owner || 'EasyWAR'}`;
   pptx.author = 'EasyWAR';
   titleSlide(pptx, theme, deck, deck.slides[0]);
-  deck.slides.slice(1).forEach((data, i) => periodSlide(pptx, theme, deck, data, i + 2));
+  deck.slides.slice(1).forEach((data, i) => (data.status === 'no_source' ? reservedSlide : periodSlide)(pptx, theme, deck, data, i + 2));
   return pptx;
 }
 

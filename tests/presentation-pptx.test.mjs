@@ -68,6 +68,15 @@ test('an empty block gets a plain sentence instead of staying blank', async () =
   assert.ok(texts[1].includes('Суттєвих змін (від 20 %) не виявлено.'));
 });
 
+test('the reserved own-losses slide renders as a plain placeholder without a chart', async () => {
+  const deck = deckOf({ reserveOwnLosses: true });
+  const { slides, texts, charts } = await open(await renderDeckToBytes(deck));
+  assert.equal(slides.length, 6);
+  assert.equal(charts.length, (slides.length - 2) * 2); // титул і місце без діаграм
+  const slot = texts[deck.slides.findIndex(s => s.id === 'own-losses')];
+  assert.ok(slot.includes('Власні втрати') && slot.includes('Місце зарезервовано'));
+});
+
 test('custom period gives a title and one period slide', async () => {
   const deck = deckOf({ custom: { from: '2026-08-01', to: '2026-08-10' } });
   const { slides, texts } = await open(await renderDeckToBytes(deck));

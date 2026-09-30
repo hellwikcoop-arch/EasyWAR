@@ -320,6 +320,16 @@ test('reasons follow the owner wording: weather, ammo quantity and ammo types, n
   assert.ok(!/внесен|неповний облік|звітніст/.test(text), text);
 });
 
+test('own-losses slot is reserved only on request and carries no invented numbers', () => {
+  const wb = makeWorkbook(flat);
+  assert.ok(!buildDeck(wb).slides.some(s => s.id === 'own-losses'));
+  const deck = buildDeck(wb, { reserveOwnLosses: true, groups: [{ id: 'a', title: 'Група А', units: ['Підрозділ А'] }] });
+  assert.deepEqual(deck.slides.map(s => s.id), ['title', 'week', 'month', 'all', 'own-losses', 'group:a']);
+  const slot = deck.slides.find(s => s.id === 'own-losses');
+  assert.equal(slot.status, 'no_source');
+  assert.deepEqual(Object.keys(slot).sort(), ['id', 'message', 'status', 'title']);
+});
+
 test('plural forms of days', () => {
   assert.deepEqual([1, 2, 5, 11, 12, 21, 22, 25].map(daysWord), ['доба', 'доби', 'діб', 'діб', 'діб', 'доба', 'доби', 'діб']);
 });
