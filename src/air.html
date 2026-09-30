@@ -10,6 +10,10 @@
 <style id="easywar-command-mode-css">
 /* У командному режимі є лише дашборд: внесення доповідей і довідник ховаємо. */
 html[data-command="pvk"] #tab-entry, html[data-command="pvk"] #tab-ref, html[data-command="pvk"] .snav-entry2 { display: none !important; }
+/* Телефон: лишаємо вкладки, назву файлу й тему; редактор підрозділів, джерело SQLite та анімації ховаємо. */
+@media (max-width: 640px) {
+  html[data-command="pvk"] #ewx-open, html[data-command="pvk"] #dashboardSourceToggle, html[data-command="pvk"] #motionBtn { display: none !important; }
+}
 </style>
 <script id="easywar-desktop-frame-bridge">
 (function(){

@@ -10,6 +10,10 @@
 <style id="easywar-command-mode-css">
 /* У командному режимі є лише дашборд: внесення доповідей і довідник ховаємо. */
 html[data-command="dshv"] #tab-entry, html[data-command="dshv"] .snav-entry { display: none !important; }
+/* Телефон: у вікні командування лишаємо назву файлу; зайві кнопки шапки ховаємо. */
+@media (max-width: 640px) {
+  html[data-command="dshv"] #ewx-open, html[data-command="dshv"] #motionBtn { display: none !important; }
+}
 </style>
 <script>
 (function(){
