@@ -43,6 +43,13 @@ function buckets(range) {
 const shareText = (part, whole) => `${formatNumber(part / whole * 100)}${NBSP}%`;
 const listText = (items, limit = 3) => items.slice(0, limit).map(i => `${i.name} — ${formatNumber(i.total)}`).join(', ');
 
+/** Втрати о/с (200, 300, 500) за період: рядки з підозрілою датою не враховуються. */
+export function ownLossesInRange(own, range) {
+  const rs = own.records.filter(r => !r.suspect && inRange(r, range));
+  const parts = { 200: sumMetric(rs, 'personnel|200'), 300: sumMetric(rs, 'personnel|300'), 500: sumMetric(rs, 'personnel|500') };
+  return { total: parts[200] + parts[300] + parts[500], parts };
+}
+
 export function buildOwnLossesSlide(own, options = {}) {
   const config = options.config;
   // Рядки з підозрілою датою (див. date-outlier) не потрапляють у періоди: їх місце невідоме до виправлення таблиці.

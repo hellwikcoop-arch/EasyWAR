@@ -15,8 +15,8 @@ import {
   validateWorkbook,
 } from './udshv-dashboard-core.js';
 
-import { buildOwnLossesSlide } from './presentation-own-losses.js';
-import { NBSP, dayNumber, peakOf, tileFor as buildTile, daysWord, formatNumber, formatPercent, isoFromDay, longDate, periodText, rollingRange, shortDate, signed } from './presentation-format.js';
+import { buildOwnLossesSlide, ownLossesInRange } from './presentation-own-losses.js';
+import { NBSP, daysAcc, dayNumber, peakOf, tileFor as buildTile, daysWord, formatNumber, formatPercent, isoFromDay, longDate, periodText, rollingRange, shortDate, signed } from './presentation-format.js';
 
 export { daysWord, formatNumber, formatPercent, rollingRange };
 
@@ -49,17 +49,17 @@ const TILE_POOL = ['affected', 'objDestroyed', 'objDamaged', 'ovtDestroyed', 'ov
 const FOCUS_DOMAINS = { result: ['personnel', 'ovt', 'objects'], efficiency: ['efficiency', 'ammo', 'fire'], all: [] };
 const CHANGE_KEYS = ['kia', 'wia', 'ovtDestroyed', 'ovtDamaged', 'ovtSuppressed', 'objDestroyed', 'objDamaged', 'objSuppressed', 'affected', 'ammo', 'vgz', 'kbb'];
 const KPI_NAMES = {
-  kia: 'Знищено о/с (200)',
-  wia: 'Поранено о/с (300)',
-  personnel: 'Втрати о/с разом',
-  ovtDestroyed: 'ОВТ знищено',
-  ovtDamaged: 'ОВТ пошкоджено',
-  ovtSuppressed: 'ОВТ подавлено',
-  objDestroyed: 'Об’єкти знищено',
-  objDamaged: 'Об’єкти пошкоджено',
-  objSuppressed: 'Об’єкти подавлено',
+  kia: 'Противник: знищено о/с (200)',
+  wia: 'Противник: поранено о/с (300)',
+  personnel: 'Противник: втрати о/с разом',
+  ovtDestroyed: 'Противник: ОВТ знищено',
+  ovtDamaged: 'Противник: ОВТ пошкоджено',
+  ovtSuppressed: 'Противник: ОВТ подавлено',
+  objDestroyed: 'Противник: об’єкти знищено',
+  objDamaged: 'Противник: об’єкти пошкоджено',
+  objSuppressed: 'Противник: об’єкти подавлено',
   ammo: 'Витрата БК',
-  affected: 'Уражено (ОВТ + об’єкти)',
+  affected: 'Противник: уражено (ОВТ + об’єкти)',
   ammoPerTarget: 'БК на одиницю ураженого',
   vgz: 'ВгЗ',
   kbb: 'КББ',
@@ -290,7 +290,7 @@ export function analyzeWindow(model, context, config = DEFAULT_CONFIG) {
   // Концентрація за підрозділами.
   const activeUnits = model.units.filter(u => u.days > 0);
   if (activeUnits.length >= 2) {
-    for (const [key, label] of [['ammo', 'Витрата БК'], ['ovtDestroyed', 'ОВТ знищено'], ['kia', 'Знищено о/с (200)']]) {
+    for (const [key, label] of [['ammo', KPI_NAMES.ammo], ['ovtDestroyed', KPI_NAMES.ovtDestroyed], ['kia', KPI_NAMES.kia]]) {
       const sum = activeUnits.reduce((s, u) => s + (u[key] || 0), 0);
       if (sum < config.minBase) continue;
       const top = activeUnits.reduce((a, u) => ((u[key] || 0) > (a[key] || 0) ? u : a));
@@ -414,7 +414,13 @@ function tileKeys(model, config, prune) {
   return kept;
 }
 
-function windowSlide(workbook, period, units, anchor, config, issues, all, prune = false) {
+/** Виноска «Наші втрати за N діб — M»: сума 200 + 300 + 500 із таблиці власних втрат за період слайда. */
+function ownCalloutFor(own, range, days) {
+  const loss = ownLossesInRange(own, range);
+  return { days, total: loss.total, parts: loss.parts, text: `Наші втрати за ${days} ${daysAcc(days)} — ${formatNumber(loss.total)}`, detail: `200 — ${formatNumber(loss.parts['200'])} · 300 — ${formatNumber(loss.parts['300'])} · 500 — ${formatNumber(loss.parts['500'])}` };
+}
+
+function windowSlide(workbook, period, units, anchor, config, issues, all, prune = false, own = null) {
   const range = period.range;
   const model = augment(createDashboardModel(workbook, { range, unit: units, preset: 'custom' }), workbook, units, config);
   const prevRange = period.kind === 'window' ? previousRange(range) : { from: '', to: '' };
@@ -439,6 +445,7 @@ function windowSlide(workbook, period, units, anchor, config, issues, all, prune
       return tileFor(period.kind === 'window' ? kpi : { ...kpi, previous: null, delta: null, deltaPercent: null }, prevComplete, config);
     }),
     charts: chartFor(model, model.kpis),
+    ownCallout: own ? ownCalloutFor(own, range, model.days) : null,
     changes: insights.changes,
     attention: insights.attention,
     hypotheses: insights.hypotheses,
@@ -461,7 +468,7 @@ export function buildDeck(workbook, options = {}) {
     return true;
   });
   const periods = deckPeriods(workbook, { anchor, custom: options.custom, dataRange: all });
-  const slides = periods.map(period => windowSlide(workbook, period, units, anchor, config, issues, all));
+  const slides = periods.map(period => windowSlide(workbook, period, units, anchor, config, issues, all, false, options.ownLosses || null));
   // Зарезервоване місце під слайд власних втрат: у таблиці УДШВ їх немає (вона про втрати противника).
   if (options.ownLosses) {
     slides.push(buildOwnLossesSlide(options.ownLosses, { anchor, custom: options.custom, config }));
@@ -477,7 +484,7 @@ export function buildDeck(workbook, options = {}) {
     for (const group of options.groups || []) {
       const present = (group.units || []).filter(u => workbook.units.includes(u));
       if (!present.length) { warnings.push(`Група «${group.title}»: підрозділів немає в таблиці, слайд пропущено.`); continue; }
-      const slide = windowSlide(workbook, { id: `group:${group.id}`, title: `${group.title} · останні 30 діб`, kind: 'window', range: rollingRange(anchor, 30) }, present, anchor, config, issues, all, true);
+      const slide = windowSlide(workbook, { id: `group:${group.id}`, title: `${group.title} · останні 30 діб`, kind: 'window', range: rollingRange(anchor, 30) }, present, anchor, config, issues, all, true, options.ownLosses || null);
       slides.push({ ...slide, scope: { label: group.title, units: present } });
     }
   }

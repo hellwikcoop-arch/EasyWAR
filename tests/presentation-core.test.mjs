@@ -79,12 +79,12 @@ test('reports a change with both numbers and a hypothesis line', () => {
   });
   const week = buildDeck(wb).slides.find(s => s.id === 'week');
   // 7 діб: (4+1)*7 = 35, попередні: (2+1)*7 = 21, +66,7 %
-  const line = week.changes.find(c => c.text.startsWith('Знищено о/с (200)'));
+  const line = week.changes.find(c => c.text.startsWith('Противник: знищено о/с (200)'));
   assert.ok(line, JSON.stringify(week.changes));
-  assert.equal(line.text, 'Знищено о/с (200): 35 проти 21 (+66,7 %).');
+  assert.equal(line.text, 'Противник: знищено о/с (200): 35 проти 21 (+66,7 %).');
   assert.ok(week.hypotheses.length >= 1);
   assert.ok(week.hypotheses.every(h => !('flag' in h) && !/гіпотез/i.test(h.text)));
-  assert.ok(week.hypotheses[0].text.startsWith('Знищено о/с (200): '));
+  assert.ok(week.hypotheses[0].text.startsWith('Противник: знищено о/с (200): '));
   const tile = week.tiles.find(t => t.key === 'kia');
   assert.equal(tile.deltaText, '+66,7 %');
 });
@@ -108,7 +108,7 @@ test('small base suppresses percentages and says so', () => {
   assert.equal(tile.reliable, false);
   assert.match(tile.deltaText, /мала база/);
   assert.ok(!week.changes.some(c => c.text.includes('%')));
-  assert.ok(week.attention.some(a => /Мала база/.test(a.text) && a.text.includes('Знищено о/с (200)')));
+  assert.ok(week.attention.some(a => /Мала база/.test(a.text) && a.text.includes('Противник: знищено о/с (200)')));
 });
 
 test('incomplete previous window is reported instead of compared', () => {
@@ -165,10 +165,10 @@ test('whole-period slide compares the recent pace with the overall pace', () => 
   const wb = makeWorkbook((n, unit) => (unit === 'Підрозділ А' ? { 'personnel|200': n > LAST - 30 ? 4 : 1 } : {}), { units: ['Підрозділ А'] });
   const all = buildDeck(wb).slides.find(s => s.id === 'all');
   assert.equal(all.previous, null);
-  const line = all.changes.find(c => c.text.startsWith('Знищено о/с (200)'));
+  const line = all.changes.find(c => c.text.startsWith('Противник: знищено о/с (200)'));
   assert.ok(line, JSON.stringify(all.changes));
   // 30*4 + 62*1 = 182 за 92 доби = 1,98/добу; останні 30: 4/добу → +102 %
-  assert.equal(line.text, 'Знищено о/с (200): 4 на добу за останні 30 діб проти 2 за весь період (+102 %).');
+  assert.equal(line.text, 'Противник: знищено о/с (200): 4 на добу за останні 30 діб проти 2 за весь період (+102 %).');
 });
 
 test('short history skips the pace comparison', () => {
@@ -223,8 +223,8 @@ test('equipment changes never include objects', () => {
     return { 'destroyed|танк': 2, 'destroyed|Склади БК, ПММ': n > LAST - 7 ? 10 : 2 };
   }, { units: ['Підрозділ А'] });
   const week = buildDeck(wb).slides.find(s => s.id === 'week');
-  assert.ok(!week.changes.some(c => c.text.startsWith('ОВТ знищено')), JSON.stringify(week.changes));
-  assert.ok(week.changes.some(c => c.text === 'Об’єкти знищено: 70 проти 14 (+400 %).'), JSON.stringify(week.changes));
+  assert.ok(!week.changes.some(c => c.text.startsWith('Противник: ОВТ знищено')), JSON.stringify(week.changes));
+  assert.ok(week.changes.some(c => c.text === 'Противник: об’єкти знищено: 70 проти 14 (+400 %).'), JSON.stringify(week.changes));
 });
 
 test('whole period ignores pre-filled zero days and rows dated outside the sheet month', () => {
@@ -274,7 +274,7 @@ test('focus chooses the tile set and puts its changes first', () => {
   assert.deepEqual(tiles('all'), ['ammoPerTarget', 'kia', 'wia', 'ovtDestroyed', 'objDestroyed', 'ammo']);
   assert.deepEqual(tiles(undefined), tiles('all'));
   const first = focus => buildDeck(wb, { focus }).slides.find(s => s.id === 'week').changes[0].text;
-  assert.ok(first('result').startsWith('Знищено о/с (200)'));
+  assert.ok(first('result').startsWith('Противник: знищено о/с (200)'));
   assert.ok(first('efficiency').startsWith('Витрата БК') || first('efficiency').startsWith('БК на одиницю'));
   assert.equal(buildDeck(wb, { focus: 'result' }).focusLabel, 'Результат');
 });

@@ -32,6 +32,12 @@ export function daysWord(n) {
   if (abs > 10 && abs < 20) return 'діб';
   return last === 1 ? 'доба' : last >= 2 && last <= 4 ? 'доби' : 'діб';
 }
+/** «за 1 добу», «за 3 доби», «за 7 діб» (знахідний відмінок). */
+export function daysAcc(n) {
+  const abs = Math.abs(n) % 100, last = abs % 10;
+  if (abs > 10 && abs < 20) return 'діб';
+  return last === 1 ? 'добу' : last >= 2 && last <= 4 ? 'доби' : 'діб';
+}
 export const signed = value => (value > 0 ? '+' : value < 0 ? '−' : '') + formatNumber(Math.abs(value));
 
 function quantile(sorted, q) {

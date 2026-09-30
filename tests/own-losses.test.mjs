@@ -3,6 +3,7 @@ import test from 'node:test';
 import JSZip from 'jszip';
 import { DEFAULT_BRIGADES, ownDate, ownUnit, parseOwnLosses, validateOwnLosses } from '../src/own-losses-core.js';
 import { buildDeck } from '../src/presentation-core.js';
+import { daysAcc } from '../src/presentation-format.js';
 import { renderDeckToBytes } from '../src/presentation-pptx.js';
 
 // Лише синтетичні дані тієї самої структури, що й таблиця «НАШІ ВТРАТИ».
@@ -155,4 +156,34 @@ test('the own-losses slide renders with two native charts and the cause block', 
   assert.ok(text.includes('Наші 300'));
   assert.ok(!/undefined|NaN|\bnull\b/.test(text));
   assert.equal(Object.keys(zip.files).filter(n => /^ppt\/charts\/chart\d+\.xml$/.test(n)).length, 3 * 2 + 2);
+});
+
+test('days are declined in the accusative: за 1 добу, за 3 доби, за 7 діб', () => {
+  assert.deepEqual([1, 2, 4, 5, 11, 21, 30, 148].map(daysAcc), ['добу', 'доби', 'доби', 'діб', 'діб', 'добу', 'діб', 'діб']);
+});
+
+test('every period and group slide carries one own-losses callout for its own number of days', () => {
+  const deck = buildDeck(udshv(), { ownLosses: ownWorkbook(), groups: [{ id: 'a', title: 'Група А', units: ['Підрозділ А'] }] });
+  const callout = id => deck.slides.find(s => s.id === id).ownCallout;
+  // 7 діб: 300 — 21 (3 × 7), 200/500 — 0. 30 діб: 300 — 90, 200 — 3 (події кожні 10 днів). Весь період: 200 — 6, 300 — 120.
+  assert.equal(callout('week').text, 'Наші втрати за 7 діб — 21');
+  assert.equal(callout('week').detail, '200 — 0 · 300 — 21 · 500 — 0');
+  assert.equal(callout('month').text, 'Наші втрати за 30 діб — 93');
+  assert.equal(callout('all').days, 60);
+  assert.equal(callout('all').text, 'Наші втрати за 60 діб — 126');
+  assert.equal(callout('group:a').text, 'Наші втрати за 30 діб — 93');
+  assert.equal(deck.slides.find(s => s.id === 'own-losses').ownCallout, undefined);
+  assert.equal(deck.slides[0].ownCallout, undefined);
+  // Без таблиці власних втрат виноски немає.
+  assert.equal(buildDeck(udshv()).slides.find(s => s.id === 'week').ownCallout, null);
+});
+
+test('the own-losses callout excludes suspect-dated rows and renders on the slide', async () => {
+  const evs = events();
+  evs.splice(40, 0, { date: '2026-08-05', unit: 'садн 79 одшбр', cells: { D: '9' } });
+  const deck = buildDeck(udshv(), { ownLosses: parseOwnLosses([sheet(evs)]) });
+  assert.equal(deck.slides.find(s => s.id === 'all').ownCallout.parts['200'], 6);
+  const zip = await JSZip.loadAsync(await renderDeckToBytes(deck));
+  const xml = await zip.file('ppt/slides/slide2.xml').async('string');
+  assert.ok(xml.includes('Наші втрати за 7 діб — 21'));
 });

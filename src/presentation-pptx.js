@@ -31,12 +31,22 @@ function tileColors(tile, theme) {
   return theme.text;
 }
 
+/** Виноска «Наші втрати за N діб — M» (одна на слайд періоду). */
+function drawOwnCallout(slide, theme, callout) {
+  if (!callout) return;
+  slide.addShape('roundRect', { x: W - M - 4.6, y: 1.06, w: 4.6, h: 0.3, rectRadius: 0.06, fill: { color: theme.panel }, line: { color: theme.accent, width: 1 } });
+  slide.addText([
+    { text: callout.text, options: { bold: true, color: theme.accent, fontSize: 11 } },
+    { text: `   (${callout.detail})`, options: { color: theme.muted, fontSize: 8 } },
+  ], { x: W - M - 4.5, y: 1.06, w: 4.4, h: 0.3, fontFace: FONT, valign: 'middle', align: 'right', margin: 0, fit: 'shrink' });
+}
+
 function drawTiles(slide, theme, tiles) {
   const gap = 0.15;
   const width = (W - 2 * M - gap * (tiles.length - 1)) / tiles.length;
   tiles.forEach((tile, i) => {
     const x = M + i * (width + gap);
-    slide.addShape('roundRect', { x, y: 1.4, w: width, h: 1.75, rectRadius: 0.08, fill: { color: theme.panel }, line: { color: theme.line, width: 0.75 } });
+    slide.addShape('roundRect', { x, y: 1.45, w: width, h: 1.72, rectRadius: 0.08, fill: { color: theme.panel }, line: { color: theme.line, width: 0.75 } });
     slide.addText(tile.name, { x: x + 0.15, y: 1.5, w: width - 0.3, h: 0.45, fontFace: FONT, fontSize: 11, color: theme.muted, valign: 'top', margin: 0 });
     slide.addText(tile.totalText, { x: x + 0.15, y: 1.92, w: width - 0.3, h: 0.7, fontFace: FONT, fontSize: 34, bold: true, color: theme.text, valign: 'middle', margin: 0, fit: 'shrink' });
     if (tile.deltaText) {
@@ -106,6 +116,7 @@ function periodSlide(pptx, theme, deck, data, number) {
   const compare = data.previous ? (data.previous.complete ? `Порівняння з ${data.previous.text}` : `Порівняння з ${data.previous.text} неповне`) : 'Без порівняння з попереднім відрізком';
   slide.addText(compare, { x: W - M - 6, y: 0.78, w: 6, h: 0.28, fontFace: FONT, fontSize: 11, color: theme.muted, align: 'right', margin: 0 });
   slide.addText(data.strip || `${data.period.activeDays} із ${data.period.days} діб з даними`, { x: M, y: 0.95, w: 8.3, h: 0.28, fontFace: FONT, fontSize: 11, color: theme.muted, margin: 0 });
+  drawOwnCallout(slide, theme, data.ownCallout);
   drawTiles(slide, theme, data.tiles);
   drawCharts(slide, theme, pptx, data.charts);
   drawBlocks(slide, theme, data);
