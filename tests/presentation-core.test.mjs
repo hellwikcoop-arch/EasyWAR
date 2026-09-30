@@ -65,7 +65,7 @@ test('deck numbers match the dashboard model for the same period', () => {
   assert.equal(all.tiles.find(t => t.key === 'kia').total, 92 * 3);
 });
 
-test('reports a change with both numbers and a hypothesis flagged as such', () => {
+test('reports a change with both numbers and a hypothesis line', () => {
   const wb = makeWorkbook((n, unit) => {
     const values = flat(n, unit);
     if (n > LAST - 7 && unit === 'Підрозділ А') values['personnel|200'] = 4; // 7 діб: +2 на добу
@@ -77,7 +77,7 @@ test('reports a change with both numbers and a hypothesis flagged as such', () =
   assert.ok(line, JSON.stringify(week.changes));
   assert.equal(line.text, 'Знищено о/с (200): 35 проти 21 (+66,7 %).');
   assert.ok(week.hypotheses.length >= 1);
-  assert.ok(week.hypotheses.every(h => h.flag === 'гіпотеза, потребує перевірки'));
+  assert.ok(week.hypotheses.every(h => !('flag' in h) && !/гіпотез/i.test(h.text)));
   assert.ok(week.hypotheses[0].text.startsWith('Знищено о/с (200): '));
   const tile = week.tiles.find(t => t.key === 'kia');
   assert.equal(tile.deltaText, '+66,7 %');

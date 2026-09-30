@@ -45,7 +45,7 @@ const KPI_DOMAIN = { kia: 'personnel', wia: 'personnel', personnel: 'personnel',
 
 /**
  * Каталог «сигнал → можливі причини». Це стартова редакція для правки
- * користувачем. Кожна причина виводиться з позначкою «гіпотеза».
+ * користувачем. Причини подаються коротко, без застережень у тексті слайда.
  * signal: change | peak | gap | concentration | structure | coverage.
  */
 export const HYPOTHESES = [
@@ -295,7 +295,7 @@ export function analyzeWindow(model, context, config = DEFAULT_CONFIG) {
   for (const s of [...signals].sort((a, b) => b.severity - a.severity)) {
     for (const h of pick(s.domain, s.signal, s.direction).slice(0, 1)) {
       const text = `${s.label}: ${h.text}`;
-      if (!seen.has(text)) { seen.add(text); hypotheses.push({ text, flag: 'гіпотеза, потребує перевірки' }); }
+      if (!seen.has(text)) { seen.add(text); hypotheses.push({ text }); }
     }
     if (hypotheses.length >= config.maxItems) break;
   }
