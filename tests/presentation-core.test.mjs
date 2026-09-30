@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   HYPOTHESES,
+  activeRange,
   buildDeck,
   classificationOf,
   classifyTarget,
@@ -16,14 +17,15 @@ import {
 // Лише синтетичні дані. Книга збирається напряму в тій формі, яку повертає parseUdshvWorkbook.
 const iso = n => new Date(Date.UTC(2026, 6, 1) + n * 864e5).toISOString().slice(0, 10); // 0 = 2026-07-01
 const LAST = 91; // 2026-09-30
+const sheetOf = date => ({ '07': 'ЛИПЕНЬ-26', '08': 'СЕРПЕНЬ-26', '09': 'ВЕРЕСЕНЬ-26', '10': 'ЖОВТЕНЬ-26' }[date.slice(5, 7)]);
 
 function makeWorkbook(valuesFor, { from = 0, to = LAST, skip = () => false, units = ['Підрозділ А', 'Підрозділ Б'] } = {}) {
   const records = [];
   for (let n = from; n <= to; n++) {
     if (skip(n)) continue;
-    for (const unit of units) records.push({ sheet: 'ТЕСТ-26', rowNumber: records.length + 5, date: iso(n), unit, values: valuesFor(n, unit) });
+    for (const unit of units) records.push({ sheet: sheetOf(iso(n)), rowNumber: records.length + 5, date: iso(n), unit, values: valuesFor(n, unit) });
   }
-  return { kind: 'udshv', readOnly: true, sourceName: 'synthetic.xlsx', sheetName: 'ТЕСТ-26', sheets: [], metrics: [], units, records, issues: [] };
+  return { kind: 'udshv', readOnly: true, sourceName: 'synthetic.xlsx', sheetName: 'ЛИПЕНЬ-26', sheets: [], metrics: [], units, records, issues: [] };
 }
 
 const flat = (n, unit) => (unit === 'Підрозділ А' ? { 'personnel|200': 2, 'personnel|300': 1, 'destroyed|танк': 1, 'damaged|танк': 1, 'ammo|155мм': 10, 'ammo|ВСЬОГО': 10, 'fire|ВгЗ': 2 } : { 'personnel|200': 1, 'ammo|122мм': 4, 'ammo|ВСЬОГО': 4 });
@@ -180,7 +182,7 @@ test('the deck is deterministic and contains no raw record fields', () => {
   const b = JSON.stringify(buildDeck(wb, { owner: 'X', generatedOn: '2026-10-01' }));
   assert.equal(a, b);
   assert.ok(!a.includes('rowNumber'));
-  assert.ok(!a.includes('ТЕСТ-26'));
+  assert.ok(!a.includes('ЛИПЕНЬ-26'));
 });
 
 test('every slide block is non-empty text and the hypothesis catalog is well formed', () => {
@@ -197,6 +199,9 @@ test('splits equipment (ОВТ) from objects using the configurable name pattern
   assert.equal(classifyTarget('РЕБ'), 'equipment');
   assert.equal(classifyTarget('Склади БК, ПММ'), 'object');
   assert.equal(classifyTarget('Переправа'), 'object');
+  assert.equal(classifyTarget('будівля (ІФС)'), 'object');
+  assert.equal(classifyTarget('ПУ БпЛА'), 'object');
+  assert.equal(classifyTarget('152 мм 2С19'), 'equipment');
   assert.equal(classifyTarget('КП, ПУ, КСП'), 'object');
   assert.equal(classifyTarget('танк', { objectPatterns: ['^танк$'] }), 'object');
   const wb = makeWorkbook((n, unit) => (unit === 'Підрозділ А' ? { 'destroyed|танк': 2, 'destroyed|Склади БК, ПММ': 5, 'damaged|РЕБ': 1, 'damaged|Переправа': 3, 'suppressed|КП, ПУ, КСП': 4 } : {}), { units: ['Підрозділ А'] });
@@ -219,6 +224,17 @@ test('equipment changes never include objects', () => {
   const week = buildDeck(wb).slides.find(s => s.id === 'week');
   assert.ok(!week.changes.some(c => c.text.startsWith('ОВТ знищено')), JSON.stringify(week.changes));
   assert.ok(week.changes.some(c => c.text === 'Об’єкти знищено: 70 проти 14 (+400 %).'), JSON.stringify(week.changes));
+});
+
+test('whole period ignores pre-filled zero days and rows dated outside the sheet month', () => {
+  const wb = makeWorkbook(flat, { from: 10, to: LAST });
+  wb.records.push({ sheet: 'ВЕРЕСЕНЬ-26', rowNumber: 900, date: '2026-07-01', unit: 'Підрозділ А', values: { 'personnel|200': 9 } });
+  for (let n = LAST + 1; n <= LAST + 10; n++) wb.records.push({ sheet: sheetOf(iso(n)), rowNumber: 950 + n, date: iso(n), unit: 'Підрозділ А', values: {} });
+  assert.deepEqual(activeRange(wb), { from: iso(10), to: '2026-09-30' });
+  const all = buildDeck(wb).slides.find(s => s.id === 'all');
+  assert.equal(all.period.to, '2026-09-30');
+  assert.equal(all.tiles.find(t => t.key === 'kia').total, (LAST - 10 + 1) * 3);
+  assert.ok(all.tiles.every(t => t.previous == null && t.deltaText === ''));
 });
 
 test('plural forms of days', () => {

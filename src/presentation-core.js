@@ -29,7 +29,7 @@ export const DEFAULT_CONFIG = {
   maxItems: 3, // на блок слайда
   // Назви стовпців груп ЗНИЩЕНО/ПОШКОДЖЕНО/ПОДАВЛЕНО, які є об'єктами, а не технікою (ОВТ).
   // Усе, що не збігається, вважається технікою. Шаблони — регулярні вирази без урахування регістру.
-  objectPatterns: ['склад', 'переправ', 'рембаз', '(^|[ ,])(кп|ксп|пу)([ ,]|$)'],
+  objectPatterns: ['склад', 'переправ', 'рембаз', 'будівл', '(^|[ ,])(кп|ксп|пу)([ ,]|$)'],
 };
 
 /** Показники плиток (до 6). Повний набір KPI береться для пошуку змін. */
@@ -94,6 +94,18 @@ const shortDate = iso => { const m = /^\d{4}-(\d{2})-(\d{2})$/.exec(iso || ''); 
 const longDate = iso => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || ''); return m ? `${m[3]}.${m[2]}.${m[1]}` : ''; };
 const periodText = range => `${longDate(range.from)} – ${longDate(range.to)}`;
 
+/**
+ * Діапазон даних: від першої дати з ненульовим показником до останньої активної дати.
+ * Таблиця містить наперед заповнені нулі до кінця місяця й інколи випадкові дати,
+ * тому діапазон усіх дат у файлі для аналізу не годиться.
+ */
+export function activeRange(workbook, issues = validateWorkbook(workbook)) {
+  const stray = new Set(issues.filter(i => i.type === 'date-outside-month').map(i => `${i.sheet}|${i.rowNumber}`));
+  const dates = (workbook?.records || []).filter(r => Object.keys(r.values).length && !stray.has(`${r.sheet}|${r.rowNumber}`)).map(r => r.date).sort();
+  if (!dates.length) return allDateRange(workbook);
+  return { from: dates[0], to: lastActiveDate(workbook) };
+}
+
 /** Останні N діб із включенням якірної дати. */
 export function rollingRange(anchor, days) {
   const end = dayNumber(anchor);
@@ -129,7 +141,7 @@ const signed = value => (value > 0 ? '+' : value < 0 ? '−' : '') + formatNumbe
  * за обраний діапазон із порівнянням із попереднім відрізком тієї самої довжини.
  */
 export function deckPeriods(workbook, options = {}) {
-  const all = allDateRange(workbook);
+  const all = options.dataRange || activeRange(workbook);
   const anchor = options.anchor || lastActiveDate(workbook);
   const custom = options.custom;
   if (custom && custom.from && custom.to) {
@@ -392,25 +404,30 @@ function paceRows(workbook, units, anchor, range, config) {
   return rows;
 }
 
-function windowSlide(workbook, period, units, anchor, config, issues) {
-  const all = allDateRange(workbook);
+function windowSlide(workbook, period, units, anchor, config, issues, all) {
   const range = period.range;
   const model = augment(createDashboardModel(workbook, { range, unit: units, preset: 'custom' }), workbook, units, config);
   const prevRange = period.kind === 'window' ? previousRange(range) : { from: '', to: '' };
   const previousCoverage = period.kind === 'window' ? coverageOf(prevRange, all) : null;
   const prevComplete = previousCoverage ? previousCoverage.complete : false;
-  const missingDays = issues.filter(i => i.type === 'missing-date' && i.raw >= range.from && i.raw <= range.to).length;
+  const present = new Set(workbook.records.map(r => r.date));
+  const missingDays = daysOf({ from: range.from < all.from ? all.from : range.from, to: range.to > all.to ? all.to : range.to }).filter(d => !present.has(d)).length;
   const pace = period.kind === 'all' ? paceRows(workbook, units, anchor, range, config) : null;
   const insights = analyzeWindow(model, { kind: period.kind, previousCoverage, pace, missingDays }, config);
   const rangeCoverage = coverageOf(range, all);
   const notes = [];
+  const strayCount = issues.filter(i => i.type === 'date-outside-month' && i.raw && (i.raw < all.from || i.raw > all.to)).length;
+  if (strayCount && period.kind === 'all') notes.push(`Не враховано ${strayCount} ${strayCount === 1 ? 'запис' : 'записів'} із датою поза місяцем аркуша (див. якість даних).`);
   if (!rangeCoverage.complete) notes.push(`Дані охоплюють ${rangeCoverage.covered} із ${rangeCoverage.days} діб обраного періоду.`);
   return {
     id: period.id,
     title: period.title,
     period: { from: range.from, to: range.to, days: model.days, activeDays: model.activeDays, text: periodText(range) },
     previous: period.kind === 'window' ? { from: prevRange.from, to: prevRange.to, text: periodText(prevRange), covered: previousCoverage.covered, days: previousCoverage.days, complete: prevComplete } : null,
-    tiles: TILE_KEYS.map(key => tileFor(model.kpis.find(k => k.key === key), prevComplete, config)),
+    tiles: TILE_KEYS.map(key => {
+      const kpi = model.kpis.find(k => k.key === key);
+      return tileFor(period.kind === 'window' ? kpi : { ...kpi, previous: null, delta: null, deltaPercent: null }, prevComplete, config);
+    }),
     chart: chartFor(model, model.kpis),
     changes: insights.changes,
     attention: insights.attention,
@@ -424,10 +441,11 @@ export function buildDeck(workbook, options = {}) {
   const config = { ...DEFAULT_CONFIG, ...(options.config || {}) };
   const units = options.units || [];
   const anchor = options.anchor || lastActiveDate(workbook);
-  const all = allDateRange(workbook);
-  const issues = validateWorkbook(workbook);
-  const periods = deckPeriods(workbook, { anchor, custom: options.custom });
-  const slides = periods.map(period => windowSlide(workbook, period, units, anchor, config, issues));
+  const rawIssues = validateWorkbook(workbook);
+  const all = activeRange(workbook, rawIssues);
+  const issues = rawIssues.filter(i => i.type !== 'missing-date' || (i.raw >= all.from && i.raw <= all.to));
+  const periods = deckPeriods(workbook, { anchor, custom: options.custom, dataRange: all });
+  const slides = periods.map(period => windowSlide(workbook, period, units, anchor, config, issues, all));
   const quality = {
     issueCount: issues.length,
     groups: groupIssues(issues).slice(0, 3).map(g => ({ text: g.text, count: g.items.length })),
