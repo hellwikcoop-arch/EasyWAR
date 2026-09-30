@@ -3,7 +3,7 @@
    фактичний розподіл поля «Причина», а не як припущення. Якір — остання дата таблиці групи. */
 
 import { inRange } from './udshv-dashboard-core.js';
-import { firstStrikeDate, lastStrikeDate, strikeIssues, strikeStats, tally } from './strikes-core.js';
+import { firstStrikeDate, lastStrikeDate, strikeStats, tally } from './strikes-core.js';
 import { NBSP, buckets, dayNumber, daysIn, formatNumber, formatPercent, isoFromDay, longDate, peakOf, periodText, rollingRange, shortDate, signed, tileFor } from './presentation-format.js';
 
 const share = (part, whole) => `${formatNumber(part / whole * 100)}${NBSP}%`;
@@ -25,7 +25,6 @@ export function buildStrikesSlide(group, options = {}) {
   const dataFrom = firstStrikeDate(strikes);
   const anchor = lastStrikeDate(strikes);
   const title = `${group.title} · останні 30 діб`;
-  const issues = strikeIssues(strikes);
   if (!records.length) {
     return { id: `group:${group.id}`, status: 'no_source', title, message: `У таблиці ${group.title} немає жодного запису з розпізнаною датою.` };
   }
@@ -81,8 +80,6 @@ export function buildStrikesSlide(group, options = {}) {
     if (peak) attention.push({ severity: 65, text: `Завдань за добу: пік ${longDate(peak.date)} — ${formatNumber(peak.value)} при типовому не більше ${formatNumber(peak.fence)}.` });
   }
   if (now.aborted) attention.push({ severity: 55, text: `Відбій: ${formatNumber(now.aborted)} із ${formatNumber(now.total)} завдань не входять в оцінку ефективності.` });
-  if (now.unknown) attention.push({ severity: 60, text: `Результат не розпізнано у ${formatNumber(now.unknown)} завданнях: у ефективність вони не входять як уражені.` });
-  if (issues.length) attention.push({ severity: 75, text: `Зауваження до таблиці ${group.title} (${issues.length}): ${[...new Set(issues.map(i => i.text))].join('; ')}.` });
   if (!current.length) attention.push({ severity: 85, text: `За останні 30 діб у таблиці ${group.title} немає жодного завдання.` });
   if (current.length && current.length < config.minBase) attention.push({ severity: 30, text: `Мала вибірка (${formatNumber(current.length)} завдань): відсотки ненадійні.` });
 

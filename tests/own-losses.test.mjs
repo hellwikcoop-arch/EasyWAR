@@ -121,13 +121,13 @@ test('own-losses slide: changes, concentration and the cause breakdown are factu
   assert.ok(slide.charts[1].horizontal);
 });
 
-test('a suspect-dated row is left out of the windows and named in the attention block', () => {
+test('a suspect-dated row is left out of the windows and is not mentioned on the slide', () => {
   const evs = events();
   evs.splice(40, 0, { date: '2026-08-05', unit: 'садн 79 одшбр', cells: { E: '50' } }); // серед вересневих рядків
   const own = parseOwnLosses([sheet(evs)]);
   const slide = buildDeck(udshv(), { ownLosses: own }).slides.find(s => s.id === 'own-losses');
   assert.equal(slide.tiles.find(t => t.key === 'k300').total, 90); // 50 із викиду не враховано
-  assert.ok(slide.attention.some(a => /Не враховано рядків із підозрілою датою: 1 \(рядок 47\)/.test(a.text)), JSON.stringify(slide.attention));
+  assert.ok(!slide.attention.some(a => /Зауваження|Не враховано/.test(a.text)), 'помилки даних на слайд не виносяться');
 });
 
 test('own-losses slide: a window before the first record is not compared, and a custom period is honoured', () => {

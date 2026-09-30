@@ -166,7 +166,6 @@ function titleSlide(pptx, theme, deck, data) {
     sourceRuns.push({ text: `${src.lastText} · ${src.lagText}`, options: { color: src.stale ? theme.bad : theme.muted, fontSize: 10, bold: src.stale, breakLine: true, paraSpaceAfter: 5 } });
   });
   slide.addText(sourceRuns, { x: 9.3, y: 3.9, w: 3.5, h: 2.6, fontFace: FONT, valign: 'top', margin: 0 });
-  if (data.quality.issueCount) slide.addText(`Зауваження до таблиці УДШВ: ${data.quality.issueCount} (${data.quality.groups.map(g => `${g.text}: ${g.count}`).join('; ')})`, { x: 0.9, y: 6.72, w: 11.9, h: 0.25, fontFace: FONT, fontSize: 9, italic: true, color: theme.muted, margin: 0 });
   const parts = [data.generatedOn ? `Сформовано ${data.generatedOn}` : '', `Остання дата з даними ${data.anchor.split('-').reverse().join('.')}`, data.marking].filter(Boolean);
   slide.addText(parts.join(' · '), { x: 0.9, y: 6.98, w: 11, h: 0.25, fontFace: FONT, fontSize: 11, color: theme.muted, margin: 0 });
 }

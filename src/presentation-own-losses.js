@@ -2,7 +2,7 @@
    Чисте ядро без DOM. Усі тексти складаються з чисел таблиці. Причини подаються як
    фактичний розподіл «Дія противника» з таблиці, а не як припущення. */
 
-import { groupTotals, inRange, lastOwnDate, sumGroup, sumMetric, validateOwnLosses } from './own-losses-core.js';
+import { groupTotals, inRange, lastOwnDate, sumGroup, sumMetric } from './own-losses-core.js';
 import { NBSP, buckets, daysIn, dayNumber, formatNumber, formatPercent, isoFromDay, longDate, peakOf, periodText, rollingRange, shortDate, signed, tileFor } from './presentation-format.js';
 
 const DEFS = [
@@ -79,14 +79,6 @@ export function buildOwnLossesSlide(own, options = {}) {
     if (peak) attention.push({ severity: 65, text: `Втрати о/с: пік ${longDate(peak.date)} — ${formatNumber(peak.value)} при типовому не більше ${formatNumber(peak.fence)}.` });
   }
 
-  // Зауваження до даних самої таблиці.
-  const issues = validateOwnLosses(own);
-  if (issues.length) {
-    const suspects = own.records.filter(r => r.suspect);
-    const kinds = [...new Set(issues.map(i => i.text))].join('; ');
-    const rows = suspects.length ? ` Не враховано рядків із підозрілою датою: ${suspects.length} (${suspects.map(r => `рядок ${r.rowNumber}`).join(', ')}).` : '';
-    attention.push({ severity: 75, text: `Зауваження до таблиці власних втрат (${issues.length}): ${kinds}.${rows}` });
-  }
   if (!current.length) attention.push({ severity: 70, text: 'За період у таблиці власних втрат немає жодної події.' });
 
   // Фактичний розподіл «Дія противника» замість припущень.

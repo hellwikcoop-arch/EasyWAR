@@ -7,7 +7,6 @@ import {
   allDateRange,
   createDashboardModel,
   daysOf,
-  groupIssues,
   inRange,
   lastActiveDate,
   seriesFor,
@@ -332,7 +331,6 @@ export function analyzeWindow(model, context, config = DEFAULT_CONFIG) {
     attention.push({ severity: 60 + silent, text: `${silent} із ${model.days} діб без жодного ненульового показника.` });
     signals.push({ signal: 'gap', direction: '*', domain: '*', severity: 60, label: `${silent} ${daysWord(silent)} без даних` });
   }
-  if (context.missingDays) attention.push({ severity: 70, text: `Без жодного рядка в таблиці: ${context.missingDays} ${daysWord(context.missingDays)} періоду.` });
 
   const focusDomains = FOCUS_DOMAINS[config.focus] || [];
   const boost = domain => (focusDomains.includes(domain) ? (domain === 'efficiency' ? 1001 : 1000) : 0);
@@ -424,20 +422,16 @@ function ownCalloutFor(own, range, days) {
   return { days, total: loss.total, parts: loss.parts, text: `Наші втрати за ${days} ${daysAcc(days)} — ${formatNumber(loss.total)}`, detail: `200 — ${formatNumber(loss.parts['200'])} · 300 — ${formatNumber(loss.parts['300'])} · 500 — ${formatNumber(loss.parts['500'])}` };
 }
 
-function windowSlide(workbook, period, units, anchor, config, issues, all, prune = false, own = null) {
+function windowSlide(workbook, period, units, anchor, config, all, prune = false, own = null) {
   const range = period.range;
   const model = augment(createDashboardModel(workbook, { range, unit: units, preset: 'custom' }), workbook, units, config);
   const prevRange = period.kind === 'window' ? previousRange(range) : { from: '', to: '' };
   const previousCoverage = period.kind === 'window' ? coverageOf(prevRange, all) : null;
   const prevComplete = previousCoverage ? previousCoverage.complete : false;
-  const present = new Set(workbook.records.map(r => r.date));
-  const missingDays = daysOf({ from: range.from < all.from ? all.from : range.from, to: range.to > all.to ? all.to : range.to }).filter(d => !present.has(d)).length;
   const pace = period.kind === 'all' ? paceRows(workbook, units, anchor, range, config) : null;
-  const insights = analyzeWindow(model, { kind: period.kind, previousCoverage, pace, missingDays }, config);
+  const insights = analyzeWindow(model, { kind: period.kind, previousCoverage, pace }, config);
   const rangeCoverage = coverageOf(range, all);
   const notes = [];
-  const strayCount = issues.filter(i => i.type === 'date-outside-month' && i.raw && (i.raw < all.from || i.raw > all.to)).length;
-  if (strayCount && period.kind === 'all') notes.push(`Не враховано ${strayCount} ${strayCount === 1 ? 'запис' : 'записів'} із датою поза місяцем аркуша (див. якість даних).`);
   if (!rangeCoverage.complete) notes.push(`Дані охоплюють ${rangeCoverage.covered} із ${rangeCoverage.days} діб обраного періоду.`);
   return {
     id: period.id,
@@ -489,17 +483,9 @@ export function buildDeck(workbook, options = {}) {
   const config = { ...DEFAULT_CONFIG, ...(options.config || {}), focus: options.focus || (options.config && options.config.focus) || DEFAULT_CONFIG.focus };
   const units = options.units || [];
   const anchor = options.anchor || lastActiveDate(workbook);
-  const rawIssues = validateWorkbook(workbook);
-  const all = activeRange(workbook, rawIssues);
-  const empty = new Set(workbook.records.filter(r => !Object.keys(r.values).length).map(r => `${r.sheet}|${r.rowNumber}`));
-  const issues = rawIssues.filter(i => {
-    if (i.type === 'missing-date') return i.raw >= all.from && i.raw <= all.to;
-    // Порожній повторний рядок підрозділу за день нічого не подвоює, тому шумом не вважаємо проблемою.
-    if (i.type === 'duplicate') return !empty.has(`${i.sheet}|${i.rowNumber}`);
-    return true;
-  });
+  const all = activeRange(workbook);
   const periods = deckPeriods(workbook, { anchor, custom: options.custom, dataRange: all });
-  const slides = periods.map(period => windowSlide(workbook, period, units, anchor, config, issues, all, false, options.ownLosses || null));
+  const slides = periods.map(period => windowSlide(workbook, period, units, anchor, config, all, false, options.ownLosses || null));
   // Зарезервоване місце під слайд власних втрат: у таблиці УДШВ їх немає (вона про втрати противника).
   if (options.ownLosses) {
     slides.push(buildOwnLossesSlide(options.ownLosses, { anchor, custom: options.custom, config }));
@@ -517,14 +503,10 @@ export function buildDeck(workbook, options = {}) {
       if (group.strikes) { slides.push(buildStrikesSlide(group, { config })); continue; }
       const present = (group.units || []).filter(u => workbook.units.includes(u));
       if (!present.length) { warnings.push(`Група «${group.title}»: підрозділів немає в таблиці, слайд пропущено.`); continue; }
-      const slide = windowSlide(workbook, { id: `group:${group.id}`, title: `${group.title} · останні 30 діб`, kind: 'window', range: rollingRange(anchor, 30) }, present, anchor, config, issues, all, true); // виноски власних втрат на слайдах груп немає
+      const slide = windowSlide(workbook, { id: `group:${group.id}`, title: `${group.title} · останні 30 діб`, kind: 'window', range: rollingRange(anchor, 30) }, present, anchor, config, all, true); // виноски власних втрат на слайдах груп немає
       slides.push({ ...slide, scope: { label: group.title, units: present } });
     }
   }
-  const quality = {
-    issueCount: issues.length,
-    groups: groupIssues(issues).slice(0, 3).map(g => ({ text: g.text, count: g.items.length })),
-  };
   const titleModel = createDashboardModel(workbook, { range: all, unit: units, preset: 'custom' });
   return {
     schemaVersion: DECK_SCHEMA_VERSION,
@@ -550,7 +532,6 @@ export function buildDeck(workbook, options = {}) {
       dataRange: { from: all.from, to: all.to, text: periodText(all), days: titleModel.days, activeDays: titleModel.activeDays },
       anchor,
       generatedOn: options.generatedOn || '',
-      quality,
     }, ...slides],
   };
 }

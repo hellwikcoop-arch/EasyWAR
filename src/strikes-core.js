@@ -79,6 +79,7 @@ export function parseStrikes(sheets, sourceName = '') {
   const weaponLabel = ['тип ла', 'тип пу'].find(label => findColumn(header, label));
   col.weapon = weaponLabel ? findColumn(header, weaponLabel) : null;
   const records = [];
+  const undated = [];
   const issues = [];
   for (const row of rows) {
     if (row.r <= header.r) continue;
@@ -86,7 +87,7 @@ export function parseStrikes(sheets, sourceName = '') {
     const resultRaw = clean(cellText(row.cells[col.result]));
     if (!dateRaw && !resultRaw) continue;
     const date = strikeDate(dateRaw);
-    if (!date) { issues.push({ rowNumber: row.r, type: 'invalid-date', raw: dateRaw }); continue; }
+    if (!date) issues.push({ rowNumber: row.r, type: 'invalid-date', raw: dateRaw });
     const countRaw = clean(cellText(row.cells[col.count]));
     let count = 0;
     if (!NONE_MARKERS.has(countRaw)) {
@@ -97,9 +98,10 @@ export function parseStrikes(sheets, sourceName = '') {
     const result = classifyResult(resultRaw);
     if (result === 'unknown') issues.push({ rowNumber: row.r, type: 'unknown-result', raw: resultRaw });
     const munition = clean(cellText(row.cells[col.munition]));
-    records.push({
+    (date ? records : undated).push({
       rowNumber: row.r,
       date,
+      dateRaw,
       unit: canonicalUnit(cellText(row.cells[col.unit])),
       types: clean(cellText(row.cells[col.type])).split(',').map(clean).filter(Boolean),
       weapon: clean(cellText(row.cells[col.weapon])),
@@ -111,7 +113,8 @@ export function parseStrikes(sheets, sourceName = '') {
     });
   }
   records.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.rowNumber - b.rowNumber));
-  return { kind: 'strikes', readOnly: true, sourceName, weaponLabel: weaponLabel === 'тип пу' ? 'Тип ПУ' : 'Тип ЛА', records, issues };
+  // Рядки без читабельної дати не потрапляють в аналіз, але лишаються для виправлення в меню перевірки даних.
+  return { kind: 'strikes', readOnly: true, sourceName, weaponLabel: weaponLabel === 'тип пу' ? 'Тип ПУ' : 'Тип ЛА', records, undated, issues };
 }
 
 const ISSUE_TEXT = {

@@ -158,7 +158,6 @@ test('unit concentration and silent days are reported with numbers', () => {
   const week = buildDeck(wb).slides.find(s => s.id === 'week');
   assert.ok(week.attention.some(a => a.text === 'Витрата БК: Підрозділ А дає 75 % (180 з 240).'), JSON.stringify(week.attention));
   assert.ok(week.attention.some(a => /1 із 7 діб без жодного ненульового показника/.test(a.text)));
-  assert.ok(week.attention.some(a => /Без жодного рядка в таблиці: 1 доба/.test(a.text)));
 });
 
 test('whole-period slide compares the recent pace with the overall pace', () => {
@@ -290,14 +289,6 @@ test('group slides use the caller-provided units, cover 30 days and skip unknown
   assert.equal(group.tiles.find(t => t.key === 'kia').total, 30 * 2);
   assert.ok(deck.warnings.some(w => w.includes('Група X')));
   assert.equal(buildDeck(wb, { custom: { from: '2026-08-01', to: '2026-08-10' }, groups: [{ id: 'a', title: 'Група А', units: ['Підрозділ А'] }] }).slides.length, 2);
-});
-
-test('an empty repeated unit row is not reported as a duplicate, a filled one is', () => {
-  const wb = makeWorkbook(flat, { units: ['Підрозділ А'] });
-  wb.records.push({ sheet: sheetOf('2026-09-30'), rowNumber: 990, date: '2026-09-30', unit: 'Підрозділ А', values: {} });
-  assert.equal(buildDeck(wb).slides[0].quality.issueCount, 0);
-  wb.records.push({ sheet: sheetOf('2026-09-30'), rowNumber: 991, date: '2026-09-30', unit: 'Підрозділ А', values: { 'personnel|200': 1 } });
-  assert.equal(buildDeck(wb).slides[0].quality.issueCount, 1);
 });
 
 test('group slides replace empty tiles with indicators that have data', () => {

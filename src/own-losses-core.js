@@ -84,6 +84,7 @@ function parseSheet(sheet) {
   }
   const first = Math.max(header.r, sub.r || 0) + 1;
   const records = [];
+  const undated = [];
   const issues = [];
   let totalsRow = null;
   for (const row of rows) {
@@ -98,7 +99,7 @@ function parseSheet(sheet) {
     if (!/^\d+$/.test(number) || !unitRaw) continue;
     const dateRaw = clean(cellText(row.cells[dateCol]));
     const date = ownDate(dateRaw);
-    if (!date) { issues.push({ sheet: sheet.name, rowNumber: row.r, type: 'invalid-date', raw: dateRaw }); continue; }
+    if (!date) issues.push({ sheet: sheet.name, rowNumber: row.r, type: 'invalid-date', raw: dateRaw });
     const values = {};
     for (const m of metrics) {
       const raw = clean(cellText(row.cells[m.letter]));
@@ -108,7 +109,7 @@ function parseSheet(sheet) {
       if (n < 0) issues.push({ sheet: sheet.name, rowNumber: row.r, type: 'negative', metric: m.name, raw });
       if (n !== 0) { const id = `${m.group}|${m.name}`; values[id] = (values[id] || 0) + n; }
     }
-    records.push({ sheet: sheet.name, rowNumber: row.r, date, unitRaw, unit: ownUnit(unitRaw), values });
+    (date ? records : undated).push({ sheet: sheet.name, rowNumber: row.r, date, dateRaw, unitRaw, unit: ownUnit(unitRaw), values });
   }
   // Дата-викид: рядок, що різко відрізняється від обох сусідніх, які між собою близькі (типова описка в місяці).
   const gap = (a, b) => Math.abs(Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`)) / 864e5;
@@ -119,7 +120,7 @@ function parseSheet(sheet) {
       issues.push({ sheet: sheet.name, rowNumber: r.rowNumber, type: 'date-outlier', raw: r.date });
     }
   });
-  return { name: clean(sheet.name), metrics, records, issues, totalsRow };
+  return { name: clean(sheet.name), metrics, records, undated, issues, totalsRow };
 }
 
 /** Кидає помилку з code = 'NOT_OWN_LOSSES', якщо жоден аркуш не схожий на таблицю власних втрат. */
@@ -140,6 +141,7 @@ export function parseOwnLosses(sheets, sourceName = '') {
     metrics: parsed.flatMap(sheet => sheet.metrics.map(({ group, name }) => ({ id: `${group}|${name}`, group, name }))).filter((m, i, list) => list.findIndex(o => o.id === m.id) === i),
     units,
     records,
+    undated: parsed.flatMap(sheet => sheet.undated),
     totalsRows: parsed.map(sheet => ({ sheet: sheet.name, values: sheet.totalsRow })).filter(item => item.values),
     issues: parsed.flatMap(sheet => sheet.issues),
   };
