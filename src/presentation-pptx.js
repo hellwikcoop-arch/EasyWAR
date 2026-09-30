@@ -142,22 +142,33 @@ function titleSlide(pptx, theme, deck, data) {
   slide.addShape('rect', { x: 0, y: 0, w: 0.25, h: H, fill: { color: theme.accent }, line: { color: theme.accent, width: 0 } });
   slide.addText('АНАЛІТИКА', { x: 0.9, y: 1.1, w: 8, h: 0.4, fontFace: FONT, fontSize: 16, bold: true, color: theme.accent, charSpacing: 6, margin: 0 });
   slide.addText(data.owner || 'Назву власника не вказано', { x: 0.9, y: 1.6, w: 11.5, h: 1.0, fontFace: FONT, fontSize: 40, bold: true, color: theme.text, valign: 'top', margin: 0, fit: 'shrink' });
-  slide.addText(deck.focusLabel, { x: 0.9, y: 2.75, w: 8, h: 0.4, fontFace: FONT, fontSize: 16, color: theme.muted, margin: 0 });
-  const cards = [
-    ['Дані', data.dataRange.text, `${data.dataRange.activeDays} діб з даними з ${data.dataRange.days}`],
-    ['Підрозділів', String(data.units.length), 'у вибірці'],
-    ['Якість даних', data.quality.issueCount ? `${data.quality.issueCount} зауважень` : 'Без зауважень', data.quality.groups.map(g => `${g.text}: ${g.count}`).join('; ') || 'перевірки пройдено'],
-  ];
-  const width = 3.85;
-  cards.forEach(([label, value, note], i) => {
-    const x = 0.9 + i * (width + 0.2);
-    slide.addShape('roundRect', { x, y: 4.4, w: width, h: 1.75, rectRadius: 0.08, fill: { color: theme.panel }, line: { color: theme.line, width: 0.75 } });
-    slide.addText(label, { x: x + 0.2, y: 4.5, w: width - 0.4, h: 0.3, fontFace: FONT, fontSize: 11, color: theme.muted, margin: 0 });
-    slide.addText(value, { x: x + 0.2, y: 4.85, w: width - 0.4, h: 0.6, fontFace: FONT, fontSize: 20, bold: true, color: theme.text, valign: 'middle', margin: 0, fit: 'shrink' });
-    slide.addText(note, { x: x + 0.2, y: 5.5, w: width - 0.4, h: 0.55, fontFace: FONT, fontSize: 10, color: theme.muted, valign: 'top', margin: 0 });
+  slide.addText(deck.focusLabel, { x: 0.9, y: 2.6, w: 8, h: 0.4, fontFace: FONT, fontSize: 16, color: theme.muted, margin: 0 });
+  // Актуальність: які підрозділи в аналізі й коли від кожного останні дані; окремо — актуальність таблиць-джерел.
+  const total = data.unitsActual.length;
+  const stale = data.unitsActual.filter(u => u.stale).length;
+  slide.addText(`Підрозділи в аналізі: ${total}${stale ? ` · без свіжих даних: ${stale}` : ' · усі з актуальними даними'}`, { x: 0.9, y: 3.55, w: 8.3, h: 0.3, fontFace: FONT, fontSize: 13, bold: true, color: theme.accent, margin: 0 });
+  slide.addText(`Дані: ${data.dataRange.text} · ${data.dataRange.activeDays} діб із даними з ${data.dataRange.days}`, { x: 0.9, y: 3.85, w: 8.3, h: 0.25, fontFace: FONT, fontSize: 10, color: theme.muted, margin: 0 });
+  const head = ['Підрозділ', 'Останні дані', 'Стан'].map(text => ({ text, options: { bold: true, color: theme.muted, fontSize: 9, fill: { color: theme.panel } } }));
+  const rowsOf = list => [head, ...list.map(u => [
+    { text: u.name, options: { color: theme.text, fontSize: 9.5 } },
+    { text: u.lastText, options: { color: u.stale ? theme.bad : theme.text, fontSize: 9.5 } },
+    { text: u.lagText, options: { color: u.stale ? theme.bad : theme.good, fontSize: 9.5, bold: u.stale } },
+  ])];
+  const half = Math.ceil(total / 2);
+  [data.unitsActual.slice(0, half), data.unitsActual.slice(half)].forEach((list, i) => {
+    if (!list.length) return;
+    slide.addTable(rowsOf(list), { x: 0.9 + i * 4.15, y: 4.2, w: 4.0, colW: [1.75, 1.05, 1.2], rowH: 0.27, fontFace: FONT, border: { type: 'solid', pt: 0.5, color: theme.line }, margin: [0.02, 0.06, 0.02, 0.06], valign: 'middle' });
   });
+  slide.addText('Джерела даних', { x: 9.3, y: 3.55, w: 3.5, h: 0.3, fontFace: FONT, fontSize: 13, bold: true, color: theme.accent, margin: 0 });
+  const sourceRuns = [];
+  data.sources.forEach(src => {
+    sourceRuns.push({ text: src.name, options: { bold: true, color: theme.text, fontSize: 11, breakLine: true } });
+    sourceRuns.push({ text: `${src.lastText} · ${src.lagText}`, options: { color: src.stale ? theme.bad : theme.muted, fontSize: 10, bold: src.stale, breakLine: true, paraSpaceAfter: 5 } });
+  });
+  slide.addText(sourceRuns, { x: 9.3, y: 3.9, w: 3.5, h: 2.6, fontFace: FONT, valign: 'top', margin: 0 });
+  if (data.quality.issueCount) slide.addText(`Зауваження до таблиці УДШВ: ${data.quality.issueCount} (${data.quality.groups.map(g => `${g.text}: ${g.count}`).join('; ')})`, { x: 0.9, y: 6.72, w: 11.9, h: 0.25, fontFace: FONT, fontSize: 9, italic: true, color: theme.muted, margin: 0 });
   const parts = [data.generatedOn ? `Сформовано ${data.generatedOn}` : '', `Остання дата з даними ${data.anchor.split('-').reverse().join('.')}`, data.marking].filter(Boolean);
-  slide.addText(parts.join(' · '), { x: 0.9, y: 6.6, w: 11, h: 0.3, fontFace: FONT, fontSize: 11, color: theme.muted, margin: 0 });
+  slide.addText(parts.join(' · '), { x: 0.9, y: 6.98, w: 11, h: 0.25, fontFace: FONT, fontSize: 11, color: theme.muted, margin: 0 });
 }
 
 /** Будує об'єкт PptxGenJS за моделлю колоди. theme: 'light' (єдина затверджена). */
