@@ -15,6 +15,11 @@ import {
   validateWorkbook,
 } from './udshv-dashboard-core.js';
 
+import { buildOwnLossesSlide } from './presentation-own-losses.js';
+import { NBSP, dayNumber, peakOf, tileFor as buildTile, daysWord, formatNumber, formatPercent, isoFromDay, longDate, periodText, rollingRange, shortDate, signed } from './presentation-format.js';
+
+export { daysWord, formatNumber, formatPercent, rollingRange };
+
 export const DECK_SCHEMA_VERSION = 1;
 
 /** Пороги. Змінюються через options.config, у коді не «зашиті» у правила. */
@@ -99,14 +104,6 @@ export const HYPOTHESES = [
 
 /* ------------------------------ дати ------------------------------ */
 
-const dayNumber = iso => {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
-  return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) / 864e5 : NaN;
-};
-const isoFromDay = n => new Date(n * 864e5).toISOString().slice(0, 10);
-const shortDate = iso => { const m = /^\d{4}-(\d{2})-(\d{2})$/.exec(iso || ''); return m ? `${m[2]}.${m[1]}` : ''; };
-const longDate = iso => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || ''); return m ? `${m[3]}.${m[2]}.${m[1]}` : ''; };
-const periodText = range => `${longDate(range.from)} – ${longDate(range.to)}`;
 
 /**
  * Діапазон даних: від першої дати з ненульовим показником до останньої активної дати.
@@ -120,32 +117,9 @@ export function activeRange(workbook, issues = validateWorkbook(workbook)) {
   return { from: dates[0], to: lastActiveDate(workbook) };
 }
 
-/** Останні N діб із включенням якірної дати. */
-export function rollingRange(anchor, days) {
-  const end = dayNumber(anchor);
-  if (!Number.isFinite(end) || !(days >= 1)) return { from: '', to: '' };
-  return { from: isoFromDay(end - days + 1), to: isoFromDay(end) };
-}
 
 /* ------------------------------ форматування ------------------------------ */
 
-const NBSP = ' ';
-export function formatNumber(value) {
-  if (value == null || !Number.isFinite(value)) return '—';
-  const rounded = Math.abs(value) >= 100 ? Math.round(value) : Math.round(value * 10) / 10;
-  return String(rounded).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, NBSP);
-}
-export function formatPercent(value) {
-  if (value == null || !Number.isFinite(value)) return '—';
-  const sign = value > 0 ? '+' : value < 0 ? '−' : '';
-  return `${sign}${formatNumber(Math.abs(value))}${NBSP}%`;
-}
-export function daysWord(n) {
-  const abs = Math.abs(n) % 100, last = abs % 10;
-  if (abs > 10 && abs < 20) return 'діб';
-  return last === 1 ? 'доба' : last >= 2 && last <= 4 ? 'доби' : 'діб';
-}
-const signed = value => (value > 0 ? '+' : value < 0 ? '−' : '') + formatNumber(Math.abs(value));
 
 /* ------------------------------ періоди колоди ------------------------------ */
 
@@ -171,24 +145,6 @@ export function deckPeriods(workbook, options = {}) {
 
 /* ------------------------------ статистика ------------------------------ */
 
-function quantile(sorted, q) {
-  if (!sorted.length) return 0;
-  const pos = (sorted.length - 1) * q;
-  const low = Math.floor(pos), high = Math.ceil(pos);
-  return sorted[low] + (sorted[high] - sorted[low]) * (pos - low);
-}
-
-/** Пік: день, що перевищує верхню межу IQR власної історії періоду. */
-export function findPeak(points, config = DEFAULT_CONFIG) {
-  const values = points.map(p => p.value);
-  if (values.length < config.anomalyMinDays) return null;
-  const sorted = [...values].sort((a, b) => a - b);
-  const q1 = quantile(sorted, 0.25), q3 = quantile(sorted, 0.75);
-  const fence = q3 + config.anomalyIqrFactor * (q3 - q1);
-  let best = null;
-  for (const p of points) if (p.value > fence && p.value >= config.minBase && (!best || p.value > best.value)) best = p;
-  return best ? { date: best.from, value: best.value, fence } : null;
-}
 
 const total = (records, predicate) => records.reduce((sum, r) => sum + Object.entries(r.values).filter(([id]) => predicate(id)).reduce((s, [, v]) => s + v, 0), 0);
 
@@ -200,24 +156,6 @@ function coverageOf(range, dataRange) {
   return { days: days.length, covered: present, complete: days.length > 0 && present === days.length };
 }
 
-function tileFor(kpi, prevComplete, config) {
-  const hasPrev = kpi.previous != null;
-  const base = kpi.base != null ? kpi.base : kpi.total;
-  const previousBase = kpi.previousBase != null ? kpi.previousBase : kpi.previous;
-  const reliable = hasPrev && prevComplete && previousBase >= config.minBase && (kpi.base == null || base >= config.minBase);
-  return {
-    key: kpi.key,
-    name: KPI_NAMES[kpi.key] || kpi.label,
-    total: kpi.total,
-    previous: kpi.previous,
-    delta: kpi.delta,
-    deltaPercent: reliable ? kpi.deltaPercent : null,
-    reliable,
-    better: kpi.better || null,
-    totalText: formatNumber(kpi.total),
-    deltaText: hasPrev && kpi.delta != null ? (reliable ? formatPercent(kpi.deltaPercent) : `${signed(kpi.delta)} (мала база)`) : '',
-  };
-}
 
 const normName = value => String(value == null ? '' : value).replace(/[’ʼ]/g, "'").replace(/\s+/g, ' ').trim().toLocaleLowerCase('uk-UA');
 
@@ -228,6 +166,11 @@ export function classifyTarget(name, config = DEFAULT_CONFIG) {
 }
 
 const classSum = (records, group, cls, config) => records.reduce((sum, r) => sum + Object.entries(r.values).reduce((s, [id, v]) => (id.startsWith(`${group}|`) && classifyTarget(id.slice(group.length + 1), config) === cls ? s + v : s), 0), 0);
+
+/** Пік за добовим рядом (обгортка з типовою конфігурацією). */
+export function findPeak(points, config = DEFAULT_CONFIG) { return peakOf(points, config); }
+
+const tileFor = (kpi, prevComplete, config) => buildTile(kpi, prevComplete, config, KPI_NAMES[kpi.key] || kpi.label);
 
 /** Показники з розділенням техніки й об'єктів у тій самій формі, що й KPI дашборда. */
 function classifiedKpis(model, workbook, units, config) {
@@ -520,7 +463,9 @@ export function buildDeck(workbook, options = {}) {
   const periods = deckPeriods(workbook, { anchor, custom: options.custom, dataRange: all });
   const slides = periods.map(period => windowSlide(workbook, period, units, anchor, config, issues, all));
   // Зарезервоване місце під слайд власних втрат: у таблиці УДШВ їх немає (вона про втрати противника).
-  if (options.reserveOwnLosses) {
+  if (options.ownLosses) {
+    slides.push(buildOwnLossesSlide(options.ownLosses, { anchor, custom: options.custom, config }));
+  } else if (options.reserveOwnLosses) {
     slides.push({
       id: 'own-losses', title: 'Власні втрати', status: 'no_source',
       message: 'Місце зарезервовано. Джерело даних про власні втрати ще не підключено.',

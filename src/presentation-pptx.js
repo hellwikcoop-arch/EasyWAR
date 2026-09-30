@@ -58,7 +58,7 @@ function drawBlocks(slide, theme, data) {
   const sections = [
     ['Що змінилось', data.changes, 'Суттєвих змін (від 20 %) не виявлено.'],
     ['На що звернути увагу', data.attention, 'Відхилень не виявлено.'],
-    ['Можливі причини', data.hypotheses, 'Змін і відхилень, що потребують пояснення, немає.'],
+    [data.thirdTitle || 'Можливі причини', data.hypotheses, 'Змін і відхилень, що потребують пояснення, немає.'],
   ];
   const width = 5.53;
   const perLine = 58;
@@ -78,18 +78,22 @@ function drawCharts(slide, theme, pptx, charts) {
   const height = 1.55;
   charts.forEach((chart, i) => {
     const y = 3.3 + i * (height + 0.32);
-    slide.addText(`${chart.title}, ${labels[chart.bucket] || ''}`.replace(/, $/, ''), { x: M, y, w: 6.5, h: 0.26, fontFace: FONT, fontSize: 11, bold: true, color: theme.accent, margin: 0 });
+    const title = chart.bucket ? `${chart.title}, ${labels[chart.bucket] || ''}` : chart.title;
+    slide.addText(title, { x: M, y, w: 6.5, h: 0.26, fontFace: FONT, fontSize: 11, bold: true, color: theme.accent, margin: 0 });
     const data = chart.series.map(s => ({ name: s.name, labels: chart.categories, values: s.values }));
+    const colors = { personnel: [theme.series[0], theme.series[3]], targets: [theme.series[1], theme.series[2]], 'own-personnel': [theme.series[0], theme.series[3], theme.series[1]], 'own-causes': [theme.series[0]] }[chart.id] || theme.series;
     slide.addChart(pptx.charts.BAR, data, {
       x: M - 0.1, y: y + 0.24, w: 6.8, h: height,
-      barDir: 'col', barGrouping: 'clustered', barGapWidthPct: 35,
-      chartColors: chart.id === 'personnel' ? [theme.series[0], theme.series[3]] : [theme.series[1], theme.series[2]],
-      catAxisLabelFontFace: FONT, catAxisLabelFontSize: 8, catAxisLabelColor: theme.muted, catAxisLabelRotate: chart.categories.length > 14 ? 270 : 0,
+      barDir: chart.horizontal ? 'bar' : 'col', barGrouping: 'clustered', barGapWidthPct: 35,
+      chartColors: colors.slice(0, data.length),
+      catAxisLabelFontFace: FONT, catAxisLabelFontSize: 8, catAxisLabelColor: theme.muted,
+      catAxisLabelRotate: !chart.horizontal && chart.categories.length > 14 ? 270 : 0,
+      catAxisOrientation: chart.horizontal ? 'maxMin' : 'minMax',
       valAxisLabelFontFace: FONT, valAxisLabelFontSize: 8, valAxisLabelColor: theme.muted,
       valGridLine: { color: theme.line, size: 0.5 }, catGridLine: { style: 'none' },
       catAxisLineShow: false, valAxisLineShow: false,
-      showLegend: true, legendPos: 'r', legendFontFace: FONT, legendFontSize: 8, legendColor: theme.muted,
-      showValue: false,
+      showLegend: data.length > 1, legendPos: 'r', legendFontFace: FONT, legendFontSize: 8, legendColor: theme.muted,
+      showValue: Boolean(chart.horizontal), dataLabelFontFace: FONT, dataLabelFontSize: 8, dataLabelColor: theme.text,
     });
   });
 }
@@ -101,7 +105,7 @@ function periodSlide(pptx, theme, deck, data, number) {
   slide.addText(data.period.text, { x: W - M - 4.2, y: 0.4, w: 4.2, h: 0.35, fontFace: FONT, fontSize: 16, color: theme.text, align: 'right', margin: 0 });
   const compare = data.previous ? (data.previous.complete ? `Порівняння з ${data.previous.text}` : `Порівняння з ${data.previous.text} неповне`) : 'Без порівняння з попереднім відрізком';
   slide.addText(compare, { x: W - M - 6, y: 0.78, w: 6, h: 0.28, fontFace: FONT, fontSize: 11, color: theme.muted, align: 'right', margin: 0 });
-  slide.addText(`${data.period.activeDays} із ${data.period.days} діб з даними`, { x: M, y: 0.95, w: 6, h: 0.28, fontFace: FONT, fontSize: 11, color: theme.muted, margin: 0 });
+  slide.addText(data.strip || `${data.period.activeDays} із ${data.period.days} діб з даними`, { x: M, y: 0.95, w: 8.3, h: 0.28, fontFace: FONT, fontSize: 11, color: theme.muted, margin: 0 });
   drawTiles(slide, theme, data.tiles);
   drawCharts(slide, theme, pptx, data.charts);
   drawBlocks(slide, theme, data);
