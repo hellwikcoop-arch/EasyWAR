@@ -27,14 +27,21 @@ export const DEFAULT_CONFIG = {
   anomalyIqrFactor: 1.5,
   paceMinDays: 60, // мінімум днів для слайда «весь період»
   maxItems: 3, // на блок слайда
+  focus: 'all', // 'result' | 'efficiency' | 'all'
   // Назви стовпців груп ЗНИЩЕНО/ПОШКОДЖЕНО/ПОДАВЛЕНО, які є об'єктами, а не технікою (ОВТ).
   // Усе, що не збігається, вважається технікою. Шаблони — регулярні вирази без урахування регістру.
   objectPatterns: ['склад', 'переправ', 'рембаз', 'будівл', '(^|[ ,])(кп|ксп|пу)([ ,]|$)'],
 };
 
 /** Показники плиток (до 6). Повний набір KPI береться для пошуку змін. */
-const TILE_KEYS = ['kia', 'wia', 'ovtDestroyed', 'ovtDamaged', 'objDestroyed', 'ammo'];
-const CHANGE_KEYS = ['kia', 'wia', 'ovtDestroyed', 'ovtDamaged', 'ovtSuppressed', 'objDestroyed', 'objDamaged', 'objSuppressed', 'ammo', 'vgz', 'kbb'];
+export const FOCUS_LABELS = { result: 'Результат', efficiency: 'Ефективність', all: 'Результат і ефективність' };
+const TILE_SETS = {
+  result: ['kia', 'wia', 'ovtDestroyed', 'ovtDamaged', 'objDestroyed', 'objDamaged'],
+  efficiency: ['ammoPerTarget', 'ammo', 'affected', 'vgz', 'kbb'],
+  all: ['ammoPerTarget', 'kia', 'wia', 'ovtDestroyed', 'objDestroyed', 'ammo'],
+};
+const FOCUS_DOMAINS = { result: ['personnel', 'ovt', 'objects'], efficiency: ['efficiency', 'ammo', 'fire'], all: [] };
+const CHANGE_KEYS = ['kia', 'wia', 'ovtDestroyed', 'ovtDamaged', 'ovtSuppressed', 'objDestroyed', 'objDamaged', 'objSuppressed', 'affected', 'ammo', 'vgz', 'kbb'];
 const KPI_NAMES = {
   kia: 'Знищено о/с (200)',
   wia: 'Поранено о/с (300)',
@@ -46,10 +53,12 @@ const KPI_NAMES = {
   objDamaged: 'Об’єкти пошкоджено',
   objSuppressed: 'Об’єкти подавлено',
   ammo: 'Витрата БК',
+  affected: 'Уражено (ОВТ + об’єкти)',
+  ammoPerTarget: 'БК на одиницю ураженого',
   vgz: 'ВгЗ',
   kbb: 'КББ',
 };
-const KPI_DOMAIN = { kia: 'personnel', wia: 'personnel', personnel: 'personnel', ovtDestroyed: 'ovt', ovtDamaged: 'ovt', ovtSuppressed: 'ovt', objDestroyed: 'objects', objDamaged: 'objects', objSuppressed: 'objects', ammo: 'ammo', vgz: 'fire', kbb: 'fire' };
+const KPI_DOMAIN = { kia: 'personnel', wia: 'personnel', personnel: 'personnel', ovtDestroyed: 'ovt', ovtDamaged: 'ovt', ovtSuppressed: 'ovt', objDestroyed: 'objects', objDamaged: 'objects', objSuppressed: 'objects', ammo: 'ammo', affected: 'result', ammoPerTarget: 'efficiency', vgz: 'fire', kbb: 'fire' };
 const CLASSIFIED = [
   { key: 'ovtDestroyed', group: 'destroyed', cls: 'equipment' },
   { key: 'ovtDamaged', group: 'damaged', cls: 'equipment' },
@@ -71,6 +80,10 @@ export const HYPOTHESES = [
   { signal: 'change', direction: 'down', domain: 'fire', text: 'менше завдань, ротація або перерва у роботі засобів' },
   { signal: 'change', direction: 'up', domain: 'ovt', text: 'краща розвідка цілей, вища результативність або більше завдань' },
   { signal: 'change', direction: 'down', domain: 'ovt', text: 'менше цілей, гірша розвідка, протидія противника або неповний облік' },
+  { signal: 'change', direction: 'up', domain: 'efficiency', text: 'гірша результативність на ту саму витрату: змінився тип цілей або боєприпасів, слабша розвідка чи коригування; перевірити облік уражень' },
+  { signal: 'change', direction: 'down', domain: 'efficiency', text: 'вища результативність: точніша розвідка або менша витрата на ціль; перевірити повноту обліку витрати' },
+  { signal: 'change', direction: 'up', domain: 'result', text: 'більше уражених цілей загалом: більше завдань або краща розвідка' },
+  { signal: 'change', direction: 'down', domain: 'result', text: 'менше уражених цілей загалом: менше завдань, гірша розвідка або неповний облік' },
   { signal: 'change', direction: 'up', domain: 'objects', text: 'більше виявлених об’єктів або більше завдань по них' },
   { signal: 'change', direction: 'down', domain: 'objects', text: 'менше виявлених об’єктів, змінено пріоритети цілей або неповний облік' },
   { signal: 'change', direction: 'up', domain: 'personnel', text: 'вища інтенсивність бойових дій або краща підтвердженість втрат' },
@@ -188,7 +201,9 @@ function coverageOf(range, dataRange) {
 
 function tileFor(kpi, prevComplete, config) {
   const hasPrev = kpi.previous != null;
-  const reliable = hasPrev && prevComplete && kpi.previous >= config.minBase;
+  const base = kpi.base != null ? kpi.base : kpi.total;
+  const previousBase = kpi.previousBase != null ? kpi.previousBase : kpi.previous;
+  const reliable = hasPrev && prevComplete && previousBase >= config.minBase && (kpi.base == null || base >= config.minBase);
   return {
     key: kpi.key,
     name: KPI_NAMES[kpi.key] || kpi.label,
@@ -197,8 +212,9 @@ function tileFor(kpi, prevComplete, config) {
     delta: kpi.delta,
     deltaPercent: reliable ? kpi.deltaPercent : null,
     reliable,
+    better: kpi.better || null,
     totalText: formatNumber(kpi.total),
-    deltaText: hasPrev ? (reliable ? formatPercent(kpi.deltaPercent) : `${signed(kpi.delta)} (мала база)`) : '',
+    deltaText: hasPrev && kpi.delta != null ? (reliable ? formatPercent(kpi.deltaPercent) : `${signed(kpi.delta)} (мала база)`) : '',
   };
 }
 
@@ -295,6 +311,14 @@ export function analyzeWindow(model, context, config = DEFAULT_CONFIG) {
           signals.push({ signal: 'change', direction: pct > 0 ? 'up' : 'down', domain: KPI_DOMAIN[key], severity: Math.abs(pct), label: KPI_NAMES[key] });
         }
       }
+      const eff = kpi('ammoPerTarget');
+      if (eff && eff.total != null && eff.previous != null && eff.base >= config.minBase && eff.previousBase >= config.minBase && Math.abs(eff.deltaPercent) >= config.changePercent) {
+        changes.push({
+          severity: Math.abs(eff.deltaPercent), key: 'ammoPerTarget',
+          text: `${KPI_NAMES.ammoPerTarget}: ${formatNumber(eff.total)} проти ${formatNumber(eff.previous)} (${formatPercent(eff.deltaPercent)}, ${eff.deltaPercent > 0 ? 'гірше' : 'краще'}; уражено ${formatNumber(eff.base)} проти ${formatNumber(eff.previousBase)}).`,
+        });
+        signals.push({ signal: 'change', direction: eff.deltaPercent > 0 ? 'up' : 'down', domain: 'efficiency', severity: Math.abs(eff.deltaPercent), label: KPI_NAMES.ammoPerTarget });
+      }
       if (small.length) attention.push({ severity: 10, text: `Мала база (< ${config.minBase}), відсотків немає: ${small.join(', ')}.` });
     }
   } else if (context.pace) {
@@ -361,6 +385,10 @@ export function analyzeWindow(model, context, config = DEFAULT_CONFIG) {
   }
   if (context.missingDays) attention.push({ severity: 70, text: `Без жодного рядка в таблиці: ${context.missingDays} ${daysWord(context.missingDays)} періоду.` });
 
+  const focusDomains = FOCUS_DOMAINS[config.focus] || [];
+  const boost = domain => (focusDomains.includes(domain) ? (domain === 'efficiency' ? 1001 : 1000) : 0);
+  for (const item of changes) item.severity += boost(KPI_DOMAIN[item.key]);
+  for (const sig of signals) sig.severity += boost(sig.domain);
   const top = list => list.sort((a, b) => b.severity - a.severity).slice(0, config.maxItems).map(({ text }) => ({ text }));
 
   const hypotheses = [];
@@ -378,12 +406,39 @@ export function analyzeWindow(model, context, config = DEFAULT_CONFIG) {
 
 /* ------------------------------ колода ------------------------------ */
 
+/** Похідні показники: уражено всього та витрата БК на одиницю ураженого (менше — краще). */
+function withDerived(kpis) {
+  const find = key => kpis.find(k => k.key === key);
+  const parts = ['ovtDestroyed', 'ovtDamaged', 'ovtSuppressed', 'objDestroyed', 'objDamaged', 'objSuppressed'].map(find);
+  const sum = pick => parts.reduce((s, k) => s + (pick(k) || 0), 0);
+  const hasPrev = parts.every(k => k.previous != null);
+  const affected = sum(k => k.total);
+  const affectedBefore = hasPrev ? sum(k => k.previous) : null;
+  const ammo = find('ammo');
+  const affectedKpi = {
+    key: 'affected', label: KPI_NAMES.affected, total: affected, previous: affectedBefore,
+    delta: hasPrev ? affected - affectedBefore : null,
+    deltaPercent: hasPrev && affectedBefore ? (affected - affectedBefore) / affectedBefore * 100 : null,
+    series: parts[0].series.map((_, i) => ({ ...parts[0].series[i], value: parts.reduce((s, k) => s + k.series[i].value, 0) })),
+  };
+  const ratio = affected > 0 ? ammo.total / affected : null;
+  const ratioBefore = hasPrev && affectedBefore > 0 && ammo.previous != null ? ammo.previous / affectedBefore : null;
+  const ratioKpi = {
+    key: 'ammoPerTarget', label: KPI_NAMES.ammoPerTarget, total: ratio, previous: ratioBefore,
+    base: affected, previousBase: affectedBefore, better: 'down',
+    delta: ratio != null && ratioBefore != null ? ratio - ratioBefore : null,
+    deltaPercent: ratio != null && ratioBefore ? (ratio - ratioBefore) / ratioBefore * 100 : null,
+    series: [],
+  };
+  return [...kpis, affectedKpi, ratioKpi];
+}
+
 /** Модель дашборда, у якій знищено/пошкоджено/подавлено розділено на техніку (ОВТ) й об'єкти. */
 function augment(model, workbook, units, config) {
   const skip = new Set(['destroyed', 'damaged', 'suppressed']);
   return {
     ...model,
-    kpis: [...model.kpis.filter(k => !skip.has(k.key)), ...classifiedKpis(model, workbook, units, config)],
+    kpis: withDerived([...model.kpis.filter(k => !skip.has(k.key)), ...classifiedKpis(model, workbook, units, config)]),
     units: model.units.map(u => ({ ...u, ovtDestroyed: classSum(model.records.filter(r => r.unit === u.unit), 'destroyed', 'equipment', config) })),
   };
 }
@@ -424,7 +479,7 @@ function windowSlide(workbook, period, units, anchor, config, issues, all) {
     title: period.title,
     period: { from: range.from, to: range.to, days: model.days, activeDays: model.activeDays, text: periodText(range) },
     previous: period.kind === 'window' ? { from: prevRange.from, to: prevRange.to, text: periodText(prevRange), covered: previousCoverage.covered, days: previousCoverage.days, complete: prevComplete } : null,
-    tiles: TILE_KEYS.map(key => {
+    tiles: (TILE_SETS[config.focus] || TILE_SETS.all).map(key => {
       const kpi = model.kpis.find(k => k.key === key);
       return tileFor(period.kind === 'window' ? kpi : { ...kpi, previous: null, delta: null, deltaPercent: null }, prevComplete, config);
     }),
@@ -438,7 +493,7 @@ function windowSlide(workbook, period, units, anchor, config, issues, all) {
 
 /** Модель колоди: title + слайди періодів. Однакові вхідні дані дають однаковий результат. */
 export function buildDeck(workbook, options = {}) {
-  const config = { ...DEFAULT_CONFIG, ...(options.config || {}) };
+  const config = { ...DEFAULT_CONFIG, ...(options.config || {}), focus: options.focus || (options.config && options.config.focus) || DEFAULT_CONFIG.focus };
   const units = options.units || [];
   const anchor = options.anchor || lastActiveDate(workbook);
   const rawIssues = validateWorkbook(workbook);
@@ -446,6 +501,16 @@ export function buildDeck(workbook, options = {}) {
   const issues = rawIssues.filter(i => i.type !== 'missing-date' || (i.raw >= all.from && i.raw <= all.to));
   const periods = deckPeriods(workbook, { anchor, custom: options.custom, dataRange: all });
   const slides = periods.map(period => windowSlide(workbook, period, units, anchor, config, issues, all));
+  // Окремі слайди груп (ПС, РВіА тощо): останні 30 діб, підрозділи задає виклик, не код.
+  const warnings = [];
+  if (!options.custom) {
+    for (const group of options.groups || []) {
+      const present = (group.units || []).filter(u => workbook.units.includes(u));
+      if (!present.length) { warnings.push(`Група «${group.title}»: підрозділів немає в таблиці, слайд пропущено.`); continue; }
+      const slide = windowSlide(workbook, { id: `group:${group.id}`, title: `${group.title} · останні 30 діб`, kind: 'window', range: rollingRange(anchor, 30) }, present, anchor, config, issues, all);
+      slides.push({ ...slide, scope: { label: group.title, units: present } });
+    }
+  }
   const quality = {
     issueCount: issues.length,
     groups: groupIssues(issues).slice(0, 3).map(g => ({ text: g.text, count: g.items.length })),
@@ -456,6 +521,9 @@ export function buildDeck(workbook, options = {}) {
     kind: 'udshv_deck',
     config,
     classification: classificationOf(workbook, config),
+    focus: config.focus,
+    focusLabel: FOCUS_LABELS[config.focus] || FOCUS_LABELS.all,
+    warnings,
     slides: [{
       id: 'title',
       title: 'Аналітика',

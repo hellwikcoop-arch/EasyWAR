@@ -58,12 +58,12 @@ test('standard deck has title, week, month and whole period in order', () => {
 });
 
 test('deck numbers match the dashboard model for the same period', () => {
-  const deck = buildDeck(makeWorkbook(flat));
+  const deck = buildDeck(makeWorkbook(flat), { focus: 'result' });
   const week = deck.slides.find(s => s.id === 'week');
   const tile = key => week.tiles.find(t => t.key === key);
   assert.equal(tile('kia').total, 7 * (2 + 1)); // обидва підрозділи
   assert.equal(tile('wia').total, 7 * 1);
-  assert.equal(tile('ammo').total, 7 * 14);
+  assert.equal(buildDeck(makeWorkbook(flat)).slides.find(s => s.id === 'week').tiles.find(t => t.key === 'ammo').total, 7 * 14);
   assert.equal(tile('ovtDestroyed').total, 7 * 1);
   assert.equal(tile('ovtDamaged').total, 7 * 1);
   assert.equal(tile('objDestroyed').total, 0);
@@ -206,7 +206,7 @@ test('splits equipment (ОВТ) from objects using the configurable name pattern
   assert.equal(classifyTarget('танк', { objectPatterns: ['^танк$'] }), 'object');
   const wb = makeWorkbook((n, unit) => (unit === 'Підрозділ А' ? { 'destroyed|танк': 2, 'destroyed|Склади БК, ПММ': 5, 'damaged|РЕБ': 1, 'damaged|Переправа': 3, 'suppressed|КП, ПУ, КСП': 4 } : {}), { units: ['Підрозділ А'] });
   assert.deepEqual(classificationOf(wb), { equipment: ['РЕБ', 'танк'], objects: ['КП, ПУ, КСП', 'Переправа', 'Склади БК, ПММ'] });
-  const week = buildDeck(wb).slides.find(s => s.id === 'week');
+  const week = buildDeck(wb, { focus: 'result' }).slides.find(s => s.id === 'week');
   const tile = key => week.tiles.find(t => t.key === key).total;
   assert.equal(tile('ovtDestroyed'), 14);
   assert.equal(tile('ovtDamaged'), 7);
@@ -235,6 +235,60 @@ test('whole period ignores pre-filled zero days and rows dated outside the sheet
   assert.equal(all.period.to, '2026-09-30');
   assert.equal(all.tiles.find(t => t.key === 'kia').total, (LAST - 10 + 1) * 3);
   assert.ok(all.tiles.every(t => t.previous == null && t.deltaText === ''));
+});
+
+test('efficiency is ammo per affected unit and only compares a group with itself', () => {
+  // На добу: БК 30, уражено 3 (ОВТ 2 + об'єкт 1) → 10 БК на одиницю. В останні 7 діб БК 60 → 20.
+  const wb = makeWorkbook((n, unit) => {
+    if (unit !== 'Підрозділ А') return {};
+    const late = n > LAST - 7;
+    return { 'ammo|155мм': late ? 60 : 30, 'ammo|ВСЬОГО': late ? 60 : 30, 'destroyed|танк': 1, 'damaged|БМП': 1, 'suppressed|Склади БК, ПММ': 1 };
+  }, { units: ['Підрозділ А'] });
+  const week = buildDeck(wb, { focus: 'efficiency' }).slides.find(s => s.id === 'week');
+  const tile = week.tiles.find(t => t.key === 'ammoPerTarget');
+  assert.equal(tile.total, 20);
+  assert.equal(tile.previous, 10);
+  assert.equal(tile.deltaText, '+100 %');
+  assert.equal(tile.better, 'down');
+  const affected = week.tiles.find(t => t.key === 'affected');
+  assert.equal(affected.total, 21);
+  const line = week.changes[0].text;
+  assert.equal(line, 'БК на одиницю ураженого: 20 проти 10 (+100 %, гірше; уражено 21 проти 21).');
+  assert.ok(week.hypotheses.some(h => h.text.startsWith('БК на одиницю ураженого: гірша результативність')));
+});
+
+test('efficiency is empty when nothing was affected', () => {
+  const wb = makeWorkbook(() => ({ 'ammo|155мм': 5, 'ammo|ВСЬОГО': 5 }), { units: ['Підрозділ А'] });
+  const tile = buildDeck(wb, { focus: 'efficiency' }).slides.find(s => s.id === 'week').tiles.find(t => t.key === 'ammoPerTarget');
+  assert.equal(tile.total, null);
+  assert.equal(tile.totalText, '—');
+  assert.equal(tile.deltaText, '');
+});
+
+test('focus chooses the tile set and puts its changes first', () => {
+  const wb = makeWorkbook((n, unit) => (unit === 'Підрозділ А' ? { 'ammo|155мм': n > LAST - 7 ? 30 : 10, 'ammo|ВСЬОГО': n > LAST - 7 ? 30 : 10, 'personnel|200': n > LAST - 7 ? 3 : 2, 'destroyed|танк': 1 } : {}), { units: ['Підрозділ А'] });
+  const tiles = focus => buildDeck(wb, { focus }).slides.find(s => s.id === 'week').tiles.map(t => t.key);
+  assert.deepEqual(tiles('result'), ['kia', 'wia', 'ovtDestroyed', 'ovtDamaged', 'objDestroyed', 'objDamaged']);
+  assert.deepEqual(tiles('efficiency'), ['ammoPerTarget', 'ammo', 'affected', 'vgz', 'kbb']);
+  assert.deepEqual(tiles('all'), ['ammoPerTarget', 'kia', 'wia', 'ovtDestroyed', 'objDestroyed', 'ammo']);
+  assert.deepEqual(tiles(undefined), tiles('all'));
+  const first = focus => buildDeck(wb, { focus }).slides.find(s => s.id === 'week').changes[0].text;
+  assert.ok(first('result').startsWith('Знищено о/с (200)'));
+  assert.ok(first('efficiency').startsWith('Витрата БК') || first('efficiency').startsWith('БК на одиницю'));
+  assert.equal(buildDeck(wb, { focus: 'result' }).focusLabel, 'Результат');
+});
+
+test('group slides use the caller-provided units, cover 30 days and skip unknown groups', () => {
+  const wb = makeWorkbook(flat);
+  const deck = buildDeck(wb, { groups: [{ id: 'a', title: 'Група А', units: ['Підрозділ А'] }, { id: 'x', title: 'Група X', units: ['Немає'] }] });
+  assert.deepEqual(deck.slides.map(s => s.id), ['title', 'week', 'month', 'all', 'group:a']);
+  const group = deck.slides.at(-1);
+  assert.equal(group.title, 'Група А · останні 30 діб');
+  assert.deepEqual(group.scope, { label: 'Група А', units: ['Підрозділ А'] });
+  assert.equal(group.period.days, 30);
+  assert.equal(group.tiles.find(t => t.key === 'kia').total, 30 * 2);
+  assert.ok(deck.warnings.some(w => w.includes('Група X')));
+  assert.equal(buildDeck(wb, { custom: { from: '2026-08-01', to: '2026-08-10' }, groups: [{ id: 'a', title: 'Група А', units: ['Підрозділ А'] }] }).slides.length, 2);
 });
 
 test('plural forms of days', () => {
