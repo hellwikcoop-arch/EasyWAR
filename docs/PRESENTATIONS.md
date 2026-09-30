@@ -1,7 +1,11 @@
 # Ціль: автоматична презентація аналітики (PPTX)
 
-Статус: M1 виконано (`src/presentation-core.js`, `tests/presentation-core.test.mjs`,
-синтетичні дані). Рендерер PPTX, збереження й кнопка ще не написані.
+Статус: M1 і M2 виконано. Ядро: `src/presentation-core.js`. Рендерер: `src/presentation-pptx.js`
+(`pptxgenjs`, дві теми: `dark`, `light`). Тести: `tests/presentation-*.test.mjs`, лише синтетичні дані.
+Збереження файлу й кнопка в дашборді (M4), вибір підрозділів і фокусу в меню ще не написані.
+
+Перегляд вигляду без реальних даних: `node script/preview_presentation.mjs <тека> [result|efficiency|all]`
+(потрібен LibreOffice з компонентом Impress для PDF; лише для розробки).
 
 ## Рішення власника (30.09.2026)
 

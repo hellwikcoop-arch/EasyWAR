@@ -291,6 +291,26 @@ test('group slides use the caller-provided units, cover 30 days and skip unknown
   assert.equal(buildDeck(wb, { custom: { from: '2026-08-01', to: '2026-08-10' }, groups: [{ id: 'a', title: 'Група А', units: ['Підрозділ А'] }] }).slides.length, 2);
 });
 
+test('an empty repeated unit row is not reported as a duplicate, a filled one is', () => {
+  const wb = makeWorkbook(flat, { units: ['Підрозділ А'] });
+  wb.records.push({ sheet: sheetOf('2026-09-30'), rowNumber: 990, date: '2026-09-30', unit: 'Підрозділ А', values: {} });
+  assert.equal(buildDeck(wb).slides[0].quality.issueCount, 0);
+  wb.records.push({ sheet: sheetOf('2026-09-30'), rowNumber: 991, date: '2026-09-30', unit: 'Підрозділ А', values: { 'personnel|200': 1 } });
+  assert.equal(buildDeck(wb).slides[0].quality.issueCount, 1);
+});
+
+test('group slides replace empty tiles with indicators that have data', () => {
+  const wb = makeWorkbook((n, unit) => (unit === 'Підрозділ А' ? { 'destroyed|Склади БК, ПММ': 2, 'damaged|Переправа': 1, 'ammo|GBU-39': 3, 'ammo|ВСЬОГО': 3 } : { 'personnel|200': 1 }));
+  const deck = buildDeck(wb, { groups: [{ id: 'a', title: 'Група А', units: ['Підрозділ А'] }] });
+  const keys = slide => slide.tiles.map(t => t.key);
+  assert.ok(keys(deck.slides.find(s => s.id === 'month')).includes('kia'));
+  const group = deck.slides.at(-1);
+  assert.ok(!keys(group).includes('kia') && !keys(group).includes('wia'));
+  assert.ok(keys(group).includes('objDestroyed') && keys(group).includes('ammo'));
+  assert.ok(group.tiles.every(t => t.total !== 0 || t.previous));
+  assert.equal(group.tiles.length, 5); // більше показників із даними немає
+});
+
 test('plural forms of days', () => {
   assert.deepEqual([1, 2, 5, 11, 12, 21, 22, 25].map(daysWord), ['доба', 'доби', 'діб', 'діб', 'діб', 'доба', 'доби', 'діб']);
 });

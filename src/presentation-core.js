@@ -40,6 +40,7 @@ const TILE_SETS = {
   efficiency: ['ammoPerTarget', 'ammo', 'affected', 'vgz', 'kbb'],
   all: ['ammoPerTarget', 'kia', 'wia', 'ovtDestroyed', 'objDestroyed', 'ammo'],
 };
+const TILE_POOL = ['affected', 'objDestroyed', 'objDamaged', 'ovtDestroyed', 'ovtDamaged', 'objSuppressed', 'ovtSuppressed', 'kia', 'wia', 'ammo', 'vgz', 'kbb'];
 const FOCUS_DOMAINS = { result: ['personnel', 'ovt', 'objects'], efficiency: ['efficiency', 'ammo', 'fire'], all: [] };
 const CHANGE_KEYS = ['kia', 'wia', 'ovtDestroyed', 'ovtDamaged', 'ovtSuppressed', 'objDestroyed', 'objDamaged', 'objSuppressed', 'affected', 'ammo', 'vgz', 'kbb'];
 const KPI_NAMES = {
@@ -459,7 +460,17 @@ function paceRows(workbook, units, anchor, range, config) {
   return rows;
 }
 
-function windowSlide(workbook, period, units, anchor, config, issues, all) {
+/** Набір плиток за фокусом. Для груп порожні (нулі в обох періодах) плитки замінюються показниками з даними. */
+function tileKeys(model, config, prune) {
+  const base = TILE_SETS[config.focus] || TILE_SETS.all;
+  if (!prune) return base;
+  const live = key => { const k = model.kpis.find(item => item.key === key); return k && ((k.total || 0) !== 0 || (k.previous || 0) !== 0); };
+  const kept = base.filter(live);
+  for (const key of TILE_POOL) { if (kept.length >= base.length) break; if (!kept.includes(key) && live(key)) kept.push(key); }
+  return kept;
+}
+
+function windowSlide(workbook, period, units, anchor, config, issues, all, prune = false) {
   const range = period.range;
   const model = augment(createDashboardModel(workbook, { range, unit: units, preset: 'custom' }), workbook, units, config);
   const prevRange = period.kind === 'window' ? previousRange(range) : { from: '', to: '' };
@@ -479,7 +490,7 @@ function windowSlide(workbook, period, units, anchor, config, issues, all) {
     title: period.title,
     period: { from: range.from, to: range.to, days: model.days, activeDays: model.activeDays, text: periodText(range) },
     previous: period.kind === 'window' ? { from: prevRange.from, to: prevRange.to, text: periodText(prevRange), covered: previousCoverage.covered, days: previousCoverage.days, complete: prevComplete } : null,
-    tiles: (TILE_SETS[config.focus] || TILE_SETS.all).map(key => {
+    tiles: tileKeys(model, config, prune).map(key => {
       const kpi = model.kpis.find(k => k.key === key);
       return tileFor(period.kind === 'window' ? kpi : { ...kpi, previous: null, delta: null, deltaPercent: null }, prevComplete, config);
     }),
@@ -498,7 +509,13 @@ export function buildDeck(workbook, options = {}) {
   const anchor = options.anchor || lastActiveDate(workbook);
   const rawIssues = validateWorkbook(workbook);
   const all = activeRange(workbook, rawIssues);
-  const issues = rawIssues.filter(i => i.type !== 'missing-date' || (i.raw >= all.from && i.raw <= all.to));
+  const empty = new Set(workbook.records.filter(r => !Object.keys(r.values).length).map(r => `${r.sheet}|${r.rowNumber}`));
+  const issues = rawIssues.filter(i => {
+    if (i.type === 'missing-date') return i.raw >= all.from && i.raw <= all.to;
+    // Порожній повторний рядок підрозділу за день нічого не подвоює, тому шумом не вважаємо проблемою.
+    if (i.type === 'duplicate') return !empty.has(`${i.sheet}|${i.rowNumber}`);
+    return true;
+  });
   const periods = deckPeriods(workbook, { anchor, custom: options.custom, dataRange: all });
   const slides = periods.map(period => windowSlide(workbook, period, units, anchor, config, issues, all));
   // Окремі слайди груп (ПС, РВіА тощо): останні 30 діб, підрозділи задає виклик, не код.
@@ -507,7 +524,7 @@ export function buildDeck(workbook, options = {}) {
     for (const group of options.groups || []) {
       const present = (group.units || []).filter(u => workbook.units.includes(u));
       if (!present.length) { warnings.push(`Група «${group.title}»: підрозділів немає в таблиці, слайд пропущено.`); continue; }
-      const slide = windowSlide(workbook, { id: `group:${group.id}`, title: `${group.title} · останні 30 діб`, kind: 'window', range: rollingRange(anchor, 30) }, present, anchor, config, issues, all);
+      const slide = windowSlide(workbook, { id: `group:${group.id}`, title: `${group.title} · останні 30 діб`, kind: 'window', range: rollingRange(anchor, 30) }, present, anchor, config, issues, all, true);
       slides.push({ ...slide, scope: { label: group.title, units: present } });
     }
   }
