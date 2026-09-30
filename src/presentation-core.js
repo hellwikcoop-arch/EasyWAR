@@ -15,6 +15,7 @@ import {
   validateWorkbook,
 } from './udshv-dashboard-core.js';
 
+import { buildStrikesSlide } from './presentation-strikes.js';
 import { buildOwnLossesSlide, ownLossesInRange } from './presentation-own-losses.js';
 import { NBSP, daysAcc, dayNumber, peakOf, tileFor as buildTile, daysWord, formatNumber, formatPercent, isoFromDay, longDate, periodText, rollingRange, shortDate, signed } from './presentation-format.js';
 
@@ -482,6 +483,8 @@ export function buildDeck(workbook, options = {}) {
   const warnings = [];
   if (!options.custom) {
     for (const group of options.groups || []) {
+      // Група зі своєю таблицею ударів (ПС, РВіА): слайд будується з неї, а не з підрозділів УДШВ.
+      if (group.strikes) { slides.push(buildStrikesSlide(group, { config })); continue; }
       const present = (group.units || []).filter(u => workbook.units.includes(u));
       if (!present.length) { warnings.push(`Група «${group.title}»: підрозділів немає в таблиці, слайд пропущено.`); continue; }
       const slide = windowSlide(workbook, { id: `group:${group.id}`, title: `${group.title} · останні 30 діб`, kind: 'window', range: rollingRange(anchor, 30) }, present, anchor, config, issues, all, true); // виноски власних втрат на слайдах груп немає

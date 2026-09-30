@@ -3,7 +3,7 @@
    фактичний розподіл «Дія противника» з таблиці, а не як припущення. */
 
 import { groupTotals, inRange, lastOwnDate, sumGroup, sumMetric, validateOwnLosses } from './own-losses-core.js';
-import { NBSP, dayNumber, formatNumber, formatPercent, isoFromDay, longDate, peakOf, periodText, rollingRange, shortDate, signed, tileFor } from './presentation-format.js';
+import { NBSP, buckets, daysIn, dayNumber, formatNumber, formatPercent, isoFromDay, longDate, peakOf, periodText, rollingRange, shortDate, signed, tileFor } from './presentation-format.js';
 
 const DEFS = [
   { key: 'k200', name: 'Наші 200', value: rs => sumMetric(rs, 'personnel|200'), chart: '200' },
@@ -15,30 +15,6 @@ const DEFS = [
 ];
 const PERSONNEL_TOTAL = rs => sumGroup(rs, 'personnel');
 const MIN_SHARE_TOTAL = 5; // менші суми не дають осмисленої частки
-
-const daysIn = range => {
-  const from = dayNumber(range.from), to = dayNumber(range.to);
-  if (!Number.isFinite(from) || !Number.isFinite(to)) return [];
-  const out = [];
-  for (let d = from; d <= to; d++) out.push(isoFromDay(d));
-  return out;
-};
-
-/** Кошики для рядів: доба (≤ 45 діб), 7 діб (≤ 200) або календарний місяць. */
-function buckets(range) {
-  const days = daysIn(range);
-  if (days.length <= 45) return { bucket: 'day', list: days.map(d => ({ from: d, to: d })) };
-  const list = [];
-  if (days.length <= 200) {
-    for (let i = 0; i < days.length; i += 7) list.push({ from: days[i], to: days[Math.min(i + 6, days.length - 1)] });
-    return { bucket: 'week', list };
-  }
-  for (const d of days) {
-    const last = list[list.length - 1];
-    if (last && last.from.slice(0, 7) === d.slice(0, 7)) last.to = d; else list.push({ from: d, to: d });
-  }
-  return { bucket: 'month', list };
-}
 
 const shareText = (part, whole) => `${formatNumber(part / whole * 100)}${NBSP}%`;
 const listText = (items, limit = 3) => items.slice(0, limit).map(i => `${i.name} — ${formatNumber(i.total)}`).join(', ');

@@ -77,3 +77,28 @@ export function tileFor(kpi, prevComplete, config, name = kpi.label) {
     deltaText: hasPrev && kpi.delta != null ? (reliable ? formatPercent(kpi.deltaPercent) : `${signed(kpi.delta)} (мала база)`) : '',
   };
 }
+
+export const daysIn = range => {
+  const from = dayNumber(range.from), to = dayNumber(range.to);
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return [];
+  const out = [];
+  for (let d = from; d <= to; d++) out.push(isoFromDay(d));
+  return out;
+};
+
+/** Кошики для рядів: доба (≤ 45 діб), 7 діб (≤ 200) або календарний місяць. */
+export function buckets(range) {
+  const days = daysIn(range);
+  if (days.length <= 45) return { bucket: 'day', list: days.map(d => ({ from: d, to: d })) };
+  const list = [];
+  if (days.length <= 200) {
+    for (let i = 0; i < days.length; i += 7) list.push({ from: days[i], to: days[Math.min(i + 6, days.length - 1)] });
+    return { bucket: 'week', list };
+  }
+  for (const d of days) {
+    const last = list[list.length - 1];
+    if (last && last.from.slice(0, 7) === d.slice(0, 7)) last.to = d; else list.push({ from: d, to: d });
+  }
+  return { bucket: 'month', list };
+}
+

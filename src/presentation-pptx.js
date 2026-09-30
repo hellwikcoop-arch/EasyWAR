@@ -28,6 +28,7 @@ function footer(slide, theme, deck, number, left) {
 function tileColors(tile, theme) {
   if (tile.deltaPercent == null || tile.delta == null) return theme.muted;
   if (tile.better === 'down') return tile.delta < 0 ? theme.good : tile.delta > 0 ? theme.bad : theme.muted;
+  if (tile.better === 'up') return tile.delta > 0 ? theme.good : tile.delta < 0 ? theme.bad : theme.muted;
   return theme.text;
 }
 
@@ -91,15 +92,17 @@ function drawCharts(slide, theme, pptx, charts) {
     const title = chart.bucket ? `${chart.title}, ${labels[chart.bucket] || ''}` : chart.title;
     slide.addText(title, { x: M, y, w: 6.5, h: 0.26, fontFace: FONT, fontSize: 11, bold: true, color: theme.accent, margin: 0 });
     const data = chart.series.map(s => ({ name: s.name, labels: chart.categories, values: s.values }));
-    const colors = { personnel: [theme.series[0], theme.series[3]], targets: [theme.series[1], theme.series[2]], 'own-personnel': [theme.series[0], theme.series[3], theme.series[1]], 'own-causes': [theme.series[0]] }[chart.id] || theme.series;
+    const peak = Math.max(0, ...chart.series.flatMap(s => s.values));
+    const whole = chart.series.every(s => s.values.every(Number.isInteger));
+    const colors = { personnel: [theme.series[0], theme.series[3]], targets: [theme.series[1], theme.series[2]], 'own-personnel': [theme.series[0], theme.series[3], theme.series[1]], 'own-causes': [theme.series[0]], 'strike-results': [theme.good, theme.series[1], theme.bad, theme.muted], 'strike-reasons': [theme.series[0]], 'strike-types': [theme.series[2]] }[chart.id] || theme.series;
     slide.addChart(pptx.charts.BAR, data, {
       x: M - 0.1, y: y + 0.24, w: 6.8, h: height,
-      barDir: chart.horizontal ? 'bar' : 'col', barGrouping: 'clustered', barGapWidthPct: 35,
+      barDir: chart.horizontal ? 'bar' : 'col', barGrouping: chart.grouping || 'clustered', barGapWidthPct: 35,
       chartColors: colors.slice(0, data.length),
       catAxisLabelFontFace: FONT, catAxisLabelFontSize: 8, catAxisLabelColor: theme.muted,
       catAxisLabelRotate: !chart.horizontal && chart.categories.length > 14 ? 270 : 0,
       catAxisOrientation: chart.horizontal ? 'maxMin' : 'minMax',
-      valAxisLabelFontFace: FONT, valAxisLabelFontSize: 8, valAxisLabelColor: theme.muted,
+      valAxisLabelFontFace: FONT, valAxisLabelFontSize: 8, valAxisLabelColor: theme.muted, ...(whole && peak <= 8 ? { valAxisMajorUnit: 1 } : {}),
       valGridLine: { color: theme.line, size: 0.5 }, catGridLine: { style: 'none' },
       catAxisLineShow: false, valAxisLineShow: false,
       showLegend: data.length > 1, legendPos: 'r', legendFontFace: FONT, legendFontSize: 8, legendColor: theme.muted,
