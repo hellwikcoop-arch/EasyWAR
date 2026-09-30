@@ -37,7 +37,7 @@ for (const theme of Object.keys(THEMES)) {
     const { slides, texts, charts } = await open(await renderDeckToBytes(deck, { theme }));
     assert.equal(slides.length, deck.slides.length);
     assert.equal(slides.length, 5); // титул, 7, 30, весь період, група
-    assert.equal(charts.length, deck.slides.length - 1);
+    assert.equal(charts.length, (deck.slides.length - 1) * 2); // дві діаграми на слайд періоду
     assert.ok(texts[0].includes('Тестова група'));
     assert.ok(texts[0].includes('АНАЛІТИКА'));
     assert.ok(texts[1].includes('Останні 7 діб'));
@@ -45,6 +45,10 @@ for (const theme of Object.keys(THEMES)) {
     for (const text of texts) assert.ok(!/undefined|NaN|\bnull\b/.test(text), text);
   });
 }
+
+test('light is the only theme and the default', () => {
+  assert.deepEqual(Object.keys(THEMES), ['light']);
+});
 
 test('tile numbers and the three text blocks reach the slide', async () => {
   const deck = deckOf({ focus: 'efficiency' });

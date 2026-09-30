@@ -5,17 +5,11 @@
 import PptxGenJS from 'pptxgenjs';
 
 export const THEMES = {
-  dark: {
-    label: 'Темний командний екран',
-    bg: '0E1116', panel: '171C24', line: '2A323E', text: 'F2F4F7', muted: '9AA4B2',
-    accent: 'E0525A', good: '3DBE8B', bad: 'E5566D',
-    series: ['E0525A', 'F2A93B', '4FA3E0'],
-  },
   light: {
     label: 'Світлий мінімалістичний',
     bg: 'FFFFFF', panel: 'F3F4F6', line: 'DDE1E7', text: '111827', muted: '6B7280',
     accent: '7A1F2B', good: '1F8F5F', bad: 'C2303F',
-    series: ['7A1F2B', 'D98E04', '2F6EA5'],
+    series: ['7A1F2B', 'D98E04', '2F6EA5', 'C9A7AD'],
   },
 };
 
@@ -79,20 +73,24 @@ function drawBlocks(slide, theme, data) {
   slide.addText(runs, { x: 7.3, y: 3.35, w: width, h: 3.55, fontFace: FONT, valign: 'top', margin: 0 });
 }
 
-function drawChart(slide, theme, pptx, chart) {
+function drawCharts(slide, theme, pptx, charts) {
   const labels = { day: 'по добах', week: 'по тижнях', month: 'по місяцях' };
-  slide.addText(`Динаміка ${labels[chart.bucket] || ''}`.trim(), { x: M, y: 3.3, w: 6.5, h: 0.3, fontFace: FONT, fontSize: 12, bold: true, color: theme.accent, margin: 0 });
-  const data = chart.series.map(s => ({ name: s.name, labels: chart.categories, values: s.values }));
-  slide.addChart(pptx.charts.BAR, data, {
-    x: M - 0.1, y: 3.6, w: 6.8, h: 3.35,
-    barDir: 'col', barGrouping: 'clustered', barGapWidthPct: 40,
-    chartColors: theme.series.slice(0, data.length),
-    catAxisLabelFontFace: FONT, catAxisLabelFontSize: 8, catAxisLabelColor: theme.muted, catAxisLabelRotate: chart.categories.length > 14 ? 270 : 0,
-    valAxisLabelFontFace: FONT, valAxisLabelFontSize: 9, valAxisLabelColor: theme.muted,
-    valGridLine: { color: theme.line, size: 0.5 }, catGridLine: { style: 'none' },
-    catAxisLineShow: false, valAxisLineShow: false,
-    showLegend: true, legendPos: 'b', legendFontFace: FONT, legendFontSize: 9, legendColor: theme.muted,
-    showValue: false,
+  const height = 1.55;
+  charts.forEach((chart, i) => {
+    const y = 3.3 + i * (height + 0.32);
+    slide.addText(`${chart.title}, ${labels[chart.bucket] || ''}`.replace(/, $/, ''), { x: M, y, w: 6.5, h: 0.26, fontFace: FONT, fontSize: 11, bold: true, color: theme.accent, margin: 0 });
+    const data = chart.series.map(s => ({ name: s.name, labels: chart.categories, values: s.values }));
+    slide.addChart(pptx.charts.BAR, data, {
+      x: M - 0.1, y: y + 0.24, w: 6.8, h: height,
+      barDir: 'col', barGrouping: 'clustered', barGapWidthPct: 35,
+      chartColors: chart.id === 'personnel' ? [theme.series[0], theme.series[3]] : [theme.series[1], theme.series[2]],
+      catAxisLabelFontFace: FONT, catAxisLabelFontSize: 8, catAxisLabelColor: theme.muted, catAxisLabelRotate: chart.categories.length > 14 ? 270 : 0,
+      valAxisLabelFontFace: FONT, valAxisLabelFontSize: 8, valAxisLabelColor: theme.muted,
+      valGridLine: { color: theme.line, size: 0.5 }, catGridLine: { style: 'none' },
+      catAxisLineShow: false, valAxisLineShow: false,
+      showLegend: true, legendPos: 'r', legendFontFace: FONT, legendFontSize: 8, legendColor: theme.muted,
+      showValue: false,
+    });
   });
 }
 
@@ -105,7 +103,7 @@ function periodSlide(pptx, theme, deck, data, number) {
   slide.addText(compare, { x: W - M - 6, y: 0.78, w: 6, h: 0.28, fontFace: FONT, fontSize: 11, color: theme.muted, align: 'right', margin: 0 });
   slide.addText(`${data.period.activeDays} із ${data.period.days} діб з даними`, { x: M, y: 0.95, w: 6, h: 0.28, fontFace: FONT, fontSize: 11, color: theme.muted, margin: 0 });
   drawTiles(slide, theme, data.tiles);
-  drawChart(slide, theme, pptx, data.chart);
+  drawCharts(slide, theme, pptx, data.charts);
   drawBlocks(slide, theme, data);
   if (data.notes.length) slide.addText(data.notes.join(' '), { x: M, y: 6.85, w: W - 2 * M, h: 0.22, fontFace: FONT, fontSize: 9, italic: true, color: theme.muted, margin: 0 });
   footer(slide, theme, deck, number, `${deck.slides[0].owner || 'EasyWAR'} · ${deck.focusLabel}`);
@@ -135,9 +133,9 @@ function titleSlide(pptx, theme, deck, data) {
   slide.addText(parts.join(' · '), { x: 0.9, y: 6.6, w: 11, h: 0.3, fontFace: FONT, fontSize: 11, color: theme.muted, margin: 0 });
 }
 
-/** Будує об'єкт PptxGenJS за моделлю колоди. theme: 'dark' | 'light'. */
+/** Будує об'єкт PptxGenJS за моделлю колоди. theme: 'light' (єдина затверджена). */
 export function renderDeck(deck, options = {}) {
-  const theme = THEMES[options.theme] || THEMES.dark;
+  const theme = THEMES[options.theme] || THEMES.light;
   const pptx = new PptxGenJS();
   pptx.layout = 'LAYOUT_WIDE';
   pptx.title = `Аналітика: ${deck.slides[0].owner || 'EasyWAR'}`;

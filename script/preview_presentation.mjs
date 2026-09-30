@@ -28,7 +28,7 @@ const workbook = { kind: 'udshv', readOnly: true, sourceName: 'synthetic.xlsx', 
 const deck = buildDeck(workbook, { owner: 'Демонстраційна група', generatedOn: '30.09.2026', focus, groups: [{ id: 'a', title: 'Група А', units: [units[0]] }] });
 
 const files = [];
-for (const theme of ['dark', 'light']) {
+for (const theme of ['light']) {
   const file = join(outDir, `demo-${focus}-${theme}.pptx`);
   writeFileSync(file, await renderDeckToBytes(deck, { theme }));
   files.push(file);

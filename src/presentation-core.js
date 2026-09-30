@@ -75,26 +75,26 @@ const CLASSIFIED = [
  * signal: change | peak | gap | concentration | structure | coverage.
  */
 export const HYPOTHESES = [
-  { signal: 'change', direction: 'up', domain: 'ammo', text: 'вищий темп робіт або більше цілей; перевірити разом із кількістю ВгЗ' },
-  { signal: 'change', direction: 'down', domain: 'ammo', text: 'менша кількість завдань або обмеження із забезпеченням; перевірити внесення даних' },
-  { signal: 'change', direction: 'up', domain: 'fire', text: 'більше завдань у зоні відповідальності або зміна складу засобів' },
-  { signal: 'change', direction: 'down', domain: 'fire', text: 'менше завдань, ротація або перерва у роботі засобів' },
-  { signal: 'change', direction: 'up', domain: 'ovt', text: 'краща розвідка цілей, вища результативність або більше завдань' },
-  { signal: 'change', direction: 'down', domain: 'ovt', text: 'менше цілей, гірша розвідка, протидія противника або неповний облік' },
-  { signal: 'change', direction: 'up', domain: 'efficiency', text: 'гірша результативність на ту саму витрату: змінився тип цілей або боєприпасів, слабша розвідка чи коригування; перевірити облік уражень' },
-  { signal: 'change', direction: 'down', domain: 'efficiency', text: 'вища результативність: точніша розвідка або менша витрата на ціль; перевірити повноту обліку витрати' },
-  { signal: 'change', direction: 'up', domain: 'result', text: 'більше уражених цілей загалом: більше завдань або краща розвідка' },
-  { signal: 'change', direction: 'down', domain: 'result', text: 'менше уражених цілей загалом: менше завдань, гірша розвідка або неповний облік' },
-  { signal: 'change', direction: 'up', domain: 'objects', text: 'більше виявлених об’єктів або більше завдань по них' },
-  { signal: 'change', direction: 'down', domain: 'objects', text: 'менше виявлених об’єктів, змінено пріоритети цілей або неповний облік' },
-  { signal: 'change', direction: 'up', domain: 'personnel', text: 'вища інтенсивність бойових дій або краща підтвердженість втрат' },
-  { signal: 'change', direction: 'down', domain: 'personnel', text: 'нижча інтенсивність, гірша підтвердженість втрат або запізніле внесення' },
-  { signal: 'peak', direction: '*', domain: '*', text: 'разова операція або накопичена звітність, внесена одним днем' },
-  { signal: 'gap', direction: '*', domain: '*', text: 'дані не внесено вчасно або активності не було; перевірити джерело' },
+  { signal: 'change', direction: 'up', domain: 'ammo', text: 'більше доступних боєприпасів або потрібних типів; сприятливіші умови для розвідки' },
+  { signal: 'change', direction: 'down', domain: 'ammo', text: 'погода не дозволяє розвідку й дорозвідку, обмежена кількість боєприпасів або бракує потрібних типів' },
+  { signal: 'change', direction: 'up', domain: 'fire', text: 'сприятливіші умови для розвідки, більше доступних боєприпасів' },
+  { signal: 'change', direction: 'down', domain: 'fire', text: 'погода не дозволяє розвідку й дорозвідку, обмежені боєприпаси' },
+  { signal: 'change', direction: 'up', domain: 'ovt', text: 'краща розвідка й дорозвідка, більше боєприпасів потрібних типів' },
+  { signal: 'change', direction: 'down', domain: 'ovt', text: 'погода обмежила розвідку й дорозвідку, не вистачало боєприпасів або потрібних типів' },
+  { signal: 'change', direction: 'up', domain: 'efficiency', text: 'тип боєприпасів не відповідав цілям або розвідка й дорозвідка були слабшими через погоду' },
+  { signal: 'change', direction: 'down', domain: 'efficiency', text: 'точніша розвідка й дорозвідка, відповідні типи боєприпасів' },
+  { signal: 'change', direction: 'up', domain: 'result', text: 'сприятливіша погода для розвідки, більше боєприпасів або потрібних типів' },
+  { signal: 'change', direction: 'down', domain: 'result', text: 'погода обмежила розвідку й дорозвідку, бракувало боєприпасів або потрібних типів' },
+  { signal: 'change', direction: 'up', domain: 'objects', text: 'більше виявлених об’єктів завдяки розвідці й дорозвідці, більше боєприпасів' },
+  { signal: 'change', direction: 'down', domain: 'objects', text: 'погода обмежила розвідку й дорозвідку, не вистачало боєприпасів або потрібних типів' },
+  { signal: 'change', direction: 'up', domain: 'personnel', text: 'вища інтенсивність бойових дій або більше уражень у зоні' },
+  { signal: 'change', direction: 'down', domain: 'personnel', text: 'нижча інтенсивність або менше можливостей для ураження (погода, боєприпаси)' },
+  { signal: 'peak', direction: '*', domain: '*', text: 'сприятливе вікно для розвідки й ураження (погода, наявні боєприпаси) або разова операція' },
+  { signal: 'gap', direction: '*', domain: '*', text: 'погодні умови, відсутність розвідки або нестача боєприпасів' },
   { signal: 'concentration', direction: '*', domain: '*', text: 'навантаження зосереджене на одному підрозділі або засобі; перевірити розподіл завдань' },
   { signal: 'structure', direction: 'up', domain: 'ovt', text: 'більше прямих влучань або змінився тип цілей' },
   { signal: 'structure', direction: 'down', domain: 'ovt', text: 'менше прямих влучань або змінився тип цілей' },
-  { signal: 'coverage', direction: '*', domain: '*', text: 'порівняння з попереднім відрізком неповне, бо даних за нього менше' },
+  { signal: 'coverage', direction: '*', domain: '*', text: 'попередній відрізок неповно представлений у таблиці' },
 ];
 
 /* ------------------------------ дати ------------------------------ */
@@ -261,18 +261,19 @@ function unitTotals(records, valueFor) {
 }
 
 function chartFor(model, kpis) {
-  const sum = (...keys) => model.personnelSeries.map((_, i) => keys.reduce((s, key) => s + kpis.find(k => k.key === key).series[i].value, 0));
+  const pick = (...keys) => model.personnelSeries.map((_, i) => keys.reduce((s, key) => s + kpis.find(k => k.key === key).series[i].value, 0));
   const categories = model.personnelSeries.map(p => (model.bucket === 'day' ? shortDate(p.from) : `${shortDate(p.from)}–${shortDate(p.to)}`));
-  return {
-    type: 'bar',
-    bucket: model.bucket,
-    categories,
-    series: [
-      { name: 'Втрати о/с (200 + 300)', values: model.personnelSeries.map(p => p.value.kia + p.value.wia) },
-      { name: 'ОВТ знищено + пошкоджено', values: sum('ovtDestroyed', 'ovtDamaged') },
-      { name: 'Об’єкти знищено + пошкоджено', values: sum('objDestroyed', 'objDamaged') },
-    ],
-  };
+  // Окремі діаграми: масштаби втрат о/с і техніки з об'єктами різні, на одній осі вони перекривали б одне одного.
+  return [
+    {
+      id: 'personnel', title: 'Втрати о/с', bucket: model.bucket, categories,
+      series: [{ name: 'Знищено (200)', values: model.personnelSeries.map(p => p.value.kia) }, { name: 'Поранено (300)', values: model.personnelSeries.map(p => p.value.wia) }],
+    },
+    {
+      id: 'targets', title: 'Техніка та об’єкти', bucket: model.bucket, categories,
+      series: [{ name: 'ОВТ знищено + пошкоджено', values: pick('ovtDestroyed', 'ovtDamaged') }, { name: 'Об’єкти знищено + пошкоджено', values: pick('objDestroyed', 'objDamaged') }],
+    },
+  ];
 }
 
 function pick(domain, signal, direction) {
@@ -381,7 +382,7 @@ export function analyzeWindow(model, context, config = DEFAULT_CONFIG) {
   // Пропуски.
   const silent = model.days - model.activeDays;
   if (silent > 0) {
-    attention.push({ severity: 60 + silent, text: `${silent} із ${model.days} діб без жодного ненульового показника: результат може бути занижений.` });
+    attention.push({ severity: 60 + silent, text: `${silent} із ${model.days} діб без жодного ненульового показника.` });
     signals.push({ signal: 'gap', direction: '*', domain: '*', severity: 60, label: `${silent} ${daysWord(silent)} без даних` });
   }
   if (context.missingDays) attention.push({ severity: 70, text: `Без жодного рядка в таблиці: ${context.missingDays} ${daysWord(context.missingDays)} періоду.` });
@@ -494,7 +495,7 @@ function windowSlide(workbook, period, units, anchor, config, issues, all, prune
       const kpi = model.kpis.find(k => k.key === key);
       return tileFor(period.kind === 'window' ? kpi : { ...kpi, previous: null, delta: null, deltaPercent: null }, prevComplete, config);
     }),
-    chart: chartFor(model, model.kpis),
+    charts: chartFor(model, model.kpis),
     changes: insights.changes,
     attention: insights.attention,
     hypotheses: insights.hypotheses,

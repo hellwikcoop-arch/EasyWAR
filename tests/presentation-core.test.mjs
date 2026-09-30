@@ -53,8 +53,8 @@ test('standard deck has title, week, month and whole period in order', () => {
   assert.equal(title.generatedOn, '2026-10-01');
   assert.equal(week.period.days, 7);
   assert.equal(week.tiles.length, 6);
-  assert.equal(week.chart.categories.length, 7);
-  assert.equal(week.chart.series[0].values.length, 7);
+  assert.deepEqual(week.charts.map(c => c.id), ['personnel', 'targets']);
+  for (const chart of week.charts) { assert.equal(chart.categories.length, 7); for (const series of chart.series) assert.equal(series.values.length, 7); }
 });
 
 test('deck numbers match the dashboard model for the same period', () => {
@@ -211,8 +211,9 @@ test('splits equipment (ОВТ) from objects using the configurable name pattern
   assert.equal(tile('ovtDestroyed'), 14);
   assert.equal(tile('ovtDamaged'), 7);
   assert.equal(tile('objDestroyed'), 35);
-  assert.equal(week.chart.series[1].values.every(v => v === 2 + 1), true); // техніка: 2 + 1 на добу
-  assert.equal(week.chart.series[2].values.every(v => v === 5 + 3), true); // об'єкти: 5 + 3 на добу
+  const targets = week.charts.find(c => c.id === 'targets');
+  assert.equal(targets.series[0].values.every(v => v === 2 + 1), true); // техніка: 2 + 1 на добу
+  assert.equal(targets.series[1].values.every(v => v === 5 + 3), true); // об'єкти: 5 + 3 на добу
   assert.ok(!week.tiles.some(t => ['destroyed', 'damaged'].includes(t.key)));
 });
 
@@ -254,7 +255,7 @@ test('efficiency is ammo per affected unit and only compares a group with itself
   assert.equal(affected.total, 21);
   const line = week.changes[0].text;
   assert.equal(line, 'БК на одиницю ураженого: 20 проти 10 (+100 %, гірше; уражено 21 проти 21).');
-  assert.ok(week.hypotheses.some(h => h.text.startsWith('БК на одиницю ураженого: гірша результативність')));
+  assert.ok(week.hypotheses.some(h => h.text.startsWith('БК на одиницю ураженого: тип боєприпасів не відповідав цілям')));
 });
 
 test('efficiency is empty when nothing was affected', () => {
@@ -309,6 +310,14 @@ test('group slides replace empty tiles with indicators that have data', () => {
   assert.ok(keys(group).includes('objDestroyed') && keys(group).includes('ammo'));
   assert.ok(group.tiles.every(t => t.total !== 0 || t.previous));
   assert.equal(group.tiles.length, 5); // більше показників із даними немає
+});
+
+test('reasons follow the owner wording: weather, ammo quantity and ammo types, never late data entry', () => {
+  const text = HYPOTHESES.map(h => h.text).join(' ');
+  assert.match(text, /погод/);
+  assert.match(text, /боєприпас/);
+  assert.match(text, /типів|типи/);
+  assert.ok(!/внесен|неповний облік|звітніст/.test(text), text);
 });
 
 test('plural forms of days', () => {
