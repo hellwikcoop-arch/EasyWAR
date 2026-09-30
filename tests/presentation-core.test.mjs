@@ -3,6 +3,8 @@ import test from 'node:test';
 import {
   HYPOTHESES,
   buildDeck,
+  classificationOf,
+  classifyTarget,
   daysWord,
   deckPeriods,
   findPeak,
@@ -60,7 +62,9 @@ test('deck numbers match the dashboard model for the same period', () => {
   assert.equal(tile('kia').total, 7 * (2 + 1)); // обидва підрозділи
   assert.equal(tile('wia').total, 7 * 1);
   assert.equal(tile('ammo').total, 7 * 14);
-  assert.equal(tile('vgz').total, 7 * 2);
+  assert.equal(tile('ovtDestroyed').total, 7 * 1);
+  assert.equal(tile('ovtDamaged').total, 7 * 1);
+  assert.equal(tile('objDestroyed').total, 0);
   const all = deck.slides.find(s => s.id === 'all');
   assert.equal(all.tiles.find(t => t.key === 'kia').total, 92 * 3);
 });
@@ -186,6 +190,35 @@ test('every slide block is non-empty text and the hypothesis catalog is well for
     assert.ok(slide.changes.length <= 3 && slide.attention.length <= 3 && slide.hypotheses.length <= 3);
   }
   for (const h of HYPOTHESES) assert.ok(h.signal && h.direction && h.domain && h.text);
+});
+
+test('splits equipment (ОВТ) from objects using the configurable name patterns', () => {
+  assert.equal(classifyTarget('танк'), 'equipment');
+  assert.equal(classifyTarget('РЕБ'), 'equipment');
+  assert.equal(classifyTarget('Склади БК, ПММ'), 'object');
+  assert.equal(classifyTarget('Переправа'), 'object');
+  assert.equal(classifyTarget('КП, ПУ, КСП'), 'object');
+  assert.equal(classifyTarget('танк', { objectPatterns: ['^танк$'] }), 'object');
+  const wb = makeWorkbook((n, unit) => (unit === 'Підрозділ А' ? { 'destroyed|танк': 2, 'destroyed|Склади БК, ПММ': 5, 'damaged|РЕБ': 1, 'damaged|Переправа': 3, 'suppressed|КП, ПУ, КСП': 4 } : {}), { units: ['Підрозділ А'] });
+  assert.deepEqual(classificationOf(wb), { equipment: ['РЕБ', 'танк'], objects: ['КП, ПУ, КСП', 'Переправа', 'Склади БК, ПММ'] });
+  const week = buildDeck(wb).slides.find(s => s.id === 'week');
+  const tile = key => week.tiles.find(t => t.key === key).total;
+  assert.equal(tile('ovtDestroyed'), 14);
+  assert.equal(tile('ovtDamaged'), 7);
+  assert.equal(tile('objDestroyed'), 35);
+  assert.equal(week.chart.series[1].values.every(v => v === 2 + 1), true); // техніка: 2 + 1 на добу
+  assert.equal(week.chart.series[2].values.every(v => v === 5 + 3), true); // об'єкти: 5 + 3 на добу
+  assert.ok(!week.tiles.some(t => ['destroyed', 'damaged'].includes(t.key)));
+});
+
+test('equipment changes never include objects', () => {
+  const wb = makeWorkbook((n, unit) => {
+    if (unit !== 'Підрозділ А') return {};
+    return { 'destroyed|танк': 2, 'destroyed|Склади БК, ПММ': n > LAST - 7 ? 10 : 2 };
+  }, { units: ['Підрозділ А'] });
+  const week = buildDeck(wb).slides.find(s => s.id === 'week');
+  assert.ok(!week.changes.some(c => c.text.startsWith('ОВТ знищено')), JSON.stringify(week.changes));
+  assert.ok(week.changes.some(c => c.text === 'Об’єкти знищено: 70 проти 14 (+400 %).'), JSON.stringify(week.changes));
 });
 
 test('plural forms of days', () => {

@@ -8,7 +8,9 @@ import {
   createDashboardModel,
   daysOf,
   groupIssues,
+  inRange,
   lastActiveDate,
+  seriesFor,
   previousRange,
   validateWorkbook,
 } from './udshv-dashboard-core.js';
@@ -25,23 +27,37 @@ export const DEFAULT_CONFIG = {
   anomalyIqrFactor: 1.5,
   paceMinDays: 60, // мінімум днів для слайда «весь період»
   maxItems: 3, // на блок слайда
+  // Назви стовпців груп ЗНИЩЕНО/ПОШКОДЖЕНО/ПОДАВЛЕНО, які є об'єктами, а не технікою (ОВТ).
+  // Усе, що не збігається, вважається технікою. Шаблони — регулярні вирази без урахування регістру.
+  objectPatterns: ['склад', 'переправ', 'рембаз', '(^|[ ,])(кп|ксп|пу)([ ,]|$)'],
 };
 
 /** Показники плиток (до 6). Повний набір KPI береться для пошуку змін. */
-const TILE_KEYS = ['kia', 'wia', 'destroyed', 'damaged', 'ammo', 'vgz'];
-const CHANGE_KEYS = ['kia', 'wia', 'destroyed', 'damaged', 'suppressed', 'ammo', 'vgz', 'kbb'];
+const TILE_KEYS = ['kia', 'wia', 'ovtDestroyed', 'ovtDamaged', 'objDestroyed', 'ammo'];
+const CHANGE_KEYS = ['kia', 'wia', 'ovtDestroyed', 'ovtDamaged', 'ovtSuppressed', 'objDestroyed', 'objDamaged', 'objSuppressed', 'ammo', 'vgz', 'kbb'];
 const KPI_NAMES = {
   kia: 'Знищено о/с (200)',
   wia: 'Поранено о/с (300)',
   personnel: 'Втрати о/с разом',
-  destroyed: 'ОВТ знищено',
-  damaged: 'ОВТ пошкоджено',
-  suppressed: 'ОВТ подавлено',
+  ovtDestroyed: 'ОВТ знищено',
+  ovtDamaged: 'ОВТ пошкоджено',
+  ovtSuppressed: 'ОВТ подавлено',
+  objDestroyed: 'Об’єкти знищено',
+  objDamaged: 'Об’єкти пошкоджено',
+  objSuppressed: 'Об’єкти подавлено',
   ammo: 'Витрата БК',
   vgz: 'ВгЗ',
   kbb: 'КББ',
 };
-const KPI_DOMAIN = { kia: 'personnel', wia: 'personnel', personnel: 'personnel', destroyed: 'ovt', damaged: 'ovt', suppressed: 'ovt', ammo: 'ammo', vgz: 'fire', kbb: 'fire' };
+const KPI_DOMAIN = { kia: 'personnel', wia: 'personnel', personnel: 'personnel', ovtDestroyed: 'ovt', ovtDamaged: 'ovt', ovtSuppressed: 'ovt', objDestroyed: 'objects', objDamaged: 'objects', objSuppressed: 'objects', ammo: 'ammo', vgz: 'fire', kbb: 'fire' };
+const CLASSIFIED = [
+  { key: 'ovtDestroyed', group: 'destroyed', cls: 'equipment' },
+  { key: 'ovtDamaged', group: 'damaged', cls: 'equipment' },
+  { key: 'ovtSuppressed', group: 'suppressed', cls: 'equipment' },
+  { key: 'objDestroyed', group: 'destroyed', cls: 'object' },
+  { key: 'objDamaged', group: 'damaged', cls: 'object' },
+  { key: 'objSuppressed', group: 'suppressed', cls: 'object' },
+];
 
 /**
  * Каталог «сигнал → можливі причини». Це стартова редакція для правки
@@ -55,6 +71,8 @@ export const HYPOTHESES = [
   { signal: 'change', direction: 'down', domain: 'fire', text: 'менше завдань, ротація або перерва у роботі засобів' },
   { signal: 'change', direction: 'up', domain: 'ovt', text: 'краща розвідка цілей, вища результативність або більше завдань' },
   { signal: 'change', direction: 'down', domain: 'ovt', text: 'менше цілей, гірша розвідка, протидія противника або неповний облік' },
+  { signal: 'change', direction: 'up', domain: 'objects', text: 'більше виявлених об’єктів або більше завдань по них' },
+  { signal: 'change', direction: 'down', domain: 'objects', text: 'менше виявлених об’єктів, змінено пріоритети цілей або неповний облік' },
   { signal: 'change', direction: 'up', domain: 'personnel', text: 'вища інтенсивність бойових дій або краща підтвердженість втрат' },
   { signal: 'change', direction: 'down', domain: 'personnel', text: 'нижча інтенсивність, гірша підтвердженість втрат або запізніле внесення' },
   { signal: 'peak', direction: '*', domain: '*', text: 'разова операція або накопичена звітність, внесена одним днем' },
@@ -172,7 +190,49 @@ function tileFor(kpi, prevComplete, config) {
   };
 }
 
-function chartFor(model) {
+const normName = value => String(value == null ? '' : value).replace(/[’ʼ]/g, "'").replace(/\s+/g, ' ').trim().toLocaleLowerCase('uk-UA');
+
+/** 'object' для складів, переправ, пунктів управління тощо; інакше 'equipment' (ОВТ). */
+export function classifyTarget(name, config = DEFAULT_CONFIG) {
+  const text = normName(name);
+  return (config.objectPatterns || []).some(pattern => new RegExp(pattern, 'iu').test(text)) ? 'object' : 'equipment';
+}
+
+const classSum = (records, group, cls, config) => records.reduce((sum, r) => sum + Object.entries(r.values).reduce((s, [id, v]) => (id.startsWith(`${group}|`) && classifyTarget(id.slice(group.length + 1), config) === cls ? s + v : s), 0), 0);
+
+/** Показники з розділенням техніки й об'єктів у тій самій формі, що й KPI дашборда. */
+function classifiedKpis(model, workbook, units, config) {
+  const prevRecords = model.hasPrevious ? workbook.records.filter(r => (!units.length || units.includes(r.unit)) && inRange(r, model.previousRange)) : null;
+  return CLASSIFIED.map(({ key, group, cls }) => {
+    const value = rs => classSum(rs, group, cls, config);
+    const totalNow = value(model.records);
+    const before = prevRecords ? value(prevRecords) : null;
+    return {
+      key, label: KPI_NAMES[key], total: totalNow, previous: before,
+      delta: before == null ? null : totalNow - before,
+      deltaPercent: before ? (totalNow - before) / before * 100 : null,
+      series: seriesFor(model.records, model.range, value, model.bucket),
+    };
+  });
+}
+
+/** Які назви стовпців віднесено до техніки, а які до об'єктів (для прозорості). */
+export function classificationOf(workbook, config = DEFAULT_CONFIG) {
+  const names = new Set();
+  for (const m of workbook.metrics || []) if (['destroyed', 'damaged', 'suppressed'].includes(m.group)) names.add(m.name);
+  for (const r of workbook.records || []) for (const id of Object.keys(r.values)) { const m = /^(destroyed|damaged|suppressed)\|(.+)$/.exec(id); if (m) names.add(m[2]); }
+  const list = [...names].sort((a, b) => a.localeCompare(b, 'uk'));
+  return { equipment: list.filter(n => classifyTarget(n, config) === 'equipment'), objects: list.filter(n => classifyTarget(n, config) === 'object') };
+}
+
+function unitTotals(records, valueFor) {
+  const byUnit = new Map();
+  for (const r of records) { const t = byUnit.get(r.unit) || { unit: r.unit, total: 0, days: new Set() }; t.total += valueFor(r); if (Object.keys(r.values).length) t.days.add(r.date); byUnit.set(r.unit, t); }
+  return [...byUnit.values()];
+}
+
+function chartFor(model, kpis) {
+  const sum = (...keys) => model.personnelSeries.map((_, i) => keys.reduce((s, key) => s + kpis.find(k => k.key === key).series[i].value, 0));
   const categories = model.personnelSeries.map(p => (model.bucket === 'day' ? shortDate(p.from) : `${shortDate(p.from)}–${shortDate(p.to)}`));
   return {
     type: 'bar',
@@ -180,7 +240,8 @@ function chartFor(model) {
     categories,
     series: [
       { name: 'Втрати о/с (200 + 300)', values: model.personnelSeries.map(p => p.value.kia + p.value.wia) },
-      { name: 'ОВТ знищено + пошкоджено', values: model.ovtSeries.map(p => p.value.destroyed + p.value.damaged) },
+      { name: 'ОВТ знищено + пошкоджено', values: sum('ovtDestroyed', 'ovtDamaged') },
+      { name: 'Об’єкти знищено + пошкоджено', values: sum('objDestroyed', 'objDamaged') },
     ],
   };
 }
@@ -233,13 +294,13 @@ export function analyzeWindow(model, context, config = DEFAULT_CONFIG) {
   }
 
   // Структура: частка знищеного серед знищеного і пошкодженого.
-  const dNow = kpi('destroyed'), gNow = kpi('damaged');
+  const dNow = kpi('ovtDestroyed'), gNow = kpi('ovtDamaged');
   if (context.kind === 'window' && dNow && gNow && dNow.previous != null && gNow.previous != null && prevComplete) {
     const nowBase = dNow.total + gNow.total, prevBase = dNow.previous + gNow.previous;
     if (nowBase >= config.minBase && prevBase >= config.minBase) {
       const now = dNow.total / nowBase * 100, before = dNow.previous / prevBase * 100;
       if (Math.abs(now - before) >= config.structureShiftPp) {
-        changes.push({ severity: Math.abs(now - before), text: `Частка знищеного серед знищеного та пошкодженого ОВТ: ${formatNumber(now)}${NBSP}% проти ${formatNumber(before)}${NBSP}% (${formatNumber(dNow.total)} з ${formatNumber(nowBase)} проти ${formatNumber(dNow.previous)} з ${formatNumber(prevBase)}).` });
+        changes.push({ severity: Math.abs(now - before), text: `Частка знищеної техніки серед знищеної та пошкодженої: ${formatNumber(now)}${NBSP}% проти ${formatNumber(before)}${NBSP}% (${formatNumber(dNow.total)} з ${formatNumber(nowBase)} проти ${formatNumber(dNow.previous)} з ${formatNumber(prevBase)}).` });
         signals.push({ signal: 'structure', direction: now > before ? 'up' : 'down', domain: 'ovt', severity: Math.abs(now - before), label: 'Структура уражень' });
       }
     }
@@ -248,7 +309,7 @@ export function analyzeWindow(model, context, config = DEFAULT_CONFIG) {
   // Концентрація за підрозділами.
   const activeUnits = model.units.filter(u => u.days > 0);
   if (activeUnits.length >= 2) {
-    for (const [key, label] of [['ammo', 'Витрата БК'], ['destroyed', 'ОВТ знищено'], ['kia', 'Знищено о/с (200)']]) {
+    for (const [key, label] of [['ammo', 'Витрата БК'], ['ovtDestroyed', 'ОВТ знищено'], ['kia', 'Знищено о/с (200)']]) {
       const sum = activeUnits.reduce((s, u) => s + (u[key] || 0), 0);
       if (sum < config.minBase) continue;
       const top = activeUnits.reduce((a, u) => ((u[key] || 0) > (a[key] || 0) ? u : a));
@@ -270,7 +331,7 @@ export function analyzeWindow(model, context, config = DEFAULT_CONFIG) {
 
   // Піки за добовими рядами.
   if (model.bucket === 'day') {
-    for (const key of ['ammo', 'kia', 'destroyed']) {
+    for (const key of ['ammo', 'kia', 'ovtDestroyed']) {
       const k = kpi(key);
       const peak = k && findPeak(k.series, config);
       if (peak) {
@@ -305,12 +366,22 @@ export function analyzeWindow(model, context, config = DEFAULT_CONFIG) {
 
 /* ------------------------------ колода ------------------------------ */
 
+/** Модель дашборда, у якій знищено/пошкоджено/подавлено розділено на техніку (ОВТ) й об'єкти. */
+function augment(model, workbook, units, config) {
+  const skip = new Set(['destroyed', 'damaged', 'suppressed']);
+  return {
+    ...model,
+    kpis: [...model.kpis.filter(k => !skip.has(k.key)), ...classifiedKpis(model, workbook, units, config)],
+    units: model.units.map(u => ({ ...u, ovtDestroyed: classSum(model.records.filter(r => r.unit === u.unit), 'destroyed', 'equipment', config) })),
+  };
+}
+
 function paceRows(workbook, units, anchor, range, config) {
   const days = daysOf(range).length;
   if (days < config.paceMinDays) return null;
   const recentRange = rollingRange(anchor, 30);
-  const whole = createDashboardModel(workbook, { range, unit: units, preset: 'custom' });
-  const recent = createDashboardModel(workbook, { range: recentRange, unit: units, preset: 'custom' });
+  const whole = augment(createDashboardModel(workbook, { range, unit: units, preset: 'custom' }), workbook, units, config);
+  const recent = augment(createDashboardModel(workbook, { range: recentRange, unit: units, preset: 'custom' }), workbook, units, config);
   const rows = [];
   for (const key of CHANGE_KEYS) {
     const all = whole.kpis.find(k => k.key === key), now = recent.kpis.find(k => k.key === key);
@@ -324,7 +395,7 @@ function paceRows(workbook, units, anchor, range, config) {
 function windowSlide(workbook, period, units, anchor, config, issues) {
   const all = allDateRange(workbook);
   const range = period.range;
-  const model = createDashboardModel(workbook, { range, unit: units, preset: 'custom' });
+  const model = augment(createDashboardModel(workbook, { range, unit: units, preset: 'custom' }), workbook, units, config);
   const prevRange = period.kind === 'window' ? previousRange(range) : { from: '', to: '' };
   const previousCoverage = period.kind === 'window' ? coverageOf(prevRange, all) : null;
   const prevComplete = previousCoverage ? previousCoverage.complete : false;
@@ -340,7 +411,7 @@ function windowSlide(workbook, period, units, anchor, config, issues) {
     period: { from: range.from, to: range.to, days: model.days, activeDays: model.activeDays, text: periodText(range) },
     previous: period.kind === 'window' ? { from: prevRange.from, to: prevRange.to, text: periodText(prevRange), covered: previousCoverage.covered, days: previousCoverage.days, complete: prevComplete } : null,
     tiles: TILE_KEYS.map(key => tileFor(model.kpis.find(k => k.key === key), prevComplete, config)),
-    chart: chartFor(model),
+    chart: chartFor(model, model.kpis),
     changes: insights.changes,
     attention: insights.attention,
     hypotheses: insights.hypotheses,
@@ -366,6 +437,7 @@ export function buildDeck(workbook, options = {}) {
     schemaVersion: DECK_SCHEMA_VERSION,
     kind: 'udshv_deck',
     config,
+    classification: classificationOf(workbook, config),
     slides: [{
       id: 'title',
       title: 'Аналітика',
