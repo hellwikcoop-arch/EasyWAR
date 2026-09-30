@@ -44,10 +44,11 @@ const shareText = (part, whole) => `${formatNumber(part / whole * 100)}${NBSP}%`
 const listText = (items, limit = 3) => items.slice(0, limit).map(i => `${i.name} — ${formatNumber(i.total)}`).join(', ');
 
 /** Втрати о/с (200, 300, 500) за період: рядки з підозрілою датою не враховуються. */
-export function ownLossesInRange(own, range) {
-  const rs = own.records.filter(r => !r.suspect && inRange(r, range));
+export function ownLossesInRange(own, range, patterns = null) {
+  const match = patterns == null ? () => true : unit => patterns.some(p => new RegExp(p, 'iu').test(unit));
+  const rs = own.records.filter(r => !r.suspect && inRange(r, range) && (match(r.unit) || match(r.unitRaw)));
   const parts = { 200: sumMetric(rs, 'personnel|200'), 300: sumMetric(rs, 'personnel|300'), 500: sumMetric(rs, 'personnel|500') };
-  return { total: parts[200] + parts[300] + parts[500], parts };
+  return { total: parts[200] + parts[300] + parts[500], parts, units: [...new Set(rs.map(r => r.unit))] };
 }
 
 export function buildOwnLossesSlide(own, options = {}) {
