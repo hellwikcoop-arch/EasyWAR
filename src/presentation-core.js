@@ -414,18 +414,13 @@ function tileKeys(model, config, prune) {
   return kept;
 }
 
-/** Виноска «Наші втрати за N діб — M»: сума 200 + 300 + 500 із таблиці власних втрат за період слайда. */
-function ownCalloutFor(own, range, days, patterns = null) {
-  const loss = ownLossesInRange(own, range, patterns);
-  const known = patterns == null ? true : own.units.some(u => patterns.some(p => new RegExp(p, 'iu').test(u)));
-  return {
-    days, total: loss.total, parts: loss.parts,
-    text: `Наші втрати за ${days} ${daysAcc(days)} — ${formatNumber(loss.total)}`,
-    detail: known ? `200 — ${formatNumber(loss.parts['200'])} · 300 — ${formatNumber(loss.parts['300'])} · 500 — ${formatNumber(loss.parts['500'])}` : 'підрозділів групи в таблиці власних втрат немає',
-  };
+/** Виноска «Наші втрати за N діб — M»: сума 200 + 300 + 500 із таблиці власних втрат за період слайда (слайди періодів). */
+function ownCalloutFor(own, range, days) {
+  const loss = ownLossesInRange(own, range);
+  return { days, total: loss.total, parts: loss.parts, text: `Наші втрати за ${days} ${daysAcc(days)} — ${formatNumber(loss.total)}`, detail: `200 — ${formatNumber(loss.parts['200'])} · 300 — ${formatNumber(loss.parts['300'])} · 500 — ${formatNumber(loss.parts['500'])}` };
 }
 
-function windowSlide(workbook, period, units, anchor, config, issues, all, prune = false, own = null, ownPatterns = null) {
+function windowSlide(workbook, period, units, anchor, config, issues, all, prune = false, own = null) {
   const range = period.range;
   const model = augment(createDashboardModel(workbook, { range, unit: units, preset: 'custom' }), workbook, units, config);
   const prevRange = period.kind === 'window' ? previousRange(range) : { from: '', to: '' };
@@ -450,7 +445,7 @@ function windowSlide(workbook, period, units, anchor, config, issues, all, prune
       return tileFor(period.kind === 'window' ? kpi : { ...kpi, previous: null, delta: null, deltaPercent: null }, prevComplete, config);
     }),
     charts: chartFor(model, model.kpis),
-    ownCallout: own ? ownCalloutFor(own, range, model.days, ownPatterns) : null,
+    ownCallout: own ? ownCalloutFor(own, range, model.days) : null,
     changes: insights.changes,
     attention: insights.attention,
     hypotheses: insights.hypotheses,
@@ -489,7 +484,7 @@ export function buildDeck(workbook, options = {}) {
     for (const group of options.groups || []) {
       const present = (group.units || []).filter(u => workbook.units.includes(u));
       if (!present.length) { warnings.push(`Група «${group.title}»: підрозділів немає в таблиці, слайд пропущено.`); continue; }
-      const slide = windowSlide(workbook, { id: `group:${group.id}`, title: `${group.title} · останні 30 діб`, kind: 'window', range: rollingRange(anchor, 30) }, present, anchor, config, issues, all, true, options.ownLosses || null, Array.isArray(group.ownPatterns) ? group.ownPatterns : null);
+      const slide = windowSlide(workbook, { id: `group:${group.id}`, title: `${group.title} · останні 30 діб`, kind: 'window', range: rollingRange(anchor, 30) }, present, anchor, config, issues, all, true); // виноски власних втрат на слайдах груп немає
       slides.push({ ...slide, scope: { label: group.title, units: present } });
     }
   }

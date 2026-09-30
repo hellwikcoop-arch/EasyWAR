@@ -171,7 +171,6 @@ test('every period and group slide carries one own-losses callout for its own nu
   assert.equal(callout('month').text, 'Наші втрати за 30 діб — 93');
   assert.equal(callout('all').days, 60);
   assert.equal(callout('all').text, 'Наші втрати за 60 діб — 126');
-  assert.equal(callout('group:a').text, 'Наші втрати за 30 діб — 93');
   assert.equal(deck.slides.find(s => s.id === 'own-losses').ownCallout, undefined);
   assert.equal(deck.slides[0].ownCallout, undefined);
   // Без таблиці власних втрат виноски немає.
@@ -188,22 +187,8 @@ test('the own-losses callout excludes suspect-dated rows and renders on the slid
   assert.ok(xml.includes('Наші втрати за 7 діб — 21'));
 });
 
-test('group slides count only the own-table units that belong to the group, and say so when there are none', () => {
-  const evs = events();
-  evs.push({ date: '2026-09-20', unit: 'ГРВ 7/3/107 реабр', cells: { E: '4', D: '1' } });
-  const own = parseOwnLosses([sheet(evs)]);
-  const deck = buildDeck(udshv(), {
-    ownLosses: own,
-    groups: [
-      { id: 'a', title: 'Група А', units: ['Підрозділ А'], ownPatterns: ['^ГРВ', '^РУК'] },
-      { id: 'b', title: 'Група Б', units: ['Підрозділ А'], ownPatterns: [] },
-      { id: 'c', title: 'Група В', units: ['Підрозділ А'] },
-    ],
-  });
-  const callout = id => deck.slides.find(s => s.id === `group:${id}`).ownCallout;
-  assert.equal(callout('a').text, 'Наші втрати за 30 діб — 5');
-  assert.equal(callout('a').detail, '200 — 1 · 300 — 4 · 500 — 0');
-  assert.equal(callout('b').text, 'Наші втрати за 30 діб — 0');
-  assert.equal(callout('b').detail, 'підрозділів групи в таблиці власних втрат немає');
-  assert.equal(callout('c').total, deck.slides.find(s => s.id === 'month').ownCallout.total); // без правила — усе угруповання
+test('group slides (ПС, РВіА) carry no own-losses callout, period slides do', () => {
+  const deck = buildDeck(udshv(), { ownLosses: ownWorkbook(), groups: [{ id: 'a', title: 'Група А', units: ['Підрозділ А'] }] });
+  assert.equal(deck.slides.find(s => s.id === 'group:a').ownCallout, null);
+  for (const id of ['week', 'month', 'all']) assert.ok(deck.slides.find(s => s.id === id).ownCallout.text.startsWith('Наші втрати за '));
 });
