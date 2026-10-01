@@ -74,7 +74,7 @@ export function openPresentationDialog(workbook, options = {}) {
       SLOTS.map(slot => h('div', { class: 'ud-slot' },
         h('strong', { text: slot.title }), ' ',
         s.names[slot.key] ? h('span', { text: s.names[slot.key] }) : h('span', { class: 'ud-muted', text: `не підключено (${slot.hint})` }),
-        h('input', { type: 'file', accept: '.xlsx', onchange: e => pick(slot.key, e.target.files[0]) }),
+        s.names[slot.key] ? null : h('input', { type: 'file', accept: '.xlsx', onchange: e => pick(slot.key, e.target.files[0]) }),
         s.names[slot.key] ? h('button', { type: 'button', class: 'ud-link', text: 'прибрати', onclick: () => pick(slot.key, null) }) : null,
         s.errors[slot.key] ? h('div', { class: 'ud-error', text: s.errors[slot.key] }) : null))),
     h('fieldset', {}, h('legend', { text: 'Підрозділи в аналізі (зніміть позначку, щоб виключити)' }),
