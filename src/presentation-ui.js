@@ -1,11 +1,17 @@
 /* Вікно «Створити звіт» дашборда УДШВ: налаштування → меню перевірки даних → збереження .pptx.
    Усе локально: файли читаються на пристрої, презентація зберігається через системне вікно збереження. */
-import { FOCUS_CHOICES, GROUP_SLOTS, composeDeck, parseSlot, presentationFileName, reviewFor } from './presentation-flow.js';
+import { FOCUS_CHOICES, FORMAT_CHOICES, GROUP_SLOTS, composeDeck, parseSlot, presentationFileName, reviewFor } from './presentation-flow.js';
 import { unitFreshness } from './udshv-dashboard-core.js';
 import { defaultDecisions } from './data-review-core.js';
 
 const OWNER_KEY = 'easywar.presentation.owner';
 const TITLE_KEY = 'easywar.presentation.title';
+const FORMAT_KEY = 'easywar.presentation.format';
+const FONT_KEY = 'easywar.presentation.font';
+const UAF_KEY = 'easywar.presentation.uafsans';
+
+const toBase64 = bytes => { let t = ''; for (let i = 0; i < bytes.length; i += 0x8000) t += String.fromCharCode(...bytes.subarray(i, i + 0x8000)); return btoa(t); };
+const fromBase64 = text => Uint8Array.from(atob(text), c => c.charCodeAt(0));
 const SLOTS = [{ key: 'own', title: 'Наші втрати', hint: 'таблиця «НАШІ ВТРАТИ»' }, ...GROUP_SLOTS.map(g => ({ key: g.key, title: g.title, hint: `таблиця ${g.title}` }))];
 
 function h(tag, props = {}, ...children) {
@@ -25,10 +31,10 @@ const store = {
 };
 const today = () => { const d = new Date(); return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`; };
 
-async function saveBytes(bytes, name) {
+async function saveBytes(bytes, name, kind = 'pptx') {
   const invoke = window.__TAURI_INTERNALS__?.invoke || window.parent?.__TAURI_INTERNALS__?.invoke;
-  if (typeof invoke === 'function') return invoke('save_presentation', { fileName: name, bytes: Array.from(bytes) });
-  const a = h('a', { href: URL.createObjectURL(new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' })), download: name });
+  if (typeof invoke === 'function') return invoke('save_presentation', { fileName: name, bytes: Array.from(bytes), kind });
+  const a = h('a', { href: URL.createObjectURL(new Blob([bytes], { type: kind === 'pdf' ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.presentationml.presentation' })), download: name });
   document.body.append(a); a.click(); a.remove();
   return name;
 }
@@ -37,7 +43,7 @@ async function saveBytes(bytes, name) {
 export function openPresentationDialog(workbook, options = {}) {
   const fresh = unitFreshness(workbook);
   const s = {
-    owner: store.get(), titleText: store.get(TITLE_KEY), focus: 'all', period: 'rolling', from: '', to: '',
+    owner: store.get(), titleText: store.get(TITLE_KEY), focus: 'all', format: store.get(FORMAT_KEY) || 'pptx', font: store.get(FONT_KEY) || 'standard', uaf: (() => { try { return JSON.parse(store.get(UAF_KEY) || 'null'); } catch { return null; } })(), period: 'rolling', from: '', to: '',
     files: {}, names: {}, errors: {}, excluded: new Set(),
     step: 'settings', review: null, decisions: {}, busy: false, message: '',
   };
@@ -59,6 +65,17 @@ export function openPresentationDialog(workbook, options = {}) {
     draw();
   }
 
+  async function pickFont(kind, file) {
+    if (!file) return;
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      s.uaf = { ...(s.uaf || {}), [kind]: toBase64(bytes), [`${kind}Name`]: file.name };
+      store.set(JSON.stringify(s.uaf), UAF_KEY);
+      s.message = '';
+    } catch (e) { s.message = `Не вдалося прочитати файл шрифту: ${e.message || e}`; }
+    draw();
+  }
+
   const settings = () => [
     h('h2', { text: 'Створити презентацію' }),
     h('label', { class: 'ud-field' }, h('span', { text: 'Заголовок титулу' }),
@@ -67,6 +84,16 @@ export function openPresentationDialog(workbook, options = {}) {
       h('input', { type: 'text', value: s.owner, placeholder: 'Напр. Угруповання ОВП УДШВ', oninput: e => { s.owner = e.target.value; } })),
     h('fieldset', {}, h('legend', { text: 'Фокус' }),
       FOCUS_CHOICES.map(([k, label]) => h('label', { class: 'ud-radio' }, h('input', { type: 'radio', name: 'focus', checked: s.focus === k, onchange: () => { s.focus = k; } }), ` ${label}`))),
+    h('fieldset', {}, h('legend', { text: 'Формат файлу' }),
+      FORMAT_CHOICES.map(([k, label]) => h('label', { class: 'ud-radio' }, h('input', { type: 'radio', name: 'format', checked: s.format === k, onchange: () => { s.format = k; } }), ` ${label}`))),
+    h('fieldset', {}, h('legend', { text: 'Шрифт' }),
+      h('label', { class: 'ud-radio' }, h('input', { type: 'radio', name: 'font', checked: s.font === 'standard', onchange: () => { s.font = 'standard'; draw(); } }), ' Стандартний (Arial у PPTX, Liberation Sans у PDF)'),
+      h('label', { class: 'ud-radio' }, h('input', { type: 'radio', name: 'font', checked: s.font === 'uaf', onchange: () => { s.font = 'uaf'; draw(); } }), ' UAF Sans (ваші файли шрифту)'),
+      s.font === 'uaf' ? h('div', { class: 'ud-slot' },
+        h('div', { class: 'ud-muted', text: 'У PDF шрифт вбудовується з ваших файлів (вони лишаються на цьому пристрої). У PPTX записується назва «UAF Sans»: на інших комп’ютерах без цього шрифту він замінюється.' }),
+        [['regular', 'Звичайний (UAF Sans Regular)'], ['bold', 'Жирний (UAF Sans OnBoard)']].map(([kind, label]) => h('div', {},
+          h('strong', { text: label }), ' ', s.uaf && s.uaf[kind] ? h('span', { text: `збережено: ${s.uaf[`${kind}Name`] || 'файл'}` }) : null,
+          h('input', { type: 'file', accept: '.ttf,.otf', onchange: e => pickFont(kind, e.target.files[0]) })))) : null),
     h('fieldset', {}, h('legend', { text: 'Період' }),
       h('label', { class: 'ud-radio' }, h('input', { type: 'radio', name: 'period', checked: s.period === 'rolling', onchange: () => { s.period = 'rolling'; draw(); } }), ' 7 діб, 30 діб і весь період'),
       h('label', { class: 'ud-radio' }, h('input', { type: 'radio', name: 'period', checked: s.period === 'custom', onchange: () => { s.period = 'custom'; draw(); } }), ' Обраний період'),
@@ -121,6 +148,9 @@ export function openPresentationDialog(workbook, options = {}) {
     if (s.excluded.size >= fresh.rows.length) { s.message = 'Залиште хоча б один підрозділ.'; return draw(); }
     store.set(s.owner.trim());
     store.set(s.titleText.trim(), TITLE_KEY);
+    store.set(s.format, FORMAT_KEY);
+    store.set(s.font, FONT_KEY);
+    if (s.font === 'uaf' && (s.format !== 'pptx') && !(s.uaf && s.uaf.regular && s.uaf.bold)) { s.message = 'Для PDF з UAF Sans додайте обидва файли шрифту.'; return draw(); }
     s.review = reviewFor(workbook, s.files);
     if (s.review.clean) return generate();
     s.decisions = defaultDecisions(s.review.items);
@@ -133,10 +163,21 @@ export function openPresentationDialog(workbook, options = {}) {
     try {
       const out = settingsOut();
       const { deck } = composeDeck(workbook, s.files, out.decisions && s.step === 'review' ? out : { ...out, decisions: undefined });
-      const { renderDeckToBytes } = await import('./presentation-pptx.js');
-      const { loadArt } = await import('./presentation-art.js');
-      const saved = await saveBytes(await renderDeckToBytes(deck, { art: await loadArt() }), presentationFileName(out.owner, out.generatedOn));
-      if (saved) { s.message = ''; close(); options.toast?.(`Презентацію збережено: ${saved}`); return; }
+      const pptx = await import('./presentation-pptx.js');
+      const artApi = await import('./presentation-art.js');
+      const art = await artApi.loadArt();
+      const saved = [];
+      if (s.format === 'pptx' || s.format === 'both') {
+        const path = await saveBytes(await pptx.renderDeckToBytes(deck, { art, font: s.font === 'uaf' ? 'UAF Sans' : 'Arial' }), presentationFileName(out.owner, out.generatedOn, 'pptx'), 'pptx');
+        if (path) saved.push(path);
+      }
+      if (s.format === 'pdf' || s.format === 'both') {
+        const base = await artApi.loadFonts();
+        const fonts = s.font === 'uaf' ? { regular: fromBase64(s.uaf.regular), bold: fromBase64(s.uaf.bold), fallback: base.regular, fallbackBold: base.bold } : base;
+        const path = await saveBytes(await pptx.renderDeckToPdfBytes(deck, { art, fonts, font: s.font === 'uaf' ? 'UAF Sans' : 'Arial' }), presentationFileName(out.owner, out.generatedOn, 'pdf'), 'pdf');
+        if (path) saved.push(path);
+      }
+      if (saved.length) { s.message = ''; close(); options.toast?.(`Збережено: ${saved.join(', ')}`); return; }
     } catch (e) { s.message = `Не вдалося створити презентацію: ${e.message || e}`; }
     s.busy = false; draw();
   }

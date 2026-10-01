@@ -20,3 +20,20 @@ export async function loadArt() {
   }
   return art;
 }
+
+const FONT_FILES = {
+  regular: new URL('./presentation-art/fonts/LiberationSans-Regular.ttf', import.meta.url),
+  bold: new URL('./presentation-art/fonts/LiberationSans-Bold.ttf', import.meta.url),
+  italic: new URL('./presentation-art/fonts/LiberationSans-Italic.ttf', import.meta.url),
+};
+
+/** Шрифти для PDF (Liberation Sans, ліцензія OFL): { regular, bold, italic } як Uint8Array. */
+export async function loadFonts() {
+  const fonts = {};
+  for (const [key, url] of Object.entries(FONT_FILES)) {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error('Не вдалося завантажити шрифт для PDF.');
+    fonts[key] = new Uint8Array(await response.arrayBuffer());
+  }
+  return fonts;
+}

@@ -102,3 +102,16 @@ test('кожен слайд має перехід; transition: none його в�
     for (const name of slides) assert.equal((await zip.file(name).async('string')).includes('<p:transition spd="med"><p:fade/></p:transition>'), expected);
   }
 });
+
+test('PDF: той самий макет, шрифт вбудований, по сторінці на слайд', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { renderDeckToPdfBytes } = await import('../src/presentation-pptx.js');
+  const dir = new URL('../src/presentation-art/fonts/', import.meta.url);
+  const fonts = { regular: readFileSync(new URL('LiberationSans-Regular.ttf', dir)), bold: readFileSync(new URL('LiberationSans-Bold.ttf', dir)), italic: readFileSync(new URL('LiberationSans-Italic.ttf', dir)) };
+  const deck = deckOf();
+  const bytes = await renderDeckToPdfBytes(deck, { fonts });
+  assert.equal(Buffer.from(bytes.slice(0, 5)).toString(), '%PDF-');
+  const { PDFDocument } = await import('pdf-lib');
+  assert.equal((await PDFDocument.load(bytes)).getPageCount(), deck.slides.length);
+  await assert.rejects(() => renderDeckToPdfBytes(deck, {}), /шрифт/);
+});

@@ -16,7 +16,6 @@ export const THEMES = {
   },
 };
 
-const FONT = 'Arial';
 const W = 13.33;
 const H = 7.5;
 const M = 0.5;
@@ -36,8 +35,8 @@ function drawLogo(slide, art, key, x, y, h) {
 }
 
 function footer(slide, theme, deck, number, left) {
-  slide.addText(left, { x: M, y: 7.1, w: 8.96, h: 0.23, fontFace: FONT, fontSize: 8.6, color: theme.muted, margin: 0 });
-  slide.addText(String(number), { x: 11.88, y: 7.1, w: 0.94, h: 0.23, fontFace: FONT, fontSize: 8.6, color: theme.muted, align: 'right', margin: 0 });
+  slide.addText(left, { x: M, y: 7.1, w: 8.96, h: 0.23, fontFace: theme.font, fontSize: 8.6, color: theme.muted, margin: 0 });
+  slide.addText(String(number), { x: 11.88, y: 7.1, w: 0.94, h: 0.23, fontFace: theme.font, fontSize: 8.6, color: theme.muted, align: 'right', margin: 0 });
 }
 
 function tileColors(tile, theme) {
@@ -54,7 +53,7 @@ function drawOwnCallout(slide, theme, callout, brand) {
   slide.addText([
     { text: callout.text, options: { bold: true, color: brand, fontSize: 10.5 } },
     { text: `   (${callout.detail})`, options: { color: theme.muted, fontSize: 7.5 } },
-  ], { x: 8.25, y: 0.98, w: 4.44, h: 0.26, fontFace: FONT, valign: 'middle', align: 'right', margin: 0, fit: 'shrink' });
+  ], { x: 8.25, y: 0.98, w: 4.44, h: 0.26, fontFace: theme.font, valign: 'middle', align: 'right', margin: 0, fit: 'shrink' });
 }
 
 function drawTiles(slide, theme, tiles) {
@@ -63,13 +62,13 @@ function drawTiles(slide, theme, tiles) {
   tiles.forEach((tile, i) => {
     const x = M + i * (width + gap);
     slide.addShape('roundRect', { x, y: 1.29, w: width, h: 1.38, rectRadius: 0.1, fill: { color: theme.card }, line: { color: theme.line, width: 0.5 }, shadow: SHADOW });
-    slide.addText(tile.name, { x: x + 0.15, y: 1.38, w: width - 0.3, h: 0.35, fontFace: FONT, fontSize: 10.5, color: theme.muted, valign: 'top', margin: 0 });
-    slide.addText(tile.totalText, { x: x + 0.15, y: 1.72, w: width - 0.3, h: 0.5, fontFace: FONT, fontSize: 30, bold: true, color: theme.text, valign: 'middle', margin: 0, fit: 'shrink' });
+    slide.addText(tile.name, { x: x + 0.15, y: 1.38, w: width - 0.3, h: 0.35, fontFace: theme.font, fontSize: 10.5, color: theme.muted, valign: 'top', margin: 0 });
+    slide.addText(tile.totalText, { x: x + 0.15, y: 1.72, w: width - 0.3, h: 0.5, fontFace: theme.font, fontSize: 30, bold: true, color: theme.text, valign: 'middle', margin: 0, fit: 'shrink' });
     if (tile.deltaText) {
       const arrow = tile.delta > 0 ? '▲ ' : tile.delta < 0 ? '▼ ' : '';
       const small = tile.deltaPercent == null;
-      slide.addText(arrow + tile.deltaText, { x: x + 0.15, y: 2.21, w: width - 0.3, h: 0.23, fontFace: FONT, fontSize: small ? 9 : 11.25, bold: !small, color: tileColors(tile, theme), margin: 0 });
-      if (tile.previous != null) slide.addText(`було ${formatPrevious(tile)}`, { x: x + 0.15, y: 2.45, w: width - 0.3, h: 0.18, fontFace: FONT, fontSize: 8.6, color: theme.muted, margin: 0 });
+      slide.addText(arrow + tile.deltaText, { x: x + 0.15, y: 2.21, w: width - 0.3, h: 0.23, fontFace: theme.font, fontSize: small ? 9 : 11.25, bold: !small, color: tileColors(tile, theme), margin: 0 });
+      if (tile.previous != null) slide.addText(`було ${formatPrevious(tile)}`, { x: x + 0.15, y: 2.45, w: width - 0.3, h: 0.18, fontFace: theme.font, fontSize: 8.6, color: theme.muted, margin: 0 });
     }
   });
 }
@@ -97,7 +96,7 @@ function drawBlocks(slide, theme, data, brand) {
     const list = items.length ? items : [{ text: empty, muted: true }];
     for (const item of list) runs.push({ text: item.text, options: { color: item.muted ? theme.muted : theme.text, fontSize: size, bullet: { indent: 12 }, breakLine: true, paraSpaceAfter: 3 } });
   });
-  slide.addText(runs, { x: 8.15, y: 2.98, w: 4.42, h: 3.54, fontFace: FONT, valign: 'top', margin: 0 });
+  slide.addText(runs, { x: 8.15, y: 2.98, w: 4.42, h: 3.54, fontFace: theme.font, valign: 'top', margin: 0 });
 }
 
 function drawCharts(slide, theme, pptx, charts) {
@@ -107,7 +106,7 @@ function drawCharts(slide, theme, pptx, charts) {
     const y = PANEL_Y + i * (PANEL_H + 0.08) + 0.06;
     slide.addShape('roundRect', { x: M, y: y - 0.06 + 0, w: 7.12, h: PANEL_H, rectRadius: 0.1, fill: { color: theme.card }, line: { color: theme.line, width: 0.5 }, shadow: SHADOW });
     const title = chart.bucket ? `${chart.title}, ${labels[chart.bucket] || ''}` : chart.title;
-    slide.addText(title, { x: M + 0.17, y: y + 0.03, w: 6.67, h: 0.24, fontFace: FONT, fontSize: 11, bold: true, color: theme.accent, margin: 0 });
+    slide.addText(title, { x: M + 0.17, y: y + 0.03, w: 6.67, h: 0.24, fontFace: theme.font, fontSize: 11, bold: true, color: theme.accent, margin: 0 });
     const data = chart.series.map(s => ({ name: s.name, labels: chart.categories, values: s.values }));
     const peak = Math.max(0, ...chart.series.flatMap(s => s.values));
     const whole = chart.series.every(s => s.values.every(Number.isInteger));
@@ -116,14 +115,14 @@ function drawCharts(slide, theme, pptx, charts) {
       x: M + 0.05, y: y + 0.27, w: 6.95, h: height - 0.12,
       barDir: chart.horizontal ? 'bar' : 'col', barGrouping: chart.grouping || 'clustered', barGapWidthPct: 35,
       chartColors: colors.slice(0, data.length),
-      catAxisLabelFontFace: FONT, catAxisLabelFontSize: 8, catAxisLabelColor: theme.muted,
+      catAxisLabelFontFace: theme.font, catAxisLabelFontSize: 8, catAxisLabelColor: theme.muted,
       catAxisLabelRotate: !chart.horizontal && chart.categories.length > 14 ? 270 : 0,
       catAxisOrientation: chart.horizontal ? 'maxMin' : 'minMax',
-      valAxisLabelFontFace: FONT, valAxisLabelFontSize: 8, valAxisLabelColor: theme.muted, ...(whole && peak <= 8 ? { valAxisMajorUnit: 1 } : {}),
+      valAxisLabelFontFace: theme.font, valAxisLabelFontSize: 8, valAxisLabelColor: theme.muted, ...(whole && peak <= 8 ? { valAxisMajorUnit: 1 } : {}),
       valGridLine: { color: theme.line, size: 0.5 }, catGridLine: { style: 'none' },
       catAxisLineShow: false, valAxisLineShow: false,
-      showLegend: data.length > 1, legendPos: 'r', legendFontFace: FONT, legendFontSize: 8, legendColor: theme.muted,
-      showValue: Boolean(chart.horizontal), dataLabelFontFace: FONT, dataLabelFontSize: 8, dataLabelColor: theme.text,
+      showLegend: data.length > 1, legendPos: 'r', legendFontFace: theme.font, legendFontSize: 8, legendColor: theme.muted,
+      showValue: Boolean(chart.horizontal), dataLabelFontFace: theme.font, dataLabelFontSize: 8, dataLabelColor: theme.text,
     });
   });
 }
@@ -137,9 +136,9 @@ function header(slide, theme, data, art, brandKey, dateText, compareText) {
   if (brandKey === 'ps' && drawLogo(slide, art, 'logo-ps', 0, 0.02, 0.96)) titleX = 2.7;
   else if (brandKey === 'rvia' && drawLogo(slide, art, 'logo-sv', 0, 0.05, 0.9)) titleX = 2.8;
   else if (drawLogo(slide, art, 'logo-dshv', 0.1, 0.02, 0.86)) titleX = 0.95;
-  slide.addText(data.heading || data.title, { x: titleX, y: tall ? 0.12 : 0.17, w: 7.92 - (titleX - 0.74), h: tall ? 0.78 : 0.54, fontFace: FONT, fontSize: 27, bold: true, color: 'FFFFFF', valign: 'middle', margin: 0, fit: 'shrink' });
-  slide.addText(dateText, { x: 8.85, y: 0.19, w: 3.96, h: 0.29, fontFace: FONT, fontSize: 13.5, color: 'FFFFFF', align: 'right', margin: 0 });
-  slide.addText(compareText, { x: 7.92, y: 0.52, w: 4.9, h: 0.25, fontFace: FONT, fontSize: 10, color: theme.soft, align: 'right', margin: 0 });
+  slide.addText(data.heading || data.title, { x: titleX, y: tall ? 0.12 : 0.17, w: 7.92 - (titleX - 0.74), h: tall ? 0.78 : 0.54, fontFace: theme.font, fontSize: 27, bold: true, color: 'FFFFFF', valign: 'middle', margin: 0, fit: 'shrink' });
+  slide.addText(dateText, { x: 8.85, y: 0.19, w: 3.96, h: 0.29, fontFace: theme.font, fontSize: 13.5, color: 'FFFFFF', align: 'right', margin: 0 });
+  slide.addText(compareText, { x: 7.92, y: 0.52, w: 4.9, h: 0.25, fontFace: theme.font, fontSize: 10, color: theme.soft, align: 'right', margin: 0 });
   return brand;
 }
 
@@ -147,12 +146,12 @@ function periodSlide(pptx, theme, deck, data, number, art) {
   const slide = pptx.addSlide();
   const compare = data.previous ? (data.previous.complete ? `Порівняння з ${data.previous.text}` : `Порівняння з ${data.previous.text} неповне`) : 'Без порівняння з попереднім відрізком';
   const brand = header(slide, theme, data, art, data.theme || 'dshv', data.period.text, compare);
-  slide.addText(data.strip || `${data.period.activeDays} із ${data.period.days} діб з даними`, { x: M, y: data.theme && data.theme !== 'dshv' ? 1.03 : 0.98, w: 7.5, h: 0.23, fontFace: FONT, fontSize: 8.6, color: theme.muted, margin: 0, fit: 'shrink' });
+  slide.addText(data.strip || `${data.period.activeDays} із ${data.period.days} діб з даними`, { x: M, y: data.theme && data.theme !== 'dshv' ? 1.03 : 0.98, w: 7.5, h: 0.23, fontFace: theme.font, fontSize: 8.6, color: theme.muted, margin: 0, fit: 'shrink' });
   drawOwnCallout(slide, theme, data.ownCallout, brand);
   drawTiles(slide, theme, data.tiles);
   drawCharts(slide, theme, pptx, data.charts);
   drawBlocks(slide, theme, data, brand);
-  if (data.notes.length) slide.addText(data.notes.join(' '), { x: M, y: 6.82, w: W - 2 * M, h: 0.22, fontFace: FONT, fontSize: 8.6, italic: true, color: theme.muted, margin: 0 });
+  if (data.notes.length) slide.addText(data.notes.join(' '), { x: M, y: 6.82, w: W - 2 * M, h: 0.22, fontFace: theme.font, fontSize: 8.6, italic: true, color: theme.muted, margin: 0 });
   footer(slide, theme, deck, number, `${deck.slides[0].owner || 'EasyWAR'} · ${deck.focusLabel}`);
 }
 
@@ -160,7 +159,7 @@ function reservedSlide(pptx, theme, deck, data, number, art) {
   const slide = pptx.addSlide();
   header(slide, theme, data, art, 'dshv', '', '');
   slide.addShape('roundRect', { x: M, y: 1.4, w: W - 2 * M, h: 5.2, rectRadius: 0.1, fill: { color: theme.card }, line: { color: theme.line, width: 1, dashType: 'dash' } });
-  slide.addText(data.message, { x: M + 0.5, y: 1.4, w: W - 2 * M - 1, h: 5.2, fontFace: FONT, fontSize: 20, color: theme.muted, align: 'center', valign: 'middle', margin: 0 });
+  slide.addText(data.message, { x: M + 0.5, y: 1.4, w: W - 2 * M - 1, h: 5.2, fontFace: theme.font, fontSize: 20, color: theme.muted, align: 'center', valign: 'middle', margin: 0 });
   footer(slide, theme, deck, number, `${deck.slides[0].owner || 'EasyWAR'} · ${deck.focusLabel}`);
 }
 
@@ -168,16 +167,16 @@ function titleSlide(pptx, theme, deck, data, art) {
   const slide = pptx.addSlide();
   const brand = theme.brands.dshv;
   slide.background = { color: brand };
-  slide.addText(data.titleText || 'Аналітика', { x: 0.75, y: 1.49, w: 11.8, h: 1.3, fontFace: FONT, fontSize: 36, bold: true, color: 'FFFFFF', valign: 'top', margin: 0, fit: 'shrink' });
+  slide.addText(data.titleText || 'Аналітика', { x: 0.75, y: 1.49, w: 11.8, h: 1.3, fontFace: theme.font, fontSize: 36, bold: true, color: 'FFFFFF', valign: 'top', margin: 0, fit: 'shrink' });
   const sub = [data.owner, deck.focusLabel].filter(Boolean).join(' · ');
-  slide.addText(sub, { x: 0.75, y: 2.95, w: 11.8, h: 0.5, fontFace: FONT, fontSize: 15, bold: true, color: 'FFFFFF', valign: 'top', margin: 0, fit: 'shrink' });
-  if (drawLogo(slide, art, 'logo-dshv', 0.62, 5.87, 1.02)) slide.addText('Десантно-штурмові війська', { x: 1.74, y: 5.8, w: 3.4, h: 1.15, fontFace: FONT, fontSize: 20, bold: true, color: 'FFFFFF', valign: 'middle', margin: 0 });
+  slide.addText(sub, { x: 0.75, y: 2.95, w: 11.8, h: 0.5, fontFace: theme.font, fontSize: 15, bold: true, color: 'FFFFFF', valign: 'top', margin: 0, fit: 'shrink' });
+  if (drawLogo(slide, art, 'logo-dshv', 0.62, 5.87, 1.02)) slide.addText('Десантно-штурмові війська', { x: 1.74, y: 5.8, w: 3.4, h: 1.15, fontFace: theme.font, fontSize: 20, bold: true, color: 'FFFFFF', valign: 'middle', margin: 0 });
 }
 
 /** Будує об'єкт PptxGenJS за моделлю колоди. theme: 'light' (єдина затверджена). */
 export function renderDeck(deck, options = {}) {
-  const theme = THEMES[options.theme] || THEMES.light;
-  const pptx = new PptxGenJS();
+  const theme = { ...(THEMES[options.theme] || THEMES.light), font: options.font || 'Arial' };
+  const pptx = options.target || new PptxGenJS(); // target: інший виконавець із тим самим інтерфейсом (PDF)
   pptx.layout = 'LAYOUT_WIDE';
   pptx.title = `Аналітика: ${deck.slides[0].owner || 'EasyWAR'}`;
   pptx.author = 'EasyWAR';
@@ -205,6 +204,14 @@ async function addTransitions(bytes, kind) {
     zip.file(name, xml.replace('</p:clrMapOvr>', `</p:clrMapOvr><p:transition spd="med">${effect}</p:transition>`));
   }
   return zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
+}
+
+/** Повертає Uint8Array готового файлу .pdf (шрифти — options.fonts: { regular, bold, italic }). */
+export async function renderDeckToPdfBytes(deck, options = {}) {
+  const { PdfDeck } = await import('./presentation-pdf.js');
+  const target = new PdfDeck({ fonts: options.fonts });
+  renderDeck(deck, { ...options, target });
+  return target.finish();
 }
 
 /** Повертає Uint8Array готового файлу .pptx. options.transition: 'fade' (за замовчуванням) | 'push' | 'wipe' | 'none'. */

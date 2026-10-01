@@ -53,4 +53,5 @@ export function composeDeck(workbook, files = {}, settings = {}) {
   return { deck, review, corrections: applied.corrections, rejected: applied.rejected };
 }
 
-export const presentationFileName = (owner, date) => `Аналітика ${String(owner || 'УДШВ').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim()} ${date || ''}`.trim() + '.pptx';
+export const FORMAT_CHOICES = [['pptx', 'PPTX (редагований)'], ['pdf', 'PDF (шрифт вбудований)'], ['both', 'Обидва']];
+export const presentationFileName = (owner, date, extension = 'pptx') => `Аналітика ${String(owner || 'УДШВ').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim()} ${date || ''}`.trim() + `.${extension}`;
