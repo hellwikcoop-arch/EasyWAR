@@ -47,7 +47,7 @@
 надсилають на телефон месенджером, поштою або кабелем:
 
 ```bash
-npm run build:standalone -- dshv   # dist-standalone/EasyWAR-UDSHV.html (~12 МБ)
+npm run build:standalone -- dshv   # dist-standalone/EasyWAR-UDSHV.html (~15 МБ)
 npm run build:standalone -- pvk    # dist-standalone/EasyWAR-PVK.html (~3,5 МБ)
 npm run build:standalone           # обидва
 ```
