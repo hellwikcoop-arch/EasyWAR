@@ -321,33 +321,10 @@ test('own-losses slot is reserved only on request and carries no invented number
   assert.deepEqual(Object.keys(slot).sort(), ['id', 'message', 'status', 'title']);
 });
 
-test('title shows the actuality of each unit: last day with data, lag from the anchor and staleness', () => {
-  const wb = makeWorkbook((n, unit) => (unit === 'Підрозділ Б' && n > LAST - 10 ? {} : { 'personnel|200': 1 }));
-  const title = buildDeck(wb).slides[0];
-  const a = title.unitsActual.find(u => u.name === 'Підрозділ А');
-  const b = title.unitsActual.find(u => u.name === 'Підрозділ Б');
-  assert.deepEqual([a.lastText, a.lagText, a.stale, a.daysWithData30], ['30.09.2026', 'актуально', false, 30]);
-  assert.deepEqual([b.lastText, b.lag, b.lagText, b.stale], ['20.09.2026', 10, '10 діб тому', true]);
-  assert.equal(b.daysWithData30, 20);
-  assert.deepEqual(title.unitsActual.map(u => u.name), ['Підрозділ А', 'Підрозділ Б']);
-  // Поріг налаштовується, вибір підрозділів звужує список.
-  assert.equal(buildDeck(wb, { config: { staleDays: 10 } }).slides[0].unitsActual.find(u => u.name === 'Підрозділ Б').stale, false);
-  assert.deepEqual(buildDeck(wb, { units: ['Підрозділ Б'] }).slides[0].unitsActual.map(u => u.name), ['Підрозділ Б']);
-});
-
-test('a unit that never had data is listed as stale with no date', () => {
-  const wb = makeWorkbook((n, unit) => (unit === 'Підрозділ Б' ? {} : { 'personnel|200': 1 }));
-  const b = buildDeck(wb).slides[0].unitsActual.find(u => u.name === 'Підрозділ Б');
-  assert.deepEqual([b.lastText, b.lag, b.lagText, b.stale], ['—', null, 'даних немає', true]);
-});
-
-test('title lists source tables with their own last dates relative to the UDSHV anchor', () => {
-  const wb = makeWorkbook(flat);
-  const strikes = { kind: 'strikes', weaponLabel: 'Тип ЛА', issues: [], records: [{ rowNumber: 2, date: '2026-09-20', unit: 'x', types: [], weapon: '', munition: '', count: 1, result: 'hit', aborted: false, reasons: [] }] };
-  const own = { kind: 'own_losses', records: [{ rowNumber: 7, date: '2026-09-29', unit: '79 одшбр', unitRaw: 'x', values: { 'personnel|200': 1 } }], units: ['79 одшбр'], totalsRows: [], issues: [], metrics: [] };
-  const sources = buildDeck(wb, { ownLosses: own, groups: [{ id: 'ps', title: 'ПС', strikes }] }).slides[0].sources;
-  assert.deepEqual(sources.map(s => `${s.name}|${s.lastText}|${s.lagText}|${s.stale}`), ['УДШВ|30.09.2026|актуально|false', 'Власні втрати|29.09.2026|1 добу тому|false', 'ПС|20.09.2026|10 діб тому|true']);
-  assert.deepEqual(buildDeck(wb).slides[0].sources.map(s => s.name), ['УДШВ']);
+test('the title carries no unit actuality block: it lives on the УДШВ dashboard', () => {
+  const title = buildDeck(makeWorkbook(flat)).slides[0];
+  assert.ok(!('unitsActual' in title) && !('sources' in title));
+  assert.equal(title.dataRange.text, '01.07.2026 – 30.09.2026');
 });
 
 test('plural forms of days', () => {

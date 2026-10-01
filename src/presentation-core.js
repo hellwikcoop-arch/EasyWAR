@@ -14,8 +14,6 @@ import {
   validateWorkbook,
 } from './udshv-dashboard-core.js';
 
-import { lastOwnDate } from './own-losses-core.js';
-import { lastStrikeDate } from './strikes-core.js';
 import { buildStrikesSlide } from './presentation-strikes.js';
 import { buildOwnLossesSlide, ownLossesInRange } from './presentation-own-losses.js';
 import { NBSP, daysAcc, dayNumber, peakOf, tileFor as buildTile, daysWord, formatNumber, formatPercent, isoFromDay, longDate, periodText, rollingRange, shortDate, signed } from './presentation-format.js';
@@ -34,7 +32,6 @@ export const DEFAULT_CONFIG = {
   anomalyIqrFactor: 1.5,
   paceMinDays: 60, // мінімум днів для слайда «весь період»
   maxItems: 3, // на блок слайда
-  staleDays: 7, // підрозділ чи джерело без свіжих даних довше цього — «неактуальні»
   focus: 'all', // 'result' | 'efficiency' | 'all'
   // Назви стовпців груп ЗНИЩЕНО/ПОШКОДЖЕНО/ПОДАВЛЕНО, які є об'єктами, а не технікою (ОВТ).
   // Усе, що не збігається, вважається технікою. Шаблони — регулярні вирази без урахування регістру.
@@ -451,33 +448,6 @@ function windowSlide(workbook, period, units, anchor, config, all, prune = false
   };
 }
 
-/** Актуальність: остання дата з даними кожного підрозділу й відставання від якірної дати. */
-export function unitActuality(workbook, units, anchor, config, dataRange) {
-  const names = units.length ? units : workbook.units;
-  const anchorDay = dayNumber(anchor);
-  const recent = rollingRange(anchor, 30);
-  return names.map(name => {
-    const dates = workbook.records.filter(r => r.unit === name && Object.keys(r.values).length && r.date <= anchor && r.date >= dataRange.from).map(r => r.date).sort();
-    const last = dates[dates.length - 1] || '';
-    const lag = last ? anchorDay - dayNumber(last) : null;
-    return {
-      name, lastDate: last, lastText: last ? longDate(last) : '—', lag,
-      lagText: lag == null ? 'даних немає' : lag === 0 ? 'актуально' : `${lag} ${daysAcc(lag)} тому`,
-      daysWithData30: new Set(dates.filter(d => d >= recent.from)).size,
-      stale: lag == null || lag > config.staleDays,
-    };
-  });
-}
-
-/** Актуальність джерел: остання дата кожної таблиці й відставання від якірної дати колоди. */
-export function sourceActuality(sources, anchor, config) {
-  const anchorDay = dayNumber(anchor);
-  return sources.filter(item => item.lastDate).map(({ name, lastDate }) => {
-    const lag = anchorDay - dayNumber(lastDate);
-    return { name, lastDate, lastText: longDate(lastDate), lag, lagText: lag <= 0 ? 'актуально' : `${lag} ${daysAcc(lag)} тому`, stale: lag > config.staleDays };
-  });
-}
-
 /** Модель колоди: title + слайди періодів. Однакові вхідні дані дають однаковий результат. */
 export function buildDeck(workbook, options = {}) {
   const config = { ...DEFAULT_CONFIG, ...(options.config || {}), focus: options.focus || (options.config && options.config.focus) || DEFAULT_CONFIG.focus };
@@ -523,12 +493,6 @@ export function buildDeck(workbook, options = {}) {
       marking: options.marking || '',
       source: workbook.sourceName || '',
       units: units.length ? units : workbook.units,
-      unitsActual: unitActuality(workbook, units, anchor, config, all),
-      sources: sourceActuality([
-        { name: 'УДШВ', lastDate: anchor },
-        ...(options.ownLosses ? [{ name: 'Власні втрати', lastDate: lastOwnDate(options.ownLosses) }] : []),
-        ...(options.groups || []).filter(g => g.strikes).map(g => ({ name: g.title, lastDate: lastStrikeDate(g.strikes) })),
-      ], anchor, config),
       dataRange: { from: all.from, to: all.to, text: periodText(all), days: titleModel.days, activeDays: titleModel.activeDays },
       anchor,
       generatedOn: options.generatedOn || '',

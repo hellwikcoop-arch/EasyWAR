@@ -196,3 +196,11 @@ html:has(body.udshv-open) {
 }
 html body.udshv-open, html.rocket-ref24 body.udshv-open, html:root body.udshv-open { background: transparent !important; }
 html:root:has(body.udshv-open) { background-color: #12091a !important; }
+
+/* Актуальність підрозділів */
+.ud-note { margin: 0; color: var(--ud-muted); font-size: 12.5px; line-height: 1.45; }
+.ud-fresh tr.ud-stale th, .ud-fresh tr.ud-stale td { background: color-mix(in srgb, var(--ud-red) 8%, transparent); }
+.ud-state { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 700; border: 1px solid var(--ud-line); }
+.ud-state.ok { color: var(--ud-green); }
+.ud-state.bad { color: var(--ud-red); border-color: var(--ud-red); }
+.ud-fresh-hint.bad { color: var(--ud-red); }
