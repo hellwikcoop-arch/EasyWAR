@@ -434,7 +434,6 @@ export function render(host, workbook, options = {}) {
   const compare = model.hasPrevious ? `порівняння з ${dateLabel(model.previousRange.from)} – ${dateLabel(model.previousRange.to)}` : 'попереднього періоду в таблиці немає';
   root.textContent = '';
   root.append(
-    h('div', { class: 'ud-banner', role: 'img', 'aria-label': 'ДШВ і Повітряні Сили — разом ближче до перемоги' }),
     h('header', { class: 'ud-hero' },
       h('div', {},
         h('span', { class: 'ud-eyebrow', text: 'Угруповання ДШВ · локальна аналітика' }),
