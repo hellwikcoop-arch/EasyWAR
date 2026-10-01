@@ -101,3 +101,13 @@
 - [x] release checklist
 - [x] recovery/backup guide
 - [x] user documentation
+
+## 1.1 — Presentations
+
+Деталі: `docs/PRESENTATIONS.md`.
+
+- [ ] deck model і рушій висновків (детермінований, без LLM)
+- [ ] PPTX-рендерер: титул, тиждень, місяць, весь період
+- [ ] профілі УДШВ і ПВК
+- [ ] локальне збереження без перезапису, кнопка в дашборді
+- [ ] візуальна перевірка через LibreOffice (лише dev)

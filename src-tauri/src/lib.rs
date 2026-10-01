@@ -279,6 +279,47 @@ struct CreatedBaseTable {
     path: String,
 }
 
+/// Зберігає готову презентацію (.pptx) у файл, який обирає користувач. Дані не залишають пристрій.
+#[tauri::command]
+async fn save_presentation(
+    app: tauri::AppHandle,
+    file_name: String,
+    bytes: Vec<u8>,
+    kind: Option<String>,
+) -> Result<Option<String>, String> {
+    if bytes.is_empty() {
+        return Err("презентація порожня".to_owned());
+    }
+    let pdf = kind.as_deref() == Some("pdf");
+    let extension = if pdf { "pdf" } else { "pptx" };
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        let dialog = app.dialog().file().set_title("Зберегти презентацію").set_file_name(file_name);
+        if pdf {
+            dialog.add_filter("Документ PDF", &["pdf"]).blocking_save_file()
+        } else {
+            dialog.add_filter("Презентація PPTX", &["pptx"]).blocking_save_file()
+        }
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let mut path = selected.into_path().map_err(|error| error.to_string())?;
+    if !path
+        .extension()
+        .is_some_and(|current| current.eq_ignore_ascii_case(extension))
+    {
+        path.as_mut_os_string().push(format!(".{extension}"));
+    }
+    let target = path.clone();
+    tauri::async_runtime::spawn_blocking(move || std::fs::write(&target, bytes))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())?;
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
 /// Зберігає порожню базову таблицю в новий файл і прив'язує її до профілю
 /// для того роду військ, чий модуль її відкриває.
 #[tauri::command]
@@ -1101,6 +1142,7 @@ pub fn run() {
             set_local_profile_password,
             choose_profile_database,
             create_profile_base_table,
+            save_presentation,
             clear_profile_database,
             read_profile_database,
             write_profile_database,

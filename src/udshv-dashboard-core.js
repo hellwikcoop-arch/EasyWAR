@@ -414,6 +414,34 @@ export function createDashboardModel(workbook, options = {}) {
   };
 }
 
+/* ------------------------------ актуальність підрозділів ------------------------------ */
+
+export const STALE_DAYS = 7; // підрозділ без даних довше цього вважається без свіжих
+
+/**
+ * Актуальність: для кожного підрозділу остання дата з ненульовими даними, відставання від останньої активної
+ * дати таблиці й кількість діб із даними за останні 30. Рядки з датою не з місяця аркуша не враховуються.
+ * Підрозділи без свіжих даних (або без даних зовсім) стоять першими.
+ */
+export function unitFreshness(workbook, options = {}) {
+  const anchor = options.anchor || lastActiveDate(workbook);
+  const staleDays = options.staleDays == null ? STALE_DAYS : options.staleDays;
+  const selected = normalizeUnits(options.units);
+  const names = selected.length ? workbook.units.filter(u => selected.includes(u)) : workbook.units;
+  const stray = new Set(validateWorkbook(workbook).filter(i => i.type === 'date-outside-month').map(i => `${i.sheet}|${i.rowNumber}`));
+  const anchorDay = dayNumber(anchor);
+  const recentFrom = Number.isFinite(anchorDay) ? isoFromDay(anchorDay - 29) : '';
+  const rows = names.map((unit, order) => {
+    const dates = workbook.records.filter(r => r.unit === unit && hasData(r) && r.date <= anchor && !stray.has(`${r.sheet}|${r.rowNumber}`)).map(r => r.date).sort();
+    const last = dates[dates.length - 1] || '';
+    const lag = last ? anchorDay - dayNumber(last) : null;
+    return { unit, order, lastDate: last, lag, daysWithData30: new Set(dates.filter(d => d >= recentFrom)).size, stale: lag == null || lag > staleDays };
+  });
+  rows.sort((a, b) => (b.stale - a.stale) || ((b.lag ?? Infinity) - (a.lag ?? Infinity)) || a.order - b.order);
+  const stale = rows.filter(r => r.stale).length;
+  return { anchor, staleDays, total: rows.length, fresh: rows.length - stale, stale, rows: rows.map(({ order, ...row }) => row) };
+}
+
 /* ------------------------------ таблиця й CSV ------------------------------ */
 
 export function pivotRows(workbook, range, unit = '') {

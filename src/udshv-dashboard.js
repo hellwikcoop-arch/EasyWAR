@@ -12,6 +12,7 @@ import {
   pivotRows,
   shiftAnchor,
   toCsv,
+  unitFreshness,
   validateWorkbook,
 } from './udshv-dashboard-core.js';
 
@@ -296,6 +297,37 @@ function tablePage(model) {
       h('tfoot', {}, h('tr', {}, h('th', { text: 'Разом' }), groups.flatMap(g => g.metrics.map(m => h('td', { class: 'ud-num', text: number(pivot.totals[m.id]) })))))))));
 }
 
+const agoText = lag => {
+  if (lag == null) return 'даних немає';
+  if (lag === 0) return 'актуально';
+  const abs = lag % 100, last = abs % 10;
+  return `${lag} ${abs > 10 && abs < 20 ? 'діб' : last === 1 ? 'добу' : last >= 2 && last <= 4 ? 'доби' : 'діб'} тому`;
+};
+
+/** Підказка в шапці: скільки підрозділів без свіжих даних, з переходом до панелі. */
+function freshHint(go) {
+  const f = unitFreshness(state.workbook);
+  if (!f.total) return null;
+  return h('button', { type: 'button', class: `ud-link ud-fresh-hint${f.stale ? ' bad' : ''}`, onclick: () => { state.view = 'freshness'; go(); }, text: f.stale ? `Без свіжих даних: ${f.stale} з ${f.total} підрозділів` : `Усі ${f.total} підрозділів актуальні` });
+}
+
+/** Панель «Актуальність підрозділів»: скільки підрозділів в аналізі, у кого свіжі дані й у кого немає. */
+function freshnessPage(go) {
+  const f = unitFreshness(state.workbook);
+  const head = f.stale
+    ? `в аналізі ${f.total} · свіжі дані ${f.fresh} · без свіжих даних ${f.stale}`
+    : `в аналізі ${f.total} · усі з актуальними даними`;
+  return h('div', { class: 'ud-page' }, section('Актуальність підрозділів', head,
+    h('p', { class: 'ud-note', text: `Відлік від останньої активної дати таблиці — ${dateLabel(f.anchor)}. Підрозділ вважається без свіжих даних, якщо від нього немає ненульових даних понад ${f.staleDays} діб: він міг і не працювати, тож це не обов’язково пропуск у звітності.` }),
+    h('div', { class: 'ud-scroll' }, h('table', { class: 'ud-table ud-fresh' },
+      h('thead', {}, h('tr', {}, ['Підрозділ', 'Останні дані', 'Стан', 'Діб із даними за 30'].map(label => h('th', { text: label })))),
+      h('tbody', {}, f.rows.map(r => h('tr', { class: r.stale ? 'ud-stale' : '' },
+        h('th', {}, h('button', { type: 'button', class: 'ud-link', onclick: () => { state.units = [r.unit]; state.view = 'summary'; go(); }, text: r.unit })),
+        h('td', { text: r.lastDate ? dateLabel(r.lastDate) : '—' }),
+        h('td', {}, h('span', { class: `ud-state ${r.stale ? 'bad' : 'ok'}`, text: agoText(r.lag) })),
+        h('td', { class: 'ud-num', text: String(r.daysWithData30) }))))))));
+}
+
 function qualityPage() {
   const issues = validateWorkbook(state.workbook);
   const groups = groupIssues(issues);
@@ -389,30 +421,33 @@ export function render(host, workbook, options = {}) {
   const go = () => render(host, workbook, options);
   const range = currentRange();
   const model = createDashboardModel(workbook, { range, unit: state.units, preset: state.preset });
-  const nav = [['summary', 'Зведення УДШВ'], ['units', 'Підрозділи'], ['personnel', 'Втрати о/с'], ['ovt', 'ОВТ'], ['ammo', 'Витрата БК'], ['table', 'Зведена таблиця'], ['quality', 'Перевірка даних']];
+  const nav = [['summary', 'Зведення УДШВ'], ['units', 'Підрозділи'], ['personnel', 'Втрати о/с'], ['ovt', 'ОВТ'], ['ammo', 'Витрата БК'], ['freshness', 'Актуальність'], ['table', 'Зведена таблиця'], ['quality', 'Перевірка даних']];
   if (!nav.some(([k]) => k === state.view)) state.view = 'summary';
   const page = state.view === 'units' ? unitsPage(model, go)
     : state.view === 'personnel' ? personnelPage(model, go)
       : state.view === 'ovt' ? ovtPage(model, go)
         : state.view === 'ammo' ? ammoPage(model, go)
+          : state.view === 'freshness' ? freshnessPage(go)
           : state.view === 'table' ? tablePage(model)
             : state.view === 'quality' ? qualityPage()
               : summaryPage(model, go);
   const compare = model.hasPrevious ? `порівняння з ${dateLabel(model.previousRange.from)} – ${dateLabel(model.previousRange.to)}` : 'попереднього періоду в таблиці немає';
   root.textContent = '';
   root.append(
-    h('div', { class: 'ud-banner', role: 'img', 'aria-label': 'ДШВ і Повітряні Сили — разом ближче до перемоги' }),
     h('header', { class: 'ud-hero' },
       h('div', {},
         h('span', { class: 'ud-eyebrow', text: 'Угруповання ДШВ · локальна аналітика' }),
         h('h1', { text: 'Дашборд УДШВ' }),
         h('p', { text: `${workbook.sourceName || 'Таблиця'} · ${workbook.sheets.length} ${workbook.sheets.length === 1 ? 'аркуш' : 'аркуші(в)'} · ${dateLabel(allDateRange(workbook).from)} – ${dateLabel(allDateRange(workbook).to)} · лише читання` })),
-      options.canRefresh ? h('button', { class: 'ud-btn', type: 'button', onclick: () => options.refresh?.(), text: 'Оновити з файлу' }) : null),
+      h('div', { class: 'ud-hero-actions' },
+        options.readSheets ? h('button', { class: 'ud-btn', type: 'button', onclick: async () => (await import('./presentation-ui.js')).openPresentationDialog(workbook, options), text: 'Презентація' }) : null,
+        options.canRefresh ? h('button', { class: 'ud-btn', type: 'button', onclick: () => options.refresh?.(), text: 'Оновити з файлу' }) : null)),
     periodControls(range, go),
     h('div', { class: 'ud-context' },
       h('span', { text: `${periodTitle(range)}${unitsLabel(state.units, ' · ')}` }),
       h('span', { text: `${model.activeDays} з ${model.days} днів із даними · ${compare}` }),
-      state.units.length ? h('button', { type: 'button', class: 'ud-link', onclick: () => { state.units = []; go(); }, text: '× усі підрозділи' }) : null),
+      state.units.length ? h('button', { type: 'button', class: 'ud-link', onclick: () => { state.units = []; go(); }, text: '× усі підрозділи' }) : null,
+      freshHint(go)),
     h('nav', { class: 'ud-nav', 'aria-label': 'Розділи дашборда УДШВ' }, nav.map(([key, label]) => h('button', { type: 'button', 'aria-pressed': String(state.view === key), onclick: () => { state.view = key; go(); }, text: label }))),
     page);
 }
