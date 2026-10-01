@@ -57,3 +57,6 @@ Minimum expectations:
 - Before substantial writes, load the installed `codex-coordinator` skill, list active claims from the primary worktree, and publish only this task's bounded claim.
 - Native Codex tasks remain the execution, messaging, and transcript authority; an explicitly requested goal Coordinator is on demand, with no heartbeat or mandatory pull-request workflow.
 - Reject cross-project notices and never store transcripts, reasoning, prompts, or tool output in Coordinator state.
+
+## 3D models
+Index of all 3D model files, loaders and tests: [`docs/3D_MODELS.md`](docs/3D_MODELS.md). Read it first; do not search the whole project for models. Files live in `src/models/*.glb`, procedural munitions in `src/munition-3d.js`, the reference viewer in `src/ref-viewer.js`.
