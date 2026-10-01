@@ -136,12 +136,12 @@ export function deckPeriods(workbook, options = {}) {
   const custom = options.custom;
   if (custom && custom.from && custom.to) {
     const range = custom.from <= custom.to ? { from: custom.from, to: custom.to } : { from: custom.to, to: custom.from };
-    return [{ id: 'custom', title: 'Обраний період', kind: 'window', range }];
+    return [{ id: 'custom', title: 'Обраний період', heading: 'Аналітика за обраний період', kind: 'window', range }];
   }
   return [
-    { id: 'week', title: 'Останні 7 діб', kind: 'window', range: rollingRange(anchor, 7) },
-    { id: 'month', title: 'Останні 30 діб', kind: 'window', range: rollingRange(anchor, 30) },
-    { id: 'all', title: 'Весь період', kind: 'all', range: all },
+    { id: 'week', title: 'Останні 7 діб', heading: 'Аналітика за тиждень', kind: 'window', range: rollingRange(anchor, 7) },
+    { id: 'month', title: 'Останні 30 діб', heading: 'Аналітика за місяць', kind: 'window', range: rollingRange(anchor, 30) },
+    { id: 'all', title: 'Весь період', heading: 'Аналітика за всю операцію', kind: 'all', range: all },
   ];
 }
 
@@ -172,7 +172,16 @@ const classSum = (records, group, cls, config) => records.reduce((sum, r) => sum
 /** Пік за добовим рядом (обгортка з типовою конфігурацією). */
 export function findPeak(points, config = DEFAULT_CONFIG) { return peakOf(points, config); }
 
-const tileFor = (kpi, prevComplete, config) => buildTile(kpi, prevComplete, config, KPI_NAMES[kpi.key] || kpi.label);
+// Підписи плиток (у тексті блоків лишаються повні назви KPI_NAMES).
+const TILE_NAMES = {
+  ovtDestroyed: 'Військова техніка знищено, од.',
+  ovtDamaged: 'Військова техніка пошкоджено, од.',
+  ovtSuppressed: 'Військова техніка подавлено, од.',
+  objDestroyed: 'Знищено об’єктів противника',
+  objDamaged: 'Пошкоджено об’єктів противника',
+  objSuppressed: 'Подавлено об’єктів противника',
+};
+const tileFor = (kpi, prevComplete, config) => buildTile(kpi, prevComplete, config, TILE_NAMES[kpi.key] || KPI_NAMES[kpi.key] || kpi.label);
 
 /** Показники з розділенням техніки й об'єктів у тій самій формі, що й KPI дашборда. */
 function classifiedKpis(model, workbook, units, config) {
@@ -211,11 +220,11 @@ function chartFor(model, kpis) {
   // Окремі діаграми: масштаби втрат о/с і техніки з об'єктами різні, на одній осі вони перекривали б одне одного.
   return [
     {
-      id: 'personnel', title: 'Втрати о/с', bucket: model.bucket, categories,
+      id: 'personnel', title: 'Втрати о/с противника', bucket: model.bucket, categories,
       series: [{ name: 'Знищено (200)', values: model.personnelSeries.map(p => p.value.kia) }, { name: 'Поранено (300)', values: model.personnelSeries.map(p => p.value.wia) }],
     },
     {
-      id: 'targets', title: 'Техніка та об’єкти', bucket: model.bucket, categories,
+      id: 'targets', title: 'Техніка та об’єкти противника', bucket: model.bucket, categories,
       series: [{ name: 'ОВТ знищено + пошкоджено', values: pick('ovtDestroyed', 'ovtDamaged') }, { name: 'Об’єкти знищено + пошкоджено', values: pick('objDestroyed', 'objDamaged') }],
     },
   ];
@@ -435,6 +444,8 @@ function windowSlide(workbook, period, units, anchor, config, all, prune = false
   return {
     id: period.id,
     title: period.title,
+    heading: period.heading || period.title,
+    theme: 'dshv',
     period: { from: range.from, to: range.to, days: model.days, activeDays: model.activeDays, text: periodText(range) },
     previous: period.kind === 'window' ? { from: prevRange.from, to: prevRange.to, text: periodText(prevRange), covered: previousCoverage.covered, days: previousCoverage.days, complete: prevComplete } : null,
     tiles: tileKeys(model, config, prune).map(key => {
@@ -510,6 +521,7 @@ export function buildDeck(sourceWorkbook, options = {}) {
       id: 'title',
       title: 'Аналітика',
       owner: options.owner || '',
+      titleText: options.titleText || 'Аналітика',
       marking: options.marking || '',
       source: workbook.sourceName || '',
       units: units.length ? units : workbook.units,

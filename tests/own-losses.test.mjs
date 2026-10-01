@@ -151,7 +151,7 @@ test('the own-losses slide renders with two native charts and the cause block', 
   assert.equal(slideNames.length, 5);
   const xml = await zip.file('ppt/slides/slide5.xml').async('string');
   const text = [...xml.matchAll(/<a:t>([^<]*)<\/a:t>/g)].map(m => m[1]).join(' | ');
-  assert.ok(text.includes('Власні втрати · останні 30 діб'));
+  assert.ok(text.includes('Втрати підрозділів ДШВ'));
   assert.ok(text.includes('Головні причини за даними таблиці'));
   assert.ok(text.includes('Наші 300'));
   assert.ok(!/undefined|NaN|\bnull\b/.test(text));

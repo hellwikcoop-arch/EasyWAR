@@ -39,9 +39,9 @@ for (const theme of Object.keys(THEMES)) {
     assert.equal(slides.length, 5); // титул, 7, 30, весь період, група
     assert.equal(charts.length, (deck.slides.length - 1) * 2); // дві діаграми на слайд періоду
     assert.ok(texts[0].includes('Тестова група'));
-    assert.ok(texts[0].includes('АНАЛІТИКА'));
+    assert.ok(texts[0].includes('Аналітика'));
     assert.ok(!/Підрозділи в аналізі|Джерела даних|Якість даних/.test(texts[0]), 'актуальність і якість на титул не виносяться');
-    assert.ok(texts[1].includes('Останні 7 діб'));
+    assert.ok(texts[1].includes('Аналітика за тиждень'));
     assert.ok(texts[4].includes('Група А · останні 30 діб'));
     for (const text of texts) assert.ok(!/undefined|NaN|\bnull\b/.test(text), text);
   });
@@ -82,7 +82,7 @@ test('custom period gives a title and one period slide', async () => {
   const deck = deckOf({ custom: { from: '2026-08-01', to: '2026-08-10' } });
   const { slides, texts } = await open(await renderDeckToBytes(deck));
   assert.equal(slides.length, 2);
-  assert.ok(texts[1].includes('Обраний період'));
+  assert.ok(texts[1].includes('Аналітика за обраний період'));
 });
 
 test('the output is deterministic apart from the zip container timestamps', async () => {

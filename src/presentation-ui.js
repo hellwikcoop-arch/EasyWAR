@@ -5,6 +5,7 @@ import { unitFreshness } from './udshv-dashboard-core.js';
 import { defaultDecisions } from './data-review-core.js';
 
 const OWNER_KEY = 'easywar.presentation.owner';
+const TITLE_KEY = 'easywar.presentation.title';
 const SLOTS = [{ key: 'own', title: 'Наші втрати', hint: 'таблиця «НАШІ ВТРАТИ»' }, ...GROUP_SLOTS.map(g => ({ key: g.key, title: g.title, hint: `таблиця ${g.title}` }))];
 
 function h(tag, props = {}, ...children) {
@@ -19,8 +20,8 @@ function h(tag, props = {}, ...children) {
   return el;
 }
 const store = {
-  get() { try { return localStorage.getItem(OWNER_KEY) || ''; } catch { return ''; } },
-  set(v) { try { localStorage.setItem(OWNER_KEY, v); } catch { /* пам'ять недоступна — не критично */ } },
+  get(key = OWNER_KEY) { try { return localStorage.getItem(key) || ''; } catch { return ''; } },
+  set(v, key = OWNER_KEY) { try { localStorage.setItem(key, v); } catch { /* пам'ять недоступна — не критично */ } },
 };
 const today = () => { const d = new Date(); return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`; };
 
@@ -36,7 +37,7 @@ async function saveBytes(bytes, name) {
 export function openPresentationDialog(workbook, options = {}) {
   const fresh = unitFreshness(workbook);
   const s = {
-    owner: store.get(), focus: 'all', period: 'rolling', from: '', to: '',
+    owner: store.get(), titleText: store.get(TITLE_KEY), focus: 'all', period: 'rolling', from: '', to: '',
     files: {}, names: {}, errors: {}, excluded: new Set(),
     step: 'settings', review: null, decisions: {}, busy: false, message: '',
   };
@@ -60,7 +61,9 @@ export function openPresentationDialog(workbook, options = {}) {
 
   const settings = () => [
     h('h2', { text: 'Створити презентацію' }),
-    h('label', { class: 'ud-field' }, h('span', { text: 'Чия аналітика (назва на титулі)' }),
+    h('label', { class: 'ud-field' }, h('span', { text: 'Заголовок титулу' }),
+      h('input', { type: 'text', value: s.titleText, placeholder: 'Напр. Аналітика центру ОВгП', oninput: e => { s.titleText = e.target.value; } })),
+    h('label', { class: 'ud-field' }, h('span', { text: 'Підзаголовок: чия аналітика (угруповання)' }),
       h('input', { type: 'text', value: s.owner, placeholder: 'Напр. Угруповання ОВП УДШВ', oninput: e => { s.owner = e.target.value; } })),
     h('fieldset', {}, h('legend', { text: 'Фокус' }),
       FOCUS_CHOICES.map(([k, label]) => h('label', { class: 'ud-radio' }, h('input', { type: 'radio', name: 'focus', checked: s.focus === k, onchange: () => { s.focus = k; } }), ` ${label}`))),
@@ -107,7 +110,7 @@ export function openPresentationDialog(workbook, options = {}) {
   function draw() { dialog.textContent = ''; dialog.append(...body().flat().filter(Boolean)); }
 
   const settingsOut = () => ({
-    owner: s.owner.trim(), focus: s.focus, generatedOn: today(),
+    owner: s.owner.trim(), titleText: s.titleText.trim(), focus: s.focus, generatedOn: today(),
     custom: s.period === 'custom' ? { from: s.from, to: s.to } : null,
     excludeUnits: [...s.excluded], decisions: s.decisions,
   });
@@ -117,6 +120,7 @@ export function openPresentationDialog(workbook, options = {}) {
     if (s.period === 'custom' && !(s.from && s.to)) { s.message = 'Вкажіть початок і кінець періоду.'; return draw(); }
     if (s.excluded.size >= fresh.rows.length) { s.message = 'Залиште хоча б один підрозділ.'; return draw(); }
     store.set(s.owner.trim());
+    store.set(s.titleText.trim(), TITLE_KEY);
     s.review = reviewFor(workbook, s.files);
     if (s.review.clean) return generate();
     s.decisions = defaultDecisions(s.review.items);

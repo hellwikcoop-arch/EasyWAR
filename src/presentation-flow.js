@@ -7,8 +7,8 @@ import { applyReview, defaultDecisions, reviewData } from './data-review-core.js
 
 export const FOCUS_CHOICES = [['all', 'Усе'], ['result', 'Результат'], ['efficiency', 'Ефективність']];
 export const GROUP_SLOTS = [
-  { key: 'ps', title: 'ПС', weapon: 'Тип ЛА' },
-  { key: 'rvia', title: 'РВіА', weapon: 'Тип ПУ' },
+  { key: 'ps', title: 'ПС', weapon: 'Тип ЛА', heading: 'Місячна аналітика тактичної авіації' },
+  { key: 'rvia', title: 'РВіА', weapon: 'Тип ПУ', heading: 'Місячна аналітика ракетних військ' },
 ];
 
 /** Розбір файлу в слот: own | ps | rvia. Повертає { workbook } або { error } українською. */
@@ -27,7 +27,7 @@ export function parseSlot(slot, sheets, fileName) {
   }
 }
 
-const groupsOf = files => GROUP_SLOTS.filter(g => files[g.key]).map(g => ({ id: g.key, title: g.title, strikes: files[g.key] }));
+const groupsOf = files => GROUP_SLOTS.filter(g => files[g.key]).map(g => ({ id: g.key, title: g.title, heading: g.heading, strikes: files[g.key] }));
 
 /** Меню перевірки: пункти за всіма підключеними таблицями. */
 export function reviewFor(workbook, files = {}) {
@@ -42,6 +42,7 @@ export function composeDeck(workbook, files = {}, settings = {}) {
   const custom = settings.custom && settings.custom.from && settings.custom.to ? settings.custom : null;
   const deck = buildDeck(applied.udshv, {
     owner: settings.owner || '',
+    titleText: settings.titleText || '',
     generatedOn: settings.generatedOn || '',
     focus: settings.focus || 'all',
     custom,

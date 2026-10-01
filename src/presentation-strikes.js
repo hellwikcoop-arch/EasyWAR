@@ -111,6 +111,8 @@ export function buildStrikesSlide(group, options = {}) {
     id: `group:${group.id}`,
     status: 'ready',
     title,
+    heading: group.heading || title,
+    theme: group.id === 'ps' ? 'ps' : group.id === 'rvia' ? 'rvia' : 'dshv',
     thirdTitle: 'Головні факти за даними таблиці',
     strip,
     period: { from: range.from, to: range.to, days: daysIn(range).length, activeDays: new Set(current.map(r => r.date)).size, text: periodText(range) },

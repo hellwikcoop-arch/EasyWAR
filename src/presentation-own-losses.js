@@ -97,7 +97,7 @@ export function buildOwnLossesSlide(own, options = {}) {
 
   const categories = list.map(b => (bucket === 'day' ? chartDay(b.from) : `${shortDate(b.from)}–${shortDate(b.to)}`));
   const charts = [{
-    id: 'own-personnel', title: 'Втрати о/с', bucket, categories,
+    id: 'own-personnel', title: 'Втрати о/с, ДШВ', bucket, categories,
     series: DEFS.filter(d => d.chart).map(d => ({ name: d.chart, values: list.map(b => d.value(inBucket(b))) })),
   }];
   if (causeTotals.length) {
@@ -113,6 +113,8 @@ export function buildOwnLossesSlide(own, options = {}) {
     id: 'own-losses',
     status: 'ready',
     title: custom ? 'Власні втрати · обраний період' : 'Власні втрати · останні 30 діб',
+    heading: custom ? 'Втрати підрозділів ДШВ · обраний період' : 'Втрати підрозділів ДШВ',
+    theme: 'dshv',
     thirdTitle: 'Головні причини за даними таблиці',
     strip,
     period: { from: range.from, to: range.to, days: length, activeDays: new Set(current.map(r => r.date)).size, text: periodText(range) },
