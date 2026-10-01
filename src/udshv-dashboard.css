@@ -204,3 +204,19 @@ html:root:has(body.udshv-open) { background-color: #12091a !important; }
 .ud-state.ok { color: var(--ud-green); }
 .ud-state.bad { color: var(--ud-red); border-color: var(--ud-red); }
 .ud-fresh-hint.bad { color: var(--ud-red); }
+
+/* Презентація */
+.ud-hero-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.ud-present-dialog { max-width: 640px; width: calc(100vw - 32px); max-height: 90vh; overflow: auto; border: 1px solid var(--ud-line, #d0d7de); border-radius: 12px; padding: 20px; }
+.ud-present-dialog fieldset { margin: 12px 0; border: 1px solid var(--ud-line, #d0d7de); border-radius: 8px; }
+.ud-present-dialog .ud-field { display: grid; gap: 4px; }
+.ud-present-dialog .ud-field input[type=text] { padding: 8px; }
+.ud-present-dialog .ud-radio { display: block; margin: 4px 0; }
+.ud-present-dialog .ud-slot { margin: 8px 0; }
+.ud-present-dialog .ud-error { color: #b42318; margin-top: 4px; }
+.ud-present-dialog .ud-muted { color: var(--ud-muted, #667085); }
+.ud-present-dialog .ud-review { border-left: 3px solid #f79009; padding: 6px 10px; margin: 8px 0; }
+.ud-present-dialog .ud-review.error { border-color: #d92d20; }
+.ud-present-dialog .ud-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+.ud-btn.primary { font-weight: 600; }
+.ud-hero > .ud-hero-actions { margin-right: 0; }

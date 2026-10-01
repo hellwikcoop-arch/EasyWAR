@@ -4072,7 +4072,7 @@ async function openUdshv(u8, name) {
 function renderUdshv() {
   const host = $('#view-udshv'); const ud = window.UDSHVDashboard;
   if (!host || !ud || !S.udshv) return;
-  ud.render(host, S.udshv, { canRefresh: true, refresh: () => S.handle ? refreshFromDisk(true) : pickFile() });
+  ud.render(host, S.udshv, { canRefresh: true, refresh: () => S.handle ? refreshFromDisk(true) : pickFile(), readSheets: u8 => C.readAllSheets(u8), toast });
 }
 function leaveUdshv() {
   if (!S.udshv) return;
