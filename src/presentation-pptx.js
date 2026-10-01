@@ -8,7 +8,7 @@ export const THEMES = {
   light: {
     label: 'Світлий мінімалістичний',
     bg: 'FFFFFF', panel: 'F3F4F6', line: 'DDE1E7', text: '111827', muted: '6B7280',
-    accent: '7A1F2B', good: '1F8F5F', bad: 'C2303F',
+    accent: '7A1F2B', stripe: '7A1F2B', good: '1F8F5F', bad: 'C2303F',
     series: ['7A1F2B', 'D98E04', '2F6EA5', 'C9A7AD'],
   },
 };
@@ -19,6 +19,27 @@ const H = 7.5;
 const M = 0.5;
 
 const lines = (text, charsPerLine) => Math.max(1, Math.ceil(String(text).length / charsPerLine));
+
+const ART_SIZE = { soldiers: [640, 616], f16: [760, 317], himars: [760, 372] };
+
+/** Праворуч марунова смуга: єдиний елемент стилю всіх слайдів. */
+function drawStripe(slide, theme) {
+  slide.addShape('rect', { x: W - 0.25, y: 0, w: 0.25, h: H, fill: { color: theme.stripe }, line: { color: theme.stripe, width: 0 } });
+}
+
+/** Коротка акцентна лінія під заголовком слайда. */
+function drawUnderline(slide, theme) {
+  slide.addShape('rect', { x: M, y: 0.3, w: 0.7, h: 0.05, fill: { color: theme.accent }, line: { color: theme.accent, width: 0 } });
+}
+
+/** Вирізана ілюстрація в заданій рамці з збереженням пропорцій, вирівнювання по правому краю. */
+function drawArt(slide, art, key, box) {
+  if (!art || !art[key]) return;
+  const [w, h] = ART_SIZE[key];
+  const scale = Math.min(box.w / w, box.h / h);
+  const width = w * scale, height = h * scale;
+  slide.addImage({ data: art[key], x: box.x + (box.align === 'left' ? 0 : box.w - width), y: box.y + (box.valign === 'top' ? 0 : box.h - height), w: width, h: height });
+}
 
 function footer(slide, theme, deck, number, left) {
   slide.addText(left, { x: M, y: 7.08, w: 9, h: 0.25, fontFace: FONT, fontSize: 9, color: theme.muted, margin: 0 });
@@ -111,10 +132,14 @@ function drawCharts(slide, theme, pptx, charts) {
   });
 }
 
-function periodSlide(pptx, theme, deck, data, number) {
+function periodSlide(pptx, theme, deck, data, number, art) {
   const slide = pptx.addSlide();
   slide.background = { color: theme.bg };
-  slide.addText(data.title, { x: M, y: 0.35, w: 8.3, h: 0.6, fontFace: FONT, fontSize: 28, bold: true, color: theme.text, margin: 0 });
+  drawStripe(slide, theme);
+  drawUnderline(slide, theme);
+  const emblem = { 'group:ps': 'f16', 'group:rvia': 'himars' }[data.id];
+  if (emblem) drawArt(slide, art, emblem, { x: 6.2, y: 0.2, w: 2.3, h: 0.72, valign: 'top' });
+  slide.addText(data.title, { x: M, y: 0.4, w: 8.3, h: 0.6, fontFace: FONT, fontSize: 28, bold: true, color: theme.text, margin: 0 });
   slide.addText(data.period.text, { x: W - M - 4.2, y: 0.4, w: 4.2, h: 0.35, fontFace: FONT, fontSize: 16, color: theme.text, align: 'right', margin: 0 });
   const compare = data.previous ? (data.previous.complete ? `Порівняння з ${data.previous.text}` : `Порівняння з ${data.previous.text} неповне`) : 'Без порівняння з попереднім відрізком';
   slide.addText(compare, { x: W - M - 6, y: 0.78, w: 6, h: 0.28, fontFace: FONT, fontSize: 11, color: theme.muted, align: 'right', margin: 0 });
@@ -130,23 +155,31 @@ function periodSlide(pptx, theme, deck, data, number) {
 function reservedSlide(pptx, theme, deck, data, number) {
   const slide = pptx.addSlide();
   slide.background = { color: theme.bg };
-  slide.addText(data.title, { x: M, y: 0.35, w: 8.3, h: 0.6, fontFace: FONT, fontSize: 28, bold: true, color: theme.text, margin: 0 });
+  drawStripe(slide, theme);
+  drawUnderline(slide, theme);
+  slide.addText(data.title, { x: M, y: 0.4, w: 8.3, h: 0.6, fontFace: FONT, fontSize: 28, bold: true, color: theme.text, margin: 0 });
   slide.addShape('roundRect', { x: M, y: 1.4, w: W - 2 * M, h: 5.2, rectRadius: 0.08, fill: { color: theme.panel }, line: { color: theme.line, width: 1, dashType: 'dash' } });
   slide.addText(data.message, { x: M + 0.5, y: 1.4, w: W - 2 * M - 1, h: 5.2, fontFace: FONT, fontSize: 20, color: theme.muted, align: 'center', valign: 'middle', margin: 0 });
   footer(slide, theme, deck, number, `${deck.slides[0].owner || 'EasyWAR'} · ${deck.focusLabel}`);
 }
 
-function titleSlide(pptx, theme, deck, data) {
+function titleSlide(pptx, theme, deck, data, art) {
   const slide = pptx.addSlide();
   slide.background = { color: theme.bg };
-  slide.addShape('rect', { x: 0, y: 0, w: 0.25, h: H, fill: { color: theme.accent }, line: { color: theme.accent, width: 0 } });
-  slide.addText('АНАЛІТИКА', { x: 0.9, y: 1.1, w: 8, h: 0.4, fontFace: FONT, fontSize: 16, bold: true, color: theme.accent, charSpacing: 6, margin: 0 });
-  slide.addText(data.owner || 'Назву власника не вказано', { x: 0.9, y: 1.6, w: 11.5, h: 1.0, fontFace: FONT, fontSize: 40, bold: true, color: theme.text, valign: 'top', margin: 0, fit: 'shrink' });
-  slide.addText(deck.focusLabel, { x: 0.9, y: 2.6, w: 8, h: 0.4, fontFace: FONT, fontSize: 16, color: theme.muted, margin: 0 });
+  // Праворуч марунова панель із ілюстраціями; зліва текст на білому тлі.
+  const panelX = 8.75;
+  slide.addShape('rect', { x: panelX, y: 0, w: W - panelX, h: H, fill: { color: theme.stripe }, line: { color: theme.stripe, width: 0 } });
+  drawArt(slide, art, 'f16', { x: panelX + 0.2, y: 0.55, w: W - panelX - 0.4, h: 1.7 });
+  drawArt(slide, art, 'himars', { x: panelX + 0.2, y: 2.55, w: W - panelX - 0.4, h: 1.9 });
+  drawArt(slide, art, 'soldiers', { x: panelX + 0.2, y: 4.55, w: W - panelX - 0.4, h: 2.95 });
+  slide.addShape('rect', { x: 0.9, y: 1.0, w: 0.9, h: 0.06, fill: { color: theme.accent }, line: { color: theme.accent, width: 0 } });
+  slide.addText('АНАЛІТИКА', { x: 0.9, y: 1.2, w: 7, h: 0.4, fontFace: FONT, fontSize: 16, bold: true, color: theme.accent, charSpacing: 6, margin: 0 });
+  slide.addText(data.owner || 'Назву власника не вказано', { x: 0.9, y: 1.7, w: 7.4, h: 1.5, fontFace: FONT, fontSize: 40, bold: true, color: theme.text, valign: 'top', margin: 0, fit: 'shrink' });
+  slide.addText(deck.focusLabel, { x: 0.9, y: 3.3, w: 7, h: 0.4, fontFace: FONT, fontSize: 16, color: theme.muted, margin: 0 });
   // Вміст титулу (крім назви й фокусу) узгоджується окремо.
-  slide.addText(`Дані: ${data.dataRange.text}`, { x: 0.9, y: 3.3, w: 11, h: 0.35, fontFace: FONT, fontSize: 14, color: theme.muted, margin: 0 });
+  slide.addText(`Дані: ${data.dataRange.text}`, { x: 0.9, y: 3.9, w: 7.4, h: 0.35, fontFace: FONT, fontSize: 14, color: theme.muted, margin: 0 });
   const parts = [data.generatedOn ? `Сформовано ${data.generatedOn}` : '', `Остання дата з даними ${data.anchor.split('-').reverse().join('.')}`, data.marking].filter(Boolean);
-  slide.addText(parts.join(' · '), { x: 0.9, y: 6.6, w: 11, h: 0.3, fontFace: FONT, fontSize: 11, color: theme.muted, margin: 0 });
+  slide.addText(parts.join(' · '), { x: 0.9, y: 6.6, w: 7.4, h: 0.3, fontFace: FONT, fontSize: 11, color: theme.muted, margin: 0 });
 }
 
 /** Будує об'єкт PptxGenJS за моделлю колоди. theme: 'light' (єдина затверджена). */
@@ -156,8 +189,8 @@ export function renderDeck(deck, options = {}) {
   pptx.layout = 'LAYOUT_WIDE';
   pptx.title = `Аналітика: ${deck.slides[0].owner || 'EasyWAR'}`;
   pptx.author = 'EasyWAR';
-  titleSlide(pptx, theme, deck, deck.slides[0]);
-  deck.slides.slice(1).forEach((data, i) => (data.status === 'no_source' ? reservedSlide : periodSlide)(pptx, theme, deck, data, i + 2));
+  titleSlide(pptx, theme, deck, deck.slides[0], options.art);
+  deck.slides.slice(1).forEach((data, i) => (data.status === 'no_source' ? reservedSlide(pptx, theme, deck, data, i + 2) : periodSlide(pptx, theme, deck, data, i + 2, options.art)));
   return pptx;
 }
 

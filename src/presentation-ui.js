@@ -130,7 +130,8 @@ export function openPresentationDialog(workbook, options = {}) {
       const out = settingsOut();
       const { deck } = composeDeck(workbook, s.files, out.decisions && s.step === 'review' ? out : { ...out, decisions: undefined });
       const { renderDeckToBytes } = await import('./presentation-pptx.js');
-      const saved = await saveBytes(await renderDeckToBytes(deck), presentationFileName(out.owner, out.generatedOn));
+      const { loadArt } = await import('./presentation-art.js');
+      const saved = await saveBytes(await renderDeckToBytes(deck, { art: await loadArt() }), presentationFileName(out.owner, out.generatedOn));
       if (saved) { s.message = ''; close(); options.toast?.(`Презентацію збережено: ${saved}`); return; }
     } catch (e) { s.message = `Не вдалося створити презентацію: ${e.message || e}`; }
     s.busy = false; draw();
