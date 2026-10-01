@@ -43,7 +43,8 @@ export function openPresentationDialog(workbook, options = {}) {
   const dialog = h('dialog', { class: 'ud-present-dialog' });
   document.body.append(dialog);
   const close = () => { dialog.close(); dialog.remove(); };
-  dialog.addEventListener('cancel', () => dialog.remove());
+  // Подія cancel спливає і від поля вибору файлу — реагуємо лише на власне закриття вікна.
+  dialog.addEventListener('cancel', e => { if (e.target === dialog) dialog.remove(); });
 
   async function pick(slot, file) {
     s.errors[slot] = '';
@@ -79,7 +80,7 @@ export function openPresentationDialog(workbook, options = {}) {
     h('fieldset', {}, h('legend', { text: 'Підрозділи в аналізі (зніміть позначку, щоб виключити)' }),
       fresh.rows.map(row => h('label', { class: 'ud-radio' },
         h('input', { type: 'checkbox', checked: !s.excluded.has(row.unit), onchange: e => { if (e.target.checked) s.excluded.delete(row.unit); else s.excluded.add(row.unit); } }),
-        ` ${row.unit}`, row.stale ? h('em', { class: 'ud-muted', text: ` — без свіжих даних (остання дата ${row.lastDate || '—'}), пропонується виключити` }) : null))),
+        ` ${row.unit}`, row.stale ? h('em', { class: 'ud-muted', text: ` — без свіжих даних (остання дата ${row.lastDate ? row.lastDate.split('-').reverse().join('.') : '—'}), пропонується виключити` }) : null))),
     h('div', { class: 'ud-actions' },
       h('button', { type: 'button', class: 'ud-btn', text: 'Скасувати', onclick: close }),
       h('button', { type: 'button', class: 'ud-btn primary', text: 'Далі', onclick: next })),
