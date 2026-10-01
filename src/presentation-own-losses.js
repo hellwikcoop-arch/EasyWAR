@@ -3,7 +3,7 @@
    фактичний розподіл «Дія противника» з таблиці, а не як припущення. */
 
 import { groupTotals, inRange, lastOwnDate, sumGroup, sumMetric } from './own-losses-core.js';
-import { NBSP, buckets, daysIn, dayNumber, formatNumber, formatPercent, isoFromDay, longDate, peakOf, periodText, rollingRange, shortDate, signed, tileFor } from './presentation-format.js';
+import { NBSP, buckets, daysIn, dayNumber, formatNumber, formatPercent, isoFromDay, longDate, peakOf, periodText, rollingRange, chartDay, shortDate, signed, tileFor } from './presentation-format.js';
 
 const DEFS = [
   { key: 'k200', name: 'Наші 200', value: rs => sumMetric(rs, 'personnel|200'), chart: '200' },
@@ -95,7 +95,7 @@ export function buildOwnLossesSlide(own, options = {}) {
 
   const top = list => list.sort((a, b) => b.severity - a.severity).slice(0, config.maxItems).map(({ text }) => ({ text }));
 
-  const categories = list.map(b => (bucket === 'day' ? shortDate(b.from) : `${shortDate(b.from)}–${shortDate(b.to)}`));
+  const categories = list.map(b => (bucket === 'day' ? chartDay(b.from) : `${shortDate(b.from)}–${shortDate(b.to)}`));
   const charts = [{
     id: 'own-personnel', title: 'Втрати о/с', bucket, categories,
     series: DEFS.filter(d => d.chart).map(d => ({ name: d.chart, values: list.map(b => d.value(inBucket(b))) })),

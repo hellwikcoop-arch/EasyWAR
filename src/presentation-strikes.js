@@ -4,7 +4,7 @@
 
 import { inRange } from './udshv-dashboard-core.js';
 import { firstStrikeDate, lastStrikeDate, strikeStats, tally } from './strikes-core.js';
-import { NBSP, buckets, dayNumber, daysIn, formatNumber, formatPercent, isoFromDay, longDate, peakOf, periodText, rollingRange, shortDate, signed, tileFor } from './presentation-format.js';
+import { NBSP, buckets, dayNumber, daysIn, formatNumber, formatPercent, isoFromDay, longDate, peakOf, periodText, rollingRange, chartDay, shortDate, signed, tileFor } from './presentation-format.js';
 
 const share = (part, whole) => `${formatNumber(part / whole * 100)}${NBSP}%`;
 const listText = (items, limit = 3) => items.slice(0, limit).map(i => `${i.name} — ${formatNumber(i.total)}`).join(', ');
@@ -96,7 +96,7 @@ export function buildStrikesSlide(group, options = {}) {
   facts.push(munitions.length ? `Боєприпаси (шт.): ${listText(munitions)}.` : 'Боєприпаси за період не вказано.');
 
   const top = items => items.sort((a, b) => b.severity - a.severity).slice(0, config.maxItems).map(({ text }) => ({ text }));
-  const categories = list.map(b => (bucket === 'day' ? shortDate(b.from) : `${shortDate(b.from)}–${shortDate(b.to)}`));
+  const categories = list.map(b => (bucket === 'day' ? chartDay(b.from) : `${shortDate(b.from)}–${shortDate(b.to)}`));
   const count = (rs, result) => rs.filter(r => !r.aborted && r.result === result).length;
   const charts = [{
     id: 'strike-results', title: 'Завдання за результатом', bucket, categories, grouping: 'stacked',

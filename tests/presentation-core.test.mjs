@@ -348,3 +348,11 @@ test('excludeUnits: виключений підрозділ не впливає 
   assert.ok(JSON.stringify(full.slides[1]) !== JSON.stringify(cut.slides[1]));
   assert.equal(wb.units.length, 2, 'вхідна книга не змінюється');
 });
+
+test('підписи діб на осі не схожі на числа (Canva читає «22.08» як 22,1)', () => {
+  const wb = makeWorkbook(() => ({ 'personnel|200': 1 }));
+  const deck = buildDeck(wb, {});
+  const labels = deck.slides[1].charts.flatMap(c => c.categories);
+  assert.ok(labels.length > 0);
+  for (const label of labels) assert.ok(Number.isNaN(Number(label.replace(',', '.'))), label);
+});

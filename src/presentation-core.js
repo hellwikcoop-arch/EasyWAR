@@ -16,7 +16,7 @@ import {
 
 import { buildStrikesSlide } from './presentation-strikes.js';
 import { buildOwnLossesSlide, ownLossesInRange } from './presentation-own-losses.js';
-import { NBSP, daysAcc, dayNumber, peakOf, tileFor as buildTile, daysWord, formatNumber, formatPercent, isoFromDay, longDate, periodText, rollingRange, shortDate, signed } from './presentation-format.js';
+import { NBSP, daysAcc, dayNumber, peakOf, tileFor as buildTile, daysWord, formatNumber, formatPercent, isoFromDay, longDate, periodText, rollingRange, chartDay, shortDate, signed } from './presentation-format.js';
 
 export { daysWord, formatNumber, formatPercent, rollingRange };
 
@@ -205,7 +205,7 @@ function unitTotals(records, valueFor) {
 
 function chartFor(model, kpis) {
   const pick = (...keys) => model.personnelSeries.map((_, i) => keys.reduce((s, key) => s + kpis.find(k => k.key === key).series[i].value, 0));
-  const categories = model.personnelSeries.map(p => (model.bucket === 'day' ? shortDate(p.from) : `${shortDate(p.from)}–${shortDate(p.to)}`));
+  const categories = model.personnelSeries.map(p => (model.bucket === 'day' ? chartDay(p.from) : `${shortDate(p.from)}–${shortDate(p.to)}`));
   // Окремі діаграми: масштаби втрат о/с і техніки з об'єктами різні, на одній осі вони перекривали б одне одного.
   return [
     {

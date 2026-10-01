@@ -5,6 +5,9 @@ export const dayNumber = iso => {
   return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) / 864e5 : NaN;
 };
 export const isoFromDay = n => new Date(n * 864e5).toISOString().slice(0, 10);
+const MONTHS_SHORT = ['січ', 'лют', 'бер', 'кві', 'тра', 'чер', 'лип', 'сер', 'вер', 'жов', 'лис', 'гру'];
+/** Підпис доби для осі діаграм: «22 сер». Запис «22.08» Canva та PowerPoint сприймають як число (22,1). */
+export const chartDay = iso => { const m = /^\d{4}-(\d{2})-(\d{2})$/.exec(iso || ''); return m ? `${m[2]} ${MONTHS_SHORT[Number(m[1]) - 1] || m[1]}` : ''; };
 export const shortDate = iso => { const m = /^\d{4}-(\d{2})-(\d{2})$/.exec(iso || ''); return m ? `${m[2]}.${m[1]}` : ''; };
 export const longDate = iso => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || ''); return m ? `${m[3]}.${m[2]}.${m[1]}` : ''; };
 export const periodText = range => `${longDate(range.from)} – ${longDate(range.to)}`;
