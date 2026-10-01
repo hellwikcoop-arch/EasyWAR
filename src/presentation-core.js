@@ -449,7 +449,12 @@ function windowSlide(workbook, period, units, anchor, config, all, prune = false
 }
 
 /** Модель колоди: title + слайди періодів. Однакові вхідні дані дають однаковий результат. */
-export function buildDeck(workbook, options = {}) {
+export function buildDeck(sourceWorkbook, options = {}) {
+  // Виключені підрозділи прибираються з аналізу повністю: слайди, порівняння, пік, якір і діапазон дат.
+  const excluded = new Set(options.excludeUnits || []);
+  const workbook = excluded.size
+    ? { ...sourceWorkbook, units: sourceWorkbook.units.filter(u => !excluded.has(u)), records: sourceWorkbook.records.filter(r => !excluded.has(r.unit)) }
+    : sourceWorkbook;
   const config = { ...DEFAULT_CONFIG, ...(options.config || {}), focus: options.focus || (options.config && options.config.focus) || DEFAULT_CONFIG.focus };
   const units = options.units || [];
   const anchor = options.anchor || lastActiveDate(workbook);
@@ -493,6 +498,7 @@ export function buildDeck(workbook, options = {}) {
       marking: options.marking || '',
       source: workbook.sourceName || '',
       units: units.length ? units : workbook.units,
+      excludedUnits: [...excluded],
       dataRange: { from: all.from, to: all.to, text: periodText(all), days: titleModel.days, activeDays: titleModel.activeDays },
       anchor,
       generatedOn: options.generatedOn || '',

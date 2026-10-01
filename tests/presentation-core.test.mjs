@@ -338,3 +338,13 @@ test('number formatting follows Ukrainian conventions', () => {
   assert.equal(formatPercent(-12.5), '−12,5 %');
   assert.equal(formatPercent(null), '—');
 });
+
+test('excludeUnits: виключений підрозділ не впливає на плитки, діапазон і склад титулу', () => {
+  const wb = makeWorkbook((n, unit) => ({ 'personnel|200': unit === 'Підрозділ А' ? 1 : 100 }));
+  const full = buildDeck(wb, { owner: 'Т' });
+  const cut = buildDeck(wb, { owner: 'Т', excludeUnits: ['Підрозділ Б'] });
+  assert.deepEqual(cut.slides[0].units, ['Підрозділ А']);
+  assert.deepEqual(cut.slides[0].excludedUnits, ['Підрозділ Б']);
+  assert.ok(JSON.stringify(full.slides[1]) !== JSON.stringify(cut.slides[1]));
+  assert.equal(wb.units.length, 2, 'вхідна книга не змінюється');
+});
