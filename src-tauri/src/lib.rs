@@ -326,16 +326,31 @@ async fn create_profile_base_table(
     Ok(Some(CreatedBaseTable { state, path }))
 }
 
+/// Результат збереження файлу для телефона.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PhoneExportResult {
+    /// Куди збережено файл.
+    path: String,
+    /// Назва вбудованої таблиці, якщо вона є у файлі.
+    table: Option<String>,
+}
+
 /// Зберігає автономний HTML-файл дашборда для телефона або планшета. Файл уже зібраний
 /// разом із застосунком (`script/build_standalone.mjs`), тут його лише віддають зі
-/// вбудованих ресурсів у місце, яке обрав користувач. Повертає шлях або `None`, якщо
-/// вікно вибору закрито.
+/// вбудованих ресурсів у місце, яке обрав користувач. З `with_table` у файл кладеться
+/// копія таблиці, прив'язаної до плитки активного профілю (профіль із паролем має бути
+/// розблокований); без нього даних у файлі немає. Повертає `None`, якщо вікно вибору
+/// закрито.
 #[tauri::command]
 async fn export_phone_file(
     app: tauri::AppHandle,
+    profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
     dashboard: PhoneDashboard,
-) -> Result<Option<String>, String> {
-    let bytes = app
+    with_table: Option<bool>,
+) -> Result<Option<PhoneExportResult>, String> {
+    let mut bytes = app
         .asset_resolver()
         .get(dashboard.asset_path().to_string())
         .map(|asset| asset.bytes)
@@ -344,11 +359,41 @@ async fn export_phone_file(
             "Файл для телефона є лише у зібраній версії застосунку (у режимі розробки його немає)."
                 .to_string()
         })?;
+    let now = chrono::Local::now();
+    let mut default_name = dashboard.file_name().to_string();
+    let mut table_name = None;
+    if with_table.unwrap_or(false) {
+        // Таблицю читаємо до вікна збереження: немає прив'язки або профіль заблоковано —
+        // користувач одразу бачить причину, а не порожній файл.
+        let profile_id = profiles
+            .list()
+            .await
+            .map_err(|error| error.to_string())?
+            .active_profile_id
+            .ok_or_else(|| "Оберіть профіль, до якого прив'язано таблицю.".to_string())?;
+        let path =
+            bound_database_path(&profiles, &session, &profile_id, dashboard.branch()).await?;
+        let name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "table.xlsx".to_string());
+        let xlsx = tauri::async_runtime::spawn_blocking(move || read_selected_xlsx(&path))
+            .await
+            .map_err(|error| error.to_string())??;
+        bytes = phone_export::embed_table(
+            &bytes,
+            &name,
+            &xlsx,
+            &now.to_rfc3339_opts(SecondsFormat::Secs, false),
+        )?;
+        default_name = dashboard.file_name_with_table(&now.format("%Y-%m-%d").to_string());
+        table_name = Some(name);
+    }
     let selected = tauri::async_runtime::spawn_blocking(move || {
         app.dialog()
             .file()
             .set_title(dashboard.dialog_title())
-            .set_file_name(dashboard.file_name())
+            .set_file_name(default_name)
             .add_filter("Сторінка HTML", &["html"])
             .blocking_save_file()
     })
@@ -364,7 +409,10 @@ async fn export_phone_file(
         .await
         .map_err(|error| error.to_string())?
         .map_err(|error| format!("Не вдалося зберегти файл: {error}"))?;
-    Ok(Some(path.to_string_lossy().into_owned()))
+    Ok(Some(PhoneExportResult {
+        path: path.to_string_lossy().into_owned(),
+        table: table_name,
+    }))
 }
 
 async fn bound_database_path(

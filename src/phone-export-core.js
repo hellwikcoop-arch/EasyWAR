@@ -26,13 +26,22 @@ export function isStandaloneHtml(head) {
   return String(head || '').slice(0, MARKER_SCAN_LIMIT).includes(STANDALONE_MARKER);
 }
 
-export function phoneExportSavedMessage(command, path) {
+export function phoneExportSavedMessage(command, path, table) {
   const { label } = phoneFile(command);
+  if (table) {
+    return {
+      kind: 'ok',
+      text: `Файл ${label} із таблицею «${table}» збережено: ${path}. Таблиця лежить усередині файлу: надсилайте його лише захищеним каналом і не публікуйте. На телефоні або планшеті відкрийте файл у Chrome — дані з'являться одразу.`,
+    };
+  }
   return {
     kind: 'ok',
     text: `Файл ${label} збережено: ${path}. Надішліть його на телефон або планшет і відкрийте в Chrome; таблицю .xlsx оберіть кнопкою «Відкрити таблицю…».`,
   };
 }
+
+// Попередження, коли користувач вмикає «Вбудувати таблицю у файл».
+export const EMBED_TABLE_WARNING = 'Копія таблиці буде всередині файлу. Файл на телефоні показує знімок на день збереження; після змін у таблиці збережіть його заново.';
 
 export function phoneExportDownloadedMessage(command) {
   const { label, fileName } = phoneFile(command);

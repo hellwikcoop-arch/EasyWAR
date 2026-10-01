@@ -21,6 +21,11 @@ export const PAGES = [
   { page: 'rocket', command: 'dshv', file: 'EasyWAR-UDSHV.html' },
 ];
 
+// Порожній слот для вбудованої таблиці й сценарій, що її відкриває. Застосунок заповнює слот
+// на вимогу (src-tauri/src/phone_export.rs); текст слота має збігатися з EMBED_PLACEHOLDER.
+export const EMBED_SLOT = '<script type="application/x-easywar-table" id="easywar-embedded-table"></script>';
+const embedBootstrap = readFileSync(new URL('./standalone-embedded-table.js', import.meta.url), 'utf8');
+
 const scriptSafe = (code) => code.replace(/<\/(script)/gi, '<\\/$1').replace(/<!--/g, '<\\!--');
 const styleSafe = (css) => css.replace(/<\/(style)/gi, '<\\/$1');
 
@@ -45,6 +50,9 @@ export function inlinePage(html, files, publicText, command) {
   const probe = `new URLSearchParams(location.search).get('command') === '${command}'`;
   if (!out.includes(probe)) throw new Error(`Command-mode probe for ${command} not found`);
   out = out.replace(probe, 'true');
+  const close = out.lastIndexOf('</body>');
+  if (close < 0) throw new Error('No </body> to place the embedded-table slot before');
+  out = `${out.slice(0, close)}${EMBED_SLOT}<script>${scriptSafe(embedBootstrap)}</script>\n${out.slice(close)}`;
   return out;
 }
 

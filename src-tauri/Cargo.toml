@@ -14,6 +14,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+base64 = "0.22"
 calamine = { version = "=0.26.1", features = ["dates"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 dirs = "6"

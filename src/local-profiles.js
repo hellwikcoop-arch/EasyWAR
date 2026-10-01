@@ -234,6 +234,12 @@ function initializeLocalProfiles() {
       const bind = tile.querySelector('[data-act="bind"]');
       bind.hidden = false;
       bind.textContent = path ? 'Змінити таблицю…' : 'Прив’язати таблицю…';
+      // «Файл для телефона» може взяти цю таблицю з собою лише коли вона прив'язана й профіль відкрито.
+      const embed = tile.querySelector('[data-role="embed"]');
+      if (embed) {
+        embed.disabled = !path;
+        if (!path) embed.checked = false;
+      }
     }
   }
 

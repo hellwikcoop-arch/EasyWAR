@@ -585,6 +585,10 @@ body[data-active-branch="air"] #branch-controls,body[data-active-branch="pvk"] #
 .ct-actions button[hidden]{display:none}
 .ct-actions button.ct-phone{flex:0 1 auto}
 .ct-actions button:disabled{opacity:.6;cursor:progress}
+.ct-embed{display:flex;align-items:flex-start;gap:7px;color:var(--muted);font-size:12px;line-height:1.35;cursor:pointer}
+.ct-embed input{flex:none;margin:1px 0 0;accent-color:var(--ct-accent)}
+.ct-embed:has(input:disabled){opacity:.55;cursor:default}
+.ct-embed input:checked+span{color:var(--text,#e6eef7)}
 .ct-note{margin:0;color:var(--muted);font-size:12px;line-height:1.4;overflow-wrap:anywhere}
 .ct-note[data-kind="ok"]{color:var(--text,#e6eef7)}
 .ct-note[data-kind="error"]{color:#ff8a78}
@@ -616,6 +620,7 @@ body[data-active-branch="air"] #branch-controls,body[data-active-branch="pvk"] #
 <div class="ct-head"><span class="ct-mark">ПВК</span><h4 class="ct-title">Повітряне командування</h4></div>
 <p class="ct-table" data-role="table">Таблицю не прив’язано</p>
 <div class="ct-actions"><button type="button" class="ct-open" data-act="open">Відкрити дашборд</button><button type="button" class="ct-bind" data-act="bind" hidden>Прив’язати таблицю…</button><button type="button" class="ct-phone" data-act="phone" title="Зберегти один HTML-файл, який відкривається на телефоні або планшеті без інтернету">Файл для телефона</button></div>
+<label class="ct-embed" title="Копія таблиці, прив’язаної до цієї плитки, потрапить усередину файлу, і на телефоні він відкриється вже з даними"><input type="checkbox" data-role="embed" disabled><span>Вбудувати таблицю у файл</span></label>
 <p class="ct-note" data-role="note" role="status" aria-live="polite" hidden></p>
 </section>
 <button class="branch-card" data-branch="air">
@@ -628,6 +633,7 @@ body[data-active-branch="air"] #branch-controls,body[data-active-branch="pvk"] #
 <div class="ct-head"><span class="ct-mark">УДШВ</span><h4 class="ct-title">Командування ДШВ</h4></div>
 <p class="ct-table" data-role="table">Таблицю не прив’язано</p>
 <div class="ct-actions"><button type="button" class="ct-open" data-act="open">Відкрити дашборд</button><button type="button" class="ct-bind" data-act="bind" hidden>Прив’язати таблицю…</button><button type="button" class="ct-phone" data-act="phone" title="Зберегти один HTML-файл, який відкривається на телефоні або планшеті без інтернету">Файл для телефона</button></div>
+<label class="ct-embed" title="Копія таблиці, прив’язаної до цієї плитки, потрапить усередину файлу, і на телефоні він відкриється вже з даними"><input type="checkbox" data-role="embed" disabled><span>Вбудувати таблицю у файл</span></label>
 <p class="ct-note" data-role="note" role="status" aria-live="polite" hidden></p>
 </section>
 <button class="branch-card" data-branch="rocket">

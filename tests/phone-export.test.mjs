@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {
+  EMBED_TABLE_WARNING,
   PHONE_FILES,
   STANDALONE_MARKER,
   isStandaloneHtml,
@@ -61,4 +62,28 @@ test('launcher wires the button on both command tiles and the desktop build ship
   const lib = await read('src-tauri/src/lib.rs');
   assert.match(lib, /async fn export_phone_file\(/);
   assert.match(lib, /^\s+export_phone_file,$/m);
+});
+
+test('a file with an embedded table says so, warns about the data and stays a snapshot', () => {
+  const saved = phoneExportSavedMessage('dshv', '/home/user/EasyWAR-UDSHV-2026-10-01.html', 'УДШВ.xlsx');
+  assert.equal(saved.kind, 'ok');
+  assert.match(saved.text, /УДШВ із таблицею «УДШВ\.xlsx» збережено: \/home\/user\/EasyWAR-UDSHV-2026-10-01\.html/);
+  assert.match(saved.text, /захищеним каналом/);
+  assert.doesNotMatch(saved.text, /Відкрити таблицю/, 'the table is already inside; no need to pick it on the phone');
+  assert.match(EMBED_TABLE_WARNING, /знімок на день збереження/);
+});
+
+test('the embed checkbox sits on both tiles and is enabled only while a table is bound', async () => {
+  const html = await read('src/index.html');
+  assert.equal((html.match(/data-role="embed" disabled/g) || []).length, 2, 'off and disabled until a table is bound');
+  assert.doesNotMatch(html, /data-role="embed"[^>]*checked/, 'embedding data is never the default');
+  const profiles = await read('src/local-profiles.js');
+  assert.match(profiles, /embed\.disabled = !path;/);
+  assert.match(profiles, /if \(!path\) embed\.checked = false;/);
+  const script = await read('src/phone-export.js');
+  assert.match(script, /invoke\('export_phone_file', \{ dashboard: command, withTable \}\)/);
+  assert.match(script, /embed\.checked && !embed\.disabled/);
+  const rust = await read('src-tauri/src/lib.rs');
+  assert.match(rust, /with_table: Option<bool>/);
+  assert.match(rust, /\.set_file_name\(default_name\)/);
 });

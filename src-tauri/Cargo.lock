@@ -911,6 +911,7 @@ name = "easywar"
 version = "0.9.6"
 dependencies = [
  "argon2",
+ "base64 0.22.1",
  "block2",
  "calamine",
  "chrono",
