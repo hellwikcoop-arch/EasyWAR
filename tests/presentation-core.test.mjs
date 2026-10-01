@@ -82,9 +82,9 @@ test('reports a change with both numbers and a hypothesis line', () => {
   const line = week.changes.find(c => c.text.startsWith('Противник: знищено о/с (200)'));
   assert.ok(line, JSON.stringify(week.changes));
   assert.equal(line.text, 'Противник: знищено о/с (200): 35 проти 21 (+66,7 %).');
-  assert.ok(week.hypotheses.length >= 1);
-  assert.ok(week.hypotheses.every(h => !('flag' in h) && !/гіпотез/i.test(h.text)));
-  assert.ok(week.hypotheses[0].text.startsWith('Противник: знищено о/с (200): '));
+  assert.ok(week.reasons.length >= 1);
+  assert.ok(week.reasons.every(h => !('flag' in h) && !/гіпотез/i.test(h.text)));
+  assert.ok(week.reasons[0].text.startsWith('Противник: знищено о/с (200): '));
   const tile = week.tiles.find(t => t.key === 'kia');
   assert.equal(tile.deltaText, '+66,7 %');
 });
@@ -119,7 +119,7 @@ test('incomplete previous window is reported instead of compared', () => {
   assert.equal(custom.previous.covered, 0 + 0);
   assert.ok(custom.attention.some(a => /Попередній відрізок/.test(a.text)));
   assert.equal(custom.tiles[0].deltaPercent, null);
-  assert.ok(custom.hypotheses.some(h => /неповне/.test(h.text)));
+  assert.ok(custom.reasons.some(h => /неповне/.test(h.text)));
   assert.deepEqual(deck.slides.map(s => s.id), ['title', 'custom']);
 });
 
@@ -188,7 +188,7 @@ test('every slide block is non-empty text and the hypothesis catalog is well for
   const deck = buildDeck(makeWorkbook(flat));
   for (const slide of deck.slides.slice(1)) {
     for (const item of [...slide.changes, ...slide.attention, ...slide.hypotheses]) assert.ok(item.text.trim().length > 0);
-    assert.ok(slide.changes.length <= 3 && slide.attention.length <= 3 && slide.hypotheses.length <= 3);
+    assert.ok(slide.changes.length <= 3 && slide.attention.length <= 3 && slide.hypotheses.length <= 4);
   }
   for (const h of HYPOTHESES) assert.ok(h.signal && h.direction && h.domain && h.text);
 });
@@ -254,7 +254,7 @@ test('efficiency is ammo per affected unit and only compares a group with itself
   assert.equal(affected.total, 21);
   const line = week.changes[0].text;
   assert.equal(line, 'БК на одиницю ураженого: 20 проти 10 (+100 %, гірше; уражено 21 проти 21).');
-  assert.ok(week.hypotheses.some(h => h.text.startsWith('БК на одиницю ураженого: тип боєприпасів не відповідав цілям')));
+  assert.ok(week.reasons.some(h => h.text.startsWith('БК на одиницю ураженого: тип боєприпасів не відповідав цілям')));
 });
 
 test('efficiency is empty when nothing was affected', () => {
@@ -355,4 +355,18 @@ test('підписи діб на осі не схожі на числа (Canva �
   const labels = deck.slides[1].charts.flatMap(c => c.categories);
   assert.ok(labels.length > 0);
   for (const label of labels) assert.ok(Number.isNaN(Number(label.replace(',', '.'))), label);
+});
+
+test('заключні блоки: тенденція тижня, висновок місяця, узагальнення періоду', () => {
+  const wb = makeWorkbook((n, unit) => ({ 'personnel|200': n > LAST - 7 ? 6 : 2, 'destroyed|танк': 1, 'ammo|152': 10 }));
+  const deck = buildDeck(wb);
+  const by = id => deck.slides.find(s => s.id === id);
+  assert.equal(by('week').thirdTitle, 'Тенденція: тиждень до місяця');
+  assert.ok(by('week').hypotheses.some(h => /▲ вгору|▼ вниз|без суттєвих/.test(h.text)));
+  assert.ok(by('week').hypotheses.some(h => /^▲ /.test(h.text) && /о\/с \(200\)/.test(h.text)), JSON.stringify(by('week').hypotheses));
+  assert.equal(by('month').thirdTitle, 'Висновок за місяць');
+  assert.ok(by('month').hypotheses.length >= 1);
+  assert.equal(by('all').thirdTitle, 'Узагальнення за весь період');
+  assert.ok(by('all').hypotheses[0].text.startsWith('За '));
+  for (const id of ['week', 'month', 'all']) assert.ok(!by(id).hypotheses.some(h => /погода|гіпотез|можливі причини/i.test(h.text)));
 });

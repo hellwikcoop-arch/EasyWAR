@@ -57,7 +57,7 @@ test('tile numbers and the three text blocks reach the slide', async () => {
   const week = deck.slides.find(s => s.id === 'week');
   for (const tile of week.tiles) { assert.ok(texts[1].includes(tile.name.replace(/&/g, '&amp;')), tile.name); }
   assert.ok(texts[1].includes(week.tiles[0].totalText.replace(/ /g, ' ')));
-  for (const heading of ['Що змінилось', 'На що звернути увагу', 'Можливі причини']) assert.ok(texts[1].includes(heading), heading);
+  for (const heading of ['Що змінилось', 'На що звернути увагу', 'Тенденція: тиждень до місяця']) assert.ok(texts[1].includes(heading), heading);
   assert.ok(texts[0].includes('Ефективність'));
 });
 

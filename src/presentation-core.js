@@ -16,6 +16,7 @@ import {
 
 import { buildStrikesSlide } from './presentation-strikes.js';
 import { buildOwnLossesSlide, ownLossesInRange } from './presentation-own-losses.js';
+import { periodVerdict, weekTrend, wholePeriodSummary } from './presentation-summary.js';
 import { NBSP, daysAcc, dayNumber, peakOf, tileFor as buildTile, daysWord, formatNumber, formatPercent, isoFromDay, longDate, periodText, rollingRange, chartDay, shortDate, signed } from './presentation-format.js';
 
 export { daysWord, formatNumber, formatPercent, rollingRange };
@@ -32,6 +33,7 @@ export const DEFAULT_CONFIG = {
   anomalyIqrFactor: 1.5,
   paceMinDays: 60, // мінімум днів для слайда «весь період»
   maxItems: 3, // на блок слайда
+  trendPercent: 10, // |Δ| від, % для напрямку «вгору/вниз» у підсумкових блоках
   focus: 'all', // 'result' | 'efficiency' | 'all'
   // Назви стовпців груп ЗНИЩЕНО/ПОШКОДЖЕНО/ПОДАВЛЕНО, які є об'єктами, а не технікою (ОВТ).
   // Усе, що не збігається, вважається технікою. Шаблони — регулярні вирази без урахування регістру.
@@ -443,9 +445,22 @@ function windowSlide(workbook, period, units, anchor, config, all, prune = false
     ownCallout: own ? ownCalloutFor(own, range, model.days) : null,
     changes: insights.changes,
     attention: insights.attention,
-    hypotheses: insights.hypotheses,
+    reasons: insights.hypotheses, // каталог причин: у слайд періодів не виводиться
+    ...(prune ? { hypotheses: insights.hypotheses } : closingBlock(period, model, { workbook, units, anchor, config, pace })),
     notes,
   };
+}
+
+/** Заключний блок слайда періоду замість «Можливих причин»: тенденція / висновок / узагальнення. */
+function closingBlock(period, model, { workbook, units, anchor, config, pace }) {
+  const names = KPI_NAMES;
+  let block;
+  if (period.id === 'week') {
+    const month = augment(createDashboardModel(workbook, { range: rollingRange(anchor, 30), unit: units, preset: 'custom' }), workbook, units, config);
+    block = weekTrend({ week: model, month, keys: ['affected', ...CHANGE_KEYS.filter(k => k !== 'affected'), 'ammoPerTarget'], names, config });
+  } else if (period.kind === 'all') block = wholePeriodSummary({ model, pace, names, config });
+  else block = periodVerdict({ model, names, config, title: period.id === 'month' ? 'Висновок за місяць' : 'Висновок за період' });
+  return { thirdTitle: block.title, hypotheses: block.items };
 }
 
 /** Модель колоди: title + слайди періодів. Однакові вхідні дані дають однаковий результат. */
