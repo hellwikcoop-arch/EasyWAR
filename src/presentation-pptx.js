@@ -161,7 +161,29 @@ export function renderDeck(deck, options = {}) {
   return pptx;
 }
 
-/** Повертає Uint8Array готового файлу .pptx. */
+const TRANSITIONS = {
+  fade: '<p:fade/>',
+  push: '<p:push dir="u"/>',
+  wipe: '<p:wipe dir="r"/>',
+};
+
+/** Додає до кожного слайда перехід PowerPoint. Порядок у слайді: cSld, clrMapOvr, transition. */
+async function addTransitions(bytes, kind) {
+  const effect = TRANSITIONS[kind];
+  if (!effect) return bytes;
+  const { default: JSZip } = await import('jszip');
+  const zip = await JSZip.loadAsync(bytes);
+  const names = Object.keys(zip.files).filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n));
+  for (const name of names) {
+    const xml = await zip.file(name).async('string');
+    if (xml.includes('<p:transition')) continue;
+    zip.file(name, xml.replace('</p:clrMapOvr>', `</p:clrMapOvr><p:transition spd="med">${effect}</p:transition>`));
+  }
+  return zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
+}
+
+/** Повертає Uint8Array готового файлу .pptx. options.transition: 'fade' (за замовчуванням) | 'push' | 'wipe' | 'none'. */
 export async function renderDeckToBytes(deck, options = {}) {
-  return renderDeck(deck, options).write({ outputType: 'uint8array' });
+  const bytes = await renderDeck(deck, options).write({ outputType: 'uint8array' });
+  return addTransitions(bytes, options.transition === undefined ? 'fade' : options.transition);
 }

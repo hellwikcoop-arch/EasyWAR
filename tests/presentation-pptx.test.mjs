@@ -90,3 +90,15 @@ test('the output is deterministic apart from the zip container timestamps', asyn
   const a = await open(await renderDeckToBytes(deck)), b = await open(await renderDeckToBytes(deck));
   assert.deepEqual(a.texts, b.texts);
 });
+
+test('кожен слайд має перехід; transition: none його вимикає', async () => {
+  const { default: JSZip } = await import('jszip');
+  const wb = { kind: 'udshv', sourceName: 's', sheetName: 'X', sheets: [], metrics: [], units: ['А'], issues: [], records: [{ sheet: 'X', rowNumber: 5, date: '2026-09-20', unit: 'А', values: { 'personnel|200': 1 } }] };
+  const deck = buildDeck(wb, {});
+  for (const [transition, expected] of [[undefined, true], ['none', false]]) {
+    const zip = await JSZip.loadAsync(await renderDeckToBytes(deck, { transition }));
+    const slides = Object.keys(zip.files).filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n));
+    assert.ok(slides.length > 1);
+    for (const name of slides) assert.equal((await zip.file(name).async('string')).includes('<p:transition spd="med"><p:fade/></p:transition>'), expected);
+  }
+});

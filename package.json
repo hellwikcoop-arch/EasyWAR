@@ -16,13 +16,13 @@
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-sql": "^2.4.1",
+    "jszip": "^3.10.2",
     "pptxgenjs": "4.0.1",
     "qrcode": "1.5.4",
     "three": "^0.186.1"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.5",
-    "jszip": "^3.10.2",
     "vite": "^8.3.0"
   }
 }
