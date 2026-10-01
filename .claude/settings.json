@@ -32,7 +32,8 @@
       "Bash(pkg-config --modversion *)",
       "Bash(dpkg -l)",
       "Bash(dpkg -l *)",
-      "Bash(npm ls *)"
+      "Bash(npm ls *)",
+      "Bash(node --test tests/*.test.mjs)"
     ]
   }
 }
