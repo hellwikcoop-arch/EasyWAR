@@ -85,7 +85,7 @@ function drawBlocks(slide, theme, data) {
 }
 
 function drawCharts(slide, theme, pptx, charts) {
-  const labels = { day: 'по добах', week: 'по тижнях', month: 'по місяцях' };
+  const labels = { day: 'добово', week: 'щотижнево', month: 'щомісячно' };
   const height = 1.55;
   charts.forEach((chart, i) => {
     const y = 3.3 + i * (height + 0.32);
