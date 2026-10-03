@@ -102,6 +102,35 @@ test('each branch has its own table slot and base tables open in their module', 
   assert.equal(BASE_TABLES.find(table => table.key === 'pvk').note, undefined);
 });
 
+test('the own-losses table has its own slot per command tile, apart from the main tables', async () => {
+  const { OWN_LOSSES_BRANCHES, PROFILE_BRANCHES, PROFILE_SLOTS, chooseProfileDatabase, clearProfileDatabase, ownLossesBranch, profileTablePath, readProfileDatabase } = await import('../src/local-profiles-core.js');
+  assert.deepEqual(OWN_LOSSES_BRANCHES.map(item => [item.branch, item.command]), [['pvk_losses', 'pvk'], ['dshv_losses', 'dshv']]);
+  assert.deepEqual(PROFILE_SLOTS.map(item => item.branch), [...PROFILE_BRANCHES.map(item => item.branch), 'pvk_losses', 'dshv_losses']);
+  assert.ok(OWN_LOSSES_BRANCHES.every(item => item.ownLosses && item.title && item.short && item.table));
+  assert.ok(PROFILE_BRANCHES.every(item => !item.ownLosses));
+  assert.equal(ownLossesBranch('pvk'), 'pvk_losses');
+  assert.equal(ownLossesBranch('dshv'), 'dshv_losses');
+  const profile = { tables: { dshv: '/synthetic/dshv.xlsx', dshv_losses: '/synthetic/own.xlsx' } };
+  assert.equal(profileTablePath(profile, ownLossesBranch('dshv')), '/synthetic/own.xlsx');
+  assert.equal(profileTablePath(profile, 'dshv'), '/synthetic/dshv.xlsx');
+  assert.equal(profileTablePath(profile, ownLossesBranch('pvk')), null);
+  // Ті самі команди застосунку, що й для основних таблиць, лише зі своїм слотом.
+  const calls = [];
+  const invoke = async (command, payload) => {
+    calls.push([command, payload]);
+    return command === 'read_profile_database' ? new Uint8Array([80, 75]).buffer : null;
+  };
+  const id = 'profile-000000000000000000000000';
+  await chooseProfileDatabase(id, 'pvk_losses', invoke);
+  await clearProfileDatabase(id, 'dshv_losses', invoke);
+  assert.deepEqual(await readProfileDatabase(id, 'dshv_losses', invoke), new Uint8Array([80, 75]));
+  assert.deepEqual(calls, [
+    ['choose_profile_database', { profileId: id, branch: 'pvk_losses' }],
+    ['clear_profile_database', { profileId: id, branch: 'dshv_losses' }],
+    ['read_profile_database', { profileId: id, branch: 'dshv_losses' }],
+  ]);
+});
+
 test('profile database handle reads and writes through the bound file', async () => {
   const { profileDatabaseHandle } = await import('../src/local-profiles-core.js');
   const written = [];

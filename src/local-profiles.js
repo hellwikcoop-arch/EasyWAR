@@ -15,7 +15,8 @@ import {
   getWorkspaceTemplates,
   isProfileLocked,
   lockLocalProfile,
-  PROFILE_BRANCHES,
+  ownLossesBranch,
+  PROFILE_SLOTS,
   profileDatabaseHandle,
   profileTablePath,
   readProfileDatabase,
@@ -27,7 +28,7 @@ import {
   workspaceTemplateForProfile,
   workspaceTemplateLabel,
 } from './local-profiles-core.js';
-import { airWindow, moduleWindow, trackAirWork, trackModuleWork, whenAirDashboard, whenModuleDashboard } from './air-bridge.js';
+import { airWindow, moduleWindow, ownLossesApi, trackAirWork, trackModuleWork, whenAirDashboard, whenModuleDashboard, whenOwnLosses } from './air-bridge.js';
 
 const AVATAR_SIZE = 256;
 
@@ -182,8 +183,8 @@ function initializeLocalProfiles() {
   let workspaceState = { defaultTemplateKey: null, templates: [], assignments: [] };
   let sessionProfileId = null;
   // Per branch: the profile whose table the module has open, and the one being opened.
-  const loadedDatabaseFor = Object.fromEntries(PROFILE_BRANCHES.map(({ branch }) => [branch, null]));
-  const loadingDatabaseFor = Object.fromEntries(PROFILE_BRANCHES.map(({ branch }) => [branch, null]));
+  const loadedDatabaseFor = Object.fromEntries(PROFILE_SLOTS.map(({ branch }) => [branch, null]));
+  const loadingDatabaseFor = Object.fromEntries(PROFILE_SLOTS.map(({ branch }) => [branch, null]));
   let pendingDashboardSection = null;
   let busy = false;
 
@@ -234,6 +235,20 @@ function initializeLocalProfiles() {
       const bind = tile.querySelector('[data-act="bind"]');
       bind.hidden = false;
       bind.textContent = path ? 'Змінити таблицю…' : 'Прив’язати таблицю…';
+      // «Наші втрати» плитки: окрема таблиця зі своїм слотом, відкривається на вкладці дашборда.
+      const ownPath = visible ? profileTablePath(profile, ownLossesBranch(tile.dataset.command)) : null;
+      const ownLine = tile.querySelector('[data-role="own-table"]');
+      if (ownLine) {
+        ownLine.textContent = `«Наші втрати»: ${ownPath ? databaseFileName(ownPath) : 'не прив’язано'}`;
+        ownLine.title = ownPath || '';
+        ownLine.classList.toggle('is-bound', Boolean(ownPath));
+      }
+      const bindOwn = tile.querySelector('[data-act="bind-own"]');
+      if (bindOwn) {
+        bindOwn.hidden = false;
+        // Стан видно в рядку над кнопками, тож підпис короткий і лишається однаковим.
+        bindOwn.title = `${ownPath ? 'Змінити' : 'Прив’язати'} окрему таблицю «НАШІ ВТРАТИ»: вона відкривається на вкладці «Наші втрати» дашборда`;
+      }
       // «Файл для телефона» може взяти цю таблицю з собою лише коли вона прив'язана й профіль відкрито.
       const embed = tile.querySelector('[data-role="embed"]');
       if (embed) {
@@ -243,7 +258,7 @@ function initializeLocalProfiles() {
     }
   }
 
-  for (const button of document.querySelectorAll('.command-tile [data-act="bind"]')) {
+  for (const button of document.querySelectorAll('.command-tile [data-act="bind"], .command-tile [data-act="bind-own"]')) {
     button.addEventListener('click', () => {
       const profile = activeProfile();
       if (!profile || isProfileLocked(profile, sessionProfileId)) {
@@ -252,7 +267,8 @@ function initializeLocalProfiles() {
         status.textContent = 'Створіть або оберіть профіль, щоб прив’язати до нього таблицю.';
         return;
       }
-      bindDatabase(profile, button.closest('.command-tile').dataset.command);
+      const command = button.closest('.command-tile').dataset.command;
+      bindDatabase(profile, button.dataset.act === 'bind-own' ? ownLossesBranch(command) : command);
     });
   }
 
@@ -313,7 +329,7 @@ function initializeLocalProfiles() {
 
     const database = el('div', { class: 'ew-profile-db' },
       el('span', { class: 'ew-profile-field-caption', text: 'Таблиці профілю' }),
-      PROFILE_BRANCHES.map(({ branch, title }) => {
+      PROFILE_SLOTS.map(({ branch, title }) => {
         const path = profileTablePath(profile, branch);
         const dbName = databaseFileName(path);
         return el('div', { class: 'ew-profile-db-line', 'data-branch': branch },
@@ -495,7 +511,7 @@ function initializeLocalProfiles() {
     await run(() => setLocalProfilePassword(profile.id, values[0], null), 'Пароль знято.');
   }
 
-  const branchInfo = branch => PROFILE_BRANCHES.find(entry => entry.branch === branch);
+  const branchInfo = branch => PROFILE_SLOTS.find(entry => entry.branch === branch);
 
   async function bindDatabase(profile, branch) {
     const { table } = branchInfo(branch);
@@ -507,15 +523,22 @@ function initializeLocalProfiles() {
     }, `${table} прив’язана до профілю.`, 'Таблицю не прив’язано');
     if (ok && profile.id === state.activeProfileId) {
       loadedDatabaseFor[branch] = null;
-      await loadProfileDatabase(activeProfile(), branch, true);
+      // «Наші втрати» — вкладка всередині дашборда: прив'язка не перемикає екран, таблиця відкриється там.
+      await loadProfileDatabase(activeProfile(), branch, !branchInfo(branch).ownLosses);
     }
   }
 
-  function unbindDatabase(profile, branch) {
-    return run(
+  async function unbindDatabase(profile, branch) {
+    const ok = await run(
       () => clearProfileDatabase(profile.id, branch),
       `${branchInfo(branch).table} відв’язана. Файл на диску не змінено.`,
     );
+    const slot = branchInfo(branch);
+    if (ok && slot.ownLosses && profile.id === state.activeProfileId) {
+      loadedDatabaseFor[branch] = null;
+      ownLossesApi(slot.command)?.disconnect(slot.command);
+    }
+    return ok;
   }
 
   async function createBaseTable(profile, key) {
@@ -617,7 +640,42 @@ function initializeLocalProfiles() {
   }
 
   function loadProfileDatabase(profile, branch, manual) {
-    return trackModuleWork(branch, openProfileDatabase(profile, branch, manual));
+    const slot = branchInfo(branch);
+    return trackModuleWork(slot.command || branch, slot.ownLosses ? openOwnLosses(profile, slot, manual) : openProfileDatabase(profile, branch, manual));
+  }
+
+  // «Наші втрати» читаються лише для перегляду: байти йдуть на вкладку дашборда командування,
+  // а «Оновити з файлу» перечитує прив'язаний файл тим самим шляхом.
+  async function openOwnLosses(profile, slot, manual) {
+    const { branch, command } = slot;
+    const path = profileTablePath(profile, branch);
+    if (isProfileLocked(profile, sessionProfileId)) return;
+    if (!path) {
+      // Профіль без прив'язки не повинен успадкувати таблицю попереднього профілю.
+      loadedDatabaseFor[branch] = null;
+      ownLossesApi(command)?.disconnect(command);
+      return;
+    }
+    if (!manual && loadedDatabaseFor[branch] === profile.id) return;
+    if (manual && dialog.open) dialog.close();
+    const api = await whenOwnLosses(command, { open: manual });
+    if (!api || profile.id !== state.activeProfileId) return;
+    if (!manual && loadedDatabaseFor[branch] === profile.id) return;
+    if (loadingDatabaseFor[branch] === profile.id) return;
+    loadingDatabaseFor[branch] = profile.id;
+    const name = databaseFileName(path);
+    const frame = moduleWindow(command);
+    const reread = () => readProfileDatabase(profile.id, branch, undefined, frame);
+    try {
+      await api.connect(command, await reread(), name, { reread });
+      if (manual) api.showTab(command);
+      loadedDatabaseFor[branch] = profile.id;
+      status.textContent = `«Наші втрати»: відкрито таблицю профілю «${name}».`;
+    } catch (error) {
+      status.textContent = `Не вдалося відкрити «Наші втрати» «${name}»: ${String(error?.message || error)}`;
+    } finally {
+      loadingDatabaseFor[branch] = null;
+    }
   }
 
   async function openProfileDatabase(profile, branch, manual) {
@@ -688,11 +746,11 @@ function initializeLocalProfiles() {
       avatar(profile, 'xl'),
       el('strong', { text: profile.displayName }),
       el('span', { class: 'ew-lock-position', text: profile.position || ' ' }),
-      PROFILE_BRANCHES.map(({ branch, short }) => {
+      PROFILE_SLOTS.map(({ branch, short }) => {
         const path = profileTablePath(profile, branch);
         return path ? el('span', { class: 'ew-lock-db', text: `${short}: ${databaseFileName(path)}` }) : null;
       }),
-      PROFILE_BRANCHES.some(({ branch }) => profileTablePath(profile, branch)) ? null : el('span', { class: 'ew-lock-db', text: 'Таблиць не прив’язано' }),
+      PROFILE_SLOTS.some(({ branch }) => profileTablePath(profile, branch)) ? null : el('span', { class: 'ew-lock-db', text: 'Таблиць не прив’язано' }),
       password,
       submit);
       return form;

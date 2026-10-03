@@ -8,7 +8,7 @@ import {
   groupIssues,
   searchJournal,
 } from './pvk-dashboard-core.js';
-import { ownLossesPage } from './own-losses-dashboard.js';
+import { consumeOwnLossesTabRequest, ownLossesHost, ownLossesPage } from './own-losses-dashboard.js';
 
 const state = {
   workbook: null,
@@ -434,6 +434,9 @@ export function render(host, workbook, options = {}) {
   let root = host.querySelector(':scope > #pvk-dashboard-root');
   if (!root) { root = h('div', { id: 'pvk-dashboard-root' }); host.append(root); }
   const rerender = () => render(host, workbook, options);
+  // Таблицю «Наші втрати» з профілю лончер передає, коли захоче: дашборд має вміти перемалюватись і показати вкладку.
+  ownLossesHost('pvk', rerender, options.readSheets);
+  if (options.readSheets && consumeOwnLossesTabRequest('pvk')) state.view = 'own';
   const model = createDashboardModel(workbook, { from: state.from, to: state.to });
   const runtime = { rerender, downloadCSV: options.downloadCSV || defaultDownload };
   const hasSheets = model.sheets.length > 0;

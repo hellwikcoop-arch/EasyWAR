@@ -15,7 +15,7 @@ import {
   unitFreshness,
   validateWorkbook,
 } from './udshv-dashboard-core.js';
-import { ownLossesPage } from './own-losses-dashboard.js';
+import { consumeOwnLossesTabRequest, ownLossesHost, ownLossesPage } from './own-losses-dashboard.js';
 
 const state = { workbook: null, view: 'summary', preset: 'week', anchor: '', from: '', to: '', units: [], unitsOpen: false, focusUnit: null, ovt: 'destroyed', sort: 'personnel' };
 
@@ -420,6 +420,9 @@ export function render(host, workbook, options = {}) {
   let root = host.querySelector(':scope > #udshv-dashboard-root');
   if (!root) { root = h('div', { id: 'udshv-dashboard-root' }); host.append(root); }
   const go = () => render(host, workbook, options);
+  // Таблицю «Наші втрати» з профілю лончер передає, коли захоче: дашборд має вміти перемалюватись і показати вкладку.
+  ownLossesHost('dshv', go, options.readSheets);
+  if (options.readSheets && consumeOwnLossesTabRequest('dshv')) state.view = 'own';
   const range = currentRange();
   const model = createDashboardModel(workbook, { range, unit: state.units, preset: state.preset });
   // «Наші втрати» — окрема таблиця з власним файлом і періодом: потребує читача xlsx від модуля.

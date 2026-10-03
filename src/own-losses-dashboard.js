@@ -1,6 +1,9 @@
 /* Вкладка «Наші втрати» дашбордів УДШВ і ПВК: окрема таблиця «НАШІ ВТРАТИ» (журнал подій).
-   Файл обирається на цьому пристрої, читається лише для перегляду й не змінюється. За бажанням
-   копія файлу лишається в пам'яті застосунку, щоб вкладка відкривалась одразу; «Прибрати» її видаляє. */
+   Файл читається лише для перегляду й не змінюється. Джерело одне з двох:
+   - таблиця, прив'язана до плитки командування в профілі: лончер передає її через window.EWOwnLosses,
+     вкладка перечитує її кнопкою «Оновити з файлу», копія в пам'яті не робиться;
+   - файл, який обрано на самій вкладці (телефон, профіль без прив'язки): його копія лишається в пам'яті
+     застосунку, щоб вкладка відкривалась одразу; «Прибрати» її видаляє. */
 import { parseOwnLosses } from './own-losses-core.js';
 import { OWN_PRESETS, OWN_SERIES_KEYS, createOwnLossesModel } from './own-losses-dashboard-core.js';
 import { shortDate } from './presentation-format.js';
@@ -15,7 +18,7 @@ const EVENTS_PAGE = 100;
 
 const scopes = new Map();
 const scopeState = scope => {
-  if (!scopes.has(scope)) scopes.set(scope, { own: null, fileName: '', savedAt: '', error: '', busy: false, restored: false, preset: 'month', from: '', to: '', units: [], eventLimit: EVENTS_PAGE, remembered: false });
+  if (!scopes.has(scope)) scopes.set(scope, { own: null, fileName: '', savedAt: '', error: '', busy: false, restored: false, preset: 'month', from: '', to: '', units: [], eventLimit: EVENTS_PAGE, remembered: false, bound: null, rerender: null, readSheets: null, wantTab: false });
   return scopes.get(scope);
 };
 
@@ -62,12 +65,14 @@ const recall = scope => idbRun('readonly', store => store.get(storeKey(scope))).
 
 const errorText = error => (error && error.code === 'NOT_OWN_LOSSES' ? error.message : `Не вдалося прочитати файл: ${error?.message || error}`);
 
-async function openBytes(scope, bytes, name, options) {
+// `keep`: оновлення того самого файлу зберігає вибраний період і підрозділ, якщо вони ще в таблиці.
+async function openBytes(scope, bytes, name, options, { keep = false } = {}) {
   const state = scopeState(scope);
   state.own = parseOwnLosses(await options.readSheets(bytes), name);
   state.fileName = name;
-  state.units = [];
+  state.units = keep ? state.units.filter(unit => state.own.units.includes(unit)) : [];
   state.eventLimit = EVENTS_PAGE;
+  if (keep && state.preset === 'custom') return;
   const dates = state.own.records.map(record => record.date).sort();
   state.from = dates[0] || '';
   state.to = dates[dates.length - 1] || '';
@@ -93,11 +98,11 @@ async function pickFile(scope, file, options) {
 async function restore(scope, options) {
   const state = scopeState(scope);
   state.restored = true;
-  if (!options.readSheets || !window.indexedDB) return;
+  if (state.bound || !options.readSheets || !window.indexedDB) return;
   state.busy = true;
   try {
     const saved = await recall(scope);
-    if (saved && saved.bytes) {
+    if (saved && saved.bytes && !state.bound) {
       await openBytes(scope, saved.bytes, saved.name || 'НАШІ ВТРАТИ.xlsx', options);
       state.savedAt = saved.savedAt || '';
       state.remembered = true;
@@ -272,6 +277,81 @@ function periodBar(state, model, options) {
         model.allUnits.map(unit => h('option', { value: unit, selected: state.units[0] === unit, text: unit })))));
 }
 
+/* ------------------- таблиця, прив'язана до плитки профілю ------------------- */
+const defaultReadSheets = bytes => {
+  const read = window.AVCORE && window.AVCORE.readAllSheets;
+  if (!read) throw new Error('У цьому вікні немає читача таблиць Excel.');
+  return read(bytes);
+};
+
+/**
+ * Лончер передає таблицю, прив'язану до плитки профілю. `source.reread()` повертає її свіжі байти
+ * (кнопка «Оновити з файлу»). Прив'язана таблиця має перевагу над запам'ятаною копією; копія не робиться.
+ */
+async function connectBound(scope, bytes, name, source = {}) {
+  const state = scopeState(scope);
+  state.restored = true;
+  state.error = '';
+  try {
+    await openBytes(scope, bytes, name, { readSheets: state.readSheets || defaultReadSheets });
+    state.bound = { name, reread: typeof source.reread === 'function' ? source.reread : null };
+    state.remembered = false;
+  } catch (error) {
+    state.error = errorText(error);
+    state.rerender?.();
+    throw error;
+  }
+  state.rerender?.();
+}
+
+async function refreshBound(scope, options) {
+  const state = scopeState(scope);
+  if (!state.bound?.reread) return;
+  state.error = '';
+  state.busy = true;
+  options.rerender();
+  try {
+    const bytes = await state.bound.reread();
+    await openBytes(scope, bytes, state.bound.name, { readSheets: options.readSheets || defaultReadSheets }, { keep: true });
+  } catch (error) { state.error = `Не вдалося оновити таблицю з файлу: ${errorText(error)}`; }
+  state.busy = false;
+  options.rerender();
+}
+
+/** Профіль відв'язав таблицю або змінився: вкладка повертається до вибору файлу (запам'ятану копію буде відновлено). */
+function disconnectBound(scope) {
+  const state = scopeState(scope);
+  if (!state.bound) return;
+  Object.assign(state, { own: null, fileName: '', savedAt: '', error: '', units: [], bound: null, restored: false, remembered: false, eventLimit: EVENTS_PAGE });
+  state.rerender?.();
+}
+
+/** Дашборд повідомляє, як себе перемалювати, щоб таблиця з лончера з'явилась без відкриття вкладки. */
+export function ownLossesHost(scope, rerender, readSheets) {
+  const state = scopeState(scope);
+  state.rerender = rerender;
+  if (readSheets) state.readSheets = readSheets;
+}
+
+/** Чи просили лончер показати вкладку (одноразово). */
+export function consumeOwnLossesTabRequest(scope) {
+  const state = scopeState(scope);
+  const wanted = state.wantTab;
+  state.wantTab = false;
+  return wanted;
+}
+
+function requestTab(scope) {
+  const state = scopeState(scope);
+  state.wantTab = true;
+  state.rerender?.();
+}
+
+if (typeof window !== 'undefined') {
+  window.EWOwnLosses = { connect: connectBound, disconnect: disconnectBound, showTab: requestTab, isBound: scope => Boolean(scopeState(scope).bound) };
+  if (typeof document?.dispatchEvent === 'function') document.dispatchEvent(new Event('ownlosses:ready'));
+}
+
 /**
  * Сторінка вкладки. options: { scope: 'dshv' | 'pvk', readSheets(Uint8Array) → Promise<sheets>, rerender() }.
  * Без readSheets файл обрати неможливо, тому дашборди не показують вкладку, коли модуль не передав читача.
@@ -279,6 +359,8 @@ function periodBar(state, model, options) {
 export function ownLossesPage(options) {
   const { scope } = options;
   const state = scopeState(scope);
+  state.rerender = options.rerender;
+  state.readSheets = options.readSheets || state.readSheets;
   if (!state.restored) restore(scope, options);
   if (!state.own) return emptyPage(scope, state, options);
   const own = state.own;
@@ -287,12 +369,15 @@ export function ownLossesPage(options) {
   return h('div', { class: 'ol-root' },
     h('header', { class: 'ol-head' },
       h('div', {},
-        h('span', { class: 'ol-eyebrow', text: 'Окрема таблиця · лише читання' }),
+        h('span', { class: 'ol-eyebrow', text: state.bound ? 'Окрема таблиця · прив’язана до плитки · лише читання' : 'Окрема таблиця · лише читання' }),
         h('h2', { text: 'Наші втрати' }),
         h('p', { text: `${state.fileName || own.sourceName || 'Таблиця'} · ${number(own.records.length)} подій · ${dateLabel(model.dataRange.from)} – ${dateLabel(model.dataRange.to)}` })),
       h('div', { class: 'ol-actions' },
-        filePicker(scope, 'Замінити файл', options, true),
-        h('button', { type: 'button', class: 'ol-btn quiet', onclick: () => clear(scope, options), text: 'Прибрати' }))),
+        state.bound
+          ? [state.bound.reread ? h('button', { type: 'button', class: 'ol-btn quiet', disabled: state.busy, onclick: () => refreshBound(scope, options), text: 'Оновити з файлу' }) : null]
+          : [filePicker(scope, 'Замінити файл', options, true),
+            h('button', { type: 'button', class: 'ol-btn quiet', onclick: () => clear(scope, options), text: 'Прибрати' })])),
+    state.bound ? h('p', { class: 'ol-note', text: 'Таблицю прив’язано до плитки командування в профілі. Змінити або відв’язати її можна в профілі на стартовому екрані; файл лише читається.' }) : null,
     state.error ? h('p', { class: 'ol-error', role: 'alert', text: state.error }) : null,
     state.busy ? h('p', { class: 'ol-note', role: 'status', text: 'Відкриваю таблицю…' }) : null,
     periodBar(state, model, options),

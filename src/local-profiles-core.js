@@ -90,6 +90,22 @@ export const PROFILE_BRANCHES = [
   { branch: 'dshv', short: 'УДШВ', title: 'Командування ДШВ (дашборд УДШВ)', table: 'Таблиця УДШВ' },
 ];
 
+/**
+ * Таблиця «НАШІ ВТРАТИ» (журнал власних втрат): окрема для кожної плитки командування.
+ * Має власний слот у профілі поряд з основною таблицею плитки й відкривається на вкладці
+ * «Наші втрати» дашборда свого командування (`command`) лише для читання.
+ */
+export const OWN_LOSSES_BRANCHES = [
+  { branch: 'pvk_losses', command: 'pvk', ownLosses: true, short: 'ПВК · Наші втрати', title: 'Наші втрати (дашборд ПВК)', table: 'Таблиця «Наші втрати» ПВК' },
+  { branch: 'dshv_losses', command: 'dshv', ownLosses: true, short: 'УДШВ · Наші втрати', title: 'Наші втрати (дашборд УДШВ)', table: 'Таблиця «Наші втрати» УДШВ' },
+];
+
+/** Усі слоти таблиць профілю: роди військ і «Наші втрати» командувань. */
+export const PROFILE_SLOTS = [...PROFILE_BRANCHES, ...OWN_LOSSES_BRANCHES];
+
+/** Слот «Наші втрати» плитки командування `command` (`pvk` | `dshv`). */
+export const ownLossesBranch = command => `${command}_losses`;
+
 /** Порожні базові таблиці, з яких можна почати. `branch` — модуль, що їх відкриває. */
 export const BASE_TABLES = [
   { key: 'air', branch: 'air', label: 'ПС — базова таблиця' },
