@@ -8,6 +8,7 @@ import {
   groupIssues,
   searchJournal,
 } from './pvk-dashboard-core.js';
+import { ownLossesPage } from './own-losses-dashboard.js';
 
 const state = {
   workbook: null,
@@ -441,23 +442,27 @@ export function render(host, workbook, options = {}) {
     model.journal && ['journal', model.journal.name],
     ...(hasSheets ? model.sheets.map(sheet => [sheet.name, sheet.name === "Об'єкти" ? 'Об’єкти' : sheet.name]) : []),
     hasSheets && ['table', 'Зведена таблиця'],
+    // «Наші втрати» — окрема таблиця з власним файлом і періодом: потребує читача xlsx від модуля.
+    options.readSheets && ['own', 'Наші втрати'],
     ['quality', 'Перевірка даних'],
   ].filter(Boolean);
   if (!nav.some(([key]) => key === state.view)) state.view = nav[0][0];
-  const page = state.view === 'journal' ? journalPage(model, runtime)
+  const own = state.view === 'own';
+  const page = own ? h('div', { class: 'pvk-page' }, ownLossesPage({ scope: 'pvk', readSheets: options.readSheets, rerender }))
+    : state.view === 'journal' ? journalPage(model, runtime)
     : state.view === 'summary' ? summaryPage(model)
     : state.view === 'table' ? tablePage(model, runtime)
       : state.view === 'quality' ? qualityPage(model)
         : sheetPage(model.sheets.find(sheet => sheet.name === state.view) || model.sheets[0]);
   root.textContent = '';
-  root.append(
+  root.append(...[
     h('header', { class: 'pvk-hero' },
       h('div', {}, h('span', { class: 'pvk-eyebrow', text: `${[model.journal && model.journal.name, hasSheets && 'ТАБЛ 2-3'].filter(Boolean).join(' і ')} · локальна аналітика` }), h('h1', { text: 'Дашборд ПВК' }), h('p', { text: 'Усі підпорядковані підрозділи · файл відкрито лише для читання' })),
       options.canRefresh ? h('button', { class: 'btn quiet', type: 'button', onclick: () => options.refresh?.() }, 'Оновити з файлу') : null),
-    periodControls(workbook, rerender),
+    own ? null : periodControls(workbook, rerender),
     h('nav', { class: 'pvk-nav', 'aria-label': 'Розділи дашборда ПВК' }, nav.map(([key, label]) => h('button', { type: 'button', 'aria-pressed': String(state.view === key), onclick: () => { state.view = key; rerender(); } }, label))),
     page,
-  );
+  ].filter(Boolean));
 }
 
 export function renderBase(host, workbook) {

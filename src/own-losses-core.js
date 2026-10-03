@@ -42,6 +42,18 @@ export function ownUnit(raw, brigades = DEFAULT_BRIGADES) {
 }
 export const DEFAULT_BRIGADES = { 78: '78 одшбр', 79: '79 одшбр', 80: '80 одшбр', 82: '82 одшбр', 95: '95 одшбр', 148: '148 оабр' };
 
+// Основна таблиця УДШВ теж має «Дата», «Підрозділ» і «Втрати о/с», але це втрати противника:
+// її відрізняють групи «Витрата боєприпасів» і «Втрати противника за категоріями».
+const ENEMY_TABLE_MARKERS = [/витрата боєприпасів/, /втрати противника за категоріями/];
+
+function looksLikeEnemyTable(sheet) {
+  const rows = sheet.rows || [];
+  const header = headerRowOf(rows);
+  if (!header) return false;
+  const texts = Object.values(header.cells).map(cell => norm(cellText(cell)));
+  return ENEMY_TABLE_MARKERS.some(marker => texts.some(text => marker.test(text)));
+}
+
 function headerRowOf(rows) {
   return rows.slice(0, 12).find(row => {
     const values = new Set(Object.values(row.cells).map(cell => norm(cellText(cell))));
@@ -62,7 +74,7 @@ function groupOf(top, previousKey) {
 function parseSheet(sheet) {
   const rows = sheet.rows || [];
   const header = headerRowOf(rows);
-  if (!header) return null;
+  if (!header || looksLikeEnemyTable(sheet)) return null;
   const sub = rows.find(row => row.r === header.r + 1) || { cells: {} };
   const columns = Object.keys(Object.assign({}, header.cells, sub.cells)).sort((a, b) => colNum(a) - colNum(b));
   const find = label => columns.find(letter => norm(cellText(header.cells[letter])) === label);
@@ -127,7 +139,10 @@ function parseSheet(sheet) {
 export function parseOwnLosses(sheets, sourceName = '') {
   const parsed = (sheets || []).map(parseSheet).filter(sheet => sheet && sheet.metrics.some(m => m.group === 'personnel'));
   if (!parsed.length) {
-    const error = new Error('Це не таблиця власних втрат: потрібна шапка «Дата», «Підрозділ» і «Втрати О/С».');
+    const enemy = (sheets || []).some(looksLikeEnemyTable);
+    const error = new Error(enemy
+      ? 'Це таблиця втрат противника (УДШВ), а не «НАШІ ВТРАТИ». Оберіть таблицю власних втрат.'
+      : 'Це не таблиця власних втрат: потрібна шапка «Дата», «Підрозділ» і «Втрати О/С».');
     error.code = 'NOT_OWN_LOSSES';
     throw error;
   }

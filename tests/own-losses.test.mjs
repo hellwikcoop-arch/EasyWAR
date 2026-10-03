@@ -63,6 +63,21 @@ test('rejects a workbook that is not the own-losses table', () => {
   assert.throws(() => parseOwnLosses([{ name: 'X', rows: [{ r: 1, cells: { A: 'Дата', B: 'Підрозділ', C: 'ВгЗ' } }] }]), e => e.code === 'NOT_OWN_LOSSES');
 });
 
+test('rejects the UDSHV enemy-losses table even though it shares the date, unit and «Втрати о/с» headers', () => {
+  const enemy = {
+    name: 'СЕРПЕНЬ-26',
+    rows: [
+      { r: 1, cells: { A: 'Втрати о/с та ОВТ противника за угруповання ДШВ' } },
+      { r: 2, cells: { A: '№ з/п', C: 'Дата', D: 'Підрозділ', G: 'Витрата боєприпасів', J: 'Втрати о/с', L: 'Втрати противника за категоріями', N: 'ЗНИЩЕНО' } },
+      { r: 3, cells: { J: '200', K: '300', N: 'танк' } },
+      { r: 4, cells: { A: '1', C: '46235', D: 'АГ 148 оабр', J: '3', K: '1', N: '1' } },
+    ],
+  };
+  assert.throws(() => parseOwnLosses([enemy]), e => e.code === 'NOT_OWN_LOSSES' && /втрат противника/.test(e.message));
+  // Власна таблиця поруч у тій самій книзі не заважає.
+  assert.equal(parseOwnLosses([enemy, sheet(events())]).records.length, 66);
+});
+
 test('checks row sums against the table totals row and flags a date outlier, not its neighbour', () => {
   const evs = events();
   const okOwn = parseOwnLosses([sheet(evs, { totals: { D: '6', E: '120' } })]);

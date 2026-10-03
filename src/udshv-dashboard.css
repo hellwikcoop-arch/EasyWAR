@@ -247,3 +247,17 @@ html:root:has(body.udshv-open) { background-color: #12091a !important; }
   .ud-context { gap: 4px 12px; }
   .ud-card, .ud-issue { min-width: 0; }
 }
+
+/* Вкладка «Наші втрати» (own-losses-dashboard.css) бере кольори й поверхні цього дашборда. */
+#udshv-dashboard-root .ol-root {
+  --ol-red: var(--ud-red);
+  --ol-amber: var(--ud-amber);
+  --ol-green: var(--ud-green);
+  --ol-blue: var(--ud-blue);
+  --ol-violet: var(--ud-violet);
+  --ol-ink: var(--ud-ink);
+  --ol-muted: var(--ud-muted);
+  --ol-panel: var(--ud-panel);
+  --ol-line: var(--ud-line);
+  --ol-track: var(--ud-track);
+}
