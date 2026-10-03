@@ -53,6 +53,24 @@ export function whenModuleDashboard(branch, { open = false } = {}) {
   });
 }
 
+/**
+ * Вкладка «Наші втрати» живе в модулі командування (`command`: pvk | dshv) і відкривається
+ * там через `window.EWOwnLosses`. Чекає, доки модуль і вкладка будуть готові; null, якщо не діждався.
+ */
+export async function whenOwnLosses(command, options = {}) {
+  const dashboard = await whenModuleDashboard(command, options);
+  if (!dashboard) return null;
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const api = moduleWindow(command)?.EWOwnLosses;
+    if (api?.connect) return api;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  return null;
+}
+
+/** Вкладка «Наші втрати» модуля, якщо вона вже готова (без очікування). */
+export const ownLossesApi = command => moduleWindow(command)?.EWOwnLosses ?? null;
+
 const pendingWork = Object.fromEntries(BRANCHES.map(branch => [branch, Promise.resolve()]));
 
 /**

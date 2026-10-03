@@ -15,6 +15,7 @@ import {
   unitFreshness,
   validateWorkbook,
 } from './udshv-dashboard-core.js';
+import { consumeOwnLossesTabRequest, ownLossesHost, ownLossesPage } from './own-losses-dashboard.js';
 
 const state = { workbook: null, view: 'summary', preset: 'week', anchor: '', from: '', to: '', units: [], unitsOpen: false, focusUnit: null, ovt: 'destroyed', sort: 'personnel' };
 
@@ -419,11 +420,17 @@ export function render(host, workbook, options = {}) {
   let root = host.querySelector(':scope > #udshv-dashboard-root');
   if (!root) { root = h('div', { id: 'udshv-dashboard-root' }); host.append(root); }
   const go = () => render(host, workbook, options);
+  // Таблицю «Наші втрати» з профілю лончер передає, коли захоче: дашборд має вміти перемалюватись і показати вкладку.
+  ownLossesHost('dshv', go, options.readSheets);
+  if (options.readSheets && consumeOwnLossesTabRequest('dshv')) state.view = 'own';
   const range = currentRange();
   const model = createDashboardModel(workbook, { range, unit: state.units, preset: state.preset });
-  const nav = [['summary', 'Зведення УДШВ'], ['units', 'Підрозділи'], ['personnel', 'Втрати о/с'], ['ovt', 'ОВТ'], ['ammo', 'Витрата БК'], ['freshness', 'Актуальність'], ['table', 'Зведена таблиця'], ['quality', 'Перевірка даних']];
+  // «Наші втрати» — окрема таблиця з власним файлом і періодом: потребує читача xlsx від модуля.
+  const nav = [['summary', 'Зведення УДШВ'], ['units', 'Підрозділи'], ['personnel', 'Втрати о/с'], ...(options.readSheets ? [['own', 'Наші втрати']] : []), ['ovt', 'ОВТ'], ['ammo', 'Витрата БК'], ['freshness', 'Актуальність'], ['table', 'Зведена таблиця'], ['quality', 'Перевірка даних']];
   if (!nav.some(([k]) => k === state.view)) state.view = 'summary';
-  const page = state.view === 'units' ? unitsPage(model, go)
+  const own = state.view === 'own';
+  const page = own ? h('div', { class: 'ud-page' }, ownLossesPage({ scope: 'dshv', readSheets: options.readSheets, rerender: go }))
+    : state.view === 'units' ? unitsPage(model, go)
     : state.view === 'personnel' ? personnelPage(model, go)
       : state.view === 'ovt' ? ovtPage(model, go)
         : state.view === 'ammo' ? ammoPage(model, go)
@@ -433,7 +440,7 @@ export function render(host, workbook, options = {}) {
               : summaryPage(model, go);
   const compare = model.hasPrevious ? `порівняння з ${dateLabel(model.previousRange.from)} – ${dateLabel(model.previousRange.to)}` : 'попереднього періоду в таблиці немає';
   root.textContent = '';
-  root.append(
+  root.append(...[
     h('header', { class: 'ud-hero' },
       h('div', {},
         h('span', { class: 'ud-eyebrow', text: 'Угруповання ДШВ · локальна аналітика' }),
@@ -442,14 +449,15 @@ export function render(host, workbook, options = {}) {
       h('div', { class: 'ud-hero-actions' },
         options.readSheets ? h('button', { class: 'ud-btn', type: 'button', onclick: async () => (await import('./presentation-ui.js')).openPresentationDialog(workbook, options), text: 'Презентація' }) : null,
         options.canRefresh ? h('button', { class: 'ud-btn', type: 'button', onclick: () => options.refresh?.(), text: 'Оновити з файлу' }) : null)),
-    periodControls(range, go),
-    h('div', { class: 'ud-context' },
+    // Період і підрозділи основної таблиці не стосуються вкладки «Наші втрати»: вона має власні.
+    own ? null : periodControls(range, go),
+    own ? null : h('div', { class: 'ud-context' },
       h('span', { text: `${periodTitle(range)}${unitsLabel(state.units, ' · ')}` }),
       h('span', { text: `${model.activeDays} з ${model.days} днів із даними · ${compare}` }),
       state.units.length ? h('button', { type: 'button', class: 'ud-link', onclick: () => { state.units = []; go(); }, text: '× усі підрозділи' }) : null,
       freshHint(go)),
     h('nav', { class: 'ud-nav', 'aria-label': 'Розділи дашборда УДШВ' }, nav.map(([key, label]) => h('button', { type: 'button', 'aria-pressed': String(state.view === key), onclick: () => { state.view = key; go(); }, text: label }))),
-    page);
+    page].filter(Boolean));
 }
 
 export function unmount(host) {

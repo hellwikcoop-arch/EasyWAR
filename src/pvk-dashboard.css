@@ -274,3 +274,15 @@ html[data-theme="light"] #view-base {
   .pvk-composition { grid-template-columns: 1fr; justify-items: center; }
   .pvk-table-actions { width: 100%; align-items: stretch; flex-direction: column; }
 }
+
+/* Вкладка «Наші втрати» (own-losses-dashboard.css) бере кольори й поверхні цього дашборда. */
+#pvk-dashboard-root .ol-root {
+  --ol-red: var(--pvk-red);
+  --ol-amber: var(--pvk-amber);
+  --ol-green: var(--pvk-green);
+  --ol-blue: var(--pvk-blue);
+  --ol-violet: var(--pvk-violet);
+  --ol-panel: var(--pvk-panel);
+  --ol-line: var(--pvk-border);
+  --ol-track: var(--pvk-track);
+}

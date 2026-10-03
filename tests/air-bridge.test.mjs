@@ -53,6 +53,29 @@ test('the command dashboards have their own frames and wait for their own openin
   assert.equal(moduleWindow('army'), null);
 });
 
+test('the own-losses tab of a command dashboard is reached once its module and tab are ready', async () => {
+  const { pvkWindow, dshvWindow, open, opened } = launcher();
+  const { whenOwnLosses, ownLossesApi } = await import('../src/air-bridge.js');
+  assert.equal(ownLossesApi('pvk'), null);
+  const pending = whenOwnLosses('pvk');
+  pvkWindow.__AV = { connect() {} };
+  open('pvk');
+  // Модуль готовий, а вкладка ще вантажиться: чекаємо саме її, а не лише модуль.
+  await new Promise(resolve => setTimeout(resolve, 250));
+  const api = { connect() {}, disconnect() {} };
+  pvkWindow.EWOwnLosses = api;
+  assert.equal(await pending, api);
+  assert.equal(ownLossesApi('pvk'), api);
+  assert.equal(ownLossesApi('dshv'), null, 'вкладка УДШВ окрема від вкладки ПВК');
+  assert.equal(dshvWindow.EWOwnLosses, undefined);
+  assert.deepEqual(opened, []);
+  // Явне відкриття перемикає лончер на модуль командування.
+  dshvWindow.__AV = { connect() {} };
+  dshvWindow.EWOwnLosses = api;
+  assert.equal(await whenOwnLosses('dshv', { open: true }), api);
+  assert.deepEqual(opened, ['dshv']);
+});
+
 test('work on one branch does not hold up the other', async () => {
   let finish;
   trackModuleWork('rocket', new Promise(resolve => { finish = resolve; }));

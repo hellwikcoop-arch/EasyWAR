@@ -10,6 +10,10 @@
 <style id="easywar-command-mode-css">
 /* У командному режимі є лише дашборд: внесення доповідей і довідник ховаємо. */
 html[data-command="dshv"] #tab-entry, html[data-command="dshv"] .snav-entry { display: none !important; }
+/* Телефон: у вікні командування лишаємо назву файлу; зайві кнопки шапки ховаємо. */
+@media (max-width: 640px) {
+  html[data-command="dshv"] #ewx-open, html[data-command="dshv"] #motionBtn { display: none !important; }
+}
 </style>
 <script>
 (function(){
@@ -2945,6 +2949,7 @@ html[data-theme="light"] .kh{background:#151a0f!important}
 <style id="kpi-merge">.k-l2{display:flex;flex-direction:column;line-height:1.1}.k-l2 .k-sub{display:block;margin-top:3px;font-size:.72em;font-weight:700;letter-spacing:.08em;opacity:.75}</style>
 <style id="kpi-5col">html.rocket-ref24 body .kpipanel .kpi-grid:not(:has(.kc-grey)){grid-template-columns:repeat(5,minmax(0,1fr))!important}@media (max-width:1100px){html.rocket-ref24 body .kpipanel .kpi-grid:not(:has(.kc-grey)){grid-template-columns:repeat(3,minmax(0,1fr))!important}}@media (max-width:640px){html.rocket-ref24 body .kpipanel .kpi-grid:not(:has(.kc-grey)){grid-template-columns:repeat(2,minmax(0,1fr))!important}}</style>
 <link rel="stylesheet" href="./udshv-dashboard.css">
+<link rel="stylesheet" href="./own-losses-dashboard.css">
 </head>
 <body>
 <header class="appbar">

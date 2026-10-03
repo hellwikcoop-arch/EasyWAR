@@ -22,6 +22,9 @@ pub struct LocalProfileStore {
 /// Кожна відкривається у своєму модулі й записується у свій файл. `Pvk` і `Dshv` —
 /// таблиці командувань (Повітряне командування, Командування ДШВ): вони мають
 /// власні прив'язки й відкриваються в окремих вікнах над модулями ПС і РВіА.
+/// `PvkLosses` і `DshvLosses` — таблиця «НАШІ ВТРАТИ» (журнал власних втрат) окремо
+/// для кожної плитки командування: вона відкривається на вкладці «Наші втрати»
+/// дашборда лише для читання.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Branch {
@@ -29,6 +32,10 @@ pub enum Branch {
     Rocket,
     Pvk,
     Dshv,
+    #[serde(rename = "pvk_losses")]
+    PvkLosses,
+    #[serde(rename = "dshv_losses")]
+    DshvLosses,
 }
 
 impl Branch {
@@ -38,6 +45,8 @@ impl Branch {
             Branch::Rocket => "rocket",
             Branch::Pvk => "pvk",
             Branch::Dshv => "dshv",
+            Branch::PvkLosses => "pvk_losses",
+            Branch::DshvLosses => "dshv_losses",
         }
     }
 
@@ -48,6 +57,8 @@ impl Branch {
             Branch::Rocket => "Ракетних військ і артилерії",
             Branch::Pvk => "Повітряного командування (ПВК)",
             Branch::Dshv => "Командування ДШВ (УДШВ)",
+            Branch::PvkLosses => "«Наші втрати» Повітряного командування (ПВК)",
+            Branch::DshvLosses => "«Наші втрати» Командування ДШВ (УДШВ)",
         }
     }
 
@@ -57,6 +68,8 @@ impl Branch {
             "rocket" => Ok(Branch::Rocket),
             "pvk" => Ok(Branch::Pvk),
             "dshv" => Ok(Branch::Dshv),
+            "pvk_losses" => Ok(Branch::PvkLosses),
+            "dshv_losses" => Ok(Branch::DshvLosses),
             _ => Err(LocalProfileError::InvalidBranch),
         }
     }
@@ -69,6 +82,8 @@ pub struct ProfileTables {
     pub rocket: Option<String>,
     pub pvk: Option<String>,
     pub dshv: Option<String>,
+    pub pvk_losses: Option<String>,
+    pub dshv_losses: Option<String>,
 }
 
 impl ProfileTables {
@@ -78,6 +93,8 @@ impl ProfileTables {
             Branch::Rocket => &mut self.rocket,
             Branch::Pvk => &mut self.pvk,
             Branch::Dshv => &mut self.dshv,
+            Branch::PvkLosses => &mut self.pvk_losses,
+            Branch::DshvLosses => &mut self.dshv_losses,
         }
     }
 }
@@ -606,8 +623,8 @@ pub(crate) fn validate_profile_id(id: &str) -> Result<(), LocalProfileError> {
 mod tests {
     use super::*;
     use crate::database::{
-        COMMAND_TABLES_SQL, INITIAL_SCHEMA_SQL, LOCAL_PROFILES_SQL, PROFILE_BRANCH_TABLES_SQL,
-        PROFILE_DETAILS_SQL, XLSX_DUPLICATE_LINKS_SQL,
+        COMMAND_TABLES_SQL, INITIAL_SCHEMA_SQL, LOCAL_PROFILES_SQL, OWN_LOSSES_TABLES_SQL,
+        PROFILE_BRANCH_TABLES_SQL, PROFILE_DETAILS_SQL, XLSX_DUPLICATE_LINKS_SQL,
     };
     use sqlx::sqlite::SqlitePoolOptions;
 
@@ -641,6 +658,10 @@ mod tests {
             .await
             .unwrap();
         sqlx::raw_sql(COMMAND_TABLES_SQL)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::raw_sql(OWN_LOSSES_TABLES_SQL)
             .execute(&pool)
             .await
             .unwrap();
@@ -889,7 +910,9 @@ mod tests {
                 "air": "/synthetic/air.xlsx",
                 "rocket": "/synthetic/rocket.xlsx",
                 "pvk": null,
-                "dshv": null
+                "dshv": null,
+                "pvk_losses": null,
+                "dshv_losses": null
             })
         );
 
@@ -935,6 +958,10 @@ mod tests {
         assert_eq!(Branch::parse("rocket").unwrap(), Branch::Rocket);
         assert_eq!(Branch::parse("pvk").unwrap(), Branch::Pvk);
         assert_eq!(Branch::parse("dshv").unwrap(), Branch::Dshv);
+        assert_eq!(Branch::parse("pvk_losses").unwrap(), Branch::PvkLosses);
+        assert_eq!(Branch::parse("dshv_losses").unwrap(), Branch::DshvLosses);
+        assert_eq!(Branch::PvkLosses.as_str(), "pvk_losses");
+        assert_eq!(Branch::DshvLosses.as_str(), "dshv_losses");
         assert!(matches!(
             Branch::parse("army"),
             Err(LocalProfileError::InvalidBranch)
@@ -972,6 +999,7 @@ mod tests {
                 rocket: None,
                 pvk: Some("/synthetic/pvk.xlsx".to_owned()),
                 dshv: Some("/synthetic/dshv.xlsx".to_owned()),
+                ..ProfileTables::default()
             }
         );
         // Відв'язання командної таблиці не чіпає таблицю модуля.
@@ -992,6 +1020,122 @@ mod tests {
                 .as_deref(),
             Some("/synthetic/dshv.xlsx")
         );
+    }
+
+    #[tokio::test]
+    async fn own_losses_tables_are_bound_per_command_apart_from_the_main_tables() {
+        let store = store().await;
+        let profile = id("Втрати");
+        store.create(&profile, "Втрати", NOW_1).await.unwrap();
+        store
+            .set_table_path(&profile, Branch::Dshv, Some("/synthetic/dshv.xlsx"), NOW_2)
+            .await
+            .unwrap();
+        store
+            .set_table_path(&profile, Branch::PvkLosses, Some("/synthetic/pvk-own.xlsx"), NOW_2)
+            .await
+            .unwrap();
+        let state = store
+            .set_table_path(&profile, Branch::DshvLosses, Some("/synthetic/dshv-own.xlsx"), NOW_2)
+            .await
+            .unwrap();
+        assert_eq!(
+            state.profiles[0].tables,
+            ProfileTables {
+                dshv: Some("/synthetic/dshv.xlsx".to_owned()),
+                pvk_losses: Some("/synthetic/pvk-own.xlsx".to_owned()),
+                dshv_losses: Some("/synthetic/dshv-own.xlsx".to_owned()),
+                ..ProfileTables::default()
+            }
+        );
+        // Відв'язання «Наших втрат» не чіпає основну таблицю плитки.
+        let state = store
+            .set_table_path(&profile, Branch::DshvLosses, None, NOW_2)
+            .await
+            .unwrap();
+        assert_eq!(state.profiles[0].tables.dshv_losses, None);
+        assert_eq!(
+            state.profiles[0].tables.dshv.as_deref(),
+            Some("/synthetic/dshv.xlsx")
+        );
+        assert_eq!(
+            store
+                .table_path(&profile, Branch::PvkLosses)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("/synthetic/pvk-own.xlsx")
+        );
+        // У JSON для лончера ключі збігаються з ідентифікаторами слотів.
+        let json = serde_json::to_value(&state.profiles[0].tables).unwrap();
+        assert_eq!(json["pvk_losses"], "/synthetic/pvk-own.xlsx");
+        assert!(json["dshv_losses"].is_null());
+    }
+
+    #[tokio::test]
+    async fn the_own_losses_migration_keeps_existing_bindings() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        for migration in [
+            INITIAL_SCHEMA_SQL,
+            XLSX_DUPLICATE_LINKS_SQL,
+            LOCAL_PROFILES_SQL,
+            PROFILE_DETAILS_SQL,
+            PROFILE_BRANCH_TABLES_SQL,
+            COMMAND_TABLES_SQL,
+        ] {
+            sqlx::raw_sql(migration).execute(&pool).await.unwrap();
+        }
+        let profile = id("Перенесення втрат");
+        LocalProfileStore::new(pool.clone())
+            .create(&profile, "Перенесення втрат", NOW_1)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO local_profile_tables (profile_id, branch, path, updated_at)
+             VALUES (?, 'air', '/synthetic/air.xlsx', ?), (?, 'dshv', '/synthetic/dshv.xlsx', ?)",
+        )
+        .bind(&profile)
+        .bind(NOW_1)
+        .bind(&profile)
+        .bind(NOW_1)
+        .execute(&pool)
+        .await
+        .unwrap();
+        // Стара схема ще не знає прив'язок «Наших втрат».
+        assert!(sqlx::query(
+            "INSERT INTO local_profile_tables (profile_id, branch, path, updated_at)
+             VALUES (?, 'dshv_losses', '/synthetic/own.xlsx', ?)",
+        )
+        .bind(&profile)
+        .bind(NOW_1)
+        .execute(&pool)
+        .await
+        .is_err());
+
+        sqlx::raw_sql(OWN_LOSSES_TABLES_SQL).execute(&pool).await.unwrap();
+        let state = LocalProfileStore::new(pool.clone()).list().await.unwrap();
+        assert_eq!(
+            state.profiles[0].tables,
+            ProfileTables {
+                air: Some("/synthetic/air.xlsx".to_owned()),
+                dshv: Some("/synthetic/dshv.xlsx".to_owned()),
+                ..ProfileTables::default()
+            }
+        );
+        // Невідомий слот і далі відхиляється схемою.
+        assert!(sqlx::query(
+            "INSERT INTO local_profile_tables (profile_id, branch, path, updated_at)
+             VALUES (?, 'army', '/synthetic/army.xlsx', ?)",
+        )
+        .bind(&profile)
+        .bind(NOW_1)
+        .execute(&pool)
+        .await
+        .is_err());
     }
 
     #[tokio::test]

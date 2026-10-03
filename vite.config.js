@@ -1,10 +1,54 @@
+import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 
 const host = process.env.TAURI_DEV_HOST;
 
+// Офлайн-кеш для мобільного перегляду (viewer.html): після збірки записує dist/sw.js
+// зі списком усіх файлів. Версія кешу береться з package.json, тож нова збірка
+// замінює старий кеш. 3D-моделі (.glb) у кеш не входять: у вікнах командування вони не потрібні.
+// Сервіс-воркер реєструє лише viewer.html; у застосунку Tauri його немає.
+function viewerServiceWorker() {
+  return {
+    name: "easywar-viewer-sw",
+    apply: "build",
+    closeBundle() {
+      const out = fileURLToPath(new URL("./dist", import.meta.url));
+      const files = [];
+      const walk = (dir) => {
+        for (const name of readdirSync(dir)) {
+          const full = join(dir, name);
+          if (statSync(full).isDirectory()) walk(full);
+          else if (name !== "sw.js" && !name.endsWith(".map") && !name.endsWith(".glb")) files.push("./" + relative(out, full).split("\\").join("/"));
+        }
+      };
+      walk(out);
+      const version = JSON.parse(readFileSync(fileURLToPath(new URL("./package.json", import.meta.url)), "utf8")).version;
+      const source = `// Згенеровано vite.config.js. Не редагувати.
+const CACHE = "easywar-viewer-${version}";
+const FILES = ${JSON.stringify(files.sort())};
+self.addEventListener("install", (event) => {
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(FILES)).then(() => self.skipWaiting()));
+});
+self.addEventListener("activate", (event) => {
+  event.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((key) => key !== CACHE && key.startsWith("easywar-viewer-")).map((key) => caches.delete(key)))).then(() => self.clients.claim()));
+});
+self.addEventListener("fetch", (event) => {
+  if (event.request.method !== "GET") return;
+  const url = new URL(event.request.url);
+  if (url.origin !== self.location.origin) return;
+  event.respondWith(caches.match(event.request, { ignoreSearch: true }).then((hit) => hit || fetch(event.request)));
+});
+`;
+      writeFileSync(join(out, "sw.js"), source);
+    },
+  };
+}
+
 export default defineConfig({
   root: "src",
+  plugins: [viewerServiceWorker()],
   base: "./",
   clearScreen: false,
   server: {
@@ -39,6 +83,7 @@ export default defineConfig({
         index: fileURLToPath(new URL("./src/index.html", import.meta.url)),
         air: fileURLToPath(new URL("./src/air.html", import.meta.url)),
         rocket: fileURLToPath(new URL("./src/rocket.html", import.meta.url)),
+        viewer: fileURLToPath(new URL("./src/viewer.html", import.meta.url)),
       },
     },
   },

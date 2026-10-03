@@ -1,0 +1,164 @@
+/* Вкладка «Наші втрати» дашбордів УДШВ і ПВК. Кольори й поверхні беруться з дашборда-господаря
+   (змінні --ol-* задаються в udshv-dashboard.css і pvk-dashboard.css), тут лише запасні значення. */
+.ol-root {
+  --ol-red: #ef5b5b;
+  --ol-amber: #e7a83a;
+  --ol-green: #35c57c;
+  --ol-blue: #3d9be9;
+  --ol-violet: #a17dff;
+  --ol-ink: var(--ink, var(--text, #edf1e6));
+  --ol-muted: var(--muted, #9aa396);
+  --ol-panel: color-mix(in srgb, var(--panel, #121d2d) 92%, transparent);
+  --ol-line: color-mix(in srgb, var(--line, #4c5645) 70%, transparent);
+  --ol-track: color-mix(in srgb, var(--ol-muted) 18%, transparent);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  min-width: 0;
+  color: var(--ol-ink);
+  font-variant-numeric: tabular-nums;
+}
+:root[data-theme="light"] .ol-root {
+  --ol-red: #d23f3f;
+  --ol-amber: #c9861a;
+  --ol-green: #2e9d66;
+  --ol-blue: #2479c4;
+  --ol-violet: #7a55e0;
+}
+.ol-root button { font: inherit; color: inherit; cursor: pointer; }
+.ol-root select,
+.ol-root input[type="date"] { font: inherit; color: var(--ol-ink); background: var(--ol-panel); border: 1px solid var(--ol-line); border-radius: 9px; padding: 6px 9px; max-width: 100%; }
+
+.ol-card,
+.ol-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  align-content: start;
+  min-width: 0;
+  padding: 16px 18px;
+  border: 1px solid var(--ol-line);
+  border-radius: 16px;
+  background: var(--ol-panel);
+}
+.ol-card > header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.ol-card h3 { margin: 0; font-size: 16px; }
+.ol-card > header span,
+.ol-head p,
+.ol-note,
+.ol-lead { color: var(--ol-muted); }
+.ol-lead { margin: 0; max-width: 70ch; }
+.ol-note { margin: 0; font-size: 13px; }
+.ol-error { margin: 0; padding: 9px 12px; border: 1px solid color-mix(in srgb, var(--ol-red) 60%, transparent); border-radius: 10px; background: color-mix(in srgb, var(--ol-red) 12%, transparent); }
+.ol-empty { margin: 0; color: var(--ol-muted); }
+
+.ol-head { grid-template-columns: minmax(0, 1fr) auto; align-items: start; }
+.ol-head h2 { margin: 2px 0 4px; font-size: 24px; }
+.ol-head p { margin: 0; overflow-wrap: anywhere; }
+.ol-eyebrow { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--ol-muted); }
+.ol-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.ol-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 14px;
+  border: 1px solid var(--ol-line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--ol-red) 22%, var(--ol-panel));
+  color: var(--ol-ink);
+  line-height: 1.2;
+  overflow: hidden;
+}
+.ol-btn.quiet { background: transparent; }
+.ol-btn:hover { border-color: var(--ol-ink); }
+.ol-btn:focus-within { outline: 2px solid var(--ol-blue); outline-offset: 2px; }
+.ol-file { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font-size: 0; }
+.ol-link { padding: 0; border: 0; background: none; color: var(--ol-blue); text-align: left; text-decoration: underline; text-underline-offset: 2px; }
+
+.ol-period { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+.ol-seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--ol-line); border-radius: 11px; overflow: hidden; }
+.ol-seg button { padding: 7px 13px; border: 0; background: transparent; }
+.ol-seg button[aria-pressed="true"] { background: color-mix(in srgb, var(--ol-red) 30%, transparent); font-weight: 600; }
+.ol-custom { display: flex; flex-wrap: wrap; gap: 8px; }
+.ol-unit { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.ol-unit span { color: var(--ol-muted); }
+.ol-context { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px; color: var(--ol-muted); }
+.ol-context span:first-child { color: var(--ol-ink); font-weight: 600; }
+
+.ol-kpis { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 12px; }
+.ol-kpi {
+  position: relative;
+  display: grid;
+  gap: 4px;
+  align-content: start;
+  min-width: 0;
+  padding: 14px 15px 12px;
+  border: 1px solid var(--ol-line);
+  border-top: 3px solid var(--tone);
+  border-radius: 14px;
+  background: var(--ol-panel);
+}
+.ol-kpi-label { color: var(--ol-muted); font-size: 13px; }
+.ol-kpi strong { font-size: 30px; line-height: 1.1; color: var(--tone); }
+.ol-kpi small { color: var(--ol-muted); font-size: 12px; }
+/* Для власних втрат зростання — погано, спад — добре. */
+.ol-delta { font-size: 12px; color: var(--ol-muted); }
+.ol-delta.up { color: var(--ol-red); }
+.ol-delta.down { color: var(--ol-green); }
+.ol-spark { display: block; width: 100%; height: 38px; }
+
+.ol-grid-2,
+.ol-grid-3 { display: grid; gap: 14px; min-width: 0; }
+.ol-grid-2 { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); }
+.ol-grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+.ol-chart svg { display: block; width: 100%; height: auto; }
+.ol-grid { stroke: var(--ol-line); stroke-width: 1; }
+.ol-axis { fill: var(--ol-muted); font-size: 11px; }
+.ol-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 4px; color: var(--ol-muted); font-size: 13px; }
+.ol-legend i { display: inline-block; width: 10px; height: 10px; margin-right: 6px; border-radius: 3px; }
+
+.ol-rank { display: grid; gap: 8px; }
+.ol-rank-row { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(40px, 1fr) auto auto; align-items: center; gap: 8px; font-size: 13px; }
+.ol-rank-name { overflow-wrap: anywhere; }
+.ol-rank-row i { display: block; height: 8px; border-radius: 99px; background: var(--ol-track); overflow: hidden; }
+.ol-rank-row b { display: block; height: 100%; border-radius: 99px; }
+.ol-rank-row small { min-width: 42px; text-align: right; color: var(--ol-muted); }
+.ol-more { margin: 0; color: var(--ol-muted); font-size: 12px; }
+
+.ol-scroll { overflow-x: auto; max-width: 100%; }
+.ol-scroll-tall { max-height: 520px; overflow-y: auto; }
+.ol-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ol-table th,
+.ol-table td { padding: 6px 8px; border-bottom: 1px solid var(--ol-line); text-align: left; vertical-align: top; }
+.ol-table thead th { position: sticky; top: 0; z-index: 1; background: var(--ol-panel); color: var(--ol-muted); font-weight: 600; white-space: nowrap; }
+.ol-table tfoot th,
+.ol-table tfoot td { font-weight: 700; border-bottom: 0; }
+.ol-table .ol-num { position: relative; text-align: right; white-space: nowrap; }
+.ol-table .ol-num span:last-child { position: relative; }
+.ol-cellbar { position: absolute; inset: 3px 0 3px auto; max-width: 100%; border-radius: 4px; background: color-mix(in srgb, var(--ol-red) 22%, transparent); }
+.ol-date { white-space: nowrap; font-weight: 500; }
+.ol-events td:last-child { min-width: 160px; }
+.ol-more-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 10px; color: var(--ol-muted); }
+
+.ol-issue { border-top: 1px solid var(--ol-line); padding: 8px 0; }
+.ol-issue summary { cursor: pointer; }
+.ol-issue ul { margin: 8px 0 0; padding-left: 20px; color: var(--ol-muted); font-size: 13px; }
+
+@media (max-width: 1400px) { .ol-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@media (max-width: 1100px) { .ol-grid-2, .ol-grid-3 { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 640px) {
+  .ol-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ol-head { grid-template-columns: minmax(0, 1fr); }
+  .ol-head h2 { font-size: 20px; }
+  .ol-kpi strong { font-size: 26px; }
+  .ol-period { align-items: stretch; }
+  .ol-seg { width: 100%; }
+  .ol-seg button { flex: 1 1 auto; }
+  .ol-unit { width: 100%; }
+  .ol-unit select { flex: 1 1 auto; min-width: 0; }
+  .ol-rank-row { grid-template-columns: minmax(0, 1fr) auto auto; }
+  .ol-rank-row i { grid-column: 1 / -1; grid-row: 2; }
+}

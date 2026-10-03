@@ -33,3 +33,9 @@ Command (УДШВ) bind their own tables, apart from the tables of the Air Force
 and Rocket Forces modules. SQLite cannot change a CHECK in place, so the table
 is rebuilt and existing bindings are copied unchanged. A PVK table that was
 bound to `air` earlier stays there and still opens in the Air Force module.
+
+`0008_own_losses_tables.sql` widens `local_profile_tables.branch` to
+`pvk_losses` and `dshv_losses`: the «НАШІ ВТРАТИ» table (the journal of own
+losses) is bound to each command tile apart from the tile's main table. The
+table is rebuilt because SQLite cannot change a CHECK in place; existing
+bindings are copied unchanged.

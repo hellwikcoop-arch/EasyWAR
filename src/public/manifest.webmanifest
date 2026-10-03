@@ -1,0 +1,16 @@
+{
+  "name": "EasyWAR — перегляд",
+  "short_name": "EasyWAR",
+  "description": "Перегляд дашбордів ПВК і УДШВ на телефоні. Лише читання, дані лишаються на пристрої.",
+  "lang": "uk",
+  "start_url": "./viewer.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#06101c",
+  "theme_color": "#06101c",
+  "icons": [
+    { "src": "./pwa-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "./pwa-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}
