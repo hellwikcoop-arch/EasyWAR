@@ -4,6 +4,7 @@ import { buildDeck } from './presentation-core.js';
 import { parseOwnLosses } from './own-losses-core.js';
 import { parseStrikes } from './strikes-core.js';
 import { applyReview, defaultDecisions, reviewData } from './data-review-core.js';
+import { GROUP_PROFILES, buildGroupDeck } from './presentation-group.js';
 
 export const FOCUS_CHOICES = [['all', 'Усе'], ['result', 'Результат'], ['efficiency', 'Ефективність']];
 export const GROUP_SLOTS = [
@@ -53,5 +54,22 @@ export function composeDeck(workbook, files = {}, settings = {}) {
   return { deck, review, corrections: applied.corrections, rejected: applied.rejected };
 }
 
+/** Меню перевірки даних модуля ПС або РВіА: пункти лише за його таблицею ударів. */
+export function reviewForModule(strikes, groupKey) {
+  return reviewData({ groups: [{ id: groupKey, title: GROUP_PROFILES[groupKey].short, strikes }] });
+}
+
+/** Колода модуля ПС або РВіА: рішення меню застосовуються до копій, вхідна таблиця не змінюється. */
+export function composeModuleDeck(strikes, groupKey, settings = {}) {
+  const groups = [{ id: groupKey, title: GROUP_PROFILES[groupKey].short, strikes }];
+  const review = reviewData({ groups });
+  const decisions = settings.decisions || defaultDecisions(review.items);
+  const applied = applyReview({ groups }, review, decisions);
+  const custom = settings.custom && settings.custom.from && settings.custom.to ? settings.custom : null;
+  const deck = buildGroupDeck(applied.groups[0].strikes, { group: groupKey, owner: settings.owner || '', titleText: settings.titleText || '', generatedOn: settings.generatedOn || '', custom });
+  return { deck, review, corrections: applied.corrections, rejected: applied.rejected };
+}
+
 export const FORMAT_CHOICES = [['pptx', 'PPTX (редагований)'], ['pdf', 'PDF (шрифт вбудований)'], ['both', 'Обидва']];
-export const presentationFileName = (owner, date, extension = 'pptx') => `Аналітика ${String(owner || 'УДШВ').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim()} ${date || ''}`.trim() + `.${extension}`;
+/** Назва файлу: «Аналітика <власник> <дата>.<розширення>»; без власника — fallback (для УДШВ — «УДШВ»). */
+export const presentationFileName = (owner, date, extension = 'pptx', fallback = 'УДШВ') => `Аналітика ${String(owner || fallback).replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim()} ${date || ''}`.trim() + `.${extension}`;

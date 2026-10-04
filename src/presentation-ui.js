@@ -1,8 +1,13 @@
-/* Вікно «Створити звіт» дашборда УДШВ: налаштування → меню перевірки даних → збереження .pptx.
+/* Вікно «Створити презентацію»: налаштування → меню перевірки даних → збереження .pptx / .pdf.
+   Дашборд УДШВ (openPresentationDialog) і модулі ПС та РВіА (openModulePresentationDialog) мають одне вікно:
+   у модуля немає фокусу, додаткових таблиць і підрозділів, бо колода будується з його власної таблиці ударів.
    Усе локально: файли читаються на пристрої, презентація зберігається через системне вікно збереження. */
-import { FOCUS_CHOICES, FORMAT_CHOICES, GROUP_SLOTS, composeDeck, parseSlot, presentationFileName, reviewFor } from './presentation-flow.js';
+import './presentation-dialog.css';
+import { FOCUS_CHOICES, FORMAT_CHOICES, GROUP_SLOTS, composeDeck, composeModuleDeck, parseSlot, presentationFileName, reviewFor, reviewForModule } from './presentation-flow.js';
+import { GROUP_PROFILES } from './presentation-group.js';
 import { unitFreshness } from './udshv-dashboard-core.js';
 import { defaultDecisions } from './data-review-core.js';
+import { longDate } from './presentation-format.js';
 
 const OWNER_KEY = 'easywar.presentation.owner';
 const TITLE_KEY = 'easywar.presentation.title';
@@ -39,15 +44,22 @@ async function saveBytes(bytes, name, kind = 'pptx') {
   return name;
 }
 
-/** options.readSheets(Uint8Array) → Promise<sheets> — читання XLSX ядром застосунку. */
-export function openPresentationDialog(workbook, options = {}) {
-  const fresh = unitFreshness(workbook);
+/** Дашборд УДШВ. options.readSheets(Uint8Array) → Promise<sheets> — читання XLSX ядром застосунку. */
+export const openPresentationDialog = (workbook, options = {}) => openDialog(workbook, options, null);
+
+/** Модуль ПС або РВіА: strikes — розібрана таблиця ударів (strikes-core.js), groupKey — 'ps' | 'rvia'. */
+export const openModulePresentationDialog = (strikes, groupKey, options = {}) => openDialog(strikes, options, GROUP_PROFILES[groupKey] || GROUP_PROFILES.ps);
+
+function openDialog(workbook, options, profile) {
+  // Власник і назва титулу запам'ятовуються окремо для кожного модуля: титул ПС не підміняє титул УДШВ.
+  const keyOf = key => (profile ? `${key}.${profile.key}` : key);
+  const fresh = profile ? null : unitFreshness(workbook);
   const s = {
-    owner: store.get(), titleText: store.get(TITLE_KEY), focus: 'all', format: store.get(FORMAT_KEY) || 'pptx', font: store.get(FONT_KEY) || 'standard', uaf: (() => { try { return JSON.parse(store.get(UAF_KEY) || 'null'); } catch { return null; } })(), period: 'rolling', from: '', to: '',
+    owner: store.get(keyOf(OWNER_KEY)), titleText: store.get(keyOf(TITLE_KEY)), focus: 'all', format: store.get(FORMAT_KEY) || 'pptx', font: store.get(FONT_KEY) || 'standard', uaf: (() => { try { return JSON.parse(store.get(UAF_KEY) || 'null'); } catch { return null; } })(), period: 'rolling', from: '', to: '',
     files: {}, names: {}, errors: {}, excluded: new Set(),
     step: 'settings', review: null, decisions: {}, busy: false, message: '',
   };
-  const dialog = h('dialog', { class: 'ud-present-dialog' });
+  const dialog = h('dialog', { class: profile ? 'ud-present-dialog ud-module' : 'ud-present-dialog' });
   document.body.append(dialog);
   const close = () => { dialog.close(); dialog.remove(); };
   // Подія cancel спливає і від поля вибору файлу — реагуємо лише на власне закриття вікна.
@@ -77,12 +89,13 @@ export function openPresentationDialog(workbook, options = {}) {
   }
 
   const settings = () => [
-    h('h2', { text: 'Створити презентацію' }),
+    h('h2', { text: profile ? `Створити презентацію · ${profile.short}` : 'Створити презентацію' }),
+    profile ? h('p', { class: 'ud-muted', text: `Таблиця: ${workbook.sourceName || 'без назви'} · записів з датою: ${workbook.records.length}${workbook.records.length ? `, ${longDate(workbook.records[0].date)} – ${longDate(workbook.records[workbook.records.length - 1].date)}` : ''}. Презентація будується лише з неї; файл не змінюється.` }) : null,
     h('label', { class: 'ud-field' }, h('span', { text: 'Заголовок титулу' }),
-      h('input', { type: 'text', value: s.titleText, placeholder: 'Напр. Аналітика центру ОВгП', oninput: e => { s.titleText = e.target.value; } })),
-    h('label', { class: 'ud-field' }, h('span', { text: 'Підзаголовок: чия аналітика (угруповання)' }),
-      h('input', { type: 'text', value: s.owner, placeholder: 'Напр. Угруповання ОВП УДШВ', oninput: e => { s.owner = e.target.value; } })),
-    h('fieldset', {}, h('legend', { text: 'Фокус' }),
+      h('input', { type: 'text', value: s.titleText, placeholder: profile ? `Напр. ${profile.defaultTitle}` : 'Напр. Аналітика центру ОВгП', oninput: e => { s.titleText = e.target.value; } })),
+    h('label', { class: 'ud-field' }, h('span', { text: profile ? 'Підзаголовок: чия аналітика (підрозділ, угруповання)' : 'Підзаголовок: чия аналітика (угруповання)' }),
+      h('input', { type: 'text', value: s.owner, placeholder: profile ? `Напр. ${profile.name}` : 'Напр. Угруповання ОВП УДШВ', oninput: e => { s.owner = e.target.value; } })),
+    profile ? null : h('fieldset', {}, h('legend', { text: 'Фокус' }),
       FOCUS_CHOICES.map(([k, label]) => h('label', { class: 'ud-radio' }, h('input', { type: 'radio', name: 'focus', checked: s.focus === k, onchange: () => { s.focus = k; } }), ` ${label}`))),
     h('fieldset', {}, h('legend', { text: 'Формат файлу' }),
       FORMAT_CHOICES.map(([k, label]) => h('label', { class: 'ud-radio' }, h('input', { type: 'radio', name: 'format', checked: s.format === k, onchange: () => { s.format = k; } }), ` ${label}`))),
@@ -100,14 +113,14 @@ export function openPresentationDialog(workbook, options = {}) {
       s.period === 'custom' ? h('div', { class: 'ud-dates' },
         h('input', { type: 'date', value: s.from, onchange: e => { s.from = e.target.value; } }), ' — ',
         h('input', { type: 'date', value: s.to, onchange: e => { s.to = e.target.value; } })) : null),
-    h('fieldset', {}, h('legend', { text: 'Додаткові таблиці (необов’язково: немає файлу — немає слайда)' }),
+    profile ? null : h('fieldset', {}, h('legend', { text: 'Додаткові таблиці (необов’язково: немає файлу — немає слайда)' }),
       SLOTS.map(slot => h('div', { class: 'ud-slot' },
         h('strong', { text: slot.title }), ' ',
         s.names[slot.key] ? h('span', { text: s.names[slot.key] }) : h('span', { class: 'ud-muted', text: `не підключено (${slot.hint})` }),
         s.names[slot.key] ? null : h('input', { type: 'file', accept: '.xlsx', onchange: e => pick(slot.key, e.target.files[0]) }),
         s.names[slot.key] ? h('button', { type: 'button', class: 'ud-link', text: 'прибрати', onclick: () => pick(slot.key, null) }) : null,
         s.errors[slot.key] ? h('div', { class: 'ud-error', text: s.errors[slot.key] }) : null))),
-    h('fieldset', {}, h('legend', { text: 'Підрозділи в аналізі (зніміть позначку, щоб виключити)' }),
+    profile ? null : h('fieldset', {}, h('legend', { text: 'Підрозділи в аналізі (зніміть позначку, щоб виключити)' }),
       fresh.rows.map(row => h('label', { class: 'ud-radio' },
         h('input', { type: 'checkbox', checked: !s.excluded.has(row.unit), onchange: e => { if (e.target.checked) s.excluded.delete(row.unit); else s.excluded.add(row.unit); } }),
         ` ${row.unit}`, row.stale ? h('em', { class: 'ud-muted', text: ` — без свіжих даних (остання дата ${row.lastDate ? row.lastDate.split('-').reverse().join('.') : '—'}), пропонується виключити` }) : null))),
@@ -145,13 +158,13 @@ export function openPresentationDialog(workbook, options = {}) {
   function next() {
     s.message = '';
     if (s.period === 'custom' && !(s.from && s.to)) { s.message = 'Вкажіть початок і кінець періоду.'; return draw(); }
-    if (s.excluded.size >= fresh.rows.length) { s.message = 'Залиште хоча б один підрозділ.'; return draw(); }
-    store.set(s.owner.trim());
-    store.set(s.titleText.trim(), TITLE_KEY);
+    if (!profile && s.excluded.size >= fresh.rows.length) { s.message = 'Залиште хоча б один підрозділ.'; return draw(); }
+    store.set(s.owner.trim(), keyOf(OWNER_KEY));
+    store.set(s.titleText.trim(), keyOf(TITLE_KEY));
     store.set(s.format, FORMAT_KEY);
     store.set(s.font, FONT_KEY);
     if (s.font === 'uaf' && (s.format !== 'pptx') && !(s.uaf && s.uaf.regular && s.uaf.bold)) { s.message = 'Для PDF з UAF Sans додайте обидва файли шрифту.'; return draw(); }
-    s.review = reviewFor(workbook, s.files);
+    s.review = profile ? reviewForModule(workbook, profile.key) : reviewFor(workbook, s.files);
     if (s.review.clean) return generate();
     s.decisions = defaultDecisions(s.review.items);
     s.step = 'review'; draw();
@@ -162,19 +175,20 @@ export function openPresentationDialog(workbook, options = {}) {
     s.busy = true; s.message = ''; draw();
     try {
       const out = settingsOut();
-      const { deck } = composeDeck(workbook, s.files, out.decisions && s.step === 'review' ? out : { ...out, decisions: undefined });
+      const composeSettings = out.decisions && s.step === 'review' ? out : { ...out, decisions: undefined };
+      const { deck } = profile ? composeModuleDeck(workbook, profile.key, composeSettings) : composeDeck(workbook, s.files, composeSettings);
       const pptx = await import('./presentation-pptx.js');
       const artApi = await import('./presentation-art.js');
       const art = await artApi.loadArt();
       const saved = [];
       if (s.format === 'pptx' || s.format === 'both') {
-        const path = await saveBytes(await pptx.renderDeckToBytes(deck, { art, font: s.font === 'uaf' ? 'UAF Sans' : 'Arial' }), presentationFileName(out.owner, out.generatedOn, 'pptx'), 'pptx');
+        const path = await saveBytes(await pptx.renderDeckToBytes(deck, { art, font: s.font === 'uaf' ? 'UAF Sans' : 'Arial' }), presentationFileName(out.owner, out.generatedOn, 'pptx', profile?.short), 'pptx');
         if (path) saved.push(path);
       }
       if (s.format === 'pdf' || s.format === 'both') {
         const base = await artApi.loadFonts();
         const fonts = s.font === 'uaf' ? { regular: fromBase64(s.uaf.regular), bold: fromBase64(s.uaf.bold), fallback: base.regular, fallbackBold: base.bold } : base;
-        const path = await saveBytes(await pptx.renderDeckToPdfBytes(deck, { art, fonts, font: s.font === 'uaf' ? 'UAF Sans' : 'Arial' }), presentationFileName(out.owner, out.generatedOn, 'pdf'), 'pdf');
+        const path = await saveBytes(await pptx.renderDeckToPdfBytes(deck, { art, fonts, font: s.font === 'uaf' ? 'UAF Sans' : 'Arial' }), presentationFileName(out.owner, out.generatedOn, 'pdf', profile?.short), 'pdf');
         if (path) saved.push(path);
       }
       if (saved.length) { s.message = ''; close(); options.toast?.(`Збережено: ${saved.join(', ')}`); return; }

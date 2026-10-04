@@ -2960,6 +2960,7 @@ html[data-theme="light"] .kh{background:#151a0f!important}
   </nav>
   <div class="appbar-right">
     <span id="fileChip"></span>
+    <button type="button" id="presentBtn" class="btn quiet" title="Створити презентацію (PPTX або PDF) за цією таблицею" hidden>Презентація</button>
     <button type="button" id="themeBtn" class="btn quiet">Світла тема</button>
   </div>
 </header>
@@ -7218,6 +7219,17 @@ function init() {
   $('#tab-dash').addEventListener('click', () => showView('dash')); $('#tab-entry').addEventListener('click', () => showView('entry'));
   document.querySelector('.tabs').addEventListener('keydown', e => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { const to = $('#tab-dash').getAttribute('aria-selected') === 'true' ? 'entry' : 'dash'; showView(to); $('#tab-' + to).focus(); } });
   { const tb = $('#themeBtn'); if (tb && !$('#motionBtn')) { const mb = h('button', { type: 'button', id: 'motionBtn', class: 'motion-btn', title: 'Плавні переходи та анімації. За замовчуванням вимикаються, якщо в системі увімкнено «зменшити рух».', onclick: () => { MOTION.on = !MOTION.on; store('aviahub.motion', MOTION.on ? '1' : '0'); applyMotion(); if (!MOTION.on) camStop(); } }); tb.before(mb); applyMotion(); } }
+  /* Кнопка «Презентація»: колода будується з таблиці ударів цього модуля (group-presentation.js). */
+  { const pb = $('#presentBtn');
+    if (pb) {
+      const sync = () => { const S = AV.S; pb.hidden = !(S.wb && S.bytes && !document.documentElement.dataset.command && !$('#fileChip').hidden); };
+      pb.addEventListener('click', () => {
+        const api = window.EWGroupPresentation;
+        if (!api) { AV.toast('Презентація ще завантажується, спробуйте за секунду.', ''); return; }
+        api.open({ group: 'rvia', bytes: AV.S.bytes, name: AV.S.name, readSheets: u8 => window.AVCORE.readAllSheets(u8), toast: AV.toast });
+      });
+      document.addEventListener('av:data', sync); sync();
+    } }
   $('#themeBtn').addEventListener('click', ev => {
     const t = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
     if (!MOTION.on || !document.startViewTransition) return setTheme(t);
@@ -7285,6 +7297,7 @@ document.addEventListener('DOMContentLoaded', init);
 })();
 </script>
 <script type="module" src="./udshv-dashboard.js"></script>
+<script type="module" src="./group-presentation.js"></script>
 <script src="./module-editor-access.js"></script>
 <script src="./rocket-refs.js"></script>
 <script src="./module-editor-core.js"></script>
