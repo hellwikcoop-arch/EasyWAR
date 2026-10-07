@@ -39,6 +39,9 @@ function footer(slide, theme, deck, number, left) {
   slide.addText(String(number), { x: 11.88, y: 7.1, w: 0.94, h: 0.23, fontFace: theme.font, fontSize: 8.6, color: theme.muted, align: 'right', margin: 0 });
 }
 
+/** Підпис унизу слайда: власник звіту й фокус (колода модуля фокусу не має). */
+const footerText = deck => [deck.slides[0].owner || 'EasyWAR', deck.focusLabel].filter(Boolean).join(' · ');
+
 function tileColors(tile, theme) {
   if (tile.deltaPercent == null || tile.delta == null) return theme.muted;
   if (tile.better === 'down') return tile.delta < 0 ? theme.good : tile.delta > 0 ? theme.bad : theme.muted;
@@ -152,7 +155,7 @@ function periodSlide(pptx, theme, deck, data, number, art) {
   drawCharts(slide, theme, pptx, data.charts);
   drawBlocks(slide, theme, data, brand);
   if (data.notes.length) slide.addText(data.notes.join(' '), { x: M, y: 6.82, w: W - 2 * M, h: 0.22, fontFace: theme.font, fontSize: 8.6, italic: true, color: theme.muted, margin: 0 });
-  footer(slide, theme, deck, number, `${deck.slides[0].owner || 'EasyWAR'} · ${deck.focusLabel}`);
+  footer(slide, theme, deck, number, footerText(deck));
 }
 
 function reservedSlide(pptx, theme, deck, data, number, art) {
@@ -160,17 +163,21 @@ function reservedSlide(pptx, theme, deck, data, number, art) {
   header(slide, theme, data, art, 'dshv', '', '');
   slide.addShape('roundRect', { x: M, y: 1.4, w: W - 2 * M, h: 5.2, rectRadius: 0.1, fill: { color: theme.card }, line: { color: theme.line, width: 1, dashType: 'dash' } });
   slide.addText(data.message, { x: M + 0.5, y: 1.4, w: W - 2 * M - 1, h: 5.2, fontFace: theme.font, fontSize: 20, color: theme.muted, align: 'center', valign: 'middle', margin: 0 });
-  footer(slide, theme, deck, number, `${deck.slides[0].owner || 'EasyWAR'} · ${deck.focusLabel}`);
+  footer(slide, theme, deck, number, footerText(deck));
 }
 
 function titleSlide(pptx, theme, deck, data, art) {
   const slide = pptx.addSlide();
-  const brand = theme.brands.dshv;
-  slide.background = { color: brand };
+  // Тема титулу: ДШВ (колода УДШВ), ПС або РВіА (колода окремого модуля).
+  const key = theme.brands[data.theme] ? data.theme : 'dshv';
+  slide.background = { color: theme.brands[key] };
   slide.addText(data.titleText || 'Аналітика', { x: 0.75, y: 1.49, w: 11.8, h: 1.3, fontFace: theme.font, fontSize: 36, bold: true, color: 'FFFFFF', valign: 'top', margin: 0, fit: 'shrink' });
   const sub = [data.owner, deck.focusLabel].filter(Boolean).join(' · ');
   slide.addText(sub, { x: 0.75, y: 2.95, w: 11.8, h: 0.5, fontFace: theme.font, fontSize: 15, bold: true, color: 'FFFFFF', valign: 'top', margin: 0, fit: 'shrink' });
-  if (drawLogo(slide, art, 'logo-dshv', 0.62, 5.87, 1.02)) slide.addText('Десантно-штурмові війська', { x: 1.74, y: 5.8, w: 3.4, h: 1.15, fontFace: theme.font, fontSize: 20, bold: true, color: 'FFFFFF', valign: 'middle', margin: 0 });
+  // Емблеми ПС і «Сухопутних військ» уже містять назву роду військ; для ДШВ підпис додається поруч.
+  if (key === 'ps') drawLogo(slide, art, 'logo-ps', 0.62, 5.87, 1.02);
+  else if (key === 'rvia') drawLogo(slide, art, 'logo-sv', 0.62, 5.87, 1.02);
+  else if (drawLogo(slide, art, 'logo-dshv', 0.62, 5.87, 1.02)) slide.addText('Десантно-штурмові війська', { x: 1.74, y: 5.8, w: 3.4, h: 1.15, fontFace: theme.font, fontSize: 20, bold: true, color: 'FFFFFF', valign: 'middle', margin: 0 });
 }
 
 /** Будує об'єкт PptxGenJS за моделлю колоди. theme: 'light' (єдина затверджена). */

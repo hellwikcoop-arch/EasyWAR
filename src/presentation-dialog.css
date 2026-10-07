@@ -1,0 +1,40 @@
+/* Вікно «Створити презентацію» у модулях ПС і РВіА (клас ud-module). У дашборді УДШВ те саме вікно
+   стилізує udshv-dashboard.css, тому правила нижче діють лише з модифікатором і УДШВ не чіпають.
+   Тема береться з html[data-theme]; кольори мають запасні значення, бо змінних модуля тут немає. */
+.ud-present-dialog.ud-module {
+  --pd-bg: #ffffff; --pd-ink: #111827; --pd-muted: #5b6475; --pd-line: #cdd3dc; --pd-accent: #2f6eb5; --pd-warn: #d98e04; --pd-bad: #c0392b;
+  color-scheme: light;
+  width: min(640px, calc(100vw - 32px)); max-height: 90vh; overflow: auto; padding: 20px;
+  border: 1px solid var(--pd-line); border-radius: 12px; background: var(--pd-bg); color: var(--pd-ink);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+}
+:root[data-theme="dark"] .ud-present-dialog.ud-module {
+  --pd-bg: #161c28; --pd-ink: #e8edf5; --pd-muted: #9aa6ba; --pd-line: #3a4458; --pd-accent: #6aa8f0; --pd-warn: #f2b544; --pd-bad: #ff7b6b;
+  color-scheme: dark;
+}
+.ud-present-dialog.ud-module::backdrop { background: rgba(8, 12, 20, .55); }
+.ud-present-dialog.ud-module h2 { margin: 0 0 10px; font-size: 20px; }
+.ud-present-dialog.ud-module fieldset { margin: 12px 0; padding: 8px 12px 10px; border: 1px solid var(--pd-line); border-radius: 8px; }
+.ud-present-dialog.ud-module legend { padding: 0 6px; font-weight: 600; }
+.ud-present-dialog.ud-module .ud-field { display: grid; gap: 4px; margin: 10px 0; }
+.ud-present-dialog.ud-module .ud-field > span { font-weight: 600; }
+.ud-present-dialog.ud-module input[type="text"], .ud-present-dialog.ud-module input[type="date"], .ud-present-dialog.ud-module select {
+  box-sizing: border-box; max-width: 100%; padding: 8px; font: inherit; color: inherit; background: transparent;
+  border: 1px solid var(--pd-line); border-radius: 8px;
+}
+.ud-present-dialog.ud-module input[type="text"] { width: 100%; }
+.ud-present-dialog.ud-module .ud-radio { display: block; margin: 4px 0; }
+.ud-present-dialog.ud-module .ud-slot { margin: 8px 0; }
+.ud-present-dialog.ud-module .ud-dates { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.ud-present-dialog.ud-module .ud-muted { color: var(--pd-muted); }
+.ud-present-dialog.ud-module .ud-error { margin-top: 6px; color: var(--pd-bad); }
+.ud-present-dialog.ud-module .ud-review { margin: 8px 0; padding: 6px 10px; border-left: 3px solid var(--pd-warn); }
+.ud-present-dialog.ud-module .ud-review.error { border-color: var(--pd-bad); }
+.ud-present-dialog.ud-module .ud-review select, .ud-present-dialog.ud-module .ud-review input[type="text"] { margin-top: 6px; }
+.ud-present-dialog.ud-module .ud-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+.ud-present-dialog.ud-module .ud-btn { padding: 8px 16px; font: inherit; font-weight: 600; color: inherit; cursor: pointer; background: transparent; border: 1px solid var(--pd-line); border-radius: 10px; }
+.ud-present-dialog.ud-module .ud-btn.primary { color: #fff; background: var(--pd-accent); border-color: var(--pd-accent); }
+:root[data-theme="dark"] .ud-present-dialog.ud-module .ud-btn.primary { color: #0b1220; }
+.ud-present-dialog.ud-module .ud-btn:focus-visible, .ud-present-dialog.ud-module .ud-link:focus-visible { outline: 2px solid var(--pd-accent); outline-offset: 2px; }
+.ud-present-dialog.ud-module .ud-link { padding: 0; font: inherit; color: var(--pd-accent); cursor: pointer; background: none; border: 0; text-decoration: underline; }
+@media (max-width: 520px) { .ud-present-dialog.ud-module { padding: 14px; } .ud-present-dialog.ud-module .ud-actions { flex-wrap: wrap; } }

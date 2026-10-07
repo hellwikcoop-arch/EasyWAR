@@ -60,3 +60,53 @@
 - Ліцензія: Creative Commons Attribution 4.0 (CC BY 4.0), <http://creativecommons.org/licenses/by/4.0/>
 
 Змінено: стиснуто так само, як mig-29.glb (з 2,0 до 0,7 МБ), форма моделі не змінювалася.
+
+## mi-24p.glb — Мі-24П (Ukrainian Mil Mi-24P)
+
+- Автор: 42manako (<https://sketchfab.com/42manako>)
+- Джерело: <https://sketchfab.com/3d-models/ukrainian-mil-mi-24p-2d8a8f13daae4757be0ff95195a6d6f3>
+- Ліцензія: Creative Commons Attribution 4.0 (CC BY 4.0), <http://creativecommons.org/licenses/by/4.0/>
+
+Змінено: геометрію стиснуто meshopt (з 1,5 до 0,55 МБ), форма моделі не змінювалася.
+
+## mi-8.glb — Мі-8 (Mi-8)
+
+- Автор: tiunov.se (<https://sketchfab.com/tiunov.se>)
+- Джерело: <https://sketchfab.com/3d-models/mi-8-5e5e57ef66994c6196a5f5d6b9f50403>
+- Ліцензія: Creative Commons Attribution 4.0 (CC BY 4.0), <http://creativecommons.org/licenses/by/4.0/>
+
+Змінено: текстури зменшено й перекодовано в JPEG (карти металу й шорсткості — до 1024 px), геометрію стиснуто meshopt (з 15,2 до 1,9 МБ), форма моделі не змінювалася.
+
+## su-27b.glb — Су-27 (Ukrainian Su-27B)
+
+- Автор: 42manako (<https://sketchfab.com/42manako>)
+- Джерело: <https://sketchfab.com/3d-models/ukrainian-su-27b-a1fa957a39bb4f3db8bb669c2dd6afdb>
+- Ліцензія: Creative Commons Attribution 4.0 (CC BY 4.0), <http://creativecommons.org/licenses/by/4.0/>
+
+Змінено: стиснуто так само, як mig-29.glb (з 5,2 до 0,9 МБ), форма моделі не змінювалася.
+
+## mig-29-ghost.glb — МіГ-29 «Привид Києва» (Ghost of Kiev MiG-29)
+
+- Автор: 42manako (<https://sketchfab.com/42manako>)
+- Джерело: <https://sketchfab.com/3d-models/ghost-of-kiev-mig-29-cf0c0d3e8494460b8e4d9c579550d656>
+- Ліцензія: Creative Commons Attribution 4.0 (CC BY 4.0), <http://creativecommons.org/licenses/by/4.0/>
+
+Змінено: матеріали переведено з specular-glossiness у metallic-roughness, стиснуто так само, як mig-29.glb (з 24,4 до 8,9 МБ), форма моделі не змінювалася.
+
+## aim-120.glb, aim-9x.glb, agm-65.glb — ракети зі збірки «US Weapon Pack»
+
+- Автор: Rhine_Lab_Muelsyse (<https://sketchfab.com/Rhine_Lab_Muelsyse>)
+- Джерело: <https://sketchfab.com/3d-models/us-weapon-pack-c0783151b0024554a97d8ed6e5082745>
+- Ліцензія: Creative Commons Attribution 4.0 (CC BY 4.0), <http://creativecommons.org/licenses/by/4.0/>
+
+Змінено: зі збірки виокремлено три ракети (AIM-120, AIM-9X, AGM-65 разом зі склом), кожна збережена окремим файлом; текстури перекодовано в JPEG, геометрію стиснуто meshopt. Форма ракет не змінювалася.
+
+## r-27.glb, r-77.glb, kh-29.glb, kab-500l.glb — боєприпаси зі збірки «Missile & Bomb Collection»
+
+- Автор: bohmerang (<https://sketchfab.com/bohmerang>)
+- Джерело: <https://sketchfab.com/3d-models/missile-bomb-collection-fighter-jets-free-d203b678424a43568703bf85ba680f47>
+- Ліцензія: Creative Commons Attribution-NonCommercial-ShareAlike 4.0 (CC BY-NC-SA 4.0), <http://creativecommons.org/licenses/by-nc-sa/4.0/>
+
+**Обмеження ліцензії.** CC BY-NC-SA дозволяє лише некомерційне використання, а змінені файли треба поширювати на тих самих умовах. Ці чотири файли — змінені копії (див. нижче), тож вони лишаються під CC BY-NC-SA 4.0 навіть усередині застосунку. Якщо застосунок колись поширюватиметься на комерційних умовах, ці файли слід вилучити (разом із рядками `r-27`, `r-77`, `kh-29`, `kab-500l` у `MODEL_FILES` і статтями Р-27, Р-77, Х-29, КАБ-500Л у `ref-data.js`).
+
+Змінено: зі збірки виокремлено чотири боєприпаси (Р-27, Р-77, Х-29, КАБ-500Л), кожен збережений окремим файлом; текстури перекодовано в JPEG, геометрію стиснуто meshopt. Форма моделей не змінювалася.

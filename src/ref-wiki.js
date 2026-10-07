@@ -1,7 +1,7 @@
 // Вкладка «Довідник» модуля «Повітряні Сили»: вікі по засобах (літаки-носії) і боєприпасах.
 // Ліворуч список зі пошуком, праворуч стаття: 3D-модель, картка з ТТХ, опис, пов’язані статті й підсумок по вашій таблиці.
 // Дані статей — ref-data.js, 3D-переглядач — ref-viewer.js (підвантажується, коли відкривають першу статтю з моделлю).
-import { GROUPS, ENTRIES, entryById, carriersOf, munitionsOf, searchEntries, usageFor } from './ref-data.js';
+import { GROUPS, ENTRIES, entryById, carriersOf, munitionsOf, searchEntries, usageFor, variantsOf, modelOf, creditOf } from './ref-data.js';
 
 function h(tag, props, ...kids) {
   const el = document.createElement(tag);
@@ -29,7 +29,7 @@ const RESULTS = [['hit', 'Уражено', 'var(--hit)'], ['part', 'Пошкод
 //   initial  — id статті, яку показати першою; onSelect(id) — виклик при виборі статті.
 export function mount(host, options = {}) {
   const { rows = () => [], media = {}, motion = () => true, onSelect } = options;
-  const state = { group: '', q: '', id: '' };
+  const state = { group: '', q: '', id: '', variant: '' };
   let viewer = null, viewerFailed = false, token = 0;
 
   host.classList.add('rw');
@@ -98,11 +98,12 @@ export function mount(host, options = {}) {
     if (mine !== token) return;
     if (!v) { fallback(entry, 'WebGL недоступний, тож показано лише ілюстрацію.'); return; }
     try {
-      const caps = await v.show(entry.model, { onProgress: p => { if (mine === token) status.textContent = 'Завантаження моделі… ' + Math.round(p * 100) + ' %'; } });
+      const model = modelOf(entry, state.variant);
+      const caps = await v.show(model, { onProgress: p => { if (mine === token) status.textContent = 'Завантаження моделі… ' + Math.round(p * 100) + ' %'; } });
       if (mine !== token || !caps) return;
       status.hidden = true;
       wingsCtl.row.hidden = !caps.winged; apartCtl.row.hidden = !caps.modular;
-      wingsCtl.label.textContent = entry.model.wingsLabel || 'Крила';
+      wingsCtl.label.textContent = model.wingsLabel || 'Крила';
       wingsCtl.set(1); apartCtl.set(0);
       if (caps.modular) hint.textContent = 'Потягніть, щоб повернути. Повзунок «Блоки» розкладає бомбу.';
       else hint.textContent = 'Потягніть, щоб повернути. Коліщатко наближає.';
@@ -160,6 +161,26 @@ export function mount(host, options = {}) {
       })) : null);
   }
 
+  // Підпис про автора моделі: залежить від вибраного варіанта моделі (розмальовки чи модифікації).
+  function creditNode(entry) {
+    const credit = creditOf(entry, state.variant);
+    if (!credit) return null;
+    if (credit.generated) return h('p', { class: 'rw-credit', text: credit.note });
+    return h('p', { class: 'rw-credit' }, 'Модель: «' + credit.title + '», автор ',
+      h('a', { href: credit.authorUrl, target: '_blank', rel: 'noopener noreferrer', text: credit.author }),
+      ', ліцензія ', h('a', { href: credit.licenseUrl, target: '_blank', rel: 'noopener noreferrer', text: credit.license }),
+      '. Джерело: ', h('span', { class: 'rw-src', text: credit.url.replace(/^https?:\/\//, '') }), '. Файл стиснуто для застосунку, форму моделі не змінено.' + (credit.note ? ' ' + credit.note : ''));
+  }
+
+  function pickVariant(entry, id) {
+    if (state.variant === id || state.id !== entry.id) return;
+    state.variant = id;
+    article.querySelectorAll('.rw-variants button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.variant === id)));
+    const box = article.querySelector('.rw-creditbox');
+    if (box) box.replaceChildren(creditNode(entry));
+    showModel(entry, ++token);
+  }
+
   function renderArticle(entry) {
     const photo = media.photo && media.photo(entry.id);
     const info = h('aside', { class: 'rw-info', 'aria-label': 'Основні дані' },
@@ -167,18 +188,20 @@ export function mount(host, options = {}) {
       photo && !entry.model ? h('img', { class: 'rw-photo', src: photo, alt: entry.name }) : null,
       h('dl', { class: 'rw-facts' }, entry.facts.map(([k, v]) => h('div', {}, h('dt', { text: k }), h('dd', { text: v })))),
       entry.note ? h('p', { class: 'rw-fine', text: entry.note }) : null);
+    const variants = variantsOf(entry);
+    const activeVariant = variants.find(v => v.id === state.variant) || variants[0];
+    const variantBar = variants.length ? h('div', { class: 'seg rw-variants', role: 'group', 'aria-label': 'Модель' },
+      variants.map(v => h('button', { type: 'button', 'data-variant': v.id, 'aria-pressed': String(v === activeVariant), text: v.label, onclick: () => pickVariant(entry, v.id) }))) : null;
+    const creditBox = h('div', { class: 'rw-creditbox' }, creditNode(entry));
     const main = h('div', { class: 'rw-main' },
+      variantBar,
       entry.model ? stageBox : null,
       slot,
       h('p', { class: 'rw-summary', text: entry.summary }),
       entry.sections.map(s => h('section', { class: 'rw-sec' }, h('h3', { text: s.title }),
         s.text ? h('p', { text: s.text }) : null, s.list ? h('ul', {}, s.list.map(t => h('li', { text: t }))) : null)),
       relatedBlock(entry), usageEl,
-      entry.credit && entry.credit.generated ? h('p', { class: 'rw-credit', text: entry.credit.note }) : null,
-      entry.credit && !entry.credit.generated ? h('p', { class: 'rw-credit' }, 'Модель: «' + entry.credit.title + '», автор ',
-        h('a', { href: entry.credit.authorUrl, target: '_blank', rel: 'noopener noreferrer', text: entry.credit.author }),
-        ', ліцензія ', h('a', { href: entry.credit.licenseUrl, target: '_blank', rel: 'noopener noreferrer', text: entry.credit.license }),
-        '. Джерело: ', h('span', { class: 'rw-src', text: entry.credit.url.replace(/^https?:\/\//, '') }), '. Файл стиснуто для застосунку, форму моделі не змінено.' + (entry.credit.note ? ' ' + entry.credit.note : '')) : null);
+      creditBox);
     article.replaceChildren(
       h('header', { class: 'rw-head' }, h('p', { class: 'rw-eyebrow', text: groupTitle(entry.group) + ' · ' + entry.origin }),
         h('h2', { text: entry.name }, entry.status ? h('span', { class: 'rw-badge', text: entry.status }) : null), h('p', { class: 'rw-alias', text: entry.alias })),
@@ -218,6 +241,7 @@ export function mount(host, options = {}) {
 
   function select(id, user) {
     const entry = entryById(id) || ENTRIES[0];
+    if (state.id !== entry.id) state.variant = '';
     state.id = entry.id;
     const mine = ++token;
     renderNav();

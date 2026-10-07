@@ -1526,6 +1526,7 @@ body.lay-sizing, body.lay-sizing * { -webkit-user-select: none !important; user-
   </nav>
   <div class="appbar-right">
     <span id="fileChip"></span>
+    <button type="button" id="presentBtn" class="btn quiet" title="Створити презентацію (PPTX або PDF) за цією таблицею" hidden>Презентація</button>
     <button type="button" id="dashboardSourceToggle" class="btn quiet">Джерело: файл</button>
     <button type="button" id="themeBtn" class="btn quiet">Світла тема</button>
   </div>
@@ -2753,6 +2754,13 @@ function idb() { return new Promise((res, rej) => { const r = indexedDB.open('av
 async function idbSet(k, v) { const db = await idb(); return new Promise((res, rej) => { const tx = db.transaction('kv', 'readwrite'); tx.objectStore('kv').put(v, k); tx.oncomplete = res; tx.onerror = () => rej(tx.error); }); }
 async function idbGet(k) { const db = await idb(); return new Promise((res, rej) => { const tx = db.transaction('kv'); const q = tx.objectStore('kv').get(k); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); }); }
 
+/* Кожен вигляд дашборда відкривається лише у своєму місці: «Повітряні Сили» — таблиця з аркушем «Зведена»,
+   вікно Повітряного командування (?command=pvk) — лише таблиця ПВК. Порожній рядок означає «підходить». */
+function wrongKindMessage(command, kind) {
+  if (command === 'pvk') return kind === 'pvk' ? '' : 'Це не таблиця ПВК: у вікні Повітряного командування відкриваються лише таблиці з аркушами «АА», «ПС», «Об’єкти» або журналом «Таблиця 1».';
+  return kind === 'pvk' ? 'Це таблиця ПВК: її відкриває плитка «Повітряне командування» на стартовому екрані. У модулі «Повітряні Сили» відкриваються таблиці з аркушем «Зведена».' : '';
+}
+
 async function openAnyWorkbook(u8) {
   try { return await C.openWorkbook(u8); }
   catch (standardError) {
@@ -2765,14 +2773,16 @@ async function connect(u8, name, handle, fresh) {
   showError('');
   try {
     const wb = await openAnyWorkbook(u8);
-    if (document.documentElement.dataset.command === 'pvk' && wb.kind !== 'pvk') throw new Error('Це не таблиця ПВК: у вікні Повітряного командування відкриваються лише таблиці з аркушами «АА», «ПС», «Об’єкти» або журналом «Таблиця 1».');
+    const wrongKind = wrongKindMessage(document.documentElement.dataset.command, wb.kind);
+    if (wrongKind) throw Object.assign(new Error(wrongKind), { wrongKind: true });
     S.bytes = u8; S.name = name; S.handle = handle || null; S.wb = wb; S.ctx = wb.kind === 'pvk' ? null : C.buildContext(wb);
     S.dirty = false; S.undo = []; S.session = []; S.parsed = []; S.signalReview = null;
     $('#paste').value = '';
     renderAll();
     if (wb.kind !== 'pvk') $('#paste').focus();
     if (fresh) document.dispatchEvent(new Event('av:opened'));
-  } catch (e) { showError(e.message || String(e)); }
+    return true;
+  } catch (e) { showError(e.message || String(e)); return e && e.wrongKind ? 'wrong-kind' : false; }
 }
 async function pickFile() {
   if (window.showOpenFilePicker) {
@@ -2780,7 +2790,8 @@ async function pickFile() {
       const [fh] = await window.showOpenFilePicker({ types: [{ description: 'Таблиця Excel (.xlsx)', accept: { [XLSX_MIME]: ['.xlsx'] } }] });
       let perm = 'denied'; try { perm = await fh.requestPermission({ mode: 'readwrite' }); } catch (e) {}
       const f = await fh.getFile();
-      await connect(new Uint8Array(await f.arrayBuffer()), f.name, perm === 'granted' ? fh : null, true);
+      const opened = await connect(new Uint8Array(await f.arrayBuffer()), f.name, perm === 'granted' ? fh : null, true);
+      if (opened === 'wrong-kind') return; // чужий вигляд таблиці не запам'ятовується як «останній файл» цього модуля
       if (perm === 'granted') idbSet(HANDLE_KEY, fh).catch(() => {});
       else showError('Дозволу на запис не надано — зміни зберігатимуться через кнопку «Завантажити».');
     } catch (e) {
@@ -2798,7 +2809,8 @@ async function resumeStored() {
     const perm = await fh.requestPermission({ mode: 'readwrite' });
     if (perm !== 'granted') { showError('Дозволу не надано. Відкрийте файл кнопкою «Відкрити таблицю».'); return; }
     const f = await fh.getFile();
-    await connect(new Uint8Array(await f.arrayBuffer()), f.name, fh, true);
+    const opened = await connect(new Uint8Array(await f.arrayBuffer()), f.name, fh, true);
+    if (opened === 'wrong-kind') { S.storedHandle = null; idbSet(HANDLE_KEY, null).catch(() => {}); renderFile(); } // запам'ятований файл іншого виду більше не пропонується
   } catch (e) { showError('Не вдалося відновити доступ до файлу: ' + (e.message || e) + '. Відкрийте його заново.'); }
 }
 async function fromFileObject(f) {
@@ -3185,8 +3197,8 @@ function init() {
       let perm = 'denied'; try { perm = await fh.requestPermission({ mode: 'readwrite' }); } catch (err) {}
       const f = await fh.getFile();
       if (!/\.xlsx$/i.test(f.name)) { showError('Потрібен файл .xlsx.'); return; }
-      await connect(new Uint8Array(await f.arrayBuffer()), f.name, perm === 'granted' ? fh : null, true);
-      if (perm === 'granted') idbSet(HANDLE_KEY, fh).catch(() => {});
+      const opened = await connect(new Uint8Array(await f.arrayBuffer()), f.name, perm === 'granted' ? fh : null, true);
+      if (perm === 'granted' && opened !== 'wrong-kind') idbSet(HANDLE_KEY, fh).catch(() => {});
     } else if (e.dataTransfer.files[0]) fromFileObject(e.dataTransfer.files[0]);
   });
   if (window.showOpenFilePicker && window.indexedDB) idbGet(HANDLE_KEY).then(fh => { if (fh && fh.kind === 'file') { S.storedHandle = fh; if (!S.wb) renderFile(); } }).catch(() => {});
@@ -5999,6 +6011,17 @@ function init() {
   $('#tab-dash').addEventListener('click', () => showView('dash')); $('#tab-base').addEventListener('click', () => showView('base')); $('#tab-entry').addEventListener('click', () => showView('entry')); $('#tab-ref').addEventListener('click', () => showView('ref'));
   document.querySelector('.tabs').addEventListener('keydown', e => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { const i = VORDER.findIndex(k => $('#tab-' + k).getAttribute('aria-selected') === 'true'), to = VORDER[(i + (e.key === 'ArrowRight' ? 1 : VORDER.length - 1)) % VORDER.length]; showView(to); $('#tab-' + to).focus(); } });
   { const tb = $('#themeBtn'); if (tb && !$('#motionBtn')) { const mb = h('button', { type: 'button', id: 'motionBtn', class: 'motion-btn', title: 'Плавні переходи та анімації. За замовчуванням вимикаються, якщо в системі увімкнено «зменшити рух».', onclick: () => { MOTION.on = !MOTION.on; store('aviahub.motion', MOTION.on ? '1' : '0'); applyMotion(); if (!MOTION.on) camStop(); } }); tb.before(mb); applyMotion(); } }
+  /* Кнопка «Презентація»: колода будується з таблиці ударів цього модуля (group-presentation.js). */
+  { const pb = $('#presentBtn');
+    if (pb) {
+      const sync = () => { const S = AV.S; pb.hidden = !(S.wb && S.wb.kind !== 'pvk' && S.bytes && !document.documentElement.dataset.command && !$('#fileChip').hidden); };
+      pb.addEventListener('click', () => {
+        const api = window.EWGroupPresentation;
+        if (!api) { AV.toast('Презентація ще завантажується, спробуйте за секунду.', ''); return; }
+        api.open({ group: 'ps', bytes: AV.S.bytes, name: AV.S.name, readSheets: u8 => window.AVCORE.readAllSheets(u8), toast: AV.toast });
+      });
+      document.addEventListener('av:data', sync); sync();
+    } }
   $('#themeBtn').addEventListener('click', ev => {
     const t = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
     if (!MOTION.on || !document.startViewTransition) return setTheme(t);
@@ -6043,6 +6066,7 @@ document.addEventListener('DOMContentLoaded', init);
 })();
 </script>
 <script type="module" src="./pvk-dashboard.js"></script>
+<script type="module" src="./group-presentation.js"></script>
 <script type="module" src="./xlsx-inspection.js"></script>
 <script type="module" src="./sqlite-dashboard-source.js"></script>
 <script type="module" src="./munition-3d-loader.js"></script>

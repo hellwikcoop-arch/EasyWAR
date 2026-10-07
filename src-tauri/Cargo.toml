@@ -1,6 +1,6 @@
 [package]
 name = "easywar"
-version = "1.0.1"
+version = "1.0.2"
 description = "Local-first EasyWAR desktop shell"
 authors = ["EasyWAR contributors"]
 edition = "2021"

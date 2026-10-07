@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import vm from 'node:vm';
-import { EMBED_SLOT, PAGES, inlinePage, leftoverReferences } from '../script/build_standalone.mjs';
+import { EMBED_SLOT, PAGES, buildPage, inlinePage, leftoverReferences } from '../script/build_standalone.mjs';
 
 const readText = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
@@ -123,4 +125,18 @@ test('the table waits for the dashboard to appear and a failure is shown, not th
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(av.calls.error, ['Не вдалося відкрити вбудовану таблицю: не xlsx']);
   assert.equal(av.calls.toast.length, 0);
+});
+
+test('файл ПВК для телефона не несе коду презентації: кнопки в ньому немає, а код подвоїв би розмір', { timeout: 240000 }, async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'easywar-pvk-'));
+  try {
+    const entry = PAGES.find((p) => p.command === 'pvk');
+    const { target, bytes } = await buildPage(entry, dir);
+    const html = await readFile(target, 'utf8');
+    assert.ok(!html.includes('PptxGenJS') && !html.includes('pdf-lib'), 'pptxgenjs і pdf-lib не вбудовуються у файл ПВК');
+    assert.ok(bytes < 5e6, `файл ПВК ${(bytes / 1e6).toFixed(2)} МБ має лишатись компактним`);
+    assert.match(html, /id="presentBtn"[^>]*hidden/, 'кнопка в розмітці прихована, у командному режимі її не показують');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });

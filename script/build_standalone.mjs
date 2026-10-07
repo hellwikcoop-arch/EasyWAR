@@ -63,13 +63,15 @@ export function leftoverReferences(html) {
   return [...found];
 }
 
-async function buildPage({ page, command, file }, outDir) {
+export async function buildPage({ page, command, file }, outDir) {
   const result = await build({
     root: src(''),
     configFile: false,
     base: './',
     logLevel: 'warn',
     publicDir: false,
+    // ПВК (air.html) у командному режимі не має кнопки «Презентація»: код презентації в його файл не потрапляє.
+    define: page === 'air' ? { __EW_NO_MODULE_PRESENTATION__: 'true' } : {},
     build: {
       write: false,
       target: 'safari13',

@@ -701,7 +701,12 @@ function initializeLocalProfiles() {
       // The module reports a table it cannot read itself and keeps the open one.
       await dashboard.connect(bytes, name, profileDatabaseHandle(profile.id, branch, name, undefined, frame), true);
       if (dashboard.S && dashboard.S.bytes !== bytes) {
-        status.textContent = `Модуль не відкрив таблицю профілю «${name}»; причину показано в модулі.`;
+        // Причину (наприклад, «Це таблиця ПВК: її відкриває плитка…») показує сам модуль; повторюємо її й тут.
+        let reason = '';
+        try { reason = (frame?.document?.getElementById('error')?.textContent || '').trim(); } catch { /* модуль недоступний */ }
+        status.textContent = reason
+          ? `Модуль не відкрив таблицю профілю «${name}»: ${reason}`
+          : `Модуль не відкрив таблицю профілю «${name}»; причину показано в модулі.`;
         return;
       }
       loadedDatabaseFor[branch] = profile.id;
