@@ -4092,20 +4092,30 @@ function showUdshv(wb, u8, name, handle) {
   renderAll(); renderUdshv();
 }
 
+/* Кожен вигляд дашборда відкривається лише у своєму місці: «Ракетні Війська і Артилерія» — таблиця з аркушем «Зведена»,
+   вікно Командування ДШВ (?command=dshv) — лише таблиця УДШВ. kind: 'std' | 'udshv'. Порожній рядок означає «підходить». */
+function wrongKindMessage(command, kind) {
+  if (command === 'dshv') return kind === 'udshv' ? '' : 'Це не таблиця УДШВ: у вікні Командування ДШВ відкриваються лише таблиці «Втрати о/с та ОВТ противника за угруповання ДШВ».';
+  return kind === 'udshv' ? 'Це таблиця УДШВ: її відкриває плитка «Командування ДШВ» на стартовому екрані. У модулі «Ракетні Війська і Артилерія» відкриваються таблиці з аркушем «Зведена».' : '';
+}
+
 async function connect(u8, name, handle) {
   showError('');
   try {
     let wb;
     try {
       wb = await C.openWorkbook(u8);
-      if (document.documentElement.dataset.command === 'dshv') throw Object.assign(new Error('Це не таблиця УДШВ: у вікні Командування ДШВ відкриваються лише таблиці «Втрати о/с та ОВТ противника за угруповання ДШВ».'), { notUdshv: true });
+      const wrongKind = wrongKindMessage(document.documentElement.dataset.command, 'std');
+      if (wrongKind) throw Object.assign(new Error(wrongKind), { wrongKind: true });
     }
     catch (standardError) {
-      if (standardError.notUdshv) throw standardError;
+      if (standardError.wrongKind) throw standardError;
       const ud = await openUdshv(u8, name);
       if (!ud) throw standardError;
+      const wrongKind = wrongKindMessage(document.documentElement.dataset.command, 'udshv');
+      if (wrongKind) throw Object.assign(new Error(wrongKind), { wrongKind: true });
       showUdshv(ud, u8, name, handle);
-      return;
+      return true;
     }
     leaveUdshv();
     S.bytes = u8; S.name = name; S.handle = handle || null; S.wb = wb; S.ctx = C.buildContext(wb);
@@ -4113,7 +4123,8 @@ async function connect(u8, name, handle) {
     $('#paste').value = '';
     renderAll();
     $('#paste').focus();
-  } catch (e) { showError(e.message || String(e)); }
+    return true;
+  } catch (e) { showError(e.message || String(e)); return e && e.wrongKind ? 'wrong-kind' : false; }
 }
 async function pickFile() {
   if (window.showOpenFilePicker) {
@@ -4121,7 +4132,8 @@ async function pickFile() {
       const [fh] = await window.showOpenFilePicker({ types: [{ description: 'Таблиця Excel (.xlsx)', accept: { [XLSX_MIME]: ['.xlsx'] } }] });
       let perm = 'denied'; try { perm = await fh.requestPermission({ mode: 'readwrite' }); } catch (e) {}
       const f = await fh.getFile();
-      await connect(new Uint8Array(await f.arrayBuffer()), f.name, perm === 'granted' ? fh : null);
+      const opened = await connect(new Uint8Array(await f.arrayBuffer()), f.name, perm === 'granted' ? fh : null);
+      if (opened === 'wrong-kind') return; // чужий вигляд таблиці не запам'ятовується як «останній файл» цього модуля
       if (perm === 'granted') idbSet(HANDLE_KEY, fh).catch(() => {});
       else showError('Дозволу на запис не надано — зміни зберігатимуться через кнопку «Завантажити».');
     } catch (e) {
@@ -4139,7 +4151,8 @@ async function resumeStored() {
     const perm = await fh.requestPermission({ mode: 'readwrite' });
     if (perm !== 'granted') { showError('Дозволу не надано. Відкрийте файл кнопкою «Відкрити таблицю».'); return; }
     const f = await fh.getFile();
-    await connect(new Uint8Array(await f.arrayBuffer()), f.name, fh);
+    const opened = await connect(new Uint8Array(await f.arrayBuffer()), f.name, fh);
+    if (opened === 'wrong-kind') { S.storedHandle = null; idbSet(HANDLE_KEY, null).catch(() => {}); renderFile(); } // запам'ятований файл іншого виду більше не пропонується
   } catch (e) { showError('Не вдалося відновити доступ до файлу: ' + (e.message || e) + '. Відкрийте його заново.'); }
 }
 async function fromFileObject(f) {
@@ -4436,8 +4449,8 @@ function init() {
       let perm = 'denied'; try { perm = await fh.requestPermission({ mode: 'readwrite' }); } catch (err) {}
       const f = await fh.getFile();
       if (!/\.xlsx$/i.test(f.name)) { showError('Потрібен файл .xlsx.'); return; }
-      await connect(new Uint8Array(await f.arrayBuffer()), f.name, perm === 'granted' ? fh : null);
-      if (perm === 'granted') idbSet(HANDLE_KEY, fh).catch(() => {});
+      const opened = await connect(new Uint8Array(await f.arrayBuffer()), f.name, perm === 'granted' ? fh : null);
+      if (perm === 'granted' && opened !== 'wrong-kind') idbSet(HANDLE_KEY, fh).catch(() => {});
     } else if (e.dataTransfer.files[0]) fromFileObject(e.dataTransfer.files[0]);
   });
   if (window.showOpenFilePicker && window.indexedDB) idbGet(HANDLE_KEY).then(fh => { if (fh && fh.kind === 'file') { S.storedHandle = fh; if (!S.wb) renderFile(); } }).catch(() => {});
