@@ -179,7 +179,7 @@ test('the HIMARS article lives in its own ground group, found by its Ukrainian n
   assert.equal(himars.group, 'ground');
   assert.equal(himars.model.file, 'm142-himars');
   assert.equal(himars.credit.license, 'CC BY 4.0');
-  assert.deepEqual(searchEntries('хаймарс').map(e => e.id), ['himars', 'gmlrs']); // ракета GMLRS теж має цей ключ
+  assert.deepEqual(searchEntries('хаймарс').map(e => e.id), ['himars', 'atacms', 'gmlrs']); // ракети, які несе HIMARS, мають той самий ключ
   assert.deepEqual(searchEntries('', 'ground').map(e => e.id), ['himars']);
   assert.ok(searchEntries('', 'aircraft').every(e => e.group === 'aircraft'));
   assert.deepEqual(carriersOf('himars'), []);
@@ -200,4 +200,16 @@ test('ground articles do not show the flights summary or carrier/munition pairs'
   const wiki = await readFile(new URL('../src/ref-wiki.js', import.meta.url), 'utf8');
   assert.match(wiki, /usageEl\.hidden = entry\.group === 'ground';/);
   assert.match(wiki, /function relatedBlock\(entry\) \{\s*\n\s*if \(entry\.group === 'ground'\) return null;/);
+});
+
+test('the ATACMS article is a generated munition model recognised in mission tables', async () => {
+  const e = entryById('atacms');
+  assert.equal(e.group, 'munition');
+  assert.equal(e.model.file, 'mgm-140-atacms');
+  assert.ok(e.credit.generated && e.credit.note);
+  for (const text of ['ATACMS', 'MGM-140', 'mgm140', 'ATACMS (M39)']) assert.equal(munitionId(text), 'atacms', text);
+  assert.equal(munitionId('GMLRS M31'), 'gmlrs');
+  const file = new URL('../src/models/mgm-140-atacms.glb', import.meta.url);
+  assert.ok((await stat(file)).size < 4e5, 'procedural model stays tiny');
+  assert.match(entryById('himars').sections.find(s => s.title === 'Боєприпаси').list.join(' '), /MGM-140 ATACMS/);
 });
