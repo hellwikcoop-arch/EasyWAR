@@ -91,16 +91,6 @@ const CREDIT_MI8 = {
   licenseUrl: 'http://creativecommons.org/licenses/by/4.0/',
 };
 
-const CREDIT_HIMARS = {
-  title: 'M142 HIMARS | FREE MODEL | ANIMATION',
-  author: 'Denis.Cherkasov1',
-  authorUrl: 'https://sketchfab.com/Denys.Cherkasov',
-  url: 'https://sketchfab.com/3d-models/m142-himars-free-model-animation-53c53a112c674d29a2afdbddbe3cecb5',
-  license: 'CC BY 4.0',
-  licenseUrl: 'http://creativecommons.org/licenses/by/4.0/',
-  note: 'З файлу вилучено службові об’єкти сцени (камери, світло, «підлогу» для тіней й окрему ракету), вбудовану анімацію та зайвий варіант капота; фарбу перефарбовано з пустельного піску в оливкову.',
-};
-
 const CREDIT_SU27B = {
   title: 'Ukrainian Su-27B',
   author: '42manako',
@@ -307,7 +297,7 @@ export const ENTRIES = [
   {
     id: 'himars', short: 'HIMARS', group: 'ground', name: 'M142 HIMARS', alias: 'High Mobility Artillery Rocket System, ХАЙМАРС',
     role: 'Колісна реактивна система залпового вогню', origin: 'США', tags: ['himars', 'хаймарс', 'm142', 'рсзв', 'mlrs', 'gmlrs', 'atacms', 'lockheed', 'пускова установка'],
-    model: { file: 'm142-himars', nose: '-z' }, credit: CREDIT_HIMARS,
+    model: { file: 'm142-himars', nose: '+x' }, credit: { generated: true, title: 'M142 HIMARS', note: 'Спрощена процедурна модель за відкритими габаритами та довідковими зображеннями: без сторонніх матеріалів, для перегляду, а не для впізнавання чи розрахунків.' },
     summary: 'Легка колісна реактивна система залпового вогню (Lockheed Martin) на шасі вантажівки 6×6. На машині один пакет: шість керованих ракет GMLRS калібру 227 мм або одна балістична ракета ATACMS. Це система ракетних військ і артилерії, а не авіації: її додано до довідника поруч із ракетою GMLRS M31, яку вона несе. Докладніше буде в модулі «Ракетні Війська і Артилерія».',
     facts: [
       ['Виробник', 'Lockheed Martin'], ['Шасі', 'колісне 6×6, сімейство FMTV'], ['Екіпаж', '3 особи'],

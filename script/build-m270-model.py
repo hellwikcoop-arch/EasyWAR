@@ -22,6 +22,9 @@ from trimesh.visual.material import PBRMaterial
 
 DEFAULT_OUT = Path(__file__).resolve().parent.parent / "src" / "models" / "m270-mlrs.glb"
 
+# Частини з круглими перерізами лишаються з гладкими нормалями.
+SMOOTH = {"tyres", "hubs", "rollers", "lamps", "lamps_amber", "rails", "struts", "turntable"}
+
 # --- головні розміри, м ---------------------------------------------------------------------------------------------
 X_REAR, X_FRONT = -3.45, 3.50         # торці палуби
 DECK_Y0, DECK_Y1, DECK_HALF = 1.02, 1.20, 1.45
@@ -277,6 +280,8 @@ def main() -> int:
     out = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_OUT
     scene = trimesh.Scene()
     for name, mesh in m270().items():
+        if name not in SMOOTH:
+            mesh.unmerge_vertices()  # плоске освітлення граней: інакше гранчасті деталі виглядають «розмитими»
         scene.add_geometry(mesh, node_name=name, geom_name=name)
     glb = scene.export(file_type="glb", include_normals=True)
     glb = with_extras(glb, {"title": "M270 MLRS (generated)", "generated": True,
