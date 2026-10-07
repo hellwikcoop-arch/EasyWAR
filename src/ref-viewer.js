@@ -31,6 +31,7 @@ export const MODEL_FILES = {
   'gmlrs-m31': new URL('./models/gmlrs-m31.glb', import.meta.url).href,
   'mgm-140-atacms': new URL('./models/mgm-140-atacms.glb', import.meta.url).href,
   'm142-himars': new URL('./models/m142-himars.glb', import.meta.url).href,
+  'm270-mlrs': new URL('./models/m270-mlrs.glb', import.meta.url).href,
 };
 
 // Куди в файлі дивиться ніс літака: модель повертається так, щоб ніс дивився в +X, як у боєприпасів.
