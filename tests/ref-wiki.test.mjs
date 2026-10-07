@@ -171,3 +171,33 @@ test('the Довідник tab is wired into the module', () => {
   assert.match(html, /<link rel="stylesheet" href="\.\/ref-wiki\.css">/);
   assert.match(html, /window\.RefWiki\.mount\(\$\('#view-ref'\)/);
 });
+
+// Наземні засоби (HIMARS): окрема група без підсумку з таблиці вильотів ПС.
+test('the HIMARS article lives in its own ground group, found by its Ukrainian name', () => {
+  assert.ok(GROUPS.some(g => g.id === 'ground'));
+  const himars = entryById('himars');
+  assert.equal(himars.group, 'ground');
+  assert.equal(himars.model.file, 'm142-himars');
+  assert.equal(himars.credit.license, 'CC BY 4.0');
+  assert.deepEqual(searchEntries('хаймарс').map(e => e.id), ['himars', 'gmlrs']); // ракета GMLRS теж має цей ключ
+  assert.deepEqual(searchEntries('', 'ground').map(e => e.id), ['himars']);
+  assert.ok(searchEntries('', 'aircraft').every(e => e.group === 'aircraft'));
+  assert.deepEqual(carriersOf('himars'), []);
+  assert.deepEqual(munitionsOf('himars'), []);
+});
+
+test('the HIMARS file is a clean vehicle: no scene helpers, no animation, compact', async () => {
+  const file = new URL('../src/models/m142-himars.glb', import.meta.url);
+  const bytes = await readFile(file);
+  assert.ok(bytes.length < 1.5e6, 'stays compact');
+  const json = JSON.parse(bytes.toString('utf8', 20, 20 + bytes.readUInt32LE(12)));
+  assert.equal((json.animations || []).length, 0, 'animation removed');
+  assert.equal((json.cameras || []).length, 0, 'no cameras');
+  for (const n of json.nodes) assert.doesNotMatch(n.name || '', /Camera|Light_|Shadow_Catcher|Turntable|bonnet_dam/, `service node ${n.name}`);
+});
+
+test('ground articles do not show the flights summary or carrier/munition pairs', async () => {
+  const wiki = await readFile(new URL('../src/ref-wiki.js', import.meta.url), 'utf8');
+  assert.match(wiki, /usageEl\.hidden = entry\.group === 'ground';/);
+  assert.match(wiki, /function relatedBlock\(entry\) \{\s*\n\s*if \(entry\.group === 'ground'\) return null;/);
+});

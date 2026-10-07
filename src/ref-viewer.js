@@ -29,6 +29,7 @@ export const MODEL_FILES = {
   'kab-500l': new URL('./models/kab-500l.glb', import.meta.url).href,
   'storm-shadow': new URL('./models/storm-shadow.glb', import.meta.url).href,
   'gmlrs-m31': new URL('./models/gmlrs-m31.glb', import.meta.url).href,
+  'm142-himars': new URL('./models/m142-himars.glb', import.meta.url).href,
 };
 
 // Куди в файлі дивиться ніс літака: модель повертається так, щоб ніс дивився в +X, як у боєприпасів.
