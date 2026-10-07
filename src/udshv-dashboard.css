@@ -182,16 +182,14 @@ body.udshv-open #view-entry { display: none !important; }
 }
 body.udshv-open .appbar .tabs { visibility: hidden; }
 
-/* Фон дашборда УДШВ: на весь екран фото «ДШВ × Повітряні Сили» (разом), затемнене для читабельності тексту. */
+/* Фон дашборда УДШВ: на весь екран темна підкладка EasyWAR із координатною сіткою й ізолініями (background.webp).
+   Нижній шар — запасний градієнт, поки картинка не завантажилась. Світла тема нижче лишається без картинки. */
 html:has(body.udshv-open) {
   background:
-    linear-gradient(180deg, rgba(14, 7, 18, .30), rgba(14, 7, 18, .66)),
-    url('./udshv-art/banner.webp') center 22% / cover no-repeat fixed,
-    radial-gradient(70% 60% at 8% 0%, rgba(38, 66, 112, .75), transparent 70%),
-    radial-gradient(70% 70% at 100% 0%, rgba(122, 20, 34, .8), transparent 70%),
+    url('./udshv-art/background.webp') center / cover no-repeat fixed,
     linear-gradient(115deg, #0a1730 0%, #170f24 45%, #2a0a12 100%) fixed !important;
 }
-:root[data-theme="light"] html:has(body.udshv-open) {
+:root[data-theme="light"]:has(body.udshv-open) {
   background: linear-gradient(115deg, #e9eef8 0%, #f3e9ee 55%, #f1dde1 100%) fixed !important;
 }
 html body.udshv-open, html.rocket-ref24 body.udshv-open, html:root body.udshv-open { background: transparent !important; }
