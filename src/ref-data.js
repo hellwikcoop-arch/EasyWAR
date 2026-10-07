@@ -98,7 +98,7 @@ const CREDIT_HIMARS = {
   url: 'https://sketchfab.com/3d-models/m142-himars-free-model-animation-53c53a112c674d29a2afdbddbe3cecb5',
   license: 'CC BY 4.0',
   licenseUrl: 'http://creativecommons.org/licenses/by/4.0/',
-  note: 'З файлу вилучено службові об’єкти сцени (камери, світло, окреме колесо й окрему ракету), вбудовану анімацію та зайвий варіант капота.',
+  note: 'З файлу вилучено службові об’єкти сцени (камери, світло, «підлогу» для тіней й окрему ракету), вбудовану анімацію та зайвий варіант капота; фарбу перефарбовано з пустельного піску в оливкову.',
 };
 
 const CREDIT_SU27B = {

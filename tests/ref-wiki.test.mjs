@@ -193,7 +193,10 @@ test('the HIMARS file is a clean vehicle: no scene helpers, no animation, compac
   const json = JSON.parse(bytes.toString('utf8', 20, 20 + bytes.readUInt32LE(12)));
   assert.equal((json.animations || []).length, 0, 'animation removed');
   assert.equal((json.cameras || []).length, 0, 'no cameras');
-  for (const n of json.nodes) assert.doesNotMatch(n.name || '', /Camera|Light_|Shadow_Catcher|Turntable|bonnet_dam/, `service node ${n.name}`);
+  for (const n of json.nodes) assert.doesNotMatch(n.name || '', /Camera|Light_|Shadow_Catcher|bonnet_dam/, `service node ${n.name}`);
+  // Передні колеса сидять у вузлах «Turntable»: їх не можна вилучати разом зі службовими об’єктами.
+  const names = new Set(json.nodes.map((n) => n.name));
+  for (const n of ['Turntable_1', 'Turntable_1_1', 'Tire_low_2', 'Tire_low_3']) assert.ok(names.has(n), `${n} kept`);
 });
 
 test('ground articles do not show the flights summary or carrier/munition pairs', async () => {
