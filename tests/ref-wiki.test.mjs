@@ -3,7 +3,7 @@ import { readFile, stat } from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
 import { KINDS } from '../src/munition-3d.js';
-import { ENTRIES, GROUPS, PAIRS, aircraftId, carriersOf, entryById, munitionId, munitionsOf, searchEntries, usageFor } from '../src/ref-data.js';
+import { ENTRIES, GROUPS, PAIRS, aircraftId, carriersOf, creditOf, entryById, modelOf, munitionId, munitionsOf, searchEntries, usageFor, variantsOf } from '../src/ref-data.js';
 import { MODEL_FILES, NOSE_TURN, aircraftDistance } from '../src/ref-viewer.js';
 
 const html = await readFile(new URL('../src/air.html', import.meta.url), 'utf8');
@@ -25,30 +25,80 @@ test('every munition model kind from the mission card has a munition article', (
   for (const k of KINDS.filter(k => k !== 'bomb')) assert.ok(ids.includes(k), `article for ${k}`);
 });
 
-test('glb models exist, are registered and carry the CC BY credit', async () => {
-  for (const e of ENTRIES.filter(x => x.model && x.model.file)) {
-    assert.ok(MODEL_FILES[e.model.file], `${e.id}: file registered`);
-    assert.ok(e.model.nose in NOSE_TURN, `${e.id}: nose axis`);
+// Усі моделі статті: основна й варіанти (розмальовки чи модифікації), якщо вони є.
+const modelsOf = e => (e.variants && e.variants.length > 1 ? e.variants : [e]).filter(v => v.model && v.model.file);
+const LICENSES = { 'CC BY 4.0': /CC-BY-4\.0/, 'CC BY-NC-SA 4.0': /CC-BY-NC-SA-4\.0/ };
+
+test('glb models exist, are registered and carry a Creative Commons credit', async () => {
+  const credits = await readFile(new URL('../src/models/CREDITS.md', import.meta.url), 'utf8');
+  for (const entry of ENTRIES) for (const e of modelsOf(entry)) {
+    const id = `${entry.id}/${e.id || 'main'}`;
+    assert.ok(MODEL_FILES[e.model.file], `${id}: file registered`);
+    assert.ok(e.model.nose in NOSE_TURN, `${id}: nose axis`);
     if (e.credit.generated) {
       // Процедурні моделі без сторонніх матеріалів: без ліцензійних вимог, але з поясненням у статті.
-      assert.ok(e.credit.note, `${e.id}: note`);
-      assert.ok((await stat(new URL(`../src/models/${e.model.file}.glb`, import.meta.url))).size < 1e6, `${e.id}: tiny`);
+      assert.ok(e.credit.note, `${id}: note`);
+      assert.ok((await stat(new URL(`../src/models/${e.model.file}.glb`, import.meta.url))).size < 1e6, `${id}: tiny`);
+      assert.ok(credits.includes(`${e.model.file}.glb`), `${id} in CREDITS.md`);
       continue;
     }
-    assert.equal(e.credit.license, 'CC BY 4.0');
-    assert.ok(e.credit.author && e.credit.url && e.credit.authorUrl);
+    assert.ok(LICENSES[e.credit.license], `${id}: known license ${e.credit.license}`);
+    assert.ok(e.credit.author && e.credit.url && e.credit.authorUrl && e.credit.licenseUrl);
     const file = new URL(`../src/models/${e.model.file}.glb`, import.meta.url);
-    assert.ok((await stat(file)).size < 12e6, `${e.id}: stays compact`);
+    assert.ok((await stat(file)).size < 12e6, `${id}: stays compact`);
     const bytes = await readFile(file);
     assert.equal(bytes.toString('latin1', 0, 4), 'glTF');
     const len = bytes.readUInt32LE(12), json = JSON.parse(bytes.toString('utf8', 20, 20 + len));
     // Лише розширення, які вміє читати GLTFLoader із meshopt-декодером.
     for (const x of json.extensionsRequired || []) assert.ok(['EXT_meshopt_compression', 'KHR_mesh_quantization'].includes(x), x);
-    assert.match(json.asset.extras.license, /CC-BY-4\.0/);
+    // Ліцензія в самому файлі збігається з ліцензією в підписі статті.
+    assert.match(json.asset.extras.license, LICENSES[e.credit.license], `${id}: license inside the file`);
+    assert.ok(credits.includes(e.credit.url), `${id} in CREDITS.md`);
+    assert.ok(credits.includes(`${e.model.file}.glb`), `${id}: file name in CREDITS.md`);
+    // Некомерційна ліцензія: стаття прямо про це каже.
+    if (/NC/.test(e.credit.license)) assert.match(e.credit.note, /некомерційне/, `${id}: NC note`);
   }
-  const credits = await readFile(new URL('../src/models/CREDITS.md', import.meta.url), 'utf8');
-  for (const e of ENTRIES.filter(x => x.credit && !x.credit.generated)) assert.ok(credits.includes(e.credit.url), `${e.id} in CREDITS.md`);
-  for (const e of ENTRIES.filter(x => x.credit && x.credit.generated)) assert.ok(credits.includes(`${e.model.file}.glb`), `${e.id} in CREDITS.md`);
+});
+
+test('every glb in src/models is registered and used by an article', async () => {
+  const { readdir } = await import('node:fs/promises');
+  const used = new Set(ENTRIES.flatMap(modelsOf).map(e => e.model.file));
+  const files = (await readdir(new URL('../src/models/', import.meta.url))).filter(f => f.endsWith('.glb')).map(f => f.slice(0, -4));
+  for (const f of files) assert.ok(used.has(f), `${f}.glb is not used by any article`);
+  for (const f of Object.keys(MODEL_FILES)) assert.ok(files.includes(f), `${f} is registered but missing`);
+});
+
+test('articles with several models list a default first and resolve model and credit per variant', () => {
+  const mig = entryById('mig29'), su = entryById('su27');
+  assert.deepEqual(variantsOf(mig).map(v => v.id), ['falcons', 'ghost']);
+  assert.deepEqual(variantsOf(su).map(v => v.id), ['p1m', 'b']);
+  assert.equal(variantsOf(entryById('f16')).length, 0);
+  // Основна модель статті збігається з першим варіантом, невідомий варіант дає основну.
+  assert.equal(mig.model.file, 'mig-29');
+  assert.equal(modelOf(mig).file, 'mig-29');
+  assert.equal(modelOf(mig, 'nope').file, 'mig-29');
+  assert.equal(modelOf(mig, 'ghost').file, 'mig-29-ghost');
+  assert.match(creditOf(mig, 'ghost').url, /ghost-of-kiev-mig-29/);
+  assert.equal(modelOf(su, 'b').file, 'su-27b');
+  assert.equal(modelOf(entryById('f16')).file, 'f-16');
+  assert.equal(creditOf(entryById('39')), undefined);
+});
+
+test('helicopters and the added munitions have articles that the table recognisers reach', () => {
+  for (const [text, id] of [['Мі-8', 'mi8'], ['Mi-8MT', 'mi8'], ['МІ-24П', 'mi24'], ['Mi 24', 'mi24']]) {
+    assert.equal(aircraftId(text), id, text);
+    assert.equal(entryById(id).group, 'aircraft');
+  }
+  assert.equal(aircraftId('Мі-28'), '', 'Мі-28 не плутається з Мі-8');
+  for (const [text, id] of [['AIM-120C', 'aim120'], ['AMRAAM', 'aim120'], ['AIM-9X', 'aim9'], ['AIM-9M', 'aim9'], ['AGM-65', 'agm65'], ['Р-27Р', 'r27'], ['R-27ER', 'r27'], ['Р-77', 'r77'], ['РВВ-АЕ', 'r77'],
+    ['Х-29Л', 'kh29'], ['Kh-29T', 'kh29'], ['КАБ-500Л', 'kab500'], ['KAB-500', 'kab500']]) {
+    assert.equal(munitionId(text), id, text);
+    assert.equal(entryById(id).group, 'munition');
+  }
+  // Старі розпізнавання не зачеплено.
+  for (const [text, id] of [['AGM-88', 'agm88'], ['GBU-39', '39'], ['С-13', 'c13'], ['Storm Shadow', 'storm']]) assert.equal(munitionId(text), id, text);
+  assert.equal(munitionId('Р-273'), '');
+  assert.equal(munitionId('GBU-12'), '12', 'GBU-12 лишається номером без статті');
 });
 
 test('carrier and munition ids agree with the recognisers of the module', () => {

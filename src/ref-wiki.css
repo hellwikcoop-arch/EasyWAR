@@ -36,6 +36,9 @@
 .rw-sec ul { padding-left: 20px; display: grid; gap: 4px; }
 .rw-fine, .rw-note { margin: 0; color: var(--muted); font-size: 13.5px; max-width: 72ch; }
 .rw-note { padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); }
+.rw-variants { display: flex; margin: 0 0 8px; }
+.rw-variants button { flex: 1; padding-inline: 8px; }
+.rw-creditbox:empty { display: none; }
 .rw-credit { margin: 0; padding-top: 10px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; max-width: 86ch; }
 .rw-credit a { color: var(--accent); }
 .rw-src { overflow-wrap: anywhere; }
