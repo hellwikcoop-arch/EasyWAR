@@ -8,7 +8,7 @@ import { openModulePresentation } from '../src/group-presentation.js';
 import { parseStrikes, strikeStats } from '../src/strikes-core.js';
 import { renderDeckToBytes, renderDeckToPdfBytes } from '../src/presentation-pptx.js';
 
-// Лише синтетичні дані тієї самої структури, що й таблиці ПС і РВіА («Зведена», контракт із 15 полів).
+// Лише синтетичні дані тієї самої структури, що й таблиці ПС і РВ («Зведена», контракт із 15 полів).
 const AIR_HEAD = { A: '№', B: 'Дата', C: 'Час ураження', D: '№ цілі (TS/KS)', E: 'В інтересах', F: 'Район / н.п.', G: 'DPI / Координати MGRS', H: 'Тип цілі', I: 'Місяць', J: 'Тип ЛА', K: 'Тип боєприпасу', L: 'К-сть боєприпасів', M: 'Результат ураження', N: 'Причина', O: 'Уточнення результату' };
 const ROCKET_HEAD = { ...AIR_HEAD, J: 'Тип ПУ' };
 const serial = iso => String(Date.parse(`${iso}T00:00:00Z`) / 864e5 + 25569);
@@ -108,12 +108,12 @@ test('таблиця без жодного запису з датою дає т�
   assert.match(deck.slides[1].message, /немає жодного запису/);
 });
 
-test('РВіА: власна тема, титул за замовчуванням і слайди за «Тип ПУ»', () => {
+test('РВ: власна тема, титул за замовчуванням і слайди за «Тип ПУ»', () => {
   const strikes = parseStrikes(sheets(ROCKET_HEAD, events().map(e => ({ ...e, weapon: 'М142' }))), 'rocket.xlsx');
   const deck = buildGroupDeck(strikes, { group: 'rvia' });
   assert.equal(deck.slides[0].theme, 'rvia');
   assert.equal(deck.slides[0].titleText, GROUP_PROFILES.rvia.defaultTitle);
-  assert.equal(deck.slides[1].heading, 'Аналітика РВіА · 7 діб');
+  assert.equal(deck.slides[1].heading, 'Аналітика РВ · 7 діб');
   assert.match(deck.slides[1].strip, /ПУ: М142/);
   assert.deepEqual(groupPeriods(GROUP_PROFILES.rvia, strikes).map(p => p.id), ['week', 'month', 'all']);
 });
@@ -142,7 +142,7 @@ test('меню перевірки: виправлення застосовуєт
 
 test('назва файлу: власник, а без нього — позначка модуля', () => {
   assert.equal(presentationFileName('', '04.10.2026', 'pptx', 'ПС'), 'Аналітика ПС 04.10.2026.pptx');
-  assert.equal(presentationFileName('Підрозділ: А/Б', '04.10.2026', 'pdf', 'РВіА'), 'Аналітика Підрозділ А Б 04.10.2026.pdf');
+  assert.equal(presentationFileName('Підрозділ: А/Б', '04.10.2026', 'pdf', 'РВ'), 'Аналітика Підрозділ А Б 04.10.2026.pdf');
   assert.equal(presentationFileName('', '04.10.2026'), 'Аналітика УДШВ 04.10.2026.pptx', 'для УДШВ усе як і раніше');
 });
 
@@ -163,7 +163,7 @@ test('PPTX модуля: титул у кольорі роду військ, п�
   assert.equal(Object.keys(zip.files).filter(n => /^ppt\/charts\/chart\d+\.xml$/.test(n)).length, 6);
   const rvia = parseStrikes(sheets(ROCKET_HEAD, events().map(e => ({ ...e, weapon: 'М142' }))), 'r.xlsx');
   const rzip = await JSZip.loadAsync(await renderDeckToBytes(buildGroupDeck(rvia, { group: 'rvia' })));
-  assert.ok((await rzip.file('ppt/slides/slide1.xml').async('string')).includes('6A6539'), 'фон титулу РВіА');
+  assert.ok((await rzip.file('ppt/slides/slide1.xml').async('string')).includes('6A6539'), 'фон титулу РВ');
 });
 
 test('деку УДШВ титул і підпис не змінились: ДШВ, фокус лишається в підписі', async () => {

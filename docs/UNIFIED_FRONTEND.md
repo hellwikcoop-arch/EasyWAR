@@ -7,7 +7,7 @@ application as three same-origin pages:
 | File | Source | Notes |
 | --- | --- | --- |
 | `src/index.html` | launcher from the unified HTML | payloads removed; iframes load `./air.html` / `./rocket.html`; Air controls aligned with the desktop toolbar |
-| `src/rocket.html` | «Ракетні Війська і Артилерія» module | v3.1 plus the module-editor hook and scripts |
+| `src/rocket.html` | «Ракетні Війська» module | v3.1 plus the module-editor hook and scripts |
 | `src/air.html` | previous desktop frontend + v3.1 Air changes | storage namespace `easywar.air::`, branch brand styles/mark, updated F-16 image; keeps «База даних», Signal, SQLite, XLSX, backup and profiles |
 
 Each module isolates its `localStorage` keys and IndexedDB names by prefix

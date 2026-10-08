@@ -286,8 +286,8 @@ test('the M270 article is a generated ground model with its pods, tracks and lau
   assert.match(entryById('m270').sections.find(sec => sec.title === 'Боєприпаси').list.join(' '), /MGM-140 ATACMS/);
 });
 
-// Довідник у модулі РВіА: та сама вікі, але лише наземні засоби й ракети, без підсумку по таблиці вильотів ПС.
-test('the РВіА module has its own reference tab limited to ground systems and rockets', async () => {
+// Довідник у модулі РВ: та сама вікі, але лише наземні засоби й ракети, без підсумку по таблиці вильотів ПС.
+test('the РВ module has its own reference tab limited to ground systems and rockets', async () => {
   const rocket = await readFile(new URL('../src/rocket.html', import.meta.url), 'utf8');
   assert.match(rocket, /id="tab-ref"[^>]*>Довідник<\/button>/);
   assert.match(rocket, /<main id="view-ref"[^>]*hidden><\/main>/);

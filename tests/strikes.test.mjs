@@ -5,7 +5,7 @@ import { classifyResult, parseStrikes, strikeDate, strikeIssues, strikeStats, ta
 import { buildDeck } from '../src/presentation-core.js';
 import { renderDeckToBytes } from '../src/presentation-pptx.js';
 
-// Лише синтетичні дані тієї самої структури, що й таблиці ПС і РВіА («Зведена», контракт із 15 полів).
+// Лише синтетичні дані тієї самої структури, що й таблиці ПС і РВ («Зведена», контракт із 15 полів).
 const AIR_HEAD = { A: '№', B: 'Дата', C: 'Час ураження', D: '№ цілі (TS/KS)', E: 'В інтересах', F: 'Район / н.п.', G: 'DPI / Координати MGRS', H: 'Тип цілі', I: 'Місяць', J: 'Тип ЛА', K: 'Тип боєприпасу', L: 'К-сть боєприпасів', M: 'Результат ураження', N: 'Причина', O: 'Уточнення результату' };
 const ROCKET_HEAD = { ...AIR_HEAD, J: 'Тип ПУ', P: 'Підрозділ (від кого машина)', Q: 'Вогнева бригада' };
 const serial = iso => String(Date.parse(`${iso}T00:00:00Z`) / 864e5 + 25569);
@@ -102,7 +102,7 @@ const udshv = () => {
 };
 const groups = () => [
   { id: 'ps', title: 'ПС', strikes: parseStrikes(table(AIR_HEAD, airEvents()), 'air.xlsx') },
-  { id: 'rvia', title: 'РВіА', strikes: parseStrikes(table(ROCKET_HEAD, [{ date: '2026-09-19', weapon: 'М142', munition: 'M30A2', count: '1', result: 'НЕ УРАЖЕНО' }, { date: '2026-09-20', weapon: 'М142', munition: 'M30A2', count: '1', result: 'ПОШКОДЖЕНО' }])) },
+  { id: 'rvia', title: 'РВ', strikes: parseStrikes(table(ROCKET_HEAD, [{ date: '2026-09-19', weapon: 'М142', munition: 'M30A2', count: '1', result: 'НЕ УРАЖЕНО' }, { date: '2026-09-20', weapon: 'М142', munition: 'M30A2', count: '1', result: 'ПОШКОДЖЕНО' }])) },
 ];
 
 test('group slide is built from the group table: anchor is its last date, windows and efficiency follow the repo rules', () => {
@@ -146,7 +146,7 @@ test('group slide numbers: counts, efficiency in percentage points, reasons and 
 test('a young table is not compared with a window that starts before its first record', () => {
   const rvia = buildDeck(udshv(), { groups: groups() }).slides.find(s => s.id === 'group:rvia');
   assert.equal(rvia.previous.complete, false);
-  assert.ok(rvia.attention.some(a => /починається раніше за перший запис таблиці РВіА/.test(a.text)));
+  assert.ok(rvia.attention.some(a => /починається раніше за перший запис таблиці РВ/.test(a.text)));
   assert.ok(rvia.tiles.every(t => t.deltaText === ''));
   assert.ok(rvia.attention.some(a => /Мала вибірка \(2 завдань\)/.test(a.text)));
   assert.equal(rvia.strip.includes('ПУ: М142 — 2'), true);

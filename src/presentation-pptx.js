@@ -11,7 +11,7 @@ export const THEMES = {
     bg: 'F6F4F1', card: 'FFFFFF', panel: 'FFFFFF', line: 'D9DDE3', text: '111827', muted: '6B7280', soft: 'F2DADD',
     accent: '7A1F2B', good: '1F8F5F', bad: 'C00000',
     series: ['7A1F2B', 'D98E04', '2F6EA5', 'C9A7AD'],
-    // Колір шапки й акцентів за родом військ: ДШВ, ПС, РВіА.
+    // Колір шапки й акцентів за родом військ: ДШВ, ПС, РВ.
     brands: { dshv: '7A1F2B', ps: '293657', rvia: '6A6539' },
   },
 };
@@ -168,7 +168,7 @@ function reservedSlide(pptx, theme, deck, data, number, art) {
 
 function titleSlide(pptx, theme, deck, data, art) {
   const slide = pptx.addSlide();
-  // Тема титулу: ДШВ (колода УДШВ), ПС або РВіА (колода окремого модуля).
+  // Тема титулу: ДШВ (колода УДШВ), ПС або РВ (колода окремого модуля).
   const key = theme.brands[data.theme] ? data.theme : 'dshv';
   slide.background = { color: theme.brands[key] };
   slide.addText(data.titleText || 'Аналітика', { x: 0.75, y: 1.49, w: 11.8, h: 1.3, fontFace: theme.font, fontSize: 36, bold: true, color: 'FFFFFF', valign: 'top', margin: 0, fit: 'shrink' });

@@ -29,7 +29,7 @@ const RESULTS = [['hit', 'Уражено', 'var(--hit)'], ['part', 'Пошкод
 //   initial  — id статті, яку показати першою; onSelect(id) — виклик при виборі статті.
 export function mount(host, options = {}) {
   const { rows = () => [], media = {}, motion = () => true, onSelect, groups = null, only = null, usage = true, related = true } = options;
-  // groups / only — які розділи й статті показує цей модуль (РВіА бачить лише наземні засоби й ракети); usage / related — чи малювати
+  // groups / only — які розділи й статті показує цей модуль (РВ бачить лише наземні засоби й ракети); usage / related — чи малювати
   // підсумок по таблиці вильотів ПС і блок «носії/боєприпаси».
   const groupList = groups ? GROUPS.filter(g => groups.includes(g.id)) : GROUPS;
   const visible = e => (!groups || groups.includes(e.group)) && (!only || only.includes(e.id));

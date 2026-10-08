@@ -10,7 +10,7 @@
   window.__EW_MODULE_EDITOR__ = true;
 
   const MODULE = String(window.__EASYWAR_MODULE__ || 'module');
-  const MODULE_TITLE = MODULE === 'air' ? 'Повітряні Сили' : MODULE === 'rocket' ? 'Ракетні Війська і Артилерія' : 'Модуль';
+  const MODULE_TITLE = MODULE === 'air' ? 'Повітряні Сили' : MODULE === 'rocket' ? 'Ракетні Війська' : 'Модуль';
   const CARRIER_LABEL = MODULE === 'air' ? 'Літаки (носії)' : 'Пускові установки / засоби';
   /* Довідники модуля відкриває гачок усередині коду дашборду (window.__EW_EDITOR_HOOKS__). */
   const HOOKS = () => window.__EW_EDITOR_HOOKS__ || null;
@@ -108,7 +108,7 @@
     ['--accent', 'Акцент (кнопки, виділення)'], ['--bg', 'Тло сторінки'], ['--surface', 'Тло панелей'], ['--surface-2', 'Тло вкладених панелей'],
     ['--ink', 'Основний текст'], ['--muted', 'Другорядний текст'], ['--line', 'Лінії та рамки'],
     ['--hit', 'Уражено / знищено'], ['--part', 'Пошкоджено'], ['--miss', 'Не уражено'], ['--unk', 'Не відомо'],
-    ['--ref-gold', 'Золотий акцент'], ['--ref-bg', 'Тло (оформлення РВіА)'], ['--ref-panel', 'Панелі (оформлення РВіА)'], ['--ref-text', 'Текст (оформлення РВіА)'],
+    ['--ref-gold', 'Золотий акцент'], ['--ref-bg', 'Тло (оформлення РВ)'], ['--ref-panel', 'Панелі (оформлення РВ)'], ['--ref-text', 'Текст (оформлення РВ)'],
   ];
   const appliedColors = new Set();
   function applyColors() {

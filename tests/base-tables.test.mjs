@@ -45,7 +45,7 @@ test('the Air Force base table opens in the Air Force module and takes a record'
   assert.equal(reopened.records[0].targets, 'TS-1001');
 });
 
-test('the РВіА base table opens in the rocket module and takes a record', async () => {
+test('the РВ base table opens in the rocket module and takes a record', async () => {
   const core = await moduleCore('rocket.html');
   const bytes = await baseTable('rvia-base.xlsx');
   const workbook = await core.openWorkbook(bytes);
