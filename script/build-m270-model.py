@@ -199,7 +199,7 @@ def m270():
         for x in ROAD_X:
             for dz in (-0.135, 0.135):
                 tyres.append(cyl_z((x, ROAD_Y, zc + dz), ROAD_R, 0.13, 30))
-                hubs.append(cyl_z((x, ROAD_Y, zc + dz + side * 0.07 * np.sign(dz) * side), 0.25, 0.02, 28))
+                hubs.append(cyl_z((x, ROAD_Y, zc + dz + side * 0.07 * np.sign(dz) * side), 0.25, 0.02, 20))
             hubs.append(cyl_z((x, ROAD_Y, zc), 0.20, 0.16, 20))
             for k in range(8):
                 a = 2 * np.pi * k / 8
@@ -211,14 +211,14 @@ def m270():
             rollers.append(cyl_between((x, 0.86, side * 0.92), (x, 0.86, zc), 0.03, 8))
         sx, sy, _ = SPROCKET
         for dz in (-0.12, 0.12):
-            hubs.append(cyl_z((sx, sy, zc + dz), 0.36, 0.08, 32))
+            hubs.append(cyl_z((sx, sy, zc + dz), 0.36, 0.08, 24))
             for k in range(12):
                 a = 2 * np.pi * k / 12
                 teeth.append(box((sx + 0.40 * np.cos(a), sy + 0.40 * np.sin(a), zc + dz), (0.07, 0.08, 0.07), rot_z=a, bevel=0))
         hubs.append(cyl_z((sx, sy, zc + side * 0.18), 0.16, 0.08, 20))
         ix, iy, _ = IDLER
         for dz in (-0.12, 0.12):
-            hubs.append(cyl_z((ix, iy, zc + dz), 0.36, 0.09, 32))
+            hubs.append(cyl_z((ix, iy, zc + dz), 0.36, 0.09, 24))
         hubs.append(cyl_z((ix, iy, zc + side * 0.18), 0.12, 0.08, 20))
         arms.append(cyl_between((ix + 0.30, 0.66, side * 0.92), (ix, iy, side * 1.0), 0.06, 10))
     parts["tracks"] = painted(merge(pads), trackmat)
@@ -302,10 +302,7 @@ def m270():
 
     # ---------- Рухома частина: платформа, установка, стійки й висувні напрямні, візки, пакети, троси, гідроциліндри ----------
     mats = dict(olive=olive, olive_dk=olive_dk, olive_lt=olive_lt, black=black, metal=metal,
-                steel_dk=material("SteelDark", (58, 60, 58), metallic=0.6, roughness=0.45),
-                frame=olive, tubes=olive_lt, plate=olive_dk, cap=olive, hole=black,
-                stencil=material("Stencil", (214, 210, 196), metallic=0.0, roughness=0.8),
-                red=material("StencilRed", (176, 40, 34), metallic=0.0, roughness=0.6))
+                steel_dk=material("SteelDark", (58, 60, 58), metallic=0.6, roughness=0.45))
     return parts, launcher_rig(mats)
 
 
@@ -329,7 +326,7 @@ STRUTS = [("a", (-0.25 - TURRET_X, 1.36), 1.25, 1.00, 1.00),
           ("b", (-2.45 - TURRET_X, 1.36), 2.65, 1.50, 1.40)]
 STRUT_Z = 0.95
 CLIP_SECONDS = 24.0
-SAMPLES = 241
+SAMPLES = 161
 TINY = 1e-4                             # «сховано»: масштаб майже нуль
 
 # Етапи заряджання за часткою кліпу t ∈ [0, 1] (за довідковим зображенням: установка лежить горизонтально відкритим
@@ -389,9 +386,9 @@ def strut_pose(t, base, u_top):
     return np.arctan2(-d[0], d[1]), float(np.hypot(*d))
 
 
-def pod_node(name, pz, fresh, mats):
+def pod_node(name, pz, fresh):
     """Транспортно-пусковий пакет (спільна модель LP/C). Початок координат — середина низу пакета, щоб масштаб «виростав» із землі."""
-    prims = lpc_pod(POD_U1 - POD_U0, POD_V1 - POD_V0, POD_HALF, fresh, mats, (-LUG_U, LUG_U))
+    prims = lpc_pod(POD_U1 - POD_U0, POD_V1 - POD_V0, POD_HALF, fresh, (-LUG_U, LUG_U))
     return node(name, prims, t=(POD_UC, POD_V0, pz), s=(TINY,) * 3 if fresh else (1.0, 1.0, 1.0))
 
 
@@ -436,7 +433,7 @@ def launcher_rig(mats):
     cross.append(box_pose(BOX_L - 0.18, BOX_L - 0.10, RAIL_V - 0.01, RAIL_V + 0.07, -1.26, 1.26))
     boom_2 = node("boom_2", [(merge(sec2), metal), (merge(cross), mats["steel_dk"])])
     boom_1 = node("boom_1", [(merge(sec1), mats["steel_dk"])], children=[boom_2])
-    pods = [pod_node(name, pz, fresh, mats) for pz, pod in zip(POD_Z, ("pod_l", "pod_r"))
+    pods = [pod_node(name, pz, fresh) for pz, pod in zip(POD_Z, ("pod_l", "pod_r"))
             for name, fresh in ((pod, False), (pod + "_new", True))]
     hoists = []
     for pz, pod in zip(POD_Z, ("pod_l", "pod_r")):

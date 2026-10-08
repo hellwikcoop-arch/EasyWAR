@@ -1,5 +1,5 @@
 """Спільне для генераторів наземних машин (M270, HIMARS): запис GLB з ієрархією вузлів і анімацією та транспортно-
-пусковий пакет LP/C (відкрита сталева рама з розкосами, шість труб, вушка й трафаретні написи), як на довідкових фото.
+пусковий пакет LP/C (відкрита сталева рама з розкосами, шість труб, кришки або щит з отворами), як на довідкових зображеннях.
 
 Пакет будується в «канонічній» системі: початок — середина низу, дула труб дивляться в +x. Генератор ставить вузол
 пакета на місце й за потреби повертає його (у HIMARS дула дивляться назад).
@@ -9,6 +9,7 @@ import struct
 
 import numpy as np
 import trimesh
+from trimesh.visual.material import PBRMaterial
 
 
 def ramp(t, span):
@@ -59,55 +60,95 @@ def _cyl_x(x0, x1, y, z, radius, sections=24):
     return m
 
 
-def lpc_pod(length, height, half, fresh, mats, lugs):
-    """Пакет: рама з кутових поздовжніх балок, торцевих рамок, стійок і розкосів; шість труб; на дульному торці
-    кришки (новий пакет) або порожні отвори (після пуску); вушка для підйому на відстанях lugs від середини."""
+def pbr(name, rgb, metallic=0.1, roughness=0.65):
+    """PBR-матеріал; колір задано в sRGB (0–255), glTF чекає лінійні значення."""
+    linear = [round(255 * (c / 255) ** 2.2) for c in rgb]
+    return PBRMaterial(name=name, baseColorFactor=[*linear, 255], metallicFactor=metallic, roughnessFactor=roughness)
+
+
+# Матеріали пакета — спільні для обох машин, кольори за довідковим зображенням пакета M26.
+POD_MATS = {
+    "frame": pbr("PodFrame", (110, 112, 78), metallic=0.25, roughness=0.6),
+    "tubes": pbr("PodTube", (140, 140, 106), metallic=0.15, roughness=0.45),
+    "cap": pbr("PodCap", (164, 160, 114), metallic=0.1, roughness=0.55),
+    "cap_dk": pbr("PodCapRing", (120, 118, 84), metallic=0.1, roughness=0.6),
+    "bulkhead": pbr("PodBulkhead", (126, 128, 122), metallic=0.35, roughness=0.5),
+    "hole": pbr("PodHole", (20, 21, 20), metallic=0.2, roughness=0.8),
+    "stencil": pbr("Stencil", (214, 210, 196), metallic=0.0, roughness=0.8),
+}
+
+
+def _torus_x(center, major, minor):
+    """Кільце у вертикальній площині вздовж пакета (вісь тора — z)."""
+    t = trimesh.creation.torus(major_radius=major, minor_radius=minor, major_sections=14, minor_sections=6)
+    t.apply_translation(center)
+    return t
+
+
+def lpc_pod(length, height, half, fresh, lugs):
+    """Пакет за довідковим зображенням (M26 rocket pod): шість щільно покладених труб у два ряди, кутові балки, полози
+    знизу з упорами на торцях, поперечні смуги й центральна плита з ручкою зверху, D-кільця на верхніх кутах, по три
+    стійки на борт із розкосами лише в крайніх прольотах. На дульному торці — сірий щит із шістьма отворами
+    (після пуску) або кришки з кільцем і чотирма виступами (новий пакет). lugs — вушка для підйому від середини."""
     L2, H, W = length / 2, height, half
-    frame, tubes, plate, ends, stencil, red = [], [], [], [], [], []
-    for y in (0.03, H - 0.03):                                                     # кутові балки
+    frame, tubes, ends, rings, skids, stencil = [], [], [], [], [], []
+    for y in (0.035, H - 0.03):                                                    # кутові балки
         for s in (-1, 1):
             frame.append(_box((0.0, y, s * (W - 0.03)), (length, 0.06, 0.06), bevel=0.008))
+    for s in (-1, 1):                                                              # полози з упорами
+        skids.append(_box((0.0, 0.02, s * (W - 0.05)), (length + 0.10, 0.04, 0.10), bevel=0.006))
     for x in (-L2 + 0.03, L2 - 0.03):                                              # торцеві рамки
         for s in (-1, 1):
             frame.append(_box((x, H / 2, s * (W - 0.03)), (0.06, H, 0.06)))
-        for y in (0.03, H - 0.03):
+        for y in (0.035, H - 0.03):
             frame.append(_box((x, y, 0.0), (0.06, 0.06, 2 * W)))
-    bays = 5
-    bay = length / bays
-    for k in range(1, bays):                                                       # стійки
-        x = -L2 + k * bay
+    posts = [-L2 + length * f for f in (0.25, 0.5, 0.75)]
+    for x in posts:                                                                # стійки
         for s in (-1, 1):
-            frame.append(_box((x, H / 2, s * (W - 0.02)), (0.05, H - 0.08, 0.04)))
-    diag = np.hypot(bay - 0.06, H - 0.10)
-    for k in range(bays):                                                          # розкоси, по черзі в різні боки
-        xc = -L2 + (k + 0.5) * bay
-        ang = np.arctan2(H - 0.10, bay - 0.06) * (1 if k % 2 == 0 else -1)
+            frame.append(_box((x, H / 2, s * (W - 0.02)), (0.05, H - 0.08, 0.035)))
+    bay = length * 0.25
+    diag, ang = np.hypot(bay - 0.06, H - 0.12), np.arctan2(H - 0.12, bay - 0.06)
+    for xc, a in ((-L2 + bay / 2, ang), (L2 - bay / 2, -ang)):                     # розкоси в крайніх прольотах
         for s in (-1, 1):
-            frame.append(_box((xc, H / 2, s * (W - 0.015)), (diag, 0.045, 0.03), rot_z=ang))
-    for lx in lugs:                                                                # поперечки з вушками зверху
-        frame.append(_box((lx, H - 0.02, 0.0), (0.07, 0.04, 2 * W)))
-        frame.append(_box((lx, H + 0.03, 0.0), (0.09, 0.07, 0.05)))
-    r = min(0.15, (H - 0.10) / 4.2, (2 * W - 0.08) / 6.4)
-    rows = (0.05 + (H - 0.10) * 0.26, 0.05 + (H - 0.10) * 0.74)
-    cols = (-(2 * W) / 3.2, 0.0, (2 * W) / 3.2)
+            frame.append(_box((xc, H / 2, s * (W - 0.012)), (diag, 0.04, 0.02), rot_z=a))
+    for f in (0.10, 0.30, 0.70, 0.90):                                             # поперечні смуги зверху
+        frame.append(_box((-L2 + length * f, H - 0.005, 0.0), (0.05, 0.015, 2 * W)))
+    frame.append(_box((0.0, H - 0.004, 0.0), (length * 0.20, 0.02, 2 * W - 0.02)))   # центральна плита
+    frame.append(_box((0.0, H + 0.025, 0.0), (0.26, 0.03, 0.05)))                     # ручка
+    frame += [_box((x, H + 0.015, 0.0), (0.03, 0.03, 0.05)) for x in (-0.13, 0.13)]
+    for lx in lugs:                                                                # вушка для підйому
+        frame.append(_box((lx, H + 0.02, 0.0), (0.08, 0.05, 0.05)))
+    for x in (-L2 + 0.18, L2 - 0.18):                                              # D-кільця на верхніх кутах
+        for s in (-1, 1):
+            rings.append(_torus_x((x, H + 0.02, s * (W - 0.03)), 0.035, 0.008))
+    r = min((H - 0.06) / 4, (2 * W - 0.06) / 6)                                     # труби впритул одна до одної
+    rows = (0.03 + (H - 0.06) * 0.25, 0.03 + (H - 0.06) * 0.75)
+    cols = (-2 * r, 0.0, 2 * r)
     for y in rows:
         for z in cols:
-            tubes.append(_cyl_x(-L2 + 0.06, L2, y, z, r, 24))
-            if fresh:                                                              # кришка нової труби
-                ends.append(_cyl_x(L2, L2 + 0.025, y, z, r - 0.012, 22))
-                ends.append(_cyl_x(L2 + 0.025, L2 + 0.035, y, z, r * 0.55, 16))
-            else:                                                                  # порожня труба після пуску
-                ends.append(_cyl_x(L2 - 0.002, L2 + 0.004, y, z, r - 0.025, 22))
-    plate.append(_box((-L2 + 0.035, H / 2, 0.0), (0.03, H - 0.06, 2 * W - 0.06)))    # глухий задній торець
-    for s in (-1, 1):                                                              # трафарети на балках
-        for x in (-L2 * 0.62, -L2 * 0.12, L2 * 0.42):
+            tubes.append(_cyl_x(-L2 + 0.06, L2 - 0.01, y, z, r - 0.004, 20))
+    if fresh:                                                                      # кришки: диск, кільце, чотири виступи
+        caps, caps_dk = [], []
+        for y in rows:
+            for z in cols:
+                caps.append(_cyl_x(L2 - 0.01, L2 + 0.025, y, z, r - 0.012, 20))
+                caps_dk.append(_cyl_x(L2 + 0.025, L2 + 0.032, y, z, r * 0.78, 18))
+                caps.append(_cyl_x(L2 + 0.032, L2 + 0.036, y, z, r * 0.70, 18))
+                for k in range(4):
+                    q = np.pi / 4 + k * np.pi / 2
+                    caps_dk.append(_box((L2 + 0.03, y + 0.82 * r * np.sin(q), z + 0.82 * r * np.cos(q)), (0.02, 0.035, 0.035)))
+        end_prims = [(trimesh.util.concatenate(caps), POD_MATS["cap"]), (trimesh.util.concatenate(caps_dk), POD_MATS["cap_dk"])]
+    else:                                                                          # щит із шістьма отворами
+        plate = [_box((L2 - 0.005, H / 2, 0.0), (0.02, H - 0.05, 2 * W - 0.05))]
+        holes = [_cyl_x(L2 + 0.005, L2 + 0.009, y, z, r - 0.03, 20) for y in rows for z in cols]
+        end_prims = [(trimesh.util.concatenate(plate), POD_MATS["bulkhead"]), (trimesh.util.concatenate(holes), POD_MATS["hole"])]
+    ends.append(_box((-L2 + 0.035, H / 2, 0.0), (0.03, H - 0.06, 2 * W - 0.06)))      # глухий задній торець
+    for s in (-1, 1):                                                              # кілька трафаретів на балках
+        for x in (-L2 * 0.62, L2 * 0.42):
             stencil.append(_box((x, H - 0.03, s * (W + 0.0015)), (0.30, 0.03, 0.003)))
-            stencil.append(_box((x + 0.1, 0.03, s * (W + 0.0015)), (0.26, 0.03, 0.003)))
-        red.append(_box((L2 - 0.30, H - 0.03, s * (W + 0.002)), (0.14, 0.032, 0.003)))
-    m = mats
-    return [(trimesh.util.concatenate(frame), m["frame"]), (trimesh.util.concatenate(tubes), m["tubes"]),
-            (trimesh.util.concatenate(plate), m["plate"]), (trimesh.util.concatenate(ends), m["cap"] if fresh else m["hole"]),
-            (trimesh.util.concatenate(stencil), m["stencil"]), (trimesh.util.concatenate(red), m["red"])]
+    cat = trimesh.util.concatenate
+    return ([(cat(frame), POD_MATS["frame"]), (cat(skids), POD_MATS["frame"]), (cat(rings), POD_MATS["frame"]),
+             (cat(tubes), POD_MATS["tubes"]), (cat(ends), POD_MATS["frame"]), (cat(stencil), POD_MATS["stencil"])] + end_prims)
 
 
 class GlbWriter:

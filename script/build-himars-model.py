@@ -400,10 +400,7 @@ def himars():
                                     cyl_z((-3.80, 0.98, 0.0), 0.07, 0.04, 16)]), black)
 
     parts["rivets"] = painted(merge(rivets), olive_dk)
-    mats = dict(olive=olive, olive_dk=olive_dk, black=black, steel=steel,
-                frame=olive, tubes=olive_lt, plate=olive_dk, cap=olive, hole=black,
-                stencil=material("Stencil", (214, 210, 196), metallic=0.0, roughness=0.8),
-                red=material("StencilRed", (176, 40, 34), metallic=0.0, roughness=0.6))
+    mats = dict(olive=olive, olive_dk=olive_dk, black=black, steel=steel)
     return parts, loader_rig(mats)
 
 
@@ -455,7 +452,7 @@ def loader_rig(mats):
     spreader = node("spreader", [(merge(sp), black)], t=(0.0, SPREADER_Y, 0.0))
     pods = []
     for name, fresh in (("pod", False), ("pod_new", True)):
-        prims = lpc_pod(POD_X1 - POD_X0, POD_Y1 - POD_Y0, POD_HALF, fresh, mats, POD_LUGS)
+        prims = lpc_pod(POD_X1 - POD_X0, POD_Y1 - POD_Y0, POD_HALF, fresh, POD_LUGS)
         pods.append(node(name, prims, t=(POD_XC, POD_Y0, 0.0), r=AFT, s=(TINY,) * 3 if fresh else (1.0, 1.0, 1.0)))
     boom_2 = node("boom_2", [(merge(b2), olive_dk), (merge(trolley), olive)], children=[cables, spreader] + pods)
     return node("boom_1", [(merge(b1), olive)], children=[boom_2])
