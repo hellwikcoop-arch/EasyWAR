@@ -22,8 +22,8 @@ from trimesh.visual.material import PBRMaterial
 
 DEFAULT_OUT = Path(__file__).resolve().parent.parent / "src" / "models" / "m270-mlrs.glb"
 
-# Частини з круглими перерізами лишаються з гладкими нормалями.
-SMOOTH = {"tyres", "hubs", "rollers", "lamps", "lamps_amber", "rails", "struts", "turntable"}
+# Ребра мають фаски, тож згладжені нормалі дають м'які відблиски; плоскі нормалі лише для опуклих корпусів-оболонок.
+FLAT = {"cab"}
 
 # --- головні розміри, м ---------------------------------------------------------------------------------------------
 X_REAR, X_FRONT = -3.45, 3.50         # торці палуби
@@ -54,9 +54,24 @@ def merge(meshes):
     return trimesh.util.concatenate(meshes)
 
 
+def bevelled(extents, bevel=None):
+    """Паралелепіпед зі сколеними ребрами (фаска ~2,5 см): так грані ловлять світло, як на справжньому металі."""
+    ex, ey, ez = (e / 2 for e in extents)
+    b = min(0.025, min(extents) * 0.22) if bevel is None else bevel
+    if b < 0.004:
+        return trimesh.creation.box(extents=extents)
+    pts = []
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            for sz in (-1, 1):
+                pts += [(sx * ex, sy * (ey - b), sz * (ez - b)), (sx * (ex - b), sy * ey, sz * (ez - b)),
+                        (sx * (ex - b), sy * (ey - b), sz * ez)]
+    return trimesh.convex.convex_hull(np.array(pts))
+
+
 def box(center, extents, rot_z=0.0):
     """Паралелепіпед з центром у `center`; його вісь x повернута навколо z на rot_z радіан."""
-    m = trimesh.creation.box(extents=extents)
+    m = bevelled(extents)
     m.apply_transform(trimesh.transformations.rotation_matrix(rot_z, [0, 0, 1]))
     m.apply_translation(center)
     return m
@@ -86,7 +101,7 @@ def prism_side(profile_xy, z0, z1):
 
 def box_pose(u0, u1, v0, v1, z0, z1):
     """Паралелепіпед у системі координат установки: u — уздовж корпусу від осі підйому, v — «вгору» від його низу."""
-    m = trimesh.creation.box(extents=[u1 - u0, v1 - v0, z1 - z0])
+    m = bevelled([u1 - u0, v1 - v0, z1 - z0])
     m.apply_translation([(u0 + u1) / 2, (v0 + v1) / 2, (z0 + z1) / 2])
     return m
 
@@ -280,8 +295,8 @@ def main() -> int:
     out = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_OUT
     scene = trimesh.Scene()
     for name, mesh in m270().items():
-        if name not in SMOOTH:
-            mesh.unmerge_vertices()  # плоске освітлення граней: інакше гранчасті деталі виглядають «розмитими»
+        if name in FLAT:
+            mesh.unmerge_vertices()  # плоске освітлення лише для великих гранчастих корпусів без фасок
         scene.add_geometry(mesh, node_name=name, geom_name=name)
     glb = scene.export(file_type="glb", include_normals=True)
     glb = with_extras(glb, {"title": "M270 MLRS (generated)", "generated": True,

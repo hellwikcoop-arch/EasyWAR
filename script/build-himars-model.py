@@ -22,8 +22,8 @@ from trimesh.visual.material import PBRMaterial
 
 DEFAULT_OUT = Path(__file__).resolve().parent.parent / "src" / "models" / "m142-himars.glb"
 
-# Частини з круглими перерізами лишаються з гладкими нормалями.
-SMOOTH = {"tyres", "rims", "wheel_bolts", "pod_tubes", "pod_caps", "rails", "exhaust", "axles", "mirror_arms", "wipers", "lamps", "lamps_amber", "round_cover", "hitch"}
+# Ребра мають фаски, тож згладжені нормалі дають м'які відблиски; плоскі нормалі лише для опуклих корпусів-оболонок.
+FLAT = {"cab"}
 
 # --- головні розміри, м ---------------------------------------------------------------------------------------------
 AXLES = [2.24, -1.22, -2.52]          # передня вісь і задній тандем
@@ -47,8 +47,23 @@ def merge(meshes):
     return trimesh.util.concatenate(meshes)
 
 
+def bevelled(extents, bevel=None):
+    """Паралелепіпед зі сколеними ребрами (фаска ~2,5 см): так грані ловлять світло, як на справжньому металі."""
+    ex, ey, ez = (e / 2 for e in extents)
+    b = min(0.025, min(extents) * 0.22) if bevel is None else bevel
+    if b < 0.004:
+        return trimesh.creation.box(extents=extents)
+    pts = []
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            for sz in (-1, 1):
+                pts += [(sx * ex, sy * (ey - b), sz * (ez - b)), (sx * (ex - b), sy * ey, sz * (ez - b)),
+                        (sx * (ex - b), sy * (ey - b), sz * ez)]
+    return trimesh.convex.convex_hull(np.array(pts))
+
+
 def box(center, extents, rot_z=0.0):
-    m = trimesh.creation.box(extents=extents)
+    m = bevelled(extents)
     if rot_z:
         m.apply_transform(trimesh.transformations.rotation_matrix(rot_z, [0, 0, 1]))
     m.apply_translation(center)
@@ -259,6 +274,22 @@ def himars():
                                       + [box((-3.69, 1.18, s * 0.60), (0.04, 0.10, 0.12)) for s in (-1, 1)]), red)
     parts["rear_amber"] = painted(merge([box((-3.69, 1.00, s * 0.90), (0.04, 0.08, 0.10)) for s in (-1, 1)]), amber)
     parts["hitch"] = painted(cyl_between((-3.68, 0.98, 0.0), (-3.90, 0.98, 0.0), 0.05, 12), black)
+    # Заклепки: ряди по краях бортів пускового модуля та по лонжеронах рами (як на довідкових знімках).
+    rivets = []
+    def rivet(x, y, z, s):
+        return cyl_between((x, y, z), (x, y, z + s * 0.012), 0.011, 6)
+    for s in (-1, 1):
+        zf = s * (M["half"] + 0.002)
+        for x in np.arange(M["x0"] + 0.08, -0.15, 0.14):
+            for y in (M["y0"] + 0.05, M["y1"] - 0.05):
+                rivets.append(rivet(x, y, zf, s))
+        for xc in (-3.37, -2.30, -1.20, -0.10):
+            for y in np.arange(M["y0"] + 0.15, M["y1"] - 0.1, 0.12):
+                rivets.append(rivet(xc, y, zf, s))
+        for x in np.arange(-3.25, 1.45, 0.11):
+            for y in (1.07, 1.15):
+                rivets.append(rivet(x, y, s * 0.672, s))
+    parts["rivets"] = painted(merge(rivets), olive_dk)
     return parts
 
 
@@ -277,8 +308,8 @@ def main() -> int:
     out = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_OUT
     scene = trimesh.Scene()
     for name, mesh in himars().items():
-        if name not in SMOOTH:
-            mesh.unmerge_vertices()  # плоске освітлення граней: інакше гранчасті деталі виглядають «розмитими»
+        if name in FLAT:
+            mesh.unmerge_vertices()  # плоске освітлення лише для великих гранчастих корпусів без фасок
         scene.add_geometry(mesh, node_name=name, geom_name=name)
     glb = scene.export(file_type="glb", include_normals=True)
     glb = with_extras(glb, {"title": "M142 HIMARS (generated)", "generated": True,
