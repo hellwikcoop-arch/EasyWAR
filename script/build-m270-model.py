@@ -12,14 +12,14 @@
 Це не скан і не копія чужої моделі, сторонніх текстур немає. Для перегляду, а не для впізнавання чи розрахунків. Одиниці — метри, перед машини дивиться в +x,
 «вгору» — +y, права сторона — +z (як у glTF).
 """
-import json
-import struct
 import sys
 from pathlib import Path
 
 import numpy as np
 import trimesh
 from trimesh.visual.material import PBRMaterial
+
+from glb_rig import GlbWriter, lpc_pod, node, quat_axis, ramp, shifted
 
 DEFAULT_OUT = Path(__file__).resolve().parent.parent / "src" / "models" / "m270-mlrs.glb"
 
@@ -300,7 +300,10 @@ def m270():
                                   material("Red", (170, 36, 30), metallic=0.0, roughness=0.3))
 
     # ---------- Рухома частина: платформа, установка, стріли, пакети, троси, гідроциліндри ----------
-    mats = dict(olive=olive, olive_dk=olive_dk, olive_lt=olive_lt, black=black, metal=metal)
+    mats = dict(olive=olive, olive_dk=olive_dk, olive_lt=olive_lt, black=black, metal=metal,
+                frame=olive, tubes=olive_lt, plate=olive_dk, cap=olive, hole=black,
+                stencil=material("Stencil", (214, 210, 196), metallic=0.0, roughness=0.8),
+                red=material("StencilRed", (176, 40, 34), metallic=0.0, roughness=0.6))
     return parts, launcher_rig(mats)
 
 
@@ -334,17 +337,6 @@ CYCLES = {"pod_r": (0.24, 0.52), "pod_l": (0.52, 0.80)}   # спершу пра�
 BOOM_IN = (0.80, 0.86)
 RAISE = (0.86, 0.93)
 TRAVERSE_BACK = (0.93, 1.00)
-
-
-def ramp(t, span):
-    a, b = span
-    k = np.clip((t - a) / (b - a), 0.0, 1.0)
-    return k * k * (3 - 2 * k)
-
-
-def quat_axis(axis, angle):
-    s = np.sin(angle / 2)
-    return np.array([axis[0] * s, axis[1] * s, axis[2] * s, np.cos(angle / 2)])
 
 
 def yaw_at(t):
@@ -393,43 +385,10 @@ def strut_pose(t, base, u_top):
     return np.arctan2(-d[0], d[1]), float(np.hypot(*d))
 
 
-def node(name, prims=(), t=(0.0, 0.0, 0.0), r=(0.0, 0.0, 0.0, 1.0), s=(1.0, 1.0, 1.0), children=()):
-    return {"name": name, "prims": list(prims), "t": list(t), "r": list(r), "s": list(s), "children": list(children)}
-
-
-def shifted(m, dx=0.0, dy=0.0, dz=0.0):
-    m.apply_translation([dx, dy, dz])
-    return m
-
-
 def pod_node(name, pz, fresh, mats):
-    """Транспортно-пусковий пакет (шість труб). Початок координат — середина низу пакета, щоб масштаб «виростав» із землі."""
-    o = np.array([POD_UC, POD_V0, pz])
-    body, ribs, mouths, ends = [], [], [], []
-    body.append(box_pose(POD_U0, POD_U1 - 0.03, POD_V0, POD_V1, pz - POD_HALF, pz + POD_HALF))
-    body.append(box_pose(POD_U1 - 0.03, POD_U1, POD_V0 + 0.02, POD_V1 - 0.02, pz - POD_HALF + 0.02, pz + POD_HALF - 0.02))
-    for u in (POD_U0 + 0.25, POD_UC, POD_U1 - 0.30):                                   # поперечні ребра
-        ribs.append(box_pose(u - 0.04, u + 0.04, POD_V0 - 0.01, POD_V1 + 0.01, pz - POD_HALF - 0.01, pz + POD_HALF + 0.01))
-    for du in (-LUG_U, LUG_U):                                                         # вушка для тросів
-        ribs.append(box_pose(POD_UC + du - 0.06, POD_UC + du + 0.06, POD_V1, POD_V1 + 0.06, pz - 0.05, pz + 0.05))
-    for dz in (-0.33, 0.0, 0.33):
-        for v in (0.31, 0.71):
-            m = trimesh.creation.cylinder(radius=0.150, height=0.10, sections=28)
-            m.apply_transform(trimesh.geometry.align_vectors([0, 0, 1], [1, 0, 0]))
-            m.apply_translation([POD_U1 + 0.04, v, pz + dz])
-            mouths.append(m)
-            if fresh:                                                                  # кришка нової труби
-                e = trimesh.creation.cylinder(radius=0.125, height=0.03, sections=24)
-                e.apply_transform(trimesh.geometry.align_vectors([0, 0, 1], [1, 0, 0]))
-                e.apply_translation([POD_U1 + 0.10, v, pz + dz])
-            else:                                                                      # порожня труба після пуску
-                e = trimesh.creation.cylinder(radius=0.118, height=0.012, sections=24)
-                e.apply_transform(trimesh.geometry.align_vectors([0, 0, 1], [1, 0, 0]))
-                e.apply_translation([POD_U1 + 0.087, v, pz + dz])
-            ends.append(e)
-    prims = [(shifted(merge(body), *-o), mats["olive_lt"]), (shifted(merge(ribs), *-o), mats["olive"]),
-             (shifted(merge(mouths), *-o), mats["olive_lt"]), (shifted(merge(ends), *-o), mats["olive"] if fresh else mats["black"])]
-    return node(name, prims, t=o, s=(1.0, 1.0, 1.0) if not fresh else (TINY, TINY, TINY))
+    """Транспортно-пусковий пакет (спільна модель LP/C). Початок координат — середина низу пакета, щоб масштаб «виростав» із землі."""
+    prims = lpc_pod(POD_U1 - POD_U0, POD_V1 - POD_V0, POD_HALF, fresh, mats, (-LUG_U, LUG_U))
+    return node(name, prims, t=(POD_UC, POD_V0, pz), s=(TINY,) * 3 if fresh else (1.0, 1.0, 1.0))
 
 
 def launcher_rig(mats):
@@ -515,102 +474,10 @@ def reload_tracks():
     return ts * CLIP_SECONDS, out
 
 
-# --- запис GLB ------------------------------------------------------------------------------------------------------
-class GlbWriter:
-    """Мінімальний запис glTF 2.0: вершини, нормалі, індекси, PBR-матеріали, ієрархія вузлів із TRS і один анімаційний кліп."""
-
-    def __init__(self):
-        self.bin = bytearray()
-        self.doc = {"asset": {"version": "2.0", "generator": "EasyWAR build-m270-model.py"}, "scene": 0, "scenes": [{"nodes": []}],
-                    "nodes": [], "meshes": [], "materials": [], "accessors": [], "bufferViews": [], "buffers": []}
-        self.mat_index = {}
-
-    def view(self, data: bytes, target=None):
-        self.bin += b"\0" * (-len(self.bin) % 4)
-        v = {"buffer": 0, "byteOffset": len(self.bin), "byteLength": len(data)}
-        if target:
-            v["target"] = target
-        self.bin += data
-        self.doc["bufferViews"].append(v)
-        return len(self.doc["bufferViews"]) - 1
-
-    def accessor(self, arr, kind, target=None, minmax=False):
-        arr = np.ascontiguousarray(arr)
-        comp = {np.dtype("float32"): 5126, np.dtype("uint16"): 5123, np.dtype("uint32"): 5125}[arr.dtype]
-        a = {"bufferView": self.view(arr.tobytes(), target), "componentType": comp, "count": int(arr.shape[0]), "type": kind}
-        if minmax:
-            flat = arr.reshape(arr.shape[0], -1)
-            a["min"] = [float(x) for x in flat.min(axis=0)]
-            a["max"] = [float(x) for x in flat.max(axis=0)]
-        self.doc["accessors"].append(a)
-        return len(self.doc["accessors"]) - 1
-
-    def material(self, mat):
-        if mat.name not in self.mat_index:
-            r, g, b, a = (c / 255 for c in mat.baseColorFactor)
-            self.doc["materials"].append({"name": mat.name, "pbrMetallicRoughness": {
-                "baseColorFactor": [round(r, 6), round(g, 6), round(b, 6), round(a, 6)],
-                "metallicFactor": float(mat.metallicFactor), "roughnessFactor": float(mat.roughnessFactor)}})
-            self.mat_index[mat.name] = len(self.doc["materials"]) - 1
-        return self.mat_index[mat.name]
-
-    def mesh(self, name, prims):
-        out = []
-        for m, mat in prims:
-            pos = np.asarray(m.vertices, dtype=np.float32)
-            nrm = np.asarray(m.vertex_normals, dtype=np.float32)
-            idx = np.asarray(m.faces, dtype=np.uint16 if len(pos) < 65536 else np.uint32).reshape(-1)
-            out.append({"attributes": {"POSITION": self.accessor(pos, "VEC3", 34962, True), "NORMAL": self.accessor(nrm, "VEC3", 34962)},
-                        "indices": self.accessor(idx, "SCALAR", 34963), "material": self.material(mat)})
-        self.doc["meshes"].append({"name": name, "primitives": out})
-        return len(self.doc["meshes"]) - 1
-
-    def add(self, spec, parent=None):
-        n = {"name": spec["name"]}
-        if spec["prims"]:
-            n["mesh"] = self.mesh(spec["name"], spec["prims"])
-        if any(spec["t"]):
-            n["translation"] = [float(x) for x in spec["t"]]
-        if spec["r"] != [0.0, 0.0, 0.0, 1.0]:
-            n["rotation"] = [float(x) for x in spec["r"]]
-        if spec["s"] != [1.0, 1.0, 1.0]:
-            n["scale"] = [float(x) for x in spec["s"]]
-        self.doc["nodes"].append(n)
-        i = len(self.doc["nodes"]) - 1
-        if parent is None:
-            self.doc["scenes"][0]["nodes"].append(i)
-        else:
-            self.doc["nodes"][parent].setdefault("children", []).append(i)
-        for c in spec["children"]:
-            self.add(c, i)
-        return i
-
-    def animation(self, name, times, tracks):
-        index = {n["name"]: i for i, n in enumerate(self.doc["nodes"])}
-        t_acc = self.accessor(np.asarray(times, dtype=np.float32), "SCALAR", minmax=True)
-        samplers, channels = [], []
-        for node_name, path, values in tracks:
-            kind = "VEC4" if path == "rotation" else "VEC3"
-            v_acc = self.accessor(np.asarray(values, dtype=np.float32), kind)
-            samplers.append({"input": t_acc, "output": v_acc, "interpolation": "LINEAR"})
-            channels.append({"sampler": len(samplers) - 1, "target": {"node": index[node_name], "path": path}})
-        self.doc["animations"] = [{"name": name, "samplers": samplers, "channels": channels}]
-
-    def glb(self, extras):
-        self.doc["asset"]["extras"] = extras
-        self.bin += b"\0" * (-len(self.bin) % 4)
-        self.doc["buffers"] = [{"byteLength": len(self.bin)}]
-        raw = json.dumps(self.doc, separators=(",", ":"), ensure_ascii=False).encode()
-        raw += b" " * (-len(raw) % 4)
-        total = 12 + 8 + len(raw) + 8 + len(self.bin)
-        return (struct.pack("<4sII", b"glTF", 2, total) + struct.pack("<I4s", len(raw), b"JSON") + raw
-                + struct.pack("<I4s", len(self.bin), b"BIN\0") + bytes(self.bin))
-
-
 def main() -> int:
     out = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_OUT
     parts, rig = m270()
-    w = GlbWriter()
+    w = GlbWriter("EasyWAR build-m270-model.py")
     tris = 0
     for name, mesh in parts.items():
         if name in FLAT:

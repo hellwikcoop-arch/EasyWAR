@@ -9,18 +9,19 @@
 довідок: шасі 6×6 родини FMTV з клепаними лонжеронами, броньовану кабіну з похилим лобом, двома вітровими шибами,
 ґратою, круглою кришкою, болтами броні, дзеркалами на кронштейнах і бампером із V-вирізом; ящики, бак і вихлоп за
 кабіною; арку завантажувача; пусковий модуль із клепаними бортами й дверцятами, пакетом із шести труб, що дивиться
-назад, сріблястими штангами й рамою завантажувача зверху; корму з ліхтарями й фаркопом. Це не скан і не копія чужої
+назад, сріблястими штангами й рамою завантажувача зверху; корму з ліхтарями й фаркопом. Кліп анімації «reload» за фото
+заряджання показує, як висувна U-подібна рама виносить порожній пакет за корму, опускає його й затягує новий. Це не скан і не копія чужої
 моделі, сторонніх текстур немає. Для перегляду, а не для впізнавання чи розрахунків. Одиниці — метри, перед машини
 дивиться в +x, «вгору» — +y, права сторона — +z (як у glTF).
 """
-import json
-import struct
 import sys
 from pathlib import Path
 
 import numpy as np
 import trimesh
 from trimesh.visual.material import PBRMaterial
+
+from glb_rig import GlbWriter, lpc_pod, node, quat_axis, ramp
 
 DEFAULT_OUT = Path(__file__).resolve().parent.parent / "src" / "models" / "m142-himars.glb"
 
@@ -373,25 +374,10 @@ def himars():
         rear.append(box((M["x0"] - 0.05, 2.12, s * 0.66), (0.12, 0.14, 0.14)))
     rear.append(box((M["x0"] + 0.04, 1.42, 0.0), (0.12, 0.16, 1.26)))
     parts["module_rear"] = painted(merge(rear), olive)
-    # Пакет: корпус, шість труб, торцеві кришки, хомути.
-    P = POD
-    tubes, caps, straps = [], [], []
-    for dz in (-0.31, 0.0, 0.31):
-        for y in (1.68, 2.00):
-            tubes.append(cyl_x(P["x0"], P["x1"], y, dz, 0.150, 28))
-            caps.append(cyl_x(P["x0"] - 0.02, P["x0"], y, dz, 0.140, 28))
-            caps.append(cyl_x(P["x0"] - 0.03, P["x0"] - 0.02, y, dz, 0.10, 20))
-    for x in (-3.0, -2.2, -1.4, -0.6):
-        straps.append(box((x, 1.84, 0.0), (0.06, 0.70, 1.00)))
-    straps.append(box((P["x0"] + 0.05, 1.84, 0.0), (0.10, 0.70, 1.00)))
-    parts["pod_tubes"] = painted(merge(tubes), olive_lt)
-    parts["pod_caps"] = painted(merge(caps), olive)
-    parts["pod_frame"] = painted(merge(straps), olive_dk)
-    # Зверху: рама завантажувача з візком і блоком, сріблясті штанги вздовж пакета й уперед до кабіни.
+    # Зверху: нерухома основа рами завантажувача (штанги, поперечки, барабан лебідки). Висувна рама, візок, троси й
+    # пакети — рухомі вузли, див. loader_rig().
     top = [box((-1.50, 2.40, s * 0.36), (2.80, 0.07, 0.07)) for s in (-1, 1)]
     top += [box((x, 2.40, 0.0), (0.07, 0.07, 0.72)) for x in (-2.85, -2.2, -1.5, -0.8, -0.15)]
-    top.append(hull([(-1.75, 2.42, -0.30), (-1.05, 2.42, -0.30), (-1.75, 2.42, 0.30), (-1.05, 2.42, 0.30),
-                     (-1.60, 2.53, -0.18), (-1.20, 2.53, -0.18), (-1.60, 2.53, 0.18), (-1.20, 2.53, 0.18)]))
     top.append(cyl_between((-0.78, 2.47, -0.12), (-0.78, 2.47, 0.12), 0.07, 16))
     parts["loader_frame"] = painted(merge(top), olive_dk)
     parts["rails"] = painted(merge([cyl_x(-3.30, 0.95, 2.28, s * 0.54, 0.040, 16) for s in (-1, 1)]
@@ -414,34 +400,99 @@ def himars():
                                     cyl_z((-3.80, 0.98, 0.0), 0.07, 0.04, 16)]), black)
 
     parts["rivets"] = painted(merge(rivets), olive_dk)
-    return parts
+    mats = dict(olive=olive, olive_dk=olive_dk, black=black, steel=steel,
+                frame=olive, tubes=olive_lt, plate=olive_dk, cap=olive, hole=black,
+                stencil=material("Stencil", (214, 210, 196), metallic=0.0, roughness=0.8),
+                red=material("StencilRed", (176, 40, 34), metallic=0.0, roughness=0.6))
+    return parts, loader_rig(mats)
 
 
-def with_extras(glb: bytes, extras: dict) -> bytes:
-    json_len, _ = struct.unpack("<I4s", glb[12:20])
-    doc = json.loads(glb[20:20 + json_len])
-    doc["asset"]["extras"] = extras
-    raw = json.dumps(doc, separators=(",", ":")).encode()
-    raw += b" " * (-len(raw) % 4)
-    rest = glb[20 + json_len:]
-    total = 12 + 8 + len(raw) + len(rest)
-    return glb[:8] + struct.pack("<I", total) + struct.pack("<I4s", len(raw), b"JSON") + raw + rest
+# --- заряджання (за фото: модуль у похідному положенні, U-подібна рама висувається назад, пакет висить на візку) ---
+POD_X0, POD_X1, POD_Y0, POD_Y1, POD_HALF = -3.28, -0.05, 1.49, 2.19, 0.50
+POD_XC = (POD_X0 + POD_X1) / 2
+POD_LUGS = (-0.40, 0.40)
+SLIDE = 3.80                             # на скільки рама виносить пакет назад (щоб він минув ліхтарі й фаркоп)
+BOOM_Y = 2.52
+SPREADER_Y = POD_Y1 + 0.10               # низ траверси, що чіпляє вушка пакета
+CLIP_SECONDS = 20.0
+SAMPLES = 201
+TINY = 1e-4
+OUT, DOWN, SHRINK, GROW, UP, IN = (0.02, 0.22), (0.22, 0.36), (0.36, 0.44), (0.44, 0.52), (0.52, 0.68), (0.68, 0.90)
+AFT = quat_axis((0, 1, 0), np.pi)        # пакет у HIMARS дивиться дулами назад
+
+
+def boom_at(t):
+    return -SLIDE / 2 * (ramp(t, OUT) - ramp(t, IN))
+
+
+def drop_at(t):
+    return -POD_Y0 * (ramp(t, DOWN) - ramp(t, UP))
+
+
+def loader_rig(mats):
+    olive, olive_dk, steel, black = mats["olive"], mats["olive_dk"], mats["steel"], mats["black"]
+    # Внутрішня секція рами: дві балки з поперечками.
+    b1 = [box((-1.85, BOOM_Y - 0.02, s * 0.44), (3.10, 0.08, 0.08)) for s in (-1, 1)]
+    b1 += [box((x, BOOM_Y - 0.02, 0.0), (0.08, 0.06, 0.88)) for x in (-3.36, -0.34)]
+    # Зовнішня U-подібна секція: ширші балки, на кінці — опущена П-подібна рамка, як на фото; посередині візок лебідки.
+    b2 = [box((-2.00, BOOM_Y + 0.06, s * 0.54), (3.10, 0.10, 0.10)) for s in (-1, 1)]
+    b2 += [box((-0.50, BOOM_Y + 0.06, 0.0), (0.10, 0.08, 1.18))]
+    b2 += [box((-3.52, BOOM_Y - 0.08, s * 0.54), (0.10, 0.38, 0.10)) for s in (-1, 1)]          # ноги П-рамки
+    b2 += [box((-3.52, BOOM_Y - 0.26, 0.0), (0.12, 0.10, 1.18)), box((-3.52, BOOM_Y + 0.08, 0.0), (0.12, 0.10, 1.18))]
+    b2 += [box((x, BOOM_Y + 0.02, s * 0.54), (0.30, 0.06, 0.13)) for x in (-3.0, -1.0) for s in (-1, 1)]
+    trolley = [hull([(POD_XC - 0.30, BOOM_Y - 0.05, -0.40), (POD_XC + 0.30, BOOM_Y - 0.05, -0.40), (POD_XC - 0.30, BOOM_Y - 0.05, 0.40),
+                     (POD_XC + 0.30, BOOM_Y - 0.05, 0.40), (POD_XC - 0.22, BOOM_Y + 0.10, -0.30), (POD_XC + 0.22, BOOM_Y + 0.10, -0.30),
+                     (POD_XC - 0.22, BOOM_Y + 0.10, 0.30), (POD_XC + 0.22, BOOM_Y + 0.10, 0.30)])]
+    trolley.append(box((POD_XC, BOOM_Y - 0.10, 0.0), (0.24, 0.10, 0.20)))                       # блок лебідки
+    # Троси: чотири нитки від блока вниз; вузол масштабується по висоті.
+    lines = [cyl_between((POD_XC + dx, 0.0, dz), (POD_XC + dx, -1.0, dz), 0.010, 6) for dx in (-0.08, 0.08) for dz in (-0.05, 0.05)]
+    cable_top = BOOM_Y - 0.15
+    cables = node("hoist_cables", [(merge(lines), steel)], t=(0.0, cable_top, 0.0),
+                  s=(1.0, cable_top - (SPREADER_Y + 0.06), 1.0))
+    # Траверса: балка вздовж пакета з гаками на вушках.
+    sp = [box((POD_XC, 0.04, 0.0), (0.95, 0.07, 0.10)), box((POD_XC, 0.10, 0.0), (0.16, 0.06, 0.16))]
+    sp += [box((POD_XC + lx, -0.01, 0.0), (0.05, 0.10, 0.08)) for lx in POD_LUGS]
+    spreader = node("spreader", [(merge(sp), black)], t=(0.0, SPREADER_Y, 0.0))
+    pods = []
+    for name, fresh in (("pod", False), ("pod_new", True)):
+        prims = lpc_pod(POD_X1 - POD_X0, POD_Y1 - POD_Y0, POD_HALF, fresh, mats, POD_LUGS)
+        pods.append(node(name, prims, t=(POD_XC, POD_Y0, 0.0), r=AFT, s=(TINY,) * 3 if fresh else (1.0, 1.0, 1.0)))
+    boom_2 = node("boom_2", [(merge(b2), olive_dk), (merge(trolley), olive)], children=[cables, spreader] + pods)
+    return node("boom_1", [(merge(b1), olive)], children=[boom_2])
+
+
+def reload_tracks():
+    ts = np.linspace(0.0, 1.0, SAMPLES)
+    cable_top = BOOM_Y - 0.15
+    out = [("boom_1", "translation", [(boom_at(t), 0.0, 0.0) for t in ts]),
+           ("boom_2", "translation", [(boom_at(t), 0.0, 0.0) for t in ts]),
+           ("spreader", "translation", [(0.0, SPREADER_Y + drop_at(t), 0.0) for t in ts]),
+           ("hoist_cables", "scale", [(1.0, cable_top - (SPREADER_Y + 0.06 + drop_at(t)), 1.0) for t in ts]),
+           ("pod", "translation", [(POD_XC, POD_Y0 + drop_at(t), 0.0) for t in ts]),
+           ("pod", "scale", [(max(TINY, 1 - ramp(t, SHRINK)),) * 3 for t in ts]),
+           ("pod_new", "translation", [(POD_XC, POD_Y0 + (drop_at(t) if t >= SHRINK[0] else 0.0), 0.0) for t in ts]),
+           ("pod_new", "scale", [(max(TINY, ramp(t, GROW)),) * 3 for t in ts])]
+    return ts * CLIP_SECONDS, out
 
 
 def main() -> int:
     out = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_OUT
-    scene = trimesh.Scene()
-    for name, mesh in himars().items():
+    parts, rig = himars()
+    w = GlbWriter("EasyWAR build-himars-model.py")
+    for name, mesh in parts.items():
         if name in FLAT:
             mesh.unmerge_vertices()  # плоске освітлення лише для великих гранчастих корпусів без фасок
-        scene.add_geometry(mesh, node_name=name, geom_name=name)
-    glb = scene.export(file_type="glb", include_normals=True)
-    glb = with_extras(glb, {"title": "M142 HIMARS (generated)", "generated": True,
-                            "note": "Procedural model traced from an orthographic side view and public overall dimensions (about 7.2 m long, 2.4 m wide, 6x6 FMTV chassis, armoured cab, one six-tube pod facing aft). Not a scan or copy of any other model."})
+        w.add(node(name, [(mesh, mesh.visual.material)]))
+    w.add(rig)
+    times, tracks = reload_tracks()
+    w.animation("reload", times, tracks)
+    glb = w.glb({"title": "M142 HIMARS (generated)", "generated": True,
+                 "note": "Procedural model traced from an orthographic side view and public overall dimensions (about 7.2 m long, 2.4 m wide, 6x6 FMTV chassis, "
+                         "armoured cab, one six-tube pod facing aft). The 'reload' clip schematically shows the built-in loader swapping the pod. "
+                         "Not a scan or copy of any other model."})
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(glb)
-    size = np.ptp(np.array(scene.bounds), axis=0)
-    print(f"{out.name}: {len(glb) / 1024:.0f} KB, {sum(len(m.faces) for m in scene.geometry.values())} triangles, extent {size[0]:.2f} x {size[1]:.2f} x {size[2]:.2f} m")
+    print(f"{out.name}: {len(glb) / 1024:.0f} KB, {len(w.doc['nodes'])} nodes, {w.triangles} triangles, {len(tracks)} channels")
     return 0
 
 
