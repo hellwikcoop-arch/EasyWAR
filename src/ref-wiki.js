@@ -28,7 +28,11 @@ const RESULTS = [['hit', 'Уражено', 'var(--hit)'], ['part', 'Пошкод
 //   motion() — чи дозволено анімацію;
 //   initial  — id статті, яку показати першою; onSelect(id) — виклик при виборі статті.
 export function mount(host, options = {}) {
-  const { rows = () => [], media = {}, motion = () => true, onSelect } = options;
+  const { rows = () => [], media = {}, motion = () => true, onSelect, groups = null, only = null, usage = true, related = true } = options;
+  // groups / only — які розділи й статті показує цей модуль (РВіА бачить лише наземні засоби й ракети); usage / related — чи малювати
+  // підсумок по таблиці вильотів ПС і блок «носії/боєприпаси».
+  const groupList = groups ? GROUPS.filter(g => groups.includes(g.id)) : GROUPS;
+  const visible = e => (!groups || groups.includes(e.group)) && (!only || only.includes(e.id));
   const state = { group: '', q: '', id: '', variant: '' };
   let viewer = null, viewerFailed = false, token = 0;
 
@@ -140,7 +144,7 @@ export function mount(host, options = {}) {
   const usageEl = h('section', { class: 'rw-sec rw-usage' });
 
   function relatedBlock(entry) {
-    if (entry.group === 'ground') return null;
+    if (!related || entry.group === 'ground') return null;
     const ids = entry.group === 'aircraft' ? munitionsOf(entry.id) : carriersOf(entry.id);
     if (!ids.length) return null;
     const title = entry.group === 'aircraft' ? 'Боєприпаси, показані з цим носієм' : 'Носії, показані з цим боєприпасом';
@@ -157,7 +161,7 @@ export function mount(host, options = {}) {
 
   function renderUsage(entry) {
     // Підсумок будується з таблиці вильотів ПС: для наземних засобів його немає.
-    usageEl.hidden = entry.group === 'ground';
+    usageEl.hidden = !usage || entry.group === 'ground';
     if (usageEl.hidden) { usageEl.replaceChildren(); return; }
     usageEl.replaceChildren(h('h3', { text: 'У вашій базі' }));
     const data = rows();
@@ -230,11 +234,11 @@ export function mount(host, options = {}) {
 
   // ---------- список ----------
   function renderNav() {
-    seg.replaceChildren(...[['', 'Усе'], ...GROUPS.map(g => [g.id, g.title])].map(([id, label]) =>
+    seg.replaceChildren(...[['', 'Усе'], ...groupList.map(g => [g.id, g.title])].map(([id, label]) =>
       h('button', { type: 'button', text: label, 'aria-pressed': String(state.group === id), onclick: () => { state.group = id; renderNav(); } })));
-    const found = searchEntries(state.q, state.group);
+    const found = searchEntries(state.q, state.group).filter(visible);
     list.replaceChildren();
-    for (const g of GROUPS) {
+    for (const g of groupList) {
       const items = found.filter(e => e.group === g.id);
       if (!items.length) continue;
       list.append(h('p', { class: 'rw-grp', role: 'presentation', text: g.title + ' · ' + items.length }));
@@ -258,7 +262,8 @@ export function mount(host, options = {}) {
   });
 
   function select(id, user) {
-    const entry = entryById(id) || ENTRIES[0];
+    const asked = entryById(id);
+    const entry = asked && visible(asked) ? asked : ENTRIES.find(visible) || ENTRIES[0];
     if (state.id !== entry.id) state.variant = '';
     state.id = entry.id;
     const mine = ++token;

@@ -9,7 +9,7 @@
 </script>
 <style id="easywar-command-mode-css">
 /* У командному режимі є лише дашборд: внесення доповідей і довідник ховаємо. */
-html[data-command="dshv"] #tab-entry, html[data-command="dshv"] .snav-entry { display: none !important; }
+html[data-command="dshv"] #tab-entry, html[data-command="dshv"] #tab-ref, html[data-command="dshv"] .snav-entry, html[data-command="dshv"] .snav-ref { display: none !important; }
 /* Телефон: у вікні командування лишаємо назву файлу; зайві кнопки шапки ховаємо. */
 @media (max-width: 640px) {
   html[data-command="dshv"] #ewx-open, html[data-command="dshv"] #motionBtn { display: none !important; }
@@ -2950,6 +2950,7 @@ html[data-theme="light"] .kh{background:#151a0f!important}
 <style id="kpi-5col">html.rocket-ref24 body .kpipanel .kpi-grid:not(:has(.kc-grey)){grid-template-columns:repeat(5,minmax(0,1fr))!important}@media (max-width:1100px){html.rocket-ref24 body .kpipanel .kpi-grid:not(:has(.kc-grey)){grid-template-columns:repeat(3,minmax(0,1fr))!important}}@media (max-width:640px){html.rocket-ref24 body .kpipanel .kpi-grid:not(:has(.kc-grey)){grid-template-columns:repeat(2,minmax(0,1fr))!important}}</style>
 <link rel="stylesheet" href="./udshv-dashboard.css">
 <link rel="stylesheet" href="./own-losses-dashboard.css">
+<link rel="stylesheet" href="./ref-wiki.css">
 </head>
 <body>
 <header class="appbar">
@@ -2957,6 +2958,7 @@ html[data-theme="light"] .kh{background:#151a0f!important}
   <nav class="tabs" role="tablist" aria-label="Розділи">
     <button type="button" class="tab" role="tab" id="tab-dash" aria-controls="view-dash" aria-selected="true">Дашборд</button>
     <button type="button" class="tab" role="tab" id="tab-entry" aria-controls="view-entry" aria-selected="false" tabindex="-1">Внесення доповідей</button>
+    <button type="button" class="tab" role="tab" id="tab-ref" aria-controls="view-ref" aria-selected="false" tabindex="-1">Довідник</button>
   </nav>
   <div class="appbar-right">
     <span id="fileChip"></span>
@@ -2967,6 +2969,7 @@ html[data-theme="light"] .kh{background:#151a0f!important}
 <div id="error" class="error app-error" role="alert" hidden></div>
 <main id="view-dash" class="dash" role="tabpanel" aria-labelledby="tab-dash"></main>
 <main id="view-udshv" aria-label="Дашборд УДШВ" hidden></main>
+<main id="view-ref" class="dash refv" role="tabpanel" aria-labelledby="tab-ref" hidden></main>
 <main id="view-entry" class="wrap" role="tabpanel" aria-labelledby="tab-entry" hidden>
   <header class="top">
     <h1>Внесення доповідей у таблицю</h1>
@@ -4531,6 +4534,7 @@ const ICONS = {
   bars: 'M5 20V11 M11 20V4 M17 20v-6 M2 20h20',
   shield: 'M12 2.5l8 3v6c0 5-3.5 8.6-8 10.5-4.5-1.9-8-5.5-8-10.5v-6z M8.8 12l2.2 2.2 4.2-4.4',
   edit: 'M12 20h9 M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z',
+  book: 'M4 5a2 2 0 0 1 2-2h14v15H6a2 2 0 0 0-2 2z M4 20a2 2 0 0 0 2 2h14v-4 M9 7h7',
   full: 'M4 9V4h5 M20 9V4h-5 M4 15v5h5 M20 15v5h-5',
   pin: 'M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z M12 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z',
   cross: 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z M12 2v4 M12 18v4 M2 12h4 M18 12h4',
@@ -5050,7 +5054,8 @@ function buildSide() {
   el.navBtns = NAV.map(([id, label, ic]) => h('button', { type: 'button', class: 'snav-b', 'data-t': id, onclick: () => openView(VIEW_BY_ID[id]) }, icon(ic), h('span', { text: label }), h('span', { class: 'nb', hidden: true })));
   el.side = h('aside', { class: 'side', 'aria-label': 'Розділи дашборда', hidden: true },
     h('nav', { class: 'snav' }, el.navBtns,
-      h('button', { type: 'button', class: 'snav-b snav-entry', onclick: () => showView('entry') }, icon('edit'), h('span', { text: 'Внесення доповідей' }))),
+      h('button', { type: 'button', class: 'snav-b snav-entry', onclick: () => showView('entry') }, icon('edit'), h('span', { text: 'Внесення доповідей' })),
+      h('button', { type: 'button', class: 'snav-b snav-ref', onclick: () => showView('ref') }, icon('book'), h('span', { text: 'Довідник' }))),
     h('div', { class: 'side-foot' }, CARD ? flipCard() : null));
   let raf = 0;
   window.addEventListener('scroll', () => { if (raf) return; raf = requestAnimationFrame(() => { raf = 0; markNav(); }); }, { passive: true });
@@ -7004,16 +7009,28 @@ function openPassport(r) {
 const resRawDiffers = r => { const a = String(r.resRaw || '').trim().toLowerCase(), b = String(KLABEL[r.kind] || '').toLowerCase(); return !!a && a !== b; };
 
 /* ------------------------------ вкладки, тема, події ------------------------------ */
+/* ---- вкладка «Довідник» (ref-wiki.js): у РВіА лише наземні засоби й ракети, без підсумку по таблиці ПС ---- */
+const REF = { ctl: null, pending: '' };
+const REF_SCOPE = { groups: ['ground', 'munition'], only: ['himars', 'm270', 'atacms', 'gmlrs'] };
+function refOpen() {
+  if (!REF.ctl) {
+    if (!window.RefWiki) { window.addEventListener('load', refOpen, { once: true }); return; }
+    REF.ctl = window.RefWiki.mount($('#view-ref'), { ...REF_SCOPE, usage: false, related: false, media: {}, motion: () => MOTION.on, initial: REF.pending,
+      onSelect: id => { try { history.replaceState(null, '', '#ref/' + id); } catch (e) {} } });
+  } else if (REF.pending) REF.ctl.select(REF.pending);
+  REF.pending = '';
+}
+const VORDER = ['dash', 'entry', 'ref'];
 function showView(v) {
-  const dash = v === 'dash', was = !$('#view-dash').hidden;
-  $('#view-dash').hidden = !dash; $('#view-entry').hidden = dash;
-  if (MOTION.on && was !== dash) { const n = dash ? $('#view-dash') : $('#view-entry'); n.classList.remove('view-in-r', 'view-in-l'); void n.offsetWidth; n.classList.add(dash ? 'view-in-l' : 'view-in-r'); n.addEventListener('animationend', () => n.classList.remove('view-in-r', 'view-in-l'), { once: true }); }
-  $('#tab-dash').setAttribute('aria-selected', String(dash)); $('#tab-entry').setAttribute('aria-selected', String(!dash));
-  $('#tab-dash').tabIndex = dash ? 0 : -1; $('#tab-entry').tabIndex = dash ? -1 : 0;
+  if (!VORDER.includes(v) || (v === 'ref' && document.documentElement.dataset.command)) v = 'dash';
+  const dash = v === 'dash', prev = VORDER.find(k => !$('#view-' + k).hidden);
+  for (const k of VORDER) { $('#view-' + k).hidden = k !== v; const t = $('#tab-' + k); t.setAttribute('aria-selected', String(k === v)); t.tabIndex = k === v ? 0 : -1; }
+  if (MOTION.on && prev && prev !== v) { const n = $('#view-' + v), fwd = VORDER.indexOf(v) > VORDER.indexOf(prev); n.classList.remove('view-in-r', 'view-in-l'); void n.offsetWidth; n.classList.add(fwd ? 'view-in-r' : 'view-in-l'); n.addEventListener('animationend', () => n.classList.remove('view-in-r', 'view-in-l'), { once: true }); }
   try { history.replaceState(null, '', '#' + v); } catch (e) {}
   if (dash && el.mapSvg && AV.S.wb && sizeMap()) { fitMap(); drawMap(); }
+  if (v === 'ref') refOpen();
   tabInd(); navInd();
-  if (!dash) { const p = $('#paste'); if (p && !p.disabled) p.focus(); }
+  if (v === 'entry') { const p = $('#paste'); if (p && !p.disabled) p.focus(); }
 }
 /* ---- об’ємний нахил карток показників за курсором, відблиск і зміщення тіні ---- */
 { let cur = null, raf = 0, ev0 = null;
@@ -7229,8 +7246,8 @@ function openDimap() {
 
 function init() {
   skeleton(); applyMotion();
-  $('#tab-dash').addEventListener('click', () => showView('dash')); $('#tab-entry').addEventListener('click', () => showView('entry'));
-  document.querySelector('.tabs').addEventListener('keydown', e => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { const to = $('#tab-dash').getAttribute('aria-selected') === 'true' ? 'entry' : 'dash'; showView(to); $('#tab-' + to).focus(); } });
+  $('#tab-dash').addEventListener('click', () => showView('dash')); $('#tab-entry').addEventListener('click', () => showView('entry')); $('#tab-ref').addEventListener('click', () => showView('ref'));
+  document.querySelector('.tabs').addEventListener('keydown', e => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { const ks = VORDER.filter(k => $('#tab-' + k).offsetParent !== null), i = ks.findIndex(k => $('#tab-' + k).getAttribute('aria-selected') === 'true'); if (i < 0) return; const to = ks[(i + (e.key === 'ArrowRight' ? 1 : ks.length - 1)) % ks.length]; showView(to); $('#tab-' + to).focus(); } });
   { const tb = $('#themeBtn'); if (tb && !$('#motionBtn')) { const mb = h('button', { type: 'button', id: 'motionBtn', class: 'motion-btn', title: 'Плавні переходи та анімації. За замовчуванням вимикаються, якщо в системі увімкнено «зменшити рух».', onclick: () => { MOTION.on = !MOTION.on; store('aviahub.motion', MOTION.on ? '1' : '0'); applyMotion(); if (!MOTION.on) camStop(); } }); tb.before(mb); applyMotion(); } }
   /* Кнопка «Презентація»: колода будується з таблиці ударів цього модуля (group-presentation.js). */
   { const pb = $('#presentBtn');
@@ -7250,7 +7267,7 @@ function init() {
     try { const vt = document.startViewTransition(() => setTheme(t)); vt.ready.then(() => document.documentElement.animate({ clipPath: ['circle(0px at ' + x + 'px ' + y + 'px)', 'circle(' + R + 'px at ' + x + 'px ' + y + 'px)'] }, { duration: 800, easing: 'cubic-bezier(.22,1,.36,1)', pseudoElement: '::view-transition-new(root)' })).catch(() => {}); } catch (e) { setTheme(t); }
   });
   setTheme(document.documentElement.dataset.theme === 'light' ? 'light' : 'dark');
-  showView(location.hash === '#entry' ? 'entry' : 'dash');
+  { const m = /^#ref(?:\/([\w-]+))?$/.exec(location.hash); if (m) REF.pending = m[1] || ''; showView(location.hash === '#entry' ? 'entry' : m ? 'ref' : 'dash'); }
   let rt = 0; window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { motionLayout(); if (AV.S.wb && !$('#view-dash').hidden && sizeMap()) { fitMap(); drawMap(); } }, 120); });
   const ts = store('aviahub.tiles'); if (ts && TSRC[ts]) { T.on = true; T.src = ts; }
   { const ab = document.querySelector('.appbar'), setAb = () => document.documentElement.style.setProperty('--ab', Math.ceil(ab.getBoundingClientRect().height) + 'px'); setAb(); if (window.ResizeObserver) new ResizeObserver(setAb).observe(ab); else window.addEventListener('resize', setAb); }
@@ -7311,6 +7328,7 @@ document.addEventListener('DOMContentLoaded', init);
 </script>
 <script type="module" src="./udshv-dashboard.js"></script>
 <script type="module" src="./group-presentation.js"></script>
+<script type="module" src="./ref-wiki.js"></script>
 <script src="./module-editor-access.js"></script>
 <script src="./rocket-refs.js"></script>
 <script src="./module-editor-core.js"></script>
