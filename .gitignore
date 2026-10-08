@@ -57,3 +57,7 @@ app_lite.html
 # Codex coordination runtime state
 .codex/coordination/*
 !.codex/coordination/project.yaml
+
+# Python bytecode from script/*.py
+__pycache__/
+*.pyc
