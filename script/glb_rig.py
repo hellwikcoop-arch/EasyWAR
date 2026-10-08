@@ -64,7 +64,8 @@ def _cyl_x(x0, x1, y, z, radius, sections=24):
     return m
 
 
-ID_FRAME, ID_TUBE, ID_CAP, ID_CAP_DK, ID_BULK, ID_HOLE = range(6)
+ID_FRAME, ID_TUBE, ID_CAP, ID_CAP_DK, ID_BULK, ID_HOLE, ID_BORE, ID_COLLAR = range(8)
+BORE_DEPTH = 0.55                                                                  # глибина видимого каналу труби, м
 
 
 def _torus_x(center, major, minor):
@@ -72,6 +73,95 @@ def _torus_x(center, major, minor):
     t = trimesh.creation.torus(major_radius=major, minor_radius=minor, major_sections=14, minor_sections=6)
     t.apply_translation(center)
     return t
+
+
+def _mesh_oriented(V, F, want):
+    """Сітка з гранями, повернутими так, щоб нормаль дивилась у бік want(центр грані) -> вектор."""
+    V = np.asarray(V, np.float64); F = np.asarray(F, np.int64)
+    a, b, c = V[F[:, 0]], V[F[:, 1]], V[F[:, 2]]
+    n = np.cross(b - a, c - a)
+    w = want((a + b + c) / 3.0)
+    flip = (n * w).sum(1) < 0
+    F = F.copy(); F[flip] = F[flip][:, ::-1]
+    return trimesh.Trimesh(V, F, process=False)
+
+
+def _shell_x(x0, x1, y, z, radius, sections=40):
+    """Труба без торців (лише бічна поверхня), нормалі назовні."""
+    m = _cyl_x(x0, x1, y, z, radius, sections)
+    nrm = m.face_normals
+    keep = np.abs(nrm[:, 0]) < 0.5
+    return trimesh.Trimesh(m.vertices, m.faces[keep], process=False)
+
+
+def _muzzle(x, cy, cz, rh, rect, depth, n=56, collar=0.012, lip=0.007):
+    """Дульний отвір у щиті: плоска грань щита з круглим вирізом (розгортка кола в прямокутник комірки), бортик-кільце,
+    канал труби вглиб і дно. Повертає {id: сітка}. rect = (y0, y1, z0, z1) — комірка щита навколо отвору."""
+    y0, y1, z0, z1 = rect
+    corners = [np.arctan2(yy - cy, zz - cz) for yy in (y0, y1) for zz in (z0, z1)]   # кут задано від +z до +y
+    ang = np.unique(np.concatenate([np.linspace(0, 2 * np.pi, n, endpoint=False), np.mod(corners, 2 * np.pi)]))
+    ang = ang[np.concatenate([[True], np.diff(ang) > 1e-6])]
+    def hit(a):
+        dy, dz = np.sin(a), np.cos(a)
+        ts = []
+        if dy > 1e-9: ts.append((y1 - cy) / dy)
+        if dy < -1e-9: ts.append((y0 - cy) / dy)
+        if dz > 1e-9: ts.append((z1 - cz) / dz)
+        if dz < -1e-9: ts.append((z0 - cz) / dz)
+        t = min(ts)
+        return cy + t * dy, cz + t * dz
+    rc = rh + collar
+    k = len(ang)
+    out = {}
+    # плоска грань щита між бортиком (rc) і краєм комірки
+    V = [(x, cy + rc * np.sin(a), cz + rc * np.cos(a)) for a in ang] + [(x, *hit(a)) for a in ang]
+    F = []
+    for i in range(k):
+        j = (i + 1) % k
+        F += [(i, j, k + j), (i, k + j, k + i)]
+    out[ID_BULK] = _mesh_oriented(V, F, lambda c: np.tile([1.0, 0, 0], (len(c), 1)))
+    # бортик: зовнішня стінка й кільцева верхня грань
+    xt = x + lip
+    V = [(x, cy + rc * np.sin(a), cz + rc * np.cos(a)) for a in ang] + [(xt, cy + rc * np.sin(a), cz + rc * np.cos(a)) for a in ang] \
+        + [(xt, cy + rh * np.sin(a), cz + rh * np.cos(a)) for a in ang]
+    F = []
+    for i in range(k):
+        j = (i + 1) % k
+        F += [(i, j, k + j), (i, k + j, k + i)]               # стінка
+        F += [(k + i, k + j, 2 * k + j), (k + i, 2 * k + j, 2 * k + i)]   # торець бортика
+    def want(c):
+        w = np.zeros_like(c)
+        top = np.abs(c[:, 0] - xt) < 1e-6
+        w[top, 0] = 1.0
+        side = ~top
+        w[side, 1] = c[side, 1] - cy; w[side, 2] = c[side, 2] - cz
+        return w
+    out[ID_COLLAR] = _mesh_oriented(V, F, want)
+    # канал: бічна стінка (нормаль до осі) і дно
+    nb = 48
+    ab = np.linspace(0, 2 * np.pi, nb, endpoint=False)
+    xs = np.linspace(xt, xt - depth, 7)                       # кілька кілець — для плавного затемнення за глибиною
+    V = [(xx, cy + rh * np.sin(a), cz + rh * np.cos(a)) for xx in xs for a in ab]
+    F = []
+    for r_ in range(len(xs) - 1):
+        for i in range(nb):
+            j = (i + 1) % nb
+            a0, a1, b0, b1 = r_ * nb + i, r_ * nb + j, (r_ + 1) * nb + i, (r_ + 1) * nb + j
+            F += [(a0, a1, b1), (a0, b1, b0)]
+    base = len(V)
+    V.append((xt - depth, cy, cz))
+    last = (len(xs) - 1) * nb
+    for i in range(nb):
+        F.append((last + i, last + (i + 1) % nb, base))
+    def want_b(c):
+        w = np.zeros_like(c)
+        bottom = np.abs(c[:, 0] - (xt - depth)) < 1e-6
+        w[bottom, 0] = 1.0
+        side = ~bottom
+        w[side, 1] = cy - c[side, 1]; w[side, 2] = cz - c[side, 2]
+        return w
+    out[ID_BORE] = _mesh_oriented(V, F, want_b)
+    return out
 
 
 def lpc_pod(length, height, half, fresh, lugs):
@@ -82,7 +172,7 @@ def lpc_pod(length, height, half, fresh, lugs):
     Повертає список призм [(сітка, BakeSpec)]: усе запікається в одну текстуру, частини розрізняються за id."""
     from vehicle_paint import pod_painter
     L2, H, W = length / 2, height, half
-    parts = {k: [] for k in range(6)}
+    parts = {k: [] for k in range(8)}
     frame = parts[ID_FRAME]
     for y in (0.035, H - 0.03):                                                    # кутові балки
         for s in (-1, 1):
@@ -118,7 +208,10 @@ def lpc_pod(length, height, half, fresh, lugs):
     cols = (-2 * r, 0.0, 2 * r)
     for y in rows:
         for z in cols:
-            parts[ID_TUBE].append(_cyl_x(-L2 + 0.06, L2 - 0.01, y, z, r - 0.004, 40))
+            if fresh:
+                parts[ID_TUBE].append(_cyl_x(-L2 + 0.06, L2 - 0.01, y, z, r - 0.004, 40))
+            else:                                                                  # порожня труба: лише стінка, канал видно крізь отвір
+                parts[ID_TUBE].append(_shell_x(-L2 + 0.06, L2 - 0.01, y, z, r - 0.004, 40))
     if fresh:                                                                      # кришки: диск, кільце, чотири виступи
         for y in rows:
             for z in cols:
@@ -128,11 +221,14 @@ def lpc_pod(length, height, half, fresh, lugs):
                 for k in range(4):
                     q = np.pi / 4 + k * np.pi / 2
                     parts[ID_CAP_DK].append(_box((L2 + 0.03, y + 0.82 * r * np.sin(q), z + 0.82 * r * np.cos(q)), (0.02, 0.035, 0.035)))
-    else:                                                                          # щит із шістьма отворами
-        parts[ID_BULK].append(_box((L2 - 0.005, H / 2, 0.0), (0.02, H - 0.05, 2 * W - 0.05)))
-        for y in rows:
-            for z in cols:
-                parts[ID_HOLE].append(_cyl_x(L2 + 0.005, L2 + 0.009, y, z, r - 0.03, 40))
+    else:                                                                          # щит із шістьма реальними отворами
+        y_cut = [0.025, 0.03 + (H - 0.06) * 0.5, H - 0.025]
+        z_cut = [-(W - 0.025), -r, r, W - 0.025]
+        for ri, y in enumerate(rows):
+            for ci, z in enumerate(cols):
+                rect = (y_cut[ri], y_cut[ri + 1], z_cut[ci], z_cut[ci + 1])
+                for k, m in _muzzle(L2 + 0.005, y, z, r - 0.028, rect, BORE_DEPTH).items():
+                    parts[k].append(m)
     meshes, ids = [], []
     for k, lst in parts.items():
         for m in lst:

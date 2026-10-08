@@ -50,17 +50,67 @@ def fwd_decal(direction, height=0.034, px_per_m=900):
     return img, img.width / px_per_m, img.height / px_per_m
 
 
+def _spent_muzzles(s, tx, length, height, half, ID_BULK, ID_BORE, ID_COLLAR, depth):
+    """Дульні отвори порожнього пакета: нагар і пригар на щиті навколо отворів (радіальні патьоки), вигорілий метал на
+    бортику, канал труби, що темнішає з глибиною, з сажею й слідами від ракети."""
+    L2, H, W = length / 2, height, half
+    r = min((H - 0.06) / 4, (2 * W - 0.06) / 6)
+    rh = r - 0.028
+    rows = (0.03 + (H - 0.06) * 0.25, 0.03 + (H - 0.06) * 0.75)
+    P = tx.P
+    dmin = np.full(tx.n, 9.0, np.float32)
+    ang = np.zeros(tx.n, np.float32)
+    for y in rows:
+        for z in (-2 * r, 0.0, 2 * r):
+            dy, dz = P[:, 1] - y, P[:, 2] - z
+            d = np.hypot(dy, dz).astype(np.float32)
+            near = d < dmin
+            dmin[near] = d[near]
+            ang[near] = np.arctan2(dy, dz)[near]
+    bulk, bore, collar = tx.ids == ID_BULK, tx.ids == ID_BORE, tx.ids == ID_COLLAR
+    out = np.maximum(dmin - rh, 0)
+    # ---- щит: радіальні патьоки сажі від газів, кільце пригару, нерівномірне по колу
+    rad = np.stack([np.cos(ang) * 6.0, np.sin(ang) * 6.0, dmin * 2.5], 1)
+    streak = pl.noise3(rad, 41) * 0.65 + pl.noise3(rad * 2.7, 43) * 0.35
+    soot = np.clip(np.exp(-out / 0.075) * (0.35 + 1.1 * streak), 0, 1) * bulk
+    s.blend((0.030, 0.026, 0.022), soot * 0.88, rough=0.88, metal=0.1)
+    heat = pl.smooth(0.0, 0.004, out) * (1 - pl.smooth(0.02, 0.05, out)) * (0.4 + 0.6 * streak) * bulk
+    s.blend((0.20, 0.15, 0.10), heat * 0.55)
+    flake = pl.smooth(0.62, 0.8, pl.fbm(P * 55.0, 3, 47)) * np.exp(-out / 0.04) * bulk      # облущена фарба біля краю
+    s.blend((0.42, 0.40, 0.37), flake * 0.7, rough=0.5, metal=0.6)
+    # ---- бортик: чистий метал, обпалений зсередини
+    inner = np.clip(1 - (dmin - rh) / 0.012, 0, 1)
+    s.blend((0.30, 0.29, 0.27), collar.astype(np.float32) * 0.8, rough=0.45, metal=0.75)
+    s.blend((0.035, 0.03, 0.026), collar * (0.35 + 0.55 * inner) * (0.6 + 0.6 * streak), rough=0.8)
+    s.blend((0.26, 0.20, 0.12), collar * pl.smooth(0.3, 0.9, pl.fbm(P * 90.0, 3, 51)) * 0.4)
+    # ---- канал: від обпаленої міді біля дула до суцільної чорноти
+    dep = np.clip(((L2 + 0.012) - P[:, 0]) / depth, 0, 1)
+    ax = np.stack([P[:, 0] * 5.0, np.cos(ang) * 4.0 + 7.0, np.sin(ang) * 4.0], 1)
+    sstreak = pl.noise3(ax, 53) * 0.6 + pl.noise3(ax * 2.9, 59) * 0.4
+    mouth = 1 - pl.smooth(0.0, 0.16, dep)
+    base = np.asarray((0.030, 0.025, 0.021), np.float32) * (0.5 + 0.9 * sstreak)[:, None]
+    col = base * (1 - dep ** 0.35)[:, None] * 1.0 + np.asarray((0.004, 0.004, 0.004), np.float32) * (dep ** 0.35)[:, None]
+    s.blend((0, 0, 0), bore.astype(np.float32))                                    # скидаємо базу
+    s.color[bore] = col[bore]
+    cop = np.asarray((0.17, 0.11, 0.07), np.float32) * (0.6 + 0.6 * sstreak)[:, None]
+    s.color[bore] = s.color[bore] + cop[bore] * (mouth * bore)[bore][:, None] * 0.7
+    rib = pl.smooth(0.9, 1.0, np.abs(np.sin(P[:, 0] * 90.0))) * bore * (1 - dep)
+    s.blend((0.10, 0.075, 0.05), rib * 0.5)
+    s.rough[bore] = 0.45 + 0.4 * sstreak[bore]
+    s.metal[bore] = 0.55 * (1 - dep[bore])
+
+
 def pod_painter(length, height, half, fresh, lugs):
     """Пакет: рама оливкова з потертостями до металу, труби світлі хакі, на торці щит із отворами або кришки.
     Написи — як на довідковому зображенні пакета (FWD, LIFT HERE, DO NOT TOW …)."""
-    from glb_rig import ID_BULK, ID_CAP, ID_CAP_DK, ID_FRAME, ID_HOLE, ID_TUBE
+    from glb_rig import BORE_DEPTH, ID_BORE, ID_BULK, ID_CAP, ID_CAP_DK, ID_COLLAR, ID_FRAME, ID_HOLE, ID_TUBE
 
     def painter(tx):
         s = Surface(tx.n, OLIVE, 0.62, 0.25)
         s.color = _by_id(tx, {ID_FRAME: OLIVE, ID_TUBE: KHAKI, ID_CAP: KHAKI_LT, ID_CAP_DK: srgb(118, 114, 80),
-                              ID_BULK: GREY_BULK, ID_HOLE: srgb(14, 14, 13)}, OLIVE)
-        rough = {ID_FRAME: 0.60, ID_TUBE: 0.42, ID_CAP: 0.5, ID_CAP_DK: 0.55, ID_BULK: 0.5, ID_HOLE: 0.9}
-        metal = {ID_FRAME: 0.35, ID_TUBE: 0.12, ID_CAP: 0.1, ID_CAP_DK: 0.1, ID_BULK: 0.55, ID_HOLE: 0.2}
+                              ID_BULK: GREY_BULK, ID_HOLE: srgb(14, 14, 13), ID_BORE: srgb(20, 16, 12), ID_COLLAR: srgb(92, 92, 86)}, OLIVE)
+        rough = {ID_FRAME: 0.60, ID_TUBE: 0.42, ID_CAP: 0.5, ID_CAP_DK: 0.55, ID_BULK: 0.5, ID_HOLE: 0.9, ID_BORE: 0.55, ID_COLLAR: 0.48}
+        metal = {ID_FRAME: 0.35, ID_TUBE: 0.12, ID_CAP: 0.1, ID_CAP_DK: 0.1, ID_BULK: 0.55, ID_HOLE: 0.2, ID_BORE: 0.55, ID_COLLAR: 0.7}
         for k in rough:
             s.rough[tx.ids == k] = rough[k]
             s.metal[tx.ids == k] = metal[k]
@@ -70,8 +120,8 @@ def pod_painter(length, height, half, fresh, lugs):
         bulk = tx.ids == ID_BULK
         stain = pl.smooth(0.45, 0.8, pl.fbm(tx.P * 9.0, 4, 31)) * bulk
         s.blend((0.20, 0.19, 0.17), stain * 0.55)
-        hole = tx.ids == ID_HOLE
-        s.blend((0.03, 0.03, 0.03), hole.astype(np.float32))
+        if not fresh:
+            _spent_muzzles(s, tx, length, height, half, ID_BULK, ID_BORE, ID_COLLAR, BORE_DEPTH)
         # Трубі додаємо тонкі кільця й шви, щоб вони не були «пластмасовими».
         tube = (tx.ids == ID_TUBE)
         ring = pl.smooth(0.96, 1.0, np.abs(np.sin(tx.P[:, 0] * 14.0))) * tube
