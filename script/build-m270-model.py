@@ -8,7 +8,8 @@
 довідковими зображеннями, які надав користувач: гусеничне шасі M993 з шістьма здвоєними опорними котками, кабіна з похилим
 лобом і жалюзі, відсік двигуна за кабіною, поворотна платформа й пускова установка з двома пакетами по шість труб. Установку
 показано піднятою (як на зображеннях), дулами вперед і вгору. Рухомі частини — окремі вузли, а кліп анімації «reload»
-схематично показує заряджання: поворот платформи, опускання установки, висування стріл, заміну обох пакетів і підйом.
+схематично показує заряджання за довідковим зображенням: поворот установки торцем до корми, опускання до горизонталі,
+висування напрямних із візками лебідок, заміну обох пакетів (виїхав, опустився на землю, новий піднявся й заїхав) і підйом.
 Це не скан і не копія чужої моделі, сторонніх текстур немає. Для перегляду, а не для впізнавання чи розрахунків. Одиниці — метри, перед машини дивиться в +x,
 «вгору» — +y, права сторона — +z (як у glTF).
 """
@@ -299,8 +300,9 @@ def m270():
     parts["rear_lamps"] = painted(merge([box((X_REAR - 0.02, 0.98, s * 1.05), (0.04, 0.10, 0.16)) for s in (-1, 1)]),
                                   material("Red", (170, 36, 30), metallic=0.0, roughness=0.3))
 
-    # ---------- Рухома частина: платформа, установка, стріли, пакети, троси, гідроциліндри ----------
+    # ---------- Рухома частина: платформа, установка, стійки й висувні напрямні, візки, пакети, троси, гідроциліндри ----------
     mats = dict(olive=olive, olive_dk=olive_dk, olive_lt=olive_lt, black=black, metal=metal,
+                steel_dk=material("SteelDark", (58, 60, 58), metallic=0.6, roughness=0.45),
                 frame=olive, tubes=olive_lt, plate=olive_dk, cap=olive, hole=black,
                 stencil=material("Stencil", (214, 210, 196), metallic=0.0, roughness=0.8),
                 red=material("StencilRed", (176, 40, 34), metallic=0.0, roughness=0.6))
@@ -308,7 +310,7 @@ def m270():
 
 
 # --- рухома частина ------------------------------------------------------------------------------------------------
-# Вузли: turret (поворот навколо вертикалі) → launcher (підйом навколо осі HINGE) → стріли й пакети;
+# Вузли: turret (поворот навколо вертикалі) → launcher (підйом навколо осі HINGE) → напрямні, візки й пакети;
 # гідроциліндри — діти turret, що щокадру дивляться на точку кріплення до установки.
 TURRET_X = -1.65                        # вісь поворотної платформи (x)
 HX, HY = HINGE[0] - TURRET_X, HINGE[1]  # вісь підйому в системі платформи
@@ -318,8 +320,9 @@ POD_UC = (POD_U0 + POD_U1) / 2
 SLIDE = BOX_L + 0.05                    # на скільки пакет виїжджає з установки
 GROUND_Y = 0.0
 DROP = HY + POD_V0 - GROUND_Y           # на скільки пакет опускається до землі
-BOOM_STEP = 1.65                        # висування кожної з двох секцій стріли
-CABLE_TOP = BOX_T + 0.05
+BOOM_STEP = 1.80                        # висування кожної з двох секцій напрямних
+RAIL_V = 1.00                           # низ висувних напрямних під дахом установки
+CABLE_TOP = RAIL_V - 0.01               # троси звисають з візків на напрямних
 LUG_U = 1.31                            # вушка для тросів від центру пакета
 # Гідроциліндри: (назва, основа в системі платформи (x, y), точка кріплення вздовж установки u, довжина циліндра, штока)
 STRUTS = [("a", (-0.25 - TURRET_X, 1.36), 1.25, 1.00, 1.00),
@@ -329,18 +332,19 @@ CLIP_SECONDS = 24.0
 SAMPLES = 241
 TINY = 1e-4                             # «сховано»: масштаб майже нуль
 
-# Етапи заряджання за часткою кліпу t ∈ [0, 1]
-TRAVERSE = (0.00, 0.08)                 # поворот платформи на правий борт
-LOWER = (0.08, 0.17)                    # опускання установки до горизонталі
-BOOM_OUT = (0.17, 0.24)
-CYCLES = {"pod_r": (0.24, 0.52), "pod_l": (0.52, 0.80)}   # спершу правий пакет, потім лівий
-BOOM_IN = (0.80, 0.86)
+# Етапи заряджання за часткою кліпу t ∈ [0, 1] (за довідковим зображенням: установка лежить горизонтально відкритим
+# торцем назад, з її торця висуваються напрямні з візками, пакет висить під ними за кормою й опускається на землю)
+TRAVERSE = (0.00, 0.10)                 # поворот платформи на 180°: торець установки — до корми
+LOWER = (0.10, 0.18)                    # опускання установки до горизонталі
+BOOM_OUT = (0.18, 0.25)
+CYCLES = {"pod_r": (0.25, 0.52), "pod_l": (0.52, 0.79)}   # спершу один пакет, потім другий
+BOOM_IN = (0.79, 0.86)
 RAISE = (0.86, 0.93)
 TRAVERSE_BACK = (0.93, 1.00)
 
 
 def yaw_at(t):
-    return -np.pi / 2 * (ramp(t, TRAVERSE) - ramp(t, TRAVERSE_BACK))
+    return -np.pi * (ramp(t, TRAVERSE) - ramp(t, TRAVERSE_BACK))
 
 
 def elev_at(t):
@@ -375,7 +379,7 @@ def pod_tracks(t, pod):
     length = CABLE_TOP - (POD_V1 + 0.06 + dv)
     cable_t = (POD_UC + du, CABLE_TOP, 0.0)
     cable_s = (1.0, max(length, TINY), 1.0) if shown else (TINY, TINY, TINY)
-    return spent_t, spent_s, new_t, new_s, cable_t, cable_s
+    return spent_t, spent_s, new_t, new_s, cable_t, cable_s, (du, 0.0, 0.0)
 
 
 def strut_pose(t, base, u_top):
@@ -407,35 +411,47 @@ def launcher_rig(mats):
     W2 = BOX_W / 2
     cage = [box_pose(0.0, BOX_L, 0.0, 0.06, -W2, W2), box_pose(0.0, BOX_L, BOX_T - 0.06, BOX_T, -W2, W2),
             box_pose(0.0, BOX_L, 0.0, BOX_T, -W2, -W2 + 0.04), box_pose(0.0, BOX_L, 0.0, BOX_T, W2 - 0.04, W2),
-            box_pose(0.0, 0.06, 0.0, BOX_T, -W2, W2), box_pose(0.06, BOX_L, 0.06, BOX_T - 0.06, -0.03, 0.03)]
+            box_pose(0.0, 0.06, 0.0, BOX_T, -W2, W2), box_pose(0.06, BOX_L, 0.06, RAIL_V - 0.04, -0.03, 0.03)]
     bands = [box_pose(u0, u0 + 0.06, -0.012, BOX_T + 0.012, -W2 - 0.012, W2 + 0.012) for u0 in (0.30, BOX_L - 0.35)]
     bands += [box_pose(0.2, BOX_L - 0.2, -0.05, 0.0, z - 0.07, z + 0.07) for z in (-1.15, -0.40, 0.40, 1.15)]
     bands += [box_pose(BOX_L - 0.04, BOX_L + 0.02, 0.0, BOX_T, -W2, -W2 + 0.08), box_pose(BOX_L - 0.04, BOX_L + 0.02, 0.0, BOX_T, W2 - 0.08, W2)]
     hatches = [box_pose(u - 0.22, u + 0.22, BOX_T, BOX_T + 0.015, z - 0.15, z + 0.15) for u in (1.2, 2.6) for z in (-0.65, 0.65)]
     hatches += [box_pose(1.6, 1.62, 0.55, 0.62, W2, W2 + 0.01), box_pose(1.6, 1.62, 0.55, 0.62, -W2 - 0.01, -W2)]
-    rails, sec1, sec2, tips = [], [], [], []
+    # Дві П-подібні стійки завантажувача на даху біля відкритого торця (по одній над кожним пакетом).
+    posts = []
     for pz in POD_Z:
-        for dz in (-0.48, 0.48):                                                      # стріли завантажувача: основа й дві секції
-            z = pz + dz
-            rails.append(box_pose(BOX_L - 1.80, BOX_L + 0.20, BOX_T, BOX_T + 0.12, z - 0.06, z + 0.06))
-            sec1.append(box_pose(BOX_L - 1.50, BOX_L + 0.30, BOX_T + 0.015, BOX_T + 0.105, z - 0.045, z + 0.045))
-            sec2.append(box_pose(BOX_L - 1.30, BOX_L + 0.42, BOX_T + 0.03, BOX_T + 0.09, z - 0.03, z + 0.03))
-            k = trimesh.creation.cylinder(radius=0.05, height=0.12, sections=14)
-            k.apply_translation([BOX_L + 0.42, BOX_T + 0.06, z])
-            tips.append(k)
-        sec2.append(box_pose(BOX_L + 0.36, BOX_L + 0.44, BOX_T + 0.03, BOX_T + 0.09, pz - 0.53, pz + 0.53))
-    boom_2 = node("boom_2", [(merge(sec2), olive_dk), (merge(tips), metal)])
-    boom_1 = node("boom_1", [(merge(sec1), olive)], children=[boom_2])
+        for dz in (-0.46, 0.46):
+            posts.append(box_pose(BOX_L - 0.34, BOX_L - 0.26, BOX_T, BOX_T + 0.66, pz + dz - 0.04, pz + dz + 0.04))
+            posts.append(cyl_between((BOX_L - 0.30, BOX_T + 0.40, pz + dz), (BOX_L - 0.80, BOX_T + 0.02, pz + dz), 0.025, 8))
+        posts.append(box_pose(BOX_L - 0.35, BOX_L - 0.25, BOX_T + 0.60, BOX_T + 0.68, pz - 0.50, pz + 0.50))
+        posts.append(box_pose(BOX_L - 0.42, BOX_L - 0.18, BOX_T, BOX_T + 0.03, pz - 0.52, pz + 0.52))
+    # Висувні напрямні (дві секції), сховані під дахом: темна зовнішня рама й сріблясті внутрішні штанги з поперечкою.
+    sec1, sec2, cross = [], [], []
+    for pz in POD_Z:
+        for dz in (-0.54, 0.54):
+            sec1.append(box_pose(0.35, BOX_L - 0.06, RAIL_V, RAIL_V + 0.07, pz + dz - 0.035, pz + dz + 0.035))
+        sec1.append(box_pose(BOX_L - 0.14, BOX_L - 0.06, RAIL_V, RAIL_V + 0.07, pz - 0.57, pz + 0.57))
+        for dz in (-0.42, 0.42):
+            sec2.append(box_pose(0.45, BOX_L - 0.10, RAIL_V + 0.005, RAIL_V + 0.065, pz + dz - 0.03, pz + dz + 0.03))
+    cross.append(box_pose(BOX_L - 0.18, BOX_L - 0.10, RAIL_V - 0.01, RAIL_V + 0.07, -1.26, 1.26))
+    boom_2 = node("boom_2", [(merge(sec2), metal), (merge(cross), mats["steel_dk"])])
+    boom_1 = node("boom_1", [(merge(sec1), mats["steel_dk"])], children=[boom_2])
     pods = [pod_node(name, pz, fresh, mats) for pz, pod in zip(POD_Z, ("pod_l", "pod_r"))
             for name, fresh in ((pod, False), (pod + "_new", True))]
-    cables = []
+    hoists = []
     for pz, pod in zip(POD_Z, ("pod_l", "pod_r")):
-        lines = [shifted(cyl_between((0, 0, 0), (0, -1, 0), 0.012, 6), du, 0, pz) for du in (-LUG_U, LUG_U)]
-        hooks = [box((du, -1.0, pz), (0.08, 0.05, 0.10)) for du in (-LUG_U, LUG_U)]
-        cables.append(node(pod + "_cable", [(merge(lines), metal), (merge(hooks), olive_dk)],
+        lines = [shifted(cyl_between((0, 0, 0), (0, -1, 0), 0.012, 6), du, 0, pz + dz) for du in (-LUG_U, LUG_U) for dz in (-0.05, 0.05)]
+        hooks = [box((du, -1.0, pz), (0.08, 0.05, 0.12)) for du in (-LUG_U, LUG_U)]
+        hoists.append(node(pod + "_cable", [(merge(lines), metal), (merge(hooks), olive_dk)],
                            t=(POD_UC, CABLE_TOP, 0.0), s=(TINY, TINY, TINY)))
-    launcher = node("launcher", [(merge(cage), olive), (merge(bands), olive_dk), (merge(hatches), olive_dk), (merge(rails), olive_dk)],
-                    t=(HX, HY, 0.0), r=quat_axis((0, 0, 1), elev_at(0.0)), children=[boom_1] + pods + cables)
+        carts = []                                                                     # візки лебідок на штангах
+        for du in (-LUG_U, LUG_U):
+            u = POD_UC + du
+            carts.append(box_pose(u - 0.16, u + 0.16, RAIL_V - 0.03, RAIL_V + 0.04, pz - 0.40, pz + 0.40))
+            carts.append(box_pose(u - 0.08, u + 0.08, RAIL_V - 0.06, RAIL_V - 0.02, pz - 0.10, pz + 0.10))
+        hoists.append(node(pod + "_trolley", [(merge(carts), mats["steel_dk"])]))
+    launcher = node("launcher", [(merge(cage), olive), (merge(bands), olive_dk), (merge(hatches), olive_dk), (merge(posts), olive)],
+                    t=(HX, HY, 0.0), r=quat_axis((0, 0, 1), elev_at(0.0)), children=[boom_1] + pods + hoists)
 
     struts = []
     for name, base, u_top, lb, lr in STRUTS:
@@ -465,7 +481,8 @@ def reload_tracks():
                 (pod + "_new", "translation", [base + r[2] for r in rows]),
                 (pod + "_new", "scale", [(r[3],) * 3 for r in rows]),
                 (pod + "_cable", "translation", [r[4] for r in rows]),
-                (pod + "_cable", "scale", [r[5] for r in rows])]
+                (pod + "_cable", "scale", [r[5] for r in rows]),
+                (pod + "_trolley", "translation", [r[6] for r in rows])]
     for name, base, u_top, lb, lr in STRUTS:
         poses = [strut_pose(t, base, u_top) for t in ts]
         for side in ("l", "r"):

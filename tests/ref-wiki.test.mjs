@@ -259,7 +259,7 @@ test('the M270 article is a generated ground model with its pods, tracks and lau
   const [clip] = json.animations;
   assert.equal(clip.name, 'reload');
   const animated = new Set(clip.channels.map(c => json.nodes[c.target.node].name + '.' + c.target.path));
-  for (const k of ['turret.rotation', 'launcher.rotation', 'boom_1.translation', 'pod_r.translation', 'pod_r.scale', 'pod_r_new.scale', 'pod_l_new.translation', 'strut_a_l.rotation', 'rod_a_l.translation']) assert.ok(animated.has(k), `${k} animated`);
+  for (const k of ['turret.rotation', 'launcher.rotation', 'boom_1.translation', 'pod_r.translation', 'pod_r.scale', 'pod_r_new.scale', 'pod_l_new.translation', 'pod_r_trolley.translation', 'boom_2.translation', 'strut_a_l.rotation', 'rod_a_l.translation']) assert.ok(animated.has(k), `${k} animated`);
   const times = json.accessors[clip.samplers[0].input];
   assert.equal(times.min[0], 0);
   assert.ok(times.max[0] > 10, 'clip long enough to follow');
