@@ -126,21 +126,21 @@ def lpc_pod(length, height, half, fresh, lugs):
     cols = (-2 * r, 0.0, 2 * r)
     for y in rows:
         for z in cols:
-            tubes.append(_cyl_x(-L2 + 0.06, L2 - 0.01, y, z, r - 0.004, 20))
+            tubes.append(_cyl_x(-L2 + 0.06, L2 - 0.01, y, z, r - 0.004, 32))
     if fresh:                                                                      # кришки: диск, кільце, чотири виступи
         caps, caps_dk = [], []
         for y in rows:
             for z in cols:
-                caps.append(_cyl_x(L2 - 0.01, L2 + 0.025, y, z, r - 0.012, 20))
-                caps_dk.append(_cyl_x(L2 + 0.025, L2 + 0.032, y, z, r * 0.78, 18))
-                caps.append(_cyl_x(L2 + 0.032, L2 + 0.036, y, z, r * 0.70, 18))
+                caps.append(_cyl_x(L2 - 0.01, L2 + 0.025, y, z, r - 0.012, 32))
+                caps_dk.append(_cyl_x(L2 + 0.025, L2 + 0.032, y, z, r * 0.78, 28))
+                caps.append(_cyl_x(L2 + 0.032, L2 + 0.036, y, z, r * 0.70, 28))
                 for k in range(4):
                     q = np.pi / 4 + k * np.pi / 2
                     caps_dk.append(_box((L2 + 0.03, y + 0.82 * r * np.sin(q), z + 0.82 * r * np.cos(q)), (0.02, 0.035, 0.035)))
         end_prims = [(trimesh.util.concatenate(caps), POD_MATS["cap"]), (trimesh.util.concatenate(caps_dk), POD_MATS["cap_dk"])]
     else:                                                                          # щит із шістьма отворами
         plate = [_box((L2 - 0.005, H / 2, 0.0), (0.02, H - 0.05, 2 * W - 0.05))]
-        holes = [_cyl_x(L2 + 0.005, L2 + 0.009, y, z, r - 0.03, 20) for y in rows for z in cols]
+        holes = [_cyl_x(L2 + 0.005, L2 + 0.009, y, z, r - 0.03, 32) for y in rows for z in cols]
         end_prims = [(trimesh.util.concatenate(plate), POD_MATS["bulkhead"]), (trimesh.util.concatenate(holes), POD_MATS["hole"])]
     ends.append(_box((-L2 + 0.035, H / 2, 0.0), (0.03, H - 0.06, 2 * W - 0.06)))      # глухий задній торець
     for s in (-1, 1):                                                              # кілька трафаретів на балках
@@ -229,7 +229,7 @@ class GlbWriter:
         samplers, channels = [], []
         for node_name, path, values in tracks:
             kind = "VEC4" if path == "rotation" else "VEC3"
-            v_acc = self.accessor(np.asarray(values, dtype=np.float32), kind)
+            v_acc = self.accessor(np.asarray(values, dtype=np.float32), kind, minmax=True)
             samplers.append({"input": t_acc, "output": v_acc, "interpolation": "LINEAR"})
             channels.append({"sampler": len(samplers) - 1, "target": {"node": index[node_name], "path": path}})
         self.doc["animations"] = [{"name": name, "samplers": samplers, "channels": channels}]

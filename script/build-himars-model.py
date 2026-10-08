@@ -9,8 +9,10 @@
 довідок: шасі 6×6 родини FMTV з клепаними лонжеронами, броньовану кабіну з похилим лобом, двома вітровими шибами,
 ґратою, круглою кришкою, болтами броні, дзеркалами на кронштейнах і бампером із V-вирізом; ящики, бак і вихлоп за
 кабіною; арку завантажувача; пусковий модуль із клепаними бортами й дверцятами, пакетом із шести труб, що дивиться
-назад, сріблястими штангами й рамою завантажувача зверху; корму з ліхтарями й фаркопом. Кліп анімації «reload» за фото
-заряджання показує, як висувна U-подібна рама виносить порожній пакет за корму, опускає його й затягує новий. Це не скан і не копія чужої
+назад, сріблястими штангами й рамою завантажувача зверху; корму з ліхтарями й фаркопом. Кадр 0 — бойове положення (модуль розвернуто
+дулами вперед і піднято); кліп анімації «reload» за фото заряджання показує, як модуль опускається, повертається на
+180° дулами назад, висувна U-подібна рама виносить порожній пакет за корму, опускає його й затягує новий, а модуль
+повертається в бойове положення. Це не скан і не копія чужої
 моделі, сторонніх текстур немає. Для перегляду, а не для впізнавання чи розрахунків. Одиниці — метри, перед машини
 дивиться в +x, «вгору» — +y, права сторона — +z (як у glTF).
 """
@@ -340,14 +342,15 @@ def himars():
     cradle = [box(((M["x0"] + M["x1"]) / 2, 1.29, 0.0), (M["x1"] - M["x0"] - 0.1, 0.08, 1.90))]
     cradle += [box((x, 1.24, s * 0.80), (0.20, 0.12, 0.18)) for x in (-3.20, -1.60, 0.0) for s in (-1, 1)]
     cradle.append(cyl_between((-1.50, 1.27, 0.0), (-1.50, 1.33, 0.0), 0.95, 40))
-    parts["cradle"] = painted(merge(cradle), olive_dk)
+    turret_parts = {"cradle": painted(merge(cradle), olive_dk)}
+    mod, mod_rivets = {}, []
     walls = []
     for s in (-1, 1):
         plan = [(M["x0"], s * M["inner"]), (M["x0"], s * M["half"]), (-0.28, s * M["half"]), (M["x1"], s * 0.92), (M["x1"], s * M["inner"])]
         walls.append(prism_plan(plan, M["y0"], M["y1"]))
     walls.append(box((M["x1"] - 0.06, 1.70, 0.0), (0.12, 0.74, 1.26)))            # передня стінка
     walls.append(box(((M["x0"] + M["x1"]) / 2, M["y0"] + 0.08, 0.0), (M["x1"] - M["x0"], 0.16, 1.26)))
-    parts["module"] = painted(merge(walls), olive)
+    mod["module"] = painted(merge(walls), olive)
     panels, knobs = [], []
     for s in (-1, 1):
         zf = s * (M["half"] + 0.008)
@@ -357,15 +360,15 @@ def himars():
         panels.append(box((-3.00, 1.98, zf), (0.85, 0.56, 0.016)))
         for x in np.arange(M["x0"] + 0.06, -0.30, 0.10):                            # ряди заклепок
             for y in (M["y0"] + 0.04, 1.63, M["y1"] - 0.04):
-                rivets.append(rivet(x, y, s * (M["half"] + 0.002), (0, 0, s)))
+                mod_rivets.append(rivet(x, y, s * (M["half"] + 0.002), (0, 0, s)))
         for xc in (-3.45, -2.50, -1.52, -0.70):
             for y in np.arange(1.40, 2.30, 0.09):
-                rivets.append(rivet(xc, y, s * (M["half"] + 0.002), (0, 0, s)))
+                mod_rivets.append(rivet(xc, y, s * (M["half"] + 0.002), (0, 0, s)))
         for x in np.arange(M["x0"] + 0.1, -0.3, 0.16):                              # заклепки на кришці борту
-            rivets.append(rivet(x, M["y1"], s * (M["half"] - 0.06), (0, 1, 0)))
-            rivets.append(rivet(x, M["y1"], s * (M["inner"] + 0.06), (0, 1, 0)))
-    parts["module_doors"] = painted(merge(panels), olive)
-    parts["module_handles"] = painted(merge(knobs), black)
+            mod_rivets.append(rivet(x, M["y1"], s * (M["half"] - 0.06), (0, 1, 0)))
+            mod_rivets.append(rivet(x, M["y1"], s * (M["inner"] + 0.06), (0, 1, 0)))
+    mod["module_doors"] = painted(merge(panels), olive)
+    mod["module_handles"] = painted(merge(knobs), black)
     # Задній торець: «вуха» з кронштейнами, нижня поперечина, кришки-заглушки пакета.
     rear = []
     for s in (-1, 1):
@@ -373,15 +376,17 @@ def himars():
         rear.append(box((M["x0"] - 0.08, 1.62, s * 1.00), (0.18, 0.40, 0.30)))
         rear.append(box((M["x0"] - 0.05, 2.12, s * 0.66), (0.12, 0.14, 0.14)))
     rear.append(box((M["x0"] + 0.04, 1.42, 0.0), (0.12, 0.16, 1.26)))
-    parts["module_rear"] = painted(merge(rear), olive)
+    mod["module_rear"] = painted(merge(rear), olive)
     # Зверху: нерухома основа рами завантажувача (штанги, поперечки, барабан лебідки). Висувна рама, візок, троси й
     # пакети — рухомі вузли, див. loader_rig().
     top = [box((-1.50, 2.40, s * 0.36), (2.80, 0.07, 0.07)) for s in (-1, 1)]
     top += [box((x, 2.40, 0.0), (0.07, 0.07, 0.72)) for x in (-2.85, -2.2, -1.5, -0.8, -0.15)]
     top.append(cyl_between((-0.78, 2.47, -0.12), (-0.78, 2.47, 0.12), 0.07, 16))
-    parts["loader_frame"] = painted(merge(top), olive_dk)
-    parts["rails"] = painted(merge([cyl_x(-3.30, 0.95, 2.28, s * 0.54, 0.040, 16) for s in (-1, 1)]
-                                   + [cyl_x(0.20, 0.95, 2.14, s * 0.28, 0.055, 16) for s in (-1, 1)]), steel)
+    mod["loader_frame"] = painted(merge(top), olive_dk)
+    mod["module_rails"] = painted(merge([cyl_x(-3.30, 0.20, 2.28, s * 0.54, 0.040, 16) for s in (-1, 1)]), steel)
+    mod["module_rivets"] = painted(merge(mod_rivets), olive_dk)
+    # Опори-ложементи на арці, на які модуль лягає в похідному положенні.
+    parts["rails"] = painted(merge([cyl_x(0.40, 0.95, 2.14, s * 0.28, 0.055, 16) for s in (-1, 1)]), steel)
 
     # ---------- Корма: балка, ліхтарі, фаркоп, кронштейни ----------
     stern = [box((-3.50, 1.06, 0.0), (0.16, 0.20, 2.10)), box((-3.38, 0.70, 0.0), (0.10, 0.08, 1.80))]
@@ -401,21 +406,43 @@ def himars():
 
     parts["rivets"] = painted(merge(rivets), olive_dk)
     mats = dict(olive=olive, olive_dk=olive_dk, black=black, steel=steel)
-    return parts, loader_rig(mats)
+    return parts, launcher_rig(turret_parts, mod, mats)
 
 
-# --- заряджання (за фото: модуль у похідному положенні, U-подібна рама висувається назад, пакет висить на візку) ---
+# --- рухома частина ---------------------------------------------------------------------------------------------
+# Вузли: turret (поворот навколо вертикалі) → module (підйом навколо осі HINGE) → рама завантажувача, візок, пакети;
+# гідроциліндри підйому — діти turret. Кадр 0 — бойове положення: модуль розвернуто на 180° (дулами вперед) і піднято.
+# Заряджання за фото: модуль опускається, повертається на 180° назад (у похідне положення, дулами до корми), U-подібна
+# рама виносить пакет за корму, міняє його, і модуль повертається в бойове положення.
+TURRET = np.array([-1.50, 0.0, 0.0])     # вісь поворотної платформи
+HINGE = np.array([0.12, 1.36, 0.0])      # вісь підйому модуля (передній нижній край у похідному положенні)
+HM = HINGE - TURRET                      # вісь підйому в системі платформи
+ELEV = -np.radians(45)                   # бойовий кут: задній (дульний) торець модуля піднято
 POD_X0, POD_X1, POD_Y0, POD_Y1, POD_HALF = -3.28, -0.05, 1.49, 2.19, 0.50
 POD_XC = (POD_X0 + POD_X1) / 2
 POD_LUGS = (-0.40, 0.40)
 SLIDE = 3.80                             # на скільки рама виносить пакет назад (щоб він минув ліхтарі й фаркоп)
 BOOM_Y = 2.52
 SPREADER_Y = POD_Y1 + 0.10               # низ траверси, що чіпляє вушка пакета
-CLIP_SECONDS = 20.0
-SAMPLES = 201
+# Гідроциліндри: (назва, основа у світових координатах похідного положення (x, y), відстань кріплення від осі підйому,
+# довжина циліндра, штока)
+STRUTS = [("a", (-2.60, 1.30), 1.20, 1.10, 1.00)]
+STRUT_Z = 0.45
+CLIP_SECONDS = 28.0
+SAMPLES = 281
 TINY = 1e-4
-OUT, DOWN, SHRINK, GROW, UP, IN = (0.02, 0.22), (0.22, 0.36), (0.36, 0.44), (0.44, 0.52), (0.52, 0.68), (0.68, 0.90)
-AFT = quat_axis((0, 1, 0), np.pi)        # пакет у HIMARS дивиться дулами назад
+LOWER, TURN = (0.00, 0.07), (0.07, 0.16)
+OUT, DOWN, SHRINK, GROW, UP, IN = (0.18, 0.31), (0.31, 0.41), (0.41, 0.47), (0.47, 0.53), (0.53, 0.64), (0.64, 0.78)
+TURN_BACK, RAISE = (0.80, 0.90), (0.91, 1.00)
+AFT = quat_axis((0, 1, 0), np.pi)        # пакет у модулі дивиться дулами до відкритого торця
+
+
+def yaw_at(t):
+    return np.pi * (1 - ramp(t, TURN) + ramp(t, TURN_BACK))
+
+
+def elev_at(t):
+    return ELEV * (1 - ramp(t, LOWER) + ramp(t, RAISE))
 
 
 def boom_at(t):
@@ -426,8 +453,31 @@ def drop_at(t):
     return -POD_Y0 * (ramp(t, DOWN) - ramp(t, UP))
 
 
-def loader_rig(mats):
+def strut_pose(t, base_tl, dist):
+    """Поворот циліндра (навколо z, щоб його вісь +y дивилась на точку кріплення) і відстань до неї; усе в системі платформи."""
+    ph = elev_at(t)
+    top = np.array([HM[0] - dist * np.cos(ph), HM[1] - dist * np.sin(ph)])
+    d = top - np.array(base_tl)
+    return np.arctan2(-d[0], d[1]), float(np.hypot(*d))
+
+
+def local(mesh, origin):
+    mesh.apply_translation(-np.asarray(origin, dtype=float))
+    return mesh
+
+
+def launcher_rig(turret_parts, mod, mats):
     olive, olive_dk, steel, black = mats["olive"], mats["olive_dk"], mats["steel"], mats["black"]
+    for name, m in mod.items():
+        if name in FLAT:
+            m.unmerge_vertices()
+    # Платформа: люлька, проушини осі підйому, опори гідроциліндрів.
+    cr = [turret_parts["cradle"]]
+    lugs = [box((HINGE[0], HINGE[1] - 0.06, s * 0.70), (0.26, 0.20, 0.10)) for s in (-1, 1)]
+    lugs += [box((base[0], base[1] + 0.02, s * STRUT_Z), (0.26, 0.10, 0.26)) for _, base, *_ in STRUTS for s in (-1, 1)]
+    pin = cyl_between((HINGE[0], HINGE[1], -0.80), (HINGE[0], HINGE[1], 0.80), 0.06, 16)
+    turret_prims = [(local(m, TURRET), m.visual.material) for m in cr] + [(local(merge(lugs), TURRET), olive_dk), (local(pin, TURRET), steel)]
+
     # Внутрішня секція рами: дві балки з поперечками.
     b1 = [box((-1.85, BOOM_Y - 0.02, s * 0.44), (3.10, 0.08, 0.08)) for s in (-1, 1)]
     b1 += [box((x, BOOM_Y - 0.02, 0.0), (0.08, 0.06, 0.88)) for x in (-3.36, -0.34)]
@@ -444,31 +494,58 @@ def loader_rig(mats):
     # Троси: чотири нитки від блока вниз; вузол масштабується по висоті.
     lines = [cyl_between((POD_XC + dx, 0.0, dz), (POD_XC + dx, -1.0, dz), 0.010, 6) for dx in (-0.08, 0.08) for dz in (-0.05, 0.05)]
     cable_top = BOOM_Y - 0.15
-    cables = node("hoist_cables", [(merge(lines), steel)], t=(0.0, cable_top, 0.0),
+    cables = node("hoist_cables", [(local(merge(lines), (HINGE[0], 0, 0)), steel)], t=(0.0, cable_top - HINGE[1], 0.0),
                   s=(1.0, cable_top - (SPREADER_Y + 0.06), 1.0))
     # Траверса: балка вздовж пакета з гаками на вушках.
     sp = [box((POD_XC, 0.04, 0.0), (0.95, 0.07, 0.10)), box((POD_XC, 0.10, 0.0), (0.16, 0.06, 0.16))]
     sp += [box((POD_XC + lx, -0.01, 0.0), (0.05, 0.10, 0.08)) for lx in POD_LUGS]
-    spreader = node("spreader", [(merge(sp), black)], t=(0.0, SPREADER_Y, 0.0))
+    spreader = node("spreader", [(local(merge(sp), (HINGE[0], 0, 0)), black)], t=(0.0, SPREADER_Y - HINGE[1], 0.0))
     pods = []
     for name, fresh in (("pod", False), ("pod_new", True)):
         prims = lpc_pod(POD_X1 - POD_X0, POD_Y1 - POD_Y0, POD_HALF, fresh, POD_LUGS)
-        pods.append(node(name, prims, t=(POD_XC, POD_Y0, 0.0), r=AFT, s=(TINY,) * 3 if fresh else (1.0, 1.0, 1.0)))
-    boom_2 = node("boom_2", [(merge(b2), olive_dk), (merge(trolley), olive)], children=[cables, spreader] + pods)
-    return node("boom_1", [(merge(b1), olive)], children=[boom_2])
+        pods.append(node(name, prims, t=np.array([POD_XC, POD_Y0, 0.0]) - HINGE, r=AFT, s=(TINY,) * 3 if fresh else (1.0, 1.0, 1.0)))
+    boom_2 = node("boom_2", [(local(merge(b2), HINGE), olive_dk), (local(merge(trolley), HINGE), olive)], children=[cables, spreader] + pods)
+    boom_1 = node("boom_1", [(local(merge(b1), HINGE), olive)], children=[boom_2])
+
+    # Модуль: корпус, дверцята, ручки, задній торець, штанги, заклепки; нерухома основа рами — окремий вузол.
+    frame = mod.pop("loader_frame")
+    module_prims = [(local(m, HINGE), m.visual.material) for m in mod.values()]
+    module = node("module", module_prims, t=HM, r=quat_axis((0, 0, 1), elev_at(0.0)),
+                  children=[node("loader_frame", [(local(frame, HINGE), frame.visual.material)]), boom_1])
+
+    struts = []
+    for name, base_w, dist, lb, lr in STRUTS:
+        base = (base_w[0] - TURRET[0], base_w[1])
+        ang, length = strut_pose(0.0, base, dist)
+        for side, z in (("l", -STRUT_Z), ("r", STRUT_Z)):
+            barrel = [cyl_between((0, 0, 0), (0, lb, 0), 0.085, 16), cyl_between((0, 0, -0.10), (0, 0, 0.10), 0.06, 12)]
+            rod = [cyl_between((0, 0, 0), (0, lr, 0), 0.05, 14), cyl_between((0, lr, -0.08), (0, lr, 0.08), 0.05, 12)]
+            rod_node = node(f"rod_{name}_{side}", [(merge(rod), steel)], t=(0.0, length - lr, 0.0))
+            struts.append(node(f"strut_{name}_{side}", [(merge(barrel), olive_dk)], t=(base[0], base[1], z),
+                               r=quat_axis((0, 0, 1), ang), children=[rod_node]))
+    return node("turret", turret_prims, t=TURRET, r=quat_axis((0, 1, 0), yaw_at(0.0)), children=[module] + struts)
 
 
 def reload_tracks():
     ts = np.linspace(0.0, 1.0, SAMPLES)
     cable_top = BOOM_Y - 0.15
-    out = [("boom_1", "translation", [(boom_at(t), 0.0, 0.0) for t in ts]),
+    pod0 = np.array([POD_XC, POD_Y0, 0.0]) - HINGE
+    out = [("turret", "rotation", [quat_axis((0, 1, 0), yaw_at(t)) for t in ts]),
+           ("module", "rotation", [quat_axis((0, 0, 1), elev_at(t)) for t in ts]),
+           ("boom_1", "translation", [(boom_at(t), 0.0, 0.0) for t in ts]),
            ("boom_2", "translation", [(boom_at(t), 0.0, 0.0) for t in ts]),
-           ("spreader", "translation", [(0.0, SPREADER_Y + drop_at(t), 0.0) for t in ts]),
+           ("spreader", "translation", [(0.0, SPREADER_Y - HINGE[1] + drop_at(t), 0.0) for t in ts]),
            ("hoist_cables", "scale", [(1.0, cable_top - (SPREADER_Y + 0.06 + drop_at(t)), 1.0) for t in ts]),
-           ("pod", "translation", [(POD_XC, POD_Y0 + drop_at(t), 0.0) for t in ts]),
+           ("pod", "translation", [pod0 + (0.0, drop_at(t), 0.0) for t in ts]),
            ("pod", "scale", [(max(TINY, 1 - ramp(t, SHRINK)),) * 3 for t in ts]),
-           ("pod_new", "translation", [(POD_XC, POD_Y0 + (drop_at(t) if t >= SHRINK[0] else 0.0), 0.0) for t in ts]),
+           ("pod_new", "translation", [pod0 + (0.0, drop_at(t) if t >= SHRINK[0] else 0.0, 0.0) for t in ts]),
            ("pod_new", "scale", [(max(TINY, ramp(t, GROW)),) * 3 for t in ts])]
+    for name, base_w, dist, lb, lr in STRUTS:
+        base = (base_w[0] - TURRET[0], base_w[1])
+        poses = [strut_pose(t, base, dist) for t in ts]
+        for side in ("l", "r"):
+            out += [(f"strut_{name}_{side}", "rotation", [quat_axis((0, 0, 1), a) for a, _ in poses]),
+                    (f"rod_{name}_{side}", "translation", [(0.0, length - lr, 0.0) for _, length in poses])]
     return ts * CLIP_SECONDS, out
 
 
