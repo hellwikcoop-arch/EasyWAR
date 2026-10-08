@@ -48,7 +48,8 @@ export function mount(host, options = {}) {
   const tools = h('div', { class: 'rw-tools' });
   const stageBox = h('div', { class: 'rw-stagebox' }, stageEl, tools);
 
-  const slider = (id, label, onInput, texts) => {
+  // dur — тривалість кнопкового переходу (мс); linear — рівномірно (для довгих покрокових анімацій).
+  const slider = (id, label, onInput, texts, { dur = 1400, linear = false } = {}) => {
     const out = h('span', { class: 'rw-val', text: '100 %' });
     const input = h('input', { type: 'range', id, min: '0', max: '1', step: '0.01', value: '1', 'aria-label': label });
     const set = v => { input.value = String(v); out.textContent = Math.round(v * 100) + ' %'; };
@@ -57,29 +58,34 @@ export function mount(host, options = {}) {
       cancelAnimationFrame(input._raf);
       const from = +input.value;
       if (!motion() || from === to) { set(to); onInput(to); return; }
-      const t0 = performance.now(), dur = 1400;
+      const t0 = performance.now(), span = input._dur || dur;
+      const time = linear ? span * Math.abs(to - from) : span;
       const step = now => {
-        const k = Math.min((now - t0) / dur, 1), e = k * k * (3 - 2 * k), v = from + (to - from) * e;
+        const k = Math.min((now - t0) / time, 1), e = linear ? k : k * k * (3 - 2 * k), v = from + (to - from) * e;
         set(v); onInput(v);
         if (k < 1) input._raf = requestAnimationFrame(step);
       };
       input._raf = requestAnimationFrame(step);
     };
     const name = h('label', { for: id, text: label });
-    const row = h('div', { class: 'rw-slider' },
-      name, input, out,
-      h('button', { type: 'button', class: 'btn quiet', text: texts[0], onclick: () => go(0) }),
-      h('button', { type: 'button', class: 'btn', text: texts[1], onclick: () => go(1) }));
-    return { row, set, label: name };
+    const b0 = h('button', { type: 'button', class: 'btn quiet', text: texts[0], onclick: () => go(0) });
+    const b1 = h('button', { type: 'button', class: 'btn', text: texts[1], onclick: () => go(1) });
+    const row = h('div', { class: 'rw-slider' }, name, input, out, b0, b1);
+    const stop = () => cancelAnimationFrame(input._raf);
+    const setDur = ms => { input._dur = ms; };
+    return { row, set, label: name, buttons: [b0, b1], stop, setDur, input };
   };
   const wingsCtl = slider('rw-wings', 'Крила', v => viewer && viewer.setOpen(v), ['Скласти', 'Розкрити']);
   const apartCtl = slider('rw-apart', 'Блоки', v => viewer && viewer.setApart(v), ['Зібрати', 'Розкласти']);
+  // Покрокова анімація з файлу моделі (наприклад, заряджання M270): повзунок прокручує кліп, кнопки програють його.
+  const actionCtl = slider('rw-action', 'Анімація', v => viewer && viewer.setAction(v), ['На початок', 'Програти'], { linear: true });
+  actionCtl.input.step = '0.001';
   const viewSeg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Ракурс' });
   for (const [v, label] of VIEW_BUTTONS) viewSeg.append(h('button', { type: 'button', 'aria-pressed': 'false', 'data-view': v, text: label, onclick: () => { if (!viewer) return; viewer.setView(v); markView(v); } }));
   const markView = v => viewSeg.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.view === v)));
   const autoBtn = h('button', { type: 'button', class: 'chip', 'aria-pressed': 'false', text: 'Обертати', onclick: () => setAuto(!(viewer && viewer.auto)) });
   const setAuto = on => { if (viewer) viewer.auto = on; autoBtn.classList.toggle('on', on); autoBtn.setAttribute('aria-pressed', String(on)); };
-  tools.append(h('div', { class: 'rw-toolrow' }, viewSeg, autoBtn), wingsCtl.row, apartCtl.row);
+  tools.append(h('div', { class: 'rw-toolrow' }, viewSeg, autoBtn), wingsCtl.row, apartCtl.row, actionCtl.row);
 
   async function ensureViewer() {
     if (viewer || viewerFailed) return viewer;
@@ -102,10 +108,18 @@ export function mount(host, options = {}) {
       const caps = await v.show(model, { onProgress: p => { if (mine === token) status.textContent = 'Завантаження моделі… ' + Math.round(p * 100) + ' %'; } });
       if (mine !== token || !caps) return;
       status.hidden = true;
-      wingsCtl.row.hidden = !caps.winged; apartCtl.row.hidden = !caps.modular;
+      const action = caps.action && model.action;
+      wingsCtl.row.hidden = !caps.winged; apartCtl.row.hidden = !caps.modular; actionCtl.row.hidden = !action;
       wingsCtl.label.textContent = model.wingsLabel || 'Крила';
-      wingsCtl.set(1); apartCtl.set(0);
-      if (caps.modular) hint.textContent = 'Потягніть, щоб повернути. Повзунок «Блоки» розкладає бомбу.';
+      wingsCtl.set(1); apartCtl.set(0); actionCtl.stop(); actionCtl.set(0);
+      if (action) {
+        actionCtl.label.textContent = action.label;
+        actionCtl.input.setAttribute('aria-label', action.label);
+        actionCtl.buttons.forEach((b, i) => { b.textContent = action.ends[i]; });
+        actionCtl.setDur((action.seconds || 12) * 1000);
+      }
+      if (action) hint.textContent = action.hint;
+      else if (caps.modular) hint.textContent = 'Потягніть, щоб повернути. Повзунок «Блоки» розкладає бомбу.';
       else hint.textContent = 'Потягніть, щоб повернути. Коліщатко наближає.';
       markView('three-quarter');
       setAuto(motion());

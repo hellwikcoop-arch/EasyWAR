@@ -7,8 +7,9 @@
 Модель побудовано за відкритими габаритами (довжина ≈ 7 м, ширина ≈ 3 м, висота в похідному положенні ≈ 2,6 м) і за
 довідковими зображеннями, які надав користувач: гусеничне шасі M993 з шістьма здвоєними опорними котками, кабіна з похилим
 лобом і жалюзі, відсік двигуна за кабіною, поворотна платформа й пускова установка з двома пакетами по шість труб. Установку
-показано піднятою над кабіною (як на зображеннях), дулом уперед і вгору. Це не скан і не копія чужої моделі, сторонніх
-текстур немає. Для перегляду, а не для впізнавання чи розрахунків. Одиниці — метри, перед машини дивиться в +x,
+показано піднятою (як на зображеннях), дулами вперед і вгору. Рухомі частини — окремі вузли, а кліп анімації «reload»
+схематично показує заряджання: поворот платформи, опускання установки, висування стріл, заміну обох пакетів і підйом.
+Це не скан і не копія чужої моделі, сторонніх текстур немає. Для перегляду, а не для впізнавання чи розрахунків. Одиниці — метри, перед машини дивиться в +x,
 «вгору» — +y, права сторона — +z (як у glTF).
 """
 import json
@@ -108,18 +109,6 @@ def box_pose(u0, u1, v0, v1, z0, z1):
     m = bevelled([u1 - u0, v1 - v0, z1 - z0])
     m.apply_translation([(u0 + u1) / 2, (v0 + v1) / 2, (z0 + z1) / 2])
     return m
-
-
-def to_world(m):
-    """Системи координат установки -> світові: поворот на LAUNCH_ANGLE навколо осі z і зсув до осі підйому."""
-    m.apply_transform(trimesh.transformations.rotation_matrix(LAUNCH_ANGLE, [0, 0, 1]))
-    m.apply_translation([HINGE[0], HINGE[1], 0.0])
-    return m
-
-
-def pose_point(u, v, z=0.0):
-    c, s = np.cos(LAUNCH_ANGLE), np.sin(LAUNCH_ANGLE)
-    return np.array([HINGE[0] + u * c - v * s, HINGE[1] + u * s + v * c, z])
 
 
 def track_loop():
@@ -306,97 +295,337 @@ def m270():
     parts["shovel_blade"] = painted(blade, black)
     parts["box_doors"] = painted(merge([box((0.62, 1.70, -1.395), (0.85, 0.80, 0.02)), box((0.20, 1.70, -1.41), (0.05, 0.10, 0.03))]), olive_dk)
 
-    # ---------- Поворотна платформа: кругла основа й рамна люлька ----------
-    ring = trimesh.creation.cylinder(radius=1.25, height=0.10, sections=48)
-    ring.apply_transform(trimesh.transformations.rotation_matrix(np.pi / 2, [1, 0, 0]))
-    ring.apply_translation([-1.65, DECK_Y1 + 0.05, 0])
-    parts["turntable"] = painted(ring, olive_dk)
-    cradle = [box((-1.75, 1.40, s * 1.30), (3.20, 0.20, 0.12)) for s in (-1, 1)]
-    cradle += [box((x, 1.40, 0.0), (0.12, 0.20, 2.60)) for x in (-3.30, -2.20, -1.20, -0.20)]
-    cradle += [box((HINGE[0], HINGE[1] - 0.12, s * 1.15), (0.36, 0.34, 0.26)) for s in (-1, 1)]
-    cradle += [box((x, 1.47, s * 0.95), (0.22, 0.10, 0.30)) for x in (-0.70, -2.20) for s in (-1, 1)]  # опори гідроциліндрів
-    parts["platform"] = painted(merge(cradle), olive)
-
-    # ---------- Пускова установка: корпус, бандажі, люки, торець із двома пакетами ----------
-    parts["launcher"] = painted(to_world(box_pose(0.0, BOX_L, 0.0, BOX_T, -BOX_W / 2, BOX_W / 2)), olive)
-    bands = [to_world(box_pose(u0, u0 + 0.06, -0.012, BOX_T + 0.012, -BOX_W / 2 - 0.012, BOX_W / 2 + 0.012)) for u0 in (0.30, BOX_L - 0.35)]
-    bands += [to_world(box_pose(0.2, BOX_L - 0.2, -0.05, 0.0, z - 0.07, z + 0.07)) for z in (-1.15, -0.40, 0.40, 1.15)]   # поздовжні балки знизу
-    parts["launcher_bands"] = painted(merge(bands), olive_dk)
-    hatches = [to_world(box_pose(u - 0.22, u + 0.22, BOX_T, BOX_T + 0.015, z - 0.15, z + 0.15)) for u in (1.2, 2.6) for z in (-0.65, 0.65)]
-    hatches += [to_world(box_pose(1.6, 1.62, 0.55, 0.62, BOX_W / 2, BOX_W / 2 + 0.01)), to_world(box_pose(1.6, 1.62, 0.55, 0.62, -BOX_W / 2 - 0.01, -BOX_W / 2))]
-    parts["launcher_hatches"] = painted(merge(hatches), olive_dk)
-    face_u = BOX_L
-    frames, tubes, caps, booms, knuckles = [], [], [], [], []
-    for pz in (-0.68, 0.68):
-        frames.append(to_world(box_pose(face_u, face_u + 0.03, 0.10, 0.86, pz - 0.54, pz + 0.54)))
-        for dz in (-0.33, 0.0, 0.33):
-            for v in (0.30, 0.64):
-                t = trimesh.creation.cylinder(radius=0.150, height=0.10, sections=28)
-                t.apply_transform(trimesh.geometry.align_vectors([0, 0, 1], [1, 0, 0]))
-                t.apply_translation([face_u + 0.04, v, pz + dz])
-                tubes.append(to_world(t))
-                c = trimesh.creation.cylinder(radius=0.125, height=0.03, sections=24)
-                c.apply_transform(trimesh.geometry.align_vectors([0, 0, 1], [1, 0, 0]))
-                c.apply_translation([face_u + 0.10, v, pz + dz])
-                caps.append(to_world(c))
-        for dz in (-0.48, 0.48):                                                      # стріли завантажувача
-            booms.append(to_world(box_pose(face_u - 0.50, face_u + 0.62, BOX_T - 0.10, BOX_T + 0.02, pz + dz - 0.05, pz + dz + 0.05)))
-            k = trimesh.creation.cylinder(radius=0.05, height=0.12, sections=14)
-            k.apply_translation([face_u + 0.62, BOX_T - 0.04, pz + dz])
-            knuckles.append(to_world(k))
-        booms.append(to_world(box_pose(face_u + 0.56, face_u + 0.64, BOX_T - 0.10, BOX_T - 0.02, pz - 0.53, pz + 0.53)))
-        booms.append(to_world(box_pose(face_u - 0.05, face_u + 0.02, BOX_T - 0.12, BOX_T + 0.06, pz - 0.55, pz + 0.55)))
-    face = to_world(box_pose(face_u - 0.02, face_u + 0.01, 0.02, BOX_T - 0.02, -BOX_W / 2 + 0.03, BOX_W / 2 - 0.03))
-    parts["muzzle_face"] = painted(face, olive_dk)
-    parts["pod_frames"] = painted(merge(frames), olive_lt)
-    parts["tube_mouths"] = painted(merge(tubes), olive_lt)
-    parts["tube_caps"] = painted(merge(caps), olive)
-    parts["handles"] = painted(merge(booms), olive_dk)
-    parts["boom_knuckles"] = painted(merge(knuckles), metal)
-
-    # ---------- Гідроциліндри підйому (Х-подібно, як на довідках) ----------
-    struts = []
-    for z in (-0.95, 0.95):
-        for base, u_top in (((-0.70, 1.48), 1.55), ((-2.20, 1.48), 2.55)):
-            top = pose_point(u_top, 0.0, z)
-            b3 = np.array([base[0], base[1], z])
-            struts.append(cyl_between(b3, top, 0.065))
-            struts.append(cyl_between(b3, b3 + (top - b3) * 0.55, 0.09))
-            struts.append(cyl_between(b3 - (0, 0, 0.10), b3 + (0, 0, 0.10), 0.06, 12))                  # палець опори
-    struts.append(cyl_between((HINGE[0], HINGE[1], -1.32), (HINGE[0], HINGE[1], 1.32), 0.07, 16))      # вісь підйому
-    parts["struts"] = painted(merge(struts), metal)
-
     # ---------- Корма: ліхтарі ----------
     parts["rear_lamps"] = painted(merge([box((X_REAR - 0.02, 0.98, s * 1.05), (0.04, 0.10, 0.16)) for s in (-1, 1)]),
                                   material("Red", (170, 36, 30), metallic=0.0, roughness=0.3))
-    return parts
+
+    # ---------- Рухома частина: платформа, установка, стріли, пакети, троси, гідроциліндри ----------
+    mats = dict(olive=olive, olive_dk=olive_dk, olive_lt=olive_lt, black=black, metal=metal)
+    return parts, launcher_rig(mats)
 
 
-def with_extras(glb: bytes, extras: dict) -> bytes:
-    json_len, _ = struct.unpack("<I4s", glb[12:20])
-    doc = json.loads(glb[20:20 + json_len])
-    doc["asset"]["extras"] = extras
-    raw = json.dumps(doc, separators=(",", ":")).encode()
-    raw += b" " * (-len(raw) % 4)
-    rest = glb[20 + json_len:]
-    total = 12 + 8 + len(raw) + len(rest)
-    return glb[:8] + struct.pack("<I", total) + struct.pack("<I4s", len(raw), b"JSON") + raw + rest
+# --- рухома частина ------------------------------------------------------------------------------------------------
+# Вузли: turret (поворот навколо вертикалі) → launcher (підйом навколо осі HINGE) → стріли й пакети;
+# гідроциліндри — діти turret, що щокадру дивляться на точку кріплення до установки.
+TURRET_X = -1.65                        # вісь поворотної платформи (x)
+HX, HY = HINGE[0] - TURRET_X, HINGE[1]  # вісь підйому в системі платформи
+POD_Z = (-0.68, 0.68)                   # центри двох пакетів поперек установки
+POD_U0, POD_U1, POD_V0, POD_V1, POD_HALF = 0.10, BOX_L + 0.02, 0.10, 0.92, 0.52
+POD_UC = (POD_U0 + POD_U1) / 2
+SLIDE = BOX_L + 0.05                    # на скільки пакет виїжджає з установки
+GROUND_Y = 0.0
+DROP = HY + POD_V0 - GROUND_Y           # на скільки пакет опускається до землі
+BOOM_STEP = 1.65                        # висування кожної з двох секцій стріли
+CABLE_TOP = BOX_T + 0.05
+LUG_U = 1.31                            # вушка для тросів від центру пакета
+# Гідроциліндри: (назва, основа в системі платформи (x, y), точка кріплення вздовж установки u, довжина циліндра, штока)
+STRUTS = [("a", (-0.25 - TURRET_X, 1.36), 1.25, 1.00, 1.00),
+          ("b", (-2.45 - TURRET_X, 1.36), 2.65, 1.50, 1.40)]
+STRUT_Z = 0.95
+CLIP_SECONDS = 24.0
+SAMPLES = 241
+TINY = 1e-4                             # «сховано»: масштаб майже нуль
+
+# Етапи заряджання за часткою кліпу t ∈ [0, 1]
+TRAVERSE = (0.00, 0.08)                 # поворот платформи на правий борт
+LOWER = (0.08, 0.17)                    # опускання установки до горизонталі
+BOOM_OUT = (0.17, 0.24)
+CYCLES = {"pod_r": (0.24, 0.52), "pod_l": (0.52, 0.80)}   # спершу правий пакет, потім лівий
+BOOM_IN = (0.80, 0.86)
+RAISE = (0.86, 0.93)
+TRAVERSE_BACK = (0.93, 1.00)
+
+
+def ramp(t, span):
+    a, b = span
+    k = np.clip((t - a) / (b - a), 0.0, 1.0)
+    return k * k * (3 - 2 * k)
+
+
+def quat_axis(axis, angle):
+    s = np.sin(angle / 2)
+    return np.array([axis[0] * s, axis[1] * s, axis[2] * s, np.cos(angle / 2)])
+
+
+def yaw_at(t):
+    return -np.pi / 2 * (ramp(t, TRAVERSE) - ramp(t, TRAVERSE_BACK))
+
+
+def elev_at(t):
+    return LAUNCH_ANGLE * (1 - ramp(t, LOWER) + ramp(t, RAISE))
+
+
+def boom_at(t):
+    return BOOM_STEP * (ramp(t, BOOM_OUT) - ramp(t, BOOM_IN))
+
+
+def cycle_at(t, pod):
+    a, b = CYCLES[pod]
+    return float(np.clip((t - a) / (b - a), 0.0, 1.0))
+
+
+def hoist(c):
+    """Зсув пакета вздовж установки й униз протягом циклу c ∈ [0, 1]: виїхав, опустився, (заміна), піднявся, заїхав."""
+    out = ramp(c, (0.00, 0.20)) - ramp(c, (0.76, 1.00))
+    down = ramp(c, (0.20, 0.36)) - ramp(c, (0.56, 0.76))
+    return SLIDE * out, -DROP * down
+
+
+def pod_tracks(t, pod):
+    """Поточні translation/scale старого (порожнього) і нового пакета та тросів."""
+    c = cycle_at(t, pod)
+    du, dv = hoist(c)
+    spent_s = max(TINY, 1 - ramp(c, (0.36, 0.46)))
+    new_s = max(TINY, ramp(c, (0.46, 0.56)))
+    spent_t = (du, dv, 0.0) if c < 0.5 else (SLIDE, -DROP, 0.0)
+    new_t = (du, dv, 0.0) if c >= 0.40 else (0.0, 0.0, 0.0)
+    shown = 0.18 <= c <= 0.80
+    length = CABLE_TOP - (POD_V1 + 0.06 + dv)
+    cable_t = (POD_UC + du, CABLE_TOP, 0.0)
+    cable_s = (1.0, max(length, TINY), 1.0) if shown else (TINY, TINY, TINY)
+    return spent_t, spent_s, new_t, new_s, cable_t, cable_s
+
+
+def strut_pose(t, base, u_top):
+    th = elev_at(t)
+    top = np.array([HX + u_top * np.cos(th), HY + u_top * np.sin(th)])
+    d = top - np.array(base)
+    return np.arctan2(-d[0], d[1]), float(np.hypot(*d))
+
+
+def node(name, prims=(), t=(0.0, 0.0, 0.0), r=(0.0, 0.0, 0.0, 1.0), s=(1.0, 1.0, 1.0), children=()):
+    return {"name": name, "prims": list(prims), "t": list(t), "r": list(r), "s": list(s), "children": list(children)}
+
+
+def shifted(m, dx=0.0, dy=0.0, dz=0.0):
+    m.apply_translation([dx, dy, dz])
+    return m
+
+
+def pod_node(name, pz, fresh, mats):
+    """Транспортно-пусковий пакет (шість труб). Початок координат — середина низу пакета, щоб масштаб «виростав» із землі."""
+    o = np.array([POD_UC, POD_V0, pz])
+    body, ribs, mouths, ends = [], [], [], []
+    body.append(box_pose(POD_U0, POD_U1 - 0.03, POD_V0, POD_V1, pz - POD_HALF, pz + POD_HALF))
+    body.append(box_pose(POD_U1 - 0.03, POD_U1, POD_V0 + 0.02, POD_V1 - 0.02, pz - POD_HALF + 0.02, pz + POD_HALF - 0.02))
+    for u in (POD_U0 + 0.25, POD_UC, POD_U1 - 0.30):                                   # поперечні ребра
+        ribs.append(box_pose(u - 0.04, u + 0.04, POD_V0 - 0.01, POD_V1 + 0.01, pz - POD_HALF - 0.01, pz + POD_HALF + 0.01))
+    for du in (-LUG_U, LUG_U):                                                         # вушка для тросів
+        ribs.append(box_pose(POD_UC + du - 0.06, POD_UC + du + 0.06, POD_V1, POD_V1 + 0.06, pz - 0.05, pz + 0.05))
+    for dz in (-0.33, 0.0, 0.33):
+        for v in (0.31, 0.71):
+            m = trimesh.creation.cylinder(radius=0.150, height=0.10, sections=28)
+            m.apply_transform(trimesh.geometry.align_vectors([0, 0, 1], [1, 0, 0]))
+            m.apply_translation([POD_U1 + 0.04, v, pz + dz])
+            mouths.append(m)
+            if fresh:                                                                  # кришка нової труби
+                e = trimesh.creation.cylinder(radius=0.125, height=0.03, sections=24)
+                e.apply_transform(trimesh.geometry.align_vectors([0, 0, 1], [1, 0, 0]))
+                e.apply_translation([POD_U1 + 0.10, v, pz + dz])
+            else:                                                                      # порожня труба після пуску
+                e = trimesh.creation.cylinder(radius=0.118, height=0.012, sections=24)
+                e.apply_transform(trimesh.geometry.align_vectors([0, 0, 1], [1, 0, 0]))
+                e.apply_translation([POD_U1 + 0.087, v, pz + dz])
+            ends.append(e)
+    prims = [(shifted(merge(body), *-o), mats["olive_lt"]), (shifted(merge(ribs), *-o), mats["olive"]),
+             (shifted(merge(mouths), *-o), mats["olive_lt"]), (shifted(merge(ends), *-o), mats["olive"] if fresh else mats["black"])]
+    return node(name, prims, t=o, s=(1.0, 1.0, 1.0) if not fresh else (TINY, TINY, TINY))
+
+
+def launcher_rig(mats):
+    olive, olive_dk, metal = mats["olive"], mats["olive_dk"], mats["metal"]
+    # Платформа (в системі платформи: x відносно TURRET_X)
+    ring = trimesh.creation.cylinder(radius=1.25, height=0.10, sections=48)
+    ring.apply_transform(trimesh.transformations.rotation_matrix(np.pi / 2, [1, 0, 0]))
+    ring.apply_translation([0.0, DECK_Y1 + 0.05, 0])
+    cradle = [box((-1.75 - TURRET_X, 1.40, s * 1.30), (3.20, 0.20, 0.12)) for s in (-1, 1)]
+    cradle += [box((x - TURRET_X, 1.40, 0.0), (0.12, 0.20, 2.60)) for x in (-3.30, -2.20, -1.20, -0.20)]
+    cradle += [box((HX, HY - 0.12, s * 1.15), (0.36, 0.34, 0.26)) for s in (-1, 1)]
+    cradle += [box((base[0], base[1] + 0.06, s * STRUT_Z), (0.26, 0.12, 0.30)) for _, base, *_ in STRUTS for s in (-1, 1)]
+    pin = cyl_between((HX, HY, -1.32), (HX, HY, 1.32), 0.07, 16)
+
+    # Установка (в системі установки: u, v, z)
+    W2 = BOX_W / 2
+    cage = [box_pose(0.0, BOX_L, 0.0, 0.06, -W2, W2), box_pose(0.0, BOX_L, BOX_T - 0.06, BOX_T, -W2, W2),
+            box_pose(0.0, BOX_L, 0.0, BOX_T, -W2, -W2 + 0.04), box_pose(0.0, BOX_L, 0.0, BOX_T, W2 - 0.04, W2),
+            box_pose(0.0, 0.06, 0.0, BOX_T, -W2, W2), box_pose(0.06, BOX_L, 0.06, BOX_T - 0.06, -0.03, 0.03)]
+    bands = [box_pose(u0, u0 + 0.06, -0.012, BOX_T + 0.012, -W2 - 0.012, W2 + 0.012) for u0 in (0.30, BOX_L - 0.35)]
+    bands += [box_pose(0.2, BOX_L - 0.2, -0.05, 0.0, z - 0.07, z + 0.07) for z in (-1.15, -0.40, 0.40, 1.15)]
+    bands += [box_pose(BOX_L - 0.04, BOX_L + 0.02, 0.0, BOX_T, -W2, -W2 + 0.08), box_pose(BOX_L - 0.04, BOX_L + 0.02, 0.0, BOX_T, W2 - 0.08, W2)]
+    hatches = [box_pose(u - 0.22, u + 0.22, BOX_T, BOX_T + 0.015, z - 0.15, z + 0.15) for u in (1.2, 2.6) for z in (-0.65, 0.65)]
+    hatches += [box_pose(1.6, 1.62, 0.55, 0.62, W2, W2 + 0.01), box_pose(1.6, 1.62, 0.55, 0.62, -W2 - 0.01, -W2)]
+    rails, sec1, sec2, tips = [], [], [], []
+    for pz in POD_Z:
+        for dz in (-0.48, 0.48):                                                      # стріли завантажувача: основа й дві секції
+            z = pz + dz
+            rails.append(box_pose(BOX_L - 1.80, BOX_L + 0.20, BOX_T, BOX_T + 0.12, z - 0.06, z + 0.06))
+            sec1.append(box_pose(BOX_L - 1.50, BOX_L + 0.30, BOX_T + 0.015, BOX_T + 0.105, z - 0.045, z + 0.045))
+            sec2.append(box_pose(BOX_L - 1.30, BOX_L + 0.42, BOX_T + 0.03, BOX_T + 0.09, z - 0.03, z + 0.03))
+            k = trimesh.creation.cylinder(radius=0.05, height=0.12, sections=14)
+            k.apply_translation([BOX_L + 0.42, BOX_T + 0.06, z])
+            tips.append(k)
+        sec2.append(box_pose(BOX_L + 0.36, BOX_L + 0.44, BOX_T + 0.03, BOX_T + 0.09, pz - 0.53, pz + 0.53))
+    boom_2 = node("boom_2", [(merge(sec2), olive_dk), (merge(tips), metal)])
+    boom_1 = node("boom_1", [(merge(sec1), olive)], children=[boom_2])
+    pods = [pod_node(name, pz, fresh, mats) for pz, pod in zip(POD_Z, ("pod_l", "pod_r"))
+            for name, fresh in ((pod, False), (pod + "_new", True))]
+    cables = []
+    for pz, pod in zip(POD_Z, ("pod_l", "pod_r")):
+        lines = [shifted(cyl_between((0, 0, 0), (0, -1, 0), 0.012, 6), du, 0, pz) for du in (-LUG_U, LUG_U)]
+        hooks = [box((du, -1.0, pz), (0.08, 0.05, 0.10)) for du in (-LUG_U, LUG_U)]
+        cables.append(node(pod + "_cable", [(merge(lines), metal), (merge(hooks), olive_dk)],
+                           t=(POD_UC, CABLE_TOP, 0.0), s=(TINY, TINY, TINY)))
+    launcher = node("launcher", [(merge(cage), olive), (merge(bands), olive_dk), (merge(hatches), olive_dk), (merge(rails), olive_dk)],
+                    t=(HX, HY, 0.0), r=quat_axis((0, 0, 1), elev_at(0.0)), children=[boom_1] + pods + cables)
+
+    struts = []
+    for name, base, u_top, lb, lr in STRUTS:
+        ang, length = strut_pose(0.0, base, u_top)
+        for side, z in (("l", -STRUT_Z), ("r", STRUT_Z)):
+            barrel = [cyl_between((0, 0, 0), (0, lb, 0), 0.09, 14), cyl_between((0, 0, -0.10), (0, 0, 0.10), 0.06, 12)]
+            rod = [cyl_between((0, 0, 0), (0, lr, 0), 0.055, 12), cyl_between((0, lr, -0.08), (0, lr, 0.08), 0.05, 12)]
+            rod_node = node(f"rod_{name}_{side}", [(merge(rod), metal)], t=(0.0, length - lr, 0.0))
+            struts.append(node(f"strut_{name}_{side}", [(merge(barrel), metal)], t=(base[0], base[1], z),
+                               r=quat_axis((0, 0, 1), ang), children=[rod_node]))
+    return node("turret", [(ring, olive_dk), (merge(cradle), olive), (pin, metal)], t=(TURRET_X, 0.0, 0.0),
+                children=[launcher] + struts)
+
+
+def reload_tracks():
+    """Канали анімації: (вузол, властивість, значення для кожного кадру)."""
+    ts = np.linspace(0.0, 1.0, SAMPLES)
+    out = [("turret", "rotation", [quat_axis((0, 1, 0), yaw_at(t)) for t in ts]),
+           ("launcher", "rotation", [quat_axis((0, 0, 1), elev_at(t)) for t in ts]),
+           ("boom_1", "translation", [(boom_at(t), 0.0, 0.0) for t in ts]),
+           ("boom_2", "translation", [(boom_at(t), 0.0, 0.0) for t in ts])]
+    for pod, pz in zip(("pod_l", "pod_r"), POD_Z):
+        rows = [pod_tracks(t, pod) for t in ts]
+        base = np.array([POD_UC, POD_V0, pz])
+        out += [(pod, "translation", [base + r[0] for r in rows]),
+                (pod, "scale", [(r[1],) * 3 for r in rows]),
+                (pod + "_new", "translation", [base + r[2] for r in rows]),
+                (pod + "_new", "scale", [(r[3],) * 3 for r in rows]),
+                (pod + "_cable", "translation", [r[4] for r in rows]),
+                (pod + "_cable", "scale", [r[5] for r in rows])]
+    for name, base, u_top, lb, lr in STRUTS:
+        poses = [strut_pose(t, base, u_top) for t in ts]
+        for side in ("l", "r"):
+            out += [(f"strut_{name}_{side}", "rotation", [quat_axis((0, 0, 1), a) for a, _ in poses]),
+                    (f"rod_{name}_{side}", "translation", [(0.0, length - lr, 0.0) for _, length in poses])]
+    return ts * CLIP_SECONDS, out
+
+
+# --- запис GLB ------------------------------------------------------------------------------------------------------
+class GlbWriter:
+    """Мінімальний запис glTF 2.0: вершини, нормалі, індекси, PBR-матеріали, ієрархія вузлів із TRS і один анімаційний кліп."""
+
+    def __init__(self):
+        self.bin = bytearray()
+        self.doc = {"asset": {"version": "2.0", "generator": "EasyWAR build-m270-model.py"}, "scene": 0, "scenes": [{"nodes": []}],
+                    "nodes": [], "meshes": [], "materials": [], "accessors": [], "bufferViews": [], "buffers": []}
+        self.mat_index = {}
+
+    def view(self, data: bytes, target=None):
+        self.bin += b"\0" * (-len(self.bin) % 4)
+        v = {"buffer": 0, "byteOffset": len(self.bin), "byteLength": len(data)}
+        if target:
+            v["target"] = target
+        self.bin += data
+        self.doc["bufferViews"].append(v)
+        return len(self.doc["bufferViews"]) - 1
+
+    def accessor(self, arr, kind, target=None, minmax=False):
+        arr = np.ascontiguousarray(arr)
+        comp = {np.dtype("float32"): 5126, np.dtype("uint16"): 5123, np.dtype("uint32"): 5125}[arr.dtype]
+        a = {"bufferView": self.view(arr.tobytes(), target), "componentType": comp, "count": int(arr.shape[0]), "type": kind}
+        if minmax:
+            flat = arr.reshape(arr.shape[0], -1)
+            a["min"] = [float(x) for x in flat.min(axis=0)]
+            a["max"] = [float(x) for x in flat.max(axis=0)]
+        self.doc["accessors"].append(a)
+        return len(self.doc["accessors"]) - 1
+
+    def material(self, mat):
+        if mat.name not in self.mat_index:
+            r, g, b, a = (c / 255 for c in mat.baseColorFactor)
+            self.doc["materials"].append({"name": mat.name, "pbrMetallicRoughness": {
+                "baseColorFactor": [round(r, 6), round(g, 6), round(b, 6), round(a, 6)],
+                "metallicFactor": float(mat.metallicFactor), "roughnessFactor": float(mat.roughnessFactor)}})
+            self.mat_index[mat.name] = len(self.doc["materials"]) - 1
+        return self.mat_index[mat.name]
+
+    def mesh(self, name, prims):
+        out = []
+        for m, mat in prims:
+            pos = np.asarray(m.vertices, dtype=np.float32)
+            nrm = np.asarray(m.vertex_normals, dtype=np.float32)
+            idx = np.asarray(m.faces, dtype=np.uint16 if len(pos) < 65536 else np.uint32).reshape(-1)
+            out.append({"attributes": {"POSITION": self.accessor(pos, "VEC3", 34962, True), "NORMAL": self.accessor(nrm, "VEC3", 34962)},
+                        "indices": self.accessor(idx, "SCALAR", 34963), "material": self.material(mat)})
+        self.doc["meshes"].append({"name": name, "primitives": out})
+        return len(self.doc["meshes"]) - 1
+
+    def add(self, spec, parent=None):
+        n = {"name": spec["name"]}
+        if spec["prims"]:
+            n["mesh"] = self.mesh(spec["name"], spec["prims"])
+        if any(spec["t"]):
+            n["translation"] = [float(x) for x in spec["t"]]
+        if spec["r"] != [0.0, 0.0, 0.0, 1.0]:
+            n["rotation"] = [float(x) for x in spec["r"]]
+        if spec["s"] != [1.0, 1.0, 1.0]:
+            n["scale"] = [float(x) for x in spec["s"]]
+        self.doc["nodes"].append(n)
+        i = len(self.doc["nodes"]) - 1
+        if parent is None:
+            self.doc["scenes"][0]["nodes"].append(i)
+        else:
+            self.doc["nodes"][parent].setdefault("children", []).append(i)
+        for c in spec["children"]:
+            self.add(c, i)
+        return i
+
+    def animation(self, name, times, tracks):
+        index = {n["name"]: i for i, n in enumerate(self.doc["nodes"])}
+        t_acc = self.accessor(np.asarray(times, dtype=np.float32), "SCALAR", minmax=True)
+        samplers, channels = [], []
+        for node_name, path, values in tracks:
+            kind = "VEC4" if path == "rotation" else "VEC3"
+            v_acc = self.accessor(np.asarray(values, dtype=np.float32), kind)
+            samplers.append({"input": t_acc, "output": v_acc, "interpolation": "LINEAR"})
+            channels.append({"sampler": len(samplers) - 1, "target": {"node": index[node_name], "path": path}})
+        self.doc["animations"] = [{"name": name, "samplers": samplers, "channels": channels}]
+
+    def glb(self, extras):
+        self.doc["asset"]["extras"] = extras
+        self.bin += b"\0" * (-len(self.bin) % 4)
+        self.doc["buffers"] = [{"byteLength": len(self.bin)}]
+        raw = json.dumps(self.doc, separators=(",", ":"), ensure_ascii=False).encode()
+        raw += b" " * (-len(raw) % 4)
+        total = 12 + 8 + len(raw) + 8 + len(self.bin)
+        return (struct.pack("<4sII", b"glTF", 2, total) + struct.pack("<I4s", len(raw), b"JSON") + raw
+                + struct.pack("<I4s", len(self.bin), b"BIN\0") + bytes(self.bin))
 
 
 def main() -> int:
     out = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_OUT
-    scene = trimesh.Scene()
-    for name, mesh in m270().items():
+    parts, rig = m270()
+    w = GlbWriter()
+    tris = 0
+    for name, mesh in parts.items():
         if name in FLAT:
             mesh.unmerge_vertices()  # плоске освітлення лише для великих гранчастих корпусів без фасок
-        scene.add_geometry(mesh, node_name=name, geom_name=name)
-    glb = scene.export(file_type="glb", include_normals=True)
-    glb = with_extras(glb, {"title": "M270 MLRS (generated)", "generated": True,
-                            "note": "Simplified procedural model from public overall dimensions (about 7 m long, 3 m wide, tracked carrier, cab with louvers, raised launcher with two six-tube pods). Not a scan or copy of any other model."})
+        w.add(node(name, [(mesh, mesh.visual.material)]))
+        tris += len(mesh.faces)
+    w.add(rig)
+    times, tracks = reload_tracks()
+    w.animation("reload", times, tracks)
+    glb = w.glb({"title": "M270 MLRS (generated)", "generated": True,
+                 "note": "Simplified procedural model from public overall dimensions (about 7 m long, 3 m wide, tracked carrier, cab with louvers, "
+                         "launcher with two six-tube pods). The 'reload' clip is a schematic demonstration of pod reloading. Not a scan or copy of any other model."})
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(glb)
-    size = np.ptp(np.array(scene.bounds), axis=0)
-    print(f"{out.name}: {len(glb) / 1024:.0f} KB, {sum(len(m.faces) for m in scene.geometry.values())} triangles, extent {size[0]:.2f} x {size[1]:.2f} x {size[2]:.2f} m")
+    print(f"{out.name}: {len(glb) / 1024:.0f} KB, {len(w.doc['nodes'])} nodes, {len(tracks)} channels, static {tris} triangles")
     return 0
 
 

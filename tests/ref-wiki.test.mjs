@@ -242,7 +242,24 @@ test('the M270 article is a generated ground model with its pods, tracks and lau
   assert.ok(bytes.length < 1.2e6, 'procedural model stays small');
   const json = JSON.parse(bytes.toString('utf8', 20, 20 + bytes.readUInt32LE(12)));
   const names = new Set(json.nodes.map(n => n.name));
-  for (const n of ['deck', 'tracks', 'tyres', 'cab', 'louvers', 'engine', 'turntable', 'launcher', 'pod_frames', 'tube_mouths', 'struts']) assert.ok(names.has(n), `${n} present`);
+  for (const n of ['deck', 'tracks', 'tyres', 'cab', 'louvers', 'engine', 'turret', 'launcher', 'boom_1', 'boom_2', 'pod_l', 'pod_r', 'pod_l_new', 'pod_r_new', 'pod_l_cable', 'strut_a_l', 'rod_b_r']) assert.ok(names.has(n), `${n} present`);
+  // Заряджання: один кліп, який повзунок прокручує від стану «після пуску» до «заряджено».
+  assert.equal(json.animations.length, 1);
+  const [clip] = json.animations;
+  assert.equal(clip.name, 'reload');
+  const animated = new Set(clip.channels.map(c => json.nodes[c.target.node].name + '.' + c.target.path));
+  for (const k of ['turret.rotation', 'launcher.rotation', 'boom_1.translation', 'pod_r.translation', 'pod_r.scale', 'pod_r_new.scale', 'pod_l_new.translation', 'strut_a_l.rotation', 'rod_a_l.translation']) assert.ok(animated.has(k), `${k} animated`);
+  const times = json.accessors[clip.samplers[0].input];
+  assert.equal(times.min[0], 0);
+  assert.ok(times.max[0] > 10, 'clip long enough to follow');
+  // Нові пакети на початку сховані, старі — на місці.
+  const node = name => json.nodes.find(n => n.name === name);
+  assert.ok(node('pod_r_new').scale.every(v => v < 0.01));
+  assert.equal(node('pod_r').scale, undefined);
+  const action = e.model.action;
+  assert.equal(action.label, 'Заряджання');
+  assert.equal(action.ends.length, 2);
+  assert.ok(action.seconds > 5 && action.hint);
   await stat(new URL('../script/build-m270-model.py', import.meta.url));
   const credits = await readFile(new URL('../src/models/CREDITS.md', import.meta.url), 'utf8');
   assert.match(credits, /m270-mlrs\.glb[^\n]*\n[\s\S]*?script\/build-m270-model\.py/);
