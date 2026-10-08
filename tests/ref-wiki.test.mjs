@@ -239,7 +239,7 @@ test('the M270 article is a generated ground model with its pods, tracks and lau
   assert.ok(e.credit.generated && e.credit.note);
   assert.deepEqual(searchEntries('m270').map(x => x.id).filter(id => id === 'm270' || id === 'himars'), ['m270']);
   const bytes = await readFile(new URL('../src/models/m270-mlrs.glb', import.meta.url));
-  assert.ok(bytes.length < 6e5, 'procedural model stays small');
+  assert.ok(bytes.length < 1.2e6, 'procedural model stays small');
   const json = JSON.parse(bytes.toString('utf8', 20, 20 + bytes.readUInt32LE(12)));
   const names = new Set(json.nodes.map(n => n.name));
   for (const n of ['deck', 'tracks', 'tyres', 'cab', 'louvers', 'engine', 'turntable', 'launcher', 'pod_frames', 'tube_mouths', 'struts']) assert.ok(names.has(n), `${n} present`);

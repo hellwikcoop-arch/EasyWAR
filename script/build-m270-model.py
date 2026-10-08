@@ -29,15 +29,15 @@ FLAT = {"cab"}
 X_REAR, X_FRONT = -3.45, 3.50         # торці палуби
 DECK_Y0, DECK_Y1, DECK_HALF = 1.02, 1.20, 1.45
 TRACK_Z, TRACK_W = 1.215, 0.53         # вісь і ширина гусениці
-SPROCKET = (3.05, 0.50, 0.50)          # x, y, зовнішній радіус гусениці на ведучому колесі
+SPROCKET = (2.95, 0.58, 0.46)          # x, y, зовнішній радіус гусениці на ведучому колесі
 IDLER = (-3.00, 0.48, 0.48)
-ROAD_X = [-1.95, -1.17, -0.39, 0.39, 1.17, 1.95]
+ROAD_X = [-2.05, -1.27, -0.49, 0.29, 1.07, 1.85]
 ROAD_R, ROAD_Y = 0.335, 0.405
 PAD_PITCH = 0.15
 
 LAUNCH_ANGLE = np.radians(52)          # кут підйому установки
 HINGE = (-2.60, 1.58)                  # вісь підйому (x, y)
-BOX_L, BOX_T, BOX_W = 3.50, 1.05, 2.85
+BOX_L, BOX_T, BOX_W = 3.70, 1.15, 2.80
 
 
 def material(name, rgb, metallic=0.1, roughness=0.65):
@@ -69,9 +69,9 @@ def bevelled(extents, bevel=None):
     return trimesh.convex.convex_hull(np.array(pts))
 
 
-def box(center, extents, rot_z=0.0):
+def box(center, extents, rot_z=0.0, bevel=None):
     """Паралелепіпед з центром у `center`; його вісь x повернута навколо z на rot_z радіан."""
-    m = bevelled(extents)
+    m = bevelled(extents, bevel)
     m.apply_transform(trimesh.transformations.rotation_matrix(rot_z, [0, 0, 1]))
     m.apply_translation(center)
     return m
@@ -91,6 +91,10 @@ def cyl_between(a, b, radius, sections=14):
     m.apply_transform(trimesh.geometry.align_vectors([0, 0, 1], d / np.linalg.norm(d)))
     m.apply_translation((a + b) / 2)
     return m
+
+
+def hull(points):
+    return trimesh.convex.convex_hull(np.array(points, dtype=float))
 
 
 def prism_side(profile_xy, z0, z1):
@@ -149,134 +153,222 @@ def resample(path, pitch):
 
 
 def track_pads(z_center):
-    pads = []
+    """Ланки гусениці: пластина з грунтозачепом зовні й напрямним гребенем усередині (між здвоєними котками)."""
+    pads, horns = [], []
     for x, y, a in resample(track_loop(), PAD_PITCH):
-        pads.append(box((x, y, z_center), (PAD_PITCH * 0.86, 0.065, TRACK_W), rot_z=a))
-    return pads
+        n = np.array([np.sin(a), -np.cos(a)])           # зовнішня нормаль контуру (контур іде проти годинникової)
+        pads.append(box((x, y, z_center), (PAD_PITCH * 0.84, 0.055, TRACK_W), rot_z=a, bevel=0))
+        g = np.array([x, y]) + n * 0.035
+        pads.append(box((g[0], g[1], z_center), (0.035, 0.03, TRACK_W * 0.92), rot_z=a, bevel=0))      # грунтозачеп
+        h = np.array([x, y]) - n * 0.065
+        horns.append(box((h[0], h[1], z_center), (0.07, 0.08, 0.05), rot_z=a, bevel=0))                 # напрямний гребінь
+        for side in (-1, 1):                                                                    # кінцеві з'єднувачі
+            horns.append(box((x, y, z_center + side * (TRACK_W / 2 + 0.02)), (0.06, 0.06, 0.04), rot_z=a, bevel=0))
+    return pads, horns
 
 
 def m270():
-    olive = material("Hull", (82, 90, 64), metallic=0.1, roughness=0.7)
-    olive_dk = material("HullDark", (62, 70, 50), metallic=0.1, roughness=0.75)
-    olive_lt = material("Pods", (98, 106, 78), metallic=0.1, roughness=0.65)
-    rubber = material("Tyres", (28, 28, 30), metallic=0.0, roughness=0.9)
-    trackmat = material("Track", (44, 44, 42), metallic=0.45, roughness=0.55)
-    hub = material("Hubs", (66, 76, 56), metallic=0.2, roughness=0.6)
+    olive = material("Hull", (88, 92, 62), metallic=0.1, roughness=0.72)
+    olive_dk = material("HullDark", (66, 70, 48), metallic=0.12, roughness=0.78)
+    olive_lt = material("Pods", (102, 108, 78), metallic=0.1, roughness=0.68)
+    rubber = material("Tyres", (30, 30, 30), metallic=0.0, roughness=0.9)
+    trackmat = material("Track", (52, 50, 46), metallic=0.55, roughness=0.5)
+    hub = material("Hubs", (70, 80, 58), metallic=0.2, roughness=0.6)
     black = material("Black", (24, 26, 24), metallic=0.1, roughness=0.6)
-    glass = material("Glass", (34, 42, 46), metallic=0.4, roughness=0.18)
-    amber = material("Amber", (236, 148, 28), metallic=0.0, roughness=0.3)
-    white = material("Lamp", (240, 240, 232), metallic=0.0, roughness=0.25)
-    metal = material("Metal", (120, 124, 120), metallic=0.6, roughness=0.4)
-
+    glass = material("Glass", (40, 46, 48), metallic=0.5, roughness=0.15)
+    amber = material("Amber", (236, 140, 28), metallic=0.0, roughness=0.3)
+    white = material("Lamp", (240, 240, 232), metallic=0.3, roughness=0.15)
+    metal = material("Metal", (150, 154, 150), metallic=0.8, roughness=0.3)
+    wood = material("Handle", (176, 140, 86), metallic=0.0, roughness=0.7)
     parts = {}
 
-    # Палуба й корпус між гусеницями.
-    parts["deck"] = painted(merge([
-        box(((X_REAR + X_FRONT) / 2, (DECK_Y0 + DECK_Y1) / 2, 0), (X_FRONT - X_REAR, DECK_Y1 - DECK_Y0, 2 * DECK_HALF)),
-        prism_side([(-3.05, 0.34), (3.05, 0.34), (3.55, 0.95), (3.55, 1.04), (-3.40, 1.04), (-3.40, 0.70)], -0.95, 0.95),
-    ]), olive)
-    # Гусениці: звена-пластини по контуру, опорні котки, ведуче й ліниве колеса.
-    rubber_parts, hub_parts, pad_parts, roller_parts = [], [], [], []
+    # ---------- Корпус: нижній корпус між гусеницями, похилий лоб, палуба з надгусеничними полицями ----------
+    hull_low = prism_side([(-3.10, 0.36), (2.95, 0.36), (3.55, 0.92), (3.55, 1.04), (-3.45, 1.04), (-3.45, 0.66)], -0.94, 0.94)
+    deck = box(((X_REAR + X_FRONT) / 2, (DECK_Y0 + DECK_Y1) / 2, 0), (X_FRONT - X_REAR, DECK_Y1 - DECK_Y0, 2 * DECK_HALF))
+    lips = [box(((X_REAR + X_FRONT) / 2, DECK_Y0 + 0.01, s * (DECK_HALF - 0.01)), (X_FRONT - X_REAR, 0.05, 0.06)) for s in (-1, 1)]
+    parts["deck"] = painted(merge([hull_low, deck] + lips), olive)
+    front = [box((X_FRONT + 0.06, 0.78, s * 1.20), (0.05, 0.60, 0.52)) for s in (-1, 1)]            # брудозахисні щитки
+    rear_flaps = [box((X_REAR - 0.04, 0.80, s * 1.20), (0.05, 0.48, 0.50)) for s in (-1, 1)]
+    parts["flaps"] = painted(merge(front + rear_flaps), black)
+    shackles = []
+    for x, y, z in ((3.28, 0.70, -0.42), (3.28, 0.70, 0.42), (-3.47, 0.80, -0.55), (-3.47, 0.80, 0.55)):
+        t = trimesh.creation.torus(major_radius=0.07, minor_radius=0.02, major_sections=16, minor_sections=8)
+        t.apply_transform(trimesh.transformations.rotation_matrix(np.pi / 2, [0, 1, 0]))
+        t.apply_translation((x + (0.12 if x > 0 else -0.04), y, z))
+        shackles.append(t)
+        shackles.append(box((x + (0.05 if x > 0 else 0.0), y + 0.08, z), (0.10, 0.08, 0.12)))
+    parts["shackles"] = painted(merge(shackles), olive_dk)
+
+    # ---------- Ходова: ланки, котки, ведуче й ліниве колеса, підтримувальні котки, балансири ----------
+    tyres, hubs, pads, horns, rollers, arms, teeth = [], [], [], [], [], [], []
     for side in (-1, 1):
         zc = side * TRACK_Z
-        pad_parts += track_pads(zc)
+        p_, h_ = track_pads(zc)
+        pads += p_
+        horns += h_
         for x in ROAD_X:
             for dz in (-0.135, 0.135):
-                rubber_parts.append(cyl_z((x, ROAD_Y, zc + dz), ROAD_R, 0.14))
-            hub_parts.append(cyl_z((x, ROAD_Y, zc), 0.22, 0.34))
-            hub_parts.append(cyl_z((x, ROAD_Y, zc + side * 0.215), 0.255, 0.036, 28))
-            hub_parts.append(cyl_z((x, ROAD_Y, zc + side * 0.236), 0.075, 0.024, 12))
-        for x in (-1.05, 0.05, 1.15):
-            roller_parts.append(cyl_z((x, 0.82, zc), 0.075, 0.2, 16))
-        hub_parts.append(cyl_z((SPROCKET[0], SPROCKET[1], zc), 0.40, 0.30, 32))
-        hub_parts.append(cyl_z((SPROCKET[0], SPROCKET[1], zc + side * 0.17), 0.14, 0.06, 20))
-        hub_parts.append(cyl_z((IDLER[0], IDLER[1], zc), 0.38, 0.30, 32))
-        hub_parts.append(cyl_z((IDLER[0], IDLER[1], zc + side * 0.17), 0.12, 0.06, 20))
-    parts["tracks"] = painted(merge(pad_parts), trackmat)
-    parts["tyres"] = painted(merge(rubber_parts), rubber)
-    parts["hubs"] = painted(merge(hub_parts), hub)
-    parts["rollers"] = painted(merge(roller_parts), hub)
-    # Крила гусениць і брудозахисні щитки спереду.
-    parts["flaps"] = painted(merge([box((3.62, 0.70, s * 1.18), (0.05, 0.62, 0.95)) for s in (-1, 1)]), black)
+                tyres.append(cyl_z((x, ROAD_Y, zc + dz), ROAD_R, 0.13, 30))
+                hubs.append(cyl_z((x, ROAD_Y, zc + dz + side * 0.07 * np.sign(dz) * side), 0.25, 0.02, 28))
+            hubs.append(cyl_z((x, ROAD_Y, zc), 0.20, 0.16, 20))
+            for k in range(8):
+                a = 2 * np.pi * k / 8
+                hubs.append(cyl_z((x + 0.15 * np.cos(a), ROAD_Y + 0.15 * np.sin(a), zc + side * 0.215), 0.018, 0.03, 6))
+            hubs.append(cyl_z((x, ROAD_Y, zc + side * 0.22), 0.07, 0.04, 12))
+            arms.append(cyl_between((x + 0.42, 0.66, side * 0.92), (x, ROAD_Y, side * 0.98), 0.055, 10))   # балансир
+        for x in (-1.60, -0.30, 1.00):
+            rollers.append(cyl_z((x, 0.86, zc), 0.08, 0.22, 16))
+            rollers.append(cyl_between((x, 0.86, side * 0.92), (x, 0.86, zc), 0.03, 8))
+        sx, sy, _ = SPROCKET
+        for dz in (-0.12, 0.12):
+            hubs.append(cyl_z((sx, sy, zc + dz), 0.36, 0.08, 32))
+            for k in range(12):
+                a = 2 * np.pi * k / 12
+                teeth.append(box((sx + 0.40 * np.cos(a), sy + 0.40 * np.sin(a), zc + dz), (0.07, 0.08, 0.07), rot_z=a, bevel=0))
+        hubs.append(cyl_z((sx, sy, zc + side * 0.18), 0.16, 0.08, 20))
+        ix, iy, _ = IDLER
+        for dz in (-0.12, 0.12):
+            hubs.append(cyl_z((ix, iy, zc + dz), 0.36, 0.09, 32))
+        hubs.append(cyl_z((ix, iy, zc + side * 0.18), 0.12, 0.08, 20))
+        arms.append(cyl_between((ix + 0.30, 0.66, side * 0.92), (ix, iy, side * 1.0), 0.06, 10))
+    parts["tracks"] = painted(merge(pads), trackmat)
+    parts["track_horns"] = painted(merge(horns + teeth), trackmat)
+    parts["tyres"] = painted(merge(tyres), rubber)
+    parts["hubs"] = painted(merge(hubs), hub)
+    parts["rollers"] = painted(merge(rollers), hub)
+    parts["suspension"] = painted(merge(arms), olive_dk)
 
-    # Кабіна: прямий низ спереду, похилий верх; бічні двері, вікна, фари, жалюзі, поручні й антена.
-    cab_profile = [(1.15, DECK_Y1), (3.40, DECK_Y1), (3.40, 1.78), (2.62, 2.58), (1.15, 2.58)]
-    parts["cab"] = painted(prism_side(cab_profile, -1.38, 1.38), olive)
-    side_plates = []
+    # ---------- Кабіна: прямий низ, похилий верх із броньованими жалюзі, скоси кутів ----------
+    levels = [(DECK_Y1, 3.42, 1.18, 1.40, 0.16), (1.80, 3.42, 1.18, 1.40, 0.16), (2.52, 2.66, 1.18, 1.36, 0.12),
+              (2.60, 2.56, 1.24, 1.30, 0.08)]
+    pts = []
+    for y, xf, xr, half, c in levels:
+        pts += [(xf - c, y, -half), (xf, y, -(half - c)), (xf, y, half - c), (xf - c, y, half),
+                (xr, y, half), (xr, y, -half)]
+    parts["cab"] = painted(hull(pts), olive)
+    slope = np.arctan2(2.52 - 1.80, 2.66 - 3.42)            # кут похилої частини лоба
+    d = np.array([np.cos(slope), np.sin(slope)])
+    n_out = np.array([d[1], -d[0]])
+    louvers, frames = [], []
+    for z in (-0.86, 0.0, 0.86):
+        base = np.array([3.04, 2.16])
+        c0 = base + n_out * 0.03
+        frames.append(box((c0[0], c0[1], z), (0.92, 0.03, 0.80), rot_z=slope))      # темна ніша
+        for k in range(-3, 4):                                                        # планки решітки
+            cc = base + n_out * 0.13 + d * (k * 0.12)
+            louvers.append(box((cc[0], cc[1], z), (0.035, 0.05, 0.78), rot_z=slope))
+        for zz in (z - 0.39, z + 0.39):                                               # бічні стійки решітки
+            cc = base + n_out * 0.09
+            louvers.append(box((cc[0], cc[1], zz), (0.86, 0.10, 0.03), rot_z=slope))
+    parts["louver_backs"] = painted(merge(frames), black)
+    parts["louvers"] = painted(merge(louvers), olive_dk)
+    lamps_w, lamps_a, recess = [], [], []
     for s in (-1, 1):
-        side_plates.append(box((2.45, 1.80, s * 1.395), (1.05, 1.10, 0.03)))        # двері
-        side_plates.append(box((1.60, 1.60, s * 1.395), (0.80, 0.65, 0.03)))        # бічний люк
-    parts["doors"] = painted(merge(side_plates), olive_dk)
-    parts["windows"] = painted(merge([box((2.75, 2.25, s * 1.40), (0.34, 0.26, 0.03)) for s in (-1, 1)]), glass)
-    slope = np.arctan2(2.58 - 1.78, 2.62 - 3.40)  # напрямок схилу в площині (x, y), > 90°
-    n_out = np.array([np.sin(slope) * -1, np.cos(slope) * -1])  # зовнішня нормаль до схилу
-    louvers = []
-    for z in (-0.88, 0.0, 0.88):
-        mid = np.array([3.01, 2.18])
-        c = mid + n_out * 0.02
-        louvers.append(box((c[0], c[1], z), (1.05, 0.03, 0.78), rot_z=slope))
-        for k in range(-3, 4):  # планки жалюзі
-            cc = mid + n_out * 0.05 + np.array([np.cos(slope), np.sin(slope)]) * (k * 0.13)
-            louvers.append(box((cc[0], cc[1], z), (0.025, 0.04, 0.78), rot_z=slope))
-    parts["louvers"] = painted(merge(louvers), black)
-    parts["lamps"] = painted(merge([cyl_between((3.41, 1.50, s * 1.05), (3.47, 1.50, s * 1.05), 0.055, 14) for s in (-1, 1)]), white)
-    parts["lamps_amber"] = painted(merge([cyl_between((3.41, 1.50, s * 1.22), (3.47, 1.50, s * 1.22), 0.04, 14) for s in (-1, 1)]), amber)
-    parts["lamp_housings"] = painted(merge([box((3.42, 1.50, s * 1.14), (0.06, 0.20, 0.50)) for s in (-1, 1)]), black)
-    rail = [cyl_between((1.45, 2.58, -0.9), (1.45, 2.80, -0.9), 0.015), cyl_between((1.45, 2.58, 0.9), (1.45, 2.80, 0.9), 0.015),
-            cyl_between((1.45, 2.80, -0.9), (1.45, 2.80, 0.9), 0.015), cyl_between((2.15, 2.58, -0.9), (2.15, 2.80, -0.9), 0.015),
-            cyl_between((2.15, 2.58, 0.9), (2.15, 2.80, 0.9), 0.015), cyl_between((2.15, 2.80, -0.9), (2.15, 2.80, 0.9), 0.015),
-            cyl_between((1.45, 2.80, -0.9), (2.15, 2.80, -0.9), 0.015), cyl_between((1.45, 2.80, 0.9), (2.15, 2.80, 0.9), 0.015),
-            cyl_between((1.30, 2.58, 1.12), (1.30, 3.55, 1.12), 0.011, 8)]
+        recess.append(box((3.44, 1.55, s * 0.98), (0.10, 0.24, 0.44)))
+        lamps_w.append(cyl_between((3.47, 1.55, s * 0.92), (3.51, 1.55, s * 0.92), 0.06, 16))
+        lamps_a.append(cyl_between((3.47, 1.55, s * 1.12), (3.51, 1.55, s * 1.12), 0.045, 14))
+        lamps_w.append(cyl_between((3.47, 1.55, s * 0.78), (3.50, 1.55, s * 0.78), 0.04, 12))
+    parts["lamp_recesses"] = painted(merge(recess), black)
+    parts["lamps"] = painted(merge(lamps_w), white)
+    parts["lamps_amber"] = painted(merge(lamps_a), amber)
+    det = [box((3.43, 1.48, 0.0), (0.04, 0.30, 0.07)), box((3.43, 1.35, 0.0), (0.05, 0.05, 0.22))]   # скоба по центру
+    for s in (-1, 1):
+        det.append(box((2.50, 1.80, s * 1.405), (0.95, 1.10, 0.03)))                 # двері
+        det.append(box((2.05, 1.85, s * 1.425), (0.06, 0.06, 0.04)))
+        det.append(cyl_between((2.10, 1.62, s * 1.43), (2.60, 1.62, s * 1.43), 0.02, 8))   # поручень
+        det.append(box((1.55, 1.75, s * 1.405), (0.42, 0.85, 0.03)))                 # бічний лючок
+    parts["doors"] = painted(merge(det), olive_dk)
+    parts["windows"] = painted(merge([box((2.70, 2.28, s * 1.425), (0.42, 0.09, 0.02)) for s in (-1, 1)]), glass)
+    rail = [cyl_between((1.45, 2.60, -0.85), (1.45, 2.80, -0.85), 0.016), cyl_between((1.45, 2.60, 0.85), (1.45, 2.80, 0.85), 0.016),
+            cyl_between((2.30, 2.58, -0.85), (2.30, 2.80, -0.85), 0.016), cyl_between((2.30, 2.58, 0.85), (2.30, 2.80, 0.85), 0.016),
+            cyl_between((1.45, 2.80, -0.85), (2.30, 2.80, -0.85), 0.016), cyl_between((1.45, 2.80, 0.85), (2.30, 2.80, 0.85), 0.016),
+            cyl_between((1.45, 2.80, -0.85), (1.45, 2.80, 0.85), 0.016), cyl_between((2.30, 2.80, -0.85), (2.30, 2.80, 0.85), 0.016),
+            cyl_between((1.32, 2.60, -1.05), (1.32, 3.55, -1.05), 0.010, 8)]
     parts["rails"] = painted(merge(rail), metal)
-    parts["mirrors"] = painted(merge([box((3.04, 2.12, s * 1.50), (0.08, 0.38, 0.16)) for s in (-1, 1)]), black)
+    mirror = [box((3.10, 2.20, s * 1.58), (0.08, 0.36, 0.22)) for s in (-1, 1)]
+    mirror += [cyl_between((3.10, 2.05, s * 1.40), (3.10, 2.05, s * 1.58), 0.014, 8) for s in (-1, 1)]
+    parts["mirrors"] = painted(merge(mirror), black)
+    parts["roof"] = painted(merge([box((1.85, 2.63, 0.35), (0.62, 0.05, 0.62)), cyl_between((1.55, 2.60, -0.55), (1.55, 2.86, -0.55), 0.08, 14),
+                                   box((1.55, 2.88, -0.55), (0.22, 0.06, 0.22))]), olive_dk)
 
-    # Відсік двигуна за кабіною й панель з решіткою радіатора.
-    parts["engine"] = painted(box((0.62, 1.62, 0), (1.05, 0.84, 2.76)), olive)
-    parts["grille"] = painted(merge([box((0.62, 1.55, 1.395), (0.82, 0.66, 0.03))]
-                                    + [box((0.62, 1.55, -1.395), (0.82, 0.66, 0.03))]), black)
+    # ---------- За кабіною: ящик із лопатою (ліво), блок радіатора з решіткою (право), ящики зверху ----------
+    rb = [box((0.62, 1.70, -0.98), (1.05, 1.00, 0.82)), box((0.62, 1.62, 0.98), (1.05, 0.84, 0.82)),
+          box((0.62, 1.55, 0.0), (1.05, 0.70, 1.20)), box((0.75, 2.27, -0.98), (0.55, 0.14, 0.40)),
+          box((0.40, 2.12, 0.98), (0.36, 0.16, 0.30))]
+    parts["engine"] = painted(merge(rb), olive)
+    grille = [box((0.62, 1.60, 1.395), (0.92, 0.70, 0.02))]
+    grille += [box((0.18 + k * 0.045, 1.60, 1.41), (0.014, 0.66, 0.02)) for k in range(21)]
+    parts["grille"] = painted(merge(grille), black)
+    shovel = [cyl_between((0.30, 2.15, -1.405), (0.85, 1.35, -1.405), 0.018, 8)]
+    blade = hull([(0.80, 1.38, -1.40), (0.98, 1.20, -1.40), (0.86, 1.08, -1.40), (0.70, 1.26, -1.40),
+                  (0.80, 1.38, -1.43), (0.98, 1.20, -1.43), (0.86, 1.08, -1.43), (0.70, 1.26, -1.43)])
+    parts["shovel"] = painted(shovel[0], wood)
+    parts["shovel_blade"] = painted(blade, black)
+    parts["box_doors"] = painted(merge([box((0.62, 1.70, -1.395), (0.85, 0.80, 0.02)), box((0.20, 1.70, -1.41), (0.05, 0.10, 0.03))]), olive_dk)
 
-    # Поворотна платформа й пусковий кронштейн.
-    parts["platform"] = painted(box((-1.65, 1.30, 0), (3.60, 0.20, 2.90)), olive)
-    ring = trimesh.creation.cylinder(radius=1.22, height=0.10, sections=48)
+    # ---------- Поворотна платформа: кругла основа й рамна люлька ----------
+    ring = trimesh.creation.cylinder(radius=1.25, height=0.10, sections=48)
     ring.apply_transform(trimesh.transformations.rotation_matrix(np.pi / 2, [1, 0, 0]))
-    ring.apply_translation([-1.70, 1.45, 0])
+    ring.apply_translation([-1.65, DECK_Y1 + 0.05, 0])
     parts["turntable"] = painted(ring, olive_dk)
-    parts["hinge"] = painted(merge([box((HINGE[0] + 0.05, HINGE[1] - 0.12, z), (0.34, 0.30, 0.28)) for z in (-1.15, 1.15)]), olive_dk)
+    cradle = [box((-1.75, 1.40, s * 1.30), (3.20, 0.20, 0.12)) for s in (-1, 1)]
+    cradle += [box((x, 1.40, 0.0), (0.12, 0.20, 2.60)) for x in (-3.30, -2.20, -1.20, -0.20)]
+    cradle += [box((HINGE[0], HINGE[1] - 0.12, s * 1.15), (0.36, 0.34, 0.26)) for s in (-1, 1)]
+    cradle += [box((x, 1.47, s * 0.95), (0.22, 0.10, 0.30)) for x in (-0.70, -2.20) for s in (-1, 1)]  # опори гідроциліндрів
+    parts["platform"] = painted(merge(cradle), olive)
 
-    # Пускова установка: корпус пакетів, піднятий на LAUNCH_ANGLE.
+    # ---------- Пускова установка: корпус, бандажі, люки, торець із двома пакетами ----------
     parts["launcher"] = painted(to_world(box_pose(0.0, BOX_L, 0.0, BOX_T, -BOX_W / 2, BOX_W / 2)), olive)
-    parts["launcher_bands"] = painted(merge([to_world(box_pose(u0, u0 + 0.05, -0.012, BOX_T + 0.012, -BOX_W / 2 - 0.012, BOX_W / 2 + 0.012))
-                                             for u0 in (0.55, 1.65, 2.75)]), olive_dk)
-    hatches = [to_world(box_pose(u - 0.22, u + 0.22, BOX_T, BOX_T + 0.02, z - 0.16, z + 0.16)) for u in (1.0, 2.4) for z in (-0.6, 0.6)]
+    bands = [to_world(box_pose(u0, u0 + 0.06, -0.012, BOX_T + 0.012, -BOX_W / 2 - 0.012, BOX_W / 2 + 0.012)) for u0 in (0.30, BOX_L - 0.35)]
+    bands += [to_world(box_pose(0.2, BOX_L - 0.2, -0.05, 0.0, z - 0.07, z + 0.07)) for z in (-1.15, -0.40, 0.40, 1.15)]   # поздовжні балки знизу
+    parts["launcher_bands"] = painted(merge(bands), olive_dk)
+    hatches = [to_world(box_pose(u - 0.22, u + 0.22, BOX_T, BOX_T + 0.015, z - 0.15, z + 0.15)) for u in (1.2, 2.6) for z in (-0.65, 0.65)]
+    hatches += [to_world(box_pose(1.6, 1.62, 0.55, 0.62, BOX_W / 2, BOX_W / 2 + 0.01)), to_world(box_pose(1.6, 1.62, 0.55, 0.62, -BOX_W / 2 - 0.01, -BOX_W / 2))]
     parts["launcher_hatches"] = painted(merge(hatches), olive_dk)
-
-    # Дульна торцева частина: дві рамки пакетів, по шість труб у кожній, і два поручні.
     face_u = BOX_L
-    frames, tubes, handles = [], [], []
+    frames, tubes, caps, booms, knuckles = [], [], [], [], []
     for pz in (-0.68, 0.68):
-        frames.append(to_world(box_pose(face_u, face_u + 0.04, 0.12, 0.98, pz - 0.52, pz + 0.52)))
-        for dz in (-0.31, 0.0, 0.31):
-            for v in (0.34, 0.66):
-                t = trimesh.creation.cylinder(radius=0.125, height=0.06, sections=24)
+        frames.append(to_world(box_pose(face_u, face_u + 0.03, 0.10, 0.86, pz - 0.54, pz + 0.54)))
+        for dz in (-0.33, 0.0, 0.33):
+            for v in (0.30, 0.64):
+                t = trimesh.creation.cylinder(radius=0.150, height=0.10, sections=28)
                 t.apply_transform(trimesh.geometry.align_vectors([0, 0, 1], [1, 0, 0]))
-                t.apply_translation([face_u + 0.05, v, pz + dz])
+                t.apply_translation([face_u + 0.04, v, pz + dz])
                 tubes.append(to_world(t))
-        for dz in (-0.55, 0.55):
-            handles.append(to_world(box_pose(face_u, face_u + 0.46, BOX_T - 0.14, BOX_T - 0.08, pz + dz - 0.03, pz + dz + 0.03)))
-        handles.append(to_world(box_pose(face_u + 0.40, face_u + 0.46, BOX_T - 0.14, BOX_T - 0.08, pz - 0.58, pz + 0.58)))
+                c = trimesh.creation.cylinder(radius=0.125, height=0.03, sections=24)
+                c.apply_transform(trimesh.geometry.align_vectors([0, 0, 1], [1, 0, 0]))
+                c.apply_translation([face_u + 0.10, v, pz + dz])
+                caps.append(to_world(c))
+        for dz in (-0.48, 0.48):                                                      # стріли завантажувача
+            booms.append(to_world(box_pose(face_u - 0.50, face_u + 0.62, BOX_T - 0.10, BOX_T + 0.02, pz + dz - 0.05, pz + dz + 0.05)))
+            k = trimesh.creation.cylinder(radius=0.05, height=0.12, sections=14)
+            k.apply_translation([face_u + 0.62, BOX_T - 0.04, pz + dz])
+            knuckles.append(to_world(k))
+        booms.append(to_world(box_pose(face_u + 0.56, face_u + 0.64, BOX_T - 0.10, BOX_T - 0.02, pz - 0.53, pz + 0.53)))
+        booms.append(to_world(box_pose(face_u - 0.05, face_u + 0.02, BOX_T - 0.12, BOX_T + 0.06, pz - 0.55, pz + 0.55)))
+    face = to_world(box_pose(face_u - 0.02, face_u + 0.01, 0.02, BOX_T - 0.02, -BOX_W / 2 + 0.03, BOX_W / 2 - 0.03))
+    parts["muzzle_face"] = painted(face, olive_dk)
     parts["pod_frames"] = painted(merge(frames), olive_lt)
-    parts["tube_mouths"] = painted(merge(tubes), black)
-    parts["handles"] = painted(merge(handles), olive_dk)
+    parts["tube_mouths"] = painted(merge(tubes), olive_lt)
+    parts["tube_caps"] = painted(merge(caps), olive)
+    parts["handles"] = painted(merge(booms), olive_dk)
+    parts["boom_knuckles"] = painted(merge(knuckles), metal)
 
-    # Гідроциліндри підйому.
+    # ---------- Гідроциліндри підйому (Х-подібно, як на довідках) ----------
     struts = []
     for z in (-0.95, 0.95):
-        base = (-2.30, 1.48, z)
-        top = pose_point(2.45, 0.0, z)
-        struts.append(cyl_between(base, top, 0.075))
-        struts.append(cyl_between(base, np.array(base) + (np.array(top) - np.array(base)) * 0.55, 0.095))
+        for base, u_top in (((-0.70, 1.48), 1.55), ((-2.20, 1.48), 2.55)):
+            top = pose_point(u_top, 0.0, z)
+            b3 = np.array([base[0], base[1], z])
+            struts.append(cyl_between(b3, top, 0.065))
+            struts.append(cyl_between(b3, b3 + (top - b3) * 0.55, 0.09))
+            struts.append(cyl_between(b3 - (0, 0, 0.10), b3 + (0, 0, 0.10), 0.06, 12))                  # палець опори
+    struts.append(cyl_between((HINGE[0], HINGE[1], -1.32), (HINGE[0], HINGE[1], 1.32), 0.07, 16))      # вісь підйому
     parts["struts"] = painted(merge(struts), metal)
 
+    # ---------- Корма: ліхтарі ----------
+    parts["rear_lamps"] = painted(merge([box((X_REAR - 0.02, 0.98, s * 1.05), (0.04, 0.10, 0.16)) for s in (-1, 1)]),
+                                  material("Red", (170, 36, 30), metallic=0.0, roughness=0.3))
     return parts
 
 
