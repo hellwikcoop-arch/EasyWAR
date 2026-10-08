@@ -154,6 +154,8 @@ export class RefViewer {
         });
         this.cache.set(model.file, entry);
       }
+      this.cache.delete(model.file); this.cache.set(model.file, entry); // найсвіжіша — в кінці
+      this.trim(model.file);
       if (token !== this.token) return null;
       built = { group: entry.group, wings: [], aircraft: entry };
     } else {
@@ -188,6 +190,23 @@ export class RefViewer {
     this.apart = 0; this.open = 1;
     this.setView('three-quarter');
     return { winged: this.winged, modular: this.modular, aircraft: this.aircraft, action: this.animated };
+  }
+
+  // Текстури наземних моделей важкі (атласи 2048²), тому в кеші лишаємо кілька останніх, а решту звільняємо з відеопамʼяті.
+  trim(keep) {
+    while (this.cache.size > 3) {
+      const [file, entry] = this.cache.entries().next().value;
+      if (file === keep) break;
+      this.cache.delete(file);
+      entry.group.traverse(o => {
+        if (!o.isMesh) return;
+        o.geometry.dispose();
+        for (const m of [].concat(o.material)) {
+          for (const key of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap']) if (m[key]) m[key].dispose();
+          m.dispose();
+        }
+      });
+    }
   }
 
   clear() {

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Генерує процедурну модель РСЗВ M142 HIMARS для довідника (src/models/m142-himars.glb).
 
-    pip install numpy scipy trimesh
+    pip install numpy scipy trimesh pillow xatlas   # текстури: script/glb_bake.py, paint_lib.py, vehicle_paint.py
+    # EW_FAST=1 — напіврозрізнення для швидкої перевірки; EW_BAKE_CACHE=<тека> — кеш запікань (перед випуском чистити)
     python3 script/build-himars-model.py [вихідний.glb]
 
 Розміри й силует зняті з бокової ортографічної проєкції на довідкових зображеннях, які надав користувач (≈229 пікселів
@@ -16,6 +17,7 @@
 моделі, сторонніх текстур немає. Для перегляду, а не для впізнавання чи розрахунків. Одиниці — метри, перед машини
 дивиться в +x, «вгору» — +y, права сторона — +z (як у glTF).
 """
+import os
 import sys
 from pathlib import Path
 
@@ -23,7 +25,9 @@ import numpy as np
 import trimesh
 from trimesh.visual.material import PBRMaterial
 
+from glb_bake import BakeSpec, TileSpec
 from glb_rig import GlbWriter, lpc_pod, node, quat_axis, ramp
+import vehicle_paint as vp
 
 DEFAULT_OUT = Path(__file__).resolve().parent.parent / "src" / "models" / "m142-himars.glb"
 
@@ -405,8 +409,50 @@ def himars():
                                     cyl_z((-3.80, 0.98, 0.0), 0.07, 0.04, 16)]), black)
 
     parts["rivets"] = painted(merge(rivets), olive_dk)
-    mats = dict(olive=olive, olive_dk=olive_dk, black=black, steel=steel)
-    return parts, launcher_rig(turret_parts, mod, mats)
+    return parts, launcher_rig(turret_parts, mod)
+
+
+# Групи нерухомих частин для запікання (id = номер у списку) і їхні рецепти.
+CAMO = os.environ.get("HIMARS_CAMO", "0") == "1"
+OL = vp.R("camo", 0.72, 0.1)
+OL_DK = vp.R("camo", 0.72, 0.12, tone=0.8)
+CHASSIS_NAMES = ["frame", "axles", "rear_beam", "rear_red", "rear_amber", "hitch", "tow_hooks", "vents_steps", "fuel_tanks", "exhaust",
+                 "equipment", "lids", "loader_arch", "rails", "rivets"]
+CHASSIS_RECIPES = {"frame": vp.R((56, 56, 46), 0.82, 0.3), "axles": vp.R((50, 50, 42), 0.8, 0.4), "rear_beam": vp.R((54, 54, 44), 0.8, 0.35),
+                   "rear_red": vp.LENS_R, "rear_amber": vp.LENS_A, "hitch": vp.R((38, 38, 36), 0.5, 0.8), "tow_hooks": vp.R((60, 62, 46), 0.6, 0.4),
+                   "vents_steps": vp.BLACK, "fuel_tanks": vp.R((60, 64, 46), 0.7, 0.2), "exhaust": vp.R((74, 62, 50), 0.6, 0.5),
+                   "equipment": OL, "lids": vp.R("camo", 0.72, 0.12, tone=0.85), "loader_arch": vp.R("camo", 0.7, 0.15, tone=0.9),
+                   "rails": vp.STEEL, "rivets": vp.R("camo", 0.7, 0.2, tone=0.75)}
+CAB_NAMES = ["cab", "windshields", "windshield_frames", "wipers", "grille_back", "grille", "round_cover", "armour_bolts", "doors", "side_windows",
+             "door_handles", "roof_hatch", "roof_lamps", "mirrors", "mirror_arms", "bumper", "lamps", "lamps_amber", "lamp_rings"]
+CAB_RECIPES = {"cab": OL, "windshields": vp.GLASS, "windshield_frames": OL_DK, "wipers": vp.BLACK, "grille_back": vp.BLACK,
+               "grille": vp.R("camo", 0.7, 0.2, tone=0.75), "round_cover": OL, "armour_bolts": vp.R("camo", 0.65, 0.3, tone=0.7), "doors": OL,
+               "side_windows": vp.GLASS, "door_handles": vp.R("camo", 0.6, 0.3, tone=0.7), "roof_hatch": vp.R("camo", 0.7, 0.12, tone=0.9),
+               "roof_lamps": vp.LENS_A, "mirrors": vp.BLACK, "mirror_arms": OL_DK, "bumper": vp.R("camo", 0.7, 0.2, tone=0.85),
+               "lamps": vp.LENS_W, "lamps_amber": vp.LENS_A, "lamp_rings": vp.BLACK}
+TILES = {"tyres": TileSpec("rubber", (36, 34, 31), 0.4, 1.0, 1.0), "rims": TileSpec("cast", (70, 74, 56), 0.5, 1.0, 1.0),
+         "wheel_bolts": TileSpec("steel", (95, 97, 92), 0.3, 1.0, 1.0)}
+
+
+def group_nodes(parts):
+    nodes = []
+    for gname, names, recipes in (("chassis", CHASSIS_NAMES, CHASSIS_RECIPES), ("cab", CAB_NAMES, CAB_RECIPES)):
+        meshes, ids = [], []
+        for i, nme in enumerate(names):
+            m = parts.pop(nme)
+            meshes.append(m)
+            ids.append(np.full(len(m.faces), i, np.int16))
+        painter = vp.group_painter(names, recipes, camo=CAMO, seed=21 if gname == "chassis" else 23, olive=OLIVE_RGB,
+                                   weather=dict(mud=0.65 if gname == "chassis" else 0.4, dust=0.5),
+                                   seams=("cab", "doors", "equipment", "bumper") if gname == "cab" else ("equipment",),
+                                   post=vp.post_himars_cab if gname == "cab" else vp.post_himars_chassis)
+        nodes.append(node(gname, [(merge(meshes), BakeSpec(painter, res=2048, ids=np.concatenate(ids), key=f"himars-{gname}-{CAMO}", seed=21))]))
+    for nme, spec in TILES.items():
+        nodes.append(node(nme, [(parts.pop(nme), spec)]))
+    return nodes
+
+
+OLIVE_RGB = (84, 90, 62)
 
 
 # --- рухома частина ---------------------------------------------------------------------------------------------
@@ -466,17 +512,22 @@ def local(mesh, origin):
     return mesh
 
 
-def launcher_rig(turret_parts, mod, mats):
-    olive, olive_dk, steel, black = mats["olive"], mats["olive_dk"], mats["steel"], mats["black"]
-    for name, m in mod.items():
-        if name in FLAT:
-            m.unmerge_vertices()
+def launcher_rig(turret_parts, mod):
+    metal = material("Metal", (150, 154, 150), metallic=0.8, roughness=0.3)
+    steel_dk = TileSpec("steel", (70, 72, 70), 0.5, 1.0, 1.0)
+    steel_br = TileSpec("steel", (205, 207, 204), 0.5, 1.0, 1.0)
+    olive_t = TileSpec("paint", (84, 90, 62), 0.6, 1.0, 1.0)
     # Платформа: люлька, проушини осі підйому, опори гідроциліндрів.
     cr = [turret_parts["cradle"]]
     lugs = [box((HINGE[0], HINGE[1] - 0.06, s * 0.70), (0.26, 0.20, 0.10)) for s in (-1, 1)]
     lugs += [box((base[0], base[1] + 0.02, s * STRUT_Z), (0.26, 0.10, 0.26)) for _, base, *_ in STRUTS for s in (-1, 1)]
     pin = cyl_between((HINGE[0], HINGE[1], -0.80), (HINGE[0], HINGE[1], 0.80), 0.06, 16)
-    turret_prims = [(local(m, TURRET), m.visual.material) for m in cr] + [(local(merge(lugs), TURRET), olive_dk), (local(pin, TURRET), steel)]
+    tparts = [local(cr[0], TURRET), local(merge(lugs), TURRET), local(pin, TURRET)]
+    tnames = ["cradle", "lugs", "pin"]
+    T_RECIPES = {"cradle": vp.R((50, 54, 40), 0.7, 0.2), "lugs": vp.R((50, 54, 40), 0.65, 0.25), "pin": vp.STEEL}
+    tids = np.concatenate([np.full(len(g.faces), i, np.int16) for i, g in enumerate(tparts)])
+    turret_prims = [(merge(tparts), BakeSpec(vp.group_painter(tnames, T_RECIPES, camo=False, seed=31, weather=dict(mud=0.2, dust=0.45), olive=(52, 58, 40)),
+                                             res=1024, ids=tids, key="himars-turret", seed=31))]
 
     # Внутрішня секція рами: дві балки з поперечками.
     b1 = [box((-1.85, BOOM_Y - 0.02, s * 0.44), (3.10, 0.08, 0.08)) for s in (-1, 1)]
@@ -494,34 +545,39 @@ def launcher_rig(turret_parts, mod, mats):
     # Троси: чотири нитки від блока вниз; вузол масштабується по висоті.
     lines = [cyl_between((POD_XC + dx, 0.0, dz), (POD_XC + dx, -1.0, dz), 0.010, 6) for dx in (-0.08, 0.08) for dz in (-0.05, 0.05)]
     cable_top = BOOM_Y - 0.15
-    cables = node("hoist_cables", [(local(merge(lines), (HINGE[0], 0, 0)), steel)], t=(0.0, cable_top - HINGE[1], 0.0),
+    cables = node("hoist_cables", [(local(merge(lines), (HINGE[0], 0, 0)), metal)], t=(0.0, cable_top - HINGE[1], 0.0),
                   s=(1.0, cable_top - (SPREADER_Y + 0.06), 1.0))
     # Траверса: балка вздовж пакета з гаками на вушках.
     sp = [box((POD_XC, 0.04, 0.0), (0.95, 0.07, 0.10)), box((POD_XC, 0.10, 0.0), (0.16, 0.06, 0.16))]
     sp += [box((POD_XC + lx, -0.01, 0.0), (0.05, 0.10, 0.08)) for lx in POD_LUGS]
-    spreader = node("spreader", [(local(merge(sp), (HINGE[0], 0, 0)), black)], t=(0.0, SPREADER_Y - HINGE[1], 0.0))
+    spreader = node("spreader", [(local(merge(sp), (HINGE[0], 0, 0)), steel_dk)], t=(0.0, SPREADER_Y - HINGE[1], 0.0))
     pods = []
     for name, fresh in (("pod", False), ("pod_new", True)):
         prims = lpc_pod(POD_X1 - POD_X0, POD_Y1 - POD_Y0, POD_HALF, fresh, POD_LUGS)
         pods.append(node(name, prims, t=np.array([POD_XC, POD_Y0, 0.0]) - HINGE, r=AFT, s=(TINY,) * 3 if fresh else (1.0, 1.0, 1.0)))
-    boom_2 = node("boom_2", [(local(merge(b2), HINGE), olive_dk), (local(merge(trolley), HINGE), olive)], children=[cables, spreader] + pods)
-    boom_1 = node("boom_1", [(local(merge(b1), HINGE), olive)], children=[boom_2])
+    boom_2 = node("boom_2", [(local(merge(b2), HINGE), steel_br), (local(merge(trolley), HINGE), steel_dk)], children=[cables, spreader] + pods)
+    boom_1 = node("boom_1", [(local(merge(b1), HINGE), steel_dk)], children=[boom_2])
 
     # Модуль: корпус, дверцята, ручки, задній торець, штанги, заклепки; нерухома основа рами — окремий вузол.
-    frame = mod.pop("loader_frame")
-    module_prims = [(local(m, HINGE), m.visual.material) for m in mod.values()]
-    module = node("module", module_prims, t=HM, r=quat_axis((0, 0, 1), elev_at(0.0)),
-                  children=[node("loader_frame", [(local(frame, HINGE), frame.visual.material)]), boom_1])
+    mnames = ["module", "module_doors", "module_handles", "module_rear", "loader_frame", "module_rails", "module_rivets"]
+    M_RECIPES = {"module": vp.R("camo", 0.72, 0.1), "module_doors": vp.R("camo", 0.7, 0.12, tone=0.92), "module_handles": vp.BLACK,
+                 "module_rear": vp.R("camo", 0.72, 0.15, tone=0.85), "loader_frame": vp.R("camo", 0.66, 0.25, tone=0.7), "module_rails": vp.STEEL,
+                 "module_rivets": vp.R("camo", 0.7, 0.2, tone=0.75)}
+    mmeshes = [local(mod[n], HINGE) for n in mnames]
+    mids = np.concatenate([np.full(len(g.faces), i, np.int16) for i, g in enumerate(mmeshes)])
+    mspec = BakeSpec(vp.group_painter(mnames, M_RECIPES, camo=CAMO, seed=41, weather=dict(mud=0.1, dust=0.5), olive=OLIVE_RGB, seams=("module",), post=vp.post_himars_module),
+                     res=2048, ids=mids, key=f"himars-module-{CAMO}", seed=41)
+    module = node("module", [(merge(mmeshes), mspec)], t=HM, r=quat_axis((0, 0, 1), elev_at(0.0)), children=[boom_1])
 
     struts = []
     for name, base_w, dist, lb, lr in STRUTS:
         base = (base_w[0] - TURRET[0], base_w[1])
         ang, length = strut_pose(0.0, base, dist)
         for side, z in (("l", -STRUT_Z), ("r", STRUT_Z)):
-            barrel = [cyl_between((0, 0, 0), (0, lb, 0), 0.085, 16), cyl_between((0, 0, -0.10), (0, 0, 0.10), 0.06, 12)]
-            rod = [cyl_between((0, 0, 0), (0, lr, 0), 0.05, 14), cyl_between((0, lr, -0.08), (0, lr, 0.08), 0.05, 12)]
-            rod_node = node(f"rod_{name}_{side}", [(merge(rod), steel)], t=(0.0, length - lr, 0.0))
-            struts.append(node(f"strut_{name}_{side}", [(merge(barrel), olive_dk)], t=(base[0], base[1], z),
+            barrel = [cyl_between((0, 0, 0), (0, lb, 0), 0.085, 24), cyl_between((0, 0, -0.10), (0, 0, 0.10), 0.06, 20)]
+            rod = [cyl_between((0, 0, 0), (0, lr, 0), 0.05, 24), cyl_between((0, lr, -0.08), (0, lr, 0.08), 0.05, 20)]
+            rod_node = node(f"rod_{name}_{side}", [(merge(rod), steel_br)], t=(0.0, length - lr, 0.0))
+            struts.append(node(f"strut_{name}_{side}", [(merge(barrel), olive_t)], t=(base[0], base[1], z),
                                r=quat_axis((0, 0, 1), ang), children=[rod_node]))
     return node("turret", turret_prims, t=TURRET, r=quat_axis((0, 1, 0), yaw_at(0.0)), children=[module] + struts)
 
@@ -553,10 +609,9 @@ def main() -> int:
     out = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_OUT
     parts, rig = himars()
     w = GlbWriter("EasyWAR build-himars-model.py")
-    for name, mesh in parts.items():
-        if name in FLAT:
-            mesh.unmerge_vertices()  # плоске освітлення лише для великих гранчастих корпусів без фасок
-        w.add(node(name, [(mesh, mesh.visual.material)]))
+    for nd in group_nodes(parts):
+        w.add(nd)
+    assert not parts, f"частини без поверхні: {list(parts)}"
     w.add(rig)
     times, tracks = reload_tracks()
     w.animation("reload", times, tracks)

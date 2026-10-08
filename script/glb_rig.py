@@ -4,12 +4,16 @@
 Пакет будується в «канонічній» системі: початок — середина низу, дула труб дивляться в +x. Генератор ставить вузол
 пакета на місце й за потреби повертає його (у HIMARS дула дивляться назад).
 """
+import hashlib
 import json
 import struct
 
 import numpy as np
 import trimesh
 from trimesh.visual.material import PBRMaterial
+
+from glb_bake import BakeSpec, bake, jpeg as jpeg_bytes, tiled_geometry
+from paint_lib import tile_texture
 
 
 def ramp(t, span):
@@ -60,22 +64,7 @@ def _cyl_x(x0, x1, y, z, radius, sections=24):
     return m
 
 
-def pbr(name, rgb, metallic=0.1, roughness=0.65):
-    """PBR-матеріал; колір задано в sRGB (0–255), glTF чекає лінійні значення."""
-    linear = [round(255 * (c / 255) ** 2.2) for c in rgb]
-    return PBRMaterial(name=name, baseColorFactor=[*linear, 255], metallicFactor=metallic, roughnessFactor=roughness)
-
-
-# Матеріали пакета — спільні для обох машин, кольори за довідковим зображенням пакета M26.
-POD_MATS = {
-    "frame": pbr("PodFrame", (110, 112, 78), metallic=0.25, roughness=0.6),
-    "tubes": pbr("PodTube", (140, 140, 106), metallic=0.15, roughness=0.45),
-    "cap": pbr("PodCap", (164, 160, 114), metallic=0.1, roughness=0.55),
-    "cap_dk": pbr("PodCapRing", (120, 118, 84), metallic=0.1, roughness=0.6),
-    "bulkhead": pbr("PodBulkhead", (126, 128, 122), metallic=0.35, roughness=0.5),
-    "hole": pbr("PodHole", (20, 21, 20), metallic=0.2, roughness=0.8),
-    "stencil": pbr("Stencil", (214, 210, 196), metallic=0.0, roughness=0.8),
-}
+ID_FRAME, ID_TUBE, ID_CAP, ID_CAP_DK, ID_BULK, ID_HOLE = range(6)
 
 
 def _torus_x(center, major, minor):
@@ -89,21 +78,23 @@ def lpc_pod(length, height, half, fresh, lugs):
     """Пакет за довідковим зображенням (M26 rocket pod): шість щільно покладених труб у два ряди, кутові балки, полози
     знизу з упорами на торцях, поперечні смуги й центральна плита з ручкою зверху, D-кільця на верхніх кутах, по три
     стійки на борт із розкосами лише в крайніх прольотах. На дульному торці — сірий щит із шістьма отворами
-    (після пуску) або кришки з кільцем і чотирма виступами (новий пакет). lugs — вушка для підйому від середини."""
+    (після пуску) або кришки з кільцем і чотирма виступами (новий пакет). lugs — вушка для підйому від середини.
+    Повертає список призм [(сітка, BakeSpec)]: усе запікається в одну текстуру, частини розрізняються за id."""
+    from vehicle_paint import pod_painter
     L2, H, W = length / 2, height, half
-    frame, tubes, ends, rings, skids, stencil = [], [], [], [], [], []
+    parts = {k: [] for k in range(6)}
+    frame = parts[ID_FRAME]
     for y in (0.035, H - 0.03):                                                    # кутові балки
         for s in (-1, 1):
             frame.append(_box((0.0, y, s * (W - 0.03)), (length, 0.06, 0.06), bevel=0.008))
     for s in (-1, 1):                                                              # полози з упорами
-        skids.append(_box((0.0, 0.02, s * (W - 0.05)), (length + 0.10, 0.04, 0.10), bevel=0.006))
+        frame.append(_box((0.0, 0.02, s * (W - 0.05)), (length + 0.10, 0.04, 0.10), bevel=0.006))
     for x in (-L2 + 0.03, L2 - 0.03):                                              # торцеві рамки
         for s in (-1, 1):
             frame.append(_box((x, H / 2, s * (W - 0.03)), (0.06, H, 0.06)))
         for y in (0.035, H - 0.03):
             frame.append(_box((x, y, 0.0), (0.06, 0.06, 2 * W)))
-    posts = [-L2 + length * f for f in (0.25, 0.5, 0.75)]
-    for x in posts:                                                                # стійки
+    for x in [-L2 + length * f for f in (0.25, 0.5, 0.75)]:                        # стійки
         for s in (-1, 1):
             frame.append(_box((x, H / 2, s * (W - 0.02)), (0.05, H - 0.08, 0.035)))
     bay = length * 0.25
@@ -120,35 +111,36 @@ def lpc_pod(length, height, half, fresh, lugs):
         frame.append(_box((lx, H + 0.02, 0.0), (0.08, 0.05, 0.05)))
     for x in (-L2 + 0.18, L2 - 0.18):                                              # D-кільця на верхніх кутах
         for s in (-1, 1):
-            rings.append(_torus_x((x, H + 0.02, s * (W - 0.03)), 0.035, 0.008))
+            frame.append(_torus_x((x, H + 0.02, s * (W - 0.03)), 0.035, 0.008))
+    frame.append(_box((-L2 + 0.035, H / 2, 0.0), (0.03, H - 0.06, 2 * W - 0.06)))  # глухий задній торець
     r = min((H - 0.06) / 4, (2 * W - 0.06) / 6)                                     # труби впритул одна до одної
     rows = (0.03 + (H - 0.06) * 0.25, 0.03 + (H - 0.06) * 0.75)
     cols = (-2 * r, 0.0, 2 * r)
     for y in rows:
         for z in cols:
-            tubes.append(_cyl_x(-L2 + 0.06, L2 - 0.01, y, z, r - 0.004, 32))
+            parts[ID_TUBE].append(_cyl_x(-L2 + 0.06, L2 - 0.01, y, z, r - 0.004, 40))
     if fresh:                                                                      # кришки: диск, кільце, чотири виступи
-        caps, caps_dk = [], []
         for y in rows:
             for z in cols:
-                caps.append(_cyl_x(L2 - 0.01, L2 + 0.025, y, z, r - 0.012, 32))
-                caps_dk.append(_cyl_x(L2 + 0.025, L2 + 0.032, y, z, r * 0.78, 28))
-                caps.append(_cyl_x(L2 + 0.032, L2 + 0.036, y, z, r * 0.70, 28))
+                parts[ID_CAP].append(_cyl_x(L2 - 0.01, L2 + 0.025, y, z, r - 0.012, 40))
+                parts[ID_CAP_DK].append(_cyl_x(L2 + 0.025, L2 + 0.032, y, z, r * 0.78, 32))
+                parts[ID_CAP].append(_cyl_x(L2 + 0.032, L2 + 0.036, y, z, r * 0.70, 32))
                 for k in range(4):
                     q = np.pi / 4 + k * np.pi / 2
-                    caps_dk.append(_box((L2 + 0.03, y + 0.82 * r * np.sin(q), z + 0.82 * r * np.cos(q)), (0.02, 0.035, 0.035)))
-        end_prims = [(trimesh.util.concatenate(caps), POD_MATS["cap"]), (trimesh.util.concatenate(caps_dk), POD_MATS["cap_dk"])]
+                    parts[ID_CAP_DK].append(_box((L2 + 0.03, y + 0.82 * r * np.sin(q), z + 0.82 * r * np.cos(q)), (0.02, 0.035, 0.035)))
     else:                                                                          # щит із шістьма отворами
-        plate = [_box((L2 - 0.005, H / 2, 0.0), (0.02, H - 0.05, 2 * W - 0.05))]
-        holes = [_cyl_x(L2 + 0.005, L2 + 0.009, y, z, r - 0.03, 32) for y in rows for z in cols]
-        end_prims = [(trimesh.util.concatenate(plate), POD_MATS["bulkhead"]), (trimesh.util.concatenate(holes), POD_MATS["hole"])]
-    ends.append(_box((-L2 + 0.035, H / 2, 0.0), (0.03, H - 0.06, 2 * W - 0.06)))      # глухий задній торець
-    for s in (-1, 1):                                                              # кілька трафаретів на балках
-        for x in (-L2 * 0.62, L2 * 0.42):
-            stencil.append(_box((x, H - 0.03, s * (W + 0.0015)), (0.30, 0.03, 0.003)))
-    cat = trimesh.util.concatenate
-    return ([(cat(frame), POD_MATS["frame"]), (cat(skids), POD_MATS["frame"]), (cat(rings), POD_MATS["frame"]),
-             (cat(tubes), POD_MATS["tubes"]), (cat(ends), POD_MATS["frame"]), (cat(stencil), POD_MATS["stencil"])] + end_prims)
+        parts[ID_BULK].append(_box((L2 - 0.005, H / 2, 0.0), (0.02, H - 0.05, 2 * W - 0.05)))
+        for y in rows:
+            for z in cols:
+                parts[ID_HOLE].append(_cyl_x(L2 + 0.005, L2 + 0.009, y, z, r - 0.03, 40))
+    meshes, ids = [], []
+    for k, lst in parts.items():
+        for m in lst:
+            meshes.append(m)
+            ids.append(np.full(len(m.faces), k, np.int16))
+    mesh = trimesh.util.concatenate(meshes)
+    return [(mesh, BakeSpec(pod_painter(length, height, half, fresh, lugs), res=2048, ids=np.concatenate(ids),
+                            key=f"pod-{fresh}-{length:.2f}-{height:.2f}-{half:.2f}"))]
 
 
 class GlbWriter:
@@ -159,6 +151,8 @@ class GlbWriter:
         self.doc = {"asset": {"version": "2.0", "generator": generator}, "scene": 0, "scenes": [{"nodes": []}],
                     "nodes": [], "meshes": [], "materials": [], "accessors": [], "bufferViews": [], "buffers": []}
         self.mat_index = {}
+        self.tex_index = {}
+        self.tiles = {}
         self.triangles = 0
 
     def view(self, data: bytes, target=None):
@@ -190,9 +184,71 @@ class GlbWriter:
             self.mat_index[mat.name] = len(self.doc["materials"]) - 1
         return self.mat_index[mat.name]
 
+    def image(self, data, mime="image/jpeg", repeat=False):
+        """Додає картинку й текстуру (з дедуплікацією за вмістом). Повертає індекс текстури."""
+        key = (hashlib.md5(data).hexdigest(), repeat)
+        if key not in self.tex_index:
+            self.bin += b"\0" * (-len(self.bin) % 4)
+            view = {"buffer": 0, "byteOffset": len(self.bin), "byteLength": len(data)}
+            self.bin += data
+            self.doc["bufferViews"].append(view)
+            self.doc.setdefault("images", []).append({"bufferView": len(self.doc["bufferViews"]) - 1, "mimeType": mime})
+            self.doc.setdefault("samplers", [{"magFilter": 9729, "minFilter": 9987, "wrapS": 33071, "wrapT": 33071},
+                                             {"magFilter": 9729, "minFilter": 9987, "wrapS": 10497, "wrapT": 10497}])
+            self.doc.setdefault("textures", []).append({"source": len(self.doc["images"]) - 1, "sampler": 1 if repeat else 0})
+            self.tex_index[key] = len(self.doc["textures"]) - 1
+        return self.tex_index[key]
+
+    def baked_material(self, baked, name):
+        key = hashlib.md5(baked.images["color"] + baked.images["orm"] + baked.images["normal"]).hexdigest()
+        if key not in self.mat_index:
+            self.doc["materials"].append({
+                "name": name,
+                "pbrMetallicRoughness": {
+                    "baseColorTexture": {"index": self.image(baked.images["color"])},
+                    "metallicRoughnessTexture": {"index": self.image(baked.images["orm"])},
+                    "baseColorFactor": [1.0, 1.0, 1.0, 1.0], "metallicFactor": 1.0, "roughnessFactor": 1.0},
+                "normalTexture": {"index": self.image(baked.images["normal"]), "scale": 1.0}})
+            self.mat_index[key] = len(self.doc["materials"]) - 1
+        return self.mat_index[key]
+
+    def tiled_material(self, spec):
+        key = ("tile", spec.kind, spec.color, spec.rough, spec.metal, spec.tile_m, spec.size)
+        if key not in self.mat_index:
+            if spec.kind not in self.tiles:
+                c, o, n = tile_texture(spec.kind, spec.size, spec.tile_m)
+                self.tiles[spec.kind] = (self.image(jpeg_bytes(c, 86, 2), repeat=True), self.image(jpeg_bytes(o, 82, 0), repeat=True),
+                                         self.image(jpeg_bytes(n, 90, 0), repeat=True))
+            tc, to, tn = self.tiles[spec.kind]
+            lin = [round((v / 255) ** 2.2, 6) for v in spec.color]
+            self.doc["materials"].append({
+                "name": f"{spec.kind}-{'-'.join(str(v) for v in spec.color)}",
+                "pbrMetallicRoughness": {"baseColorTexture": {"index": tc}, "baseColorFactor": [*lin, 1.0],
+                                         "metallicRoughnessTexture": {"index": to}, "metallicFactor": spec.metal, "roughnessFactor": spec.rough},
+                "normalTexture": {"index": tn, "scale": 1.0}})
+            self.mat_index[key] = len(self.doc["materials"]) - 1
+        return self.mat_index[key]
+
     def mesh(self, name, prims):
         out = []
         for m, mat in prims:
+            if getattr(mat, "tiled", False):
+                pos, nrm, uv, faces = tiled_geometry(m, mat.tile_m)
+                attrs = {"POSITION": self.accessor(pos, "VEC3", 34962, True), "NORMAL": self.accessor(nrm, "VEC3", 34962),
+                         "TEXCOORD_0": self.accessor(uv, "VEC2", 34962)}
+                idx = faces.reshape(-1).astype(np.uint16 if len(pos) < 65536 else np.uint32)
+                self.triangles += len(faces)
+                out.append({"attributes": attrs, "indices": self.accessor(idx, "SCALAR", 34963), "material": self.tiled_material(mat)})
+                continue
+            if getattr(mat, "baked", False):
+                b = bake(m, mat)
+                attrs = {"POSITION": self.accessor(b.pos, "VEC3", 34962, True), "NORMAL": self.accessor(b.nrm, "VEC3", 34962),
+                         "TEXCOORD_0": self.accessor(b.uv, "VEC2", 34962)}
+                faces = b.faces.reshape(-1)
+                idx = faces.astype(np.uint16 if len(b.pos) < 65536 else np.uint32)
+                self.triangles += len(b.faces)
+                out.append({"attributes": attrs, "indices": self.accessor(idx, "SCALAR", 34963), "material": self.baked_material(b, name)})
+                continue
             pos = np.asarray(m.vertices, dtype=np.float32)
             nrm = np.asarray(m.vertex_normals, dtype=np.float32)
             idx = np.asarray(m.faces, dtype=np.uint16 if len(pos) < 65536 else np.uint32).reshape(-1)
