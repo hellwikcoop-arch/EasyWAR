@@ -1,7 +1,7 @@
 // Тривимірний переглядач довідника по озброєнню (three.js). Показує або процедурну модель боєприпасу
 // (munition-3d.js), або .glb-модель літака з каталогу src/models. Завантажується лише коли вперше відкривають статтю
 // з моделлю. Сцена (світло, підлога) спільна з карткою вильоту — stage-3d.js.
-import { Box3, Group, PerspectiveCamera, Scene, Vector3 } from 'three';
+import { AnimationMixer, Box3, Group, PerspectiveCamera, Scene, Vector3 } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { addStageEnvironment, createRenderer, FLOOR_Y } from './stage-3d.js';
@@ -29,6 +29,9 @@ export const MODEL_FILES = {
   'kab-500l': new URL('./models/kab-500l.glb', import.meta.url).href,
   'storm-shadow': new URL('./models/storm-shadow.glb', import.meta.url).href,
   'gmlrs-m31': new URL('./models/gmlrs-m31.glb', import.meta.url).href,
+  'mgm-140-atacms': new URL('./models/mgm-140-atacms.glb', import.meta.url).href,
+  'm142-himars': new URL('./models/m142-himars.glb', import.meta.url).href,
+  'm270-mlrs': new URL('./models/m270-mlrs.glb', import.meta.url).href,
 };
 
 // Куди в файлі дивиться ніс літака: модель повертається так, щоб ніс дивився в +X, як у боєприпасів.
@@ -56,6 +59,30 @@ let loader = null;
 function gltfLoader() {
   if (!loader) loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
   return loader;
+}
+
+// Кліп анімації з .glb (наприклад, заряджання M270), який прокручують повзунком. Заодно для кожної частки кліпу
+// рахує, скільки місця займає модель: камера відходить, коли частини виїжджають далеко від корпусу.
+const ACTION_SAMPLES = 48;
+function prepareAction(gltf, entry) {
+  const clip = gltf.animations && gltf.animations[0];
+  if (!clip || !clip.duration) return null;
+  const mixer = new AnimationMixer(gltf.scene);
+  const act = mixer.clipAction(clip);
+  act.play(); act.paused = true;
+  const seek = v => { act.time = clamp(v, 0, 1) * clip.duration; mixer.update(0); };
+  const root = entry.group, box = new Box3(), base = { r: Math.hypot(entry.size.x, entry.size.z) / 2, hh: entry.size.y / 2 };
+  const reach = [];
+  for (let i = 0; i <= ACTION_SAMPLES; i++) {
+    seek(i / ACTION_SAMPLES);
+    root.updateMatrixWorld(true);
+    box.setFromObject(root);
+    const x = Math.max(-box.min.x, box.max.x), z = Math.max(-box.min.z, box.max.z), y = Math.max(-box.min.y, box.max.y);
+    reach.push({ r: Math.max(base.r, Math.hypot(x, z)), hh: Math.max(base.hh, y) });
+  }
+  seek(0);
+  root.updateMatrixWorld(true);
+  return { seek, reach };
 }
 
 // Ставить модель з .glb у стандартну позу: ніс у +X, центр у нулі, задана довжина (літак — AIRCRAFT_LENGTH, боєприпас — 4).
@@ -89,7 +116,7 @@ export class RefViewer {
     this.holder = new Group();
     this.scene.add(this.holder);
     el.prepend(this.canvas);
-    this.group = null; this.wings = []; this.update = null; this.explode = null;
+    this.group = null; this.wings = []; this.update = null; this.explode = null; this.action = null; this.step = 0;
     this.parts = []; this.spot = new Vector3();
     this.cache = new Map();
     Object.assign(this, VIEWS['three-quarter']);
@@ -104,6 +131,7 @@ export class RefViewer {
   }
 
   get modular() { return !!this.explode; }
+  get animated() { return !!this.action; }
   get winged() { return this.wings.length > 0; }
 
   // Показує модель: { kind } — процедурний боєприпас, { file, nose } — літак з .glb. Повертає можливості моделі.
@@ -117,6 +145,7 @@ export class RefViewer {
       if (!entry) {
         const gltf = await gltfLoader().loadAsync(url, e => { if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total); });
         entry = normalizeAircraft(gltf.scene, model.nose, model.length);
+        entry.action = prepareAction(gltf, entry);
         const aniso = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
         entry.group.traverse(o => {
           if (!o.isMesh) return;
@@ -125,6 +154,8 @@ export class RefViewer {
         });
         this.cache.set(model.file, entry);
       }
+      this.cache.delete(model.file); this.cache.set(model.file, entry); // найсвіжіша — в кінці
+      this.trim(model.file);
       if (token !== this.token) return null;
       built = { group: entry.group, wings: [], aircraft: entry };
     } else {
@@ -134,6 +165,8 @@ export class RefViewer {
     const { group, wings = [], update, explode, labels = [], aircraft } = built;
     this.group = group; this.wings = wings; this.update = update || null; this.explode = explode || null;
     this.aircraft = !!aircraft;
+    this.action = (aircraft && aircraft.action) || null; this.step = 0;
+    if (this.action) this.action.seek(0);
     this.parts = labels.map(label => {
       const span = document.createElement('span');
       span.className = 'rw-part rw-part-' + label.side; span.textContent = label.text; span.setAttribute('aria-hidden', 'true');
@@ -156,7 +189,24 @@ export class RefViewer {
     }
     this.apart = 0; this.open = 1;
     this.setView('three-quarter');
-    return { winged: this.winged, modular: this.modular, aircraft: this.aircraft };
+    return { winged: this.winged, modular: this.modular, aircraft: this.aircraft, action: this.animated };
+  }
+
+  // Текстури наземних моделей важкі (атласи 2048²), тому в кеші лишаємо кілька останніх, а решту звільняємо з відеопамʼяті.
+  trim(keep) {
+    while (this.cache.size > 3) {
+      const [file, entry] = this.cache.entries().next().value;
+      if (file === keep) break;
+      this.cache.delete(file);
+      entry.group.traverse(o => {
+        if (!o.isMesh) return;
+        o.geometry.dispose();
+        for (const m of [].concat(o.material)) {
+          for (const key of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap']) if (m[key]) m[key].dispose();
+          m.dispose();
+        }
+      });
+    }
   }
 
   clear() {
@@ -171,6 +221,10 @@ export class RefViewer {
 
   setOpen(v) { this.open = v; this.pose(); }
   setApart(v) { this.apart = v; this.pose(); }
+  setAction(v) {
+    if (!this.action) return;
+    this.step = clamp(v, 0, 1); this.action.seek(this.step); this.pose();
+  }
   setView(name) { Object.assign(this, VIEWS[name] || VIEWS['three-quarter']); this.zoom = 1; this.pose(); }
   spin(dYaw, dPitch = 0) { this.yaw += dYaw; this.pitch = clamp(this.pitch + dPitch, .02, 1.52); this.pose(); }
   zoomBy(f) { this.zoom = clamp(this.zoom * f, .45, 1.6); this.pose(); }
@@ -208,8 +262,14 @@ export class RefViewer {
   baseDistance() {
     const aspect = this.camera.aspect;
     // Боєприпаси: та сама відстань, що в картці вильоту, з запасом для розкладеної бомби; літак — за описаною кулею.
-    if (this.aircraft) return aircraftDistance(this.footprint, this.pitch, this.camera.fov, aspect);
+    if (this.aircraft) return aircraftDistance(this.action ? this.reach() : this.footprint, this.pitch, this.camera.fov, aspect);
     return Math.max(6, (6 * 2.1) / aspect) * (this.explode ? 1.14 : 1);
+  }
+
+  // Розмір моделі в поточній частці анімації (лінійно між сусідніми зразками).
+  reach() {
+    const list = this.action.reach, f = this.step * (list.length - 1), i = Math.min(Math.floor(f), list.length - 2), k = f - i;
+    return { r: list[i].r + (list[i + 1].r - list[i].r) * k, hh: list[i].hh + (list[i + 1].hh - list[i].hh) * k };
   }
 
   // Модель обертається навколо вертикалі (тінь від ключового світла рухається разом із нею), камера — по висоті.
