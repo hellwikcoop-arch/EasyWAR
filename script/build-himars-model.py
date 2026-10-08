@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
-"""Генерує спрощену процедурну модель РСЗВ M142 HIMARS для довідника (src/models/m142-himars.glb).
+"""Генерує процедурну модель РСЗВ M142 HIMARS для довідника (src/models/m142-himars.glb).
 
     pip install numpy scipy trimesh
     python3 script/build-himars-model.py [вихідний.glb]
 
-Модель побудовано за відкритими габаритами (довжина ≈ 7 м, ширина ≈ 2,4 м, висота ≈ 3 м) і за довідковими зображеннями,
-які надав користувач: колісне шасі 6×6 родини FMTV, броньована кабіна з гранчастим лобом, двома вітровими склами, ґратою
-й бампером із фарами, паливний бак і ящики за кабіною, поворотна платформа та пусковий модуль з бортовими дверцятами,
-одним пакетом із шести труб, що дивиться назад, і сріблястими напрямними зверху. Це не скан і не копія чужої моделі,
-сторонніх текстур немає. Для перегляду, а не для впізнавання чи розрахунків. Одиниці — метри, перед машини дивиться в +x,
-«вгору» — +y, права сторона — +z (як у glTF).
+Розміри й силует зняті з бокової ортографічної проєкції на довідкових зображеннях, які надав користувач (≈229 пікселів
+на метр), і узгоджені з відкритими габаритами (довжина ≈ 7,2 м з бамперами, ширина ≈ 2,4 м). Модель повторює вузли з
+довідок: шасі 6×6 родини FMTV з клепаними лонжеронами, броньовану кабіну з похилим лобом, двома вітровими шибами,
+ґратою, круглою кришкою, болтами броні, дзеркалами на кронштейнах і бампером із V-вирізом; ящики, бак і вихлоп за
+кабіною; арку завантажувача; пусковий модуль із клепаними бортами й дверцятами, пакетом із шести труб, що дивиться
+назад, сріблястими штангами й рамою завантажувача зверху; корму з ліхтарями й фаркопом. Це не скан і не копія чужої
+моделі, сторонніх текстур немає. Для перегляду, а не для впізнавання чи розрахунків. Одиниці — метри, перед машини
+дивиться в +x, «вгору» — +y, права сторона — +z (як у glTF).
 """
 import json
 import struct
@@ -22,16 +24,8 @@ from trimesh.visual.material import PBRMaterial
 
 DEFAULT_OUT = Path(__file__).resolve().parent.parent / "src" / "models" / "m142-himars.glb"
 
-# Ребра мають фаски, тож згладжені нормалі дають м'які відблиски; плоскі нормалі лише для опуклих корпусів-оболонок.
-FLAT = {"cab"}
-
-# --- головні розміри, м ---------------------------------------------------------------------------------------------
-AXLES = [2.24, -1.22, -2.52]          # передня вісь і задній тандем
-WHEEL_R, WHEEL_Y, WHEEL_Z, WHEEL_W = 0.53, 0.53, 1.00, 0.42
-FRAME_Y0, FRAME_Y1 = 0.98, 1.22        # низ і верх лонжеронів
-CAB_FRONT = 3.30
-MODULE = dict(x0=-3.50, x1=0.17, y0=1.34, y1=2.30, half=1.19)
-
+# Ребра мають фаски, тож згладжені нормалі дають м'які відблиски; плоскі нормалі лише для гранчастої оболонки кабіни.
+FLAT = {"cab", "module", "module_doors", "lids", "doors", "bumper", "loader_frame"}
 
 def material(name, rgb, metallic=0.08, roughness=0.75):
     linear = [round(255 * (c / 255) ** 2.2) for c in rgb]  # glTF чекає лінійні кольори
@@ -98,197 +92,327 @@ def prism_plan(plan_xz, y0, y1):
     return hull([(x, y, z) for (x, z) in plan_xz for y in (y0, y1)])
 
 
+# --- головні розміри, м (з бокової проєкції: x = 3,60 − (1745 − px)/229, y = (852 − py)/229) -------------------------
+AXLES = [2.31, -1.18, -2.47]          # передня вісь і задній тандем
+WHEEL_R, WHEEL_Y, WHEEL_Z, WHEEL_W = 0.53, 0.53, 0.99, 0.40
+CAB_FRONT, CAB_REAR = 3.50, 1.68
+MOD = dict(x0=-3.50, x1=0.24, y0=1.33, y1=2.33, half=1.19, inner=0.60)
+POD = dict(x0=-3.28, x1=-0.05, y0=1.50, y1=2.18, half=0.47)
+
+
+def rivet(x, y, z, axis, r=0.011, h=0.012):
+    """Заклепка на поверхні, звернена вздовж осі `axis` (+-1, 0, 0), (0, 0, +-1) тощо."""
+    a = np.array(axis, float)
+    p = np.array((x, y, z), float)
+    u = np.array([0.0, 1.0, 0.0]) if abs(a[1]) < 0.5 else np.array([1.0, 0.0, 0.0])
+    v = np.cross(a, u)
+    base = [p + r * (np.cos(k * np.pi / 2) * u + np.sin(k * np.pi / 2) * v) for k in range(4)]
+    verts = np.array(base + [p + a * h])
+    faces = [[k, (k + 1) % 4, 4] for k in range(4)]
+    m = trimesh.Trimesh(verts, faces, process=False)
+    if np.dot(m.face_normals[0], a) < 0:    # грані назовні
+        m.invert()
+    return m  # пірамідка з 4 граней: на відстані перегляду не відрізнити від круглої головки
+
+
 def tyre(x, z):
-    """Шина: тор із плечима навколо осі z, із грунтозачепами по колу."""
-    r_in, r_out, w = 0.31, WHEEL_R, WHEEL_W / 2
-    profile = [(r_in, -w), (r_out - 0.05, -w), (r_out, -w + 0.06), (r_out, w - 0.06), (r_out - 0.05, w), (r_in, w)]
-    ring = trimesh.creation.revolve(np.array(profile, dtype=float), sections=40)
+    """Шина з закругленими плечима й ялинковим протектором (два ряди скошених грунтозачепів)."""
+    r_in, r_out, w = 0.30, WHEEL_R - 0.03, WHEEL_W / 2
+    profile = [(r_in, -w + 0.01), (r_out - 0.06, -w), (r_out - 0.015, -w + 0.04), (r_out, -w + 0.09),
+               (r_out, w - 0.09), (r_out - 0.015, w - 0.04), (r_out - 0.06, w), (r_in, w - 0.01)]
+    ring = trimesh.creation.revolve(np.array(profile, dtype=float), sections=48)
     ring.apply_translation((x, WHEEL_Y, z))
     lugs = []
-    for k in range(34):
-        a = 2 * np.pi * k / 34
-        for dz, off in ((-0.085, 0.0), (0.085, np.pi / 34)):
-            aa = a + off
-            lug = trimesh.creation.box(extents=[0.075, 0.05, 0.15])
+    n = 26
+    for k in range(n):
+        a = 2 * np.pi * k / n
+        for side in (-1, 1):
+            aa = a + (np.pi / n if side > 0 else 0.0)
+            lug = trimesh.creation.box(extents=[0.09, 0.034, 0.17])
+            lug.apply_transform(trimesh.transformations.rotation_matrix(side * 0.45, [0, 1, 0]))  # «ялинка»
             lug.apply_transform(trimesh.transformations.rotation_matrix(aa + np.pi / 2, [0, 0, 1]))
-            lug.apply_translation((x + (r_out + 0.012) * np.cos(aa), WHEEL_Y + (r_out + 0.012) * np.sin(aa), z + dz))
+            r = r_out + 0.012
+            lug.apply_translation((x + r * np.cos(aa), WHEEL_Y + r * np.sin(aa), z + side * 0.092))
             lugs.append(lug)
     return ring, merge(lugs)
 
 
+def wheel_rim(x, s):
+    """Глибокий обід: тарілка, кільце з 20 болтів, маточина з шестигранником."""
+    face = s * (WHEEL_Z + 0.17)
+    rim, bolts = [], []
+    rim.append(cyl_z((x, WHEEL_Y, s * (WHEEL_Z + 0.04)), 0.31, 0.24, 36))
+    rim.append(cyl_z((x, WHEEL_Y, face), 0.26, 0.03, 36))
+    rim.append(cyl_z((x, WHEEL_Y, face + s * 0.025), 0.12, 0.04, 24))
+    for k in range(20):
+        a = 2 * np.pi * k / 20
+        bolts.append(cyl_z((x + 0.19 * np.cos(a), WHEEL_Y + 0.19 * np.sin(a), face + s * 0.02), 0.016, 0.03, 5))
+    for k in range(8):
+        a = 2 * np.pi * k / 8
+        bolts.append(cyl_z((x + 0.085 * np.cos(a), WHEEL_Y + 0.085 * np.sin(a), face + s * 0.05), 0.011, 0.02, 6))
+    bolts.append(cyl_z((x, WHEEL_Y, face + s * 0.06), 0.045, 0.05, 6))
+    return rim, bolts
+
+
+def on_slope(p0, p1, t, offset, extents, z):
+    """Пластина на похилій площині лобового скла: p0→p1 у площині (x, y), t — частка довжини, offset — назовні."""
+    p0, p1 = np.array(p0, float), np.array(p1, float)
+    d = p1 - p0
+    L = np.linalg.norm(d)
+    d /= L
+    n = np.array([d[1], -d[0]])          # зовнішня нормаль (уперед-угору)
+    c = p0 + d * (t * L) + n * offset
+    return box((c[0], c[1], z), extents, rot_z=np.arctan2(d[1], d[0]))
+
+
 def himars():
-    olive = material("Hull", (96, 100, 82), metallic=0.08, roughness=0.78)
-    olive_dk = material("HullDark", (74, 78, 64), metallic=0.1, roughness=0.8)
-    olive_lt = material("Pod", (108, 112, 92), metallic=0.1, roughness=0.7)
-    rubber = material("Tyres", (52, 48, 44), metallic=0.0, roughness=0.95)
-    black = material("Black", (26, 28, 26), metallic=0.1, roughness=0.65)
-    glass = material("Glass", (92, 86, 78), metallic=0.5, roughness=0.18)
-    amber = material("Amber", (240, 150, 30), metallic=0.0, roughness=0.3)
-    white = material("Lamp", (238, 238, 228), metallic=0.0, roughness=0.25)
-    red = material("Red", (176, 40, 32), metallic=0.0, roughness=0.35)
-    steel = material("Steel", (150, 154, 150), metallic=0.8, roughness=0.3)
+    olive = material("Hull", (104, 106, 86), metallic=0.1, roughness=0.72)
+    olive_dk = material("HullDark", (82, 84, 68), metallic=0.12, roughness=0.78)
+    olive_lt = material("Pod", (118, 120, 98), metallic=0.1, roughness=0.7)
+    grime = material("Chassis", (70, 70, 58), metallic=0.15, roughness=0.85)
+    rubber = material("Tyres", (66, 58, 50), metallic=0.0, roughness=0.95)
+    black = material("Black", (30, 31, 29), metallic=0.1, roughness=0.6)
+    glass = material("Glass", (118, 112, 102), metallic=0.55, roughness=0.12)
+    amber = material("Amber", (236, 140, 30), metallic=0.0, roughness=0.3)
+    white = material("Lamp", (236, 236, 226), metallic=0.3, roughness=0.15)
+    red = material("Red", (170, 36, 30), metallic=0.0, roughness=0.3)
+    steel = material("Steel", (176, 180, 178), metallic=0.85, roughness=0.22)
     parts = {}
+    rivets = []
 
-    # Рама, мости, вузли під кабіною й за нею.
-    parts["frame"] = painted(merge([
-        box((-0.2, (FRAME_Y0 + FRAME_Y1) / 2, 0.0), (6.6, FRAME_Y1 - FRAME_Y0, 1.10)),
-        box((-0.2, 1.10, 0.0), (6.6, 0.10, 1.34)),
-    ]), olive_dk)
-    parts["axles"] = painted(merge([cyl_between((x, WHEEL_Y, -WHEEL_Z + 0.1), (x, WHEEL_Y, WHEEL_Z - 0.1), 0.085) for x in AXLES]
-                                    + [box((x, 0.80, 0.0), (0.32, 0.22, 0.34)) for x in AXLES]), olive_dk)
-    parts["boxes_low"] = painted(merge([
-        box((-0.10, 0.84, s * 0.80), (0.95, 0.46, 0.40)) for s in (-1, 1)
-    ] + [
-        cyl_between((0.62, 0.86, s * 0.80), (1.60, 0.86, s * 0.80), 0.19, 18) for s in (-1, 1)
-    ]), olive)
+    # ---------- Рама: лонжерони, клепані бічні листи, мости, ресори ----------
+    frame = [box((-0.10, 1.00, s * 0.43), (6.90, 0.26, 0.10)) for s in (-1, 1)]
+    frame += [box((x, 1.00, 0.0), (0.10, 0.20, 0.86)) for x in (-3.35, -2.0, -0.6, 0.9, 2.9)]
+    frame += [box((-1.60, 1.17, s * 0.60), (3.80, 0.20, 0.06)) for s in (-1, 1)]       # підрамник модуля
+    for s in (-1, 1):
+        for x in np.arange(-3.40, 0.25, 0.115):
+            for y in (1.10, 1.24):
+                rivets.append(rivet(x, y, s * 0.63, (0, 0, s)))
+        for xc in (-2.55, -1.15, 0.0):                                                    # групи заклепок на накладках
+            for x in (xc - 0.06, xc, xc + 0.06):
+                for y in (1.12, 1.17, 1.22):
+                    rivets.append(rivet(x, y, s * 0.635, (0, 0, s)))
+    parts["frame"] = painted(merge(frame), grime)
+    axle = []
+    for x in AXLES:
+        axle.append(cyl_between((x, WHEEL_Y, -WHEEL_Z + 0.12), (x, WHEEL_Y, WHEEL_Z - 0.12), 0.085, 16))
+        axle.append(box((x, 0.56, 0.0), (0.42, 0.30, 0.40)))                               # редуктор моста
+        for s in (-1, 1):
+            axle.append(box((x, 0.80, s * 0.43), (0.95 if x < 0 else 0.80, 0.07, 0.10)))   # ресора
+    axle.append(cyl_between((-1.18, 0.56, 0.0), (2.31, 0.62, 0.0), 0.05, 12))             # карданний вал
+    axle.append(cyl_between((-2.47, 0.56, 0.0), (-1.18, 0.56, 0.0), 0.05, 12))
+    parts["axles"] = painted(merge(axle), grime)
 
-    # Колеса: шини, обода з болтами.
-    tyres, lugs, rims, bolts = [], [], [], []
+    # ---------- Колеса ----------
+    tyres, rims, bolts = [], [], []
     for x in AXLES:
         for s in (-1, 1):
             ring, lug = tyre(x, s * WHEEL_Z)
-            tyres.append(ring)
-            lugs.append(lug)
-            rims.append(cyl_z((x, WHEEL_Y, s * (WHEEL_Z + 0.02)), 0.30, 0.34, 28))
-            face = s * (WHEEL_Z + 0.195)
-            rims.append(cyl_z((x, WHEEL_Y, face), 0.23, 0.04, 28))
-            for k in range(12):
-                a = 2 * np.pi * k / 12
-                bolts.append(cyl_z((x + 0.18 * np.cos(a), WHEEL_Y + 0.18 * np.sin(a), face + s * 0.025), 0.017, 0.03, 8))
-            bolts.append(cyl_z((x, WHEEL_Y, face + s * 0.04), 0.045, 0.05, 6))
-    parts["tyres"] = painted(merge(tyres + lugs), rubber)
+            tyres += [ring, lug]
+            r, b = wheel_rim(x, s)
+            rims += r
+            bolts += b
+    parts["tyres"] = painted(merge(tyres), rubber)
     parts["rims"] = painted(merge(rims), olive)
     parts["wheel_bolts"] = painted(merge(bolts), olive_dk)
 
-    # Кабіна: гранчаста, з сколами верхніх і бічних ребер.
-    levels = [(1.22, 3.12, 1.62, 1.10), (1.55, CAB_FRONT, 1.55, 1.12), (2.40, CAB_FRONT, 1.60, 1.12),
-              (2.72, 3.22, 1.80, 1.05), (2.90, 3.02, 1.95, 0.95)]
+    # ---------- Кабіна: опукла гранчаста оболонка ----------
+    # Рівні (y, лоб x, зад x, півширина, скіс кутів спереду).
+    levels = [(1.10, 3.38, 1.78, 1.08, 0.22), (1.48, CAB_FRONT, CAB_REAR, 1.18, 0.30), (2.18, CAB_FRONT, CAB_REAR, 1.18, 0.30),
+              (2.58, 3.12, 1.72, 1.13, 0.30), (2.66, 3.04, 1.80, 1.07, 0.26)]
     pts = []
-    for y, xf, xr, half in levels:
-        c, c2 = 0.36, 0.12
+    for y, xf, xr, half, c in levels:
+        c2 = 0.10
         pts += [(xf - c, y, -half), (xf, y, -(half - c)), (xf, y, half - c), (xf - c, y, half),
                 (xr + c2, y, half), (xr, y, half - c2), (xr, y, -(half - c2)), (xr + c2, y, -half)]
     parts["cab"] = painted(hull(pts), olive)
-    # Бічні двері з вікном і ручкою; вітрові скла, склоочисники, ґрата, круглий люк, лампи на даху.
+    slope = ((CAB_FRONT, 2.18), (3.12, 2.58))
+    parts["windshields"] = painted(merge([on_slope(*slope, 0.48, 0.012, (0.40, 0.025, 0.72), z) for z in (-0.47, 0.47)]), glass)
+    parts["windshield_frames"] = painted(merge([on_slope(*slope, 0.48, 0.004, (0.48, 0.02, 0.80), z) for z in (-0.47, 0.47)]), olive_dk)
+    wipers = []
+    for z in (-0.47, 0.47):
+        a = np.array(slope[0]) + (np.array(slope[1]) - np.array(slope[0])) * 0.2
+        b = np.array(slope[0]) + (np.array(slope[1]) - np.array(slope[0])) * 0.62
+        wipers.append(cyl_between((a[0] + 0.03, a[1], z + 0.30), (b[0] + 0.03, b[1], z - 0.25), 0.008, 6))
+    parts["wipers"] = painted(merge(wipers), black)
+    # Ґрата радіатора (рамка з перегородками), кругла кришка, болти броні на лобі й бортах.
+    grille = [box((CAB_FRONT + 0.010, 1.73, -0.10), (0.03, 0.46, 0.86))]
+    parts["grille_back"] = painted(merge(grille), black)
+    gbars = [box((CAB_FRONT + 0.03, 1.73, -0.10 + k * 0.215), (0.04, 0.46, 0.035)) for k in (-2, -1, 0, 1, 2)]
+    gbars += [box((CAB_FRONT + 0.03, 1.73 + k * 0.115, -0.10), (0.04, 0.035, 0.86)) for k in (-2, -1, 0, 1, 2)]
+    gbars += [box((CAB_FRONT + 0.05, 1.40 + k * 0.045, -0.10), (0.03, 0.018, 0.80)) for k in range(4)]   # нижні ламелі
+    parts["grille"] = painted(merge(gbars), olive_dk)
+    parts["round_cover"] = painted(merge([cyl_between((CAB_FRONT, 1.80, 0.70), (CAB_FRONT + 0.035, 1.80, 0.70), 0.14, 28),
+                                          cyl_between((CAB_FRONT + 0.03, 1.80, 0.70), (CAB_FRONT + 0.05, 1.80, 0.70), 0.11, 28)]), olive_dk)
+    armour = []
+    for z in (-0.95, -0.55, 0.0, 0.55, 0.95):
+        for y in (1.25, 2.08):
+            armour.append(cyl_between((CAB_FRONT, y, z * 0.92), (CAB_FRONT + 0.025, y, z * 0.92), 0.032, 10))
+    for y in (1.45, 1.95):
+        for z in (-0.82, 0.38):
+            armour.append(cyl_between((CAB_FRONT, y, z), (CAB_FRONT + 0.025, y, z), 0.032, 10))
+    for s in (-1, 1):
+        for x in (1.85, 2.15, 3.20):
+            for y in (1.25, 1.75, 2.30):
+                armour.append(cyl_between((x, y, s * 1.18), (x, y, s * 1.205), 0.032, 10))
+    parts["armour_bolts"] = painted(merge(armour), olive_dk)
+    # Двері з вікном, ручками й завісами; дах із люком і лампами.
     doors, door_glass, handles = [], [], []
     for s in (-1, 1):
-        doors.append(box((2.45, 1.95, s * 1.125), (1.15, 1.25, 0.04)))
-        door_glass.append(box((2.85, 2.38, s * 1.14), (0.36, 0.28, 0.03)))
-        handles.append(box((2.00, 1.80, s * 1.15), (0.14, 0.05, 0.05)))
-        handles.append(box((2.00, 2.38, s * 1.15), (0.06, 0.22, 0.05)))
-    parts["doors"] = painted(merge(doors), olive_dk)
+        doors.append(hull([(2.30, 1.22, s * 1.19), (3.28, 1.22, s * 1.19), (3.28, 2.40, s * 1.19), (2.55, 2.50, s * 1.19),
+                           (2.30, 2.50, s * 1.19), (2.30, 1.22, s * 1.205), (3.28, 1.22, s * 1.205), (3.28, 2.40, s * 1.205),
+                           (2.55, 2.50, s * 1.205), (2.30, 2.50, s * 1.205)]))
+        door_glass.append(box((2.86, 2.10, s * 1.21), (0.24, 0.20, 0.02)))
+        handles += [box((2.42, 1.88, s * 1.225), (0.14, 0.04, 0.04)), box((3.18, 1.75, s * 1.225), (0.05, 0.30, 0.04)),
+                    box((2.42, 2.25, s * 1.225), (0.05, 0.14, 0.04))]
+        for y in (1.40, 2.25):
+            handles.append(cyl_between((3.30, y - 0.08, s * 1.21), (3.30, y + 0.08, s * 1.21), 0.022, 8))   # завіси
+    parts["doors"] = painted(merge(doors), olive)
     parts["side_windows"] = painted(merge(door_glass), glass)
-    parts["door_handles"] = painted(merge(handles), black)
-    parts["windshields"] = painted(merge([box((CAB_FRONT + 0.012, 2.28, z), (0.03, 0.46, 0.88)) for z in (-0.52, 0.52)]), glass)
-    parts["windshield_frames"] = painted(merge([box((CAB_FRONT + 0.004, 2.28, z), (0.02, 0.54, 0.96)) for z in (-0.52, 0.52)]), olive_dk)
-    wipers = []
-    for z in (-0.52, 0.52):
-        wipers.append(cyl_between((CAB_FRONT + 0.03, 2.10, z - 0.35), (CAB_FRONT + 0.03, 2.22, z + 0.35), 0.008, 6))
-    parts["wipers"] = painted(merge(wipers), black)
-    parts["grille"] = painted(merge([box((CAB_FRONT + 0.012, 1.78, 0.0), (0.03, 0.40, 0.84))]
-                                    + [box((CAB_FRONT + 0.03, 1.78 + k * 0.10, 0.0), (0.02, 0.025, 0.84)) for k in (-1, 0, 1)]
-                                    + [box((CAB_FRONT + 0.03, 1.78, k * 0.28), (0.02, 0.40, 0.025)) for k in (-1, 0, 1)]), black)
-    parts["round_cover"] = painted(cyl_between((CAB_FRONT, 1.82, 0.74), (CAB_FRONT + 0.04, 1.82, 0.74), 0.13, 24), olive_dk)
-    parts["roof_hatch"] = painted(merge([box((2.40, 2.93, 0.0), (0.95, 0.06, 0.92)), box((2.40, 2.97, 0.0), (0.75, 0.05, 0.72))]), olive_dk)
-    parts["roof_lamps"] = painted(merge([box((3.14, 2.78, z), (0.10, 0.07, 0.14)) for z in (-0.80, -0.40, 0.0, 0.40, 0.80)]), amber)
-
-    # Бампер, фари, буксирні вушка, нижня решітка.
-    parts["bumper"] = painted(merge([
-        box((CAB_FRONT + 0.20, 1.12, 0.0), (0.30, 0.28, 2.30)),
-        prism_plan([(CAB_FRONT + 0.05, -0.55), (CAB_FRONT + 0.34, -0.38), (CAB_FRONT + 0.34, 0.38), (CAB_FRONT + 0.05, 0.55)], 0.94, 1.12),
-        box((CAB_FRONT + 0.10, 0.88, 0.0), (0.26, 0.20, 1.10)),
-    ]), olive_dk)
-    parts["lamps"] = painted(merge([cyl_between((CAB_FRONT + 0.35, 1.14, z), (CAB_FRONT + 0.41, 1.14, z), 0.085, 18) for z in (-0.84, 0.84)]), white)
-    parts["lamps_amber"] = painted(merge([cyl_between((CAB_FRONT + 0.35, 1.14, z), (CAB_FRONT + 0.40, 1.14, z), 0.06, 14) for z in (-1.03, -0.62, 0.62, 1.03)]), amber)
-    parts["tow_hooks"] = painted(merge([box((CAB_FRONT + 0.37, 1.12, z), (0.05, 0.14, 0.12)) for z in (-0.22, 0.22)]), black)
-    parts["lower_vent"] = painted(merge([box((CAB_FRONT + 0.18, 0.86 + k * 0.05, 0.0), (0.18, 0.02, 0.95)) for k in range(4)]), black)
-
-    # Дзеркала на кронштейнах.
+    parts["door_handles"] = painted(merge(handles), olive_dk)
+    parts["roof_hatch"] = painted(merge([box((2.32, 2.69, 0.0), (0.92, 0.05, 0.92)), box((2.32, 2.73, 0.0), (0.74, 0.04, 0.74)),
+                                         box((2.32, 2.76, 0.0), (0.10, 0.03, 0.55))]), olive_dk)
+    parts["roof_lamps"] = painted(merge([box((3.02, 2.69, z), (0.08, 0.06, 0.12)) for z in (-0.95, -0.18, 0.0, 0.18, 0.95)]), amber)
+    # Дзеркала на трубчастих кронштейнах і поручні.
     mirrors, arms = [], []
     for s in (-1, 1):
-        mirrors.append(box((3.02, 2.10, s * 1.42), (0.07, 0.42, 0.22)))
-        arms.append(cyl_between((3.05, 1.78, s * 1.30), (3.05, 2.55, s * 1.30), 0.018, 8))
-        arms.append(cyl_between((3.05, 2.50, s * 1.30), (3.05, 2.50, s * 1.15), 0.018, 8))
-        arms.append(cyl_between((3.05, 1.82, s * 1.30), (3.05, 1.82, s * 1.15), 0.018, 8))
-        arms.append(cyl_between((3.05, 2.00, s * 1.38), (3.05, 2.22, s * 1.38), 0.018, 8))
+        mirrors.append(box((3.30, 2.28, s * 1.46), (0.06, 0.44, 0.20)))
+        arms += [cyl_between((3.30, 2.02, s * 1.46), (3.30, 2.58, s * 1.46), 0.016, 8),
+                 cyl_between((3.30, 2.58, s * 1.46), (3.30, 2.58, s * 1.16), 0.016, 8),
+                 cyl_between((3.30, 2.02, s * 1.46), (3.30, 2.02, s * 1.16), 0.016, 8),
+                 cyl_between((2.40, 2.60, s * 1.17), (3.10, 2.60, s * 1.17), 0.014, 8)]
     parts["mirrors"] = painted(merge(mirrors), black)
-    parts["mirror_arms"] = painted(merge(arms), black)
+    parts["mirror_arms"] = painted(merge(arms), olive_dk)
 
-    # Ящики й вихлоп за кабіною, дуга пакета.
-    parts["equipment"] = painted(merge([
-        box((1.02, 1.95, s * 0.93), (0.78, 1.20, 0.38)) for s in (-1, 1)
-    ] + [
-        box((1.38, 1.50, s * 0.93), (0.58, 0.55, 0.38)) for s in (-1, 1)
-    ] + [
-        box((0.50, 2.58, s * 0.74), (0.34, 0.65, 0.26)) for s in (-1, 1)
-    ] + [
-        box((0.50, 2.88, 0.0), (0.34, 0.14, 1.74)),
-    ]), olive)
-    parts["exhaust"] = painted(cyl_between((1.55, 2.15, 0.86), (1.55, 2.85, 0.86), 0.075, 14), olive_dk)
+    # ---------- Бампер із V-вирізом, фари, буксирні скоби, нижня решітка, сходинки ----------
+    bump = [box((CAB_FRONT + 0.12, 1.06, s * 0.78), (0.24, 0.22, 0.84)) for s in (-1, 1)]
+    bump.append(hull([(CAB_FRONT, 0.96, -0.36), (CAB_FRONT + 0.24, 0.98, -0.36), (CAB_FRONT + 0.24, 1.17, -0.36),
+                      (CAB_FRONT, 1.17, -0.36), (CAB_FRONT, 0.96, 0.36), (CAB_FRONT + 0.24, 0.98, 0.36),
+                      (CAB_FRONT + 0.24, 1.17, 0.36), (CAB_FRONT, 1.17, 0.36), (CAB_FRONT + 0.24, 0.90, 0.0), (CAB_FRONT, 0.90, 0.0)]))
+    bump.append(box((CAB_FRONT - 0.05, 0.82, 0.0), (0.30, 0.22, 1.10)))
+    bump += [box((CAB_FRONT - 0.10, 0.88, s * 1.05), (0.36, 0.40, 0.05)) for s in (-1, 1)]
+    parts["bumper"] = painted(merge(bump), olive)
+    parts["lamps"] = painted(merge([cyl_between((CAB_FRONT + 0.24, 1.07, z), (CAB_FRONT + 0.29, 1.07, z), 0.075, 20) for z in (-0.70, 0.70)]), white)
+    parts["lamps_amber"] = painted(merge([cyl_between((CAB_FRONT + 0.24, 1.07, z), (CAB_FRONT + 0.28, 1.07, z), 0.055, 16) for z in (-0.98, 0.98)]
+                                         + [box((CAB_FRONT + 0.02, 1.29, s * 1.21), (0.06, 0.06, 0.10)) for s in (-1, 1)]), amber)
+    parts["lamp_rings"] = painted(merge([cyl_between((CAB_FRONT + 0.23, 1.07, z), (CAB_FRONT + 0.27, 1.07, z), 0.09, 20) for z in (-0.70, 0.70)]), black)
+    hooks = []
+    for z in (-0.30, 0.30):
+        t = trimesh.creation.torus(major_radius=0.055, minor_radius=0.016, major_sections=16, minor_sections=8) \
+            if hasattr(trimesh.creation, "torus") else cyl_z((0, 0, 0), 0.06, 0.03)
+        t.apply_transform(trimesh.transformations.rotation_matrix(np.pi / 2, [0, 1, 0]))
+        t.apply_translation((CAB_FRONT + 0.27, 1.02, z))
+        hooks.append(t)
+    parts["tow_hooks"] = painted(merge(hooks), olive_dk)
+    vent = [box((CAB_FRONT + 0.11, 0.76 + k * 0.04, 0.0), (0.03, 0.016, 0.95)) for k in range(4)]
+    for s in (-1, 1):                                            # сходинки під дверима
+        for k in range(3):
+            vent.append(box((3.15, 0.66 + k * 0.16, s * 1.10), (0.24, 0.025, 0.16)))
+    parts["vents_steps"] = painted(merge(vent), black)
 
-    # Поворотна платформа й пусковий модуль: стінки, підлога, передня стінка, дверцята на бортах.
-    M = MODULE
-    parts["turntable"] = painted(merge([
-        box(((M["x0"] + M["x1"]) / 2 + 0.1, 1.28, 0.0), (M["x1"] - M["x0"] + 0.0, 0.12, 2.10)),
-        cyl_between((-1.60, 1.34, 0.0), (-1.60, 1.40, 0.0), 1.00, 40),
-    ]), olive_dk)
-    right_wall = [(M["x0"], 0.60), (M["x0"], M["half"]), (-0.15, M["half"]), (M["x1"], 0.88), (M["x1"], 0.60)]
-    left_wall = [(x, -z) for (x, z) in right_wall]
-    walls = [prism_plan(right_wall, M["y0"], M["y1"]), prism_plan(left_wall, M["y0"], M["y1"]),
-             box((M["x1"] - 0.06, (M["y0"] + M["y1"]) / 2, 0.0), (0.12, M["y1"] - M["y0"], 1.30)),
-             box(((M["x0"] + M["x1"]) / 2, M["y0"] + 0.10, 0.0), (M["x1"] - M["x0"], 0.20, 1.30))]
+    # ---------- За кабіною: ящики, бак, акумуляторний ящик, вихлоп, арка завантажувача ----------
+    eq = []
+    for s in (-1, 1):
+        eq.append(box((1.46, 1.64, s * 0.90), (0.48, 1.13, 0.52)))           # високий ящик
+        eq.append(box((0.88, 1.66, s * 0.88), (0.66, 0.63, 0.48)))           # середній ящик
+        eq.append(box((-0.04, 0.92, s * 0.95), (0.99, 0.50, 0.46)))          # акумуляторний ящик
+    parts["equipment"] = painted(merge(eq), olive)
+    lids = []
+    for s in (-1, 1):
+        lids += [box((1.46, 1.70, s * 1.165), (0.38, 0.90, 0.02)), box((0.88, 1.66, s * 1.13), (0.54, 0.52, 0.02)),
+                 box((1.36, 1.70, s * 1.18), (0.03, 0.10, 0.02)), box((0.70, 1.66, s * 1.145), (0.03, 0.10, 0.02))]
+    parts["lids"] = painted(merge(lids), olive_dk)
+    tank = bevelled([1.03, 0.37, 0.42], 0.09)
+    tank.apply_translation((1.15, 0.85, -0.92))
+    tank2 = bevelled([1.03, 0.37, 0.42], 0.09)
+    tank2.apply_translation((1.15, 0.85, 0.92))
+    parts["fuel_tanks"] = painted(merge([tank, tank2, cyl_between((1.45, 1.03, -0.92), (1.45, 1.07, -0.92), 0.06, 12)]), olive_dk)
+    parts["exhaust"] = painted(merge([cyl_between((1.30, 2.10, 0.70), (1.30, 2.45, 0.70), 0.07, 16),
+                                      cyl_between((1.30, 2.45, 0.70), (1.30, 2.50, 0.70), 0.085, 16)]), grime)
+    arch = [box((0.96, 1.92, s * 0.78), (0.10, 1.24, 0.14)) for s in (-1, 1)]
+    arch.append(box((0.96, 2.50, 0.0), (0.12, 0.12, 1.70)))
+    arch += [box((0.90, 2.40, s * 0.55), (0.18, 0.18, 0.14)) for s in (-1, 1)]
+    parts["loader_arch"] = painted(merge(arch), olive)
+
+    # ---------- Поворотна платформа й пусковий модуль ----------
+    M = MOD
+    cradle = [box(((M["x0"] + M["x1"]) / 2, 1.29, 0.0), (M["x1"] - M["x0"] - 0.1, 0.08, 1.90))]
+    cradle += [box((x, 1.24, s * 0.80), (0.20, 0.12, 0.18)) for x in (-3.20, -1.60, 0.0) for s in (-1, 1)]
+    cradle.append(cyl_between((-1.50, 1.27, 0.0), (-1.50, 1.33, 0.0), 0.95, 40))
+    parts["cradle"] = painted(merge(cradle), olive_dk)
+    walls = []
+    for s in (-1, 1):
+        plan = [(M["x0"], s * M["inner"]), (M["x0"], s * M["half"]), (-0.28, s * M["half"]), (M["x1"], s * 0.92), (M["x1"], s * M["inner"])]
+        walls.append(prism_plan(plan, M["y0"], M["y1"]))
+    walls.append(box((M["x1"] - 0.06, 1.70, 0.0), (0.12, 0.74, 1.26)))            # передня стінка
+    walls.append(box(((M["x0"] + M["x1"]) / 2, M["y0"] + 0.08, 0.0), (M["x1"] - M["x0"], 0.16, 1.26)))
     parts["module"] = painted(merge(walls), olive)
     panels, knobs = [], []
     for s in (-1, 1):
-        for xc in (-2.85, -1.75, -0.65):
-            panels.append(box((xc, 1.82, s * (M["half"] + 0.012)), (1.00, 0.74, 0.03)))
-            knobs.append(box((xc + 0.40, 1.82, s * (M["half"] + 0.035)), (0.04, 0.12, 0.03)))
-    parts["module_doors"] = painted(merge(panels), olive_dk)
+        zf = s * (M["half"] + 0.008)
+        for x0, x1 in ((-2.45, -1.57), (-1.48, -0.75), (-0.66, -0.30)):
+            panels.append(box(((x0 + x1) / 2, 1.98, zf), (x1 - x0, 0.56, 0.016)))
+            knobs.append(box((x1 - 0.06, 2.00, s * (M["half"] + 0.025)), (0.025, 0.08, 0.025)))
+        panels.append(box((-3.00, 1.98, zf), (0.85, 0.56, 0.016)))
+        for x in np.arange(M["x0"] + 0.06, -0.30, 0.10):                            # ряди заклепок
+            for y in (M["y0"] + 0.04, 1.63, M["y1"] - 0.04):
+                rivets.append(rivet(x, y, s * (M["half"] + 0.002), (0, 0, s)))
+        for xc in (-3.45, -2.50, -1.52, -0.70):
+            for y in np.arange(1.40, 2.30, 0.09):
+                rivets.append(rivet(xc, y, s * (M["half"] + 0.002), (0, 0, s)))
+        for x in np.arange(M["x0"] + 0.1, -0.3, 0.16):                              # заклепки на кришці борту
+            rivets.append(rivet(x, M["y1"], s * (M["half"] - 0.06), (0, 1, 0)))
+            rivets.append(rivet(x, M["y1"], s * (M["inner"] + 0.06), (0, 1, 0)))
+    parts["module_doors"] = painted(merge(panels), olive)
     parts["module_handles"] = painted(merge(knobs), black)
-    # Пакет: шість труб (3 × 2), що дивляться назад, і темні кільця-торці.
-    tubes, caps = [], []
-    for dz in (-0.31, 0.0, 0.31):
-        for y in (1.72, 2.04):
-            tubes.append(cyl_x(-3.28, 0.00, y, dz, 0.145, 24))
-            caps.append(cyl_x(-3.295, -3.27, y, dz, 0.128, 24))
-    parts["pod_tubes"] = painted(merge(tubes), olive_lt)
-    parts["pod_caps"] = painted(merge(caps), olive_dk)
-    # «Вуха» й перемичка на задньому торці, поперечки зверху.
-    parts["module_rear"] = painted(merge([
-        box((M["x0"] + 0.06, 2.22, s * 0.72), (0.14, 0.34, 0.28)) for s in (-1, 1)
-    ] + [
-        box((M["x0"] + 0.04, 1.44, 0.0), (0.12, 0.18, 1.30)),
-        box((-1.60, 2.33, 0.0), (0.10, 0.06, 1.28)), box((-2.55, 2.33, 0.0), (0.10, 0.06, 1.28)),
-        box((-0.55, 2.33, 0.0), (0.10, 0.06, 1.28)),
-    ]), olive_dk)
-    # Срібні напрямні по краях пакета, що виходять уперед до кабіни.
-    parts["rails"] = painted(merge([cyl_x(-3.25, 0.95, 2.30, s * 0.56, 0.042, 14) for s in (-1, 1)]
-                                   + [cyl_x(0.17, 0.95, 2.04, s * 0.30, 0.050, 14) for s in (-1, 1)]), steel)
-
-    # Корма: бампер, ліхтарі, фаркоп.
-    parts["rear_beam"] = painted(merge([
-        box((-3.55, 1.05, 0.0), (0.26, 0.24, 2.30)),
-        box((-3.40, 0.82, 0.0), (0.12, 0.10, 2.10)),
-    ]), olive_dk)
-    parts["rear_red"] = painted(merge([box((-3.69, 1.12, s * 0.90), (0.04, 0.16, 0.20)) for s in (-1, 1)]
-                                      + [box((-3.69, 1.18, s * 0.60), (0.04, 0.10, 0.12)) for s in (-1, 1)]), red)
-    parts["rear_amber"] = painted(merge([box((-3.69, 1.00, s * 0.90), (0.04, 0.08, 0.10)) for s in (-1, 1)]), amber)
-    parts["hitch"] = painted(cyl_between((-3.68, 0.98, 0.0), (-3.90, 0.98, 0.0), 0.05, 12), black)
-    # Заклепки: ряди по краях бортів пускового модуля та по лонжеронах рами (як на довідкових знімках).
-    rivets = []
-    def rivet(x, y, z, s):
-        return cyl_between((x, y, z), (x, y, z + s * 0.012), 0.011, 6)
+    # Задній торець: «вуха» з кронштейнами, нижня поперечина, кришки-заглушки пакета.
+    rear = []
     for s in (-1, 1):
-        zf = s * (M["half"] + 0.002)
-        for x in np.arange(M["x0"] + 0.08, -0.15, 0.14):
-            for y in (M["y0"] + 0.05, M["y1"] - 0.05):
-                rivets.append(rivet(x, y, zf, s))
-        for xc in (-3.37, -2.30, -1.20, -0.10):
-            for y in np.arange(M["y0"] + 0.15, M["y1"] - 0.1, 0.12):
-                rivets.append(rivet(xc, y, zf, s))
-        for x in np.arange(-3.25, 1.45, 0.11):
-            for y in (1.07, 1.15):
-                rivets.append(rivet(x, y, s * 0.672, s))
+        rear.append(box((M["x0"] - 0.10, 2.12, s * 0.95), (0.22, 0.42, 0.46)))
+        rear.append(box((M["x0"] - 0.08, 1.62, s * 1.00), (0.18, 0.40, 0.30)))
+        rear.append(box((M["x0"] - 0.05, 2.12, s * 0.66), (0.12, 0.14, 0.14)))
+    rear.append(box((M["x0"] + 0.04, 1.42, 0.0), (0.12, 0.16, 1.26)))
+    parts["module_rear"] = painted(merge(rear), olive)
+    # Пакет: корпус, шість труб, торцеві кришки, хомути.
+    P = POD
+    tubes, caps, straps = [], [], []
+    for dz in (-0.31, 0.0, 0.31):
+        for y in (1.68, 2.00):
+            tubes.append(cyl_x(P["x0"], P["x1"], y, dz, 0.150, 28))
+            caps.append(cyl_x(P["x0"] - 0.02, P["x0"], y, dz, 0.140, 28))
+            caps.append(cyl_x(P["x0"] - 0.03, P["x0"] - 0.02, y, dz, 0.10, 20))
+    for x in (-3.0, -2.2, -1.4, -0.6):
+        straps.append(box((x, 1.84, 0.0), (0.06, 0.70, 1.00)))
+    straps.append(box((P["x0"] + 0.05, 1.84, 0.0), (0.10, 0.70, 1.00)))
+    parts["pod_tubes"] = painted(merge(tubes), olive_lt)
+    parts["pod_caps"] = painted(merge(caps), olive)
+    parts["pod_frame"] = painted(merge(straps), olive_dk)
+    # Зверху: рама завантажувача з візком і блоком, сріблясті штанги вздовж пакета й уперед до кабіни.
+    top = [box((-1.50, 2.40, s * 0.36), (2.80, 0.07, 0.07)) for s in (-1, 1)]
+    top += [box((x, 2.40, 0.0), (0.07, 0.07, 0.72)) for x in (-2.85, -2.2, -1.5, -0.8, -0.15)]
+    top.append(hull([(-1.75, 2.42, -0.30), (-1.05, 2.42, -0.30), (-1.75, 2.42, 0.30), (-1.05, 2.42, 0.30),
+                     (-1.60, 2.53, -0.18), (-1.20, 2.53, -0.18), (-1.60, 2.53, 0.18), (-1.20, 2.53, 0.18)]))
+    top.append(cyl_between((-0.78, 2.47, -0.12), (-0.78, 2.47, 0.12), 0.07, 16))
+    parts["loader_frame"] = painted(merge(top), olive_dk)
+    parts["rails"] = painted(merge([cyl_x(-3.30, 0.95, 2.28, s * 0.54, 0.040, 16) for s in (-1, 1)]
+                                   + [cyl_x(0.20, 0.95, 2.14, s * 0.28, 0.055, 16) for s in (-1, 1)]), steel)
+
+    # ---------- Корма: балка, ліхтарі, фаркоп, кронштейни ----------
+    stern = [box((-3.50, 1.06, 0.0), (0.16, 0.20, 2.10)), box((-3.38, 0.70, 0.0), (0.10, 0.08, 1.80))]
+    stern += [box((-3.42, 0.86, s * 0.85), (0.06, 0.36, 0.06)) for s in (-1, 1)]
+    stern += [box((-3.60, 1.07, s * 0.86), (0.06, 0.22, 0.36)) for s in (-1, 1)]
+    parts["rear_beam"] = painted(merge(stern), grime)
+    lights = []
+    for s in (-1, 1):
+        lights.append(cyl_between((-3.63, 1.10, s * 0.96), (-3.66, 1.10, s * 0.96), 0.055, 16))
+        lights.append(cyl_between((-3.63, 1.10, s * 0.76), (-3.66, 1.10, s * 0.76), 0.045, 16))
+        lights.append(box((-3.535, 1.14, s * 0.45), (0.02, 0.05, 0.16)))
+    parts["rear_red"] = painted(merge(lights), red)
+    parts["rear_amber"] = painted(merge([cyl_between((-3.63, 0.99, s * 0.96), (-3.66, 0.99, s * 0.96), 0.035, 12) for s in (-1, 1)]
+                                        + [box((-3.30, 1.10, s * 1.18), (0.08, 0.06, 0.04)) for s in (-1, 1)]), amber)
+    parts["hitch"] = painted(merge([cyl_between((-3.58, 0.98, 0.0), (-3.82, 0.98, 0.0), 0.05, 12),
+                                    cyl_z((-3.80, 0.98, 0.0), 0.07, 0.04, 16)]), black)
+
     parts["rivets"] = painted(merge(rivets), olive_dk)
     return parts
 
@@ -313,7 +437,7 @@ def main() -> int:
         scene.add_geometry(mesh, node_name=name, geom_name=name)
     glb = scene.export(file_type="glb", include_normals=True)
     glb = with_extras(glb, {"title": "M142 HIMARS (generated)", "generated": True,
-                            "note": "Simplified procedural model from public overall dimensions (about 7 m long, 2.4 m wide, 6x6 FMTV chassis, armoured cab, one six-tube pod facing aft). Not a scan or copy of any other model."})
+                            "note": "Procedural model traced from an orthographic side view and public overall dimensions (about 7.2 m long, 2.4 m wide, 6x6 FMTV chassis, armoured cab, one six-tube pod facing aft). Not a scan or copy of any other model."})
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(glb)
     size = np.ptp(np.array(scene.bounds), axis=0)
