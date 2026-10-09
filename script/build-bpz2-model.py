@@ -233,6 +233,8 @@ def build():
 
 
 # ---------- групи для запікання ----------
+# темно-зелений, шоколадно-коричневий і чорний — триколірний камуфляж Bundeswehr, як на довідковому фото
+NATO = (vp.srgb(58, 72, 44), vp.srgb(88, 64, 42), vp.srgb(24, 26, 22))
 OL = vp.R("camo", 0.74, 0.1)
 OL_DK = vp.R("camo", 0.76, 0.12, tone=0.8)
 HULL_NAMES = ["hull", "guards", "super", "skirts", "louvers", "rear_plate", "tow_eyes", "hatches", "cupola", "periscopes", "smoke", "lights",
@@ -271,7 +273,7 @@ def group_nodes(parts):
             m = parts.pop(nme)
             meshes.append(m)
             ids.append(np.full(len(m.faces), i, np.int16))
-        painter = vp.group_painter(names, recipes, camo=True, seed=51 + gi, olive=OLIVE_RGB, weather=dict(mud=0.6, dust=0.55), seams=seams, post=post)
+        painter = vp.group_painter(names, recipes, camo=True, camo_colors=NATO, seed=51 + gi, olive=OLIVE_RGB, weather=dict(mud=0.6, dust=0.55), seams=seams, post=post)
         nodes.append(node(gname, [(merge(meshes), BakeSpec(painter, res=res, ids=np.concatenate(ids), key=f"bpz2-{gname}", seed=51 + gi))]))
     for nme, spec in TILES.items():
         nodes.append(node(nme, [(parts.pop(nme), spec)]))
