@@ -321,6 +321,22 @@ export function sumItems(model, items, unitIds = null) {
   return { spent, left };
 }
 
+/** '' — усе гаразд або даних немає; 'lo' — залишок не більший за поріг; 'out' — залишок нульовий, але витрата була. */
+export function stockState(left, spent, limit) {
+  if (left === null || left === undefined) return '';
+  if (left === 0) return spent > 0 ? 'out' : '';
+  return left <= limit ? 'lo' : '';
+}
+
+/** Порядок груп у зведеннях: відомі калібри за списком, решта за калібром, високоточні й заряди — наприкінці. */
+export function groupRank(g) {
+  const i = GROUP_ORDER.indexOf(g);
+  if (i >= 0) return i;
+  if (g === 'Високоточні') return 900;
+  if (g === 'Заряди') return 950;
+  return 100 + (parseInt(g, 10) || 0);
+}
+
 export function byCaliberGroup(model, unitIds = null) {
   const groups = new Map();
   for (const it of model.items) {
@@ -331,8 +347,7 @@ export function byCaliberGroup(model, unitIds = null) {
     const e = groups.get(g);
     e.spent += s.spent; e.left += s.left; e.items.push(it);
   }
-  const order = g => { const i = GROUP_ORDER.indexOf(g); return i < 0 ? 100 + (parseInt(g, 10) || 0) : i; };
-  return [...groups.values()].sort((a, b) => order(a.group) - order(b.group));
+  return [...groups.values()].sort((a, b) => groupRank(a.group) - groupRank(b.group));
 }
 
 export function byUnit(model) {

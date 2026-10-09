@@ -170,3 +170,11 @@ test('artillery shows an ammunition icon for every caliber group', async () => {
   const files = (await readdir(new URL('../src/ammo-art/', import.meta.url))).sort();
   assert.deepEqual(files, ['105', '120-mortar', '122', '122-rocket', '152', '155-cluster', '155-he', '155-scatter', '155-smoke', '203', '227', '60-mortar', '82-mortar', 'guided', 'other'].map((n) => `${n}.webp`).sort());
 });
+
+test('artillery ammunition tab has a type × unit matrix, filters, low-stock marks and distribution charts', async () => {
+  const app = await read('artillery-app.js');
+  for (const part of ['Матриця «тип × підрозділ»', 'ammoMatrix', 'ammoCharts', 'stockState', "'Калібр'", "'Клас'", 'Малий залишок', 'Лише з малим залишком', 'Вичерпано', 'Розподіл']) assert.ok(app.includes(part), part);
+  assert.match(app, /createElementNS\(SVG_NS/, 'діаграми — SVG без innerHTML');
+  const css = await read('artillery.css');
+  for (const part of ['.matrix-t', 'td.mx.lo', 'td.mx.out', '.donut', '--c8']) assert.ok(css.includes(part), part);
+});

@@ -1,7 +1,7 @@
 // Модуль «Артилерія»: зведення витрати й залишку боєприпасів і внесення даних бригадою у спільну таблицю.
 import { ensureMetaSheet, openWorkbook, readMeta, saveWorkbook, setCells, writeMeta } from './artillery-xlsx.js';
 import {
-  PERIODS, buildEdits, byCaliberGroup, byUnit, groupEdits, parseArtilleryWorkbook, remapEntry, stampEdits, stampFromTitle, sumItems, totals, unitKey, valueOf,
+  PERIODS, buildEdits, byCaliberGroup, byUnit, classLabel, groupEdits, groupRank, parseArtilleryWorkbook, remapEntry, stampEdits, stampFromTitle, stockState, sumItems, totals, unitKey, valueOf,
 } from './artillery-core.js';
 
 // Емблеми підрозділів: файли в unit-art, ключ — назва підрозділу без пробілів і розділових знаків.
@@ -80,6 +80,7 @@ const S = {
   form: null,                                   // { unitId, name, shells:{id:{spent,left}}, charges:{}, vgz, kbb, losses:{} } — рядки введеного як у полях
   showAll: false, search: '', notice: null,
   openGroups: new Set(), closedGroups: new Set(), detailUnit: '', ammoGroup: '', ammoSearch: '',
+  ammoClass: '', ammoView: 'matrix', ammoMetric: 'left', ammoOnlyLow: false, ammoEmpty: false,
 };
 
 function notice(kind, text, ms = 7000) {
@@ -269,26 +270,174 @@ function viewUnits() {
 }
 
 // ---------- вкладка «Боєприпаси» ----------
-function viewAmmo() {
-  const m = S.model;
-  const groups = [...new Set(m.items.map(i => i.group))];
-  const q = S.ammoSearch.trim().toLowerCase();
-  let items = m.items.filter(i => (!S.ammoGroup || i.group === S.ammoGroup) && (!q || i.label.toLowerCase().includes(q)));
+// Малий залишок: поріг у штуках зберігається на комп'ютері. Колір завжди рахується за залишком, навіть коли в клітинках показано витрату.
+const LOW_DEFAULT = 50;
+const lowLimit = () => { const n = parseInt(lsGet('low'), 10); return Number.isFinite(n) && n >= 0 ? n : LOW_DEFAULT; };
+const STOCK_MARK = { lo: '▼', out: '✕' };
+const STOCK_HINT = { lo: 'малий залишок', out: 'залишок вичерпано' };
+const SVG_NS = 'http://www.w3.org/2000/svg';
+function svg(tag, attrs, ...kids) {
+  const el = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs || {})) if (v !== null && v !== undefined && v !== false) el.setAttribute(k, v);
+  for (const kid of kids.flat()) if (kid !== null && kid !== undefined && kid !== false) el.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+  return el;
+}
+const toggle = (set, key) => { if (set.has(key)) set.delete(key); else set.add(key); };
+
+/** Рядки, що проходять фільтри вкладки (калібр, клас, пошук, «лише малий залишок», «показувати порожні»). */
+function ammoSelection() {
+  const m = S.model, limit = lowLimit(), q = S.ammoSearch.trim().toLowerCase();
   const rows = [];
-  for (const it of items) {
-    const s = sumItems(m, [it]);
-    if (!q && !s.spent && !s.left) continue;
-    const holders = m.units.filter(u => { const v = valueOf(m, it.id, u.id); return v.spent || v.left; });
-    const expanded = S.openGroups.has('ammo:' + it.id);
-    rows.push(h('tr', { class: 'link', onclick: () => { const k = 'ammo:' + it.id; if (S.openGroups.has(k)) S.openGroups.delete(k); else S.openGroups.add(k); renderAll(); } },
-      h('td', null, (expanded ? '▾ ' : '▸ '), ammoIcon(it.group, 'sm'), it.label), h('td', { class: 'muted' }, it.group), cellNum(s.spent), cellNum(s.left), h('td', { class: 'num muted' }, holders.length ? `${holders.length}` : '')));
-    if (expanded) for (const u of holders) { const v = valueOf(m, it.id, u.id); rows.push(h('tr', { class: 'sub' }, h('td', { style: 'padding-left:32px' }, u.name), h('td'), cellNum(v.spent || 0), cellNum(v.left || 0), h('td'))); }
+  for (const it of m.items) {
+    if (S.ammoGroup && it.group !== S.ammoGroup) continue;
+    if (S.ammoClass && it.cls !== S.ammoClass) continue;
+    if (q && !it.label.toLowerCase().includes(q)) continue;
+    const per = new Map(m.units.map(u => [u.id, valueOf(m, it.id, u.id)]));
+    const sum = sumItems(m, [it]);
+    const has = m.units.some(u => per.get(u.id).spent || per.get(u.id).left);
+    if (!has && !q && !S.ammoEmpty) continue;
+    const flagged = m.units.some(u => { const v = per.get(u.id); return stockState(v.left, v.spent, limit); });
+    if (S.ammoOnlyLow && !flagged && !stockState(sum.left, sum.spent, limit)) continue;
+    rows.push({ it, per, sum, state: stockState(sum.left, sum.spent, limit) });
   }
-  const tools = h('div', { class: 'toolbar' },
+  return rows.sort((a, b) => groupRank(a.it.group) - groupRank(b.it.group));   // сортування стабільне: у межах групи лишається порядок таблиці
+}
+const metricOf = (v, metric) => (v && v[metric]) || 0;
+
+function ammoToolbar(groups, classes) {
+  const seg = (items, cur, set) => h('div', { class: 'seg', role: 'group' }, items.map(([id, label]) => h('button', { type: 'button', 'aria-pressed': String(cur === id), onclick: () => { set(id); renderAll(); } }, label)));
+  const check = (label, key, title) => h('label', { class: 'check', title }, h('input', { type: 'checkbox', checked: S[key], onchange: e => { S[key] = e.target.checked; renderAll(); } }), h('span', null, label));
+  return h('div', { class: 'toolbar ammo-tools' },
+    h('div', { class: 'field' }, h('span', null, 'Вигляд'), seg([['matrix', 'Матриця'], ['list', 'Список']], S.ammoView, v => { S.ammoView = v; })),
+    h('div', { class: 'field' }, h('span', null, 'Показувати'), seg([['left', 'Залишок'], ['spent', 'Витрату']], S.ammoMetric, v => { S.ammoMetric = v; })),
     h('label', { class: 'field' }, h('span', null, 'Калібр'), h('select', { onchange: e => { S.ammoGroup = e.target.value; renderAll(); } }, h('option', { value: '' }, 'Усі'), groups.map(g => h('option', { value: g, selected: g === S.ammoGroup }, g)))),
-    h('label', { class: 'field' }, h('span', null, 'Пошук'), h('input', { type: 'search', placeholder: 'наприклад, М795', value: S.ammoSearch, id: 'ammoSearch', oninput: e => { S.ammoSearch = e.target.value; renderAll(); $('ammoSearch').focus(); $('ammoSearch').setSelectionRange(S.ammoSearch.length, S.ammoSearch.length); } })));
-  return h('section', { class: 'panel' }, h('div', { class: 'panel-head' }, h('h2', null, 'Боєприпаси за типами'), h('span', { class: 'muted small' }, 'рядки без витрати й залишку приховано; пошук показує все')),
-    tools, table(['Боєприпас', 'Калібр', { label: 'Витрата', num: true }, { label: 'Залишок', num: true }, { label: 'Підрозділів із запасом', num: true }], rows));
+    h('label', { class: 'field' }, h('span', null, 'Клас'), h('select', { onchange: e => { S.ammoClass = e.target.value; renderAll(); } }, h('option', { value: '' }, 'Усі'), classes.map(c => h('option', { value: c, selected: c === S.ammoClass }, classLabel(c))))),
+    h('label', { class: 'field' }, h('span', null, 'Пошук'), h('input', { type: 'search', placeholder: 'наприклад, М795', value: S.ammoSearch, id: 'ammoSearch', oninput: e => { S.ammoSearch = e.target.value; renderAll(); $('ammoSearch').focus(); $('ammoSearch').setSelectionRange(S.ammoSearch.length, S.ammoSearch.length); } })),
+    h('label', { class: 'field narrow' }, h('span', null, 'Малий залишок, шт. і менше'), h('input', { type: 'number', min: '0', step: '10', value: String(lowLimit()), id: 'ammoLow', onchange: e => { const n = Math.max(0, parseInt(e.target.value, 10) || 0); lsSet('low', String(n)); renderAll(); } })),
+    check('Лише з малим залишком', 'ammoOnlyLow', 'Показати тільки типи, де хоч у когось залишок малий або вичерпаний'),
+    check('Показувати порожні', 'ammoEmpty', 'Також типи, за якими в таблиці немає ні витрати, ні залишку'));
+}
+
+/** Діаграма-«бублик»: частки (value) з підписом у центрі. */
+function donut(parts, total, centerLabel) {
+  const R = 15.9155, size = 42;
+  const circles = [];
+  let offset = 0;
+  parts.forEach((p, i) => {
+    const pct = total ? p.value / total * 100 : 0;
+    if (pct <= 0) return;
+    circles.push(svg('circle', { cx: 21, cy: 21, r: R, fill: 'none', 'stroke-width': 6, stroke: p.color, 'stroke-dasharray': `${Math.max(pct - 0.4, 0.1)} ${100 - Math.max(pct - 0.4, 0.1)}`, 'stroke-dashoffset': String(25 - offset) }, svg('title', null, `${p.label}: ${fmt(p.value)} (${pct.toFixed(1).replace('.', ',')} %)`)));
+    offset += pct;
+  });
+  return svg('svg', { viewBox: `0 0 ${size} ${size}`, class: 'donut', role: 'img', 'aria-label': 'Розподіл: ' + parts.map(p => `${p.label} ${fmt(p.value)}`).join(', ') },
+    svg('circle', { cx: 21, cy: 21, r: R, fill: 'none', 'stroke-width': 6, stroke: 'var(--bar-bg)' }), circles,
+    svg('text', { x: 21, y: 21.5, class: 'donut-n', 'text-anchor': 'middle' }, fmt(total)),
+    svg('text', { x: 21, y: 26.5, class: 'donut-l', 'text-anchor': 'middle' }, centerLabel));
+}
+const PALETTE = 8;
+
+function ammoCharts(rows, metric, groups) {
+  const m = S.model, word = metric === 'left' ? 'залишку' : 'витрати';
+  const byKey = new Map();
+  const perItem = !!S.ammoGroup;            // коли вибрано калібр, діаграма розбиває його на типи, інакше — на калібри
+  for (const r of rows) {
+    const key = perItem ? r.it.id : r.it.group;
+    const e = byKey.get(key) || { key, label: perItem ? r.it.label : r.it.group, group: r.it.group, value: 0 };
+    e.value += metricOf(r.sum, metric); byKey.set(key, e);
+  }
+  let parts = [...byKey.values()].filter(p => p.value > 0).sort((a, b) => b.value - a.value);
+  if (parts.length > PALETTE) {
+    const rest = parts.slice(PALETTE - 1);
+    parts = [...parts.slice(0, PALETTE - 1), { key: '', label: 'Решта', value: rest.reduce((a, p) => a + p.value, 0), group: '', rest: rest.length }];
+  }
+  parts.forEach((p, i) => { p.color = p.rest ? 'var(--muted)' : `var(--c${i + 1})`; });
+  const total = parts.reduce((a, p) => a + p.value, 0);
+  const caliberPanel = h('section', { class: 'panel' }, h('div', { class: 'panel-head' }, h('h2', null, perItem ? `Розподіл ${word} за типами` : `Розподіл ${word} за калібрами`), h('span', { class: 'muted small' }, 'за поточними фільтрами')));
+  if (!total) caliberPanel.append(h('p', { class: 'muted' }, 'За цими фільтрами немає даних.'));
+  else caliberPanel.append(h('div', { class: 'chart-row' }, donut(parts, total, metric === 'left' ? 'залишок' : 'витрата'),
+    h('ul', { class: 'legend' }, parts.map(p => h('li', { class: p.key && !perItem ? 'click' : '', title: p.key && !perItem ? 'Показати лише цей калібр' : '', onclick: p.key && !perItem ? () => { S.ammoGroup = p.key; renderAll(); } : null },
+      h('i', { style: `background:${p.color}` }), h('span', { class: 'lbl' }, p.label, p.rest ? h('small', { class: 'muted' }, ` · ще ${p.rest}`) : ''), h('b', { class: 'num' }, fmt(p.value)), h('span', { class: 'pct num muted' }, (p.value / total * 100).toFixed(p.value / total < 0.1 ? 1 : 0).replace('.', ',') + ' %'))))));
+  // за підрозділами
+  const units = m.units.map(u => ({ u, value: rows.reduce((a, r) => a + metricOf(r.per.get(u.id), metric), 0), low: rows.filter(r => { const v = r.per.get(u.id); return stockState(v.left, v.spent, lowLimit()); }).length }))
+    .filter(x => x.value > 0).sort((a, b) => b.value - a.value);
+  const max = Math.max(1, ...units.map(x => x.value));
+  const unitPanel = h('section', { class: 'panel' }, h('div', { class: 'panel-head' }, h('h2', null, `Розподіл ${word} за підрозділами`), h('span', { class: 'muted small' }, 'позначка ▼ — є типи з малим залишком')));
+  if (!units.length) unitPanel.append(h('p', { class: 'muted' }, 'За цими фільтрами немає даних.'));
+  else unitPanel.append(h('div', { class: 'hbars' }, units.map(x => h('div', { class: 'hbar' },
+    h('span', { class: 'who' }, x.u.name), h('div', { class: 'bar' }, h('i', { style: `width:${Math.max(2, Math.round(x.value / max * 100))}%` })),
+    h('b', { class: 'num' }, fmt(x.value)), h('span', { class: 'flag', title: x.low ? `Типів із малим залишком: ${x.low}` : '' }, x.low && metric === 'left' ? '▼' : '')))));
+  return h('div', { class: 'cols' }, caliberPanel, unitPanel);
+}
+
+function ammoMatrix(rows, metric) {
+  const m = S.model, limit = lowLimit();
+  const units = m.units.filter(u => S.ammoEmpty || rows.some(r => { const v = r.per.get(u.id); return v.spent || v.left; }));
+  if (!rows.length || !units.length) return h('p', { class: 'muted' }, 'За цими фільтрами немає рядків із даними. Змініть фільтри або увімкніть «Показувати порожні».');
+  const head = h('tr', null, h('th', { class: 'corner' }, 'Боєприпас'),
+    units.map(u => { const em = emblemOf(u.name); return h('th', { class: 'num unit-h', title: u.name }, em ? h('img', { class: 'crest-s', src: em, alt: '' }) : null, h('span', null, u.name)); }),
+    h('th', { class: 'num total-h' }, 'Разом'));
+  const body = [];
+  let lastGroup = null;
+  const colTotals = new Map(units.map(u => [u.id, { spent: 0, left: 0 }]));
+  for (const r of rows) {
+    if (!S.ammoGroup && r.it.group !== lastGroup) {
+      lastGroup = r.it.group;
+      body.push(h('tr', { class: 'grp' }, h('td', { colspan: units.length + 2 }, ammoIcon(r.it.group, 'xs'), r.it.group)));
+    }
+    const cells = units.map(u => {
+      const v = r.per.get(u.id), st = stockState(v.left, v.spent, limit), n = metricOf(v, metric);
+      const t = colTotals.get(u.id); t.spent += v.spent || 0; t.left += v.left || 0;
+      const title = `${u.name}: витрата ${fmt(v.spent || 0)}, залишок ${fmt(v.left || 0)}${st ? ' · ' + STOCK_HINT[st] : ''}`;
+      return h('td', { class: `num mx ${st} ${n ? '' : 'zero'}`.trim(), title }, st ? h('em', { class: 'mark' }, STOCK_MARK[st]) : null, n ? fmt(n) : (v.left === null && v.spent === null ? '' : '0'));
+    });
+    const tot = metricOf(r.sum, metric);
+    body.push(h('tr', null, h('td', { class: 'first', title: r.it.label }, r.it.label, r.it.kind === 'precision' ? h('span', { class: 'muted small' }, ' · високоточні') : ''), cells,
+      h('td', { class: `num mx totalc ${r.state}`.trim(), title: r.state ? STOCK_HINT[r.state] + ' у сумі' : '' }, r.state ? h('em', { class: 'mark' }, STOCK_MARK[r.state]) : null, fmt(tot))));
+  }
+  const grand = { spent: 0, left: 0 };
+  for (const t of colTotals.values()) { grand.spent += t.spent; grand.left += t.left; }
+  body.push(h('tr', { class: 'total' }, h('td', { class: 'first' }, 'Разом'), units.map(u => h('td', { class: 'num' }, fmt(colTotals.get(u.id)[metric]))), h('td', { class: 'num' }, fmt(grand[metric]))));
+  return h('div', { class: 'scroll matrix' }, h('table', { class: 'matrix-t' }, h('thead', null, head), h('tbody', null, body)));
+}
+
+function ammoList(rows, metric) {
+  const m = S.model, limit = lowLimit(), q = S.ammoSearch.trim();
+  const out = [];
+  for (const r of rows) {
+    const holders = m.units.filter(u => { const v = r.per.get(u.id); return v.spent || v.left; });
+    const expanded = S.openGroups.has('ammo:' + r.it.id);
+    out.push(h('tr', { class: 'link', onclick: () => { toggle(S.openGroups, 'ammo:' + r.it.id); renderAll(); } },
+      h('td', null, (expanded ? '▾ ' : '▸ '), ammoIcon(r.it.group, 'sm'), r.it.label), h('td', { class: 'muted' }, r.it.group), cellNum(r.sum.spent),
+      h('td', { class: `num mx ${r.state} ${r.sum.left ? '' : 'zero'}`.trim() }, r.state ? h('em', { class: 'mark' }, STOCK_MARK[r.state]) : null, r.sum.left ? fmt(r.sum.left) : '0'),
+      h('td', { class: 'num muted' }, holders.length ? `${holders.length}` : '')));
+    if (expanded) for (const u of holders) {
+      const v = r.per.get(u.id), st = stockState(v.left, v.spent, limit);
+      out.push(h('tr', { class: 'sub' }, h('td', { style: 'padding-left:32px' }, u.name), h('td'), cellNum(v.spent || 0),
+        h('td', { class: `num mx ${st} ${v.left ? '' : 'zero'}`.trim() }, st ? h('em', { class: 'mark' }, STOCK_MARK[st]) : null, v.left ? fmt(v.left) : '0'), h('td')));
+    }
+  }
+  return out.length ? table(['Боєприпас', 'Калібр', { label: 'Витрата', num: true }, { label: 'Залишок', num: true }, { label: 'Підрозділів із запасом', num: true }], out)
+    : h('p', { class: 'muted' }, q ? 'Нічого не знайдено.' : 'За цими фільтрами немає рядків із даними.');
+}
+
+function viewAmmo() {
+  const m = S.model, metric = S.ammoMetric, limit = lowLimit();
+  const groups = [...new Set(m.items.map(i => i.group))];
+  const classes = [...new Set(m.items.map(i => i.cls))];
+  if (S.ammoGroup && !groups.includes(S.ammoGroup)) S.ammoGroup = '';
+  if (S.ammoClass && !classes.includes(S.ammoClass)) S.ammoClass = '';
+  const rows = ammoSelection();
+  // Підсумок станів за всіма клітинками вибраних рядків: скільки позицій «тип × підрозділ» вичерпано і скільки з малим залишком.
+  let out = 0, lo = 0;
+  for (const r of rows) for (const u of m.units) { const v = r.per.get(u.id); const st = stockState(v.left, v.spent, limit); if (st === 'out') out++; else if (st === 'lo') lo++; }
+  const legend = h('div', { class: 'stock-legend' },
+    h('span', { class: 'chip out' }, h('em', { class: 'mark' }, STOCK_MARK.out), `Вичерпано: ${out}`),
+    h('span', { class: 'chip lo' }, h('em', { class: 'mark' }, STOCK_MARK.lo), `Малий залишок (≤ ${fmt(limit)}): ${lo}`),
+    h('span', { class: 'muted small' }, 'Позначка стоїть біля залишку «тип × підрозділ»; колір не залежить від того, що показано в клітинках.'));
+  const tools = ammoToolbar(groups, classes);
+  const main = h('section', { class: 'panel' }, h('div', { class: 'panel-head' }, h('h2', null, S.ammoView === 'matrix' ? 'Матриця «тип × підрозділ»' : 'Боєприпаси за типами'),
+    h('span', { class: 'muted small' }, `${rowsWord(rows.length)}; рядки без витрати й залишку приховано`)), legend, S.ammoView === 'matrix' ? ammoMatrix(rows, metric) : ammoList(rows, metric));
+  return h('div', { style: 'display:grid;gap:16px' }, h('section', { class: 'panel' }, tools), ammoCharts(rows, metric, groups), main);
 }
 
 // ---------- вкладка «Заряди» ----------

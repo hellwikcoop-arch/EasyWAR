@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { openWorkbook, readSheet, saveWorkbook, setCells, writeMeta } from '../src/artillery-xlsx.js';
 import {
-  GROUP_ORDER, buildEdits, byCaliberGroup, byUnit, classify, diffModels, groupEdits, parseArtilleryWorkbook, remapEntry, stampEdits, stampFromTitle, stampText, totals, unitKey, valueOf,
+  GROUP_ORDER, buildEdits, byCaliberGroup, byUnit, classify, diffModels, groupEdits, groupRank, parseArtilleryWorkbook, remapEntry, stampEdits, stampFromTitle, stampText, stockState, totals, unitKey, valueOf,
 } from '../src/artillery-core.js';
 
 const fixture = () => readFile(new URL('./fixtures/artillery-sample.xlsx', import.meta.url));
@@ -200,4 +200,21 @@ test('moves an entry to a fresh copy of the file by row labels', async () => {
   const re = remapEntry(model, shifted, entry);
   assert.deepEqual(Object.keys(re.shells), [`shells:${item(model, 'М795').row + 1}`]);
   assert.ok(wb);
+});
+
+test('marks low and exhausted stock without flagging cells that never had any', () => {
+  assert.equal(stockState(0, 12, 50), 'out');
+  assert.equal(stockState(0, 0, 50), '');
+  assert.equal(stockState(0, null, 50), '');
+  assert.equal(stockState(1, 0, 50), 'lo');
+  assert.equal(stockState(50, 0, 50), 'lo');
+  assert.equal(stockState(51, 0, 50), '');
+  assert.equal(stockState(null, 5, 50), '');
+  assert.equal(stockState(undefined, 5, 50), '');
+  assert.equal(stockState(5, 0, 0), '', 'з нульовим порогом «малий» не позначається');
+});
+
+test('orders caliber groups the same way in every view', () => {
+  const groups = ['Високоточні', '60 мм', '155 мм ОФ', '203 мм', '152 мм', '85 мм', 'Заряди', '155 мм касетні'];
+  assert.deepEqual([...groups].sort((a, b) => groupRank(a) - groupRank(b)), ['155 мм ОФ', '155 мм касетні', '152 мм', '60 мм', '85 мм', '203 мм', 'Високоточні', 'Заряди']);
 });
