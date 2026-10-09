@@ -20,7 +20,7 @@ test('launcher opens both branch modules as same-origin pages', async () => {
   const html = await read('index.html');
   assert.match(html, /<iframe class="module-frame" id="frame-air"/);
   assert.match(html, /<iframe class="module-frame" id="frame-rocket"/);
-  assert.match(html, /const MODULE_SRC = \{air:'\.\/air\.html', rocket:'\.\/rocket\.html', pvk:'\.\/air\.html\?command=pvk', dshv:'\.\/rocket\.html\?command=dshv'\};/);
+  assert.match(html, /const MODULE_SRC = \{air:'\.\/air\.html', rocket:'\.\/rocket\.html', artillery:'\.\/artillery\.html', pvk:'\.\/air\.html\?command=pvk', dshv:'\.\/rocket\.html\?command=dshv'\};/);
   assert.match(html, /frame\.src = MODULE_SRC\[branch\];/);
   assert.doesNotMatch(html, /application\/x-easywar-module/, 'base64 module payloads must not be shipped');
   assert.doesNotMatch(html, /\.srcdoc\s*=/);
@@ -38,19 +38,21 @@ test('army aviation is a dimmed branch block that does not open a module yet', a
   assert.match(html, /\.branch-card\.branch-card-soon\{[^}]*opacity:\.42[^}]*pointer-events:none/);
 });
 
-test('artillery is a separate dimmed block next to army aviation, and the rocket card is just «Ракетні Війська»', async () => {
+test('artillery is a live block next to the dimmed army aviation, and the rocket card is just «Ракетні Війська»', async () => {
   const html = await read('index.html');
-  const card = html.match(/<div class="branch-card branch-card-soon" data-soon="artillery"[^>]*>[\s\S]*?<\/h3>\s*<span class="bc-soon">([^<]+)<\/span>/);
+  const card = html.match(/<button class="branch-card branch-card-soon branch-card-live" data-branch="artillery"[^>]*>[\s\S]*?<\/button>/);
   assert.ok(card, 'artillery card is on the start screen');
-  assert.match(card[0], /aria-disabled="true"/);
-  assert.match(card[0], /aria-label="Артилерія — у розробці"/);
+  assert.match(card[0], /aria-label="Артилерія — облік боєприпасів"/);
   assert.match(card[0], /<h3>Артилерія<\/h3>/);
-  assert.equal(card[1], 'У розробці');
-  assert.doesNotMatch(card[0], /data-branch=/, 'no module behind it yet');
+  assert.doesNotMatch(card[0], /aria-disabled/, 'the module opens now');
+  assert.match(html, /artillery:'\.\/artillery\.html'/);
+  assert.match(html, /<iframe class="module-frame" id="frame-artillery"/);
+  assert.match(html, /<div class="branch-card branch-card-soon" data-soon="army-aviation"[^>]*aria-disabled="true"/, 'army aviation is still dimmed');
   assert.match(html, /<h3>Ракетні Війська<\/h3>/);
   assert.doesNotMatch(html, /Війська і Артилерія/);
-  // кожен із двох блоків «у розробці» стоїть у своїй колонці, а не на всю ширину
   assert.match(html, /\.branch-card\.branch-card-soon\{grid-column:auto;/);
+  const vite = await readFile(new URL('../vite.config.js', import.meta.url), 'utf8');
+  assert.match(vite, /artillery: fileURLToPath\(new URL\("\.\/src\/artillery\.html"/);
 });
 
 test('air module keeps desktop integrations and v3.1 isolation', async () => {
@@ -144,4 +146,16 @@ test('start screen is neutral and fits 16:9 / 16:10 monitors; tile grids are bal
   const pvk = await read('pvk-dashboard.css');
   assert.match(pvk, /nth-child\(7\):last-child\),\s*\.pvk-kpis:has\(> :nth-child\(8\):last-child\) \{ grid-template-columns: repeat\(4/, 'PVK seven tiles lay out as 4+3');
   assert.match(pvk, /grid-column: 1 \/ -1;\s*justify-self: center;/, 'PVK dashboard is centred in the module grid');
+});
+
+test('artillery page is a module of its own with the shared-file entry flow', async () => {
+  const html = await read('artillery.html');
+  assert.match(html, /<script type="module" src="\.\/artillery-app\.js">/);
+  assert.match(html, /aviahub\.theme/, 'follows the launcher theme switch');
+  const app = await read('artillery-app.js');
+  assert.match(app, /showOpenFilePicker/);
+  assert.match(app, /createWritable/);
+  assert.match(app, /file\.lastModified !== S\.lastModified/, 'merges onto a newer copy of the shared file');
+  assert.match(app, /PERIODS/);
+  assert.doesNotMatch(app, /innerHTML/, 'table text goes in as text, never as markup');
 });

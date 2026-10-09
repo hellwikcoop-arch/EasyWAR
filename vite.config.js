@@ -83,6 +83,7 @@ export default defineConfig({
         index: fileURLToPath(new URL("./src/index.html", import.meta.url)),
         air: fileURLToPath(new URL("./src/air.html", import.meta.url)),
         rocket: fileURLToPath(new URL("./src/rocket.html", import.meta.url)),
+        artillery: fileURLToPath(new URL("./src/artillery.html", import.meta.url)),
         viewer: fileURLToPath(new URL("./src/viewer.html", import.meta.url)),
       },
     },

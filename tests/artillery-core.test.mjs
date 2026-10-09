@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { openWorkbook, readSheet, saveWorkbook, setCells, writeMeta } from '../src/artillery-xlsx.js';
 import {
-  GROUP_ORDER, buildEdits, byCaliberGroup, byUnit, classify, diffModels, groupEdits, parseArtilleryWorkbook, totals, unitKey, valueOf,
+  GROUP_ORDER, buildEdits, byCaliberGroup, byUnit, classify, diffModels, groupEdits, parseArtilleryWorkbook, remapEntry, stampEdits, stampFromTitle, stampText, totals, unitKey, valueOf,
 } from '../src/artillery-core.js';
 
 const fixture = () => readFile(new URL('./fixtures/artillery-sample.xlsx', import.meta.url));
@@ -179,4 +179,25 @@ test('rejects a workbook that is not the artillery ledger', async () => {
   const wb = await openWorkbook(await fixture());
   wb.sheets = wb.sheets.filter(s => s.name !== 'витр.залиш.-СН');
   await assert.rejects(() => parseArtilleryWorkbook(wb), /витр\.залиш\.-СН/);
+});
+
+test('stamps the date and period into the sheet titles', async () => {
+  const wb = await openWorkbook(await fixture());
+  assert.deepEqual(await stampEdits(wb, '2026-10-08', '17:00'), [], 'у синтетичній таблиці заголовок без штампа');
+  await setCells(wb, 'витр.залиш.-СН', [{ ref: 'A1', value: 'Витрата та залишок боєприпасів станом на 24.00 07.10.2026 року' }]);
+  const edits = await stampEdits(wb, '2026-10-08', '17:00');
+  assert.deepEqual(edits, [{ sheet: 'витр.залиш.-СН', ref: 'A1', value: 'Витрата та залишок боєприпасів станом на 17.00 08.10.2026 року' }]);
+  assert.match((await stampEdits(wb, '2026-10-08', '00:00'))[0].value, /станом на 24\.00 08\.10\.2026/);
+  assert.deepEqual(await stampFromTitle(wb), { date: '2026-10-07', period: '00:00' });
+  assert.equal(stampText('2026-01-05', '17:00'), 'станом на 17.00 05.01.2026');
+});
+
+test('moves an entry to a fresh copy of the file by row labels', async () => {
+  const { wb, model } = await load();
+  const entry = { shells: { [item(model, 'М795').id]: { spent: 3, left: 77 } }, charges: {} };
+  // інша бригада вставила рядок вище — номери рядків зсунулися, підписи ті самі
+  const shifted = { ...model, items: model.items.map(i => ({ ...i, id: `shells:${i.row + 1}`, row: i.row + 1 })) };
+  const re = remapEntry(model, shifted, entry);
+  assert.deepEqual(Object.keys(re.shells), [`shells:${item(model, 'М795').row + 1}`]);
+  assert.ok(wb);
 });

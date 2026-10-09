@@ -415,3 +415,55 @@ export function groupEdits(edits) {
   for (const e of edits) { if (!by.has(e.sheet)) by.set(e.sheet, []); by.get(e.sheet).push({ ref: e.ref, value: e.value }); }
   return by;
 }
+
+// ---------- штамп «станом на …» у заголовках аркушів ----------
+const STAMP_RE = /станом на\s+\d{1,2}[.:]\d{2}\s+\d{1,2}\.\d{1,2}\.\d{4}/i;
+const pad2 = n => String(n).padStart(2, '0');
+
+/** «станом на 17.00 08.10.2026»; період 00:00 у таблиці записують як кінець доби — «24.00». */
+export function stampText(date, period) {
+  const [y, m, d] = String(date).split('-');
+  return `станом на ${period === '00:00' ? '24.00' : period.replace(':', '.')} ${pad2(+d)}.${pad2(+m)}.${y}`;
+}
+
+/** Зміни заголовків A1 аркушів снарядів і зарядів, де вже є «станом на …». */
+export async function stampEdits(wb, date, period) {
+  const edits = [];
+  for (const key of [SHEET_SHELLS, SHEET_CHARGES]) {
+    const info = findSheet(wb, key);
+    if (!info) continue;
+    const sh = await readSheet(wb, info.name);
+    const cur = sh.value(1, 1);
+    if (typeof cur !== 'string' || !STAMP_RE.test(cur)) continue;
+    const next = cur.replace(STAMP_RE, stampText(date, period));
+    if (next !== cur) edits.push({ sheet: info.name, ref: 'A1', value: next });
+  }
+  return edits;
+}
+
+/** Стан, який показати в шапці: дата й період із заголовка таблиці, якщо в службовому аркуші їх немає. */
+export async function stampFromTitle(wb) {
+  const info = findSheet(wb, SHEET_SHELLS);
+  if (!info) return null;
+  const cur = (await readSheet(wb, info.name)).value(1, 1);
+  const m = typeof cur === 'string' && /станом на\s+(\d{1,2})[.:](\d{2})\s+(\d{1,2})\.(\d{1,2})\.(\d{4})/i.exec(cur);
+  if (!m) return null;
+  const hh = +m[1];
+  return { date: `${m[5]}-${pad2(+m[4])}-${pad2(+m[3])}`, period: hh === 17 ? '17:00' : (hh === 24 || hh === 0) ? '00:00' : `${pad2(hh)}:${m[2]}` };
+}
+
+// ---------- перенесення введеного на свіжу копію файлу ----------
+/** Якщо файл змінили інші бригади, поки форма була відкрита: той самий набір правок, прив'язаний до підписів рядків. */
+export function remapEntry(prevModel, nextModel, entry) {
+  const mapKind = (kind, prevItems, nextItems) => {
+    const out = {};
+    const byLabel = new Map(nextItems.map(i => [lc(i.label), i]));
+    for (const [id, v] of Object.entries(entry[kind] || {})) {
+      const old = prevItems.find(i => i.id === id);
+      const now = old && byLabel.get(lc(old.label));
+      if (now) out[now.id] = v;
+    }
+    return out;
+  };
+  return { ...entry, shells: mapKind('shells', prevModel.items, nextModel.items), charges: mapKind('charges', prevModel.chargeItems, nextModel.chargeItems) };
+}
