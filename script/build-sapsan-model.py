@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Генерує процедурну модель оперативно-тактичного ракетного комплексу «Сапсан» (колісне шасі 8×8, один великий
+"""Генерує процедурну модель оперативно-тактичного ракетного комплексу «Сапсан» (колісне шасі 10×10, один великий
 транспортно-пусковий контейнер) для довідника (src/models/sapsan.glb).
 
     pip install numpy scipy trimesh pillow xatlas   # текстури: script/glb_bake.py, paint_lib.py, vehicle_paint.py
@@ -9,7 +9,7 @@
 Форму знято з фото, яке надав користувач (вид спереду зліва): висока гранчаста броньована кабіна над передніми мостами з
 двома великими лобовими вікнами під броньованими заслінками, широкий низький бампер із фарами в нішах, номерний знак,
 двері з вікном і підніжками, люк на даху, за кабіною — жалюзійний відсік двигуна, далі довгий гранчастий контейнер із
-піксельним камуфляжем і ґратчастою кормою, рівно розставлені осі, великі колеса й арки. Це не скан і не копія чужих моделей,
+піксельним камуфляжем і ґратчастою кормою, п'ять рівно розставлених осей на борт, великі колеса й арки. Це не скан і не копія чужих моделей,
 сторонніх текстур немає. Для перегляду, а не для впізнавання чи розрахунків. Одиниці — метри, перед машини дивиться в +x,
 «вгору» — +y, права сторона — +z (як у glTF).
 """
@@ -26,19 +26,19 @@ import vehicle_paint as vp
 from vehicle_kit import box, cyl_between, level_hull, merge, rivet_row
 
 DEFAULT_OUT = Path(__file__).resolve().parent.parent / "src" / "models" / "sapsan.glb"
-AXLES = [3.95, 1.95, -0.05, -2.05]
-FRAME_X0, FRAME_X1 = -5.60, 5.00
+AXLES = [3.95, 2.05, 0.15, -1.75, -3.65]       # 10×10: п'ять осей на борт, рівні проміжки
+FRAME_X0, FRAME_X1 = -6.40, 5.00
 XF = 5.15                          # лобова грань кабіни
 CAB_X0 = 3.00
 CAB_HALF = 1.30
 CAB_Y0, CAB_Y1 = 1.55, 3.18
 BOX2_X0 = 1.72                     # відсік двигуна за кабіною
-CONT_X0, CONT_X1 = -5.25, 1.72
+CONT_X0, CONT_X1 = -6.05, 1.72
 CONT_Y0, CONT_Y1, CONT_HALF = 1.62, 3.16, 1.34
 
 
 def build():
-    parts = v8.chassis(AXLES, FRAME_X0, FRAME_X1)
+    parts = v8.chassis(AXLES, FRAME_X0, FRAME_X1, groups=[(0, 1), (2, 3, 4)])
     rivets = []
     # кабіна
     parts["cab"] = level_hull([(CAB_Y0 - 0.05, XF, CAB_X0, CAB_HALF, 0.10), (2.30, XF, CAB_X0, CAB_HALF, 0.08), (CAB_Y1 - 0.12, XF - 0.05, CAB_X0, CAB_HALF, 0.10),
@@ -109,7 +109,7 @@ def build():
     parts["rear_grille"] = merge(rg)
     cr = []
     for s in (-1, 1):
-        for x in (-4.6, 1.0):
+        for x in (-5.4, 1.0):
             cr += [box((x, 1.52, s * 1.04), (0.50, 0.20, 0.22), bevel=0.02)]
     parts["cradle"] = merge(cr + [box((0.0, 1.46, s * 0.55), (CONT_X1 - CONT_X0 - 0.6, 0.12, 0.14), bevel=0.01) for s in (-1, 1)])
     parts["cont_rivets"] = merge(rivet_row((CONT_X0 + 0.25, 2.25, CONT_HALF + 0.001), (CONT_X1 - 0.25, 2.25, CONT_HALF + 0.001), 0.17, (0, 0, 1)) +
@@ -118,7 +118,7 @@ def build():
     # опорні домкрати (підняті) біля задньої осі, вихлоп
     jacks = []
     for s in (-1, 1):
-        x = -3.30
+        x = -4.30
         jacks += [box((x, 1.00, s * 1.12), (0.30, 0.22, 0.20), bevel=0.02), cyl_between((x, 1.00, s * 1.26), (x, 0.72, s * 1.26), 0.065, 10),
                   box((x, 0.68, s * 1.26), (0.34, 0.06, 0.34), bevel=0.01)]
     parts["jacks"] = merge(jacks)
@@ -180,7 +180,7 @@ def main() -> int:
         w.add(nd)
     assert not parts, f"частини без поверхні: {list(parts)}"
     glb = w.glb({"title": "Sapsan (generated)", "generated": True,
-                 "note": "Procedural model of an 8x8 wheeled operational-tactical missile launcher with a transport-launch container, built from open "
+                 "note": "Procedural model of an 10x10 wheeled operational-tactical missile launcher with a transport-launch container, built from open "
                          "overall dimensions and a user-supplied reference photo. Not a scan or copy of any other model."})
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(glb)
