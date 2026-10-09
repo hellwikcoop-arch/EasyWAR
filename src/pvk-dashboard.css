@@ -38,6 +38,14 @@
   box-shadow: 0 18px 45px rgba(0, 0, 0, .16);
 }
 
+/* Логотип Повітряного командування зліва від заголовка дашборда. */
+.pvk-hero { align-items: center; }
+.pvk-hero::before {
+  content: ''; flex: none; width: 88px; aspect-ratio: 1; border-radius: 14px;
+  background: url('./pvk-art/emblem.webp') center / cover no-repeat;
+  box-shadow: 0 0 0 1px rgba(232, 240, 250, .18), 0 8px 22px rgba(0, 0, 0, .35);
+}
+.pvk-hero > div { margin-right: auto; }
 .pvk-hero h1,
 .pvk-base-hero h1,
 .pvk-page-head h2 { margin: 4px 0 0; }

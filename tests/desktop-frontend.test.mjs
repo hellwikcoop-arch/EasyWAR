@@ -119,3 +119,12 @@ test('start screen hosts profile, backup, updates and Signal', async () => {
   assert.ok(order.every(index => index > 0), 'all three tools are loaded');
   assert.deepEqual([...order].sort((a, b) => a - b), order, 'prepend order gives Профіль, Резервна копія, Оновлення, Signal');
 });
+
+test('PVK emblem is shown on the launcher tile and in the PVK dashboard hero', async () => {
+  const html = await read('index.html');
+  assert.match(html, /<img class="ct-logo"[^>]*src="data:image\/webp;base64,/, 'launcher PVK tile carries the logo');
+  const css = await read('pvk-dashboard.css');
+  assert.match(css, /\.pvk-hero::before[^}]*pvk-art\/emblem\.webp/, 'dashboard hero uses the emblem');
+  const emblem = await readFile(new URL('../src/pvk-art/emblem.webp', import.meta.url));
+  assert.ok(emblem.length > 1000 && emblem.length < 40000, 'emblem is a small webp');
+});
