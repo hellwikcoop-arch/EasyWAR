@@ -32,6 +32,8 @@ export const MODEL_FILES = {
   'mgm-140-atacms': new URL('./models/mgm-140-atacms.glb', import.meta.url).href,
   'm142-himars': new URL('./models/m142-himars.glb', import.meta.url).href,
   'm270-mlrs': new URL('./models/m270-mlrs.glb', import.meta.url).href,
+  'vilkha': new URL('./models/vilkha.glb', import.meta.url).href,
+  'sapsan': new URL('./models/sapsan.glb', import.meta.url).href,
   'm1084a1p2': new URL('./models/m1084a1p2.glb', import.meta.url).href,
   'm984a2': new URL('./models/m984a2.glb', import.meta.url).href,
   'bergepanzer2': new URL('./models/bergepanzer2.glb', import.meta.url).href,

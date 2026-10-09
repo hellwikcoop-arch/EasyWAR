@@ -7011,7 +7011,7 @@ const resRawDiffers = r => { const a = String(r.resRaw || '').trim().toLowerCase
 /* ------------------------------ вкладки, тема, події ------------------------------ */
 /* ---- вкладка «Довідник» (ref-wiki.js): у РВ лише наземні засоби й ракети, без підсумку по таблиці ПС ---- */
 const REF = { ctl: null, pending: '' };
-const REF_SCOPE = { groups: ['ground', 'support', 'munition'], only: ['himars', 'm270', 'm1084', 'm984', 'bpz2', 'hemtt-pods', 'atacms', 'gmlrs'] };
+const REF_SCOPE = { groups: ['ground', 'support', 'munition'], only: ['himars', 'm270', 'vilkha', 'sapsan', 'm1084', 'm984', 'bpz2', 'hemtt-pods', 'atacms', 'gmlrs'] };
 function refOpen() {
   if (!REF.ctl) {
     if (!window.RefWiki) { window.addEventListener('load', refOpen, { once: true }); return; }

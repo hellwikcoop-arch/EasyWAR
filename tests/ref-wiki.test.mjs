@@ -182,7 +182,7 @@ test('the HIMARS article lives in its own ground group, found by its Ukrainian n
   assert.equal(himars.model.file, 'm142-himars');
   assert.ok(himars.credit.generated && himars.credit.note, 'generated model, no third-party licence');
   assert.deepEqual(searchEntries('хаймарс').map(e => e.id), ['himars', 'atacms', 'gmlrs']); // ракети, які несе HIMARS, мають той самий ключ
-  assert.deepEqual(searchEntries('', 'ground').map(e => e.id), ['himars', 'm270']);
+  assert.deepEqual(searchEntries('', 'ground').map(e => e.id), ['himars', 'm270', 'vilkha', 'sapsan']);
   assert.ok(searchEntries('', 'aircraft').every(e => e.group === 'aircraft'));
   assert.deepEqual(carriersOf('himars'), []);
   assert.deepEqual(munitionsOf('himars'), []);
@@ -286,6 +286,23 @@ test('the M270 article is a generated ground model with its pods, tracks and lau
   assert.match(entryById('m270').sections.find(sec => sec.title === 'Боєприпаси').list.join(' '), /MGM-140 ATACMS/);
 });
 
+// Українські системи в «Наземних засобах»: РСЗВ «Вільха» і ОТРК «Сапсан» — згенеровані моделі на спільному шасі 8×8.
+test('Vilkha and Sapsan are generated ground models built on the shared 8x8 chassis', async () => {
+  const credits = await readFile(new URL('../src/models/CREDITS.md', import.meta.url), 'utf8');
+  for (const [id, file, script] of [['vilkha', 'vilkha', 'build-vilkha-model.py'], ['sapsan', 'sapsan', 'build-sapsan-model.py']]) {
+    const e = entryById(id);
+    assert.equal(e.group, 'ground');
+    assert.equal(e.model.file, file);
+    assert.ok(e.credit.generated && e.credit.note);
+    assert.ok((await stat(new URL(`../src/models/${file}.glb`, import.meta.url))).size < 16e6);
+    await stat(new URL(`../script/${script}`, import.meta.url));
+    assert.ok(credits.includes(`${file}.glb`));
+  }
+  await stat(new URL('../script/vehicle_8x8.py', import.meta.url));
+  assert.ok(searchEntries('вільха').some(e => e.id === 'vilkha'));
+  assert.ok(searchEntries('сапсан').some(e => e.id === 'sapsan'));
+});
+
 // Машини забезпечення: евакуація й підвіз до пускових установок; окрема група, без підсумку по вильотах ПС і пар «носій — БП».
 test('support vehicles live in their own group with generated models and no air-force summary', async () => {
   assert.ok(GROUPS.some(g => g.id === 'support' && g.title === 'Машини забезпечення'));
@@ -324,7 +341,7 @@ test('the РВ module has its own reference tab limited to ground systems and ro
   const scope = /REF_SCOPE = \{ groups: \[([^\]]*)\], only: \[([^\]]*)\] \}/.exec(rocket);
   assert.ok(scope, 'scope declared');
   const ids = scope[2].match(/'([\w-]+)'/g).map(s => s.slice(1, -1));
-  assert.deepEqual(ids.sort(), ['atacms', 'bpz2', 'gmlrs', 'hemtt-pods', 'himars', 'm1084', 'm270', 'm984']);
+  assert.deepEqual(ids.sort(), ['atacms', 'bpz2', 'gmlrs', 'hemtt-pods', 'himars', 'm1084', 'm270', 'm984', 'sapsan', 'vilkha']);
   assert.ok(scope[1].includes("'support'"), 'support vehicles group is shown in the РВ reference');
   for (const id of ids) assert.ok(entryById(id), `${id} exists`);
   assert.match(rocket, /usage: false, related: false/);
