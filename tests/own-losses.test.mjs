@@ -202,7 +202,7 @@ test('the own-losses callout excludes suspect-dated rows and renders on the slid
   assert.ok(xml.includes('Наші втрати за 7 діб — 21'));
 });
 
-test('group slides (ПС, РВіА) carry no own-losses callout, period slides do', () => {
+test('group slides (ПС, РВ) carry no own-losses callout, period slides do', () => {
   const deck = buildDeck(udshv(), { ownLosses: ownWorkbook(), groups: [{ id: 'a', title: 'Група А', units: ['Підрозділ А'] }] });
   assert.equal(deck.slides.find(s => s.id === 'group:a').ownCallout, null);
   for (const id of ['week', 'month', 'all']) assert.ok(deck.slides.find(s => s.id === id).ownCallout.text.startsWith('Наші втрати за '));

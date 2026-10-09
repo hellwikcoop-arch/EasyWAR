@@ -59,7 +59,7 @@ The original source must remain auditable and must not be silently overwritten b
 ├── src/
 │   ├── index.html   # launcher: вибір роду військ
 │   ├── air.html     # Повітряні Сили + desktop-інтеграції
-│   └── rocket.html  # Ракетні Війська і Артилерія
+│   └── rocket.html  # Ракетні Війська
 ├── src-tauri/
 │   ├── capabilities/default.json
 │   ├── migrations/README.md

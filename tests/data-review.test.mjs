@@ -84,7 +84,7 @@ test('own-losses outlier: neighbours come from the table order, not from date or
 
 test('strikes: identical unknown results are one item; bad dates and counts are separate items', () => {
   const t = strikes([{ date: '2026-09-01' }, { date: '2026-09-02', result: 'НЕ ВІДОМО' }, { date: '2026-09-03', result: 'НЕ ВІДОМО' }, { date: 'xне дата' }, { date: '2026-09-04', count: 'багато' }]);
-  const items = reviewData({ groups: [{ id: 'rvia', title: 'РВіА', strikes: t }] }).items;
+  const items = reviewData({ groups: [{ id: 'rvia', title: 'РВ', strikes: t }] }).items;
   assert.deepEqual(items.map(i => i.kind).sort(), ['invalid-count', 'invalid-date', 'unknown-result']);
   const unknown = items.find(i => i.kind === 'unknown-result');
   assert.equal(unknown.rows.length, 2);

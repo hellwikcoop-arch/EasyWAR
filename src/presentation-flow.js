@@ -1,5 +1,5 @@
 /* Оркестрація створення презентації без DOM: файли → перевірка даних → рішення → модель колоди.
-   Таблиці ПС, РВіА і «НАШІ ВТРАТИ» необов'язкові: немає файлу — немає відповідного слайда, заміни з УДШВ немає. */
+   Таблиці ПС, РВ і «НАШІ ВТРАТИ» необов'язкові: немає файлу — немає відповідного слайда, заміни з УДШВ немає. */
 import { buildDeck } from './presentation-core.js';
 import { parseOwnLosses } from './own-losses-core.js';
 import { parseStrikes } from './strikes-core.js';
@@ -9,7 +9,7 @@ import { GROUP_PROFILES, buildGroupDeck } from './presentation-group.js';
 export const FOCUS_CHOICES = [['all', 'Усе'], ['result', 'Результат'], ['efficiency', 'Ефективність']];
 export const GROUP_SLOTS = [
   { key: 'ps', title: 'ПС', weapon: 'Тип ЛА', heading: 'Місячна аналітика тактичної авіації' },
-  { key: 'rvia', title: 'РВіА', weapon: 'Тип ПУ', heading: 'Місячна аналітика ракетних військ' },
+  { key: 'rvia', title: 'РВ', weapon: 'Тип ПУ', heading: 'Місячна аналітика ракетних військ' },
 ];
 
 /** Розбір файлу в слот: own | ps | rvia. Повертає { workbook } або { error } українською. */
@@ -54,12 +54,12 @@ export function composeDeck(workbook, files = {}, settings = {}) {
   return { deck, review, corrections: applied.corrections, rejected: applied.rejected };
 }
 
-/** Меню перевірки даних модуля ПС або РВіА: пункти лише за його таблицею ударів. */
+/** Меню перевірки даних модуля ПС або РВ: пункти лише за його таблицею ударів. */
 export function reviewForModule(strikes, groupKey) {
   return reviewData({ groups: [{ id: groupKey, title: GROUP_PROFILES[groupKey].short, strikes }] });
 }
 
-/** Колода модуля ПС або РВіА: рішення меню застосовуються до копій, вхідна таблиця не змінюється. */
+/** Колода модуля ПС або РВ: рішення меню застосовуються до копій, вхідна таблиця не змінюється. */
 export function composeModuleDeck(strikes, groupKey, settings = {}) {
   const groups = [{ id: groupKey, title: GROUP_PROFILES[groupKey].short, strikes }];
   const review = reviewData({ groups });

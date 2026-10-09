@@ -1,4 +1,4 @@
-/* Кнопка «Презентація» модулів ПС (air.html) і РВіА (rocket.html): читає відкриту таблицю модуля,
+/* Кнопка «Презентація» модулів ПС (air.html) і РВ (rocket.html): читає відкриту таблицю модуля,
    розбирає її ядром strikes-core.js і відкриває вікно створення презентації (presentation-ui.js).
    Сторінка модуля викликає window.EWGroupPresentation.open({ group, bytes, name, readSheets, toast }).
    Код презентації (pptxgenjs, pdf-lib, шрифти, емблеми) підвантажується лише після натискання кнопки. */

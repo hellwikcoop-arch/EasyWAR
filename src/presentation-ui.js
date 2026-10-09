@@ -1,5 +1,5 @@
 /* Вікно «Створити презентацію»: налаштування → меню перевірки даних → збереження .pptx / .pdf.
-   Дашборд УДШВ (openPresentationDialog) і модулі ПС та РВіА (openModulePresentationDialog) мають одне вікно:
+   Дашборд УДШВ (openPresentationDialog) і модулі ПС та РВ (openModulePresentationDialog) мають одне вікно:
    у модуля немає фокусу, додаткових таблиць і підрозділів, бо колода будується з його власної таблиці ударів.
    Усе локально: файли читаються на пристрої, презентація зберігається через системне вікно збереження. */
 import './presentation-dialog.css';
@@ -47,7 +47,7 @@ async function saveBytes(bytes, name, kind = 'pptx') {
 /** Дашборд УДШВ. options.readSheets(Uint8Array) → Promise<sheets> — читання XLSX ядром застосунку. */
 export const openPresentationDialog = (workbook, options = {}) => openDialog(workbook, options, null);
 
-/** Модуль ПС або РВіА: strikes — розібрана таблиця ударів (strikes-core.js), groupKey — 'ps' | 'rvia'. */
+/** Модуль ПС або РВ: strikes — розібрана таблиця ударів (strikes-core.js), groupKey — 'ps' | 'rvia'. */
 export const openModulePresentationDialog = (strikes, groupKey, options = {}) => openDialog(strikes, options, GROUP_PROFILES[groupKey] || GROUP_PROFILES.ps);
 
 function openDialog(workbook, options, profile) {

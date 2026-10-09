@@ -148,7 +148,7 @@ test('exports a pivot CSV and reports data problems', () => {
   assert.ok(types.includes('missing-date'));
 });
 
-test('the РВіА module opens UDSHV tables read-only in its own dashboard', async () => {
+test('the РВ module opens UDSHV tables read-only in its own dashboard', async () => {
   const html = await readFile(new URL('../src/rocket.html', import.meta.url), 'utf8');
   assert.match(html, /<script type="module" src="\.\/udshv-dashboard\.js"><\/script>/);
   assert.match(html, /<link rel="stylesheet" href="\.\/udshv-dashboard\.css">/);

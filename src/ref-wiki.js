@@ -29,7 +29,7 @@ const RESULTS = [['hit', 'Уражено', 'var(--hit)'], ['part', 'Пошкод
 //   initial  — id статті, яку показати першою; onSelect(id) — виклик при виборі статті.
 export function mount(host, options = {}) {
   const { rows = () => [], media = {}, motion = () => true, onSelect, groups = null, only = null, usage = true, related = true } = options;
-  // groups / only — які розділи й статті показує цей модуль (РВіА бачить лише наземні засоби й ракети); usage / related — чи малювати
+  // groups / only — які розділи й статті показує цей модуль (РВ бачить лише наземні засоби й ракети); usage / related — чи малювати
   // підсумок по таблиці вильотів ПС і блок «носії/боєприпаси».
   const groupList = groups ? GROUPS.filter(g => groups.includes(g.id)) : GROUPS;
   const visible = e => (!groups || groups.includes(e.group)) && (!only || only.includes(e.id));
@@ -144,7 +144,7 @@ export function mount(host, options = {}) {
   const usageEl = h('section', { class: 'rw-sec rw-usage' });
 
   function relatedBlock(entry) {
-    if (!related || entry.group === 'ground') return null;
+    if (!related || entry.group === 'ground' || entry.group === 'support') return null;
     const ids = entry.group === 'aircraft' ? munitionsOf(entry.id) : carriersOf(entry.id);
     if (!ids.length) return null;
     const title = entry.group === 'aircraft' ? 'Боєприпаси, показані з цим носієм' : 'Носії, показані з цим боєприпасом';
@@ -161,7 +161,7 @@ export function mount(host, options = {}) {
 
   function renderUsage(entry) {
     // Підсумок будується з таблиці вильотів ПС: для наземних засобів його немає.
-    usageEl.hidden = !usage || entry.group === 'ground';
+    usageEl.hidden = !usage || entry.group === 'ground' || entry.group === 'support';
     if (usageEl.hidden) { usageEl.replaceChildren(); return; }
     usageEl.replaceChildren(h('h3', { text: 'У вашій базі' }));
     const data = rows();
@@ -234,7 +234,7 @@ export function mount(host, options = {}) {
 
   // ---------- список ----------
   function renderNav() {
-    seg.replaceChildren(...[['', 'Усе'], ...groupList.map(g => [g.id, g.title])].map(([id, label]) =>
+    seg.replaceChildren(...[['', 'Усе'], ...groupList.map(g => [g.id, g.tab || g.title])].map(([id, label]) =>
       h('button', { type: 'button', text: label, 'aria-pressed': String(state.group === id), onclick: () => { state.group = id; renderNav(); } })));
     const found = searchEntries(state.q, state.group).filter(visible);
     list.replaceChildren();

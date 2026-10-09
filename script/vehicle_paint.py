@@ -163,13 +163,28 @@ LENS_R = R((172, 36, 30), 0.15, 0.0, 0.15)
 WOOD = R((150, 110, 68), 0.82, 0.0, 0.8)
 
 
+def pixel_camo(P, seed=0, colors=None, cell=0.085, scale=1.7):
+    """«Піксельний» камуфляж: світові точки квантуються до клітинок cell (м), а плями кольорів — пороги шуму поверх цих клітинок.
+    colors — (основа, середній, світлий, пісочний) у лінійних кольорах; повертає (n, 3)."""
+    base, mid, light, tan = colors or (srgb(60, 72, 46), srgb(92, 100, 64), srgb(132, 134, 92), srgb(166, 156, 108))
+    q = (np.floor(np.asarray(P, np.float32) / cell) + 0.5) * cell
+    a = pl.fbm(q * scale, 4, seed + 201)
+    b = pl.fbm(q * scale * 1.3 + 40.0, 4, seed + 202)
+    c = pl.fbm(q * scale * 0.9 + 80.0, 4, seed + 203)
+    col = np.tile(base, (len(q), 1))
+    col = pl.mix(col, mid, (a > 0.54).astype(np.float32))
+    col = pl.mix(col, light, (b > 0.63).astype(np.float32))
+    col = pl.mix(col, tan, (c > 0.70).astype(np.float32))
+    return col
+
+
 def group_painter(names, recipes, *, camo=True, seed=1, weather=None, post=None, camo_colors=None, olive=(78, 82, 56), seams=None):
     """Малювальник групи частин. names[i] — частина з id = i; recipes — словник рецептів за назвою частини."""
     weather = weather or {}
 
     def painter(tx):
         s = Surface(tx.n, srgb(*olive), 0.68, 0.12)
-        cam = pl.nato_camo(tx.P, seed, camo_colors) if camo else None
+        cam = (pixel_camo(tx.P, seed, camo_colors) if camo == 'pixel' else pl.nato_camo(tx.P, seed, camo_colors)) if camo else None
         age = np.ones(tx.n, np.float32)
         for i, name in enumerate(names):
             sel = tx.ids == i

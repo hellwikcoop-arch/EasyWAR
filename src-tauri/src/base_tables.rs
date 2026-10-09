@@ -17,7 +17,7 @@ use crate::local_profiles::Branch;
 pub enum BaseTable {
     /// Повітряні Сили: аркуш «Зведена» з довідниками, як читає модуль ПС.
     Air,
-    /// Ракетні війська і артилерія: аркуш «Зведена» з довідниками.
+    /// Ракетні війська: аркуш «Зведена» з довідниками.
     Rvia,
     /// Повітряні Сили рівня ПВК: журнал ударів «Таблиця 1» і ТАБЛ 2-3 (аркуші «АА», «ПС», «Об'єкти»).
     Pvk,
@@ -44,7 +44,7 @@ impl BaseTable {
     pub fn title(self) -> &'static str {
         match self {
             BaseTable::Air => "ПС",
-            BaseTable::Rvia => "РВіА",
+            BaseTable::Rvia => "РВ",
             BaseTable::Pvk => "ПС рівня ПВК",
         }
     }
@@ -52,7 +52,7 @@ impl BaseTable {
     pub fn file_name(self) -> &'static str {
         match self {
             BaseTable::Air => "EasyWAR_ПС.xlsx",
-            BaseTable::Rvia => "EasyWAR_РВіА.xlsx",
+            BaseTable::Rvia => "EasyWAR_РВ.xlsx",
             BaseTable::Pvk => "EasyWAR_ПС_ПВК.xlsx",
         }
     }

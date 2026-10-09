@@ -28,10 +28,11 @@ def quat_axis(axis, angle):
     return np.array([axis[0] * s, axis[1] * s, axis[2] * s, np.cos(angle / 2)])
 
 
-def node(name, prims=(), t=(0.0, 0.0, 0.0), r=(0.0, 0.0, 0.0, 1.0), s=(1.0, 1.0, 1.0), children=()):
-    """Опис вузла: prims — пари (сітка, матеріал), t/r/s — початкова поза (кадр 0 анімації)."""
+def node(name, prims=(), t=(0.0, 0.0, 0.0), r=(0.0, 0.0, 0.0, 1.0), s=(1.0, 1.0, 1.0), children=(), share=None):
+    """Опис вузла: prims — пари (сітка, матеріал), t/r/s — початкова поза (кадр 0 анімації); share — назва раніше доданого вузла,
+    чию сітку (разом із запеченою текстурою) слід використати знову: однакові пакети не запікаються по кілька разів."""
     return {"name": name, "prims": list(prims), "t": [float(x) for x in t], "r": [float(x) for x in r],
-            "s": [float(x) for x in s], "children": list(children)}
+            "s": [float(x) for x in s], "children": list(children), "share": share}
 
 
 def shifted(m, dx=0.0, dy=0.0, dz=0.0):
@@ -249,6 +250,7 @@ class GlbWriter:
         self.mat_index = {}
         self.tex_index = {}
         self.tiles = {}
+        self.shared_meshes = {}
         self.triangles = 0
 
     def view(self, data: bytes, target=None):
@@ -358,6 +360,9 @@ class GlbWriter:
         n = {"name": spec["name"]}
         if spec["prims"]:
             n["mesh"] = self.mesh(spec["name"], spec["prims"])
+            self.shared_meshes[spec["name"]] = n["mesh"]
+        elif spec.get("share"):
+            n["mesh"] = self.shared_meshes[spec["share"]]
         if any(spec["t"]):
             n["translation"] = spec["t"]
         if spec["r"] != [0.0, 0.0, 0.0, 1.0]:

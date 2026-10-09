@@ -496,11 +496,11 @@ export function buildDeck(sourceWorkbook, options = {}) {
       message: 'Місце зарезервовано. Джерело даних про власні втрати ще не підключено.',
     });
   }
-  // Окремі слайди груп (ПС, РВіА тощо): останні 30 діб, підрозділи задає виклик, не код.
+  // Окремі слайди груп (ПС, РВ тощо): останні 30 діб, підрозділи задає виклик, не код.
   const warnings = [];
   if (!options.custom) {
     for (const group of options.groups || []) {
-      // Група зі своєю таблицею ударів (ПС, РВіА): слайд будується з неї, а не з підрозділів УДШВ.
+      // Група зі своєю таблицею ударів (ПС, РВ): слайд будується з неї, а не з підрозділів УДШВ.
       if (group.strikes) { slides.push(buildStrikesSlide(group, { config })); continue; }
       const present = (group.units || []).filter(u => workbook.units.includes(u));
       if (!present.length) { warnings.push(`Група «${group.title}»: підрозділів немає в таблиці, слайд пропущено.`); continue; }

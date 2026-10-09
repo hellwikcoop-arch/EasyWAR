@@ -1,4 +1,4 @@
-/* Дашборд УДШВ у модулі РВіА. Поки він відкритий, звичайний дашборд і внесення приховано. */
+/* Дашборд УДШВ у модулі РВ. Поки він відкритий, звичайний дашборд і внесення приховано. */
 body.udshv-open #view-dash,
 body.udshv-open #view-entry,
 body.udshv-open #view-ref { display: none !important; }
