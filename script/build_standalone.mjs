@@ -4,6 +4,7 @@
 // a server, without internet and without installing anything:
 //   dist-standalone/EasyWAR-PVK.html   - ПВК   (air.html,    command mode "pvk")
 //   dist-standalone/EasyWAR-UDSHV.html - УДШВ  (rocket.html, command mode "dshv")
+//   dist-standalone/EasyWAR-Artillery.html - Артилерія (artillery.html; `npm run build:standalone -- artillery`)
 // Scripts, styles and images are inlined; 3D models (*.glb) are left out because the
 // command dashboards do not use them. The .xlsx table is picked on the device and
 // is read in the browser; nothing is sent anywhere.
@@ -20,6 +21,10 @@ export const PAGES = [
   { page: 'air', command: 'pvk', file: 'EasyWAR-PVK.html' },
   { page: 'rocket', command: 'dshv', file: 'EasyWAR-UDSHV.html' },
 ];
+
+// Артилерія — запасний автономний файл: у застосунок (build:app) не вбудовується, вбудованої таблиці не має,
+// збирається окремо командою `npm run build:standalone -- artillery`.
+export const ARTILLERY = { page: 'artillery', command: null, file: 'EasyWAR-Artillery.html' };
 
 // Порожній слот для вбудованої таблиці й сценарій, що її відкриває. Застосунок заповнює слот
 // на вимогу (src-tauri/src/phone_export.rs); текст слота має збігатися з EMBED_PLACEHOLDER.
@@ -46,6 +51,7 @@ export function inlinePage(html, files, publicText, command) {
     if (text === null) throw new Error(`Missing classic script ${name}`);
     return `<script>${scriptSafe(text)}</script>`;
   });
+  if (command === null) return out;            // сторінка без командного режиму й вбудованої таблиці
   // The launcher normally opens the page with ?command=…; a lone file has no query string.
   const probe = `new URLSearchParams(location.search).get('command') === '${command}'`;
   if (!out.includes(probe)) throw new Error(`Command-mode probe for ${command} not found`);
@@ -124,8 +130,8 @@ if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) 
       i += 1;
     } else wanted.push(args[i]);
   }
-  const pages = wanted.length ? PAGES.filter((entry) => wanted.includes(entry.command)) : PAGES;
-  if (!pages.length) throw new Error(`Unknown target: ${wanted.join(', ')} (use pvk or dshv)`);
+  const pages = wanted.length ? [...PAGES, ARTILLERY].filter((entry) => wanted.includes(entry.command ?? entry.page)) : PAGES;
+  if (!pages.length) throw new Error(`Unknown target: ${wanted.join(', ')} (use pvk, dshv or artillery)`);
   for (const entry of pages) {
     const { file, bytes } = await buildPage(entry, outDir);
     console.log(`${file}  ${(bytes / 1e6).toFixed(2)} MB`);
