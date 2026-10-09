@@ -30,6 +30,8 @@ data/
 *.xls
 # Empty base tables shipped with the app (structure only, see script/make_base_tables.py)
 !src-tauri/resources/base-tables/*.xlsx
+# Synthetic spreadsheets for tests (invented names and numbers, see script/make-artillery-fixture.py)
+!tests/fixtures/*.xlsx
 *.csv
 *.kml
 *.kmz
