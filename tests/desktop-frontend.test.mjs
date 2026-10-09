@@ -38,6 +38,21 @@ test('army aviation is a dimmed branch block that does not open a module yet', a
   assert.match(html, /\.branch-card\.branch-card-soon\{[^}]*opacity:\.42[^}]*pointer-events:none/);
 });
 
+test('artillery is a separate dimmed block next to army aviation, and the rocket card is just «Ракетні Війська»', async () => {
+  const html = await read('index.html');
+  const card = html.match(/<div class="branch-card branch-card-soon" data-soon="artillery"[^>]*>[\s\S]*?<\/h3>\s*<span class="bc-soon">([^<]+)<\/span>/);
+  assert.ok(card, 'artillery card is on the start screen');
+  assert.match(card[0], /aria-disabled="true"/);
+  assert.match(card[0], /aria-label="Артилерія — у розробці"/);
+  assert.match(card[0], /<h3>Артилерія<\/h3>/);
+  assert.equal(card[1], 'У розробці');
+  assert.doesNotMatch(card[0], /data-branch=/, 'no module behind it yet');
+  assert.match(html, /<h3>Ракетні Війська<\/h3>/);
+  assert.doesNotMatch(html, /Війська і Артилерія/);
+  // кожен із двох блоків «у розробці» стоїть у своїй колонці, а не на всю ширину
+  assert.match(html, /\.branch-card\.branch-card-soon\{grid-column:auto;/);
+});
+
 test('air module keeps desktop integrations and v3.1 isolation', async () => {
   const html = await read('air.html');
   const bridge = html.indexOf('id="easywar-desktop-frame-bridge"');
