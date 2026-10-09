@@ -38,6 +38,21 @@ test('army aviation is a dimmed branch block that does not open a module yet', a
   assert.match(html, /\.branch-card\.branch-card-soon\{[^}]*opacity:\.42[^}]*pointer-events:none/);
 });
 
+test('artillery is a separate dimmed block next to army aviation, and the rocket card is just «Ракетні Війська»', async () => {
+  const html = await read('index.html');
+  const card = html.match(/<div class="branch-card branch-card-soon" data-soon="artillery"[^>]*>[\s\S]*?<\/h3>\s*<span class="bc-soon">([^<]+)<\/span>/);
+  assert.ok(card, 'artillery card is on the start screen');
+  assert.match(card[0], /aria-disabled="true"/);
+  assert.match(card[0], /aria-label="Артилерія — у розробці"/);
+  assert.match(card[0], /<h3>Артилерія<\/h3>/);
+  assert.equal(card[1], 'У розробці');
+  assert.doesNotMatch(card[0], /data-branch=/, 'no module behind it yet');
+  assert.match(html, /<h3>Ракетні Війська<\/h3>/);
+  assert.doesNotMatch(html, /Війська і Артилерія/);
+  // кожен із двох блоків «у розробці» стоїть у своїй колонці, а не на всю ширину
+  assert.match(html, /\.branch-card\.branch-card-soon\{grid-column:auto;/);
+});
+
 test('air module keeps desktop integrations and v3.1 isolation', async () => {
   const html = await read('air.html');
   const bridge = html.indexOf('id="easywar-desktop-frame-bridge"');
@@ -103,4 +118,30 @@ test('start screen hosts profile, backup, updates and Signal', async () => {
   const order = ['signal-settings', 'backup', 'local-profiles'].map(name => tools.indexOf(`import './${name}.js';`));
   assert.ok(order.every(index => index > 0), 'all three tools are loaded');
   assert.deepEqual([...order].sort((a, b) => a - b), order, 'prepend order gives Профіль, Резервна копія, Оновлення, Signal');
+});
+
+test('PVK emblem is a launcher card that opens the PVK tile and in the PVK dashboard hero', async () => {
+  const html = await read('index.html');
+  const card = html.match(/<button[^>]*data-cmd-card[^>]*><div class="bc-icon"><img[^>]*src="data:image\/webp;base64,[^"]+"><\/div><h3>([^<]+)<\/h3>/);
+  assert.ok(card, 'launcher has a PVK card with the logo, like the other branch cards');
+  assert.match(html, /<section class="command-tile" data-command="pvk" id="pvk-tile"[^>]*hidden>/, 'the PVK tile opens from the card and starts hidden');
+  assert.match(html, /<button[^>]*data-cmd-card[^>]*aria-controls="dshv-tile"[^>]*><div class="bc-icon"><img[^>]*src="data:image\/webp;base64,/, 'the ДШВ command card carries its logo too');
+  assert.match(html, /<section class="command-tile" data-command="dshv" id="dshv-tile"[^>]*hidden>/, 'the ДШВ tile opens from its card');
+  const css = await read('pvk-dashboard.css');
+  assert.match(css, /\.pvk-hero::before[^}]*pvk-art\/emblem\.webp/, 'dashboard hero uses the emblem');
+  const emblem = await readFile(new URL('../src/pvk-art/emblem.webp', import.meta.url));
+  assert.ok(emblem.length > 1000 && emblem.length < 40000, 'emblem is a small webp');
+});
+
+test('start screen is neutral and fits 16:9 / 16:10 monitors; tile grids are balanced', async () => {
+  const html = await read('index.html');
+  assert.match(html, /<style id="easywar-start-wide">[\s\S]*?min-aspect-ratio:3\/2[\s\S]*?repeat\(4,minmax\(0,1fr\)\)/, 'four cards in one row on wide monitors');
+  assert.match(html, /function fitStart\(\)[\s\S]*?box\.style\.zoom/, 'start box is scaled down instead of scrolling');
+  for (const page of ['air.html', 'rocket.html']) {
+    const doc = await read(page);
+    assert.match(doc, /<style id="easywar-kpi-balance">[\s\S]*?nth-child\(6\):last-child[\s\S]*?repeat\(3/, `${page}: six tiles lay out as 3×2`);
+  }
+  const pvk = await read('pvk-dashboard.css');
+  assert.match(pvk, /nth-child\(7\):last-child\),\s*\.pvk-kpis:has\(> :nth-child\(8\):last-child\) \{ grid-template-columns: repeat\(4/, 'PVK seven tiles lay out as 4+3');
+  assert.match(pvk, /grid-column: 1 \/ -1;\s*justify-self: center;/, 'PVK dashboard is centred in the module grid');
 });

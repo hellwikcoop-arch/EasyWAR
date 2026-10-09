@@ -1514,6 +1514,15 @@ body.lay-sizing, body.lay-sizing * { -webkit-user-select: none !important; user-
    clear for the launcher's floating module controls (theme / back to branches). */
 .appbar{padding-right:196px}
 </style>
+<style id="easywar-kpi-balance">
+/* Плитки показників: 6 — це 3×2, 5 — це 3+2 на всю ширину; шість в один ряд тільки коли вистачає місця. */
+@container (min-width: 621px) and (max-width: 1462px) { .kpipanel .kpi-grid:has(> :nth-child(6):last-child) { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@container (min-width: 621px) and (max-width: 1216px) {
+  .kpipanel .kpi-grid:has(> :nth-child(5):last-child) { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .kpipanel .kpi-grid:has(> :nth-child(5):last-child) > :nth-child(-n+3) { grid-column: span 2; }
+  .kpipanel .kpi-grid:has(> :nth-child(5):last-child) > :nth-child(n+4) { grid-column: span 3; }
+}
+</style>
 </head>
 <body>
 <header class="appbar">

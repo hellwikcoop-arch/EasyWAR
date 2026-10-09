@@ -14,7 +14,9 @@ WHEEL_R, WHEEL_W, WHEEL_Z = 0.66, 0.53, 1.12
 FRAME_Y = 1.22
 
 
-def chassis(axles, frame_x0, frame_x1, with_tanks=True):
+def chassis(axles, frame_x0, frame_x1, with_tanks=True, groups=None):
+    """groups — які осі разом під однією аркою (за замовчуванням дві пари для 8×8; для 10×10 — пара й трійка)."""
+    groups = groups or [(0, 1), (2, 3)]
     p = {}
     L = frame_x1 - frame_x0
     xc = (frame_x0 + frame_x1) / 2
@@ -28,17 +30,19 @@ def chassis(axles, frame_x0, frame_x1, with_tanks=True):
         axle.append(box((x, 0.78, 0.0), (0.56, 0.36, 0.50)))
         for s in (-1, 1):
             springs += k.leaf_spring(x, 0.98, s * 0.52, 0.95)
-    for xa, xb in ((axles[0], axles[1]), (axles[2], axles[3])):
-        axle.append(cyl_between((xa, 0.80, 0.0), (xb, 0.80, 0.0), 0.065, 12))
+    for g in groups:
+        for ia, ib in zip(g[:-1], g[1:]):
+            axle.append(cyl_between((axles[ia], 0.80, 0.0), (axles[ib], 0.80, 0.0), 0.065, 12))
     p["axles"] = merge(axle)
     p["springs"] = merge(springs)
     if with_tanks:
         p["tanks"] = merge([box((axles[1] - 0.95, 1.00, -0.92), (1.40, 0.56, 0.58), bevel=0.04), box((axles[1] - 0.95, 1.00, 0.92), (1.10, 0.50, 0.56), bevel=0.04),
-                            box((axles[3] + 0.9, 0.96, 0.92), (0.80, 0.40, 0.50), bevel=0.03)])
+                            box((axles[-1] + 0.9, 0.96, 0.92), (0.80, 0.40, 0.50), bevel=0.03)])
     # арки: плита зверху, зовнішня стінка, передня й задня стінки — як на «МАЗ»-подібних шасі
     top = 2 * WHEEL_R + 0.10
     fenders = []
-    for xa, xb in ((axles[0], axles[1]), (axles[2], axles[3])):
+    for g in groups:
+        xa, xb = axles[g[0]], axles[g[-1]]
         xm, w = (xa + xb) / 2, abs(xa - xb) + 1.50
         for s in (-1, 1):
             fenders += [box((xm, top, s * 1.14), (w, 0.05, 0.76), bevel=0.012),
