@@ -17,6 +17,9 @@
   display: grid;
   gap: 16px;
   width: min(1700px, calc(100vw - 36px));
+  /* Батьківський #view-dash — сітка «бічна панель + вміст»: дашборд ПВК займає обидві колонки й стоїть по центру. */
+  grid-column: 1 / -1;
+  justify-self: center;
   margin: 0 auto;
   padding: 18px 0 56px;
   /* The Air Force module names its text colour --ink (dark and light theme). */
@@ -294,3 +297,20 @@ html[data-theme="light"] #view-base {
   --ol-line: var(--pvk-border);
   --ol-track: var(--pvk-track);
 }
+
+/* Плитки показників рівними рядками на моніторах 16:9 / 16:10: без «сирітської» плитки в останньому ряду. */
+@media (min-width: 900px) {
+  .pvk-kpis:has(> :nth-child(5):last-child) { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .pvk-kpis:has(> :nth-child(5):last-child) > :nth-child(-n+3) { grid-column: span 2; }
+  .pvk-kpis:has(> :nth-child(5):last-child) > :nth-child(n+4) { grid-column: span 3; }
+  .pvk-kpis:has(> :nth-child(6):last-child) { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .pvk-kpis:has(> :nth-child(7):last-child),
+  .pvk-kpis:has(> :nth-child(8):last-child) { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (min-width: 1200px) {
+  .pvk-kpis:has(> :nth-child(5):last-child) { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .pvk-kpis:has(> :nth-child(5):last-child) > * { grid-column: auto; }
+  .pvk-kpis:has(> :nth-child(6):last-child) { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+}
+@media (min-width: 1500px) { .pvk-kpis:has(> :nth-child(7):last-child) { grid-template-columns: repeat(7, minmax(0, 1fr)); } }
+@media (min-width: 1720px) { .pvk-kpis:has(> :nth-child(8):last-child) { grid-template-columns: repeat(8, minmax(0, 1fr)); } }

@@ -98,9 +98,11 @@ body.udshv-open #view-ref { display: none !important; }
 
 .ud-page { display: grid; gap: 14px; }
 .ud-kpis { display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 10px; }
-@media (max-width: 1400px) { .ud-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 1599px) { .ud-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 640px) { .ud-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .ud-kpis-3 { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+@media (max-width: 1599px) { .ud-kpis.ud-kpis-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .ud-kpis.ud-kpis-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .ud-kpi {
   position: relative; display: grid; gap: 3px; padding: 14px 14px 10px; overflow: hidden; border-radius: 14px;
   border: 1px solid color-mix(in srgb, var(--tone) 60%, transparent);

@@ -132,3 +132,16 @@ test('PVK emblem is a launcher card that opens the PVK tile and in the PVK dashb
   const emblem = await readFile(new URL('../src/pvk-art/emblem.webp', import.meta.url));
   assert.ok(emblem.length > 1000 && emblem.length < 40000, 'emblem is a small webp');
 });
+
+test('start screen is neutral and fits 16:9 / 16:10 monitors; tile grids are balanced', async () => {
+  const html = await read('index.html');
+  assert.match(html, /<style id="easywar-start-wide">[\s\S]*?min-aspect-ratio:3\/2[\s\S]*?repeat\(4,minmax\(0,1fr\)\)/, 'four cards in one row on wide monitors');
+  assert.match(html, /function fitStart\(\)[\s\S]*?box\.style\.zoom/, 'start box is scaled down instead of scrolling');
+  for (const page of ['air.html', 'rocket.html']) {
+    const doc = await read(page);
+    assert.match(doc, /<style id="easywar-kpi-balance">[\s\S]*?nth-child\(6\):last-child[\s\S]*?repeat\(3/, `${page}: six tiles lay out as 3×2`);
+  }
+  const pvk = await read('pvk-dashboard.css');
+  assert.match(pvk, /nth-child\(7\):last-child\),\s*\.pvk-kpis:has\(> :nth-child\(8\):last-child\) \{ grid-template-columns: repeat\(4/, 'PVK seven tiles lay out as 4+3');
+  assert.match(pvk, /grid-column: 1 \/ -1;\s*justify-self: center;/, 'PVK dashboard is centred in the module grid');
+});

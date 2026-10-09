@@ -622,6 +622,20 @@ body[data-active-branch="air"] #branch-controls,body[data-active-branch="pvk"] #
 @media(max-aspect-ratio:1/1){#view-start{background-size:auto,auto,auto,cover,auto !important}}
 #view-start::before{opacity:0 !important}
 </style>
+<style id="easywar-start-wide">
+/* Монітори 16:9 і 16:10: чотири картки в один ряд, фон «cover», а решту висоти добирає масштаб (див. fitStart). */
+#view-start{background-size:auto,auto,auto,cover,auto !important;background-position:center,center,center,center 30%,center !important}
+@media(min-width:1000px) and (min-aspect-ratio:3/2){
+  #view-start > .start-box{width:min(1100px,100%) !important;--branch-card-height:196px}
+  #view-start .branch-cards{grid-template-columns:repeat(4,minmax(0,1fr)) !important}
+  #view-start .branch-cards .branch-col{display:contents}
+  #view-start .branch-cards [data-col="air"] > .cmd-slot{order:1}
+  #view-start .branch-cards [data-col="air"] > .branch-card{order:2}
+  #view-start .branch-cards [data-col="rocket"] > .cmd-slot{order:3}
+  #view-start .branch-cards [data-col="rocket"] > .branch-card{order:4}
+  #view-start .branch-cards > .branch-card-soon{order:5;grid-column:span 2}
+}
+</style>
 </head>
 <body>
 <!-- Головний екран взято з RID VIYSK.html -->
@@ -799,6 +813,7 @@ body[data-active-branch="air"] #branch-controls,body[data-active-branch="pvk"] #
     document.querySelectorAll('.module-frame').forEach(f => f.style.display='none');
     start.style.display='grid';
     controls.style.display='none';
+    fitStart();
     label.style.display='none';
     document.title='easyWAR — Рід військ';
   }
@@ -824,12 +839,25 @@ body[data-active-branch="air"] #branch-controls,body[data-active-branch="pvk"] #
     document.addEventListener('keydown', e => { if (e.key === 'Escape' && !tile.hidden) setOpen(false, true); });
     document.addEventListener('pointerdown', e => { if (!tile.hidden && !slot.contains(e.target)) setOpen(false, false); });
   });
+  // Екран вибору не гортається на моніторах 16:9 / 16:10: якщо вміст вищий за вікно, стискаємо його масштабом.
+  function fitStart() {
+    const box = start.querySelector('.start-box');
+    if (!box || start.style.display === 'none') return;
+    box.style.zoom = '';
+    const cs = getComputedStyle(start);
+    const avail = start.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+    const need = box.offsetHeight;
+    box.style.zoom = need > avail && avail > 0 ? String(Math.max(0.55, avail / need)) : '';
+  }
+  window.addEventListener('resize', fitStart);
+  window.addEventListener('load', fitStart);
   theme.addEventListener('click', toggleTheme);
   home.addEventListener('click', showBranches);
   // Start-screen tools (launcher-tools.js) open the Air Force module when a task needs it.
   window.EW_LAUNCHER = { openBranch, isLoaded: branch => Boolean(loaded[branch]) };
   window.addEventListener('keydown', e => { if (e.key === 'Escape' && stage.style.display === 'block') showBranches(); });
   showBranches();
+  fitStart();
 })();
 </script>
 <script type="module" src="./launcher-tools.js"></script>

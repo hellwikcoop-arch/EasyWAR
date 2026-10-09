@@ -2951,6 +2951,19 @@ html[data-theme="light"] .kh{background:#151a0f!important}
 <link rel="stylesheet" href="./udshv-dashboard.css">
 <link rel="stylesheet" href="./own-losses-dashboard.css">
 <link rel="stylesheet" href="./ref-wiki.css">
+<style id="easywar-kpi-balance">
+/* Плитки показників: 6 — це 3×2, 5 — це 3+2 на всю ширину; шість в один ряд тільки коли вистачає місця. */
+@container (min-width: 621px) and (max-width: 1262px) { .kpipanel .kpi-grid:has(> :nth-child(6):last-child) { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@container (min-width: 621px) and (max-width: 1032px) {
+  .kpipanel .kpi-grid:has(> :nth-child(5):last-child) { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .kpipanel .kpi-grid:has(> :nth-child(5):last-child) > :nth-child(-n+3) { grid-column: span 2; }
+  .kpipanel .kpi-grid:has(> :nth-child(5):last-child) > :nth-child(n+4) { grid-column: span 3; }
+}
+@media (max-width: 1500px) {
+  .appbar { flex-wrap: wrap !important; }
+  .appbar > .appbar-right, .rocket-ref24 .appbar > .appbar-right { flex-wrap: wrap !important; min-width: 0 !important; max-width: 100%; justify-content: flex-end; }
+}
+</style>
 </head>
 <body>
 <header class="appbar">
