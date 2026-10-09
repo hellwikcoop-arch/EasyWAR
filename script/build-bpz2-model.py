@@ -201,19 +201,28 @@ def build():
         frame.append(cyl_between((3.20, 1.20, s * 1.12), (3.58, 1.00, s * 1.30), 0.04, 10))
     parts["blade_arms"] = merge(frame)
 
-    # ---------- Кран у транспортному положенні, упор, сошник ----------
+    # ---------- Кран у робочому положенні (стріла піднята назад під ≈ 28°, як на довідковому зображенні), сошник ----------
     cx, cz = 0.85, 0.62
     parts["crane_base"] = merge([cyl_between((cx, ROOF_Y, cz), (cx, ROOF_Y + 0.14, cz), 0.52, 28),
-                                 box((cx - 0.05, ROOF_Y + 0.38, cz), (0.95, 0.40, 0.80), bevel=0.04)])
-    tip_x = -2.85
-    b0, b1 = np.array([cx - 0.35, ROOF_Y + 0.50]), np.array([tip_x, ROOF_Y + 0.36])
-    parts["crane_boom"] = merge([k.beam_between((b0[0], b0[1], cz), (b1[0], b1[1], cz), 0.42, 0.46, bevel=0.03),
-                                 box((tip_x - 0.15, ROOF_Y + 0.35, cz), (0.30, 0.38, 0.40), bevel=0.03)])
-    parts["crane_rams"] = merge([cyl_between((cx - 0.25, ROOF_Y + 0.30, cz + s * 0.18), (cx - 1.40, ROOF_Y + 0.38, cz + s * 0.18), 0.045, 12) for s in (-1, 1)])
-    parts["crane_hook"] = merge([cyl_between((tip_x - 0.28, ROOF_Y + 0.28, cz), (tip_x - 0.28, ROOF_Y - 0.12, cz), 0.014, 6),
-                                 box((tip_x - 0.28, ROOF_Y - 0.20, cz), (0.16, 0.18, 0.14), bevel=0.03)])
-    parts["boom_rest"] = merge([box((-2.55, (1.58 + ROOF_Y + 0.15) / 2, cz + s * 0.30), (0.10, ROOF_Y - 1.58 + 0.13, 0.08), bevel=0.01) for s in (-1, 1)]
-                               + [box((-2.55, ROOF_Y + 0.17, cz), (0.18, 0.08, 0.72), bevel=0.02)])
+                                 box((cx - 0.05, ROOF_Y + 0.38, cz), (0.95, 0.40, 0.80), bevel=0.04),
+                                 box((cx - 0.30, ROOF_Y + 0.72, cz), (0.50, 0.40, 0.62), bevel=0.04)])
+    lift = np.radians(28.0)
+    d = np.array([-np.cos(lift), np.sin(lift)])
+    b0 = np.array([cx - 0.30, ROOF_Y + 0.80])
+    b1 = b0 + d * 2.9
+    b2 = b0 + d * 5.0
+    tip = b2 + d * 0.10
+    parts["crane_boom"] = merge([k.beam_between((b0[0], b0[1], cz), (b1[0], b1[1], cz), 0.52, 0.50, bevel=0.03),
+                                 k.beam_between(((b1 - d * 0.6)[0], (b1 - d * 0.6)[1], cz), (b2[0], b2[1], cz), 0.40, 0.40, bevel=0.025),
+                                 box((tip[0], tip[1], cz), (0.34, 0.44, 0.46), bevel=0.03)])
+    ram_a = np.array([cx - 0.15, ROOF_Y + 0.35])
+    ram_b = b0 + d * 1.35 + np.array([0.0, -0.26])
+    parts["crane_rams"] = merge([cyl_between((ram_a[0], ram_a[1], cz + s * 0.20), (ram_b[0], ram_b[1], cz + s * 0.20), 0.05, 12) for s in (-1, 1)])
+    hang = tip + np.array([-0.05, -0.30])
+    parts["crane_hook"] = merge([cyl_between((hang[0] + o, hang[1], cz + z), (hang[0] + o, hang[1] - 1.55, cz + z), 0.012, 6) for o in (-0.05, 0.05) for z in (-0.07, 0.07)] +
+                                [box((hang[0], hang[1] - 1.66, cz), (0.22, 0.26, 0.20), bevel=0.04),
+                                 cyl_z((hang[0], hang[1] - 1.56, cz), 0.07, 0.24, 14),
+                                 cyl_between((hang[0], hang[1] - 1.78, cz), (hang[0], hang[1] - 1.92, cz), 0.03, 8)])
     spade = [box((-3.88, 1.12, 0.0), (0.10, 0.90, 2.60), rot_z=0.0, bevel=0.015),
              box((-3.88, 0.62, 0.0), (0.12, 0.12, 2.60), bevel=0.015)]
     for s in (-1, 1):
@@ -224,6 +233,8 @@ def build():
 
 
 # ---------- групи для запікання ----------
+# темно-зелений, шоколадно-коричневий і чорний — триколірний камуфляж Bundeswehr, як на довідковому фото
+NATO = (vp.srgb(58, 72, 44), vp.srgb(88, 64, 42), vp.srgb(24, 26, 22))
 OL = vp.R("camo", 0.74, 0.1)
 OL_DK = vp.R("camo", 0.76, 0.12, tone=0.8)
 HULL_NAMES = ["hull", "guards", "super", "skirts", "louvers", "rear_plate", "tow_eyes", "hatches", "cupola", "periscopes", "smoke", "lights",
@@ -232,10 +243,10 @@ HULL_RECIPES = {"hull": OL, "guards": OL_DK, "super": OL, "skirts": vp.R("camo",
                 "rear_plate": OL_DK, "tow_eyes": vp.R((52, 52, 44), 0.7, 0.4), "hatches": OL_DK, "cupola": OL, "periscopes": vp.GLASS,
                 "smoke": vp.R((40, 42, 36), 0.7, 0.4), "lights": vp.LENS_W, "lights_amber": vp.LENS_A, "rear_red": vp.LENS_R,
                 "stowage": vp.R((82, 78, 58), 0.8, 0.3), "rivets": vp.R("camo", 0.7, 0.2, tone=0.75), "suspension": vp.R((50, 52, 42), 0.8, 0.4)}
-WORK_NAMES = ["blade", "blade_arms", "crane_base", "crane_boom", "crane_rams", "crane_hook", "boom_rest", "spade"]
+WORK_NAMES = ["blade", "blade_arms", "crane_base", "crane_boom", "crane_rams", "crane_hook", "spade"]
 WORK_RECIPES = {"blade": vp.R("camo", 0.7, 0.4, tone=0.8), "blade_arms": vp.R((54, 54, 44), 0.7, 0.4), "crane_base": OL,
                 "crane_boom": vp.R("camo", 0.7, 0.2, tone=0.9), "crane_rams": vp.STEEL, "crane_hook": vp.R((40, 40, 38), 0.5, 0.8),
-                "boom_rest": vp.R((54, 54, 44), 0.8, 0.35), "spade": vp.R("camo", 0.72, 0.4, tone=0.75)}
+                "spade": vp.R("camo", 0.72, 0.4, tone=0.75)}
 TILES = {"tracks": TileSpec("track", (255, 255, 255), 0.5, 1.0, 1.0), "track_horns": TileSpec("track", (235, 235, 235), 0.5, 1.0, 1.0),
          "tyres": TileSpec("rubber", (36, 34, 31), 0.4, 1.0, 1.0), "hubs": TileSpec("cast", (70, 74, 56), 0.5, 1.0, 1.0),
          "rollers": TileSpec("cast", (66, 70, 54), 0.5, 1.0, 1.0)}
@@ -262,7 +273,7 @@ def group_nodes(parts):
             m = parts.pop(nme)
             meshes.append(m)
             ids.append(np.full(len(m.faces), i, np.int16))
-        painter = vp.group_painter(names, recipes, camo=False, seed=51 + gi, olive=OLIVE_RGB, weather=dict(mud=0.6, dust=0.55), seams=seams, post=post)
+        painter = vp.group_painter(names, recipes, camo=True, camo_colors=NATO, seed=51 + gi, olive=OLIVE_RGB, weather=dict(mud=0.6, dust=0.55), seams=seams, post=post)
         nodes.append(node(gname, [(merge(meshes), BakeSpec(painter, res=res, ids=np.concatenate(ids), key=f"bpz2-{gname}", seed=51 + gi))]))
     for nme, spec in TILES.items():
         nodes.append(node(nme, [(parts.pop(nme), spec)]))

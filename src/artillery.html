@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>easyWAR — Артилерія</title>
+<script>try { document.documentElement.dataset.theme = localStorage.getItem('aviahub.theme') === 'light' ? 'light' : 'dark'; } catch (e) { document.documentElement.dataset.theme = 'dark'; }</script>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 100 100%27%3E%3Crect width=%27100%27 height=%27100%27 rx=%2722%27 fill=%27%23121b27%27/%3E%3Ccircle cx=%2750%27 cy=%2750%27 r=%2722%27 fill=%27none%27 stroke=%27%23e0a53a%27 stroke-width=%278%27/%3E%3C/svg%3E">
+<link rel="stylesheet" href="./artillery.css">
+</head>
+<body>
+<header class="appbar">
+  <div class="brand">
+    <div class="brand-mark" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 15h9l7-7 2 2-4 4"/><circle cx="6" cy="17" r="2.2"/><path d="M14 15l3 3h4"/></svg>
+    </div>
+    <div><h1>Артилерія <span class="beta">beta тестування</span></h1><p>Облік витрати й залишку боєприпасів</p></div>
+  </div>
+  <div class="filechip" id="filechip" hidden>
+    <b id="fileName"></b><span class="tag" id="fileMode"></span>
+    <button class="btn small" id="reloadBtn" type="button" title="Прочитати файл заново">Оновити</button>
+    <button class="btn small quiet" id="openBtn" type="button">Інший файл…</button>
+  </div>
+  <div class="stamp" id="stamp" hidden><b id="stampMain"></b><span id="stampSub"></span></div>
+</header>
+<nav class="tabs" id="tabs" role="tablist" hidden></nav>
+<main id="view"></main>
+<div class="savebar" id="savebar" hidden></div>
+<input type="file" id="fileInput" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
+<script type="module" src="./artillery-app.js"></script>
+</body>
+</html>
