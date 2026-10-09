@@ -3,6 +3,8 @@ import { ensureMetaSheet, openWorkbook, readMeta, saveWorkbook, setCells, writeM
 import {
   PERIODS, buildEdits, byCaliberGroup, byUnit, classLabel, groupEdits, groupRank, parseArtilleryWorkbook, remapEntry, stampEdits, stampFromTitle, stockState, sumItems, totals, unitKey, valueOf,
 } from './artillery-core.js';
+import { mount as mountRef } from './ref-wiki.js';
+import * as ART_REF from './artillery-ref-data.js';
 
 // Емблеми підрозділів: файли в unit-art, ключ — назва підрозділу без пробілів і розділових знаків.
 const EMBLEM_FILES = { '79одшбр': '79-odshbr', '80одшбр': '80-odshbr', '82одшбр': '82-odshbr', '95одшбр': '95-odshbr', '425ошп': '425-oshp', '1ошп': '1-oshp' };
@@ -107,6 +109,7 @@ async function load(bytes, name, handle, lastModified) {
   S.period = S.period || (PERIODS.includes(S.meta.period) ? S.meta.period : null) || S.titleStamp?.period || d.period;
   if (!model.units.some(u => u.id === S.unitId)) S.unitId = '';
   S.form = null;
+  if (REF.ctl) REF.ctl.refresh();
   renderAll();
 }
 
@@ -184,7 +187,7 @@ function goTab(id) {
   S.tab = id; renderAll();
 }
 const TABS = [
-  ['summary', 'Зведення'], ['entry', 'Внесення'], ['units', 'Підрозділи'], ['ammo', 'Боєприпаси'], ['charges', 'Заряди'], ['losses', 'Втрати противника'], ['check', 'Перевірка'],
+  ['summary', 'Зведення'], ['entry', 'Внесення'], ['units', 'Підрозділи'], ['ammo', 'Боєприпаси'], ['charges', 'Заряди'], ['losses', 'Втрати противника'], ['ref', 'Довідник'], ['check', 'Перевірка'],
 ];
 function renderTabs() {
   const nav = $('tabs'); nav.textContent = '';
@@ -452,6 +455,58 @@ function viewCharges() {
     h('section', { class: 'panel' }, h('div', { class: 'panel-head' }, h('h2', null, 'За підрозділами')), table(['Підрозділ', { label: 'Витрата', num: true }, { label: 'Залишок', num: true }], unitRowsEls)));
 }
 
+// ---------- вкладка «Довідник» ----------
+// Стаття про кожен тип боєприпасів: ілюстрація, 3D-модель, коротке пояснення й підсумок по вашій таблиці. Сама вікі — ref-wiki.js
+// (та сама, що в «Повітряних Силах» і «Ракетних Військах»), дані — artillery-ref-data.js, моделі — artillery-3d.js.
+const REF = { host: null, ctl: null };
+const refGroups = () => (S.model ? [...new Set([...S.model.items.map(i => i.group), ...(S.model.chargeItems.length ? ['Заряди'] : [])])] : []);
+const refItems = entry => {
+  const m = S.model;
+  if (!m) return [];
+  if (entry.charges) return m.chargeItems;
+  const groups = ART_REF.groupsOf(entry, refGroups());
+  return m.items.filter(i => groups.includes(i.group));
+};
+const refIcon = id => { const e = ART_REF.entryById(id); return e && e.icon ? AMMO_URLS[`./ammo-art/${e.icon}.webp`] || null : null; };
+
+function refExtra(entry) {
+  const m = S.model;
+  const box = h('div', { class: 'ref-live' }, h('h3', { text: 'У вашій таблиці' }));
+  if (!m) { box.append(h('p', { class: 'rw-fine', text: 'Таблицю ще не завантажено. Відкрийте її, і тут з’явиться підсумок по цьому типу.' })); return box; }
+  const items = refItems(entry), limit = lowLimit();
+  const unitIds = entry.charges ? m.chargeUnits.map(c => c.id) : m.units.map(u => u.id);
+  const rows = items.map(it => ({ it, ...sumItems(m, [it], unitIds), per: unitIds.map(id => valueOf(m, it.id, id)) })).filter(r => r.spent || r.left);
+  if (!rows.length) { box.append(h('p', { class: 'rw-fine', text: items.length ? 'Рядки цього типу в таблиці є, але витрати й залишку за ними немає.' : 'У завантаженій таблиці немає рядків цього типу.' })); return box; }
+  const spent = rows.reduce((a, r) => a + r.spent, 0), left = rows.reduce((a, r) => a + r.left, 0);
+  const holders = unitIds.filter(id => rows.some(r => { const v = valueOf(m, r.it.id, id); return v.left; })).length;
+  const tile = (label, value) => h('div', { class: 'rw-tile' }, h('b', { text: fmt(value) }), h('span', { text: label }));
+  const stateOf = r => stockState(r.left, r.spent, limit);
+  box.append(h('div', { class: 'rw-tiles' }, tile('витрата', spent), tile('залишок', left), tile('підрозділів із запасом', holders)),
+    table(['Рядок таблиці', { label: 'Витрата', num: true }, { label: 'Залишок', num: true }], rows.map(r => {
+      const st = stateOf(r);
+      return h('tr', null, h('td', null, r.it.label), cellNum(r.spent), h('td', { class: `num mx ${st} ${r.left ? '' : 'zero'}`.trim(), title: st ? STOCK_HINT[st] : '' }, st ? h('em', { class: 'mark' }, STOCK_MARK[st]) : null, r.left ? fmt(r.left) : '0'));
+    })));
+  if (!entry.charges) {
+    const groups = ART_REF.groupsOf(entry, refGroups());
+    box.append(h('p', null, h('button', { class: 'btn small', type: 'button', onclick: () => { S.ammoGroup = groups.length === 1 ? groups[0] : ''; S.ammoSearch = ''; S.ammoClass = ''; S.ammoOnlyLow = false; S.tab = 'ammo'; renderAll(); } }, 'Показати в матриці «тип × підрозділ»')));
+  } else box.append(h('p', null, h('button', { class: 'btn small', type: 'button', onclick: () => { S.tab = 'charges'; renderAll(); } }, 'Відкрити вкладку «Заряди»')));
+  return box;
+}
+
+function viewRef() {
+  if (!REF.ctl) {
+    REF.host = h('div', { class: 'ref-host' });
+    REF.ctl = mountRef(REF.host, {
+      data: ART_REF, usage: false, related: false, initial: lsGet('ref') || 'g155he',
+      media: { thumb: refIcon, photo: refIcon }, motion: () => !matchMedia('(prefers-reduced-motion: reduce)').matches,
+      extra: refExtra,
+      searchText: e => refItems(e).map(i => i.label).join(' '),
+      onSelect: id => lsSet('ref', id),
+    });
+  } else REF.ctl.refresh();                // таблицю могли перезавантажити
+  return REF.host;
+}
+
 // ---------- вкладка «Втрати противника» ----------
 function viewLosses() {
   const m = S.model;
@@ -715,7 +770,7 @@ function renderAll() {
   renderHeader(); renderTabs();
   const view = $('view'); view.textContent = '';
   if (!S.model) { view.append(viewWelcome()); renderSaveBar(); return; }
-  const views = { summary: viewSummary, entry: viewEntry, units: viewUnits, ammo: viewAmmo, charges: viewCharges, losses: viewLosses, check: viewCheck };
+  const views = { summary: viewSummary, entry: viewEntry, units: viewUnits, ammo: viewAmmo, charges: viewCharges, losses: viewLosses, ref: viewRef, check: viewCheck };
   view.append((views[S.tab] || viewSummary)());
   renderSaveBar();
 }
