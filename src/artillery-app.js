@@ -6,8 +6,16 @@ import {
 
 // Емблеми підрозділів: файли в unit-art, ключ — назва підрозділу без пробілів і розділових знаків.
 const EMBLEM_FILES = { '79одшбр': '79-odshbr', '80одшбр': '80-odshbr', '82одшбр': '82-odshbr', '95одшбр': '95-odshbr', '425ошп': '425-oshp', '1ошп': '1-oshp' };
+// Решта підрозділів пізнається за змістом назви: «АГр, РУК 148 оабр» і «АГр 148 оабр» — та сама емблема. «Арез №2» — зведений загін 148 і 44 оабр.
+const EMBLEM_PATTERNS = [
+  [/арез\s*№\s*2/i, 'arez2-148-44'], [/148\s*оабр/i, '148-oabr'], [/^грв.*107/i, '107-reabr'],
+  [/225\s*ошп/i, '225-oshp'], [/475\s*ошп/i, '475-oshp'], [/^78\s*од/i, '78-odshbr'], [/71\s*оє?бр/i, '71-oebr'], [/^67\s*омбр/i, '67-ombr'],
+];
 const EMBLEM_URLS = import.meta.glob('./unit-art/*.webp', { eager: true, query: '?url', import: 'default' });
-const emblemOf = name => { const f = EMBLEM_FILES[unitKey(name)]; return f ? EMBLEM_URLS[`./unit-art/${f}.webp`] || null : null; };
+const emblemOf = name => {
+  const f = EMBLEM_FILES[unitKey(name)] || EMBLEM_PATTERNS.find(([re]) => re.test(name))?.[1];
+  return f ? EMBLEM_URLS[`./unit-art/${f}.webp`] || null : null;
+};
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const HANDLE_KEY = 'handle';
