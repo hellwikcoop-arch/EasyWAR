@@ -157,5 +157,7 @@ test('artillery page is a module of its own with the shared-file entry flow', as
   assert.match(app, /createWritable/);
   assert.match(app, /file\.lastModified !== S\.lastModified/, 'merges onto a newer copy of the shared file');
   assert.match(app, /PERIODS/);
+  assert.match(app, /Від якого підрозділу вносимо дані/, 'на вкладці «Внесення» спершу обирається підрозділ');
+  assert.match(app, /unit-art\/\*\.webp/, "емблеми підрозділів");
   assert.doesNotMatch(app, /innerHTML/, 'table text goes in as text, never as markup');
 });

@@ -131,3 +131,22 @@ td.zero, .zero { color: color-mix(in srgb, var(--muted) 60%, transparent); }
   .entry-row { grid-template-columns: minmax(0, 1fr) 84px 84px; padding: 5px 8px; }
   .stamp { margin-left: 0; text-align: left; }
 }
+
+/* вибір підрозділу й шапка форми внесення */
+.unit-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
+.unit-card { display: grid; justify-items: center; align-content: start; gap: 6px; padding: 16px 12px 14px; min-height: 176px; text-align: center; cursor: pointer; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface-2); transition: border-color .15s, transform .15s, box-shadow .15s; }
+.unit-card:hover, .unit-card:focus-visible { border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 10px 28px rgba(0, 0, 0, .25); outline: none; }
+.unit-card b { font-size: 16px; line-height: 1.2; }
+.unit-card.free { border-style: dashed; }
+.unit-card .tag { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--info-soft); color: var(--info); }
+.unit-card .tag.ok { background: var(--ok-soft); color: var(--ok); }
+.crest { width: 64px; height: 72px; object-fit: contain; filter: drop-shadow(0 3px 6px rgba(0, 0, 0, .4)); }
+.crest.big { width: 56px; height: 64px; }
+.crest.ph { display: grid; place-items: center; border-radius: 50%; width: 64px; height: 64px; border: 2px solid var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: 18px; filter: none; }
+.crest.ph.big { width: 56px; height: 56px; font-size: 16px; }
+.entry-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 12px; }
+.entry-title { min-width: 0; }
+.entry-title h2 { margin: 0; font-size: 22px; }
+.entry-head .btn { margin-left: auto; }
+.crest.ph.long { font-size: 12px; letter-spacing: -.02em; }
+.crest.ph.big.long { font-size: 11px; }

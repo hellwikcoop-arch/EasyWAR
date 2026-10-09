@@ -1,8 +1,13 @@
 // Модуль «Артилерія»: зведення витрати й залишку боєприпасів і внесення даних бригадою у спільну таблицю.
 import { ensureMetaSheet, openWorkbook, readMeta, saveWorkbook, setCells, writeMeta } from './artillery-xlsx.js';
 import {
-  PERIODS, buildEdits, byCaliberGroup, byUnit, groupEdits, parseArtilleryWorkbook, remapEntry, stampEdits, stampFromTitle, sumItems, totals, valueOf,
+  PERIODS, buildEdits, byCaliberGroup, byUnit, groupEdits, parseArtilleryWorkbook, remapEntry, stampEdits, stampFromTitle, sumItems, totals, unitKey, valueOf,
 } from './artillery-core.js';
+
+// Емблеми підрозділів: файли в unit-art, ключ — назва підрозділу без пробілів і розділових знаків.
+const EMBLEM_FILES = { '79одшбр': '79-odshbr', '80одшбр': '80-odshbr', '82одшбр': '82-odshbr', '95одшбр': '95-odshbr', '425ошп': '425-oshp', '1ошп': '1-oshp' };
+const EMBLEM_URLS = import.meta.glob('./unit-art/*.webp', { eager: true, query: '?url', import: 'default' });
+const emblemOf = name => { const f = EMBLEM_FILES[unitKey(name)]; return f ? EMBLEM_URLS[`./unit-art/${f}.webp`] || null : null; };
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const HANDLE_KEY = 'handle';
@@ -49,7 +54,7 @@ async function idbGet(k) { const db = await idb(); return new Promise((res, rej)
 const S = {
   bytes: null, name: '', handle: null, lastModified: 0, storedHandle: null,
   wb: null, model: null, meta: null, titleStamp: null,
-  tab: 'summary', unitId: lsGet('unit') || '', date: '', period: '',
+  tab: 'summary', unitId: '', lastUnit: lsGet('unit') || '', date: '', period: '',
   form: null,                                   // { unitId, name, shells:{id:{spent,left}}, charges:{}, vgz, kbb, losses:{} } — рядки введеного як у полях
   showAll: false, search: '', notice: null,
   openGroups: new Set(), closedGroups: new Set(), detailUnit: '', ammoGroup: '', ammoSearch: '',
@@ -147,6 +152,14 @@ function renderHeader() {
   $('stampSub').textContent = S.meta?.journal?.length ? `Останнє внесення: ${S.meta.journal.at(-1).unit}` : 'Звітний період';
 }
 
+function goTab(id) {
+  if (id === S.tab) return;
+  const p = pendingEdits();
+  if (p && p.edits.length && !confirm('Є незбережені зміни. Залишити внесення без збереження?')) return;
+  S.form = null;
+  if (id === 'entry') S.unitId = '';           // на вкладці «Внесення» спершу обирається підрозділ
+  S.tab = id; renderAll();
+}
 const TABS = [
   ['summary', 'Зведення'], ['entry', 'Внесення'], ['units', 'Підрозділи'], ['ammo', 'Боєприпаси'], ['charges', 'Заряди'], ['losses', 'Втрати противника'], ['check', 'Перевірка'],
 ];
@@ -155,7 +168,7 @@ function renderTabs() {
   if (!S.model) return;
   const errors = S.model.issues.filter(i => i.level === 'error').length, warns = S.model.issues.filter(i => i.level === 'warn').length;
   for (const [id, label] of TABS) {
-    const btn = h('button', { class: 'tab', role: 'tab', type: 'button', 'aria-selected': String(S.tab === id), onclick: () => { S.tab = id; renderAll(); } }, label);
+    const btn = h('button', { class: 'tab', role: 'tab', type: 'button', 'aria-selected': String(S.tab === id), onclick: () => goTab(id) }, label);
     if (id === 'check' && (errors || warns)) btn.append(h('span', { class: 'badge' + (errors ? ' bad' : '') }, errors || warns));
     nav.append(btn);
   }
@@ -325,21 +338,54 @@ function entryFromForm(f) {
   return { entry, bad };
 }
 
+function crest(unit, big) {
+  const src = unit.free ? null : emblemOf(unit.name);
+  if (src) return h('img', { class: 'crest' + (big ? ' big' : ''), src, alt: '' });
+  const num = /^[^\d]*(\d+(?:\/\d+)*)/.exec(unit.name)?.[1] || '';
+  const label = unit.free ? '+' : num || unit.name.slice(0, 2);
+  return h('span', { class: 'crest ph' + (big ? ' big' : '') + (label.length > 4 ? ' long' : ''), 'aria-hidden': 'true' }, label);
+}
+
+function reportedBy(unit) {
+  return (S.meta?.journal || []).some(j => j.unit === unit.name && j.date === S.date && j.period === S.period);
+}
+
+function viewUnitPicker() {
+  const m = S.model;
+  const stats = new Map(byUnit(m).map(r => [r.unit.id, r]));
+  const cards = [...m.units].sort((a, b) => !!a.free - !!b.free).map(u => {
+    const r = stats.get(u.id);
+    const has = r && (r.spent || r.left || r.chargesLeft || r.vgz);
+    const done = reportedBy(u);
+    return h('button', { class: 'unit-card' + (u.free ? ' free' : '') + (S.lastUnit === u.id ? ' last' : ''), type: 'button', onclick: () => { S.unitId = u.id; S.lastUnit = u.id; lsSet('unit', u.id); S.form = null; renderAll(); window.scrollTo(0, 0); } },
+      crest(u),
+      h('b', null, u.free ? 'Нова колонка' : u.name),
+      h('span', { class: 'muted small' }, u.free ? u.name.replace('Вільні колонки ', 'колонки ') : has ? `витрата ${fmt(r.spent)} · залишок ${fmt(r.left)}` : 'даних ще немає'),
+      done ? h('span', { class: 'tag ok' }, `внесено на ${S.period === '00:00' ? '24:00' : S.period}`) : S.lastUnit === u.id ? h('span', { class: 'tag' }, 'востаннє обирали') : null);
+  });
+  return h('div', { style: 'display:grid;gap:16px' },
+    h('section', { class: 'panel' },
+      h('div', { class: 'panel-head' }, h('h2', null, 'Від якого підрозділу вносимо дані?'),
+        h('span', { class: 'muted small' }, `Звіт на ${S.period === '00:00' ? '24:00' : S.period} · ${fmtDate(S.date)}`)),
+      h('p', { class: 'muted', style: 'margin:0 0 12px' }, 'Оберіть підрозділ: відкриється форма з його колонок таблиці. Після внесення ви отримаєте цю саму таблицю з оновленими даними.'),
+      h('div', { class: 'unit-grid' }, cards)));
+}
+
 function viewEntry() {
   const m = S.model;
   const unit = m.units.find(u => u.id === S.unitId);
+  if (!unit) return viewUnitPicker();
   const wrap = h('div', { style: 'display:grid;gap:16px' });
-  const unitSelect = h('select', { id: 'unitSel', onchange: e => { S.unitId = e.target.value; lsSet('unit', S.unitId); S.form = null; renderAll(); } },
-    h('option', { value: '' }, '— оберіть бригаду —'),
-    m.units.map(u => h('option', { value: u.id, selected: u.id === S.unitId }, u.name)));
   const head = h('section', { class: 'panel' },
-    h('div', { class: 'panel-head' }, h('h2', null, 'Внесення даних бригадою'), h('span', { class: 'muted small' }, 'записуються лише колонки обраного підрозділу, формули й чужі дані не чіпаються')),
+    h('div', { class: 'entry-head' },
+      crest(unit, true),
+      h('div', { class: 'entry-title' }, h('small', { class: 'muted' }, 'Вносимо дані від підрозділу'), h('h2', null, unit.free ? 'Нова колонка таблиці' : unit.name)),
+      h('button', { class: 'btn small', type: 'button', onclick: () => { const p = pendingEdits(); if (p && p.edits.length && !confirm('Є незбережені зміни. Обрати інший підрозділ без збереження?')) return; S.form = null; S.unitId = ''; renderAll(); } }, '← Інший підрозділ')),
     h('div', { class: 'toolbar' },
-      h('label', { class: 'field' }, h('span', null, 'Бригада (підрозділ)'), unitSelect),
       h('label', { class: 'field' }, h('span', null, 'Дата звіту'), h('input', { type: 'date', value: S.date, onchange: e => { S.date = e.target.value; renderHeader(); renderSaveBar(); } })),
-      h('label', { class: 'field' }, h('span', null, 'Звіт на'), h('select', { onchange: e => { S.period = e.target.value; renderHeader(); } }, PERIODS.map(p => h('option', { value: p, selected: p === S.period }, p === '00:00' ? '24:00' : p))))));
+      h('label', { class: 'field' }, h('span', null, 'Звіт на'), h('select', { onchange: e => { S.period = e.target.value; renderHeader(); } }, PERIODS.map(p => h('option', { value: p, selected: p === S.period }, p === '00:00' ? '24:00' : p)))),
+      h('span', { class: 'muted small', style: 'align-self:center' }, 'записуються лише колонки цього підрозділу; формули й дані інших підрозділів не змінюються')));
   wrap.append(head);
-  if (!unit) { wrap.append(h('p', { class: 'muted' }, 'Оберіть свою бригаду, щоб внести витрату й залишок.')); return wrap; }
   if (!S.form || S.form.unitId !== unit.id) S.form = newForm(unit);
   const f = S.form;
   if (unit.free) {
@@ -358,7 +404,7 @@ function viewEntry() {
   const toolbar = h('div', { class: 'toolbar' },
     h('label', { class: 'field' }, h('span', null, 'Пошук рядка'), h('input', { id: 'entrySearch', type: 'search', placeholder: 'калібр або марка', value: S.search, oninput: e => { S.search = e.target.value; renderAll(); const i = $('entrySearch'); i.focus(); i.setSelectionRange(S.search.length, S.search.length); } })),
     h('label', { style: 'display:flex;gap:8px;align-items:center;min-height:38px' }, h('input', { type: 'checkbox', checked: S.showAll, onchange: e => { S.showAll = e.target.checked; renderAll(); } }), 'Показувати всі рядки (не лише ті, де вже є дані)'));
-  const body = h('section', { class: 'panel' }, h('div', { class: 'panel-head' }, h('h2', null, unit.name), h('span', { class: 'muted small' }, 'цілі невід\'ємні числа; порожнє поле — немає даних')), toolbar);
+  const body = h('section', { class: 'panel' }, h('div', { class: 'panel-head' }, h('h2', null, 'Витрата й залишок'), h('span', { class: 'muted small' }, 'цілі невід\'ємні числа; порожнє поле — немає даних')), toolbar);
 
   const groupNames = [...new Set(m.items.map(i => i.group))];
   const sections = [...(groupNames.includes('Високоточні') ? ['Високоточні'] : []), ...groupNames.filter(g => g !== 'Високоточні')];
@@ -430,7 +476,7 @@ function renderSaveBar() {
   const msg = p.bad ? `Є некоректні поля (${p.bad}): потрібні цілі числа.` : needName ? 'Вкажіть назву підрозділу.' : p.edits.length ? `Змінено клітинок: ${p.edits.length}` : 'Змін немає.';
   bar.append(h('span', { class: 'msg ' + (p.bad || needName ? 'warn' : 'muted') }, msg),
     h('button', { class: 'btn', type: 'button', disabled: !p.edits.length, onclick: () => { S.form = null; renderAll(); } }, 'Скасувати зміни'),
-    h('button', { class: 'btn primary', type: 'button', disabled: !p.edits.length || !!p.bad || needName, onclick: save }, S.handle ? 'Зберегти у файл' : 'Зберегти й завантажити файл'));
+    h('button', { class: 'btn primary', type: 'button', disabled: !p.edits.length || !!p.bad || needName, onclick: save }, S.handle ? 'Зберегти в таблицю' : 'Зберегти таблицю з новими даними'));
 }
 
 async function applyAndSerialize(wb, model, unitId, entry) {
