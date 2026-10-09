@@ -24,7 +24,7 @@ import vehicle_paint as vp
 from vehicle_kit import box, cyl_between, cyl_z, level_hull, merge, rivet_row, slope_box
 
 DEFAULT_OUT = Path(__file__).resolve().parent.parent / "src" / "models" / "m984a2.glb"
-OLIVE_RGB = (84, 90, 62)
+OLIVE_RGB = (176, 156, 112)   # піщаний «desert tan» американського парку, як на довідковому фото
 
 AXLES = [3.55, 2.05, -0.30, -1.80]            # дві передні осі, проміжок, дві задні
 WHEEL_R, WHEEL_Y, WHEEL_Z, WHEEL_W = 0.56, 0.56, 1.06, 0.44
@@ -50,8 +50,10 @@ def build(spare=True):
         axle.append(cyl_between((xa, 0.66, 0.0), (xb, 0.66, 0.0), 0.055, 12))
     parts["axles"] = merge(axle)
     parts["springs"] = merge(springs)
-    tanks = [box((0.9, 0.92, -0.86), (1.80, 0.50, 0.52), bevel=0.04), box((0.9, 0.92, 0.86), (1.20, 0.46, 0.50), bevel=0.04)]
-    tanks.append(box((-3.15, 0.90, 0.86), (0.80, 0.36, 0.46), bevel=0.03))
+    tanks = [cyl_between((-0.20, 0.95, -0.84), (1.95, 0.95, -0.84), 0.27, 24), cyl_between((-0.20, 0.95, 0.84), (1.35, 0.95, 0.84), 0.25, 24)]
+    tanks.append(cyl_between((-3.45, 0.92, 0.84), (-2.65, 0.92, 0.84), 0.22, 20))
+    for xb in (0.1, 0.9, 1.7):   # стяжні хомути баків
+        tanks.append(cyl_between((xb, 0.95, -0.84), (xb + 0.05, 0.95, -0.84), 0.285, 24))
     parts["tanks"] = merge(tanks)
     parts["exhaust"] = merge([cyl_between((2.55, 1.20, 1.04), (2.55, 3.30, 1.04), 0.08, 14),
                               cyl_between((2.55, 3.30, 1.04), (2.55, 3.40, 1.04), 0.11, 14)])
@@ -94,7 +96,7 @@ def build(spare=True):
     doors, handles, side_win = [], [], []
     for s in (-1, 1):
         doors.append(box(((CAB_FRONT + CAB_REAR) / 2, 1.92, s * 1.225), (1.12, 1.18, 0.025), bevel=0.012))
-        side_win.append(box((3.42, 2.36, s * 1.233), (0.78, 0.56, 0.014), bevel=0.004))
+        side_win.append(box((3.40, 2.36, s * 1.236), (0.92, 0.66, 0.014), bevel=0.004))
         handles.append(box((3.0, 1.98, s * 1.245), (0.14, 0.04, 0.04), bevel=0.008))
         for x in (2.9, 3.9):
             rivets += rivet_row((x, 1.40, s * 1.224), (x, 2.20, s * 1.224), 0.12, (0, 0, s))
@@ -146,6 +148,14 @@ def build(spare=True):
             deck_rivets += rivet_row((x0 - 0.05, DECK_Y + 1.08, s * (DECK_HALF + 0.001)), (x1 + 0.05, DECK_Y + 1.08, s * (DECK_HALF + 0.001)), 0.13, (0, 0, s))
     parts["lockers"] = merge(lockers)
     parts["locker_doors"] = merge(doors_l)
+    # обладнання посеред платформи: вертикальний ресивер за кабіною, компресорний блок, ящики, барабан шланга
+    eq = [cyl_between((2.02, DECK_Y + 0.06, -0.46), (2.02, DECK_Y + 1.12, -0.46), 0.21, 28),
+          cyl_between((2.02, DECK_Y + 1.12, -0.46), (2.02, DECK_Y + 1.18, -0.46), 0.15, 24),
+          box((1.30, DECK_Y + 0.42, 0.28), (1.00, 0.72, 0.84), bevel=0.04), box((1.30, DECK_Y + 0.82, 0.28), (0.90, 0.10, 0.74), bevel=0.02),
+          box((0.30, DECK_Y + 0.28, -0.40), (0.78, 0.46, 0.62), bevel=0.03), box((0.15, DECK_Y + 0.26, 0.42), (0.60, 0.42, 0.56), bevel=0.03),
+          cyl_z((0.70, DECK_Y + 0.40, 0.26), 0.30, 0.34, 24), cyl_z((0.70, DECK_Y + 0.40, 0.26), 0.12, 0.40, 16),
+          cyl_between((1.55, DECK_Y + 0.76, -0.10), (2.02, DECK_Y + 0.76, -0.40), 0.035, 8)]
+    parts["equipment"] = merge(eq)
     parts["headboard"] = merge([box((DECK_X1 - 0.07, DECK_Y + 0.70, 0.0), (0.12, 1.40, 2 * DECK_HALF - 0.04), bevel=0.02),
                                 box((DECK_X1 - 0.07, DECK_Y + 1.44, 0.0), (0.16, 0.08, 2 * DECK_HALF - 0.04), bevel=0.02)])
     tools = []   # лопата, лом, ланцюг — прикріплені до заднього листа платформи
@@ -216,8 +226,8 @@ def build(spare=True):
 OL = vp.R("camo", 0.72, 0.1)
 OL_DK = vp.R("camo", 0.74, 0.12, tone=0.8)
 CHASSIS_NAMES = ["frame", "axles", "springs", "tanks", "exhaust", "fenders", "rear_beam", "rear_red", "rear_amber", "hitch", "spades", "steps", "winch"]
-CHASSIS_RECIPES = {"frame": vp.R((56, 56, 46), 0.82, 0.3), "axles": vp.R((50, 50, 42), 0.8, 0.4), "springs": vp.R((44, 44, 38), 0.7, 0.6),
-                   "tanks": vp.R("camo", 0.7, 0.2, tone=0.8), "exhaust": vp.R((74, 62, 50), 0.6, 0.5), "fenders": OL_DK, "rear_beam": vp.R((54, 54, 44), 0.8, 0.35),
+CHASSIS_RECIPES = {"frame": vp.R((78, 70, 54), 0.82, 0.3), "axles": vp.R((66, 60, 48), 0.8, 0.4), "springs": vp.R((44, 44, 38), 0.7, 0.6),
+                   "tanks": vp.R("camo", 0.7, 0.2, tone=0.8), "exhaust": vp.R((74, 62, 50), 0.6, 0.5), "fenders": OL_DK, "rear_beam": vp.R((120, 106, 80), 0.8, 0.35),
                    "rear_red": vp.LENS_R, "rear_amber": vp.LENS_A, "hitch": vp.R((38, 38, 36), 0.5, 0.8), "spades": vp.R((60, 58, 44), 0.7, 0.4),
                    "steps": vp.R((46, 46, 40), 0.8, 0.5), "winch": vp.R((40, 40, 36), 0.55, 0.7)}
 CAB_NAMES = ["hood", "cab", "windshields", "windshield_frames", "wipers", "grille_back", "grille", "doors", "side_windows", "door_handles",
@@ -226,13 +236,13 @@ CAB_RECIPES = {"hood": OL, "cab": OL, "windshields": vp.GLASS, "windshield_frame
                "grille": vp.R("camo", 0.7, 0.2, tone=0.75), "doors": OL, "side_windows": vp.GLASS, "door_handles": vp.R("camo", 0.6, 0.3, tone=0.7),
                "lamps": vp.LENS_W, "lamps_amber": vp.LENS_A, "bumper": vp.R("camo", 0.7, 0.2, tone=0.85), "mirror_arms": OL_DK, "mirrors": vp.BLACK,
                "cab_rivets": vp.R("camo", 0.7, 0.2, tone=0.75)}
-BODY_NAMES = ["deck", "lockers", "locker_doors", "headboard", "tools", "tie_downs", "deck_rivets", "crane_base", "crane_boom", "crane_boom_inner",
+BODY_NAMES = ["deck", "equipment", "lockers", "locker_doors", "headboard", "tools", "tie_downs", "deck_rivets", "crane_base", "crane_boom", "crane_boom_inner",
               "crane_rams", "crane_hook", "boom_rest"]
-BODY_RECIPES = {"deck": vp.R((70, 66, 52), 0.8, 0.3), "lockers": OL, "locker_doors": OL_DK, "headboard": OL, "tools": vp.R((90, 76, 54), 0.7, 0.5),
+BODY_RECIPES = {"deck": vp.R((98, 88, 66), 0.8, 0.3), "equipment": OL_DK, "lockers": OL, "locker_doors": OL_DK, "headboard": OL, "tools": vp.R((90, 76, 54), 0.7, 0.5),
                 "tie_downs": vp.R((60, 62, 52), 0.6, 0.6), "deck_rivets": vp.R("camo", 0.7, 0.2, tone=0.75), "crane_base": OL,
                 "crane_boom": vp.R("camo", 0.68, 0.2, tone=0.9), "crane_boom_inner": vp.R("camo", 0.7, 0.25, tone=0.8), "crane_rams": vp.STEEL,
-                "crane_hook": vp.R((40, 40, 38), 0.5, 0.8), "boom_rest": vp.R((54, 54, 44), 0.8, 0.35)}
-TILES = {"tyres": TileSpec("rubber", (36, 34, 31), 0.4, 1.0, 1.0), "rims": TileSpec("cast", (70, 74, 56), 0.5, 1.0, 1.0),
+                "crane_hook": vp.R((40, 40, 38), 0.5, 0.8), "boom_rest": vp.R((120, 106, 80), 0.8, 0.35)}
+TILES = {"tyres": TileSpec("rubber", (36, 34, 31), 0.4, 1.0, 1.0), "rims": TileSpec("cast", (168, 148, 104), 0.5, 1.0, 1.0),
          "wheel_bolts": TileSpec("steel", (95, 97, 92), 0.3, 1.0, 1.0)}
 
 

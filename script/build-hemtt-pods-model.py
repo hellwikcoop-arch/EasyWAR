@@ -113,7 +113,7 @@ def trailer(parts):
 
 def build():
     parts = m984.build(spare=False)
-    for name in ("lockers", "locker_doors", "tools", "deck_rivets", "crane_base", "crane_boom", "crane_boom_inner", "crane_rams", "crane_hook",
+    for name in ("equipment", "lockers", "locker_doors", "tools", "deck_rivets", "crane_base", "crane_boom", "crane_boom_inner", "crane_rams", "crane_hook",
                  "boom_rest", "spades"):
         parts.pop(name)
     pods_y0 = DECK_Y + 0.06
@@ -142,6 +142,11 @@ def build():
 
 
 # ---------- групи для запікання ----------
+# M984A2 тепер піщаний, а пакетовоз за довідковим фото — темно-зелений: перекриваємо піщані частини спільного шасі й кабіни
+OLIVE = (78, 88, 58)
+CH_FIX = {"frame": vp.R((56, 56, 46), 0.82, 0.3), "axles": vp.R((50, 50, 42), 0.8, 0.4), "rear_beam": vp.R((54, 54, 44), 0.8, 0.35)}
+BODY_FIX = {"deck": vp.R((70, 66, 52), 0.8, 0.3)}
+TILES = {**m984.TILES, "rims": TileSpec("cast", (70, 74, 56), 0.5, 1.0, 1.0)}
 WHITE = vp.R((224, 223, 210), 0.62, 0.1, 0.9)
 BELT = vp.R((196, 188, 150), 0.82, 0.0, 0.9)
 EXTRA_CHASSIS = {"t_frame": vp.R((56, 56, 46), 0.82, 0.3), "t_axles": vp.R((50, 50, 42), 0.8, 0.4), "t_springs": vp.R((44, 44, 38), 0.7, 0.6),
@@ -154,9 +159,9 @@ def group_nodes(parts):
     chassis = [n for n in m984.CHASSIS_NAMES if n in parts] + list(EXTRA_CHASSIS)
     body = [n for n in m984.BODY_NAMES if n in parts] + list(EXTRA_BODY)
     cab = [n for n in m984.CAB_NAMES if n in parts]
-    spec = (("chassis", chassis, {**m984.CHASSIS_RECIPES, **EXTRA_CHASSIS}, 1536, None, ("fenders", "t_fenders")),
+    spec = (("chassis", chassis, {**m984.CHASSIS_RECIPES, **CH_FIX, **EXTRA_CHASSIS}, 1536, None, ("fenders", "t_fenders")),
             ("cab", cab, m984.CAB_RECIPES, 1536, m984.post_cab, ("cab", "doors", "bumper")),
-            ("body", body, {**m984.BODY_RECIPES, **EXTRA_BODY}, 1536, None, ("deck", "crane_base", "crane_boom")),
+            ("body", body, {**m984.BODY_RECIPES, **BODY_FIX, **EXTRA_BODY}, 1536, None, ("deck", "crane_base", "crane_boom")),
             ("rack", ["rack", "straps"], {"rack": WHITE, "straps": BELT}, 1024, None, ("rack",)))
     for gi, (gname, names, recipes, res, post, seams) in enumerate(spec):
         meshes, ids = [], []
@@ -164,11 +169,11 @@ def group_nodes(parts):
             m = parts.pop(nme)
             meshes.append(m)
             ids.append(np.full(len(m.faces), i, np.int16))
-        olive = m984.OLIVE_RGB
+        olive = OLIVE
         painter = vp.group_painter(names, recipes, camo=False, seed=61 + gi, olive=olive, weather=dict(mud=0.65 if gname == "chassis" else 0.35, dust=0.5),
                                    seams=seams, post=post)
         nodes.append(node(gname, [(merge(meshes), BakeSpec(painter, res=res, ids=np.concatenate(ids), key=f"hemtt-pods-{gname}", seed=61 + gi))]))
-    for nme, spec in m984.TILES.items():
+    for nme, spec in TILES.items():
         nodes.append(node(nme, [(parts.pop(nme), spec)]))
     # пакети: одна запечена сітка, вісім вузлів
     prims = lpc_pod(POD_L, POD_H, POD_HALF, True, POD_LUGS)
