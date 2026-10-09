@@ -81,10 +81,10 @@ def build(spare=True):
     ws0, ws1 = (CAB_FRONT, 2.20), (CAB_FRONT - 0.18, 2.88)
     glass, frames, wipers = [], [], []
     for z0 in (-0.54, 0.54):
-        glass.append(slope_box(ws0, ws1, 0.5, 0.012, (0.012, 0.66, 0.98), z0))
-        frames.append(slope_box(ws0, ws1, 0.5, 0.020, (0.018, 0.72, 1.08), z0))
-        wipers.append(slope_box(ws0, ws1, 0.30, 0.03, (0.012, 0.34, 0.02), z0 + 0.1))
-    frames.append(slope_box(ws0, ws1, 0.5, 0.025, (0.025, 0.74, 0.05), 0.0))
+        glass.append(slope_box(ws0, ws1, 0.5, 0.05, (0.012, 0.66, 0.98), z0))
+        frames.append(slope_box(ws0, ws1, 0.5, 0.03, (0.018, 0.72, 1.08), z0))
+        wipers.append(slope_box(ws0, ws1, 0.30, 0.07, (0.012, 0.34, 0.02), z0 + 0.1))
+    frames.append(slope_box(ws0, ws1, 0.5, 0.035, (0.025, 0.74, 0.05), 0.0))
     parts["windshields"] = merge(glass)
     parts["windshield_frames"] = merge(frames)
     parts["wipers"] = merge(wipers)

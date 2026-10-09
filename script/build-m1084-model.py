@@ -42,7 +42,7 @@ def slope_box(p0, p1, t, offset, extents, z):
     d /= length
     n = np.array([d[1], -d[0]])
     c = p0 + d * (t * length) + n * offset
-    return box((c[0], c[1], z), extents, rot_z=np.arctan2(d[1], d[0]))
+    return box((c[0], c[1], z), (extents[1], extents[0], extents[2]), rot_z=np.arctan2(d[1], d[0]))   # (товщина, довжина вздовж схилу, ширина)
 
 
 def build():
@@ -111,10 +111,10 @@ def build():
     ws0, ws1 = (CAB_FRONT - 0.02, 2.06), (3.36, 2.58)
     glass, frames, wipers = [], [], []
     for z0 in (-0.58, 0.58):
-        glass.append(slope_box(ws0, ws1, 0.5, 0.012, (0.012, 0.50, 0.96), z0))
-        frames.append(slope_box(ws0, ws1, 0.5, 0.020, (0.018, 0.56, 1.06), z0))
-        wipers.append(slope_box(ws0, ws1, 0.30, 0.03, (0.012, 0.30, 0.02), z0 + 0.1))
-    frames.append(slope_box(ws0, ws1, 0.5, 0.025, (0.025, 0.58, 0.05), 0.0))
+        glass.append(slope_box(ws0, ws1, 0.5, 0.05, (0.012, 0.50, 0.96), z0))
+        frames.append(slope_box(ws0, ws1, 0.5, 0.03, (0.018, 0.56, 1.06), z0))
+        wipers.append(slope_box(ws0, ws1, 0.30, 0.07, (0.012, 0.30, 0.02), z0 + 0.1))
+    frames.append(slope_box(ws0, ws1, 0.5, 0.035, (0.025, 0.58, 0.05), 0.0))
     parts["windshields"] = merge(glass)
     parts["windshield_frames"] = merge(frames)
     parts["wipers"] = merge(wipers)

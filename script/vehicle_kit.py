@@ -197,7 +197,8 @@ def slope_box(p0, p1, t, offset, extents, z, rot_extra=0.0):
     d /= length
     n = np.array([d[1], -d[0]])
     c = p0 + d * (t * length) + n * offset
-    return box((c[0], c[1], z), extents, rot_z=np.arctan2(d[1], d[0]) + rot_extra)
+    # extents = (товщина вздовж нормалі, довжина вздовж схилу, ширина по z)
+    return box((c[0], c[1], z), (extents[1], extents[0], extents[2]), rot_z=np.arctan2(d[1], d[0]) + rot_extra)
 
 
 def beam_between(a, b, thick_y, thick_z, bevel=None):
