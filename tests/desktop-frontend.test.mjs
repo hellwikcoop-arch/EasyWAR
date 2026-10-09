@@ -120,9 +120,11 @@ test('start screen hosts profile, backup, updates and Signal', async () => {
   assert.deepEqual([...order].sort((a, b) => a - b), order, 'prepend order gives Профіль, Резервна копія, Оновлення, Signal');
 });
 
-test('PVK emblem is shown on the launcher tile and in the PVK dashboard hero', async () => {
+test('PVK emblem is a launcher card that opens the PVK tile and in the PVK dashboard hero', async () => {
   const html = await read('index.html');
-  assert.match(html, /<img class="ct-logo"[^>]*src="data:image\/webp;base64,/, 'launcher PVK tile carries the logo');
+  const card = html.match(/<button[^>]*data-pvk-card[^>]*><div class="bc-icon"><img[^>]*src="data:image\/webp;base64,[^"]+"><\/div><h3>([^<]+)<\/h3>/);
+  assert.ok(card, 'launcher has a PVK card with the logo, like the other branch cards');
+  assert.match(html, /<section class="command-tile" data-command="pvk" id="pvk-tile"[^>]*hidden>/, 'the PVK tile opens from the card and starts hidden');
   const css = await read('pvk-dashboard.css');
   assert.match(css, /\.pvk-hero::before[^}]*pvk-art\/emblem\.webp/, 'dashboard hero uses the emblem');
   const emblem = await readFile(new URL('../src/pvk-art/emblem.webp', import.meta.url));
