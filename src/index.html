@@ -624,7 +624,12 @@ body[data-active-branch="air"] #branch-controls,body[data-active-branch="pvk"] #
 </style>
 <style id="easywar-start-wide">
 /* Монітори 16:9 і 16:10: чотири картки в один ряд, фон «cover», а решту висоти добирає масштаб (див. fitStart). */
-#view-start{background-size:auto,auto,auto,cover,auto !important;background-position:center,center,center,center 30%,center !important}
+#view-start{background:
+    linear-gradient(180deg,#06101c 0,#06101c var(--bg-gap,0px),rgba(6,16,28,0) calc(var(--bg-gap,0px) + 120px),rgba(6,16,28,0) 90%,#06101c 100%),
+    radial-gradient(60% 55% at 50% 42%,rgba(6,12,22,.38),transparent 75%),
+    linear-gradient(180deg,rgba(6,12,22,.12),rgba(6,12,22,.34)),
+    url('./launcher-bg.webp') var(--bg-pos,center 30%) / var(--bg-size,cover) no-repeat,
+    #06101c !important}
 @media(min-width:1000px) and (min-aspect-ratio:3/2){
   #view-start > .start-box{width:min(1100px,100%) !important;--branch-card-height:196px}
   #view-start .branch-cards{grid-template-columns:repeat(4,minmax(0,1fr)) !important}
@@ -848,6 +853,21 @@ body[data-active-branch="air"] #branch-controls,body[data-active-branch="pvk"] #
     const avail = start.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
     const need = box.offsetHeight;
     box.style.zoom = need > avail && avail > 0 ? String(Math.max(0.55, avail / need)) : '';
+    alignBackground(start);
+  }
+  // Кільце з прицілом на фоні стоїть концентрично з кільцем логотипа easyWAR при будь-якому співвідношенні сторін вікна.
+  function alignBackground(host) {
+    const art = host.querySelector('.start-brand-art');
+    if (!art) return;
+    const r = art.getBoundingClientRect();
+    if (!r.width) return;
+    const IW = 1376, IH = 768, RX = 690, RY = 150;          // розмір фонового зображення й центр його кільця
+    const tx = r.left + r.width / 2, ty = r.top + r.height * 0.376;
+    const vw = host.clientWidth, vh = host.clientHeight;
+    const k = Math.max(vw / IW, tx / RX, (vw - tx) / (IW - RX), (vh - ty) / (IH - RY));
+    host.style.setProperty('--bg-size', `${IW * k}px ${IH * k}px`);
+    host.style.setProperty('--bg-pos', `${tx - RX * k}px ${ty - RY * k}px`);
+    host.style.setProperty('--bg-gap', `${Math.max(0, ty - RY * k)}px`);
   }
   window.addEventListener('resize', fitStart);
   window.addEventListener('load', fitStart);
