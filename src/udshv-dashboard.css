@@ -49,9 +49,9 @@ body.udshv-open #view-ref { display: none !important; }
 }
 /* Емблема ДШВ зліва від заголовка. */
 .ud-hero::before {
-  content: ''; flex: none; width: 88px; aspect-ratio: 491 / 472; border-radius: 14px;
-  background: url('./udshv-art/emblem.webp') center / cover no-repeat;
-  box-shadow: 0 0 0 1px rgba(232, 220, 203, .18), 0 8px 22px rgba(0, 0, 0, .45);
+  content: ''; flex: none; width: 96px; aspect-ratio: 1;
+  background: url('./udshv-art/command-logo.webp') center / contain no-repeat;
+  filter: drop-shadow(0 4px 12px rgba(0, 0, 0, .5));
 }
 .ud-hero > div { margin-right: auto; }
 /* Банер «ДШВ × Повітряні Сили» над шапкою. */

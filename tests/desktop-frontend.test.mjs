@@ -122,9 +122,11 @@ test('start screen hosts profile, backup, updates and Signal', async () => {
 
 test('PVK emblem is a launcher card that opens the PVK tile and in the PVK dashboard hero', async () => {
   const html = await read('index.html');
-  const card = html.match(/<button[^>]*data-pvk-card[^>]*><div class="bc-icon"><img[^>]*src="data:image\/webp;base64,[^"]+"><\/div><h3>([^<]+)<\/h3>/);
+  const card = html.match(/<button[^>]*data-cmd-card[^>]*><div class="bc-icon"><img[^>]*src="data:image\/webp;base64,[^"]+"><\/div><h3>([^<]+)<\/h3>/);
   assert.ok(card, 'launcher has a PVK card with the logo, like the other branch cards');
   assert.match(html, /<section class="command-tile" data-command="pvk" id="pvk-tile"[^>]*hidden>/, 'the PVK tile opens from the card and starts hidden');
+  assert.match(html, /<button[^>]*data-cmd-card[^>]*aria-controls="dshv-tile"[^>]*><div class="bc-icon"><img[^>]*src="data:image\/webp;base64,/, 'the ДШВ command card carries its logo too');
+  assert.match(html, /<section class="command-tile" data-command="dshv" id="dshv-tile"[^>]*hidden>/, 'the ДШВ tile opens from its card');
   const css = await read('pvk-dashboard.css');
   assert.match(css, /\.pvk-hero::before[^}]*pvk-art\/emblem\.webp/, 'dashboard hero uses the emblem');
   const emblem = await readFile(new URL('../src/pvk-art/emblem.webp', import.meta.url));
