@@ -17,6 +17,20 @@ const emblemOf = name => {
   return f ? EMBLEM_URLS[`./unit-art/${f}.webp`] || null : null;
 };
 
+// Іконки боєприпасів за групою калібру (ammo-art). Групи без своєї іконки (85, 100, 128, 130, 220 мм) дістають загальну.
+const AMMO_URLS = import.meta.glob('./ammo-art/*.webp', { eager: true, query: '?url', import: 'default' });
+const AMMO_BY_GROUP = {
+  '155 мм ОФ': '155-he', '155 мм касетні': '155-cluster', '155 мм дист. мінування': '155-scatter', '155 мм димові й освітлювальні': '155-smoke',
+  '152 мм': '152', '122 мм': '122', '122 мм РС': '122-rocket', '105 мм': '105', '203 мм': '203', '227 мм': '227',
+  '120 мм': '120-mortar', '82 мм': '82-mortar', '60 мм': '60-mortar', 'Високоточні': 'guided',
+};
+const ammoIconOf = group => {
+  if (group === 'Заряди') return null;
+  const f = AMMO_BY_GROUP[group] || 'other';
+  return AMMO_URLS[`./ammo-art/${f}.webp`] || null;
+};
+const ammoIcon = (group, cls = '') => { const src = ammoIconOf(group); return src ? h('img', { class: `ammo-ico ${cls}`.trim(), src, alt: '', loading: 'lazy' }) : null; };
+
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const HANDLE_KEY = 'handle';
 const $ = id => document.getElementById(id);
@@ -205,7 +219,7 @@ function viewSummary() {
     kpi('Заряди', t.chargesSpent, `витрата · залишок ${fmt(t.chargesLeft)}`),
     kpi('Виконано ВгЗ', t.vgz, `з них КББ: ${fmt(t.kbb)}`)));
   const byGroupRows = groups.map(g => h('tr', null,
-    h('td', null, g.group), cellNum(g.spent), cellNum(g.left),
+    h('td', null, ammoIcon(g.group, 'sm'), g.group), cellNum(g.spent), cellNum(g.left),
     h('td', null, h('div', { class: 'bar' }, h('i', { style: `width:${Math.round(g.spent / maxSpent * 100)}%` })))));
   byGroupRows.push(h('tr', { class: 'total' }, h('td', null, 'Разом'), h('td', { class: 'num' }, fmt(t.spent)), h('td', { class: 'num' }, fmt(t.left)), h('td')));
   const unitRows = units.map(r => h('tr', { class: 'link', onclick: () => { S.detailUnit = r.unit.id; S.tab = 'units'; renderAll(); } },
@@ -267,7 +281,7 @@ function viewAmmo() {
     const holders = m.units.filter(u => { const v = valueOf(m, it.id, u.id); return v.spent || v.left; });
     const expanded = S.openGroups.has('ammo:' + it.id);
     rows.push(h('tr', { class: 'link', onclick: () => { const k = 'ammo:' + it.id; if (S.openGroups.has(k)) S.openGroups.delete(k); else S.openGroups.add(k); renderAll(); } },
-      h('td', null, (expanded ? '▾ ' : '▸ ') + it.label), h('td', { class: 'muted' }, it.group), cellNum(s.spent), cellNum(s.left), h('td', { class: 'num muted' }, holders.length ? `${holders.length}` : '')));
+      h('td', null, (expanded ? '▾ ' : '▸ '), ammoIcon(it.group, 'sm'), it.label), h('td', { class: 'muted' }, it.group), cellNum(s.spent), cellNum(s.left), h('td', { class: 'num muted' }, holders.length ? `${holders.length}` : '')));
     if (expanded) for (const u of holders) { const v = valueOf(m, it.id, u.id); rows.push(h('tr', { class: 'sub' }, h('td', { style: 'padding-left:32px' }, u.name), h('td'), cellNum(v.spent || 0), cellNum(v.left || 0), h('td'))); }
   }
   const tools = h('div', { class: 'toolbar' },
@@ -426,7 +440,7 @@ function viewEntry() {
     if (!visible.length) continue;
     const dirty = visible.filter(it => f.shells[it.id].spent !== f.orig.shells[it.id].spent || f.shells[it.id].left !== f.orig.shells[it.id].left).length;
     const det = h('details', { class: 'group', open: !S.closedGroups.has('e:' + g) || !!q || dirty > 0 },
-      h('summary', null, g, h('span', { class: 'muted' }, dirty ? `змінено: ${dirty}` : rowsWord(visible.length))));
+      h('summary', null, ammoIcon(g, 'md'), g, h('span', { class: 'muted' }, dirty ? `змінено: ${dirty}` : rowsWord(visible.length))));
     det.addEventListener('toggle', () => { if (det.open) S.closedGroups.delete('e:' + g); else S.closedGroups.add('e:' + g); });
     det.append(h('div', { class: 'entry-row head' }, h('span', null, 'Боєприпас'), h('span', { class: 'num' }, 'Витрата'), h('span', { class: 'num' }, 'Залишок')));
     for (const it of visible) {

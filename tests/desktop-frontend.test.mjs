@@ -161,3 +161,12 @@ test('artillery page is a module of its own with the shared-file entry flow', as
   assert.match(app, /unit-art\/\*\.webp/, "емблеми підрозділів");
   assert.doesNotMatch(app, /innerHTML/, 'table text goes in as text, never as markup');
 });
+
+test('artillery shows an ammunition icon for every caliber group', async () => {
+  const app = await read('artillery-app.js');
+  assert.match(app, /import\.meta\.glob\('\.\/ammo-art\/\*\.webp'/);
+  for (const group of ['155 мм ОФ', '155 мм касетні', '155 мм дист. мінування', '155 мм димові й освітлювальні', '122 мм РС', '120 мм', 'Високоточні']) assert.ok(app.includes(`'${group}'`), group);
+  const { readdir } = await import('node:fs/promises');
+  const files = (await readdir(new URL('../src/ammo-art/', import.meta.url))).sort();
+  assert.deepEqual(files, ['105', '120-mortar', '122', '122-rocket', '152', '155-cluster', '155-he', '155-scatter', '155-smoke', '203', '227', '60-mortar', '82-mortar', 'guided', 'other'].map((n) => `${n}.webp`).sort());
+});
