@@ -6,6 +6,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { addStageEnvironment, createRenderer, FLOOR_Y } from './stage-3d.js';
 import { buildModel, spreadLabels } from './munition-3d.js';
+import { SHELL_KINDS, buildShell } from './artillery-3d.js';
 
 // Файли моделей літаків. Шлях у new URL(...) має бути дослівним, щоб Vite покласти файл у збірку.
 export const MODEL_FILES = {
@@ -165,7 +166,7 @@ export class RefViewer {
       if (token !== this.token) return null;
       built = { group: entry.group, wings: [], aircraft: entry };
     } else {
-      built = buildModel(model.kind);
+      built = SHELL_KINDS.includes(model.kind) ? buildShell(model.kind) : buildModel(model.kind);
     }
     this.clear();
     const { group, wings = [], update, explode, labels = [], aircraft } = built;

@@ -19,7 +19,7 @@ const COLORS = {
 };
 
 // Детермінований генератор: потертості й заклепки щоразу ті самі.
-function random(seed) {
+export function random(seed) {
   let a = seed >>> 0;
   return () => {
     a = (a + 0x6d2b79f5) >>> 0;
@@ -29,7 +29,7 @@ function random(seed) {
   };
 }
 
-function canvas(w, h) {
+export function canvas(w, h) {
   const c = document.createElement('canvas');
   c.width = w; c.height = h;
   return c;
@@ -72,7 +72,7 @@ function grime() {
 }
 
 // Фарбована або металева поверхня простих деталей; кеш, щоб моделі ділили матеріали.
-const paint = (() => {
+export const paint = (() => {
   const cache = new Map();
   return (color, roughness, metalness, extra = {}) => {
     const key = [color, roughness, metalness, JSON.stringify(extra)].join('|');
@@ -81,7 +81,7 @@ const paint = (() => {
   };
 })();
 
-function material(name, extra = {}) {
+export function material(name, extra = {}) {
   const metal = name === 'steel' || name === 'fuze' || name === 'grey';
   return paint(COLORS[name], metal ? .35 : .55, metal ? .6 : .2, extra);
 }
@@ -91,7 +91,7 @@ function material(name, extra = {}) {
 // рядок — частка кола v: 0 низ, .25 дальній бік (−z), .5 верх, .75 ближній бік (+z), 1 знову низ.
 const FAR = .25, NEAR = .75;
 
-class Skin {
+export class Skin {
   constructor(span, radius, seed) {
     [this.x0, this.x1] = span;
     this.w = 2048; this.h = 512;
@@ -211,7 +211,7 @@ class Skin {
 
 // Розгортки дорогі, тож малюємо кожну один раз. Без DOM — проста фарба того ж кольору.
 const skins = new Map();
-function skin(key, build, fallback) {
+export function skin(key, build, fallback) {
   if (!HAS_DOM) return fallback;
   if (!skins.has(key)) skins.set(key, build());
   return skins.get(key);
@@ -220,7 +220,7 @@ function skin(key, build, fallback) {
 // ------------------------------------------------------------------ геометрія
 // Тіло обертання вздовж осі X: точки [радіус, x] від хвоста до носа. Шов розгортки — знизу.
 // span — межі осі, на які натягнуто розгортку (u уздовж осі, v по колу).
-function lathe(points, mat, { segments = 48, span } = {}) {
+export function lathe(points, mat, { segments = 48, span } = {}) {
   const geometry = new LatheGeometry(points.map(([r, x]) => new Vector2(Math.max(r, 0), x)), segments, Math.PI / 2);
   geometry.rotateZ(-Math.PI / 2);
   if (span) {
@@ -231,7 +231,7 @@ function lathe(points, mat, { segments = 48, span } = {}) {
 }
 
 // Точки профілю r(x) з рівним кроком на відрізку [x0, x1].
-function sample(r, x0, x1, step = .02) {
+export function sample(r, x0, x1, step = .02) {
   const n = Math.max(1, Math.ceil((x1 - x0) / step)), out = [];
   for (let i = 0; i <= n; i++) { const x = x0 + (x1 - x0) * i / n; out.push([r(x), x]); }
   return out;
@@ -263,7 +263,7 @@ function loft(xs, section, mat, { capStart = true } = {}) {
 
 // Пластина за контуром [x, y] завтовшки thickness (уздовж z), зі скругленими кромками.
 // UV нормуються на габарит контуру, щоб на пластину лягала власна розгортка.
-function plate(points, thickness, mat) {
+export function plate(points, thickness, mat) {
   const bevel = Math.min(thickness * .3, .006), depth = Math.max(thickness - bevel * 2, .001);
   const geometry = new ExtrudeGeometry(new Shape(points.map(([x, y]) => new Vector2(x, y))),
     { depth, bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel * .8, bevelSegments: 2, curveSegments: 4 });
@@ -276,7 +276,7 @@ function plate(points, thickness, mat) {
 }
 
 // Хрестоподібні стабілізатори: трапеції в площині осі, розставлені навколо корпусу.
-function fins({ at, root, tip, span, sweep = .5, base, count = 4, offset = Math.PI / 4, thickness = .03, mat }) {
+export function fins({ at, root, tip, span, sweep = .5, base, count = 4, offset = Math.PI / 4, thickness = .03, mat }) {
   const shape = new Shape();
   shape.moveTo(at, 0);
   shape.lineTo(at + root, 0);
@@ -295,7 +295,7 @@ function fins({ at, root, tip, span, sweep = .5, base, count = 4, offset = Math.
 }
 
 // Стабілізатори за точним контуром [x, радіус]; count штук навколо осі, починаючи з кута offset.
-function finSet(points, thickness, mat, { count = 4, offset = Math.PI / 4 } = {}) {
+export function finSet(points, thickness, mat, { count = 4, offset = Math.PI / 4 } = {}) {
   const group = new Group(), proto = plate(points, thickness, mat);
   for (let i = 0; i < count; i++) {
     const fin = new Mesh(proto.geometry, mat);
@@ -305,7 +305,7 @@ function finSet(points, thickness, mat, { count = 4, offset = Math.PI / 4 } = {}
   return group;
 }
 
-function ring(x, radius, tube, mat) {
+export function ring(x, radius, tube, mat) {
   const mesh = new Mesh(new TorusGeometry(radius, tube, 8, 48), mat);
   mesh.rotation.y = Math.PI / 2;
   mesh.position.x = x;
@@ -313,7 +313,7 @@ function ring(x, radius, tube, mat) {
 }
 
 // Бандаж, що щільно облягає корпус із профілем r(x) між a і b.
-function band(r, a, b, mat, lift = .007) {
+export function band(r, a, b, mat, lift = .007) {
   const pts = [[r(a) - .002, a], [r(a) + lift, a + .005], ...sample(x => r(x) + lift, a + .008, b - .008, .01), [r(b) + lift, b - .005], [r(b) - .002, b]];
   return lathe(pts, mat, { segments: 64 });
 }
@@ -339,18 +339,18 @@ function lug(x, y, mat, post = .026) {
   return g;
 }
 
-function at(object, x, y, z) {
+export function at(object, x, y, z) {
   object.position.set(x, y, z);
   return object;
 }
 
-function castShadows(group) {
+export function castShadows(group) {
   group.traverse(o => { if (o.isMesh && !o.userData.decal) { o.castShadow = true; o.receiveShadow = true; } });
   return group;
 }
 
 // Стрижень між двома точками.
-function rod(a, b, radius, mat) {
+export function rod(a, b, radius, mat) {
   const p0 = new Vector3(...a), dir = new Vector3(...b).sub(p0), len = dir.length();
   const mesh = new Mesh(new CylinderGeometry(radius, radius, len, 10), mat);
   mesh.position.copy(p0).addScaledVector(dir, .5);

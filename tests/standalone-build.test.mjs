@@ -140,3 +140,13 @@ test('файл ПВК для телефона не несе коду презе�
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('artillery is a separate standalone target without command mode or embedded table', async () => {
+  const { ARTILLERY } = await import('../script/build_standalone.mjs');
+  assert.deepEqual([ARTILLERY.page, ARTILLERY.command, ARTILLERY.file], ['artillery', null, 'EasyWAR-Artillery.html']);
+  assert.ok(!PAGES.some((p) => p.page === 'artillery'), 'у застосунок (build:app) вона не вбудовується');
+  const html = '<html><body><link rel="stylesheet" href="./assets/a.css"><script type="module" crossorigin src="./assets/a.js"></script></body></html>';
+  const out = inlinePage(html, { 'assets/a.css': 'b{}', 'assets/a.js': 'x()' }, () => null, null);
+  assert.match(out, /<style>b\{\}<\/style>/);
+  assert.doesNotMatch(out, /easywar-embedded-table/);
+});

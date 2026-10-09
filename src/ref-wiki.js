@@ -1,7 +1,7 @@
 // Вкладка «Довідник» модуля «Повітряні Сили»: вікі по засобах (літаки-носії) і боєприпасах.
 // Ліворуч список зі пошуком, праворуч стаття: 3D-модель, картка з ТТХ, опис, пов’язані статті й підсумок по вашій таблиці.
 // Дані статей — ref-data.js, 3D-переглядач — ref-viewer.js (підвантажується, коли відкривають першу статтю з моделлю).
-import { GROUPS, ENTRIES, entryById, carriersOf, munitionsOf, searchEntries, usageFor, variantsOf, modelOf, creditOf } from './ref-data.js';
+import * as AIR_DATA from './ref-data.js';
 
 function h(tag, props, ...kids) {
   const el = document.createElement(tag);
@@ -18,7 +18,6 @@ function h(tag, props, ...kids) {
 
 const N0 = n => Number(n).toLocaleString('uk-UA');
 const dmy = iso => (/^(\d{4})-(\d\d)-(\d\d)/.exec(iso || '') || []).slice(1).reverse().join('.');
-const groupTitle = id => (GROUPS.find(g => g.id === id) || {}).title || '';
 const VIEW_BUTTONS = [['three-quarter', '3/4'], ['side', 'Збоку'], ['front', 'Спереду'], ['top', 'Зверху'], ['rear', 'Ззаду']];
 const RESULTS = [['hit', 'Уражено', 'var(--hit)'], ['part', 'Пошкоджено', 'var(--part)'], ['miss', 'Не уражено', 'var(--miss)'], ['unk', 'Не відомо', 'var(--unk)']];
 
@@ -26,9 +25,15 @@ const RESULTS = [['hit', 'Уражено', 'var(--hit)'], ['part', 'Пошкод
 //   rows()   — рядки завантаженої таблиці вильотів ({ aircraft, munition, count, kind, date });
 //   media    — { thumb(id), photo(id), pair(carrierId, munitionId) } → data-URL зображення або null;
 //   motion() — чи дозволено анімацію;
-//   initial  — id статті, яку показати першою; onSelect(id) — виклик при виборі статті.
+//   initial  — id статті, яку показати першою; onSelect(id) — виклик при виборі статті;
+//   data     — інший набір статей замість ref-data.js (наприклад, артилерійські боєприпаси): { GROUPS, ENTRIES, entryById, searchEntries,
+//              variantsOf, modelOf, creditOf }, відсутнє береться з ref-data.js;
+//   extra(entry) — вузол, який стаття показує під розділами (дані з вашої таблиці); refresh() малює його заново;
+//   searchText(entry) — додатковий текст для пошуку (наприклад, підписи рядків таблиці).
 export function mount(host, options = {}) {
-  const { rows = () => [], media = {}, motion = () => true, onSelect, groups = null, only = null, usage = true, related = true } = options;
+  const { rows = () => [], media = {}, motion = () => true, onSelect, groups = null, only = null, usage = true, related = true, extra = null, searchText = null } = options;
+  const { GROUPS, ENTRIES, entryById, carriersOf, munitionsOf, searchEntries, usageFor, variantsOf, modelOf, creditOf } = { ...AIR_DATA, ...(options.data || {}) };
+  const groupTitle = id => (GROUPS.find(g => g.id === id) || {}).title || '';
   // groups / only — які розділи й статті показує цей модуль (РВ бачить лише наземні засоби й ракети); usage / related — чи малювати
   // підсумок по таблиці вильотів ПС і блок «носії/боєприпаси».
   const groupList = groups ? GROUPS.filter(g => groups.includes(g.id)) : GROUPS;
@@ -123,7 +128,7 @@ export function mount(host, options = {}) {
         actionCtl.setDur((action.seconds || 12) * 1000);
       }
       if (action) hint.textContent = action.hint;
-      else if (caps.modular) hint.textContent = 'Потягніть, щоб повернути. Повзунок «Блоки» розкладає бомбу.';
+      else if (caps.modular) hint.textContent = 'Потягніть, щоб повернути. Повзунок «Блоки» розкладає виріб на частини.';
       else hint.textContent = 'Потягніть, щоб повернути. Коліщатко наближає.';
       markView('three-quarter');
       setAuto(motion());
@@ -142,6 +147,12 @@ export function mount(host, options = {}) {
   // ---------- стаття ----------
   const slot = h('div', { class: 'rw-slot' });
   const usageEl = h('section', { class: 'rw-sec rw-usage' });
+  const extraEl = h('section', { class: 'rw-sec rw-extra' });
+  function renderExtra(entry) {
+    const node = extra ? extra(entry) : null;
+    extraEl.hidden = !node;
+    extraEl.replaceChildren(...(node ? [node] : []));
+  }
 
   function relatedBlock(entry) {
     if (!related || entry.group === 'ground' || entry.group === 'support') return null;
@@ -222,7 +233,7 @@ export function mount(host, options = {}) {
       h('p', { class: 'rw-summary', text: entry.summary }),
       entry.sections.map(s => h('section', { class: 'rw-sec' }, h('h3', { text: s.title }),
         s.text ? h('p', { text: s.text }) : null, s.list ? h('ul', {}, s.list.map(t => h('li', { text: t }))) : null)),
-      relatedBlock(entry), usageEl,
+      relatedBlock(entry), usageEl, extraEl,
       creditBox);
     article.replaceChildren(
       h('header', { class: 'rw-head' }, h('p', { class: 'rw-eyebrow', text: groupTitle(entry.group) + ' · ' + entry.origin }),
@@ -230,13 +241,14 @@ export function mount(host, options = {}) {
       h('div', { class: 'rw-body' }, main, info));
     slot.replaceChildren();
     renderUsage(entry);
+    renderExtra(entry);
   }
 
   // ---------- список ----------
   function renderNav() {
     seg.replaceChildren(...[['', 'Усе'], ...groupList.map(g => [g.id, g.tab || g.title])].map(([id, label]) =>
       h('button', { type: 'button', text: label, 'aria-pressed': String(state.group === id), onclick: () => { state.group = id; renderNav(); } })));
-    const found = searchEntries(state.q, state.group).filter(visible);
+    const found = searchEntries(state.q, state.group, searchText).filter(visible);
     list.replaceChildren();
     for (const g of groupList) {
       const items = found.filter(e => e.group === g.id);
@@ -279,7 +291,7 @@ export function mount(host, options = {}) {
   select(options.initial);
   return {
     select: id => select(id, false),
-    refresh: () => { const e = entryById(state.id); if (e) renderUsage(e); },
+    refresh: () => { const e = entryById(state.id); if (e) { renderUsage(e); renderExtra(e); } },
     get id() { return state.id; },
     dispose: () => { token++; if (viewer) viewer.dispose(); viewer = null; },
   };
