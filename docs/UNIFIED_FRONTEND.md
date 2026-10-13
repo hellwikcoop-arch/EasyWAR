@@ -28,6 +28,10 @@ switch: it neutralises these animations through the existing `animation-duration
 override, and `playMotion` also skips the number count-up. Do not reuse the
 `data-motion` name on a dashboard root: it would match the `<html>` toggle.
 
+## Dashboard theme (PVK, UDSHV, «Наші втрати»)
+
+`src/dashboard-theme.css` — шар кольорів і поверхонь поверх `pvk-dashboard.css`, `udshv-dashboard.css` і `own-losses-dashboard.css`, підключений у `air.html` і `rocket.html` після `dashboard-motion.css`. Усі правила стоять під `html:not([data-theme="light"])`, зображень і анімацій у файлі немає. Палітри задано змінними `--ud-*` / `--pvk-*` та спільними `--th-*` на коренях `#udshv-dashboard-root` і `#pvk-dashboard-root`; `.ol-root` успадковує їх.
+
 ## Desktop behaviour
 
 - **Tauri IPC in the iframe.** Tauri injects its bridge only into the top-level
