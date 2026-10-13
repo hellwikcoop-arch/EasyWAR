@@ -194,7 +194,7 @@ function renderTabs() {
   if (!S.model) return;
   const errors = S.model.issues.filter(i => i.level === 'error').length, warns = S.model.issues.filter(i => i.level === 'warn').length;
   for (const [id, label] of TABS) {
-    const btn = h('button', { class: 'tab', role: 'tab', type: 'button', 'aria-selected': String(S.tab === id), onclick: () => goTab(id) }, label);
+    const btn = h('button', { class: 'tab', role: 'tab', type: 'button', 'data-tab': id, 'aria-selected': String(S.tab === id), onclick: () => goTab(id) }, label);
     if (id === 'check' && (errors || warns)) btn.append(h('span', { class: 'badge' + (errors ? ' bad' : '') }, errors || warns));
     nav.append(btn);
   }
@@ -215,7 +215,7 @@ function viewSummary() {
   const groups = byCaliberGroup(m).filter(g => g.spent || g.left);
   const maxSpent = Math.max(1, ...groups.map(g => g.spent));
   const units = byUnit(m).filter(r => r.spent || r.left || r.precisionSpent || r.precisionLeft || r.vgz || r.kbb || r.chargesLeft);
-  const wrap = h('div', { style: 'display:grid;gap:16px' });
+  const wrap = h('div', { class: 'stack' });
   wrap.append(h('div', { class: 'kpis' },
     kpi('Витрата боєприпасів', t.spent, 'за звітний період, без високоточних', 'accent'),
     kpi('Залишок боєприпасів', t.left, 'у підрозділах'),
@@ -440,7 +440,7 @@ function viewAmmo() {
   const tools = ammoToolbar(groups, classes);
   const main = h('section', { class: 'panel' }, h('div', { class: 'panel-head' }, h('h2', null, S.ammoView === 'matrix' ? 'Матриця «тип × підрозділ»' : 'Боєприпаси за типами'),
     h('span', { class: 'muted small' }, `${rowsWord(rows.length)}; рядки без витрати й залишку приховано`)), legend, S.ammoView === 'matrix' ? ammoMatrix(rows, metric) : ammoList(rows, metric));
-  return h('div', { style: 'display:grid;gap:16px' }, h('section', { class: 'panel' }, tools), ammoCharts(rows, metric, groups), main);
+  return h('div', { class: 'stack' }, h('section', { class: 'panel' }, tools), ammoCharts(rows, metric, groups), main);
 }
 
 // ---------- вкладка «Заряди» ----------
@@ -589,7 +589,7 @@ function viewUnitPicker() {
       h('span', { class: 'muted small' }, u.free ? u.name.replace('Вільні колонки ', 'колонки ') : has ? `витрата ${fmt(r.spent)} · залишок ${fmt(r.left)}` : 'даних ще немає'),
       done ? h('span', { class: 'tag ok' }, `внесено на ${S.period === '00:00' ? '24:00' : S.period}`) : S.lastUnit === u.id ? h('span', { class: 'tag' }, 'востаннє обирали') : null);
   });
-  return h('div', { style: 'display:grid;gap:16px' },
+  return h('div', { class: 'stack' },
     h('section', { class: 'panel' },
       h('div', { class: 'panel-head' }, h('h2', null, 'Від якого підрозділу вносимо дані?'),
         h('span', { class: 'muted small' }, `Звіт на ${S.period === '00:00' ? '24:00' : S.period} · ${fmtDate(S.date)}`)),
@@ -601,7 +601,7 @@ function viewEntry() {
   const m = S.model;
   const unit = m.units.find(u => u.id === S.unitId);
   if (!unit) return viewUnitPicker();
-  const wrap = h('div', { style: 'display:grid;gap:16px' });
+  const wrap = h('div', { class: 'stack' });
   const head = h('section', { class: 'panel' },
     h('div', { class: 'entry-head' },
       crest(unit, true),
