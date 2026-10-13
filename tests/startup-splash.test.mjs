@@ -3,12 +3,15 @@ import { readFile, stat } from 'node:fs/promises';
 import test from 'node:test';
 import {
   SPLASH,
+  SPLASH_SLOGAN,
   SPLASH_TILES,
+  VIDEO_ZOOM_KEYS,
   progressValue,
   shouldRunSplash,
   splashClockMs,
   splashFinished,
   tileDelayMs,
+  videoZoom,
   visibleTileCount,
 } from '../src/startup-splash-core.js';
 
@@ -93,4 +96,37 @@ test('splash is local-only, survives a broken video and cannot trap the user', a
   assert.match(js, /launcher\.inert = true[\s\S]*launcher\.inert = false/, 'launcher is not focusable under the splash and is released afterwards');
   assert.match(css, /animation: ew-splash-failsafe 0s linear 20s forwards/, 'CSS removes the splash even if the script never runs');
   assert.match(css, /\.ew-splash__video\s*\{[^}]*object-fit: cover/, 'video fills any window aspect');
+});
+
+test('slogan plate hides the baked-in slogan before it types in and carries the new text', async () => {
+  assert.match(SPLASH_SLOGAN, /[А-Яа-яІіЇїЄєҐґ]/, 'slogan is in Ukrainian');
+  assert.ok(SPLASH_SLOGAN.length <= 48, 'slogan fits the plate on one line');
+  // у відео старий слоган набирається з ~2,6 с: табличка має бути закрита раніше
+  assert.ok(SPLASH.plateInMs < 2600, 'plate closes before the old slogan starts to type');
+  assert.ok(SPLASH.plateInMs < SPLASH.sloganInMs, 'text appears after the plate');
+  assert.ok(SPLASH.sloganInMs < SPLASH.tilesStartMs, 'text appears before the tiles');
+  const js = await read('startup-splash.js');
+  const css = await read('startup-splash.css');
+  assert.match(js, /ew-splash__plate/);
+  assert.match(js, /ew-splash__stage/);
+  assert.match(js, /plate\.classList\.toggle\('is-in', clock >= SPLASH\.plateInMs\)/);
+  assert.match(js, /stage\.style\.transform = `scale\(\$\{videoZoom\(clock\)/, 'plate follows the video zoom');
+  assert.match(css, /\.ew-splash__plate\s*\{[^}]*top: 71\.9%/, 'plate sits where the old slogan is');
+  assert.match(css, /\.ew-splash__stage\s*\{[^}]*transform-origin: 50% 37\.5%/, 'zoom origin matches the video');
+});
+
+test('video zoom is piecewise linear, clamped and ends at 1', () => {
+  assert.equal(videoZoom(-100), VIDEO_ZOOM_KEYS[0][1]);
+  assert.equal(videoZoom(0), 1.07);
+  assert.equal(videoZoom(3600), 1.07);
+  assert.ok(Math.abs(videoZoom(3800) - 1.062) < 1e-9, 'midpoint of the 3600..4000 segment');
+  assert.equal(videoZoom(SPLASH.videoMs), 1);
+  assert.equal(videoZoom(SPLASH.videoMs + 5000), 1);
+  assert.equal(VIDEO_ZOOM_KEYS[VIDEO_ZOOM_KEYS.length - 1][0], SPLASH.videoMs, 'last key is the end of the video');
+  let prev = Infinity;
+  for (let t = 0; t <= SPLASH.videoMs; t += 50) {
+    const z = videoZoom(t);
+    assert.ok(z <= prev + 1e-12, `zoom never grows (t=${t})`);
+    prev = z;
+  }
 });

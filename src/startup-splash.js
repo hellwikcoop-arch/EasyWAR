@@ -4,11 +4,13 @@
 // Логіка таймінгів — у startup-splash-core.js (є тести), тут лише DOM.
 import {
   SPLASH,
+  SPLASH_SLOGAN,
   SPLASH_TILES,
   progressValue,
   shouldRunSplash,
   splashClockMs,
   splashFinished,
+  videoZoom,
   visibleTileCount,
 } from './startup-splash-core.js';
 
@@ -50,6 +52,14 @@ const VIDEO_URL = new URL('./splash/easywar-intro.mp4', import.meta.url).href;
   video.tabIndex = -1;
   video.setAttribute('aria-hidden', 'true');
 
+  // Сцена збігається з видимою частиною відео (cover/contain) і масштабується разом із ним.
+  // Табличка накриває слоган, вшитий у відео, і несе новий текст.
+  const slogan = el('span', 'ew-splash__slogan', SPLASH_SLOGAN);
+  const plate = el('div', 'ew-splash__plate');
+  plate.append(slogan);
+  const stage = el('div', 'ew-splash__stage');
+  stage.append(plate);
+
   const tileEls = SPLASH_TILES.map(tile => el('div', 'ew-splash__tile', tile.label));
   const tiles = el('div', 'ew-splash__tiles');
   tiles.setAttribute('aria-hidden', 'true');
@@ -68,7 +78,7 @@ const VIDEO_URL = new URL('./splash/easywar-intro.mp4', import.meta.url).href;
   skip.type = 'button';
   skip.append('Пропустити ', el('kbd', '', 'Esc'));
 
-  root.append(video, hud, skip);
+  root.append(video, stage, hud, skip);
   if (launcher) launcher.inert = true;
   skip.focus({ preventScroll: true });
 
@@ -124,6 +134,9 @@ const VIDEO_URL = new URL('./splash/easywar-intro.mp4', import.meta.url).href;
       videoEnded: Boolean(endedAt),
       msSinceEnd: endedAt ? now - endedAt : 0,
     });
+    stage.style.transform = `scale(${videoZoom(clock).toFixed(4)})`;
+    plate.classList.toggle('is-in', clock >= SPLASH.plateInMs);
+    slogan.classList.toggle('is-in', clock >= SPLASH.sloganInMs);
     const shown = visibleTileCount(clock, tileEls.length);
     tileEls.forEach((tile, index) => tile.classList.toggle('is-in', index < shown));
     const loadingElapsed = clock - SPLASH.videoMs;
