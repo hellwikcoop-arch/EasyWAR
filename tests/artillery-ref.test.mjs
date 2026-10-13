@@ -28,7 +28,8 @@ test('every article has the required fields and unique ids', () => {
 test('articles use only text that reads as Ukrainian prose (no stray Latin letters inside Cyrillic words)', () => {
   const mixed = /[а-яіїєґ][a-z]|[a-z][а-яіїєґ]/i;
   for (const e of ENTRIES) {
-    const text = [e.summary, e.role, ...e.facts.flat(), ...e.sections.flatMap(s => [s.text, ...(s.list || [])])].filter(Boolean);
+    const own = variantsOf(e).flatMap(v => [v.label, v.text, ...(v.facts || []).flat()]);
+    const text = [e.summary, e.role, ...e.facts.flat(), ...own, ...e.sections.flatMap(s => [s.text, ...(s.list || [])])].filter(Boolean);
     for (const t of text) for (const word of t.split(/[\s,.;:()«»—–/]+/)) assert.ok(!mixed.test(word) || /^[A-Za-z0-9-]+$/.test(word), `${e.id}: «${word}»`);
   }
 });
@@ -39,8 +40,45 @@ test('every model of every article exists: procedural kinds build, files are reg
     if (m.file) { assert.ok(MODEL_FILES[m.file], `${e.id}: ${m.file} is registered`); continue; }
     assert.ok(SHELL_KINDS.includes(m.kind), `${e.id}: kind ${m.kind}`);
   }
-  assert.equal(modelOf(entryById('g155sm'), 'illum').kind, 'shell-155-illum');
-  assert.equal(creditOf(entryById('g155sm'), 'smoke').generated, true);
+  assert.equal(modelOf(entryById('g155sm'), 'm485').kind, 'shell-m485');
+  assert.equal(creditOf(entryById('g155sm'), 'm110').generated, true);
+});
+
+test('munition variants: each has its own model, unique id, facts and a credit naming the data source', () => {
+  const expected = {
+    g155he: ['generic', 'm107', 'm795', 'm549a1', 'erfb', 'dm121'], g155cl: ['m483a1', 'm864'], g155sc: ['raam', 'adam'], g155sm: ['m110', 'm825', 'm485'],
+    guided: ['generic', 'copperhead', 'smart', 'bonus', 'm454'], charges: ['bmcs', 'm3a1', 'm4a2', 'm119a2', 'm203a1'],
+  };
+  for (const [id, ids] of Object.entries(expected)) {
+    const vs = variantsOf(entryById(id));
+    assert.deepEqual(vs.map(v => v.id), ids, id);
+    assert.equal(new Set(vs.map(v => v.model.kind)).size, vs.length, `${id}: every variant has its own model`);
+    for (const v of vs) {
+      assert.ok(v.label, `${id}/${v.id}: label`);
+      assert.ok(v.text || v.facts, `${id}/${v.id}: described`);
+      if (v.facts) for (const f of v.facts) assert.ok(Array.isArray(f) && f.length === 2 && f.every(Boolean), `${id}/${v.id}: fact pair`);
+      if (v.id !== 'generic') assert.match(creditOf(entryById(id), v.id).note, /bk155\.com\.ua/, `${id}/${v.id}: source`);
+    }
+  }
+  // Кількості на моделях збігаються з довідником: підписи розбору снаряда називають ті самі числа, що й факти варіантів.
+  const labelsOf = kind => buildShell(kind).labels.map(l => l.text).join(' | ');
+  assert.match(labelsOf('shell-m483a1'), /88/);
+  assert.match(labelsOf('shell-m864'), /72/);
+  assert.match(labelsOf('shell-m718'), /9 протитанков/);
+  assert.match(labelsOf('shell-m692'), /36 протипіх/);
+  assert.match(labelsOf('shell-m825'), /116/);
+  assert.match(labelsOf('shell-smart'), /двома/);
+});
+
+test('payload models: the payload is hidden inside the body when assembled and leaves through the base when apart', () => {
+  for (const kind of ['shell-m483a1', 'shell-m864', 'shell-m718', 'shell-m692', 'shell-m825', 'shell-m485', 'shell-smart', 'shell-bonus', 'shell-m454']) {
+    const built = buildShell(kind);
+    assert.ok(built.group.userData.fit >= 1.3, `${kind}: viewer fit for the apart view`);
+    const before = size(built.group).x;
+    built.explode(1);
+    built.group.updateMatrixWorld(true);
+    assert.ok(size(built.group).x > before + 1, `${kind}: payload leaves the body`);
+  }
 });
 
 test('3D models share the common length, stay compact and fall apart into labelled blocks', () => {
