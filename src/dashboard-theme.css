@@ -59,6 +59,11 @@ html:not([data-theme="light"]) :is(.ud-hero, .pvk-hero) {
     linear-gradient(135deg, var(--th-hero-b) -40%, var(--ud-panel, var(--pvk-panel)) 55%);
   box-shadow: 0 18px 46px rgba(0, 0, 0, .38), inset 0 1px 0 rgba(255, 255, 255, .06);
 }
+/* Оригінальна SVG-графіка праворуч у шапці: купол з десантником (УДШВ) і літак із слідами (ПВК). */
+html:not([data-theme="light"]) .ud-hero { background-image: url('./udshv-art/hero-canopy.svg'), linear-gradient(112deg, transparent 38%, rgba(255, 255, 255, .045) 38.2%, transparent 38.6%, transparent 52%, rgba(255, 255, 255, .035) 52.2%, transparent 52.6%), radial-gradient(120% 160% at 100% 0%, var(--th-hero-a), transparent 58%), radial-gradient(80% 120% at 0% 100%, color-mix(in srgb, var(--th-accent) 14%, transparent), transparent 60%), linear-gradient(135deg, var(--th-hero-b) -40%, var(--ud-panel) 55%); background-repeat: no-repeat; background-position: right center, 0 0, 0 0, 0 0, 0 0; background-size: auto 100%, auto, auto, auto, auto; }
+html:not([data-theme="light"]) .pvk-hero { background-image: url('./pvk-art/hero-sky.svg'), linear-gradient(112deg, transparent 38%, rgba(255, 255, 255, .045) 38.2%, transparent 38.6%, transparent 52%, rgba(255, 255, 255, .035) 52.2%, transparent 52.6%), radial-gradient(120% 160% at 100% 0%, var(--th-hero-a), transparent 58%), radial-gradient(80% 120% at 0% 100%, color-mix(in srgb, var(--th-accent) 14%, transparent), transparent 60%), linear-gradient(135deg, var(--th-hero-b) -40%, var(--pvk-panel) 55%); background-repeat: no-repeat; background-position: right center, 0 0, 0 0, 0 0, 0 0; background-size: auto 100%, auto, auto, auto, auto; }
+/* Кнопки дій шапки лежать над графікою. */
+html:not([data-theme="light"]) :is(.ud-hero-actions, .pvk-hero > :not(div:first-child)) { position: relative; z-index: 1; }
 html:not([data-theme="light"]) :is(.ud-hero, .pvk-hero)::after {
   content: ''; position: absolute; left: 24px; right: 24px; bottom: 0; height: 2px; pointer-events: none;
   background: linear-gradient(90deg, transparent, var(--ud-gold, var(--pvk-gold)), transparent);

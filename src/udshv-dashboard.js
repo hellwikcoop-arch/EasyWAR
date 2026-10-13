@@ -457,7 +457,7 @@ export function render(host, workbook, options = {}) {
       h('span', { text: `${model.activeDays} з ${model.days} днів із даними · ${compare}` }),
       state.units.length ? h('button', { type: 'button', class: 'ud-link', onclick: () => { state.units = []; go(); }, text: '× усі підрозділи' }) : null,
       freshHint(go)),
-    h('nav', { class: 'ud-nav', 'aria-label': 'Розділи дашборда УДШВ' }, nav.map(([key, label]) => h('button', { type: 'button', 'aria-pressed': String(state.view === key), onclick: () => { state.view = key; go(); }, text: label }))),
+    h('nav', { class: 'ud-nav', 'aria-label': 'Розділи дашборда УДШВ' }, nav.map(([key, label]) => h('button', { type: 'button', 'data-nav': key, 'aria-pressed': String(state.view === key), onclick: () => { state.view = key; go(); }, text: label }))),
     page].filter(Boolean));
   // «Наші втрати» отримують дані пізніше за перехід на вкладку: поява таблиці теж анімується.
   playMotion(root, own && root.querySelector('.ol-kpi') ? 'own:data' : state.view);

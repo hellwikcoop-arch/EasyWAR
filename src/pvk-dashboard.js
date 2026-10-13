@@ -464,7 +464,7 @@ export function render(host, workbook, options = {}) {
       h('div', {}, h('span', { class: 'pvk-eyebrow', text: `${[model.journal && model.journal.name, hasSheets && 'ТАБЛ 2-3'].filter(Boolean).join(' і ')} · локальна аналітика` }), h('h1', { text: 'Дашборд ПВК' }), h('p', { text: 'Усі підпорядковані підрозділи · файл відкрито лише для читання' })),
       options.canRefresh ? h('button', { class: 'btn quiet', type: 'button', onclick: () => options.refresh?.() }, 'Оновити з файлу') : null),
     own ? null : periodControls(workbook, rerender),
-    h('nav', { class: 'pvk-nav', 'aria-label': 'Розділи дашборда ПВК' }, nav.map(([key, label]) => h('button', { type: 'button', 'aria-pressed': String(state.view === key), onclick: () => { state.view = key; rerender(); } }, label))),
+    h('nav', { class: 'pvk-nav', 'aria-label': 'Розділи дашборда ПВК' }, nav.map(([key, label]) => h('button', { type: 'button', 'data-nav': key, 'aria-pressed': String(state.view === key), onclick: () => { state.view = key; rerender(); } }, label))),
     page,
   ].filter(Boolean));
   // «Наші втрати» отримують дані пізніше за перехід на вкладку: поява таблиці теж анімується.

@@ -32,6 +32,10 @@ override, and `playMotion` also skips the number count-up. Do not reuse the
 
 `src/dashboard-theme.css` — шар кольорів і поверхонь поверх `pvk-dashboard.css`, `udshv-dashboard.css` і `own-losses-dashboard.css`, підключений у `air.html` і `rocket.html` після `dashboard-motion.css`. Усі правила стоять під `html:not([data-theme="light"])`, зображень і анімацій у файлі немає. Палітри задано змінними `--ud-*` / `--pvk-*` та спільними `--th-*` на коренях `#udshv-dashboard-root` і `#pvk-dashboard-root`; `.ol-root` успадковує їх.
 
+## Dashboard layout (PVK, UDSHV)
+
+`src/dashboard-layout.css` (підключений у `air.html` і `rocket.html` перед `dashboard-theme.css`) від 1200px робить із `<nav>` дашборда ліву колонку сітки кореня: `grid-column: 1; grid-row: 1 / span 12`, решта блоків — у колонці 2. Проміжки між блоками задано полями, а не `gap`, щоб порожні неявні рядки сітки не додавали висоти. Іконки меню — CSS-маски за атрибутом `data-nav` кнопки (його ставлять `udshv-dashboard.js` і `pvk-dashboard.js`; ключ — ключ розділу). Новому розділу потрібен рядок `--nav-icon` у цьому файлі, інакше буде іконка за замовчуванням. Графіка шапок — `udshv-art/hero-canopy.svg` і `pvk-art/hero-sky.svg`, підключена в `dashboard-theme.css` лише для темної теми.
+
 ## Desktop behaviour
 
 - **Tauri IPC in the iframe.** Tauri injects its bridge only into the top-level
