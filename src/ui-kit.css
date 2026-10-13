@@ -122,7 +122,7 @@ html[data-ew-module="air"] .kpipanel {
 }
 html[data-ew-module="air"] .kpipanel > .kh {
   position: relative; isolation: isolate; overflow: hidden;
-  grid-template-columns: minmax(0, 1.25fr) minmax(300px, .95fr) minmax(0, .9fr);
+  grid-template-columns: minmax(0, 1fr) auto;
   min-height: 112px; margin: 0 -8px; padding: 12px 18px 8px;
   border: 0; border-bottom: 1px solid var(--ew-line); border-radius: 0; box-shadow: none;
   background:
@@ -134,18 +134,19 @@ html[data-ew-module="air"] .kpipanel > .kh h2 {
   font: 700 clamp(26px, 2.45vw, 38px)/1.05 var(--display); letter-spacing: .025em; text-transform: uppercase;
 }
 html[data-ew-module="air"] .kpipanel > .kh p { font-size: 13px; max-width: 54ch; }
+html[data-ew-module="air"] .kpipanel > .kh { position: relative; }
+/* Літак — на всю ширину банера; текст і показники лежать поверх нього. */
 html[data-ew-module="air"] .kpipanel > .kh .kh-c {
-  position: relative; z-index: 0; align-self: stretch; height: auto; min-height: 88px;
-  margin: -12px 0 -8px; display: grid; place-items: end center; pointer-events: none;
+  position: absolute; inset: 0; z-index: 0; margin: 0; display: grid; place-items: end center; pointer-events: none; overflow: hidden;
 }
 html[data-ew-module="air"] .kpipanel > .kh .kh-jet {
-  position: absolute; inset: 0 0 34px 0; width: 100%; height: calc(100% - 34px); object-fit: cover; object-position: 50% 45%;
-  opacity: .7;
-  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 24%, #000 76%, transparent 100%);
-  mask-image: linear-gradient(90deg, transparent 0, #000 24%, #000 76%, transparent 100%);
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 50% 38%;
+  opacity: .85;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, rgba(0,0,0,.45) 18%, #000 42%, #000 62%, rgba(0,0,0,.5) 88%, transparent 100%);
+  mask-image: linear-gradient(90deg, transparent 0, rgba(0,0,0,.45) 18%, #000 42%, #000 62%, rgba(0,0,0,.5) 88%, transparent 100%);
   animation: ewJetDrift 24s var(--ew-ease-io) infinite alternate;
 }
-html[data-ew-module="air"] .kpipanel > .kh .kh-tag { position: relative; margin-bottom: 8px; }
+html[data-ew-module="air"] .kpipanel > .kh .kh-tag { position: relative; z-index: 1; margin-bottom: 6px; }
 html[data-ew-module="air"] .kpipanel > .kh .kh-r { position: relative; z-index: 2; gap: 18px; }
 html[data-ew-module="air"] .kpipanel > .kh .kh-eff { border-color: var(--ew-line); background: color-mix(in srgb, var(--ew-card) 78%, transparent); padding: 7px 13px; }
 @keyframes ewJetDrift { from { transform: scale(1) translateX(0); } to { transform: scale(1.05) translateX(-1.5%); } }
@@ -306,7 +307,7 @@ html[data-ew-module="air"] { --sw: 188px; }
   html[data-ew-module] #p-types .tt-list { gap: 5px; min-height: 0 !important; grid-template-rows: none !important; grid-auto-rows: 48px; padding-top: 2px; padding-bottom: 6px; }
   html[data-ew-module] #p-types .tt-h { flex: none; }
   html[data-ew-module="air"] #p-types .tt-f { display: none; }
-  html[data-ew-module="air"] .kpipanel > .kh { grid-template-columns: minmax(0, 1.5fr) minmax(280px, .85fr) minmax(0, .8fr); }
+  html[data-ew-module="air"] .kpipanel > .kh { grid-template-columns: minmax(0, 1fr) auto; }
   html[data-ew-module="air"] .kpipanel > .kh p { font-size: 12px; max-width: none; }
   html[data-ew-module] #p-units .units-tbl tr, html[data-ew-module] #p-units .units-tbl td { height: 28px; }
 
@@ -338,6 +339,20 @@ html[data-ew-module="air"] { --sw: 188px; }
   html[data-ew-module="rocket"] #p-kpis .kc.kc .ewr-ksub { font-size: 10.5px; line-height: 1.2; }
   html[data-ew-module] #p-kpis .kc.kc .k-v { font-size: clamp(30px, 3.6vh, 42px); line-height: 1; }
 }
+
+/* ---------- Панель «Карта операцій» — як у РВ: компактна шапка, параметри за кнопкою ---------- */
+.map-gear { width: 28px; min-width: 28px; padding: 3px; border: 0; background: transparent; opacity: .85; display: inline-grid; place-items: center; }
+.map-gear .ic { width: 18px; height: 18px; }
+.map-gear[aria-expanded="true"] { color: var(--accent); opacity: 1; }
+.map-options { padding: 8px 2px; max-height: 350px; overflow: auto; }
+#p-map.options-open .mapwrap { flex: none !important; }
+html[data-ew-module="air"] #p-map { padding-top: 10px; padding-bottom: 10px; }
+html[data-ew-module="air"] #p-map .ph { margin-bottom: 8px; }
+html[data-ew-module="air"] #p-map .ph h2 { font-size: 17px; }
+html[data-ew-module="air"] #p-map .ph-r { gap: 6px; flex-wrap: nowrap; }
+html[data-ew-module="air"] #p-map .ph-r .btn, html[data-ew-module="air"] #p-map .ph-r select { min-height: 32px; height: 32px; padding-top: 0; padding-bottom: 0; font-size: 12.5px; }
+html[data-ew-module="air"] #p-map .ph-r .btn.map-gear { height: 32px; padding: 3px; }
+html[data-ew-module="air"] #p-map .seg button { min-height: 28px; padding-top: 3px; padding-bottom: 3px; font-size: 12.5px; }
 
 /* ---------- Таблиці: легка шапка, роздільники, наведення ---------- */
 .dtbl th, .dtbl2 th, .tbl th, .pvk-table th, .ud-table th {

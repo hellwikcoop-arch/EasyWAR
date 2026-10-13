@@ -4126,6 +4126,12 @@ function buildMapPanel() {
   el.mapPanel = h('section', { class: 'dpanel' }, h('div', { class: 'ph' }, h('h2', { text: 'Карта операцій' }), h('div', { class: 'ph-r' }, el.m3.toggle, h('button', { class: 'btn', type: 'button', title: 'Карта повітряних тривог dimap.live у вікні (за вашою згодою)', onclick: openDimap }, 'Тривоги · DIMAP'), el.mapSelect)), el.mapWrap,
     h('div', { class: 'map-foot' }, el.mapInfo, h('div', { class: 'layers' }, el.mapLayers, el.baseBtn, el.geoBtn)), el.tileBar, el.tileAsk, el.planetBox, el.baseForm, el.lbzForm, el.zrForm);
   el.m3.init();
+  /* Параметри карти (підкладка, шари, довідка) — за кнопкою «Параметри карти» у шапці панелі, як у РВ. */
+  { const mp = el.mapPanel, controls = h('div', { class: 'map-options', hidden: true });
+    [...mp.children].filter(n => !n.classList.contains('ph') && n !== el.mapWrap).forEach(n => controls.append(n));
+    mp.append(controls);
+    mp.querySelector('.ph-r').append(h('button', { type: 'button', class: 'btn map-gear', title: 'Шари, підкладка та параметри карти', 'aria-label': 'Параметри карти', 'aria-expanded': 'false',
+      onclick: ev => { const on = controls.hidden; controls.hidden = !on; mp.classList.toggle('options-open', on); ev.currentTarget.setAttribute('aria-expanded', String(on)); } }, icon('grid'))); }
   $('#baseInput').addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; if (f) openBaseForm(f); });
   const svg = el.mapSvg;
   svg.addEventListener('pointerdown', e => {
