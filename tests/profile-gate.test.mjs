@@ -1,0 +1,139 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import test from 'node:test';
+import {
+  GATE_MODULES,
+  MODULE_IDS,
+  NAME_MAX,
+  PASSWORD_MAX,
+  PASSWORD_MIN,
+  POSITION_MAX,
+  failureDelayMs,
+  gateScreen,
+  loginCardNote,
+  modulesError,
+  moduleVisible,
+  normalizeModules,
+  passwordError,
+  slotsForModules,
+  validateProfileStep,
+} from '../src/profile-gate-core.js';
+import { consumeSplashSkip, requestSplashSkip, SPLASH_SKIP_KEY } from '../src/startup-splash-core.js';
+
+const read = name => readFile(new URL(`../src/${name}`, import.meta.url), 'utf8');
+const ok = { displayName: 'Тестовий Оператор', position: '', password: 'пароль-1', confirm: 'пароль-1' };
+
+test('first screen after the splash: registration without profiles, login with any', () => {
+  assert.equal(gateScreen({ profiles: [] }), 'register');
+  assert.equal(gateScreen(null), 'register');
+  assert.equal(gateScreen({ profiles: [{ id: 'profile-1' }] }), 'login');
+});
+
+test('password is mandatory, at least 6 characters, counted by code points', () => {
+  assert.equal(PASSWORD_MIN, 6);
+  assert.match(passwordError(''), /щонайменше 6/);
+  assert.match(passwordError('12345'), /щонайменше 6/);
+  assert.equal(passwordError('123456'), null);
+  assert.equal(passwordError('😀'.repeat(6)), null);
+  assert.equal(passwordError('a'.repeat(PASSWORD_MAX)), null);
+  assert.match(passwordError('a'.repeat(PASSWORD_MAX + 1)), /не більше/);
+});
+
+test('profile step checks name, uniqueness, lengths and password confirmation', () => {
+  assert.deepEqual(validateProfileStep(ok, []), {});
+  assert.ok(validateProfileStep({ ...ok, displayName: '   ' }).displayName);
+  assert.ok(validateProfileStep({ ...ok, displayName: 'я'.repeat(NAME_MAX + 1) }).displayName);
+  assert.ok(validateProfileStep({ ...ok, position: 'я'.repeat(POSITION_MAX + 1) }).position);
+  assert.ok(validateProfileStep({ ...ok, confirm: 'інший' }).confirm);
+  assert.ok(validateProfileStep({ ...ok, password: '', confirm: '' }).password);
+  // дубль без урахування регістру й зайвих пробілів
+  assert.ok(validateProfileStep({ ...ok, displayName: '  тестовий   ОПЕРАТОР ' }, ['Тестовий Оператор']).displayName);
+  assert.deepEqual(validateProfileStep({ ...ok, displayName: 'Другий' }, ['Тестовий Оператор']), {});
+});
+
+test('at least one known module must be chosen; unknown ids are dropped', () => {
+  assert.deepEqual(MODULE_IDS, ['air', 'rocket', 'artillery', 'pvk', 'dshv']);
+  assert.ok(modulesError([]));
+  assert.ok(modulesError(['unknown']));
+  assert.ok(modulesError(null));
+  assert.equal(modulesError(['rocket']), null);
+  assert.deepEqual(normalizeModules(['dshv', 'air', 'air', 'x']), ['air', 'dshv']);
+});
+
+test('table slots follow the chosen modules; artillery has no own slot', () => {
+  assert.deepEqual(slotsForModules(['air']).map(s => s.branch), ['air']);
+  assert.deepEqual(slotsForModules(['artillery']), []);
+  assert.deepEqual(slotsForModules(['pvk', 'air']).map(s => s.branch), ['air', 'pvk', 'pvk_losses']);
+  assert.deepEqual(slotsForModules(MODULE_IDS).map(s => s.branch),
+    ['air', 'rocket', 'pvk', 'pvk_losses', 'dshv', 'dshv_losses']);
+});
+
+test('start screen shows only chosen modules; a profile without a list sees all', () => {
+  const profile = { modules: ['air', 'pvk'] };
+  assert.equal(moduleVisible('air', profile), true);
+  assert.equal(moduleVisible('rocket', profile), false);
+  assert.equal(moduleVisible('rocket', { modules: [] }), true);
+  assert.equal(moduleVisible('rocket', {}), true);
+  assert.equal(moduleVisible('rocket', null), true);
+});
+
+test('failed attempts slow down after five tries, capped at one minute', () => {
+  assert.equal(failureDelayMs(0), 0);
+  assert.equal(failureDelayMs(4), 0);
+  assert.equal(failureDelayMs(5), 5000);
+  assert.equal(failureDelayMs(6), 10000);
+  assert.equal(failureDelayMs(40), 60000);
+  assert.equal(failureDelayMs(NaN), 0);
+});
+
+test('login card says whether the password must still be set', () => {
+  assert.match(loginCardNote({ hasPassword: true }), /паролем/);
+  assert.match(loginCardNote({ hasPassword: false }), /встановити пароль/);
+});
+
+test('every gate module points to an element that exists on the start screen', async () => {
+  const html = await read('index.html');
+  for (const module of GATE_MODULES) {
+    const attr = module.card.match(/\[([\w-]+)="([^"]+)"\]/);
+    assert.ok(attr, `${module.id}: card selector`);
+    assert.ok(html.includes(`${attr[1]}="${attr[2]}"`), `${module.id}: ${module.card} exists in index.html`);
+    if (module.tile) assert.ok(html.includes(`id="${module.tile.slice(1)}"`), `${module.id}: ${module.tile} exists`);
+  }
+});
+
+test('gate code stays local: no network, no storage of passwords', async () => {
+  for (const file of ['profile-gate.js', 'profile-gate-core.js']) {
+    const code = await read(file);
+    assert.doesNotMatch(code, /\bfetch\s*\(|XMLHttpRequest|WebSocket|sendBeacon|EventSource/, `${file}: no network`);
+    assert.doesNotMatch(code, /localStorage|indexedDB|document\.cookie/, `${file}: no persistent browser storage`);
+  }
+  assert.doesNotMatch(await read('profile-gate.js'), /sessionStorage/, 'gate does not touch sessionStorage itself');
+});
+
+test('the page behind the gate is inert and the gate sits under the splash', async () => {
+  const code = await read('profile-gate.js');
+  assert.match(code, /inert/);
+  assert.match(code, /ew-locked/);
+  const css = await read('profile-gate.css');
+  assert.match(css, /z-index:\s*4000/, 'gate sits under the splash (5000)');
+  assert.match(await read('startup-splash.css'), /z-index:\s*5000/);
+});
+
+test('splash skip flag survives one reload only and tolerates broken storage', () => {
+  const data = new Map();
+  const storage = { getItem: k => data.get(k) ?? null, setItem: (k, v) => data.set(k, v), removeItem: k => data.delete(k) };
+  assert.equal(consumeSplashSkip(storage), false);
+  requestSplashSkip(storage);
+  assert.equal(data.get(SPLASH_SKIP_KEY), '1');
+  assert.equal(consumeSplashSkip(storage), true);
+  assert.equal(consumeSplashSkip(storage), false);
+  const broken = { getItem() { throw new Error('x'); }, setItem() { throw new Error('x'); }, removeItem() { throw new Error('x'); } };
+  assert.doesNotThrow(() => requestSplashSkip(broken));
+  assert.equal(consumeSplashSkip(broken), false);
+});
+
+test('splash leaves the launcher inert while the gate is locked', async () => {
+  const code = await read('startup-splash.js');
+  assert.match(code, /consumeSplashSkip\(\)/);
+  assert.match(code, /ew-locked/);
+});
