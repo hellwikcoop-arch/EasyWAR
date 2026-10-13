@@ -80,7 +80,7 @@
   }
 
   /* Лінії й спарклайни «промальовуються» зліва направо. */
-  [data-dash-motion] :is(.ud-spark, .ol-spark, .pvk-spark, .pvk-lines) { animation: dm-reveal .9s cubic-bezier(.3, .6, .2, 1) var(--dm-d, 0ms) backwards; }
+  [data-dash-motion] :is(.ud-spark, .ol-spark, .pvk-spark, .pvk-kpi-spark, .pvk-lines) { animation: dm-reveal .9s cubic-bezier(.3, .6, .2, 1) var(--dm-d, 0ms) backwards; }
 
   /* Кільцева діаграма добудовується по колу. */
   [data-dash-motion] .pvk-donut {

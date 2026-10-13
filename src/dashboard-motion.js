@@ -49,7 +49,7 @@ function stagger(root) {
     bars.forEach((rect, i) => setDelay(rect, 160 + i * step));
   }
   // Лінії, спарклайни й кільця стартують після того, як з'явилась їхня картка.
-  for (const node of root.querySelectorAll('.ud-spark, .ol-spark, .pvk-spark, .pvk-lines, .pvk-donut')) setDelay(node, 220);
+  for (const node of root.querySelectorAll('.ud-spark, .ol-spark, .pvk-spark, .pvk-kpi-spark, .pvk-lines, .pvk-donut')) setDelay(node, 220);
 }
 
 const parseCount = text => {

@@ -26,25 +26,6 @@ test('тема дашбордів підключена на сторінках �
   }
 });
 
-test('картки KPI з фото: кожен ключ data-photo із pvk-dashboard.js має правило в темі та локальний файл', async () => {
-  const js = await read('pvk-dashboard.js');
-  const css = (await read('dashboard-theme.css')).replace(/\/\*[\s\S]*?\*\//g, '');
-  // Ключі беремо з викликів kpi(..., тон, 'ключ') — лише тут фото підключаються до карток.
-  const keys = [...js.matchAll(/kpi\([^\n]*?,\s*'(?:blue|amber|green|violet|red)',\s*'([\w-]+)'\)/g)].map(match => match[1]);
-  assert.deepEqual([...keys].sort(), ['impact', 'jet', 'munition']);
-  for (const key of keys) {
-    const rule = css.match(new RegExp(`\\.pvk-kpi\\[data-photo="${key}"\\]\\s*\\{([^}]*)\\}`));
-    assert.ok(rule, `немає правила для data-photo="${key}"`);
-    const file = rule[1].match(/url\('\.\/pvk-art\/([\w-]+\.webp)'\)/);
-    assert.ok(file, `правило ${key} без локального webp`);
-    const { size } = await stat(new URL(`../src/pvk-art/${file[1]}`, import.meta.url));
-    assert.ok(size > 1000 && size < 200_000, `${file[1]}: ${size} байт`);
-  }
-  // Текст на фото лишається читабельним: тінь під підписами й вимкнений декоративний кружок.
-  assert.match(css, /\.pvk-kpi\[data-photo\]::after\s*\{\s*display:\s*none/);
-  assert.match(css, /\.pvk-kpi\[data-photo\] :is\(span, small\)\s*\{[^}]*text-shadow/);
-});
-
 test('фото в шапці УДШВ не розтягується, а файл лишається легким', async () => {
   const css = (await read('dashboard-theme.css')).replace(/\/\*[\s\S]*?\*\//g, '');
   const rule = css.match(/\.ud-hero\s*\{([^}]*)\}/);

@@ -192,9 +192,41 @@ function sheetPage(sheet) {
       h('div', { class: 'pvk-metric-grid' }, group.widgets.map(metricCard)))));
 }
 
-function kpi(label, value, detail, tone = '', photo = '') {
-  // photo — ключ фонового фото картки (див. dashboard-theme.css, [data-photo]); без нього картка як раніше.
-  return h('article', { class: `pvk-kpi ${tone}`, ...(photo ? { 'data-photo': photo } : {}) }, h('span', { text: label }), h('strong', { text: value }), h('small', { text: detail }));
+/** Міні-графік у картці показника: лінія з заливкою й точкою на останньому дні. Без даних за днями — нічого не малює. */
+function miniSpark(series) {
+  if (!series?.length) return null;
+  const width = 120;
+  const height = 44;
+  const maximum = Math.max(1, ...series.map(item => item.value));
+  const points = series.map((item, index) => [
+    series.length === 1 ? width / 2 : index / (series.length - 1) * width,
+    height - 5 - item.value / maximum * (height - 13),
+  ]);
+  const line = points.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
+  const [lastX, lastY] = points.at(-1);
+  return h('svg:svg', { class: 'pvk-kpi-spark', viewBox: `0 0 ${width} ${height}`, role: 'img', 'aria-label': 'Динаміка показника за днями' },
+    h('svg:polygon', { class: 'area', points: `${points[0][0].toFixed(1)},${height} ${line} ${lastX.toFixed(1)},${height}` }),
+    h('svg:polyline', { class: 'line', points: line }),
+    h('svg:circle', { class: 'dot', cx: lastX.toFixed(1), cy: lastY.toFixed(1), r: 3 }));
+}
+
+/** Кільце-відсоток у картці показника (замість міні-графіка, коли показник — частка). */
+function ratioRing(value) {
+  if (value == null || !Number.isFinite(value)) return null;
+  const clamped = Math.max(0, Math.min(100, value));
+  return h('div', { class: 'pvk-kpi-ring', role: 'img', 'aria-label': `${decimal(clamped)}%`, style: { '--p': clamped.toFixed(1) } });
+}
+
+/**
+ * Картка показника. icon — ключ плитки-іконки (маски [data-ic] у dashboard-layout.css),
+ * series — ряд по днях для міні-графіка, ring — відсоток для кільця. Без них картка лишається текстовою.
+ */
+function kpi(label, value, detail, tone = '', { icon = '', series = null, ring = null } = {}) {
+  const visual = ring != null ? ratioRing(ring) : miniSpark(series);
+  return h('article', { class: `pvk-kpi ${tone}` },
+    icon ? h('i', { class: 'pvk-kpi-ic', 'data-ic': icon, 'aria-hidden': 'true' }) : null,
+    h('div', { class: 'pvk-kpi-text' }, h('span', { text: label }), h('strong', { text: value }), h('small', { text: detail })),
+    visual);
 }
 
 const MONTHS = ['Січ', 'Лют', 'Бер', 'Кві', 'Тра', 'Чер', 'Лип', 'Сер', 'Вер', 'Жов', 'Лис', 'Гру'];
@@ -249,14 +281,14 @@ function summaryPage(model) {
   return h('div', { class: 'pvk-page' },
     h('header', { class: 'pvk-page-head' }, h('div', {}, h('span', { class: 'pvk-eyebrow', text: 'Усі підпорядковані підрозділи' }), h('h2', { text: 'Зведення ПВК' }))),
     h('div', { class: 'pvk-kpis' },
-      kpi('АУ · разом', number(summary.totalAu), `АА ${number(summary.aaAu)} · ПС ${number(summary.airAu)}`, 'blue', 'jet'),
-      kpi('Усього БП', number(summary.munitions), `АА ${number(summary.aaMunitions)} · ПС ${number(summary.airMunitions)}`, 'amber', 'munition'),
-      kpi('Уражено', number(summary.affected), `НЕ уражено ${number(summary.notAffected)}`, 'green', 'impact'),
-      kpi('Дорозвідується', number(summary.reconnaissance), 'Окремий результат ПС', 'violet'),
-      kpi('% уражених', percent(summary.affectedPercent), 'Уражено / (Уражено + НЕ уражено)', 'green'),
-      kpi('Уражені об’єкти', number(summary.objects), 'Без показника «Витрата»', 'blue'),
-      kpi('Витрата', number(summary.expenditure), 'Окремо від об’єктів', 'red'),
-      summary.journalRecords == null ? null : kpi('Таблиця 1', number(summary.journalRecords), 'Записів у журналі ударів', 'violet')),
+      kpi('АУ · разом', number(summary.totalAu), `АА ${number(summary.aaAu)} · ПС ${number(summary.airAu)}`, 'blue', { icon: 'plane', series: summary.dynamics.au }),
+      kpi('Усього БП', number(summary.munitions), `АА ${number(summary.aaMunitions)} · ПС ${number(summary.airMunitions)}`, 'amber', { icon: 'bullet', series: summary.dynamics.munitions }),
+      kpi('Уражено', number(summary.affected), `НЕ уражено ${number(summary.notAffected)}`, 'green', { icon: 'target', series: summary.dynamics.affected }),
+      kpi('Дорозвідується', number(summary.reconnaissance), 'Окремий результат ПС', 'violet', { icon: 'radar', series: summary.dynamics.reconnaissance }),
+      kpi('% уражених', percent(summary.affectedPercent), 'Уражено / (Уражено + НЕ уражено)', 'green', { icon: 'shield', ring: summary.affectedPercent }),
+      kpi('Уражені об’єкти', number(summary.objects), 'Без показника «Витрата»', 'blue', { icon: 'pin', series: summary.dynamics.objects }),
+      kpi('Витрата', number(summary.expenditure), 'Окремо від об’єктів', 'red', { icon: 'burst', series: summary.dynamics.expenditure }),
+      summary.journalRecords == null ? null : kpi('Таблиця 1', number(summary.journalRecords), 'Записів у журналі ударів', 'violet', { icon: 'doc' })),
     h('section', { class: 'pvk-section' }, h('header', {}, h('h3', { text: 'Календар активності' }), h('span', { text: 'Сума АУ за днями' })), activityCalendar(summary.activity, model.range)),
     h('section', { class: 'pvk-section' }, h('header', {}, h('h3', { text: 'Загальна динаміка' }), h('span', { text: 'Обраний період' })), multiLine(summary.dynamics)));
 }
@@ -363,11 +395,11 @@ function journalPage(model, options) {
       h('div', {}, h('span', { class: 'pvk-eyebrow', text: 'Журнал ударів' }), h('h2', { text: journal.name })),
       h('strong', { text: `${journal.headers.length} стовпців` })),
     h('div', { class: 'pvk-kpis' },
-      kpi('Записів', number(journal.total), 'Ударів за період', 'blue'),
-      kpi('Днів з ударами', number(journal.days), `${dateLabel(model.range.from)} – ${dateLabel(model.range.to)}`, 'amber'),
-      journal.targets == null ? null : kpi('Унікальних цілей', number(journal.targets), 'За «Номер цілі»', 'green'),
-      journal.withCoordinates == null ? null : kpi('Із координатами', number(journal.withCoordinates), `Без координат ${number(journal.total - journal.withCoordinates)}`, 'violet'),
-      journal.confirmed ? kpi('Підтверджено відео', percent(journal.confirmed.percent), `Фактичні приходи ${decimal(journal.confirmed.counted)} з витрати АЗУ ${decimal(journal.confirmed.reported)}`, 'green') : null),
+      kpi('Записів', number(journal.total), 'Ударів за період', 'blue', { icon: 'doc' }),
+      kpi('Днів з ударами', number(journal.days), `${dateLabel(model.range.from)} – ${dateLabel(model.range.to)}`, 'amber', { icon: 'clock' }),
+      journal.targets == null ? null : kpi('Унікальних цілей', number(journal.targets), 'За «Номер цілі»', 'green', { icon: 'target' }),
+      journal.withCoordinates == null ? null : kpi('Із координатами', number(journal.withCoordinates), `Без координат ${number(journal.total - journal.withCoordinates)}`, 'violet', { icon: 'pin' }),
+      journal.confirmed ? kpi('Підтверджено відео', percent(journal.confirmed.percent), `Фактичні приходи ${decimal(journal.confirmed.counted)} з витрати АЗУ ${decimal(journal.confirmed.reported)}`, 'green', { icon: 'shield', ring: journal.confirmed.percent }) : null),
     h('section', { class: 'pvk-section' }, h('header', {}, h('h3', { text: 'Удари за днями' }), h('span', { text: 'Кількість записів' })), dayBars(journal.series, model.range)),
     journal.columns.some(column => column.kind === 'time')
       ? h('section', { class: 'pvk-section' }, h('header', {}, h('h3', { text: 'Час удару' }), h('span', { text: 'Розподіл за годинами доби' })), hourBars(journal.hours))
@@ -398,7 +430,7 @@ function qualityPage(model) {
   const levelLabel = level => level === 'info' ? 'Інформаційно' : level === 'warning' ? 'Попередження' : 'Помилка';
   return h('div', { class: 'pvk-page' },
     h('header', { class: 'pvk-page-head' }, h('div', {}, h('span', { class: 'pvk-eyebrow', text: 'Лише читання · файл не змінюється' }), h('h2', { text: 'Перевірка даних' })), h('strong', { text: `${number(model.issues.length)} повідомлень у ${number(groups.length)} групах` })),
-    h('div', { class: 'pvk-quality-kpis' }, kpi('Помилки', number(byLevel('error')), 'Потребують перевірки', 'red'), kpi('Попередження', number(byLevel('warning')), 'Порожні клітинки й пропущені дати', 'amber'), kpi('Інформаційно', number(byLevel('info')), 'Не блокує звіт', 'blue')),
+    h('div', { class: 'pvk-quality-kpis' }, kpi('Помилки', number(byLevel('error')), 'Потребують перевірки', 'red', { icon: 'alert' }), kpi('Попередження', number(byLevel('warning')), 'Порожні клітинки й пропущені дати', 'amber', { icon: 'alert' }), kpi('Інформаційно', number(byLevel('info')), 'Не блокує звіт', 'blue', { icon: 'doc' })),
     groups.length ? h('div', { class: 'pvk-issues' }, groups.map(group => h('article', { class: `pvk-issue ${group.level}` },
       h('span', { text: levelLabel(group.level) }),
       h('strong', { text: group.sheet }),

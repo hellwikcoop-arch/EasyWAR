@@ -243,6 +243,9 @@ export function createDashboardModel(workbook, range = {}) {
     munitions: mergeDaily(sheets, sheet => sheet.groups.find(group => group.name === 'Боєприпаси')?.metrics || []),
     objects: mergeDaily(sheets, sheet => sheet.name === "Об'єкти" ? (sheet.groups.find(group => group.name === 'Уражені об’єкти')?.metrics || []) : []),
     expenditure: mergeDaily(sheets, sheet => sheet.name === "Об'єкти" ? ['Витрата'] : []),
+    // Ряди для міні-графіків карток «Уражено» і «Дорозвідується» (лише з даних вибраного періоду).
+    affected: mergeDaily(sheets, sheet => sheet.name === 'АА' || sheet.name === 'ПС' ? ['Уражено'] : []),
+    reconnaissance: mergeDaily(sheets, sheet => sheet.name === 'ПС' ? ['Дорозвідується'] : []),
   };
   const journal = createJournalModel(workbook?.journal, resolvedRange);
   summary.journalRecords = journal ? journal.total : null;

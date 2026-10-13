@@ -45,6 +45,10 @@
   --ic-shield: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3l7.5 3v5.5c0 4.6-3.1 8-7.5 9.5-4.4-1.5-7.5-4.9-7.5-9.5V6z'/%3E%3Cpath d='M8.6 12l2.5 2.5 4.4-5'/%3E%3C/svg%3E");
   --ic-target: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='12' cy='12' r='8'/%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3Cpath d='M12 2v4M12 18v4M2 12h4M18 12h4'/%3E%3C/svg%3E");
   --ic-plane: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 12L13 9V4.5a1 1 0 0 0-2 0V9l-8 3v2l8-1.5V18l-2.5 1.8V21l3.5-1 3.5 1v-1.2L13 18v-5.5l8 1.5z'/%3E%3C/svg%3E");
+  --ic-radar: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Ccircle cx='12' cy='12' r='4.5'/%3E%3Cpath d='M12 12l6.4-6.4'/%3E%3C/svg%3E");
+  --ic-pin: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z'/%3E%3Ccircle cx='12' cy='10' r='2.4'/%3E%3C/svg%3E");
+  --ic-burst: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12.0 2.0 L14.0 7.2 L19.1 4.9 L16.8 10.0 L22.0 12.0 L16.8 14.0 L19.1 19.1 L14.0 16.8 L12.0 22.0 L10.0 16.8 L4.9 19.1 L7.2 14.0 L2.0 12.0 L7.2 10.0 L4.9 4.9 L10.0 7.2z'/%3E%3C/svg%3E");
+  --ic-alert: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3.5l9.5 16.5h-19z'/%3E%3Cpath d='M12 10v4.5M12 17.4v.1'/%3E%3C/svg%3E");
 }
 .ud-nav button[data-nav="summary"], .pvk-nav button[data-nav="summary"] { --nav-icon: var(--ic-bars); }
 .ud-nav button[data-nav="units"] { --nav-icon: var(--ic-users); }
@@ -76,4 +80,32 @@
     border: 1px solid var(--ud-line); pointer-events: none;
     background: url('./udshv-art/badge.webp') center / auto 78% no-repeat, radial-gradient(70% 90% at 50% 45%, rgba(214, 69, 93, .3), transparent 75%), rgba(255, 255, 255, .02);
   }
+}
+
+/* Плитки-іконки карток показників ПВК: ключ data-ic → маска (ті самі --ic-* , що й у меню). */
+.pvk-kpi-ic::before {
+  content: ''; width: 24px; height: 24px; background: currentColor;
+  -webkit-mask: var(--kpi-ic, var(--ic-doc)) center / contain no-repeat; mask: var(--kpi-ic, var(--ic-doc)) center / contain no-repeat;
+}
+.pvk-kpi-ic[data-ic="plane"] { --kpi-ic: var(--ic-plane); }
+.pvk-kpi-ic[data-ic="bullet"] { --kpi-ic: var(--ic-bullet); }
+.pvk-kpi-ic[data-ic="target"] { --kpi-ic: var(--ic-target); }
+.pvk-kpi-ic[data-ic="radar"] { --kpi-ic: var(--ic-radar); }
+.pvk-kpi-ic[data-ic="shield"] { --kpi-ic: var(--ic-shield); }
+.pvk-kpi-ic[data-ic="pin"] { --kpi-ic: var(--ic-pin); }
+.pvk-kpi-ic[data-ic="burst"] { --kpi-ic: var(--ic-burst); }
+.pvk-kpi-ic[data-ic="alert"] { --kpi-ic: var(--ic-alert); }
+.pvk-kpi-ic[data-ic="clock"] { --kpi-ic: var(--ic-clock); }
+.pvk-kpi-ic[data-ic="doc"] { --kpi-ic: var(--ic-doc); }
+
+/* З лівим меню контент вужчий на 262px: плитки показників ПВК тримаємо по 3–4 в ряд, щоб вмістилися іконка й міні-графік
+   (7–8 в ряд — лише на дуже широких екранах). Селектор із #id перекриває розкладку з pvk-dashboard.css. */
+@media (min-width: 1200px) {
+  #pvk-dashboard-root .pvk-kpis:has(> :nth-child(6):last-child) { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  #pvk-dashboard-root .pvk-kpis:has(> :nth-child(7):last-child),
+  #pvk-dashboard-root .pvk-kpis:has(> :nth-child(8):last-child) { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (min-width: 2200px) {
+  #pvk-dashboard-root .pvk-kpis:has(> :nth-child(7):last-child) { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+  #pvk-dashboard-root .pvk-kpis:has(> :nth-child(8):last-child) { grid-template-columns: repeat(8, minmax(0, 1fr)); }
 }
