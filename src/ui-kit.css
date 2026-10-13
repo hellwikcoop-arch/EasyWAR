@@ -190,7 +190,7 @@ html[data-ew-module="air"] .kc-art.kc-art-photo {
   mask-composite: intersect;
 }
 html[data-ew-module="air"] .kc-art-photo .kc-photo { opacity: .5; }
-html[data-theme="light"][data-ew-module="air"] .kc-art-photo .kc-photo { opacity: .28; }
+html[data-theme="light"][data-ew-module="air"] .kc-art .kc-photo { opacity: .28; }
 html[data-ew-module="air"] .kc-wide { gap: 8px; padding: 8px 9px; }
 html[data-ew-module="air"] .kc-wide .kc-ti { width: 22px; height: 22px; }
 html[data-ew-module="air"] .kc-wide span { font-size: 10.5px; gap: 2px; }
@@ -238,20 +238,41 @@ html[data-ew-module="air"] #p-map { min-height: 360px; }
 /* ---------- ПС і РВ: перший екран (карта, праворуч підрозділи й типи цілей, банер із шістьма картками) без прокручування ---------- */
 /* Висоти рахуються від висоти вікна: картки ~26vh, банер 72px, решту займає ряд із картою. На менших вікнах (<1400×850) лишається звичайне прокручування. */
 html[data-ew-module] { --fit-top: 64px; --fit-card: clamp(240px, 30.5vh, 370px); --fit-kh: 76px; --fit-gap: 14px; }
-html[data-ew-module="air"] { --fit-top: 105px; }
 .filter-toggle { width: 34px; min-width: 34px; padding: 4px; border: 0; background: transparent; color: var(--muted); }
 .filter-toggle[aria-expanded="true"] { color: var(--accent); }
 .filter-toggle .ic { width: 20px; height: 20px; }
 html[data-ew-module="air"] .dmain:not(.filters-open) > .toolbar { display: none; }
-html[data-ew-module="air"] .appbar { gap: 2px 14px; padding-top: 3px; padding-bottom: 3px; min-height: 56px; }
-html[data-ew-module="air"] .appbar-right { gap: 6px; margin-left: auto; }
-html[data-ew-module="air"] .appbar .tab { padding-left: 8px; padding-right: 8px; height: 48px; min-height: 0; }
-html[data-ew-module="air"] .appbar .filechip .nm { max-width: 84px; }
+/* Шапка ПС — один рядок, як у РВ: тема іконкою, компактні вкладки й кнопки; запасу під плаваючі кнопки лаунчера немає (як у РВ). */
+html[data-ew-module="air"] .appbar { flex-wrap: nowrap; gap: 8px 22px; padding: 4px 14px !important; min-height: 56px; }
+html[data-ew-module="air"] .appbar-right { flex-wrap: nowrap; gap: 8px; margin-left: auto; min-width: 0; flex: 0 1 auto; }
+html[data-ew-module="air"] .appbar .tabs { flex: none; }
+html[data-ew-module="air"] .appbar .tab { padding-left: 9px; padding-right: 9px; height: 48px; min-height: 0; white-space: nowrap; }
+html[data-ew-module="air"] .appbar .filechip { height: 38px; min-width: 0; }
+html[data-ew-module="air"] .appbar .filechip .nm { max-width: 64px; }
+html[data-ew-module="air"] .appbar .filechip { flex: none; }
 html[data-ew-module="air"] #dashboardSourceToggle:disabled { display: none; }
-html[data-ew-module="air"] #dashboardSourceToggle { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-html[data-ew-module="air"] .appbar .tab { white-space: nowrap; }
+html[data-ew-module="air"] #dashboardSourceToggle { max-width: 104px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 html[data-ew-module="air"] .appbar-right > * { align-self: center; white-space: nowrap; }
 html[data-ew-module="air"] .appbar-right > .btn.quiet { height: auto; min-height: 34px; }
+@media (max-width: 1560px) { html[data-ew-module="air"] .appbar .filechip .cnt { display: none; } }
+html[data-ew-module="air"] #themeBtn { font-size: 0; width: 36px; min-width: 36px; height: 36px; padding: 0; display: inline-grid; place-items: center; color: var(--accent); }
+html[data-ew-module="air"] #themeBtn::before { content: "☀"; font-size: 19px; line-height: 1; }
+html[data-theme="light"][data-ew-module="air"] #themeBtn::before { content: "☾"; }
+
+/* Бічне меню ПС — вужче й компактніше, як у РВ. */
+html[data-ew-module="air"] { --sw: 188px; }
+@media (min-width: 900px) {
+  html[data-ew-module="air"] .side { padding: 8px 8px 0 10px; background: transparent; border-right: 0; box-shadow: none; }
+  html[data-ew-module="air"] .snav { gap: 2px; }
+  html[data-ew-module="air"] .snav-b { min-height: 38px; padding: 8px 10px; font-size: 13px; gap: 10px; border-radius: 9px; border: 1px solid transparent; color: var(--ink); }
+  html[data-ew-module="air"] .snav-b svg { width: 20px; height: 20px; color: var(--accent); }
+  html[data-ew-module="air"] .snav-b.on { border-color: color-mix(in srgb, var(--accent) 55%, transparent); background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 22%, transparent), color-mix(in srgb, var(--accent) 5%, transparent)); box-shadow: inset 3px 0 0 var(--accent), 0 0 11px var(--ew-glow); }
+  html[data-ew-module="air"] .snav-b .nb { flex: none; min-width: 20px; height: 18px; padding: 0 6px; font-size: 10px; line-height: 16px; box-sizing: border-box; }
+  html[data-ew-module="air"] .snav-b { gap: 8px; padding-left: 9px; padding-right: 8px; }
+  html[data-ew-module="air"] .snav-entry { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--ew-line); }
+  html[data-ew-module="air"] .side-foot { margin: 14px 0 0; }
+  html[data-ew-module="air"] .side-foot > * { border-radius: var(--ew-r); overflow: hidden; border: 1px solid var(--ew-line); }
+}
 
 @media (min-width: 1400px) and (min-height: 850px) {
   html[data-ew-module] .dmain-in[data-view="overview"] > .lrow:has(#p-map) {
