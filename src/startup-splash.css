@@ -78,7 +78,8 @@
 .ew-splash__slogan {
   font-size: calc(var(--dh) * 0.026);
   font-weight: 500;
-  letter-spacing: .04em;
+  letter-spacing: .08em;
+  text-transform: uppercase;
   white-space: nowrap;
   color: #c3d1da;
   opacity: 0;
@@ -105,8 +106,9 @@
   padding: 13px 22px;
   text-align: center;
   font-weight: 600;
-  font-size: clamp(13px, 1.1vw, 16px);
-  letter-spacing: .02em;
+  font-size: clamp(11px, 0.95vw, 14px);
+  letter-spacing: .06em;
+  text-transform: uppercase;
   color: #e8f1f7;
   border: 1px solid rgba(140, 176, 200, .34);
   border-radius: 5px;
@@ -141,8 +143,9 @@
   display: block;
   margin-bottom: 8px;
   text-align: center;
-  font-size: 14px;
-  letter-spacing: .04em;
+  font-size: 13px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
   color: #c4d3de;
 }
 .ew-splash__bar {
@@ -168,7 +171,9 @@
   align-items: center;
   gap: 8px;
   padding: 10px 14px;
-  font: 650 13px/1 var(--display, Inter, ui-sans-serif, system-ui, sans-serif);
+  font: 650 12px/1 var(--display, Inter, ui-sans-serif, system-ui, sans-serif);
+  letter-spacing: .08em;
+  text-transform: uppercase;
   color: #f5f8fb;
   border: 1px solid rgba(255, 255, 255, .18);
   border-radius: 12px;

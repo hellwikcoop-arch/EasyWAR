@@ -130,3 +130,12 @@ test('video zoom is piecewise linear, clamped and ends at 1', () => {
     prev = z;
   }
 });
+
+test('all splash texts are shown in capitals by CSS, the source strings stay in normal case', async () => {
+  const css = await read('startup-splash.css');
+  for (const cls of ['__slogan', '__tile', '__loading-text', '__skip']) {
+    const block = css.match(new RegExp(`\\.ew-splash${cls}\\s*\\{[^}]*\\}`));
+    assert.ok(block && /text-transform: uppercase/.test(block[0]), `.ew-splash${cls} is uppercase`);
+  }
+  assert.notEqual(SPLASH_SLOGAN, SPLASH_SLOGAN.toUpperCase(), 'text is stored in normal case');
+});
