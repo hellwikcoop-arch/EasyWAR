@@ -262,7 +262,7 @@ function ovtPage(model, go) {
     h('div', { class: 'ud-kpis ud-kpis-3' }, model.kpis.filter(k => OVT_GROUPS.includes(k.key)).map(k => kpiCard(k, () => { state.ovt = k.key; go(); }))),
     h('div', { class: 'ud-tabs' }, OVT_GROUPS.map(g => h('button', { type: 'button', 'aria-pressed': String(g === key), onclick: () => { state.ovt = g; go(); }, text: groupInfo(g).name }))),
     h('div', { class: 'ud-grid-2' },
-      section(`${groupInfo(key).name}: типи ОВТ`, null, rankBars(model.groups[key], color, 24)),
+      section(`${groupInfo(key).name}: типи ОВТ`, `усього ${number(model.kpis.find(k => k.key === key).total)} за період · ${number(model.ovtOverall[key])} за весь час`, rankBars(model.groups[key], color, 24)),
       section('Динаміка', null, stackedBars(model.ovtSeries.map(s => ({ ...s, value: { [key]: s.value[key] } })), OVT_KEYS.filter(k => k.key === key), model.bucket))),
     section(`${groupInfo(key).name}: підрозділ × тип`, null, heatmap(model.matrix[key], color, unit => { state.units = [unit]; go(); })));
 }
