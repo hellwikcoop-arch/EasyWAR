@@ -457,7 +457,7 @@ const airList=[];body.traverse(o=>{if(!o.isMesh)return;let p=o;while(p&&p!==body
 const VIEW={mode:'model'};
 const AIR={cur:'mig'};
 const MODEL={root:null,canopy:null,mats:[],pick:[],ready:false};
-const MODELS={mig:MODEL,f16:{root:null,canopy:null,mats:[],pick:[],ready:false,loading:false},su:{root:null,canopy:null,mats:[],pick:[],ready:false,loading:false},mi8:{root:null,canopy:null,mats:[],pick:[],ready:false,loading:false},mi24:{root:null,canopy:null,mats:[],pick:[],ready:false,loading:false},il:{root:null,canopy:null,mats:[],pick:[],ready:false,loading:false},su24:{root:null,canopy:null,mats:[],pick:[],ready:false,loading:false},m2k:{root:null,canopy:null,mats:[],pick:[],ready:false,loading:false}};
+const MODELS={mig:MODEL,f16:{root:null,canopy:null,mats:[],pick:[],ready:false,loading:false},su:{root:null,canopy:null,mats:[],pick:[],ready:false,loading:false},mi8:{root:null,canopy:null,mats:[],pick:[],ready:false,loading:false},mi24:{root:null,canopy:null,mats:[],pick:[],ready:false,loading:false},il:{root:null,canopy:null,mats:[],pick:[],ready:false,loading:false},su24:{root:null,canopy:null,mats:[],pick:[],ready:false,loading:false},m2k:{root:null,canopy:null,mats:[],pick:[],ready:false,loading:false},su25:{root:null,canopy:null,mats:[],pick:[],ready:false,loading:false},gripen:{root:null,canopy:null,mats:[],pick:[],ready:false,loading:false}};
 const LAY={
  proc:{nG:[5.2,-.45,0],mG:[-.9,-.72,1.62],fl:[-8.55,-.18,1.2],disc:[-7.55,-.18,1.2],nav:[-3.65,.06,5.75],fin:[-6.6,2.47,0],b0:[-.6,.97,0],b1:[-1.8,-.32,0],tail:[-8.05,.22,0],chute:[-8.3,.22,0],ck:[4.3,1.1,0],nd:[4.75,-.5,.2],st0:[-1.3,-.03,2.6],st2:[-2.2,-.03,3.6],st1:[-3.05,-.03,4.6],
    door:[2.6,-.04,1.2],doorS:[1,1,1],eng:[-2.9,-.3,1.2],engS:1,tank:[-1.0,.05,1.6],inner:[0,0,0]},
@@ -468,14 +468,14 @@ LAY.f16={nG:[1.3,-.77,0],mG:[-2.7,-.98,1.32],gS:.8,fl:[-7.65,-.48,0],disc:[-7.3,
   nd:[.94,-1.4,.17],st0:[-2.1,-.58,2.19],st2:[-2.83,-.58,3.14],st1:[-2.6,-.47,4.97],door:[0,-9,0],doorS:[1,1,1],eng:[-3.6,-.5,0],engS:.7,tank:[-2.4,-.7,1.6],inner:[0,-.55,0]};
 LAY.su={nG:[2.43,-.07,0],mG:[-3.45,-.46,2.17],gS:1.2,gN:1.24,fl:[-9.44,-.08,1.2],disc:[-9.1,-.08,1.2],nav:[-5.93,.45,7.39],fin:[-9.0,3.75,2.17],b0:[-3.0,1.2,0],b1:[-.1,-.36,0],tail:[-11.45,.42,0],chute:[-10.7,.42,0],ck:[5.2,1.35,0],
   nd:[3.3,-.1,.2],st0:[-3.0,.42,3.0],st2:[-3.8,.42,4.1],st1:[-4.6,.43,5.2],door:[1.0,.15,1.0],doorS:[1,1.1,.83],eng:[-5.6,-.05,1.2],engS:1.2,tank:[-.5,.4,1.0],inner:[1.2,.2,0]};
-LAY.mi8=LAY.su;LAY.mi24=LAY.su;LAY.il=LAY.su;LAY.su24=LAY.su;LAY.m2k=LAY.su;
+LAY.mi8=LAY.su;LAY.mi24=LAY.su;LAY.il=LAY.su;LAY.su24=LAY.su;LAY.m2k=LAY.su;LAY.su25=LAY.su;LAY.gripen=LAY.su;
 function isH(){return AIR.cur==='mi8'||AIR.cur==='mi24';}
 function curLay(){const a=AIR.cur;if(a!=='mig'&&MODELS[a].ready)return LAY[a];return LAY[isModel()?'model':'proc'];}
 function isModel(){const a=AIR.cur;return a==='mig'?(VIEW.mode==='model'&&MODEL.ready):MODELS[a].ready;}
 function curModel(){return MODELS[AIR.cur];}
 function applyView(){
-  const f=AIR.cur==='f16'&&MODELS.f16.ready,su=AIR.cur==='su'&&MODELS.su.ready,m=isModel(),L=curLay(),hm=isH()&&MODELS[AIR.cur].ready,il=AIR.cur==='il'&&MODELS.il.ready,s24=AIR.cur==='su24'&&MODELS.su24.ready,m2=AIR.cur==='m2k'&&MODELS.m2k.ready;
-  body.visible=!(hm||il||s24||m2);if(HEL.pv)HEL.pv.visible=hm;if(HEL.g8)HEL.g8.visible=AIR.cur==='mi8';if(H24.g)H24.g.visible=AIR.cur==='mi24';if(IL.pv)IL.pv.visible=il;if(S24.pv)S24.pv.visible=s24;if(M2.pv)M2.pv.visible=m2;
+  const f=AIR.cur==='f16'&&MODELS.f16.ready,su=AIR.cur==='su'&&MODELS.su.ready,m=isModel(),L=curLay(),hm=isH()&&MODELS[AIR.cur].ready,il=AIR.cur==='il'&&MODELS.il.ready,s24=AIR.cur==='su24'&&MODELS.su24.ready,m2=AIR.cur==='m2k'&&MODELS.m2k.ready,st=isSt()&&MODELS[AIR.cur].ready;
+  body.visible=!(hm||il||s24||m2||st);if(HEL.pv)HEL.pv.visible=hm;if(HEL.g8)HEL.g8.visible=AIR.cur==='mi8';if(H24.g)H24.g.visible=AIR.cur==='mi24';if(IL.pv)IL.pv.visible=il;if(S24.pv)S24.pv.visible=s24;if(M2.pv)M2.pv.visible=m2;for(const k in ST)ST[k].pv.visible=st&&AIR.cur===k;
   airList.forEach(o=>o.visible=!m);
   if(MODEL.root){MODEL.root.visible=m&&AIR.cur==='mig';MODEL.canopy.visible=m&&AIR.cur==='mig';}
   const SU=MODELS.su;if(SU.root){SU.root.visible=su;SU.canopy.visible=su;}
@@ -484,7 +484,7 @@ function applyView(){
   const gs=L.gS||1;R.nGear.scale.setScalar(L.gN||gs);R.side.forEach(sd=>sd.gear.scale.setScalar(gs));
   R.side.forEach((sd,i)=>{const one=!(f&&i===1);sd.flame.visible=sd.core.visible=sd.nozDisc.visible=sd.eng.visible=sd.engHit.visible=one;sd.door.visible=!f;
     sd.st1.userData.py.visible=!f;sd.st1.userData.rail.visible=!f;setMslType(sd.msl);});
-  document.getElementById('dims').textContent=m2?'L 14,5 м · S 8,2 м · H 4,9 м':s24?'Су-24М · стріловидність 16°–69°':il?'L 46,6 м · S 50,5 м · H 14,8 м':f?'L 15,06 м · S 9,96 м · H 4,88 м':su?'L 21,94 м · S 14,7 м · H 5,93 м':'L 17,32 м · S 11,36 м · H 4,73 м';
+  document.getElementById('dims').textContent=st?ST_DEF[AIR.cur].name:m2?'L 14,5 м · S 8,2 м · H 4,9 м':s24?'Су-24М · стріловидність 16°–69°':il?'L 46,6 м · S 50,5 м · H 14,8 м':f?'L 15,06 м · S 9,96 м · H 4,88 м':su?'L 21,94 м · S 14,7 м · H 5,93 м':'L 17,32 м · S 11,36 м · H 4,73 м';
   R.nGear.position.set(...L.nG);R.beacons[0].position.set(...L.b0);R.beacons[1].position.set(...L.b1);
   R.tailLight.position.set(...L.tail);if(R.chute.parent===body)R.chute.position.set(...L.chute);
   R.nDoors.forEach(g=>g.position.set(L.nd[0],L.nd[1],L.nd[2]*g.userData.s));gearEdges.forEach(e=>e.visible=!m);R.cockpitGlow.position.set(...L.ck);R.inner.position.set(...L.inner);
@@ -492,7 +492,7 @@ function applyView(){
     sd.nav.position.set(...L.nav);sd.finTip.position.set(...L.fin);sd.door.position.set(...L.door);sd.door.scale.set(...L.doorS);
     sd.st0.position.set(...L.st0);sd.st1.position.set(...L.st1);sd.st2.position.set(...L.st2);
     sd.eng.position.set(...L.eng);sd.eng.scale.x=L.engS;sd.engHit.position.copy(sd.eng.position);sd.engHit.scale.x=L.engS;sd.tank.position.set(...L.tank);});
-  const t=document.getElementById('ttl');if(t)t.textContent=m2?'Mirage 2000-5F · ПС ЗСУ':s24?'Су-24М · ПС ЗСУ':il?'Іл-76МД · ПС ЗСУ':hm?(AIR.cur==='mi24'?'Мі-24П · ЗСУ':'Мі-8 · ЗСУ'):f?'F-16 · ПС ЗСУ':su?'Су-27П1М · борт 39':m?'МіГ-29МУ1 · борт 05':'МіГ-29 · схема';
+  const t=document.getElementById('ttl');if(t)t.textContent=st?ST_DEF[AIR.cur].name+' · ПС ЗСУ':m2?'Mirage 2000-5F · ПС ЗСУ':s24?'Су-24М · ПС ЗСУ':il?'Іл-76МД · ПС ЗСУ':hm?(AIR.cur==='mi24'?'Мі-24П · ЗСУ':'Мі-8 · ЗСУ'):f?'F-16 · ПС ЗСУ':su?'Су-27П1М · борт 39':m?'МіГ-29МУ1 · борт 05':'МіГ-29 · схема';
   if(typeof buildLabels==='function'){buildLabels();updateChips();}
 }
 function dequant(geo){const a=geo.attributes.position;if(!a)return;const src=a.isInterleavedBufferAttribute?a.data.array:a.array;if(src instanceof Float32Array)return;
@@ -532,11 +532,11 @@ function setAircraft(a){if(a===AIR.cur)return;
   const go=()=>{const was=AIR.cur;AIR.cur=a;if(S.sel)select(null);if(R.chute.parent===body&&S.chute!==1)stowChute();
     const wasH=was==='mi8'||was==='mi24',nowH=a==='mi8'||a==='mi24';
     if(nowH){S.insp=false;$('#dims').hidden=true;if(HEL.podId!==a)buildPods(a);heliReset();setPhase(1);}else if(wasH){heliLeave();setPhase(1);}
-    if(a==='il'||a==='su24'||a==='m2k'){S.insp=false;S.cut=0;$('#dims').hidden=true;}
-    applyView();updateChips();toast(a==='f16'?'F-16':a==='su'?'Су-27П1М':a==='mi8'?'Мі-8':a==='mi24'?'Мі-24П':a==='il'?'Іл-76МД':a==='su24'?'Су-24М':a==='m2k'?'Mirage 2000-5F':'МіГ-29МУ1');};
-  if(a==='f16')loadF16(go);else if(a==='su')loadSu(go);else if(a==='mi8')loadMi8(go);else if(a==='mi24')loadMi24(go);else if(a==='il')loadIl(go);else if(a==='su24')loadSu24(go);else if(a==='m2k')loadM2(go);else go();}
+    if(a==='il'||a==='su24'||a==='m2k'||ST_DEF[a]){S.insp=false;S.cut=0;$('#dims').hidden=true;}
+    applyView();updateChips();toast(a==='f16'?'F-16':a==='su'?'Су-27П1М':a==='mi8'?'Мі-8':a==='mi24'?'Мі-24П':a==='il'?'Іл-76МД':a==='su24'?'Су-24М':a==='m2k'?'Mirage 2000-5F':ST_DEF[a]?ST_DEF[a].name:'МіГ-29МУ1');};
+  if(a==='f16')loadF16(go);else if(a==='su')loadSu(go);else if(a==='mi8')loadMi8(go);else if(a==='mi24')loadMi24(go);else if(a==='il')loadIl(go);else if(a==='su24')loadSu24(go);else if(a==='m2k')loadM2(go);else if(ST_DEF[a])loadSt(a,go);else go();}
 /* ---------- control-surface rigs on imported models ---------- */
-const RIG={mig:[],f16:[],su:[],mi8:[],mi24:[],il:[],su24:[],m2k:[]};
+const RIG={mig:[],f16:[],su:[],mi8:[],mi24:[],il:[],su24:[],m2k:[],su25:[],gripen:[]};
 const HINGE=(()=>{const mx=([x,y,z])=>[-x,y,z],mz=([x,y,z])=>[x,y,-z];
   const mig={flapR:['down',[1.77,.33,-1.86],[3.64,.33,-2.30]],ailR:['down',[3.64,.28,-2.32],[4.95,.28,-2.73]],slatR:['down',[1.73,.3,.98],[4.95,.3,-1.55]],
     stabR:['up',[1.5,.3,-5.2],[3.6,.3,-5.2]],rudR:['side',[1.70,.84,-4.64],[1.90,2.09,-4.86]],abrkU:['up',[-.36,.3,-3.95],[.36,.3,-3.95]],abrkD:['down',[-.36,-.05,-3.95],[.36,-.05,-3.95]]};
@@ -871,6 +871,58 @@ function updIl(dt){
   const ln=f.land&&C.gear>.5?1:0,tx=f.taxi&&C.gear>.5?1:0;
   L.lamp.material.opacity=(ln||tx)?1:0;L.wl.material.opacity=L.wr.material.opacity=ln;
   L.beam.material.uniforms.uI.value=ln?1:tx?.55:0;
+  L.cock.material.opacity=f.cockpit?.7:0;}
+
+/* =========================================================
+   СУ-25 і JAS 39 GRIPEN: цільні моделі без виділених вузлів (шасі, механізацію й підвіски
+   не відокремлено). У спільному конвеєрі фаз показано ландшафт, двигуни й вогні; шасі лишається
+   прибраним (як у моделі). Модель — .glb зі свого джерела (aircraft-3d/), масштабована до довжини літака.
+   ========================================================= */
+const ST_DEF={su25:{file:'aircraft-3d/su25.glb',name:'Су-25',len:15.5,nose:'+z',cock:[4.4,2.1],top:[-1.5,2.8]},gripen:{file:'aircraft-3d/gripen.glb',name:'JAS 39 Gripen',len:14.1,nose:'-z',cock:[2.4,1.9],top:[-2,1.9]}};
+const ST={};
+Object.keys(ST_DEF).forEach(k=>{const o={pv:new T.Group(),m:new T.Group(),ready:false,L:{}};o.pv.visible=false;pitchG.add(o.pv);o.pv.add(o.m);ST[k]=o;});
+const isSt=()=>!!ST_DEF[AIR.cur];
+// Межі за справжніми вершинами: у квантованих моделях (Int16 normalized) геометричний boundingBox r128 рахує сирі цілі.
+function stBox(root){root.updateMatrixWorld(true);const b=new T.Box3(),v=new T.Vector3(),ex={zmin:null,zmax:null,ytop:null};
+  root.traverse(o=>{if(!o.isMesh)return;const a=o.geometry.attributes.position,r=a.array,
+    k=!a.normalized?1:r instanceof Int16Array?32767:r instanceof Int8Array?127:r instanceof Uint16Array?65535:r instanceof Uint8Array?255:1;
+    for(let i=0;i<a.count;i++){v.set(a.getX(i)/k,a.getY(i)/k,a.getZ(i)/k).applyMatrix4(o.matrixWorld);b.expandByPoint(v);
+      if(!ex.zmin||v.z<ex.zmin.z)ex.zmin=v.clone();if(!ex.zmax||v.z>ex.zmax.z)ex.zmax=v.clone();if(!ex.ytop||v.y>ex.ytop.y)ex.ytop=v.clone();}});
+  b.ex=ex;return b;}
+function initSt(k,sc){
+  const D=ST_DEF[k],O=ST[k],F=MODELS[k];
+  const th={'+x':0,'-x':PI,'+z':PI/2,'-z':-PI/2}[D.nose];
+  const tmp=new T.Group();tmp.rotation.y=th;tmp.add(sc);tmp.updateMatrixWorld(true);
+  const b=stBox(tmp),c=b.getCenter(new T.Vector3()),s=D.len/(b.max.x-b.min.x);
+  tmp.remove(sc);O.m.rotation.y=th;O.m.scale.setScalar(s);O.m.position.set(-s*c.x,-s*b.min.y,-s*c.z);O.m.add(sc);
+  sc.traverse(o=>{if(!o.isMesh)return;
+    (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>{if(m.map){m.map.anisotropy=4;m.map.encoding=T.LinearEncoding;}m.needsUpdate=true;
+      if(!F.mats.includes(m)){m.userData.op=m.opacity;m.userData.tr=m.transparent;m.userData.dw=m.depthWrite;F.mats.push(m);}});});
+  const hx=D.len/2,H=(b.max.y-b.min.y)*s;
+  const mk=(col,sz,x,y,z)=>{const g=glow(col,sz);g.position.set(x,y,z);g.material.opacity=0;O.pv.add(g);return g;};
+  const P=q=>[s*(q.x-c.x),s*(q.y-b.min.y),s*(q.z-c.z)],e0=P(b.ex.zmin),e1=P(b.ex.zmax),et=P(b.ex.ytop);   // законцівки крила й верх кіля — за вершинами моделі
+  O.L={navL:mk(0xff2a2a,.7,e0[0],e0[1],e0[2]),navR:mk(0x2aff6a,.7,e1[0],e1[1],e1[2]),tail:mk(0xffffff,.6,et[0]-.3,et[1],et[2]),
+    b0:mk(0xff3030,1,D.top[0],D.top[1],0),b1:mk(0xff3030,1,D.top[0],.15,0),lamp:mk(0xfff2dd,.9,hx*.55,H*.2,0),cock:mk(0x7be0b4,1.4,D.cock[0],D.cock[1],0)};
+  const lg=new T.ConeGeometry(.9,7,20,1,true);lg.rotateZ(PI/2);lg.translate(3.5,0,0);O.L.beam=M(lg,beamMat());
+  O.L.beam.position.set(hx*.55,H*.2,0);O.L.beam.rotation.z=-.13;O.pv.add(O.L.beam);
+  O.ready=true;}
+function loadSt(k,cb){const F=MODELS[k],D=ST_DEF[k];if(F.ready){cb();return;}if(F.loading)return;F.loading=true;
+  const el=document.getElementById('load');el.hidden=false;el.textContent='Завантаження '+D.name;
+  const fail=()=>{el.hidden=true;F.loading=false;toast(D.name+' не завантажився');};
+  if(!T.GLTFLoader||typeof MeshoptDecoder==='undefined'){fail();return;}
+  fetch(D.file).then(r=>{if(!r.ok)throw new Error(r.status);return r.arrayBuffer();}).then(buf=>{
+    const L=new T.GLTFLoader();L.setMeshoptDecoder(MeshoptDecoder);
+    L.parse(buf,'',g=>{try{initSt(k,g.scene);F.root=ST[k].pv;F.canopy=ST[k].pv;F.ready=true;F.loading=false;el.hidden=true;cb();}catch(e){console.error(e);fail();}},fail);}).catch(fail);}
+function stChips(){if(!isSt())return;
+  ['gear','canopy','cut','flap','ctrl','brake','insp','doors','chute','view'].forEach(k=>{chipsS[k].classList.add('lock');chipsS[k].classList.remove('on');setSub(chipsS[k],'');});
+  ['b','s','m','rearm'].forEach(k=>{chipsW[k].classList.add('lock');setSub(chipsW[k],'');});}
+function updSt(dt){
+  if(!isSt())return;const O=ST[AIR.cur];if(!O.ready||!O.pv.visible)return;
+  const L=O.L,f=S.L,bf=f.beacon?Math.pow(Math.max(0,Math.sin(time*PI*1.4)),8):0;
+  L.navL.material.opacity=L.navR.material.opacity=L.tail.material.opacity=f.nav?1:0;
+  L.b0.material.opacity=L.b1.material.opacity=bf;L.b0.scale.setScalar(.6+bf*.9);L.b1.scale.setScalar(.6+bf*.9);
+  const ln=f.land&&C.gear>.5?1:0,tx=f.taxi&&C.gear>.5?1:0;
+  L.lamp.material.opacity=(ln||tx)?1:0;L.beam.material.uniforms.uI.value=ln?1:tx?.55:0;
   L.cock.material.opacity=f.cockpit?.7:0;}
 
 /* =========================================================
@@ -1404,6 +1456,7 @@ function doSys(id){
   if(AIR.cur==='su24'){if(id==='flap'){S24.mode=(S24.mode+1)%3;toast('Стріловидність: '+['авто','16°','69°'][S24.mode]);updateChips();return;}
     if(id!=='gear'&&id!=='eng'){toast('Недоступно для Су-24М');updateChips();return;}}
   if(AIR.cur==='m2k'&&id!=='gear'&&id!=='eng'){toast('Недоступно для Mirage 2000-5F');updateChips();return;}
+  if(isSt()&&id!=='eng'){toast(id==='gear'?'У моделі '+ST_DEF[AIR.cur].name+' шасі прибране':'Недоступно для '+ST_DEF[AIR.cur].name);updateChips();return;}
   const f16=AIR.cur==='f16';
   if(AIR.cur!=='mig'&&id==='view'){toast('Схема є лише для МіГ-29');return;}
   if(f16&&id==='doors'){toast('У F-16 немає заслінок повітрозабірника');return;}
@@ -1438,7 +1491,7 @@ function updateChips(){
   chipsS.gear.classList.toggle('lock',!S.air);chipsS.chute.classList.toggle('lock',S.air);chipsS.eng.classList.toggle('lock',S.air);
   const def=PHA()[S.phase].L;
   for(const k in chipsL){chipsL[k].classList.toggle('on',!!S.L[k]);setSub(chipsL[k],(!!S.L[k]===!!def[k])?'авто':'руч.');}
-  heliChips();ilChips();su24Chips();m2Chips();
+  heliChips();ilChips();su24Chips();m2Chips();stChips();
 }
 
 /* card & labels */
@@ -1536,6 +1589,7 @@ function release(k){
   if(AIR.cur==='su24'){su24Fire(k);return;}
   if(AIR.cur==='m2k'){m2Fire(k);return;}
   if(AIR.cur==='il'){toast('На Іл-76МД підвісок немає');return;}
+  if(isSt()){toast('У моделі '+ST_DEF[AIR.cur].name+' підвісок немає');return;}
   const nm={b:'скидання',s:'скидання',m:'пуск'}[k];
   if(!S.air){toast('Шасі обтиснуте — '+nm+' заблоковано');return;}
   const a=S.wpn[k],L=a.length;let j=-1;for(let q=0;q<L;q++){const c=(S.nx[k]+q)%L;if(a[c]){j=c;break;}}
@@ -1571,7 +1625,7 @@ function rearm(silent){
   if(isH()){heliRearm(silent);return;}
   if(AIR.cur==='su24'){su24Rearm(silent);return;}
   if(AIR.cur==='m2k'){m2Rearm(silent);return;}
-  if(AIR.cur==='il')return;
+  if(AIR.cur==='il'||isSt())return;
   if(!silent&&(S.air||S.speed>5)){toast('Обслуговування — лише на стоянці');return;}
   S.wpn={b:[1,1],s:[1,1,1,1],m:[1,1]};['b','s','m'].forEach(k=>SLOT[k].forEach((_,j)=>{const o=slotObj(k,j);if(o.parent===o.userData.home.parent)o.visible=true;}));
   if(S.chute!==1&&S.chute!==2)packChute();
@@ -1579,7 +1633,7 @@ function rearm(silent){
 
 /* ---------- drag chute ---------- */
 function packChute(){S.chute=0;R.capFly=null;R.capm.visible=true;R.capm.position.set(-.03,0,0);R.capm.rotation.set(0,0,0);R.swing.visible=false;}
-function deployChute(){if(AIR.cur==='il'||AIR.cur==='su24'||AIR.cur==='m2k')return;if(S.chute===3){toast('Парашут використано — H на стоянці');return;}if(S.chute!==0)return;S.chute=1;S.ct=0;R.capFly={t:0};R.infl=0;updateChips();}
+function deployChute(){if(isSt()||AIR.cur==='il'||AIR.cur==='su24'||AIR.cur==='m2k')return;if(S.chute===3){toast('Парашут використано — H на стоянці');return;}if(S.chute!==0)return;S.chute=1;S.ct=0;R.capFly={t:0};R.infl=0;updateChips();}
 function stowChute(){if(R.chute.parent!==body)body.add(R.chute);R.chute.rotation.set(0,0,0);R.chute.scale.set(1,1,1);const L=curLay();R.chute.position.set(...L.chute);R.swing.visible=false;R.canMat.opacity=1;}
 function releaseChute(){if(S.chute!==1)return;S.chute=2;S.relT=0;body.updateMatrixWorld(true);world.attach(R.chute);updateChips();}
 function updChute(dt,Vv){
@@ -1609,7 +1663,7 @@ let last=performance.now(), time=0;
 function frame(now){
   const dt=Math.min(.05,(now-last)/1000);last=now;time+=dt;S.pt+=dt;
   const p=S.phase;
-  const HM=isH()&&MODELS[AIR.cur].ready,IM=AIR.cur==='il'&&MODELS.il.ready,SM=AIR.cur==='su24'&&MODELS.su24.ready,MM=AIR.cur==='m2k'&&MODELS.m2k.ready;
+  const HM=isH()&&MODELS[AIR.cur].ready,IM=AIR.cur==='il'&&MODELS.il.ready,SM=AIR.cur==='su24'&&MODELS.su24.ready,MM=AIR.cur==='m2k'&&MODELS.m2k.ready,XM=isSt()&&MODELS[AIR.cur].ready;
   // ---- phase logic
   if(HM){heliLogic(dt,p);}else{
   if(p===2){/* sequential start */}
@@ -1644,7 +1698,7 @@ function frame(now){
   let tr=S.eng?RPM[p]||68:0;let trL=tr,trR=tr;
   if(p===2&&S.eng){trL=S.pt>.6?68:0;trR=S.pt>3.2?68:0;if(AIR.cur==='f16'||AIR.cur==='m2k')trR=trL;}
   C.rpmL=ease(C.rpmL,trL,trL>C.rpmL?.7:1.1,dt);C.rpmR=ease(C.rpmR,trR,trR>C.rpmR?.7:1.1,dt);
-  const abT=!HM&&!IM&&S.eng&&((p===5&&S.pt>.6)||(p===6&&S.pt<7))?1:0;C.ab=ease(C.ab,abT,abT?2.5:1.5,dt);
+  const abT=!HM&&!IM&&!XM&&S.eng&&((p===5&&S.pt>.6)||(p===6&&S.pt<7))?1:0;C.ab=ease(C.ab,abT,abT?2.5:1.5,dt);
 
   // ---- surfaces
   C.canopy=ease(C.canopy,S.canopy,1.6,dt);
@@ -1723,7 +1777,7 @@ function frame(now){
     const tw=o.mode==='runway'||o.mode==='taxi'?.85+.15*Math.sin(time*3+o.bx):1;
     o.s.material.opacity=op*tw;});
   keyMeshes.forEach(m=>{const x=-9.5-S.scroll;m.position.x=x;const r=Math.hypot(Math.abs(x)+2.1,Math.abs(m.position.z)+.65);m.material.opacity=S.ground==='runway'?clamp((GR-.2-r)/1.2,0,1)*.75*C.mark*(1-C.land):0;});
-  const Vv=S.speed/3.6*.32;updLand(dt,Vv);updChute(dt,Vv);updShots(dt,Vv);updP(dt,Vv);updFXM(dt,Vv);updHeli(dt,Vv,HM);updIl(dt);updSu24(dt,Vv);updM2(dt,Vv);
+  const Vv=S.speed/3.6*.32;updLand(dt,Vv);updChute(dt,Vv);updShots(dt,Vv);updP(dt,Vv);updFXM(dt,Vv);updHeli(dt,Vv,HM);updIl(dt);updSu24(dt,Vv);updM2(dt,Vv);updSt(dt);
   // clouds
   const cs=S.speed/3.6*.05;clouds.forEach((c,i)=>{c.position.x-=cs*dt*(.7+(i%5)*.12);if(c.position.x<-18)c.position.x+=36;
     const r=Math.hypot(c.position.x,c.position.z);c.material.opacity=C.cloud*clamp((17-r)/5,0,1)*.9;});
@@ -1731,8 +1785,8 @@ function frame(now){
   // ---- camera
   if(!drag){yaw+=yawV;yawV*=.92;}
   world.rotation.y=yaw;
-  const aspectK=Math.max(1,1.35/camera.aspect);const dist=(IM?50:SM?47:MM?40:44)*zoom*Math.pow(aspectK,.85);
-  const ty=(HM?3.0:IM?3.4:SM?1.9:1.4)+C.lift*.55;
+  const aspectK=Math.max(1,1.35/camera.aspect);const dist=(IM?50:SM?47:MM?40:XM?36:44)*zoom*Math.pow(aspectK,.85);
+  const ty=(HM?3.0:IM?3.4:SM?1.9:XM?1.6:1.4)+C.lift*.55;
   const sk=shake;shake*=Math.exp(-4*dt);camera.position.set(rnd(-sk,sk),ty+Math.sin(el)*dist+rnd(-sk,sk),Math.cos(el)*dist);camera.lookAt(0,ty,0);
 
   // ---- status
@@ -1741,8 +1795,8 @@ function frame(now){
   else{
     st.classList.remove('toast');
     const gearTxt=C.gear>.97?'шасі випущене':C.gear<.03?'шасі прибране':(S.gear?'шасі випускається':'шасі прибирається');
-    const parts=HM?[PHH[p].n,'гвинт '+Math.round(C.rot*100)+' %',`${fmt(S.speed)} км/год`]:[PH[p].n,IM?'':SM?'крило '+Math.round(S24.swDeg)+'°':MM?'дельта-крило':'механізація '+FLAP[S.flap].t,(AIR.cur==='f16'||AIR.cur==='m2k'?`N ${Math.round(C.rpmR)} %`:`N ${Math.round(C.rpmL)}/${Math.round(C.rpmR)} %`)+(C.ab>.5?' · ФОРСАЖ':(C.rpmL>97?' · МАКСИМАЛ':'')),`${fmt(S.speed)} км/год`];
-    if(S.alt>1)parts.push(`H ${fmt(S.alt)} м`);parts.push(HM?'С-8: '+heliTotal():gearTxt);if(S.chute===1)parts.push('парашут');
+    const parts=HM?[PHH[p].n,'гвинт '+Math.round(C.rot*100)+' %',`${fmt(S.speed)} км/год`]:[PH[p].n,IM||XM?'':SM?'крило '+Math.round(S24.swDeg)+'°':MM?'дельта-крило':'механізація '+FLAP[S.flap].t,(AIR.cur==='f16'||AIR.cur==='m2k'?`N ${Math.round(C.rpmR)} %`:`N ${Math.round(C.rpmL)}/${Math.round(C.rpmR)} %`)+(C.ab>.5?' · ФОРСАЖ':(C.rpmL>97?' · МАКСИМАЛ':'')),`${fmt(S.speed)} км/год`];
+    if(S.alt>1)parts.push(`H ${fmt(S.alt)} м`);if(!XM)parts.push(HM?'С-8: '+heliTotal():gearTxt);if(S.chute===1)parts.push('парашут');
     if(S.ctrl>=0)parts.push('перевірка: '+ctrlName(S.ctrl));
     const t=parts.filter(Boolean).join(' · ');if(st.textContent!==t)st.textContent=t;
   }
@@ -1753,7 +1807,7 @@ function frame(now){
 }
 setPhase(1);applyView();updateChips();loadModel();loadJdam();setTimeout(loadLand,1500);
 /* Вбудований режим (?embed=1&a=<літак>): літак задає стаття довідника, тож ряд «Літак» і гарячі клавіші перемикання вимкнено. */
-{const q=new URLSearchParams(location.search),a0=q.get('a'),ids=['mig','f16','su','mi8','mi24','il','su24','m2k'];
+{const q=new URLSearchParams(location.search),a0=q.get('a'),ids=['mig','f16','su','mi8','mi24','il','su24','m2k','su25','gripen'];
  if(q.has('embed')){document.documentElement.classList.add('embed');const ra=document.getElementById('rowA');if(ra&&ra.parentElement)ra.parentElement.hidden=true;
    if(ids.includes(a0)){const real=setAircraft;setAircraft=function(a){if(a===a0)real(a);};}}
  if(ids.includes(a0))setAircraft(a0);}

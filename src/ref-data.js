@@ -223,7 +223,7 @@ export const ENTRIES = [
   {
     id: 'su25', short: 'Су-25', group: 'aircraft', name: 'Су-25', alias: 'Su-25, за кодифікацією НАТО — Frogfoot',
     role: 'Штурмовик', origin: 'СРСР', tags: ['su25', 'су25', 'frogfoot', 'грач', 'штурмовик'],
-    model: { file: 'su-25', nose: '+z' }, credit: CREDIT_SU25,
+    viewer: 'su25', credits: [CREDIT_SU25, CREDIT_LANDSCAPE],
     summary: 'Броньований дозвуковий штурмовик безпосередньої підтримки військ (ОКБ Сухого). Працює з малих висот некерованими ракетами, бомбами й гарматою.',
     facts: [
       ['Екіпаж', '1 особа'], ['Довжина', '≈ 15,5 м'], ['Розмах крила', '≈ 14,4 м'], ['Висота', '≈ 4,8 м'],
@@ -252,7 +252,7 @@ export const ENTRIES = [
   {
     id: 'gripen', short: 'Gripen', group: 'aircraft', name: 'JAS 39 Gripen', alias: 'Saab Gripen C/D та E/F',
     role: 'Багатоцільовий винищувач', origin: 'Швеція', tags: ['gripen', 'грипен', 'jas39', 'jas 39', 'saab', 'сааб'],
-    status: 'Очікується', model: { file: 'gripen', nose: '+z' }, credit: CREDIT_GRIPEN,
+    status: 'Очікується', viewer: 'gripen', credits: [CREDIT_GRIPEN, CREDIT_LANDSCAPE],
     summary: 'Шведський одномоторний багатоцільовий винищувач четвертого покоління (Saab), спроєктований для польотів із коротких і розосереджених ділянок доріг. У ПС ЗСУ ще не надійшов: Україна й Швеція домовилися про поставки, але літаки очікуються. Стаття попередня і показує, чого чекати.',
     facts: [
       ['Статус в Україні', 'Очікується: C/D — з початку 2027 року, E/F — з 2029 року'], ['Екіпаж', '1 особа (C, E), 2 особи (D, F)'],

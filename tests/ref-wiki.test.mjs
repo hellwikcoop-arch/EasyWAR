@@ -73,15 +73,12 @@ test('every glb in src/models is registered and used by an article', async () =>
 
 test('articles without alternative models resolve model and credit from the article itself', () => {
   // Літаки з інтерактивного переглядача не мають ні файлу моделі, ні перемикача розмальовок.
-  for (const id of ['mig29', 'su27', 'f16', 'mirage', 'su24', 'mi24', 'mi8', 'il76']) {
+  for (const id of ['mig29', 'su27', 'f16', 'mirage', 'su24', 'mi24', 'mi8', 'il76', 'su25', 'gripen']) {
     const e = entryById(id);
     assert.equal(variantsOf(e).length, 0, id);
     assert.equal(e.model, undefined, `${id}: no glb in src/models`);
     assert.equal(modelOf(e), undefined, id);
   }
-  // Су-25 і Gripen лишилися зі своїми моделями.
-  assert.equal(modelOf(entryById('su25')).file, 'su-25');
-  assert.equal(modelOf(entryById('gripen')).file, 'gripen');
   assert.equal(creditOf(entryById('39')), undefined);
 });
 
@@ -89,14 +86,19 @@ test('aircraft articles open the interactive viewer page, which runs offline wit
   const page = await readFile(new URL('../src/aircraft-viewer.html', import.meta.url), 'utf8');
   const keys = Object.keys(/const RIG=\{([^}]*)\}/.exec(page)[1].split(',').reduce((o, p) => (o[p.split(':')[0]] = 1, o), {}));
   const viewers = ENTRIES.filter(e => viewerOf(e));
-  assert.deepEqual(viewers.map(e => e.id).sort(), ['f16', 'il76', 'mi24', 'mi8', 'mig29', 'mirage', 'su24', 'su27']);
+  assert.deepEqual(viewers.map(e => e.id).sort(), ['f16', 'gripen', 'il76', 'mi24', 'mi8', 'mig29', 'mirage', 'su24', 'su25', 'su27']);
   assert.deepEqual(viewers.map(e => viewerOf(e)).sort(), [...keys].sort(), 'every aircraft of the page has one article');
   for (const e of viewers) assert.equal(e.group, 'aircraft', e.id);
   // Жодного завантаження з мережі: бібліотеки й моделі лежать у src/public/aircraft-3d.
   assert.doesNotMatch(page, /<script[^>]+src="https?:/);
   assert.doesNotMatch(page, /<link[^>]+href="https?:/, 'no web fonts or stylesheets');
   assert.doesNotMatch(page, /@import|url\(\s*['"]?https?:/, 'no remote CSS');
-  assert.doesNotMatch(page, /\bfetch\(|XMLHttpRequest|WebSocket/);
+  assert.doesNotMatch(page, /XMLHttpRequest|WebSocket|fetch\(\s*['"`]https?:/);
+  // Су-25 і Gripen — цільні .glb зі свого джерела, а не base64-скрипти.
+  const stFiles = [...page.matchAll(/file:'(aircraft-3d\/[\w.]+\.glb)'/g)].map(m => m[1]);
+  assert.deepEqual(stFiles.sort(), ['aircraft-3d/gripen.glb', 'aircraft-3d/su25.glb']);
+  for (const f of stFiles) assert.ok((await stat(new URL(`../src/public/${f}`, import.meta.url))).size > 1e5, f);
+  assert.match(page, /setMeshoptDecoder\(MeshoptDecoder\)/);
   const data = [...page.matchAll(/(?:sc\.src|src)=['"]aircraft-3d\/([\w.]+)['"]/g)].map(m => m[1]);
   for (const lib of ['three.r128.min.js', 'GLTFLoader.r128.js', 'meshopt_decoder.js']) assert.ok(data.includes(lib), lib);
   for (const f of ['mig29mu1', 'su27', 'f16', 'mi8', 'il76', 'mi24', 'su24', 'm2k', 'landscape']) assert.ok(data.includes(`${f}.js`), `${f}.js is loaded by the page`);
