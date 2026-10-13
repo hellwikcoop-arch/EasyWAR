@@ -197,6 +197,40 @@
   box-shadow: var(--ew-shadow-hi);
 }
 
+
+/* ---------- Локальні акценти дашбордів ПВК та УДШВ (власна палітра модуля) ---------- */
+#pvk-dashboard-root, #view-base {
+  --ew-accent: var(--pvk-blue, #2a8cff);
+  --ew-line: color-mix(in srgb, var(--ew-accent) 18%, var(--pvk-border, var(--line)));
+  --ew-line-hi: color-mix(in srgb, var(--ew-accent) 46%, var(--pvk-border, var(--line)));
+  --ew-glow: color-mix(in srgb, var(--ew-accent) 26%, transparent);
+}
+#udshv-dashboard-root {
+  --ew-accent: var(--ud-green, #c2384a);
+  --accent-ink: #fff;
+  --ew-line: color-mix(in srgb, var(--ew-accent) 20%, var(--ud-line));
+  --ew-line-hi: color-mix(in srgb, var(--ew-accent) 50%, var(--ud-line));
+  --ew-glow: color-mix(in srgb, var(--ew-accent) 28%, transparent);
+}
+#pvk-dashboard-root { --accent-ink: #04111f; }
+
+/* ---------- ПВК: банер із рельєфом (абстрактне тло), емблема зліва ---------- */
+:root .pvk-hero {
+  position: relative; overflow: hidden; min-height: 132px; align-items: center;
+  border-color: var(--ew-line);
+  background:
+    linear-gradient(90deg, var(--pvk-panel) 0, color-mix(in srgb, var(--pvk-panel) 82%, transparent) 36%, transparent 78%),
+    url('./pvk-art/relief-banner.webp') right center / cover no-repeat,
+    var(--pvk-panel);
+}
+:root .pvk-hero h1 { font-size: clamp(28px, 3vw, 42px); letter-spacing: -.01em; }
+:root .pvk-period { border-color: var(--ew-line); }
+:root .pvk-nav { border-color: var(--ew-line); border-radius: var(--ew-r); }
+
+/* ---------- УДШВ: періодичний перемикач і вкладки в одному ритмі з рештою ---------- */
+:root .ud-period { border-color: var(--ew-line); }
+:root .ud-hero { border-color: var(--ew-line); min-height: 132px; }
+
 /* ---------- Motion: поява при першому відкритті дашборда ---------- */
 /* Клас ew-boot ставить ui-kit.js на ~1.8 с після завантаження; повторні відмальовування даних не анімуються. */
 @keyframes ewRise { from { opacity: 0; transform: translateY(16px) scale(.992); } }
