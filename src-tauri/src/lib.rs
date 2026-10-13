@@ -121,15 +121,50 @@ async fn get_local_profiles(
     profiles.list().await.map_err(|error| error.to_string())
 }
 
+/// Реєстрація користувача: профіль, обов'язковий пароль, посада, фото й обрані модулі
+/// створюються одним кроком, а новий користувач одразу входить у свій профіль.
+/// Профілю без пароля цей шлях не створює.
 #[tauri::command]
-async fn create_local_profile(
+async fn register_local_profile(
     profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
     display_name: String,
+    password: String,
+    position: Option<String>,
+    avatar_data_url: Option<String>,
+    modules: Vec<String>,
 ) -> Result<LocalProfilesState, String> {
     let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
     let profile_id = local_profiles::generate_profile_id(&display_name, &now);
+    let state = profiles
+        .register(
+            local_profiles::NewProfile {
+                id: &profile_id,
+                display_name: &display_name,
+                password: &password,
+                position: position.as_deref().unwrap_or(""),
+                avatar_data_url: avatar_data_url.as_deref(),
+                modules: &modules,
+            },
+            &now,
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    session.set(Some(profile_id));
+    Ok(state)
+}
+
+#[tauri::command]
+async fn set_local_profile_modules(
+    profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
+    profile_id: String,
+    modules: Vec<String>,
+) -> Result<LocalProfilesState, String> {
+    ensure_profile_unlocked(&profiles, &session, &profile_id).await?;
+    let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
     profiles
-        .create(&profile_id, &display_name, &now)
+        .set_modules(&profile_id, &modules, &now)
         .await
         .map_err(|error| error.to_string())
 }
@@ -208,6 +243,10 @@ async fn set_local_profile_password(
     current_password: Option<String>,
     new_password: Option<String>,
 ) -> Result<LocalProfilesState, String> {
+    // Пароль обов'язковий: його можна встановити або змінити, але не зняти.
+    if new_password.is_none() {
+        return Err(local_profiles::LocalProfileError::PasswordRequired.to_string());
+    }
     let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
     let state = profiles
         .set_password(
@@ -1223,7 +1262,8 @@ pub fn run() {
             get_database_status,
             get_dashboard_model,
             get_local_profiles,
-            create_local_profile,
+            register_local_profile,
+            set_local_profile_modules,
             rename_local_profile,
             activate_local_profile,
             delete_local_profile,

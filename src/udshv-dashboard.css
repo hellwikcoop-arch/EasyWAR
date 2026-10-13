@@ -104,23 +104,43 @@ body.udshv-open #view-ref { display: none !important; }
 @media (max-width: 1599px) { .ud-kpis.ud-kpis-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 640px) { .ud-kpis.ud-kpis-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .ud-kpi {
-  position: relative; display: grid; gap: 3px; padding: 14px 14px 10px; overflow: hidden; border-radius: 14px;
+  position: relative; display: grid; padding: 14px 14px 10px; overflow: hidden; border-radius: 14px;
+  /* Плитка-іконка | підпис, число, динаміка | міні-графік; нижче — пояснення на всю ширину. */
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: "ic label spark" "ic value spark" "ic delta spark" "hint hint hint";
+  column-gap: 12px; row-gap: 3px; align-items: start;
+  container: ud-kpi / inline-size;
   border: 1px solid color-mix(in srgb, var(--tone) 60%, transparent);
   background: linear-gradient(160deg, color-mix(in srgb, var(--tone) 18%, transparent), color-mix(in srgb, var(--ud-panel) 92%, transparent) 62%);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .07), 0 8px 22px rgba(0, 0, 0, .28);
   -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
 }
-.ud-kpi-icon { position: absolute; top: 12px; right: 12px; color: var(--tone); opacity: .95; }
-.ud-kpi-label { padding-right: 30px; }
+.ud-kpi-ic {
+  grid-area: ic; align-self: start; width: 44px; height: 44px; border-radius: 13px; display: grid; place-items: center;
+  color: var(--tone);
+  background: color-mix(in srgb, var(--tone) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tone) 40%, transparent);
+}
+.ud-kpi-icon { opacity: .95; }
 .ud-kpi[role="button"] { cursor: pointer; }
 .ud-kpi[role="button"]:hover { border-color: var(--tone); }
-.ud-kpi-label { font-weight: 800; color: var(--ud-muted); font-size: 13px; }
-.ud-kpi strong { font-size: clamp(22px, 2vw, 30px); line-height: 1.1; }
-.ud-kpi small { color: var(--ud-muted); font-size: 11px; }
+.ud-kpi-label { grid-area: label; font-weight: 800; color: var(--ud-muted); font-size: 13px; }
+.ud-kpi strong { grid-area: value; font-size: clamp(22px, 2vw, 30px); line-height: 1.1; }
+.ud-kpi small { grid-area: hint; margin-top: 6px; color: var(--ud-muted); font-size: 11px; }
+.ud-kpi > .ud-delta { grid-area: delta; }
 .ud-delta { font-size: 12px; color: var(--ud-muted); }
 .ud-delta.up { color: var(--ud-green); }
 .ud-delta.down { color: var(--ud-red); }
 .ud-spark { width: 100%; height: 38px; display: block; }
+.ud-kpi > .ud-spark { grid-area: spark; align-self: end; justify-self: end; width: 104px; height: 38px; }
+.ud-kpi > .ud-spark:empty { display: none; }
+/* У вузьких картках спершу зникає графік, потім іконка: число не обрізається. */
+@container ud-kpi (max-width: 299px) {
+  .ud-kpi-ic { width: 38px; height: 38px; border-radius: 11px; }
+  .ud-kpi > .ud-spark { width: 60px; }
+}
+@container ud-kpi (max-width: 219px) { .ud-kpi > .ud-spark { display: none; } }
+@container ud-kpi (max-width: 169px) { .ud-kpi-ic { display: none; } }
 
 .ud-grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .ud-grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }

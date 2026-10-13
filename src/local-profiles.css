@@ -208,8 +208,7 @@
 .ew-password-dialog form { display: grid; gap: 10px; }
 .ew-password-dialog h3 { margin: 0 0 4px; }
 .ew-password-dialog label { display: grid; gap: 4px; color: var(--muted); font-size: 13px; font-weight: 600; }
-.ew-password-dialog input,
-.ew-lock-card input {
+.ew-password-dialog input {
   min-height: 38px;
   color: var(--ink);
   background: var(--surface-2, var(--surface));
@@ -218,37 +217,9 @@
   padding: 7px 10px;
   font: inherit;
 }
-.ew-password-error, .ew-lock-message { min-height: 1.2em; margin: 0; color: var(--bad); font-weight: 600; }
+.ew-password-error { min-height: 1.2em; margin: 0; color: var(--bad); font-weight: 600; }
 
-/* ---- екран входу ---- */
-html.ew-locked, html.ew-locked body { overflow: hidden; }
-.ew-lock {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
-  display: grid;
-  place-items: center;
-  padding: 24px 16px;
-  overflow: auto;
-  background: var(--bg, #0b1220);
-}
-.ew-lock[hidden] { display: none; }
-.ew-lock-inner { width: min(900px, 100%); display: grid; gap: 14px; justify-items: center; text-align: center; }
-.ew-lock-inner h2 { margin: 0; }
-.ew-lock-note { margin: 0; color: var(--muted); }
-.ew-lock-cards { display: flex; flex-wrap: wrap; justify-content: center; gap: 14px; width: 100%; }
-.ew-lock-card {
-  display: grid;
-  justify-items: center;
-  gap: 8px;
-  width: 220px;
-  padding: 18px 16px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: var(--surface);
-}
-.ew-lock-card.is-active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
-.ew-lock-card strong { font-size: 16px; }
-.ew-lock-position { color: var(--muted); font-size: 13px; min-height: 1.2em; }
-.ew-lock-db { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
-.ew-lock-card input, .ew-lock-card button { width: 100%; }
+/* ---- модулі профілю ---- */
+.ew-profile-modules { display: grid; gap: 8px; margin-top: 10px; }
+.ew-profile-module-list { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.ew-profile-module { display: inline-flex; align-items: center; gap: 6px; }

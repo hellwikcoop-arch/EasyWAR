@@ -4,7 +4,8 @@ import vm from 'node:vm';
 import {
   activateLocalProfile,
   activeProfileLabel,
-  createLocalProfile,
+  registerLocalProfile,
+  setLocalProfileModules,
   deleteLocalProfile,
   getLocalProfiles,
   renameLocalProfile,
@@ -18,14 +19,25 @@ test('local profile helpers call only dedicated desktop commands', async () => {
   };
 
   await getLocalProfiles(invoke);
-  await createLocalProfile('Навчальний', invoke);
+  await registerLocalProfile({ displayName: 'Навчальний', password: 'синтетичний', modules: ['air'] }, invoke);
+  await setLocalProfileModules('profile-000000000000000000000000', ['air', 'pvk'], invoke);
   await renameLocalProfile('profile-000000000000000000000000', 'Оновлений', invoke);
   await activateLocalProfile('profile-000000000000000000000000', invoke);
   await deleteLocalProfile('profile-000000000000000000000000', invoke);
 
   assert.deepEqual(calls, [
     ['get_local_profiles', undefined],
-    ['create_local_profile', { displayName: 'Навчальний' }],
+    ['register_local_profile', {
+      displayName: 'Навчальний',
+      password: 'синтетичний',
+      position: null,
+      avatarDataUrl: null,
+      modules: ['air'],
+    }],
+    ['set_local_profile_modules', {
+      profileId: 'profile-000000000000000000000000',
+      modules: ['air', 'pvk'],
+    }],
     ['rename_local_profile', {
       profileId: 'profile-000000000000000000000000',
       displayName: 'Оновлений',

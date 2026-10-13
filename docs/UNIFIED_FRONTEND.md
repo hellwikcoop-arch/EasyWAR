@@ -13,6 +13,101 @@ application as three same-origin pages:
 Each module isolates its `localStorage` keys and IndexedDB names by prefix
 (`easywar.air::`, `easywar.rocket::`), so both work side by side in one origin.
 
+## Dashboard motion (PVK, UDSHV, «Наші втрати»)
+
+`src/dashboard-motion.css` and `src/dashboard-motion.js` are shared by the PVK and
+UDSHV dashboards (and the «Наші втрати» tab inside them). The dashboards rebuild the
+whole page on every filter change, so entrance animations are not attached to node
+creation: `playMotion(root, viewKey)` is called at the end of `render()` and sets
+`data-dash-motion="first|enter"` on the dashboard root only when the section changed
+(or on first open); otherwise it removes the attribute and the page appears instantly.
+All animation rules are gated by that attribute and by
+`prefers-reduced-motion: no-preference`. The application toggle «Анімації»
+(`html[data-motion="off"]`, defined in `air.html` / `rocket.html`) stays the global
+switch: it neutralises these animations through the existing `animation-duration`
+override, and `playMotion` also skips the number count-up. Do not reuse the
+`data-motion` name on a dashboard root: it would match the `<html>` toggle.
+
+Time budget: every entrance animation plus its stagger delay (`--dm-d`, capped per group
+in `STAGGER_GROUPS`) must finish within 1200 ms (design system v1.1, motion rule 1).
+`tests/dashboard-motion.test.mjs` computes the worst-case delay of each group and fails
+when a new rule or a longer duration breaks the budget; a new rule that uses `--dm-d`
+needs an entry in the test's `FAMILIES` table.
+
+## Dashboard theme (PVK, UDSHV, «Наші втрати»)
+
+`src/dashboard-theme.css` — шар кольорів і поверхонь поверх `pvk-dashboard.css`, `udshv-dashboard.css` і `own-losses-dashboard.css`, підключений у `air.html` і `rocket.html` після `dashboard-motion.css`. Усі правила стоять під `html:not([data-theme="light"])`, анімацій у файлі немає, а зображення — лише локальні `webp`/`svg` з папок `udshv-art` і `pvk-art` (перевіряє `tests/dashboard-theme.test.mjs`). Картки показників ПВК: `kpi(label, value, detail, tone, { icon, series, ring })` у `pvk-dashboard.js` будує `article.pvk-kpi` з плиткою `i.pvk-kpi-ic[data-ic]`, текстом `.pvk-kpi-text` і міні-графіком `svg.pvk-kpi-spark` (ряд по днях із `summary.dynamics`, який рахує `pvk-dashboard-core.js`) або кільцем `.pvk-kpi-ring` (`--p` — відсоток). Структура й адаптація (container query `pvk-kpi`: графік зникає від 219px, іконка від 169px вмісту) — у `pvk-dashboard.css`, маски іконок за `data-ic` — у `dashboard-layout.css` (той самий набір `--ic-*`, що й меню; новий ключ потребує `--ic-<key>` і правила `.pvk-kpi-ic[data-ic]`), світіння — у темі. Ряди не вигадуються на фронтенді: нова картка з графіком потребує ряду в `summary.dynamics` (тест `tests/dashboard-layout.test.mjs` це перевіряє). Із лівим меню `dashboard-layout.css` тримає 6 плиток по 3, а 7–8 по 4 в ряд (7–8 в ряд лише від 2200px). Картки УДШВ (`kpiCard` в `udshv-dashboard.js`): плитка `i.ud-kpi-ic` з наявним SVG-значком, графік `svg.ud-spark` із заливкою `.ud-spark-area`; розкладка — `grid-template-areas` у `udshv-dashboard.css` (ic / label / value / delta / spark / hint) з тими самими container query-порогами, що й ПВК. Число лишається прямим нащадком `.ud-kpi` (його шукає лічильник у `dashboard-motion.js`). Із меню 9 карток стоять по 3 в ряд, 9 в ряд — від 2400px. Палітри задано змінними `--ud-*` / `--pvk-*` та спільними `--th-*` на коренях `#udshv-dashboard-root` і `#pvk-dashboard-root`; `.ol-root` успадковує їх.
+
+## Dashboard layout (PVK, UDSHV)
+
+`src/dashboard-layout.css` (підключений у `air.html` і `rocket.html` перед `dashboard-theme.css`) від 1200px робить із `<nav>` дашборда ліву колонку сітки кореня: `grid-column: 1; grid-row: 1 / span 12`, решта блоків — у колонці 2. Проміжки між блоками задано полями, а не `gap`, щоб порожні неявні рядки сітки не додавали висоти. Іконки меню — CSS-маски за атрибутом `data-nav` кнопки (його ставлять `udshv-dashboard.js` і `pvk-dashboard.js`; ключ — ключ розділу). Новому розділу потрібен рядок `--nav-icon` у цьому файлі, інакше буде іконка за замовчуванням. Фото шапок — `udshv-art/hero-photo.webp` (десантник під куполом: права частина банера УДШВ від власника, пропорції 760:142 під висоту шапки, згасання зліва вшите в альфа-канал) і `pvk-art/hero-photo.webp`, підключені в `dashboard-theme.css` лише для темної теми. Шапка УДШВ використовує `background-size: auto 100%`, тому фото не розтягується при зміні ширини вікна; нове фото для неї печеться під те саме співвідношення сторін. Картки внизу лівого меню (`pvk-art/pilot-card.webp`, `udshv-art/badge.webp`) задані в кінці `dashboard-layout.css` через `::after` меню, лише в темній темі й лише від 1200px.
+
+## Startup splash
+
+A short intro covers the launcher from the first paint and then fades into it.
+
+| File | Role |
+| --- | --- |
+| `src/startup-splash-core.js` | pure timings, tile list, progress rules (tested in `tests/startup-splash.test.mjs`) |
+| `src/startup-splash.js` | DOM: video, tiles, «Завантаження…» bar, skip button; loaded as a module after `launcher-tools.js` |
+| `src/startup-splash.css` | overlay styles, ultrawide rule, CSS failsafe that hides the overlay after 20 s even if the script never runs |
+| `src/splash/easywar-intro.mp4` | 5.33 s, silent, H.264 High, 1280×720, 24 fps, ≈0.5 MB |
+
+`src/index.html` carries only three anchored additions: the stylesheet link, an
+empty `<div class="ew-splash" id="ew-splash">` right after `<body>`, and the
+module script before `</body>`. `script/import_unified_html.mjs` rewrites
+`index.html`, so after an import re-apply those three lines;
+`tests/startup-splash.test.mjs` fails if any of them is lost.
+
+- The video is fetched and played from a blob, because WKWebView on macOS may
+  not play media from the `tauri://` scheme without Range support. If the fetch
+  fails it falls back to the plain URL; if the video errors or does not start
+  within 2.5 s, the splash is removed at once.
+- Tiles are labels only (no navigation). The loading bar holds at 90 % until the
+  page and fonts are loaded.
+- `prefers-reduced-motion: reduce` skips the splash. The launcher is `inert`
+  while it is shown.
+- The clip has a slogan baked in («ОБЕРИ СВІЙ РІД ВІЙСЬК», types in from ≈2.6 s) that
+  cannot be edited. `.ew-splash__plate` (inside `.ew-splash__stage`) is an opaque
+  plate that closes over it at `SPLASH.plateInMs` and then shows `SPLASH_SLOGAN`
+  from the core. The stage has the size of the visible video frame and is scaled
+  by `videoZoom()` (the video slowly zooms out 1.07 → 1.0 around 50% / 37.5%), so
+  the plate stays glued to the same spot. Change the text only in `SPLASH_SLOGAN`.
+  If the clip is replaced, re-measure the plate position (`top: 71.9%`, height,
+  width in `startup-splash.css`) and `VIDEO_ZOOM_KEYS` in the core.
+- `vite.config.js` keeps `.mp4` out of the phone viewer's offline cache.
+- Source clip: generated by the owner with an AI video tool and trimmed to its
+  first 5.33 s; the original is not stored in the repository. To replace the
+  video keep it silent and small, and re-encode with
+  `ffmpeg -i in.mp4 -t 5.3 -an -vf scale=1280:720,format=yuv420p -c:v libx264 -profile:v high -preset veryslow -crf 28 -r 24 -movflags +faststart src/splash/easywar-intro.mp4`
+  (adjust `SPLASH.videoMs` and the tile timings in the core if the length changes).
+  Every committed version stays in git history and ships in each update package
+  (backlog P2-6), so do not commit iterations.
+
+
+## Registration and sign-in gate
+
+After the splash the launcher is covered by a registration wizard (no profiles
+yet) or a sign-in screen (any later launch). The gate is mounted at startup under
+the splash (`z-index` 4000 vs 5000), so it is already in place when the splash
+ends, and the launcher stays `inert` until sign-in.
+
+| File | Role |
+| --- | --- |
+| `src/profile-gate-core.js` | pure rules: form validation, module list, table slots per module, retry delay, which screen to show (tested in `tests/profile-gate.test.mjs`) |
+| `src/profile-gate.js` | DOM: login, three-step registration (profile → modules → tables), error screen; `html.ew-locked` + `inert` on the page; no network, no browser storage |
+| `src/profile-gate.css` | gate styles; `.ew-module-off` hides unchosen module cards (selectors carry `#view-start` because `index.html` uses `!important` ids) |
+| `src/local-profiles.js` | creates the gate, hides unchosen modules (`applyModules`), keeps the profile dialog; sign-out sets the splash skip flag and reloads |
+| `src/startup-splash-core.js` | `requestSplashSkip` / `consumeSplashSkip`: one-shot `sessionStorage` flag so sign-out does not replay the video |
+
+- `src/index.html` is unchanged. Module cards and tiles are found by the selectors
+  in `GATE_MODULES`; `tests/profile-gate.test.mjs` fails if one disappears from
+  `index.html`, so re-check it after `script/import_unified_html.mjs`.
+- Outside Tauri (plain browser, `npm run dev`) there is no profile backend, so no
+  gate is shown.
+- The gate is a UI barrier plus the Rust unlock check of data commands, not
+  protection against file tampering; see `docs/DATABASE.md` (Local profiles).
+
 ## Desktop behaviour
 
 - **Tauri IPC in the iframe.** Tauri injects its bridge only into the top-level

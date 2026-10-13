@@ -39,3 +39,9 @@ bound to `air` earlier stays there and still opens in the Air Force module.
 losses) is bound to each command tile apart from the tile's main table. The
 table is rebuilt because SQLite cannot change a CHECK in place; existing
 bindings are copied unchanged.
+
+`0009_profile_modules.sql` adds `local_profile_modules`: the modules a user chose
+at registration (`air`, `rocket`, `artillery`, `pvk`, `dshv`), one row per
+`(profile_id, module)`. It only decides which cards the start screen shows for
+that profile; data access is still decided by the password and the bound tables.
+Profiles that exist before this migration keep all five modules.

@@ -10,7 +10,10 @@ pub const MAX_LOCAL_PROFILES: i64 = 32;
 const MAX_PROFILE_NAME_CHARS: usize = 80;
 const MAX_POSITION_CHARS: usize = 120;
 const MAX_AVATAR_BYTES: usize = 400_000;
-const MIN_PASSWORD_CHARS: usize = 4;
+const MIN_PASSWORD_CHARS: usize = 6;
+
+/// Модулі, які користувач обирає при реєстрації, у порядку показу на стартовому екрані.
+pub const MODULES: [&str; 5] = ["air", "rocket", "artillery", "pvk", "dshv"];
 const MAX_PASSWORD_CHARS: usize = 128;
 
 #[derive(Clone, Debug)]
@@ -107,6 +110,8 @@ pub struct LocalProfile {
     pub position: String,
     pub avatar_data_url: Option<String>,
     pub has_password: bool,
+    /// Модулі, обрані при реєстрації (ключі з `MODULES`), у порядку показу.
+    pub modules: Vec<String>,
     pub tables: ProfileTables,
     pub created_at: String,
     pub updated_at: String,
@@ -137,7 +142,7 @@ pub enum LocalProfileError {
     InvalidPosition,
     #[error("фото профілю має бути зображенням до 400 КБ")]
     InvalidAvatar,
-    #[error("пароль має містити від 4 до 128 символів")]
+    #[error("пароль має містити від 6 до 128 символів")]
     InvalidPassword,
     #[error("неправильний пароль профілю")]
     WrongPassword,
@@ -147,6 +152,38 @@ pub enum LocalProfileError {
     InvalidBranch,
     #[error("шлях до таблиці має містити від 1 до 4096 символів")]
     InvalidTablePath,
+    #[error("оберіть щонайменше один із наявних модулів")]
+    InvalidModules,
+    #[error("пароль профілю обов'язковий")]
+    PasswordRequired,
+}
+
+/// Дані реєстрації: профіль створюється разом з обов'язковим паролем і модулями.
+pub struct NewProfile<'a> {
+    pub id: &'a str,
+    pub display_name: &'a str,
+    pub password: &'a str,
+    pub position: &'a str,
+    pub avatar_data_url: Option<&'a str>,
+    pub modules: &'a [String],
+}
+
+/// Перелік модулів у каноничному порядку без дублікатів; порожній або невідомий — помилка.
+pub fn normalize_modules(modules: &[String]) -> Result<Vec<&'static str>, LocalProfileError> {
+    if modules
+        .iter()
+        .any(|module| !MODULES.contains(&module.as_str()))
+    {
+        return Err(LocalProfileError::InvalidModules);
+    }
+    let chosen: Vec<&'static str> = MODULES
+        .into_iter()
+        .filter(|known| modules.iter().any(|module| module == known))
+        .collect();
+    if chosen.is_empty() {
+        return Err(LocalProfileError::InvalidModules);
+    }
+    Ok(chosen)
 }
 
 impl LocalProfileStore {
@@ -187,6 +224,13 @@ impl LocalProfileStore {
         .bind(now)
         .execute(&mut *transaction)
         .await?;
+        for module in MODULES {
+            sqlx::query("INSERT INTO local_profile_modules (profile_id, module) VALUES (?, ?)")
+                .bind(id)
+                .bind(module)
+                .execute(&mut *transaction)
+                .await?;
+        }
         sqlx::query(
             "UPDATE local_profile_state
              SET active_profile_id = ?, updated_at = ?
@@ -196,6 +240,110 @@ impl LocalProfileStore {
         .bind(now)
         .execute(&mut *transaction)
         .await?;
+        transaction.commit().await?;
+        self.list().await
+    }
+
+    /// Реєстрація: профіль, пароль, посада, фото й модулі зберігаються одним
+    /// кроком, а новий профіль стає активним. Пароль обов'язковий.
+    pub async fn register(
+        &self,
+        new: NewProfile<'_>,
+        now: &str,
+    ) -> Result<LocalProfilesState, LocalProfileError> {
+        validate_profile_id(new.id)?;
+        let (display_name, name_key) = normalize_display_name(new.display_name)?;
+        let hash = hash_password(new.password)?;
+        let position = new
+            .position
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        if position.chars().count() > MAX_POSITION_CHARS {
+            return Err(LocalProfileError::InvalidPosition);
+        }
+        if let Some(avatar) = new.avatar_data_url {
+            validate_avatar(avatar)?;
+        }
+        let modules = normalize_modules(new.modules)?;
+        let mut transaction = self.pool.begin().await?;
+        ensure_unique_name(&mut transaction, &name_key, None).await?;
+        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM local_profiles")
+            .fetch_one(&mut *transaction)
+            .await?;
+        if count >= MAX_LOCAL_PROFILES {
+            return Err(LocalProfileError::ProfileLimitReached);
+        }
+        sqlx::query(
+            "INSERT INTO local_profiles
+             (id, display_name, name_key, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(new.id)
+        .bind(&display_name)
+        .bind(&name_key)
+        .bind(now)
+        .bind(now)
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::query(
+            "INSERT INTO local_profile_details
+             (profile_id, position, avatar_data_url, password_hash, updated_at)
+             VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(new.id)
+        .bind(&position)
+        .bind(new.avatar_data_url)
+        .bind(&hash)
+        .bind(now)
+        .execute(&mut *transaction)
+        .await?;
+        for module in modules {
+            sqlx::query("INSERT INTO local_profile_modules (profile_id, module) VALUES (?, ?)")
+                .bind(new.id)
+                .bind(module)
+                .execute(&mut *transaction)
+                .await?;
+        }
+        sqlx::query(
+            "UPDATE local_profile_state SET active_profile_id = ?, updated_at = ?
+             WHERE singleton = 1",
+        )
+        .bind(new.id)
+        .bind(now)
+        .execute(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        self.list().await
+    }
+
+    /// Змінює набір модулів профілю; потрібен щонайменше один.
+    pub async fn set_modules(
+        &self,
+        id: &str,
+        modules: &[String],
+        now: &str,
+    ) -> Result<LocalProfilesState, LocalProfileError> {
+        validate_profile_id(id)?;
+        let modules = normalize_modules(modules)?;
+        let mut transaction = self.pool.begin().await?;
+        ensure_profile_exists(&mut transaction, id).await?;
+        sqlx::query("DELETE FROM local_profile_modules WHERE profile_id = ?")
+            .bind(id)
+            .execute(&mut *transaction)
+            .await?;
+        for module in modules {
+            sqlx::query("INSERT INTO local_profile_modules (profile_id, module) VALUES (?, ?)")
+                .bind(id)
+                .bind(module)
+                .execute(&mut *transaction)
+                .await?;
+        }
+        sqlx::query("UPDATE local_profiles SET updated_at = ? WHERE id = ?")
+            .bind(now)
+            .bind(id)
+            .execute(&mut *transaction)
+            .await?;
         transaction.commit().await?;
         self.list().await
     }
@@ -525,6 +673,14 @@ async fn load_state(pool: &SqlitePool) -> Result<LocalProfilesState, LocalProfil
         sqlx::query_as("SELECT profile_id, branch, path FROM local_profile_tables")
             .fetch_all(pool)
             .await?;
+    let module_rows: Vec<(String, String)> =
+        sqlx::query_as("SELECT profile_id, module FROM local_profile_modules")
+            .fetch_all(pool)
+            .await?;
+    let mut chosen = std::collections::HashMap::<String, Vec<String>>::new();
+    for (profile_id, module) in module_rows {
+        chosen.entry(profile_id).or_default().push(module);
+    }
     let mut tables = std::collections::HashMap::<String, ProfileTables>::new();
     for (profile_id, branch, path) in table_rows {
         // The schema only admits known branches.
@@ -544,6 +700,15 @@ async fn load_state(pool: &SqlitePool) -> Result<LocalProfilesState, LocalProfil
                 created_at,
                 updated_at,
             )| LocalProfile {
+                modules: MODULES
+                    .into_iter()
+                    .filter(|known| {
+                        chosen
+                            .get(&id)
+                            .is_some_and(|list| list.iter().any(|module| module == known))
+                    })
+                    .map(str::to_owned)
+                    .collect(),
                 tables: tables.remove(&id).unwrap_or_default(),
                 id,
                 display_name,
@@ -624,7 +789,8 @@ mod tests {
     use super::*;
     use crate::database::{
         COMMAND_TABLES_SQL, INITIAL_SCHEMA_SQL, LOCAL_PROFILES_SQL, OWN_LOSSES_TABLES_SQL,
-        PROFILE_BRANCH_TABLES_SQL, PROFILE_DETAILS_SQL, XLSX_DUPLICATE_LINKS_SQL,
+        PROFILE_BRANCH_TABLES_SQL, PROFILE_DETAILS_SQL, PROFILE_MODULES_SQL,
+        XLSX_DUPLICATE_LINKS_SQL,
     };
     use sqlx::sqlite::SqlitePoolOptions;
 
@@ -662,6 +828,10 @@ mod tests {
             .await
             .unwrap();
         sqlx::raw_sql(OWN_LOSSES_TABLES_SQL)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::raw_sql(PROFILE_MODULES_SQL)
             .execute(&pool)
             .await
             .unwrap();
@@ -1032,11 +1202,21 @@ mod tests {
             .await
             .unwrap();
         store
-            .set_table_path(&profile, Branch::PvkLosses, Some("/synthetic/pvk-own.xlsx"), NOW_2)
+            .set_table_path(
+                &profile,
+                Branch::PvkLosses,
+                Some("/synthetic/pvk-own.xlsx"),
+                NOW_2,
+            )
             .await
             .unwrap();
         let state = store
-            .set_table_path(&profile, Branch::DshvLosses, Some("/synthetic/dshv-own.xlsx"), NOW_2)
+            .set_table_path(
+                &profile,
+                Branch::DshvLosses,
+                Some("/synthetic/dshv-own.xlsx"),
+                NOW_2,
+            )
             .await
             .unwrap();
         assert_eq!(
@@ -1090,10 +1270,7 @@ mod tests {
             sqlx::raw_sql(migration).execute(&pool).await.unwrap();
         }
         let profile = id("Перенесення втрат");
-        LocalProfileStore::new(pool.clone())
-            .create(&profile, "Перенесення втрат", NOW_1)
-            .await
-            .unwrap();
+        insert_legacy_profile(&pool, &profile, "Перенесення втрат").await;
         sqlx::query(
             "INSERT INTO local_profile_tables (profile_id, branch, path, updated_at)
              VALUES (?, 'air', '/synthetic/air.xlsx', ?), (?, 'dshv', '/synthetic/dshv.xlsx', ?)",
@@ -1116,7 +1293,14 @@ mod tests {
         .await
         .is_err());
 
-        sqlx::raw_sql(OWN_LOSSES_TABLES_SQL).execute(&pool).await.unwrap();
+        sqlx::raw_sql(OWN_LOSSES_TABLES_SQL)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::raw_sql(PROFILE_MODULES_SQL)
+            .execute(&pool)
+            .await
+            .unwrap();
         let state = LocalProfileStore::new(pool.clone()).list().await.unwrap();
         assert_eq!(
             state.profiles[0].tables,
@@ -1155,10 +1339,7 @@ mod tests {
             sqlx::raw_sql(migration).execute(&pool).await.unwrap();
         }
         let profile = id("Перенесення");
-        LocalProfileStore::new(pool.clone())
-            .create(&profile, "Перенесення", NOW_1)
-            .await
-            .unwrap();
+        insert_legacy_profile(&pool, &profile, "Перенесення").await;
         sqlx::query(
             "INSERT INTO local_profile_tables (profile_id, branch, path, updated_at)
              VALUES (?, 'air', '/synthetic/air.xlsx', ?), (?, 'rocket', '/synthetic/rocket.xlsx', ?)",
@@ -1181,7 +1362,18 @@ mod tests {
         .await
         .is_err());
 
-        sqlx::raw_sql(COMMAND_TABLES_SQL).execute(&pool).await.unwrap();
+        sqlx::raw_sql(COMMAND_TABLES_SQL)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::raw_sql(OWN_LOSSES_TABLES_SQL)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::raw_sql(PROFILE_MODULES_SQL)
+            .execute(&pool)
+            .await
+            .unwrap();
         let state = LocalProfileStore::new(pool).list().await.unwrap();
         assert_eq!(
             state.profiles[0].tables,
@@ -1242,6 +1434,10 @@ mod tests {
             .await
             .unwrap();
 
+        sqlx::raw_sql(PROFILE_MODULES_SQL)
+            .execute(&pool)
+            .await
+            .unwrap();
         let store = LocalProfileStore::new(pool);
         let state = store.list().await.unwrap();
         let tables = |profile: &str| {
@@ -1262,5 +1458,301 @@ mod tests {
         );
         assert_eq!(tables(&bound).position, "Аналітик");
         assert_eq!(tables(&empty).tables, ProfileTables::default());
+    }
+
+    /// Профіль у старій схемі (до міграції модулів): `create` ще не вміє писати модулі.
+    async fn insert_legacy_profile(pool: &SqlitePool, profile: &str, name: &str) {
+        sqlx::query(
+            "INSERT INTO local_profiles (id, display_name, name_key, created_at, updated_at)
+             VALUES (?, ?, lower(?), ?, ?)",
+        )
+        .bind(profile)
+        .bind(name)
+        .bind(name)
+        .bind(NOW_1)
+        .bind(NOW_1)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    fn modules(keys: &[&str]) -> Vec<String> {
+        keys.iter().map(|key| (*key).to_owned()).collect()
+    }
+
+    fn registration<'a>(
+        profile: &'a str,
+        name: &'a str,
+        password: &'a str,
+        chosen: &'a [String],
+    ) -> NewProfile<'a> {
+        NewProfile {
+            id: profile,
+            display_name: name,
+            password,
+            position: "  Оператор   ПС ",
+            avatar_data_url: None,
+            modules: chosen,
+        }
+    }
+
+    #[tokio::test]
+    async fn registration_creates_profile_password_details_and_modules_at_once() {
+        let store = store().await;
+        let profile = id("Реєстрація");
+        let chosen = modules(&["pvk", "air", "air"]);
+        let state = store
+            .register(
+                registration(
+                    &profile,
+                    "  Новий   користувач ",
+                    "синтетичний-пароль",
+                    &chosen,
+                ),
+                NOW_1,
+            )
+            .await
+            .unwrap();
+        assert_eq!(state.active_profile_id.as_deref(), Some(profile.as_str()));
+        let created = &state.profiles[0];
+        assert_eq!(created.display_name, "Новий користувач");
+        assert_eq!(created.position, "Оператор ПС");
+        assert!(created.has_password);
+        // Дублікати зникають, порядок — як на стартовому екрані.
+        assert_eq!(created.modules, ["air", "pvk"]);
+        assert!(store
+            .verify_password(&profile, "синтетичний-пароль")
+            .await
+            .unwrap());
+        assert!(!store.verify_password(&profile, "").await.unwrap());
+        let stored: String = sqlx::query_scalar("SELECT password_hash FROM local_profile_details")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        assert!(stored.starts_with("$argon2id$"));
+        assert!(!stored.contains("синтетичний-пароль"));
+    }
+
+    #[tokio::test]
+    async fn registration_rejects_bad_input_without_leaving_a_partial_profile() {
+        let store = store().await;
+        let ok_modules = modules(&["air"]);
+        assert!(matches!(
+            store
+                .register(registration(&id("a"), "Профіль", "", &ok_modules), NOW_1)
+                .await,
+            Err(LocalProfileError::InvalidPassword)
+        ));
+        assert!(matches!(
+            store
+                .register(
+                    registration(&id("b"), "Профіль", "12345", &ok_modules),
+                    NOW_1
+                )
+                .await,
+            Err(LocalProfileError::InvalidPassword)
+        ));
+        assert!(matches!(
+            store
+                .register(
+                    registration(&id("c"), "   ", "добрий-пароль", &ok_modules),
+                    NOW_1
+                )
+                .await,
+            Err(LocalProfileError::InvalidDisplayName)
+        ));
+        assert!(matches!(
+            store
+                .register(
+                    registration(&id("d"), "Профіль", "добрий-пароль", &[]),
+                    NOW_1
+                )
+                .await,
+            Err(LocalProfileError::InvalidModules)
+        ));
+        let unknown = modules(&["air", "army"]);
+        assert!(matches!(
+            store
+                .register(
+                    registration(&id("e"), "Профіль", "добрий-пароль", &unknown),
+                    NOW_1
+                )
+                .await,
+            Err(LocalProfileError::InvalidModules)
+        ));
+        let avatar_profile = id("f");
+        let mut with_bad_avatar =
+            registration(&avatar_profile, "Профіль", "добрий-пароль", &ok_modules);
+        with_bad_avatar.avatar_data_url = Some("data:text/html;base64,AAAA");
+        assert!(matches!(
+            store.register(with_bad_avatar, NOW_1).await,
+            Err(LocalProfileError::InvalidAvatar)
+        ));
+        assert!(store.list().await.unwrap().profiles.is_empty());
+        for table in [
+            "local_profiles",
+            "local_profile_details",
+            "local_profile_modules",
+        ] {
+            let rows: i64 = sqlx::query_scalar(&format!("SELECT count(*) FROM {table}"))
+                .fetch_one(&store.pool)
+                .await
+                .unwrap();
+            assert_eq!(rows, 0, "{table} stays empty after a rejected registration");
+        }
+    }
+
+    #[tokio::test]
+    async fn registration_keeps_names_unique_and_switches_the_active_profile() {
+        let store = store().await;
+        let chosen = modules(&["rocket"]);
+        let first = id("перший");
+        let second = id("другий");
+        store
+            .register(
+                registration(&first, "Перший", "перший-пароль", &chosen),
+                NOW_1,
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            store
+                .register(
+                    registration(&id("дубль"), " ПЕРШИЙ ", "дубль-пароль", &chosen),
+                    NOW_1
+                )
+                .await,
+            Err(LocalProfileError::DuplicateDisplayName)
+        ));
+        let state = store
+            .register(
+                registration(
+                    &second,
+                    "Другий",
+                    "другий-пароль",
+                    &modules(&["artillery", "dshv"]),
+                ),
+                NOW_2,
+            )
+            .await
+            .unwrap();
+        assert_eq!(state.active_profile_id.as_deref(), Some(second.as_str()));
+        assert_eq!(state.profiles.len(), 2);
+        // Паролі й модулі окремі для кожного користувача.
+        assert!(store
+            .verify_password(&first, "перший-пароль")
+            .await
+            .unwrap());
+        assert!(!store
+            .verify_password(&first, "другий-пароль")
+            .await
+            .unwrap());
+        let by_name = |name: &str| {
+            state
+                .profiles
+                .iter()
+                .find(|p| p.display_name == name)
+                .unwrap()
+                .clone()
+        };
+        assert_eq!(by_name("Перший").modules, ["rocket"]);
+        assert_eq!(by_name("Другий").modules, ["artillery", "dshv"]);
+    }
+
+    #[tokio::test]
+    async fn modules_can_be_changed_but_never_emptied_and_follow_profile_deletion() {
+        let store = store().await;
+        let profile = id("модулі");
+        store
+            .register(
+                registration(&profile, "Модулі", "модулі-пароль", &modules(&["air"])),
+                NOW_1,
+            )
+            .await
+            .unwrap();
+        let state = store
+            .set_modules(&profile, &modules(&["dshv", "rocket"]), NOW_2)
+            .await
+            .unwrap();
+        assert_eq!(state.profiles[0].modules, ["rocket", "dshv"]);
+        assert_eq!(state.profiles[0].updated_at, NOW_2);
+        assert!(matches!(
+            store.set_modules(&profile, &[], NOW_2).await,
+            Err(LocalProfileError::InvalidModules)
+        ));
+        assert!(matches!(
+            store
+                .set_modules(&profile, &modules(&["army"]), NOW_2)
+                .await,
+            Err(LocalProfileError::InvalidModules)
+        ));
+        assert!(matches!(
+            store
+                .set_modules(&id("немає"), &modules(&["air"]), NOW_2)
+                .await,
+            Err(LocalProfileError::ProfileNotFound)
+        ));
+        assert_eq!(
+            store.list().await.unwrap().profiles[0].modules,
+            ["rocket", "dshv"]
+        );
+        store.delete(&profile, NOW_2).await.unwrap();
+        let left: i64 = sqlx::query_scalar("SELECT count(*) FROM local_profile_modules")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        assert_eq!(left, 0);
+    }
+
+    #[tokio::test]
+    async fn profiles_created_without_registration_see_every_module() {
+        let store = store().await;
+        let state = store
+            .create(&id("старий"), "Старий профіль", NOW_1)
+            .await
+            .unwrap();
+        assert_eq!(state.profiles[0].modules, MODULES);
+    }
+
+    #[tokio::test]
+    async fn the_modules_migration_gives_existing_profiles_every_module() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        for migration in [
+            INITIAL_SCHEMA_SQL,
+            XLSX_DUPLICATE_LINKS_SQL,
+            LOCAL_PROFILES_SQL,
+            PROFILE_DETAILS_SQL,
+            PROFILE_BRANCH_TABLES_SQL,
+            COMMAND_TABLES_SQL,
+            OWN_LOSSES_TABLES_SQL,
+        ] {
+            sqlx::raw_sql(migration).execute(&pool).await.unwrap();
+        }
+        let profile = id("до модулів");
+        sqlx::query("INSERT INTO local_profiles (id, display_name, name_key, created_at, updated_at) VALUES (?, 'До модулів', 'до модулів', ?, ?)")
+            .bind(&profile)
+            .bind(NOW_1)
+            .bind(NOW_1)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::raw_sql(PROFILE_MODULES_SQL)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let state = LocalProfileStore::new(pool.clone()).list().await.unwrap();
+        assert_eq!(state.profiles[0].modules, MODULES);
+        // Невідомий модуль схема відхиляє.
+        assert!(sqlx::query(
+            "INSERT INTO local_profile_modules (profile_id, module) VALUES (?, 'army')"
+        )
+        .bind(&profile)
+        .execute(&pool)
+        .await
+        .is_err());
     }
 }

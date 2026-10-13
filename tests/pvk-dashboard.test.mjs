@@ -129,6 +129,10 @@ test('reads a synthetic three-sheet ПВК workbook and ignores empty and total 
   assert.equal(model.summary.totalAu, 3);
   assert.equal(model.summary.objects, 3);
   assert.equal(model.summary.expenditure, 7);
+  // Ряди по днях для міні-графіків карток зведення: сума АА і ПС, «Дорозвідується» лише з ПС.
+  assert.deepEqual(model.summary.dynamics.affected, [{ date: '2026-01-01', value: 2 }]);
+  assert.deepEqual(model.summary.dynamics.reconnaissance, [{ date: '2026-01-01', value: 0 }]);
+  assert.deepEqual(model.summary.dynamics.au, [{ date: '2026-01-01', value: 3 }]);
   assert.equal(model.sheets.find(sheet => sheet.name === 'АА').affectedSeries[0].value, 100);
   assert.equal(model.sheets.find(sheet => sheet.name === 'ПС').affectedSeries[0].value, 50);
 });
