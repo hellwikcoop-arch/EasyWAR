@@ -13,6 +13,35 @@ application as three same-origin pages:
 Each module isolates its `localStorage` keys and IndexedDB names by prefix
 (`easywar.air::`, `easywar.rocket::`), so both work side by side in one origin.
 
+## Dashboard motion (PVK, UDSHV, «Наші втрати»)
+
+`src/dashboard-motion.css` and `src/dashboard-motion.js` are shared by the PVK and
+UDSHV dashboards (and the «Наші втрати» tab inside them). The dashboards rebuild the
+whole page on every filter change, so entrance animations are not attached to node
+creation: `playMotion(root, viewKey)` is called at the end of `render()` and sets
+`data-dash-motion="first|enter"` on the dashboard root only when the section changed
+(or on first open); otherwise it removes the attribute and the page appears instantly.
+All animation rules are gated by that attribute and by
+`prefers-reduced-motion: no-preference`. The application toggle «Анімації»
+(`html[data-motion="off"]`, defined in `air.html` / `rocket.html`) stays the global
+switch: it neutralises these animations through the existing `animation-duration`
+override, and `playMotion` also skips the number count-up. Do not reuse the
+`data-motion` name on a dashboard root: it would match the `<html>` toggle.
+
+Time budget: every entrance animation plus its stagger delay (`--dm-d`, capped per group
+in `STAGGER_GROUPS`) must finish within 1200 ms (design system v1.1, motion rule 1).
+`tests/dashboard-motion.test.mjs` computes the worst-case delay of each group and fails
+when a new rule or a longer duration breaks the budget; a new rule that uses `--dm-d`
+needs an entry in the test's `FAMILIES` table.
+
+## Dashboard theme (PVK, UDSHV, «Наші втрати»)
+
+`src/dashboard-theme.css` — шар кольорів і поверхонь поверх `pvk-dashboard.css`, `udshv-dashboard.css` і `own-losses-dashboard.css`, підключений у `air.html` і `rocket.html` після `dashboard-motion.css`. Усі правила стоять під `html:not([data-theme="light"])`, анімацій у файлі немає, а зображення — лише локальні `webp`/`svg` з папок `udshv-art` і `pvk-art` (перевіряє `tests/dashboard-theme.test.mjs`). Картки показників ПВК: `kpi(label, value, detail, tone, { icon, series, ring })` у `pvk-dashboard.js` будує `article.pvk-kpi` з плиткою `i.pvk-kpi-ic[data-ic]`, текстом `.pvk-kpi-text` і міні-графіком `svg.pvk-kpi-spark` (ряд по днях із `summary.dynamics`, який рахує `pvk-dashboard-core.js`) або кільцем `.pvk-kpi-ring` (`--p` — відсоток). Структура й адаптація (container query `pvk-kpi`: графік зникає від 219px, іконка від 169px вмісту) — у `pvk-dashboard.css`, маски іконок за `data-ic` — у `dashboard-layout.css` (той самий набір `--ic-*`, що й меню; новий ключ потребує `--ic-<key>` і правила `.pvk-kpi-ic[data-ic]`), світіння — у темі. Ряди не вигадуються на фронтенді: нова картка з графіком потребує ряду в `summary.dynamics` (тест `tests/dashboard-layout.test.mjs` це перевіряє). Із лівим меню `dashboard-layout.css` тримає 6 плиток по 3, а 7–8 по 4 в ряд (7–8 в ряд лише від 2200px). Картки УДШВ (`kpiCard` в `udshv-dashboard.js`): плитка `i.ud-kpi-ic` з наявним SVG-значком, графік `svg.ud-spark` із заливкою `.ud-spark-area`; розкладка — `grid-template-areas` у `udshv-dashboard.css` (ic / label / value / delta / spark / hint) з тими самими container query-порогами, що й ПВК. Число лишається прямим нащадком `.ud-kpi` (його шукає лічильник у `dashboard-motion.js`). Із меню 9 карток стоять по 3 в ряд, 9 в ряд — від 2400px. Палітри задано змінними `--ud-*` / `--pvk-*` та спільними `--th-*` на коренях `#udshv-dashboard-root` і `#pvk-dashboard-root`; `.ol-root` успадковує їх.
+
+## Dashboard layout (PVK, UDSHV)
+
+`src/dashboard-layout.css` (підключений у `air.html` і `rocket.html` перед `dashboard-theme.css`) від 1200px робить із `<nav>` дашборда ліву колонку сітки кореня: `grid-column: 1; grid-row: 1 / span 12`, решта блоків — у колонці 2. Проміжки між блоками задано полями, а не `gap`, щоб порожні неявні рядки сітки не додавали висоти. Іконки меню — CSS-маски за атрибутом `data-nav` кнопки (його ставлять `udshv-dashboard.js` і `pvk-dashboard.js`; ключ — ключ розділу). Новому розділу потрібен рядок `--nav-icon` у цьому файлі, інакше буде іконка за замовчуванням. Фото шапок — `udshv-art/hero-photo.webp` (десантник під куполом: права частина банера УДШВ від власника, пропорції 760:142 під висоту шапки, згасання зліва вшите в альфа-канал) і `pvk-art/hero-photo.webp`, підключені в `dashboard-theme.css` лише для темної теми. Шапка УДШВ використовує `background-size: auto 100%`, тому фото не розтягується при зміні ширини вікна; нове фото для неї печеться під те саме співвідношення сторін. Картки внизу лівого меню (`pvk-art/pilot-card.webp`, `udshv-art/badge.webp`) задані в кінці `dashboard-layout.css` через `::after` меню, лише в темній темі й лише від 1200px.
+
 ## Startup splash
 
 A short intro covers the launcher from the first paint and then fades into it.

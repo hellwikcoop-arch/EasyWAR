@@ -405,6 +405,8 @@ export function createDashboardModel(workbook, options = {}) {
     activeDays: new Set(current.filter(hasData).map(r => r.date)).size,
     records: current,
     kpis,
+    // Усього за весь час таблиці (з урахуванням фільтра підрозділів, без фільтра періоду).
+    ovtOverall: Object.fromEntries(OVT_GROUPS.map(g => [g, sumBy(scoped, inGroup(g))])),
     personnelSeries: seriesFor(current, range, rs => ({ kia: sumBy(rs, id => id === 'personnel|200'), wia: sumBy(rs, id => id === 'personnel|300') }), bucket),
     ovtSeries: seriesFor(current, range, rs => ({ destroyed: sumBy(rs, inGroup('destroyed')), damaged: sumBy(rs, inGroup('damaged')), suppressed: sumBy(rs, inGroup('suppressed')) }), bucket),
     units: unitSummary(current, units),

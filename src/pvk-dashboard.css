@@ -131,8 +131,10 @@
 .pvk-kpi {
   position: relative;
   overflow: hidden;
-  display: grid;
-  gap: 5px;
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  container: pvk-kpi / inline-size;
   min-height: 116px;
   padding: 16px;
   border: 1px solid var(--pvk-border);
@@ -143,6 +145,31 @@
 .pvk-kpi span,
 .pvk-kpi small { color: var(--muted, #9ba8ba); }
 .pvk-kpi strong { z-index: 1; align-self: end; font-size: clamp(28px, 3vw, 42px); line-height: 1; }
+/* Текст картки — окрема колонка; плитка-іконка ліворуч, міні-графік або кільце праворуч (див. референси власника). */
+.pvk-kpi-text { position: relative; z-index: 1; flex: 1 1 0; min-width: 0; display: grid; gap: 5px; align-content: space-between; }
+.pvk-kpi-ic {
+  position: relative; z-index: 1; flex: none; align-self: flex-start; width: 44px; height: 44px; border-radius: 13px;
+  display: grid; place-items: center; color: var(--tone, var(--pvk-blue));
+  background: color-mix(in srgb, var(--tone, var(--pvk-blue)) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tone, var(--pvk-blue)) 40%, transparent);
+}
+.pvk-kpi-spark { position: relative; z-index: 1; flex: none; align-self: flex-end; width: clamp(64px, 28%, 100px); height: 44px; color: var(--tone, var(--pvk-blue)); overflow: visible; }
+.pvk-kpi-spark .area { fill: currentColor; opacity: .16; }
+.pvk-kpi-spark .line { fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.pvk-kpi-spark .dot { fill: currentColor; }
+.pvk-kpi-ring {
+  position: relative; z-index: 1; flex: none; align-self: center; width: 52px; height: 52px; border-radius: 50%;
+  background: conic-gradient(var(--tone, var(--pvk-blue)) calc(var(--p, 0) * 1%), color-mix(in srgb, var(--tone, var(--pvk-blue)) 20%, transparent) 0);
+  -webkit-mask: radial-gradient(circle, transparent 57%, #000 59%); mask: radial-gradient(circle, transparent 57%, #000 59%);
+}
+/* У вузьких картках (7–8 в ряд на дуже широких екранах) лишається текст: спершу зникає графік, потім іконка. */
+@container pvk-kpi (max-width: 299px) {
+  .pvk-kpi-ic { width: 38px; height: 38px; border-radius: 11px; }
+  .pvk-kpi-spark { width: 60px; }
+  .pvk-kpi-text strong { font-size: clamp(26px, 2.5vw, 36px); }
+}
+@container pvk-kpi (max-width: 219px) { .pvk-kpi-spark, .pvk-kpi-ring { display: none; } }
+@container pvk-kpi (max-width: 169px) { .pvk-kpi-ic { display: none; } }
 .pvk-kpi.blue { --tone: var(--pvk-blue); }
 .pvk-kpi.amber { --tone: var(--pvk-amber); }
 .pvk-kpi.green { --tone: var(--pvk-green); }
@@ -309,7 +336,7 @@ html[data-theme="light"] #view-base {
 }
 @media (min-width: 1200px) {
   .pvk-kpis:has(> :nth-child(5):last-child) { grid-template-columns: repeat(5, minmax(0, 1fr)); }
-  .pvk-kpis:has(> :nth-child(5):last-child) > * { grid-column: auto; }
+  .pvk-kpis:has(> :nth-child(5):last-child) > :nth-child(n) { grid-column: auto; }
   .pvk-kpis:has(> :nth-child(6):last-child) { grid-template-columns: repeat(6, minmax(0, 1fr)); }
 }
 @media (min-width: 1500px) { .pvk-kpis:has(> :nth-child(7):last-child) { grid-template-columns: repeat(7, minmax(0, 1fr)); } }

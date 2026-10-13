@@ -1,0 +1,165 @@
+/* Візуальна тема дашбордів (темна): «Марун ДШВ» для УДШВ і «Небо ПС» для ПВК.
+   Шар лежить поверх базових стилів дашбордів і змінює лише кольори, поверхні й тіні — розмітку й логіку не чіпає.
+   Світла тема не змінюється: усі правила під html:not([data-theme="light"]).
+   «Наші втрати» успадковують палітру того дашборда, у якому відкриті. Без зображень: лише градієнти й тіні. */
+
+/* ---------- Палітри ---------- */
+html:not([data-theme="light"]) #udshv-dashboard-root {
+  --ud-green: #d6455d;               /* акцент ДШВ (назва лишилась від старої схеми) */
+  --ud-accent-hi: #ff7a8e;
+  --ud-gold: #e8b84a;
+  --ud-red: #ff6b6b;
+  --ud-amber: #f0b13f;
+  --ud-blue: #4aa8ff;
+  --ud-violet: #a98bff;
+  --ud-panel: rgba(13, 21, 35, .88);
+  --ud-line: rgba(132, 150, 182, .2);
+  --ud-track: rgba(132, 150, 182, .16);
+  --th-accent: var(--ud-green);
+  --th-accent-hi: var(--ud-accent-hi);
+  --th-glow: rgba(214, 69, 93, .35);
+  --th-hero-a: rgba(214, 69, 93, .34);
+  --th-hero-b: rgba(120, 20, 48, .5);
+  --th-ink-hi: #f4f7fc;
+}
+html:not([data-theme="light"]) #pvk-dashboard-root {
+  --pvk-blue: #2a8cff;
+  --pvk-cyan: #25d3ee;
+  --pvk-gold: #f2b84b;
+  --pvk-green: #34d399;
+  --pvk-amber: #f0b13f;
+  --pvk-red: #ff6b7a;
+  --pvk-violet: #a98bff;
+  --pvk-panel: rgba(12, 22, 40, .9);
+  --pvk-border: rgba(110, 150, 210, .22);
+  --pvk-track: rgba(110, 150, 210, .16);
+  --th-accent: var(--pvk-blue);
+  --th-accent-hi: #6cb4ff;
+  --th-glow: rgba(42, 140, 255, .35);
+  --th-hero-a: rgba(42, 140, 255, .32);
+  --th-hero-b: rgba(10, 52, 120, .55);
+  --th-ink-hi: #f2f7ff;
+}
+/* «Наші втрати» тягнуть колір із дашборда-господаря. */
+html:not([data-theme="light"]) #udshv-dashboard-root .ol-root,
+html:not([data-theme="light"]) #pvk-dashboard-root .ol-root {
+  --ol-panel: var(--ud-panel, var(--pvk-panel));
+  --ol-line: var(--ud-line, var(--pvk-border));
+  --ol-track: var(--ud-track, var(--pvk-track));
+}
+
+/* ---------- Герой: світіння, діагональні промені, золота рисочка ---------- */
+html:not([data-theme="light"]) :is(.ud-hero, .pvk-hero) {
+  position: relative;
+  border-color: color-mix(in srgb, var(--th-accent) 38%, var(--ud-line, var(--pvk-border)));
+  background:
+    linear-gradient(112deg, transparent 38%, rgba(255, 255, 255, .045) 38.2%, transparent 38.6%, transparent 52%, rgba(255, 255, 255, .035) 52.2%, transparent 52.6%),
+    radial-gradient(120% 160% at 100% 0%, var(--th-hero-a), transparent 58%),
+    radial-gradient(80% 120% at 0% 100%, color-mix(in srgb, var(--th-accent) 14%, transparent), transparent 60%),
+    linear-gradient(135deg, var(--th-hero-b) -40%, var(--ud-panel, var(--pvk-panel)) 55%);
+  box-shadow: 0 18px 46px rgba(0, 0, 0, .38), inset 0 1px 0 rgba(255, 255, 255, .06);
+}
+/* Фото праворуч у шапці: десантник під куполом з банера власника (УДШВ; розмір «auto 100%» зберігає пропорції) і літак у хмарах (ПВК); зліва плавно тонуть у тло. */
+html:not([data-theme="light"]) .ud-hero { background-image: url('./udshv-art/hero-photo.webp'), linear-gradient(112deg, transparent 38%, rgba(255, 255, 255, .045) 38.2%, transparent 38.6%, transparent 52%, rgba(255, 255, 255, .035) 52.2%, transparent 52.6%), radial-gradient(120% 160% at 100% 0%, var(--th-hero-a), transparent 58%), radial-gradient(80% 120% at 0% 100%, color-mix(in srgb, var(--th-accent) 14%, transparent), transparent 60%), linear-gradient(135deg, var(--th-hero-b) -40%, var(--ud-panel) 55%); background-repeat: no-repeat; background-position: right center, 0 0, 0 0, 0 0, 0 0; background-size: auto 100%, auto, auto, auto, auto; }
+html:not([data-theme="light"]) .pvk-hero { background-image: url('./pvk-art/hero-photo.webp'), linear-gradient(112deg, transparent 38%, rgba(255, 255, 255, .045) 38.2%, transparent 38.6%, transparent 52%, rgba(255, 255, 255, .035) 52.2%, transparent 52.6%), radial-gradient(120% 160% at 100% 0%, var(--th-hero-a), transparent 58%), radial-gradient(80% 120% at 0% 100%, color-mix(in srgb, var(--th-accent) 14%, transparent), transparent 60%), linear-gradient(135deg, var(--th-hero-b) -40%, var(--pvk-panel) 55%); background-repeat: no-repeat; background-position: right center, 0 0, 0 0, 0 0, 0 0; background-size: min(58%, 760px) 100%, auto, auto, auto, auto; }
+/* Кнопки дій шапки лежать над графікою. */
+html:not([data-theme="light"]) :is(.ud-hero-actions, .pvk-hero > :not(div:first-child)) { position: relative; z-index: 1; }
+html:not([data-theme="light"]) :is(.ud-hero, .pvk-hero)::after {
+  content: ''; position: absolute; left: 24px; right: 24px; bottom: 0; height: 2px; pointer-events: none;
+  background: linear-gradient(90deg, transparent, var(--ud-gold, var(--pvk-gold)), transparent);
+  opacity: .55;
+}
+html:not([data-theme="light"]) :is(.ud-hero h1, .pvk-hero h1) { color: var(--th-ink-hi); letter-spacing: .01em; text-shadow: 0 2px 18px var(--th-glow); }
+html:not([data-theme="light"]) :is(.ud-hero, .pvk-hero) .pvk-eyebrow,
+html:not([data-theme="light"]) .ud-hero [class*="eyebrow"] { color: var(--th-accent-hi); }
+
+/* ---------- Панелі й картки ---------- */
+html:not([data-theme="light"]) :is(.ud-card, .pvk-section, .ol-card, .ud-period, .pvk-period, .pvk-nav) {
+  background: linear-gradient(180deg, rgba(255, 255, 255, .028), transparent 38%), var(--ud-panel, var(--pvk-panel));
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .28), inset 0 1px 0 rgba(255, 255, 255, .045);
+}
+html:not([data-theme="light"]) :is(.ud-card h3, .pvk-section h3, .ol-card h3) { color: var(--th-ink-hi); }
+
+/* ---------- Навігація й перемикачі ---------- */
+html:not([data-theme="light"]) .ud-nav button,
+html:not([data-theme="light"]) .ud-tabs button { background: rgba(255, 255, 255, .03); }
+html:not([data-theme="light"]) .ud-nav button:hover,
+html:not([data-theme="light"]) .ud-tabs button:hover { border-color: color-mix(in srgb, var(--th-accent) 60%, transparent); }
+html:not([data-theme="light"]) .ud-nav button[aria-pressed="true"],
+html:not([data-theme="light"]) .ud-nav button.active,
+html:not([data-theme="light"]) .ud-tabs button[aria-pressed="true"],
+html:not([data-theme="light"]) .ud-tabs button.active,
+html:not([data-theme="light"]) .ud-seg button[aria-pressed="true"],
+html:not([data-theme="light"]) .ud-seg button.active,
+html:not([data-theme="light"]) .ud-seg button.on {
+  color: #fff; border-color: transparent;
+  background: linear-gradient(135deg, var(--th-accent-hi), var(--th-accent) 55%, #8f1d36);
+  box-shadow: 0 6px 20px var(--th-glow), inset 0 1px 0 rgba(255, 255, 255, .22);
+}
+html:not([data-theme="light"]) .pvk-nav button[aria-pressed="true"] {
+  background: linear-gradient(135deg, var(--th-accent-hi), var(--th-accent) 60%, #1457b8);
+  box-shadow: 0 6px 20px var(--th-glow), inset 0 1px 0 rgba(255, 255, 255, .22);
+}
+html:not([data-theme="light"]) .pvk-seg button[aria-pressed="true"] {
+  background: linear-gradient(135deg, var(--th-accent-hi), var(--th-accent) 60%, #1457b8);
+  box-shadow: 0 4px 14px var(--th-glow);
+}
+html:not([data-theme="light"]) .ud-btn.primary,
+html:not([data-theme="light"]) .ud-hero .ud-btn:first-child {
+  background: linear-gradient(135deg, var(--th-accent-hi), var(--th-accent) 60%, #8f1d36);
+  border-color: transparent; color: #fff; box-shadow: 0 6px 18px var(--th-glow);
+}
+
+/* ---------- KPI: кольорова риска зверху, м'яке світіння кольору показника ---------- */
+html:not([data-theme="light"]) .ud-kpi {
+  background:
+    radial-gradient(90% 70% at 100% 0%, color-mix(in srgb, var(--tone) 20%, transparent), transparent 70%),
+    linear-gradient(180deg, rgba(255, 255, 255, .035), transparent 45%),
+    var(--ud-panel);
+  border-color: color-mix(in srgb, var(--tone) 42%, var(--ud-line));
+}
+html:not([data-theme="light"]) .ud-kpi::before,
+html:not([data-theme="light"]) .pvk-kpi::before {
+  content: ''; position: absolute; left: 14px; right: 14px; top: 0; height: 2px; border-radius: 0 0 3px 3px;
+  background: linear-gradient(90deg, transparent, var(--tone, var(--pvk-blue)), transparent); opacity: .85;
+}
+html:not([data-theme="light"]) .ud-kpi strong,
+html:not([data-theme="light"]) .pvk-kpi strong { color: var(--th-ink-hi); text-shadow: 0 0 22px color-mix(in srgb, var(--tone, var(--pvk-blue)) 38%, transparent); }
+html:not([data-theme="light"]) .pvk-kpi {
+  background:
+    radial-gradient(90% 80% at 100% 100%, color-mix(in srgb, var(--tone, var(--pvk-blue)) 20%, transparent), transparent 70%),
+    linear-gradient(180deg, rgba(255, 255, 255, .035), transparent 45%),
+    var(--pvk-panel);
+  border-color: color-mix(in srgb, var(--tone, var(--pvk-blue)) 38%, var(--pvk-border));
+}
+html:not([data-theme="light"]) .pvk-kpi::after { filter: blur(14px); opacity: .9; }
+
+/* ---------- Смуги рейтингів і графіки ---------- */
+html:not([data-theme="light"]) :is(.ud-rank-row i, .pvk-rank-row > i, .ol-rank-row i) { height: 10px; box-shadow: inset 0 1px 2px rgba(0, 0, 0, .35); }
+html:not([data-theme="light"]) :is(.ud-rank-row i b, .pvk-rank-row > i > b, .ol-rank-row i b) {
+  box-shadow: 0 0 12px color-mix(in srgb, var(--th-accent) 30%, transparent);
+}
+html:not([data-theme="light"]) .pvk-rank-row > i > b { background: linear-gradient(90deg, var(--pvk-blue), var(--pvk-cyan)); }
+html:not([data-theme="light"]) :is(.ud-chart, .ol-chart, .pvk-stacked, .pvk-daybars) svg line { stroke: rgba(132, 150, 182, .16); }
+html:not([data-theme="light"]) :is(.ud-chart, .ol-chart) svg rect:not(.ud-hit):not(.ol-hit) { filter: drop-shadow(0 0 6px rgba(0, 0, 0, .35)); rx: 3px; }
+html:not([data-theme="light"]) .pvk-donut { filter: drop-shadow(0 0 18px var(--th-glow)); }
+
+/* ---------- Таблиці й поля ---------- */
+html:not([data-theme="light"]) #udshv-dashboard-root table thead th,
+html:not([data-theme="light"]) #pvk-dashboard-root table thead th { background: rgba(255, 255, 255, .035); color: var(--th-ink-hi); }
+html:not([data-theme="light"]) #udshv-dashboard-root tbody tr:hover > td,
+html:not([data-theme="light"]) #pvk-dashboard-root tbody tr:hover > td { background: color-mix(in srgb, var(--th-accent) 9%, transparent); }
+html:not([data-theme="light"]) #udshv-dashboard-root input,
+html:not([data-theme="light"]) #udshv-dashboard-root select { background: rgba(255, 255, 255, .04); }
+
+/* ---------- Картки показників ПВК: світіння плитки-іконки та міні-графіка (структура — у pvk-dashboard.css) ---------- */
+html:not([data-theme="light"]) .pvk-kpi-ic {
+  background: linear-gradient(160deg, color-mix(in srgb, var(--tone, var(--pvk-blue)) 26%, transparent), color-mix(in srgb, var(--tone, var(--pvk-blue)) 8%, transparent));
+  box-shadow: 0 0 18px color-mix(in srgb, var(--tone, var(--pvk-blue)) 26%, transparent), inset 0 1px 0 rgba(255, 255, 255, .1);
+}
+html:not([data-theme="light"]) .pvk-kpi-spark { filter: drop-shadow(0 0 6px color-mix(in srgb, var(--tone, var(--pvk-blue)) 55%, transparent)); }
+html:not([data-theme="light"]) .ud-kpi-ic {
+  background: linear-gradient(160deg, color-mix(in srgb, var(--tone) 26%, transparent), color-mix(in srgb, var(--tone) 8%, transparent));
+  box-shadow: 0 0 18px color-mix(in srgb, var(--tone) 26%, transparent), inset 0 1px 0 rgba(255, 255, 255, .1);
+}
+html:not([data-theme="light"]) .ud-kpi > .ud-spark { filter: drop-shadow(0 0 6px color-mix(in srgb, var(--tone) 55%, transparent)); }
