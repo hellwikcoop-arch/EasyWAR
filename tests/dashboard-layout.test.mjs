@@ -25,3 +25,10 @@ test('компонування: ліве меню лише від 1200px, пол
     assert.ok(html.indexOf('dashboard-layout.css') < html.indexOf('dashboard-theme.css'), page);
   }
 });
+
+test('картки внизу меню: лише локальні зображення з папок *-art, лише темна тема', async () => {
+  const css = await read('dashboard-layout.css');
+  for (const [, target] of css.matchAll(/url\('?(\.[^')]*)'?\)/g)) assert.match(target, /^\.\/(udshv|pvk)-art\/[\w-]+\.webp$/, target);
+  assert.match(css, /html:not\(\[data-theme="light"\]\) #pvk-dashboard-root > \.pvk-nav::after/);
+  assert.match(css, /html:not\(\[data-theme="light"\]\) #udshv-dashboard-root > \.ud-nav::after/);
+});

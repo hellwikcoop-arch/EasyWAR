@@ -63,3 +63,17 @@
 @media (min-width: 1200px) {
   #udshv-dashboard-root > .ud-nav button::before, #pvk-dashboard-root > .pvk-nav button::before { display: block; }
 }
+
+/* Картка внизу лівого меню (лише темна тема, лише коли меню — ліва колонка): пілот із гаслом (ПВК) і золотий знак ДШВ (УДШВ). */
+@media (min-width: 1200px) {
+  html:not([data-theme="light"]) #pvk-dashboard-root > .pvk-nav::after {
+    content: ''; display: block; flex: none; margin-top: 10px; aspect-ratio: 368 / 420; border-radius: 12px;
+    border: 1px solid var(--pvk-border); pointer-events: none;
+    background: url('./pvk-art/pilot-card.webp') center / cover no-repeat;
+  }
+  html:not([data-theme="light"]) #udshv-dashboard-root > .ud-nav::after {
+    content: ''; display: block; flex: none; margin-top: 10px; height: 170px; border-radius: 12px;
+    border: 1px solid var(--ud-line); pointer-events: none;
+    background: url('./udshv-art/badge.webp') center / auto 78% no-repeat, radial-gradient(70% 90% at 50% 45%, rgba(214, 69, 93, .3), transparent 75%), rgba(255, 255, 255, .02);
+  }
+}
