@@ -46,7 +46,10 @@ test('every model of every article exists: procedural kinds build, files are reg
 
 test('munition variants: each has its own model, unique id, facts and a credit naming the data source', () => {
   const expected = {
-    g155he: ['generic', 'm107', 'm795', 'm549a1', 'erfb', 'dm121'], g155cl: ['m483a1', 'm864'], g155sc: ['raam', 'adam'], g155sm: ['m110', 'm825', 'm485'],
+    g155he: ['generic', 'm107', 'm795', 'm549a1', 'erfb', 'dm121', 'l15a1', 'kta5938', 'lu211hb', 'lu211bb', 'er02a1hb', 'er02a1bb', 'ofd', 'm77b', 'erfbbt'],
+    g155cl: ['m483a1', 'm864', 'dm642', 'm449'], g155sc: ['raam', 'adam'],
+    g155sm: ['m110', 'm825', 'm485', 'm116', 'dm105', 'lu214hb', 'lu214bb', 'erfbsmoke', 'erfbsmokebb'],
+    g152: ['generic', 'of25', 'of61'], g203: ['generic', 'm106', 'm509', 'of43'], g105: ['generic', 'm1'],
     guided: ['generic', 'copperhead', 'smart', 'bonus', 'm454'], charges: ['bmcs', 'm3a1', 'm4a2', 'm119a2', 'm203a1'],
   };
   for (const [id, ids] of Object.entries(expected)) {
@@ -71,7 +74,7 @@ test('munition variants: each has its own model, unique id, facts and a credit n
 });
 
 test('payload models: the payload is hidden inside the body when assembled and leaves through the base when apart', () => {
-  for (const kind of ['shell-m483a1', 'shell-m864', 'shell-m718', 'shell-m692', 'shell-m825', 'shell-m485', 'shell-smart', 'shell-bonus', 'shell-m454']) {
+  for (const kind of ['shell-m483a1', 'shell-m864', 'shell-dm642', 'shell-m449', 'shell-m509', 'shell-m116', 'shell-dm105', 'shell-m718', 'shell-m692', 'shell-m825', 'shell-m485', 'shell-smart', 'shell-bonus', 'shell-m454']) {
     const built = buildShell(kind);
     assert.ok(built.group.userData.fit >= 1.3, `${kind}: viewer fit for the apart view`);
     const before = size(built.group).x;

@@ -15,6 +15,7 @@ const COL = {
 };
 const L = 4, H = L / 2;
 const R155 = mm => Math.round(310 / mm * 1000) / 1000;      // радіус при довжині моделі 4 для калібру 155 мм й повної довжини mm
+const RC = (cal, mm) => Math.round(2 * cal / mm * 1000) / 1000; // те саме для довільного калібру cal (мм)
 const smooth = t => { const c = Math.min(Math.max(t, 0), 1); return c * c * (3 - 2 * c); };
 const metal = (color, rough = .38, m = .7) => paint(color, rough, m);
 const matte = (color, rough = .6, m = .08) => paint(color, rough, m);
@@ -52,6 +53,36 @@ const SHELLS = {
   'shell-bonus': { r: R155(898), ej: .24, bt: .28, base: .9, og: 1.5, tip: .18, fz: .5, fuze: 'mt', body: COL.olive, rings: [[.55, .67, COL.yellow], [.72, .78, COL.red]], ink: COL.yellow, text: ['155 mm', 'BONUS'], lot: 'LOT 00-000', payload: { kind: 'subs', n: 2, finned: true }, explode: ['Часовий підривник', 'Корпус із двома бронебійними боєголовками', 'Донна плита (викидається)'] },
   'shell-m454': { r: R155(850), ej: .24, bt: .28, base: .9, og: 1.5, tip: .18, fz: .5, fuze: 'mt', body: COL.olive, rings: [[.55, .67, COL.yellow]], ink: COL.yellow, text: ['155 mm', 'S-HE'], lot: 'LOT 00-000', payload: { kind: 'warhead' }, explode: ['Дистанційний підривник', 'Корпус із бойовою частиною', 'Донна плита (викидається)'] },
 };
+// Хвиля 2: типи з bk155.com.ua (155 мм) і відкритих джерел (інші калібри). Довжини з підривником; «оцінка» — де джерела не називають довжину корпусу.
+const mk = (from, over) => ({ ...SHELLS[from], ...over });
+const HE = { bt: .24, base: .92, tip: .18, fz: .3, fuze: 'contact', body: COL.olive, rings: [[.55, .67, COL.yellow]], ink: COL.yellow, lot: 'LOT 00-000' };
+const gold = '#b89a2a';
+Object.assign(SHELLS, {
+  'shell-l15a1': { ...HE, r: R155(874), og: 1.9, obt: true, text: ['155 mm', 'HE L15A1'], explode: ['Підривник', 'Корпус із 11,3 кг вибухівки', 'Дно'] },
+  'shell-kta5938': { ...HE, r: R155(815), bt: .22, og: 1.7, text: ['155 mm', 'HE KTA 5938'], explode: ['Підривник', 'Корпус із 9 кг вибухівки', 'Дно'] },
+  'shell-lu211-hb': { ...HE, r: R155(865), off: .1, hb: true, bt: .26, base: .9, og: 1.9, obt: true, text: ['155 mm', 'HE LU 211 HB'], explode: ['Підривник', 'Корпус із 8,8 кг вибухівки', 'Порожниста основа'] },
+  'shell-lu211-bb': { ...HE, r: R155(867), off: .2, bleed: true, bt: .3, base: .86, og: 1.9, obt: true, text: ['155 mm', 'HE LU 211 BB'], explode: ['Підривник', 'Корпус із 8,8 кг вибухівки', 'Донний газогенератор'] },
+  'shell-er02a1-hb': { ...HE, r: R155(865), off: .1, hb: true, bt: .26, base: .9, og: 1.9, obt: true, body: COL.greyDk, rings: [[.5, .58, gold]], text: ['155 mm', 'HE ER02A1'], explode: ['Підривник', 'Корпус із 10,6 кг вибухівки', 'Порожниста основа'] },
+  'shell-er02a1-bb': { ...HE, r: R155(867), off: .2, bleed: true, bt: .3, base: .86, og: 1.9, obt: true, body: COL.greyDk, rings: [[.5, .58, gold]], text: ['155 mm', 'HE-BB ER02A1'], explode: ['Підривник', 'Корпус із 10,6 кг вибухівки', 'Донний газогенератор'] },
+  'shell-ofd-mkm': { ...HE, r: R155(862), off: .1, hb: true, bt: .26, base: .9, og: 1.8, text: ['155 mm', 'HE-HB OFd MKM'], explode: ['Підривник', 'Корпус із 10 кг вибухівки', 'Порожниста основа'] },
+  'shell-m77b': { ...HE, r: R155(775), off: .1, hb: true, bt: .26, base: .9, og: 1.6, obt: true, text: ['155 mm', 'HE M77B'], explode: ['Підривник', 'Корпус із 9 кг вибухівки', 'Порожниста основа'] },
+  'shell-m1a1-bt': { ...HE, r: R155(890), bt: .5, base: .78, og: 2.0, obt: true, text: ['155 mm', 'HE M1A1 BT'], explode: ['Підривник (M557)', 'Корпус із вибухівкою', 'Конічне дно (boat-tail)'] },
+  'shell-m116': { ...HE, r: R155(715), ej: .24, bt: .26, base: .9, og: 1.1, tip: .22, fz: .5, fuze: 'mt', body: COL.paleGreen, rings: [[.55, .67, COL.yellow]], ink: '#2a2f26', payload: { kind: 'cans', n: 4 }, text: ['155 mm', 'HC M116'], explode: ['Часовий підривник', 'Корпус із 4 димовими каністрами', 'Донна плита (викидається)'] },
+  'shell-dm105': { ...HE, r: R155(875), ej: .24, bt: .28, base: .9, og: 1.5, tip: .2, fz: .5, fuze: 'mt', body: COL.paleGreen, rings: [[.55, .67, COL.white]], ink: '#2a2f26', payload: { kind: 'cans', n: 4 }, text: ['155 mm', 'HC DM105'], explode: ['Часовий підривник', 'Корпус із 4 каністрами HC', 'Донна плита (викидається)'] },
+  'shell-lu214-hb': { ...HE, r: R155(865), off: .1, hb: true, bt: .26, base: .9, og: 1.9, obt: true, body: COL.paleGreen, rings: [[.55, .67, COL.white]], ink: '#2a2f26', text: ['155 mm', 'WP LU 214 HB'], explode: ['Підривник', 'Корпус із 8,4 кг білого фосфору', 'Порожниста основа'] },
+  'shell-lu214-bb': { ...HE, r: R155(867), off: .2, bleed: true, bt: .3, base: .86, og: 1.9, obt: true, body: COL.paleGreen, rings: [[.55, .67, COL.white]], ink: '#2a2f26', text: ['155 mm', 'WP LU 214 BB'], explode: ['Підривник', 'Корпус із 8,7 кг білого фосфору', 'Донний газогенератор'] },
+  'shell-erfb-smoke': { ...HE, r: R155(938), off: .1, hb: true, bt: .26, base: .9, og: 1.9, obt: true, body: COL.paleGreen, rings: [[.55, .67, COL.white]], ink: '#2a2f26', text: ['155 mm', 'WP ERFB'], explode: ['Підривник', 'Корпус із 7,6 кг білого фосфору', 'Дно'] },
+  'shell-erfb-smoke-bb': { ...HE, r: R155(958), off: .2, bleed: true, bt: .3, base: .86, og: 1.9, obt: true, body: COL.paleGreen, rings: [[.55, .67, COL.white]], ink: '#2a2f26', text: ['155 mm', 'WP ERFB-BB'], explode: ['Підривник', 'Корпус із 7,6 кг білого фосфору', 'Донний газогенератор'] },
+  'shell-dm642': mk('shell-m864', { r: R155(899), og: 1.2, text: ['155 mm', 'DPICM DM642'], payload: { kind: 'grenades', n: 21 }, explode: ['Часовий підривник', 'Корпус із 63 суббоєприпасами DM1383', 'Донний газогенератор'] }),
+  'shell-m449': mk('shell-m483a1', { r: R155(698), og: 1.0, text: ['155 mm', 'DPICM M449'], payload: { kind: 'grenades', n: 14 }, explode: ['Часовий підривник', 'Корпус із 60 гранатами M43', 'Донна плита'] }),
+  'shell-3of25': { ...HE, r: RC(152, 860), og: 1.7, body: COL.greyDk, rings: [[.52, .66, COL.red]], ink: COL.white, text: ['152', '3ОФ25'], lot: '№ 00-00', explode: ['Підривник', 'Корпус із вибухівкою', 'Дно'] },
+  'shell-3of61': { ...HE, r: RC(152, 860), off: .2, bleed: true, bt: .3, base: .86, og: 1.7, body: COL.greyDk, rings: [[.52, .66, COL.red]], ink: COL.white, text: ['152', '3ОФ61'], lot: '№ 00-00', explode: ['Підривник', 'Корпус із вибухівкою', 'Донний газогенератор'] },
+  'shell-m106': { ...HE, r: RC(203, 798), bt: .25, base: .92, og: 1.2, tip: .22, text: ['203 mm', 'HE M106'], explode: ['Підривник', 'Корпус із вибухівкою', 'Дно'] },
+  'shell-m509': mk('shell-m483a1', { r: RC(203, 1115), og: 1.3, text: ['203 mm', 'DPICM M509A1'], payload: { kind: 'grenades', n: 28 }, explode: ['Часовий підривник', 'Корпус зі 180 суббоєприпасами M42', 'Донна плита'] }),
+  'shell-3of43': { ...HE, r: RC(203, 1000), og: 1.5, body: COL.greyDk, rings: [[.52, .66, COL.red]], ink: COL.white, text: ['203', '3ОФ43'], lot: '№ 00-00', explode: ['Підривник', 'Корпус із вибухівкою', 'Дно'] },
+  'shell-m1-105': { ...HE, r: RC(105, 495), bt: .3, base: .85, og: 1.1, tip: .22, text: ['105 mm', 'HE M1'], explode: ['Підривник', 'Корпус із вибухівкою', 'Дно'] },
+});
+
 
 const radiusFn = s => {
   const x0 = -H + (s.off || 0), xb = x0 + s.bt, xn = H - s.fz, xo = xn - s.og, rn = s.r * (s.tip || .2);
@@ -134,6 +165,11 @@ function buildPayload(s, x0, xn) {
     const layers = Math.max(1, Math.round((p.n || 35) / 7)), step = .15;
     for (let i = 0; i < layers; i++) layer(7, inner * .62, () => cyl(inner * .24, .12, felt, 12), i * step, i * .3);
     half = layers * step / 2; xc = x0 + .5 + half; g.children.forEach(c => { c.position.x += xc - half; });
+  } else if (p.kind === 'cans') {
+    // Димові каністри (HC), складені одна на одну вздовж осі.
+    const n = p.n || 4, step = .34;
+    for (let i = 0; i < n; i++) { const c = cyl(inner * .92, .24, i % 2 ? matte(COL.sand, .7, .1) : metal(COL.steel, .5, .5), 28); c.position.x = i * step; g.add(c); }
+    half = n * step / 2; xc = x0 + .5 + half; g.children.forEach(c => { c.position.x += xc - half; });
   } else if (p.kind === 'subs') {
     // Самонавідні суббоєприпаси: циліндр із датчиком на торці (і розкритими стабілізаторами, якщо finned).
     for (let i = 0; i < (p.n || 2); i++) {
@@ -180,6 +216,10 @@ function buildShellModel(kind) {
       const a = i ? (i - 1) / 6 * Math.PI * 2 : 0, rr = i ? s.r * .42 : 0;
       base.add(hole(s.r * .09, x0 - s.off - .005, Math.sin(a) * rr, Math.cos(a) * rr));
     }
+  } else if (s.hb) {
+    // Порожниста основа (HB): плита з глибокою чашею, що ловить розрідження за снарядом.
+    base.add(lathe([[0, x0 - s.off + .07], [s.r * .5, x0 - s.off + .07], [s.r * .6, x0 - s.off], [s.r * s.base * .97, x0 - s.off], [s.r * s.base, x0 + .03]], graphite, { segments: 48 }));
+    base.add(lathe([[0, x0 - s.off + .075], [s.r * .48, x0 - s.off + .075]], black, { segments: 32 }));
   } else if (s.rap) {
     // Ракетний двигун: широке дно з центральною заглушкою й кільцем сопел.
     base.add(lathe([[0, x0 - .07], [s.r * .66, x0 - .07], [s.r * .72, x0 - .03], [s.r * .8, x0 + .0], [s.r * s.base, x0 + .03]], metal(COL.copper, .5, .5), { segments: 48 }));
