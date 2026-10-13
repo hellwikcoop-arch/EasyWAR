@@ -155,3 +155,35 @@
 ## Моделі довідника «Артилерія» — побудовані в коді
 
 Тривимірні моделі статей довідника модуля «Артилерія» (снаряди 155, 152, 122, 105 і 203 мм, міни 120, 82 і 60 мм, реактивний снаряд 122 мм, високоточний снаряд і модульний метальний заряд) будуються в коді, у файлі `src/artillery-3d.js`, за відкритими габаритами. Файлів `.glb` вони не мають, сторонніх моделей і текстур не використовують, ліцензійних вимог немає. Забарвлення й написи умовні. Призначені для перегляду, а не для впізнавання чи розрахунків. Стаття про ракети 227 мм показує модель `gmlrs-m31.glb` (див. вище).
+
+## ka-52.glb — Ка-52 (Russian Ka-52 Alligator)
+
+- Автор: 42manako (<https://sketchfab.com/42manako>)
+- Джерело: <https://sketchfab.com/3d-models/russian-ka-52-alligator-9b31733ceed24be49b2f621487b35ea9>
+- Ліцензія: Creative Commons Attribution 4.0 (CC BY 4.0), <http://creativecommons.org/licenses/by/4.0/>
+
+Змінено: стиснуто для застосунку (≈ 4,2 МБ), форма моделі не змінювалася. Прозорі матеріали виправляються під час завантаження (`fixMaterials` у `ref-viewer.js`). Модель належить статті «Ворожа техніка».
+
+## mi-8tv.glb — Мі-8ТВ (Mi-8TB (War Thunder))
+
+- Автор: KojfDiscord (<https://sketchfab.com/KojfDiscord>)
+- Джерело: <https://sketchfab.com/3d-models/mi-8tb-war-thunder-war-thunder-9e8deeb240964b2eba81b462041e8967>
+- Ліцензія: Creative Commons Attribution 4.0 (CC BY 4.0), <http://creativecommons.org/licenses/by/4.0/>
+
+Змінено: конвертовано з вихідного формату в glTF і стиснуто (геометрія — meshopt, текстури — WebP, ≈ 4,9 МБ), форма моделі не змінювалася. Ліцензію й автора взято з даних, що супроводжували файл; сторінку Sketchfab не було відкрито для повторної перевірки.
+
+## fp-5-flamingo.glb — FP-5 «Фламінго» (Missile FP-5 Flamingo 3D model)
+
+- Автор: rombic991 (<https://sketchfab.com/rombic991>)
+- Джерело: <https://sketchfab.com/3d-models/missile-fp-5-flamingo-3d-model-d638fc564342416baa4480ed1900d407>
+- Ліцензія: Creative Commons Attribution 4.0 (CC BY 4.0), <http://creativecommons.org/licenses/by/4.0/>
+
+Змінено: конвертовано з вихідного формату в glTF і стиснуто (геометрія — meshopt, текстури — WebP, ≈ 0,3 МБ), форма моделі не змінювалася. Ліцензію й автора взято з даних, що супроводжували файл; сторінку Sketchfab не було відкрито для повторної перевірки.
+
+## fp-7.glb — FP-7 (Firepoint FP-7 ballistic missile)
+
+- Автор: FLIGHTCLUB UA (профіль автора не перевірено, тому посилання веде на сторінку моделі)
+- Джерело: <https://sketchfab.com/3d-models/firepoint-fp-7-ballistic-missile-a2da452aa5f94611b54b9d56757b61f0>
+- Ліцензія: Creative Commons Attribution 4.0 (CC BY 4.0), <http://creativecommons.org/licenses/by/4.0/>
+
+Змінено: конвертовано з вихідного формату в glTF і стиснуто (геометрія — meshopt, текстури — WebP, ≈ 0,4 МБ), форма моделі не змінювалася. Ліцензію й автора взято з даних, що супроводжували файл; сторінку Sketchfab не було відкрито для повторної перевірки.
