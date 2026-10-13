@@ -8,6 +8,8 @@ import { addStageEnvironment, createRenderer, FLOOR_Y } from './stage-3d.js';
 import { buildModel, spreadLabels } from './munition-3d.js';
 import { SHELL_KINDS, buildShell } from './artillery-3d.js';
 import { Sim } from './ref-sim.js';
+import { Machine } from './ref-machine.js';
+import { legacySim } from './ref-sim-data.js';
 
 // Файли моделей літаків. Шлях у new URL(...) має бути дослівним, щоб Vite покласти файл у збірку.
 export const MODEL_FILES = {
@@ -139,7 +141,8 @@ export function normalizeAircraft(scene, nose = '+x', length = AIRCRAFT_LENGTH) 
   root.scale.setScalar(k);
   root.updateMatrixWorld(true);
   const fit = new Box3().setFromObject(root);
-  return { group: root, size: fit.getSize(new Vector3()), min: fit.min.clone() };
+  // inner / scene / k / center потрібні рушієві техніки (ref-machine.js): початок файлу моделі лежить у root у точці −k·center.
+  return { group: root, inner, scene, k, center: c.clone(), size: fit.getSize(new Vector3()), min: fit.min.clone() };
 }
 
 // Моделі зі збірок мають прозорі матеріали, які без правки дають артефакти сортування: «скло» (назва матеріалу
@@ -303,6 +306,7 @@ export class RefViewer {
         const gltf = await loadGltf(model, onProgress);
         if (model.glass !== undefined) fixMaterials(gltf.scene, model);
         entry = normalizeAircraft(gltf.scene, model.nose, model.length);
+        entry.clips = gltf.animations || [];
         entry.action = prepareAction(gltf, entry);
         if (model.decals && model.decals.length) applyDecals(entry, model.decals);
         const aniso = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
@@ -478,10 +482,21 @@ export class RefViewer {
     if (!this.group || !this.entry || !cfg) return [];
     this.setSpotsVisible(false);
     this.auto = false;
-    this.sim = new Sim(this, cfg);
+    this.sim = this.makeSim(cfg);
     this.pose();
     return this.sim.phases;
   }
+
+  // Техніку веде рушій ref-machine.js; якщо він не запустився, статтю показує простий сценарій Sim.
+  makeSim(cfg) {
+    if (cfg.machine) {
+      try { return new Machine(this, cfg); } catch (e) { console.warn('Довідник: рушій техніки не запустився, показано простий сценарій', e); cfg = legacySim(cfg); }
+    }
+    return new Sim(this, cfg);
+  }
+
+  // Завантаження файлу моделі (каталог src/models чи обгортка) для рушія техніки: ландшафт і ракети.
+  load(model, onProgress) { return loadGltf(model, onProgress); }
 
   setSimPhase(id) { if (this.sim) this.sim.set(id); }
 
@@ -516,11 +531,14 @@ export class RefViewer {
     el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
     el.addEventListener('wheel', e => { e.preventDefault(); this.zoomBy(e.deltaY > 0 ? 1.08 : 1 / 1.08); }, { passive: false });
     el.addEventListener('keydown', e => {
+      if (this.sim && this.sim.keyDown && this.sim.keyDown(e)) { e.preventDefault(); return; }
       const step = { ArrowLeft: [-.15, 0], ArrowRight: [.15, 0], ArrowUp: [0, .1], ArrowDown: [0, -.1] }[e.key];
       if (step) { e.preventDefault(); this.spin(step[0], step[1]); }
       else if (e.key === '+' || e.key === '=') this.zoomBy(1 / 1.12);
       else if (e.key === '-') this.zoomBy(1.12);
     });
+    el.addEventListener('keyup', e => { if (this.sim && this.sim.keyUp && this.sim.keyUp(e)) e.preventDefault(); });
+    el.addEventListener('blur', () => { if (this.sim && this.sim.releaseAll) this.sim.releaseAll(); });
   }
 
   resize() {

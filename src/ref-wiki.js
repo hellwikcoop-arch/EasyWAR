@@ -64,6 +64,9 @@ export function mount(host, options = {}) {
   stageEl.append(status, hint, simCap);
   const tools = h('div', { class: 'rw-tools' });
   const simBar = h('div', { class: 'seg rw-simbar', role: 'group', 'aria-label': 'Що робить модель', hidden: true });
+  // Керування технікою (ref-machine.js): ряди кнопок наведення й зброї та боєкомплект; сповіщення для читачів з екрана — окремо від рядка стану.
+  const machineBar = h('div', { class: 'rw-machine', role: 'group', 'aria-label': 'Керування машиною', hidden: true });
+  const live = h('p', { class: 'sr-only', 'aria-live': 'polite' });
   const stageBox = h('div', { class: 'rw-stagebox' }, stageEl, tools);
 
   // dur — тривалість кнопкового переходу (мс); linear — рівномірно (для довгих покрокових анімацій).
@@ -106,7 +109,12 @@ export function mount(host, options = {}) {
   // «Позначки» — номери уразливих місць на моделі; кнопка з’являється лише в статтях, де такі місця описано.
   const marksBtn = h('button', { type: 'button', class: 'chip on', 'aria-pressed': 'true', text: 'Позначки', hidden: true, onclick: () => setMarks(marksBtn.getAttribute('aria-pressed') !== 'true') });
   const setMarks = on => { marksBtn.classList.toggle('on', on); marksBtn.setAttribute('aria-pressed', String(on)); if (viewer) viewer.setSpotsVisible(on); };
-  tools.append(simBar, h('div', { class: 'rw-toolrow' }, viewSeg, h('div', { class: 'rw-chips' }, autoBtn, marksBtn)), wingsCtl.row, apartCtl.row, actionCtl.row);
+  tools.append(simBar, machineBar, live, h('div', { class: 'rw-toolrow' }, viewSeg, h('div', { class: 'rw-chips' }, autoBtn, marksBtn)), wingsCtl.row, apartCtl.row, actionCtl.row);
+  // Клавіші техніки діють і тоді, коли фокус на кнопках під сценою (після кліку по кнопці фокус лишається там, а не на сцені).
+  const liveMachine = () => (viewer && viewer.sim && typeof viewer.sim.press === 'function' ? viewer.sim : null);
+  tools.addEventListener('keydown', e => { const m = liveMachine(); if (m && !(e.target instanceof HTMLInputElement) && m.keyDown(e)) e.preventDefault(); });
+  tools.addEventListener('keyup', e => { const m = liveMachine(); if (m && m.keyUp(e)) e.preventDefault(); });
+  tools.addEventListener('focusout', e => { const m = liveMachine(); if (m && !tools.contains(e.relatedTarget)) m.releaseAll(); });
 
   async function ensureViewer() {
     if (viewer || viewerFailed) return viewer;
@@ -150,28 +158,80 @@ export function mount(host, options = {}) {
       if (weak.length) setMarks(true);
       const sim = state.mode === 'live' ? simOf(entry, viewerOf) : null;
       if (sim) startSim(v, sim);
-      else { simBar.hidden = true; simCap.hidden = true; }
+      else { simBar.hidden = true; simCap.hidden = true; machineBar.hidden = true; }
     } catch (e) {
       console.warn('Довідник: модель не завантажилась', e);
       if (mine === token) fallback(entry, 'Не вдалося завантажити модель.');
     }
   }
 
-  // «Інтерактивна модель» для статей без окремого переглядача: кнопки фаз під сценою, підпис дії на сцені.
+  // «Інтерактивна модель» для статей без окремого переглядача: кнопки фаз під сценою, підпис дії на сцені. Техніку веде рушій
+  // ref-machine.js: він сам повідомляє про зміни (onState), а кнопки наведення й зброї будуються з його списку керування.
   function startSim(v, sim) {
     const phases = v.startSim(sim);
+    const machine = v.sim && typeof v.sim.press === 'function' ? v.sim : null;
     wingsCtl.row.hidden = true; apartCtl.row.hidden = true; actionCtl.row.hidden = true;
     marksBtn.hidden = true; setAuto(false);
+    simCap.setAttribute('aria-live', machine ? 'off' : 'polite');
+    machineBar.replaceChildren(); machineBar.hidden = true;
     hint.textContent = 'Кнопки під сценою вмикають дії. Потягніть, щоб оглянути з іншого боку.';
+    const mark = id => simBar.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.phase === id)));
     const pick = id => {
       v.setSimPhase(id);
-      simBar.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.phase === id)));
+      if (machine) return;
+      mark(id);
       const ph = phases.find(p => p[0] === id);
       simCap.textContent = ph ? ph[1] + '. ' + ph[2] : '';
     };
-    simBar.replaceChildren(...phases.map(([id, label]) => h('button', { type: 'button', 'data-phase': id, 'aria-pressed': 'false', text: label, onclick: () => pick(id) })));
+    simBar.replaceChildren(...phases.map(([id, label, text], i) => h('button', { type: 'button', 'data-phase': id, 'aria-pressed': 'false', title: machine ? text + ' Клавіша ' + (i + 1) + '.' : null, text: label, onclick: () => pick(id) })));
     simBar.hidden = false; simCap.hidden = false;
+    if (machine) buildMachineBar(machine, mark);
     pick(phases[0][0]);
+    if (machine) machine.report(true);
+  }
+
+  // Ряди кнопок керування машиною. Кнопки наведення діють, поки їх тримають (миша, дотик, Enter/пробіл); решта — по натисканню.
+  function buildMachineBar(machine, mark) {
+    const buttons = new Map(), rows = {};
+    for (const c of machine.controls) {
+      const btn = h('button', { type: 'button', class: 'rw-ctl' + (c.hold ? ' hold' : ''), 'data-ctl': c.id, title: 'Клавіша ' + c.key }, h('kbd', { text: c.key }), h('span', { text: c.label }));
+      const locked = () => btn.classList.contains('lock');
+      if (c.hold) {
+        const off = () => machine.hold(c.id, false);
+        btn.addEventListener('pointerdown', e => { e.preventDefault(); if (locked()) return; btn.setPointerCapture?.(e.pointerId); machine.hold(c.id, true); });
+        for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture', 'blur']) btn.addEventListener(ev, off);
+        btn.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && !e.repeat) { e.preventDefault(); if (!locked()) machine.hold(c.id, true); } });
+        btn.addEventListener('keyup', e => { if (e.key === 'Enter' || e.key === ' ') off(); });
+      } else btn.addEventListener('click', () => { if (!locked()) machine.press(c.id); });
+      buttons.set(c.id, btn);
+      (rows[c.row] || (rows[c.row] = h('div', { class: 'rw-ctlrow' }))).append(btn);
+    }
+    const ammo = h('span', { class: 'rw-ammo', role: 'img' });
+    if (rows.weapon) rows.weapon.append(ammo);
+    machineBar.replaceChildren(...Object.values(rows));
+    machineBar.hidden = !buttons.size;
+    if (buttons.size) hint.textContent = 'Клавіші, коли сцена чи кнопки в фокусі: 1–4 фази · ←↑↓→ наведення · X пуск · Z залп · H заряджання · T тип ракети.';
+    let toast = '';
+    machine.onState = u => {
+      mark(u.phase);
+      simCap.textContent = u.status;
+      for (const [id, btn] of buttons) {
+        const lock = !!u.locks[id], on = !!u.on[id];
+        btn.classList.toggle('lock', lock); btn.setAttribute('aria-disabled', String(lock));
+        btn.classList.toggle('on', on); if (id in u.on) btn.setAttribute('aria-pressed', String(on));
+        if (u.labels[id]) btn.querySelector('span').textContent = u.labels[id];
+      }
+      if (u.ammo) {
+        if (ammo.children.length !== u.ammo.max || ammo.classList.contains('big') !== u.ammo.big) {
+          ammo.classList.toggle('big', u.ammo.big);
+          ammo.replaceChildren(...Array.from({ length: u.ammo.max }, () => h('i')));
+        }
+        [...ammo.children].forEach((dot, i) => dot.classList.toggle('spent', i >= u.ammo.n));
+        ammo.setAttribute('aria-label', 'Боєкомплект: ' + u.ammo.n + ' з ' + u.ammo.max);
+      }
+      if (u.toast && u.toast !== toast) live.textContent = u.toast;
+      toast = u.toast || '';
+    };
   }
 
   // Вибір позначки на моделі (або зняття вибору, idx = -1) підсвічує пункт списку «Уразливі місця»; обертання зупиняється.
@@ -206,7 +266,7 @@ export function mount(host, options = {}) {
   function fallback(entry, why) {
     stageBox.hidden = true;
     const photo = media.photo && media.photo(entry.id);
-    slot.replaceChildren(h('p', { class: 'rw-note', text: why }), photo ? h('img', { class: 'rw-photo', src: photo, alt: entry.name }) : null);
+    slot.replaceChildren(...[h('p', { class: 'rw-note', text: why }), photo ? h('img', { class: 'rw-photo', src: photo, alt: entry.name }) : null].filter(Boolean));
   }
 
   // ---------- літаки: сторінка переглядача в кадрі ----------
@@ -415,7 +475,7 @@ export function mount(host, options = {}) {
     renderArticle(entry);
     state.weakFor = '';
     if (entry.model && !viewerOf(entry)) showModel(entry, mine);
-    else { stageBox.hidden = true; simBar.hidden = true; simCap.hidden = true; if (viewer) viewer.stopSim(); }
+    else { stageBox.hidden = true; simBar.hidden = true; simCap.hidden = true; machineBar.hidden = true; if (viewer) viewer.stopSim(); }
     if (onSelect) onSelect(entry.id);
     if (user && article.getBoundingClientRect().top < 0) article.scrollIntoView({ block: 'start', behavior: motion() ? 'smooth' : 'auto' });
   }

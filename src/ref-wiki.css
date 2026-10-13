@@ -65,7 +65,7 @@
 .rw-stage:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
 .rw-canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
 .rw-status { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; padding: 20px; text-align: center; color: #b7c6c6; font-size: 14px; pointer-events: none; }
-.rw-hint { position: absolute; left: 12px; bottom: 8px; margin: 0; font-size: 12px; color: #8ea1a1; pointer-events: none; }
+.rw-hint { position: absolute; left: 12px; right: 12px; bottom: 8px; margin: 0; font-size: 12px; color: #8ea1a1; pointer-events: none; }
 .rw-part { position: absolute; padding: 2px 7px; border: 1px solid var(--mw-hi); border-radius: 2px; background: rgba(9, 18, 24, .78); color: #fff; font: 600 10.5px/1.3 var(--mono); letter-spacing: .05em; white-space: nowrap; opacity: 0; pointer-events: none; }
 .rw-part::before { content: ''; position: absolute; left: calc(50% + var(--lead, 0px)); width: 1px; height: calc(12px + var(--drop, 0px)); background: var(--mw-hi); }
 .rw-part-up { transform: translate(-50%, calc(-100% - 12px - var(--drop, 0px))); } .rw-part-up::before { top: 100%; }
@@ -139,6 +139,23 @@ button.rw-weak[aria-pressed="true"] { border-color: var(--accent); background: v
 .rw-simbar { display: flex; flex-wrap: wrap; justify-self: start; max-width: 100%; }
 .rw-simbar[hidden], .rw-simcap[hidden] { display: none; }
 .rw-simcap { position: absolute; left: 12px; top: 10px; right: 12px; margin: 0; max-width: 46ch; padding: 6px 10px; border-radius: 6px; background: rgba(9, 18, 24, .72); color: #d7e3e3; font-size: 12.5px; line-height: 1.35; pointer-events: none; }
+/* Керування технікою (ref-machine.js): ряди кнопок наведення й зброї та боєкомплект. */
+.rw-machine { display: grid; gap: 8px; }
+.rw-machine[hidden] { display: none; }
+.rw-ctlrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.rw-ctl { display: inline-flex; align-items: center; gap: 7px; min-height: 36px; padding: 4px 13px; font: inherit; font-size: 13.5px; color: var(--ink); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 999px; cursor: pointer; user-select: none; -webkit-user-select: none; }
+.rw-ctl.hold { touch-action: none; }
+.rw-ctl:hover:not(.lock), .rw-ctl:focus-visible { border-color: var(--accent); outline: none; }
+.rw-ctl:focus-visible { box-shadow: 0 0 0 2px var(--accent-soft), 0 0 0 3px var(--accent); }
+.rw-ctl.hold:active:not(.lock) { background: var(--accent-soft); border-color: var(--accent); }
+.rw-ctl.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+.rw-ctl.lock { opacity: .45; cursor: not-allowed; }
+.rw-ctl kbd { padding: 1px 5px; border: 1px solid var(--line-strong); border-radius: 4px; font: 600 11px/1.3 var(--mono); color: var(--muted); }
+.rw-ctl.on kbd { color: inherit; border-color: currentColor; }
+.rw-ammo { display: inline-flex; gap: 5px; align-items: center; margin-left: auto; padding: 0 4px; }
+.rw-ammo i { width: 9px; height: 9px; border-radius: 50%; border: 1px solid var(--accent); background: var(--accent); }
+.rw-ammo i.spent { background: transparent; border-color: var(--line-strong); }
+.rw-ammo.big i { width: 16px; height: 16px; }
 .rw-air-frame { display: block; width: 100%; height: 560px; border: 1px solid var(--line); border-radius: 10px; background: #111214; }
 .rw-credit-head { margin: 0 0 4px; }
 .rw-credit ul { margin: 0; padding-left: 18px; display: grid; gap: 3px; }
