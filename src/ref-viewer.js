@@ -322,7 +322,13 @@ export class RefViewer {
     const { group, wings = [], update, explode, labels = [], aircraft } = built;
     this.group = group; this.wings = wings; this.update = update || null; this.explode = explode || null;
     this.aircraft = !!aircraft;
-    this.entry = aircraft || null;
+    // Позначки потребують розмірів моделі в стандартній позі; процедурному боєприпасу їх дає межовий об’єм групи.
+    if (aircraft) this.entry = aircraft;
+    else {
+      group.updateMatrixWorld(true);
+      const box = new Box3().setFromObject(group);
+      this.entry = { group, size: box.getSize(new Vector3()), min: box.min.clone() };
+    }
     this.action = (aircraft && aircraft.action) || null; this.step = 0;
     if (this.action) this.action.seek(0);
     this.parts = labels.map(label => {
@@ -388,7 +394,7 @@ export class RefViewer {
     this.spots = list.map((s, i) => {
       const el = document.createElement('button');
       el.type = 'button'; el.className = 'rw-spot'; el.textContent = String(i + 1);
-      el.title = s.title; el.setAttribute('aria-label', 'Уразливе місце ' + (i + 1) + ': ' + s.title);
+      el.title = s.title; el.setAttribute('aria-label', 'Позначка ' + (i + 1) + ': ' + s.title);
       el.addEventListener('pointerdown', e => { e.stopPropagation(); cancelAnimationFrame(this.turnRaf); });
       el.addEventListener('click', () => this.pickSpot(i, true));
       this.el.append(el);

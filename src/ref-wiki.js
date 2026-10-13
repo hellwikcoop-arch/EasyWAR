@@ -276,16 +276,19 @@ export function mount(host, options = {}) {
         '.' + (c.note ? ' ' + c.note : '')))));
   }
 
+  // Для ворожої техніки пункти описують уразливі місця; для своєї, боєприпасів і машин — чутливі вузли, що їх треба берегти.
+  const weakLabel = entry => (entry.group === 'enemy' ? 'Уразливі місця' : 'Чутливі вузли');
+
   // Уразливі місця: нумерований список, пов’язаний із позначками на моделі (якщо модель є, пункти — кнопки).
   function weakBlock(entry) {
     const weak = entry.weak || [];
     if (!weak.length) return null;
     const live = !!entry.model;
-    return h('section', { class: 'rw-sec rw-weaksec' }, h('h3', { text: 'Уразливі місця' }),
+    return h('section', { class: 'rw-sec rw-weaksec' }, h('h3', { text: weakLabel(entry) }),
       live ? h('p', { class: 'rw-fine', text: 'Номер на моделі й пункт списку пов’язані: натисніть, і зона підсвітиться, а модель повернеться до неї.' }) : null,
       h('ol', { class: 'rw-weaklist' }, weak.map((w, i) => h('li', {}, h(live ? 'button' : 'div', { class: 'rw-weak', type: live ? 'button' : null, 'data-spot': String(i), 'aria-pressed': live ? 'false' : null, onclick: live ? () => spotFromList(i) : null },
         h('b', { text: String(i + 1), 'aria-hidden': 'true' }), h('strong', { text: w.t }), h('span', { text: w.d }))))),
-      h('p', { class: 'rw-fine', text: 'Відкритий навчальний огляд для розпізнавання, а не бойова інструкція.' + (live ? ' Номери на моделі показують зону приблизно.' : '') }));
+      h('p', { class: 'rw-fine', text: (entry.group === 'enemy' ? 'Відкритий навчальний огляд для розпізнавання, а не бойова інструкція.' : 'Загальний довідковий огляд за відкритими даними, а не експлуатаційна чи бойова інструкція.') + (live ? ' Номери на моделі показують зону приблизно.' : '') }));
   }
 
   function sourcesNode(entry) {
@@ -319,7 +322,7 @@ export function mount(host, options = {}) {
     state.mode = both ? 'live' : 'weak';
     airBox = viewerOf(entry) ? aircraftBox(entry) : null;
     modeBar = both ? h('div', { class: 'seg rw-modes', role: 'group', 'aria-label': 'Вигляд моделі' },
-      [['live', 'Інтерактивна модель'], ['weak', 'Уразливі місця']].map(([m, label]) =>
+      [['live', 'Інтерактивна модель'], ['weak', weakLabel(entry)]].map(([m, label]) =>
         h('button', { type: 'button', 'data-mode': m, 'aria-pressed': String(m === 'live'), text: label, onclick: () => setMode(m) }))) : null;
     const main = h('div', { class: 'rw-main' },
       variantBar,

@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { readFile, stat } from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
-import { KINDS } from '../src/munition-3d.js';
+import { KINDS, buildModel } from '../src/munition-3d.js';
 import { ENTRIES, GROUPS, PAIRS, aircraftId, carriersOf, creditOf, creditsOf, entryById, modelOf, munitionId, munitionsOf, searchEntries, usageFor, variantsOf, viewerOf } from '../src/ref-data.js';
-import { BoxGeometry, Group, Mesh, MeshStandardMaterial, Vector3 } from 'three';
+import { Box3, BoxGeometry, Group, Mesh, MeshStandardMaterial, Vector3 } from 'three';
 import { MODEL_FILES, NOSE_TURN, aircraftDistance, applyDecals, fixMaterials, normalizeAircraft, spotAnchors } from '../src/ref-viewer.js';
 
 const html = await readFile(new URL('../src/air.html', import.meta.url), 'utf8');
@@ -537,4 +537,42 @@ test('decals lie on both sides of the hull, face outwards and are not taken for 
   // Промені «уразливих місць» не бачать наклейок як обшивку.
   const anchor = spotAnchors(aircraft, [[.5, .5]])[0];
   assert.ok(Math.abs(Math.abs(anchor.z) - half) < 1e-6, 'anchor on the hull, not on the decal');
+});
+
+test('every article with a model has numbered spots in both modes, labelled by group', async () => {
+  const wiki = await readFile(new URL('../src/ref-wiki.js', import.meta.url), 'utf8');
+  for (const e of ENTRIES) {
+    assert.ok(e.model, `${e.id}: model`);
+    assert.ok(e.weak && e.weak.length >= 3 && e.weak.length <= 4, `${e.id}: 3–4 spots`);
+    const seen = new Set();
+    for (const w of e.weak) {
+      assert.ok(w.t.length > 3 && w.d.length > 20, `${e.id}: text`);
+      assert.ok(!seen.has(w.t), `${e.id}: unique titles`);
+      seen.add(w.t);
+      assert.ok((w.p.length === 2 || w.p.length === 3) && w.p.every(v => v >= 0 && v <= 1), `${e.id}: anchor`);
+    }
+  }
+  // Ворожа техніка має «Уразливі місця», решта — «Чутливі вузли»; перемикач виду бере ту саму назву.
+  assert.match(wiki, /entry\.group === 'enemy' \? 'Уразливі місця' : 'Чутливі вузли'/);
+  assert.match(wiki, /\['weak', weakLabel\(entry\)\]/);
+});
+
+test('spots of procedural munitions land on the hull, not in the air', () => {
+  for (const e of ENTRIES.filter(x => x.model && x.model.kind)) {
+    const { group } = buildModel(e.model.kind);
+    group.updateMatrixWorld(true);
+    const box = new Box3().setFromObject(group);
+    const entry = { group, size: box.getSize(new Vector3()), min: box.min.clone() };
+    const pts = spotAnchors(entry, e.weak.map(w => w.p));
+    pts.forEach((pt, i) => {
+      assert.ok(pt.x >= box.min.x - 1e-6 && pt.x <= box.max.x + 1e-6, `${e.id}#${i}: along the body`);
+      if (e.weak[i].p.length === 2) assert.ok(pt.z > 0, `${e.id}#${i}: hit the hull from the viewer side`);
+    });
+  }
+});
+
+test('viewer aircraft and weak-spot models share the same files, so no second copy is shipped', async () => {
+  const doc = await readFile(new URL('../src/ref-viewer.js', import.meta.url), 'utf8');
+  assert.match(doc, /wrapper: 'aircraft-3d\/x\.js'/);
+  for (const e of ENTRIES.filter(x => x.model && x.model.wrapper)) assert.ok(e.viewer, `${e.id}: wrapper models belong to viewer aircraft`);
 });
