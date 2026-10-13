@@ -6,7 +6,6 @@ import {
   chooseProfileDatabase,
   clearProfileDatabase,
   createPositionDatabaseTemplate,
-  createLocalProfile,
   createProfileBaseTable,
   databaseFileName,
   deleteLocalProfile,
@@ -21,6 +20,7 @@ import {
   profileTablePath,
   readProfileDatabase,
   renameLocalProfile,
+  setLocalProfileModules,
   setLocalProfilePassword,
   setProfileWorkspaceTemplate,
   signInLocalProfile,
@@ -28,6 +28,9 @@ import {
   workspaceTemplateForProfile,
   workspaceTemplateLabel,
 } from './local-profiles-core.js';
+import { createProfileGate } from './profile-gate.js';
+import { requestSplashSkip } from './startup-splash-core.js';
+import { GATE_MODULES, modulesError, moduleVisible } from './profile-gate-core.js';
 import { airWindow, moduleWindow, ownLossesApi, trackAirWork, trackModuleWork, whenAirDashboard, whenModuleDashboard, whenOwnLosses } from './air-bridge.js';
 
 const AVATAR_SIZE = 256;
@@ -157,25 +160,17 @@ function initializeLocalProfiles() {
       <h2 id="ew-profile-title">Локальні профілі</h2>
       <button type="button" class="btn quiet" id="ew-profile-close" aria-label="Закрити">Закрити</button>
     </div>
-    <p>Профілі зберігаються лише в локальній базі цього пристрою.</p>
+    <p>Профілі зберігаються лише в локальній базі цього пристрою. Пароль обов’язковий.</p>
     <p class="ew-profile-note">Пароль закриває вхід у профіль на цьому пристрої. Файли таблиць на диску він не шифрує.</p>
     <p class="ew-profile-note">До профілю можна прив'язати окремо таблицю Повітряних Сил і таблицю Ракетних військ. Кожна відкривається у своєму модулі після входу в профіль і записується прямо у свій файл.</p>
     <p class="ew-profile-note">Рольовий шаблон змінює лише початковий розділ робочого простору. Він не надає і не обмежує доступ.</p>
     <p id="ew-profile-status" class="ew-profile-status" role="status" aria-live="polite"></p>
     <div id="ew-profile-list" class="ew-profile-list"></div>
-    <form id="ew-profile-create" class="ew-profile-create">
-      <label for="ew-profile-name">Назва нового профілю</label>
-      <div>
-        <input id="ew-profile-name" name="displayName" maxlength="80" autocomplete="off" required>
-        <button type="submit" class="btn primary">Створити</button>
-      </div>
-    </form>`;
+    <p class="ew-profile-note">Щоб додати користувача або увійти під іншим, вийдіть з профілю: на екрані входу є кнопка «Додати користувача». Кожен користувач має власний пароль, модулі й таблиці.</p>`;
   document.body.append(dialog);
 
   const list = dialog.querySelector('#ew-profile-list');
   const status = dialog.querySelector('#ew-profile-status');
-  const createForm = dialog.querySelector('#ew-profile-create');
-  const nameInput = dialog.querySelector('#ew-profile-name');
   const avatarPicker = el('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp', hidden: true });
   document.body.append(avatarPicker);
 
@@ -188,8 +183,7 @@ function initializeLocalProfiles() {
   let pendingDashboardSection = null;
   let busy = false;
 
-  const lockScreen = el('div', { class: 'ew-lock', hidden: true, role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'ew-lock-title' });
-  document.body.append(lockScreen);
+  const gate = createProfileGate({ el, avatar, readAvatar });
 
   const activeProfile = () => state.profiles.find(profile => profile.id === state.activeProfileId) || null;
 
@@ -272,9 +266,25 @@ function initializeLocalProfiles() {
     });
   }
 
+  // Стартовий екран показує лише модулі, які користувач обрав при реєстрації.
+  function applyModules() {
+    const profile = activeProfile();
+    const signedIn = Boolean(profile) && !isProfileLocked(profile, sessionProfileId);
+    for (const module of GATE_MODULES) {
+      const visible = !signedIn || moduleVisible(module.id, profile);
+      for (const selector of [module.card, module.tile]) {
+        if (selector) document.querySelector(selector)?.classList.toggle('ew-module-off', !visible);
+      }
+    }
+    // Коли частини карток немає, решта стає по центру, а не липне до лівого краю.
+    const trimmed = Boolean(document.querySelector('.branch-cards .ew-module-off'));
+    document.querySelector('.branch-cards')?.classList.toggle('ew-modules-trimmed', trimmed);
+  }
+
   function render() {
     renderHeaderButton();
     renderCommandTiles();
+    applyModules();
     list.textContent = '';
     if (!state.profiles.length) {
       list.append(el('p', { class: 'ew-profile-empty', text: 'Локальних профілів ще немає.' }));
@@ -297,8 +307,7 @@ function initializeLocalProfiles() {
         el('div', { class: 'ew-profile-ident' }, avatar(profile, 'lg'),
           el('div', {}, el('strong', { text: profile.displayName }), profile.position ? el('div', { class: 'ew-profile-position-text', text: profile.position }) : null)),
         badge,
-        el('div', { class: 'ew-profile-actions' },
-          el('button', { type: 'button', class: 'btn primary', text: 'Увійти', onclick: () => signIn(profile) })),
+        el('p', { class: 'ew-profile-note', text: 'Щоб увійти в цей профіль, вийдіть із поточного.' }),
       );
       return row;
     }
@@ -344,12 +353,10 @@ function initializeLocalProfiles() {
     const passwordButtons = profile.hasPassword
       ? [
         el('button', { type: 'button', class: 'btn quiet', text: 'Змінити пароль', onclick: () => changePassword(profile) }),
-        el('button', { type: 'button', class: 'btn quiet', text: 'Зняти пароль', onclick: () => removePassword(profile) }),
       ]
-      : [el('button', { type: 'button', class: 'btn quiet', text: 'Захистити паролем…', onclick: () => setPassword(profile) })];
+      : [el('button', { type: 'button', class: 'btn quiet', text: 'Встановити пароль…', onclick: () => setPassword(profile) })];
 
     const actions = el('div', { class: 'ew-profile-actions' },
-      el('button', { type: 'button', class: 'btn', text: 'Обрати', disabled: isActive, onclick: () => signIn(profile) }),
       saveButton,
       passwordButtons,
       profile.avatarDataUrl ? el('button', { type: 'button', class: 'btn quiet', text: 'Прибрати фото', onclick: () => saveDetails(profile, profile.position, null, 'Фото прибрано.') }) : null,
@@ -371,10 +378,39 @@ function initializeLocalProfiles() {
           el('label', {}, el('span', { class: 'ew-profile-field-caption', text: 'Посада' }), positionField))),
       badge,
       database,
+      renderModules(profile),
       templateSection.label,
       actions,
     );
     return row;
+  }
+
+  /** Модулі профілю: які картки показує стартовий екран. Потрібен щонайменше один. */
+  function renderModules(profile) {
+    const boxes = GATE_MODULES.map(module => el('input', {
+      type: 'checkbox',
+      value: module.id,
+      checked: moduleVisible(module.id, profile),
+      'aria-label': `${module.title} — профіль ${profile.displayName}`,
+    }));
+    return el('div', { class: 'ew-profile-modules' },
+      el('span', { class: 'ew-profile-field-caption', text: 'Модулі на стартовому екрані' }),
+      el('div', { class: 'ew-profile-module-list' },
+        GATE_MODULES.map((module, index) => el('label', { class: 'ew-profile-module' }, boxes[index], el('span', { text: module.title })))),
+      el('button', {
+        type: 'button',
+        class: 'btn',
+        text: 'Зберегти модулі',
+        onclick: () => {
+          const chosen = boxes.filter(box => box.checked).map(box => box.value);
+          const problem = modulesError(chosen);
+          if (problem) {
+            status.textContent = problem;
+            return;
+          }
+          run(() => setLocalProfileModules(profile.id, chosen), 'Модулі збережено.');
+        },
+      }));
   }
 
   /** Нова порожня базова таблиця: зберігається в новий файл і прив’язується до свого роду військ. */
@@ -477,7 +513,7 @@ function initializeLocalProfiles() {
       title: `Пароль для профілю «${profile.displayName}»`,
       submitLabel: 'Захистити',
       fields: [
-        { label: 'Новий пароль (від 4 символів)', autocomplete: 'new-password' },
+        { label: 'Новий пароль (від 6 символів)', autocomplete: 'new-password' },
         { label: 'Повторіть пароль', autocomplete: 'new-password', confirms: 0 },
       ],
     });
@@ -493,22 +529,12 @@ function initializeLocalProfiles() {
       submitLabel: 'Змінити',
       fields: [
         { label: 'Поточний пароль' },
-        { label: 'Новий пароль (від 4 символів)', autocomplete: 'new-password' },
+        { label: 'Новий пароль (від 6 символів)', autocomplete: 'new-password' },
         { label: 'Повторіть новий пароль', autocomplete: 'new-password', confirms: 1 },
       ],
     });
     if (!values) return;
     await run(() => setLocalProfilePassword(profile.id, values[0], values[1]), 'Пароль змінено.');
-  }
-
-  async function removePassword(profile) {
-    const values = await askPasswords({
-      title: `Зняти пароль із профілю «${profile.displayName}»`,
-      submitLabel: 'Зняти пароль',
-      fields: [{ label: 'Поточний пароль' }],
-    });
-    if (!values) return;
-    await run(() => setLocalProfilePassword(profile.id, values[0], null), 'Пароль знято.');
   }
 
   const branchInfo = branch => PROFILE_SLOTS.find(entry => entry.branch === branch);
@@ -592,40 +618,6 @@ function initializeLocalProfiles() {
     } finally {
       setBusy(false);
     }
-  }
-
-  /** Вхід у профіль: пароль, якщо він є, потім автозавантаження таблиці. */
-  async function signIn(profile) {
-    let password = null;
-    if (isProfileLocked(profile, sessionProfileId)) {
-      const values = await askPasswords({
-        title: `Вхід у профіль «${profile.displayName}»`,
-        submitLabel: 'Увійти',
-        fields: [{ label: 'Пароль' }],
-      });
-      if (!values) return false;
-      [password] = values;
-    }
-    return completeSignIn(profile, password, message => { status.textContent = message; });
-  }
-
-  async function completeSignIn(profile, password, report) {
-    try {
-      state = password == null
-        ? await activateLocalProfile(profile.id)
-        : await signInLocalProfile(profile.id, password);
-      sessionProfileId = await getProfileSession();
-      workspaceState = await getWorkspaceTemplates();
-    } catch (error) {
-      report(`Не вдалося увійти: ${String(error)}`);
-      return false;
-    }
-    report(`Вхід у профіль «${profile.displayName}» виконано.`);
-    render();
-    hideLockScreen();
-    applyActiveWorkspaceTemplate();
-    loadProfileDatabases(activeProfile(), { reload: true });
-    return true;
   }
 
   // Each table opens in its branch module. Automatically it loads when the user
@@ -720,58 +712,6 @@ function initializeLocalProfiles() {
     }
   }
 
-  function hideLockScreen() {
-    lockScreen.hidden = true;
-    lockScreen.textContent = '';
-    document.documentElement.classList.remove('ew-locked');
-  }
-
-  /** Екран входу при запуску, якщо активний профіль захищено паролем. */
-  function showLockScreen() {
-    lockScreen.textContent = '';
-    const message = el('p', { class: 'ew-lock-message', role: 'alert' });
-    const cards = state.profiles.map(profile => {
-      const password = profile.hasPassword
-        ? el('input', { type: 'password', autocomplete: 'current-password', maxlength: '128', placeholder: 'Пароль', 'aria-label': `Пароль профілю ${profile.displayName}` })
-        : null;
-      const submit = el('button', { type: 'submit', class: 'btn primary', text: 'Увійти' });
-      const form = el('form', {
-        class: `ew-lock-card${profile.id === state.activeProfileId ? ' is-active' : ''}`,
-        onsubmit: async event => {
-          event.preventDefault();
-          submit.disabled = true;
-          message.textContent = '';
-          const ok = await completeSignIn(profile, password ? password.value : null, text => { message.textContent = text; });
-          if (!ok) {
-            submit.disabled = false;
-            if (password) { password.value = ''; password.focus(); }
-          }
-        },
-      },
-      avatar(profile, 'xl'),
-      el('strong', { text: profile.displayName }),
-      el('span', { class: 'ew-lock-position', text: profile.position || ' ' }),
-      PROFILE_SLOTS.map(({ branch, short }) => {
-        const path = profileTablePath(profile, branch);
-        return path ? el('span', { class: 'ew-lock-db', text: `${short}: ${databaseFileName(path)}` }) : null;
-      }),
-      PROFILE_SLOTS.some(({ branch }) => profileTablePath(profile, branch)) ? null : el('span', { class: 'ew-lock-db', text: 'Таблиць не прив’язано' }),
-      password,
-      submit);
-      return form;
-    });
-    lockScreen.append(
-      el('div', { class: 'ew-lock-inner' },
-        el('h2', { id: 'ew-lock-title', text: 'Вхід у профіль EasyWAR' }),
-        el('p', { class: 'ew-lock-note', text: 'Оберіть профіль. Для захищеного профілю введіть пароль.' }),
-        el('div', { class: 'ew-lock-cards' }, cards),
-        message));
-    lockScreen.hidden = false;
-    document.documentElement.classList.add('ew-locked');
-    const activeInput = lockScreen.querySelector('.ew-lock-card.is-active input') || lockScreen.querySelector('.ew-lock-card input, .ew-lock-card button');
-    activeInput?.focus();
-  }
-
   function applyPendingDashboardSection() {
     if (!pendingDashboardSection) return;
     const button = [...(airWindow()?.document.querySelectorAll('.snav-b[data-t]') ?? [])]
@@ -816,15 +756,14 @@ function initializeLocalProfiles() {
     }
   }
 
+  // Після заставки завжди стоїть вхід: без нього стартовий екран недоступний. Реєстрація,
+  // додавання користувачів і вхід — у profile-gate.js; тут лише те, що йде після входу.
   async function startup() {
+    await gate.requireSignIn();
     await refresh(true);
-    const profile = activeProfile();
-    if (profile && isProfileLocked(profile, sessionProfileId)) {
-      showLockScreen();
-      return;
-    }
+    render();
     applyActiveWorkspaceTemplate();
-    loadProfileDatabases(profile);
+    loadProfileDatabases(activeProfile(), { reload: true });
   }
 
   function close() {
@@ -835,7 +774,6 @@ function initializeLocalProfiles() {
   openButton.addEventListener('click', async () => {
     dialog.showModal();
     await refresh();
-    nameInput.focus();
   });
   dialog.querySelector('#ew-profile-close').addEventListener('click', close);
   dialog.addEventListener('cancel', event => {
@@ -845,14 +783,6 @@ function initializeLocalProfiles() {
   whenAirDashboard().then(dashboard => {
     if (dashboard) airWindow().document.addEventListener('av:data', applyPendingDashboardSection);
   });
-  createForm.addEventListener('submit', event => {
-    event.preventDefault();
-    const displayName = nameInput.value;
-    mutate(() => createLocalProfile(displayName), 'Профіль створено.').then(ok => {
-      if (ok) nameInput.value = '';
-    });
-  });
-
   // Кнопка «Вийти» в діалозі: блокує захищений профіль і показує екран входу.
   const signOut = el('button', {
     type: 'button',
@@ -862,8 +792,10 @@ function initializeLocalProfiles() {
       await lockLocalProfile();
       sessionProfileId = null;
       close();
-      if (state.profiles.some(profile => profile.hasPassword)) showLockScreen();
-      else render();
+      // Модулі тримають таблиці попереднього користувача в пам’яті, тож вихід перезавантажує
+      // вікно: екран входу відкривається на чистому стані, а заставка вдруге не грає.
+      requestSplashSkip();
+      window.location.reload();
     },
   });
   dialog.querySelector('.ew-profile-head').insertBefore(signOut, dialog.querySelector('#ew-profile-close'));
