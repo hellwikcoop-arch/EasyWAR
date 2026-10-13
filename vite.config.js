@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 
@@ -7,7 +7,8 @@ const host = process.env.TAURI_DEV_HOST;
 
 // Офлайн-кеш для мобільного перегляду (viewer.html): після збірки записує dist/sw.js
 // зі списком усіх файлів. Версія кешу береться з package.json, тож нова збірка
-// замінює старий кеш. 3D-моделі (.glb) у кеш не входять: у вікнах командування вони не потрібні.
+// замінює старий кеш. 3D-моделі (.glb) і переглядач літаків (aircraft-viewer.html, aircraft-3d/) у кеш не входять:
+// у вікнах командування вони не потрібні, а моделі важать десятки мегабайтів.
 // Сервіс-воркер реєструє лише viewer.html; у застосунку Tauri його немає.
 function viewerServiceWorker() {
   return {
@@ -20,7 +21,7 @@ function viewerServiceWorker() {
         for (const name of readdirSync(dir)) {
           const full = join(dir, name);
           if (statSync(full).isDirectory()) walk(full);
-          else if (name !== "sw.js" && !name.endsWith(".map") && !name.endsWith(".glb")) files.push("./" + relative(out, full).split("\\").join("/"));
+          else if (name !== "sw.js" && !name.endsWith(".map") && !name.endsWith(".glb") && name !== "aircraft-viewer.html" && !full.includes(`${sep}aircraft-3d${sep}`)) files.push("./" + relative(out, full).split("\\").join("/"));
         }
       };
       walk(out);
@@ -85,6 +86,8 @@ export default defineConfig({
         rocket: fileURLToPath(new URL("./src/rocket.html", import.meta.url)),
         artillery: fileURLToPath(new URL("./src/artillery.html", import.meta.url)),
         viewer: fileURLToPath(new URL("./src/viewer.html", import.meta.url)),
+        // Літаки у вкладці «Довідник» (ПС): окрема сторінка зі своєю сценою, відкривається в кадрі.
+        aircraftViewer: fileURLToPath(new URL("./src/aircraft-viewer.html", import.meta.url)),
       },
     },
   },

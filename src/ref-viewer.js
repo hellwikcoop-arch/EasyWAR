@@ -10,17 +10,8 @@ import { SHELL_KINDS, buildShell } from './artillery-3d.js';
 
 // Файли моделей літаків. Шлях у new URL(...) має бути дослівним, щоб Vite покласти файл у збірку.
 export const MODEL_FILES = {
-  'mig-29': new URL('./models/mig-29.glb', import.meta.url).href,
-  'su-27': new URL('./models/su-27.glb', import.meta.url).href,
-  'mirage-2000-5f': new URL('./models/mirage-2000-5f.glb', import.meta.url).href,
-  'su-24': new URL('./models/su-24.glb', import.meta.url).href,
-  'f-16': new URL('./models/f-16.glb', import.meta.url).href,
   'su-25': new URL('./models/su-25.glb', import.meta.url).href,
   'gripen': new URL('./models/gripen.glb', import.meta.url).href,
-  'mi-24p': new URL('./models/mi-24p.glb', import.meta.url).href,
-  'mi-8': new URL('./models/mi-8.glb', import.meta.url).href,
-  'su-27b': new URL('./models/su-27b.glb', import.meta.url).href,
-  'mig-29-ghost': new URL('./models/mig-29-ghost.glb', import.meta.url).href,
   'aim-120': new URL('./models/aim-120.glb', import.meta.url).href,
   'aim-9x': new URL('./models/aim-9x.glb', import.meta.url).href,
   'agm-65': new URL('./models/agm-65.glb', import.meta.url).href,

@@ -10,15 +10,6 @@ export const GROUPS = [
   { id: 'support', title: 'Машини забезпечення', tab: 'Допоміжні', hint: 'евакуація, підвіз, заряджання' },
 ];
 
-const CREDIT_MIG29 = {
-  title: 'MiG-29 «Ukrainian Falcons»',
-  author: '42manako',
-  authorUrl: 'https://sketchfab.com/42manako',
-  url: 'https://sketchfab.com/3d-models/mig-29-ukrainian-falcons-f53fae12952b43d8b6cc5b7af6576da5',
-  license: 'CC BY 4.0',
-  licenseUrl: 'http://creativecommons.org/licenses/by/4.0/',
-};
-
 const CREDIT_SU27 = {
   title: 'Ukrainian Su-27P1M',
   author: '42manako',
@@ -53,7 +44,7 @@ const CREDIT_F16 = {
   url: 'https://sketchfab.com/3d-models/lockheed-martin-f-16ef-fighting-falcon-d54c72e055a647ad9173e01548e50db3',
   license: 'CC BY 4.0',
   licenseUrl: 'http://creativecommons.org/licenses/by/4.0/',
-  note: 'Модель — двомісний F-16E/F в іноземній розмальовці, а не літак ПС ЗСУ.',
+  note: 'Модель — двомісний F-16E/F, а не літак ПС ЗСУ: текстуру перефарбовано в сірий, кокарди ОАЕ замінено на тризуби, прапор — на український.',
 };
 
 const CREDIT_SU25 = {
@@ -83,33 +74,6 @@ const CREDIT_MI24 = {
   licenseUrl: 'http://creativecommons.org/licenses/by/4.0/',
 };
 
-const CREDIT_MI8 = {
-  title: 'Mi-8',
-  author: 'tiunov.se',
-  authorUrl: 'https://sketchfab.com/tiunov.se',
-  url: 'https://sketchfab.com/3d-models/mi-8-5e5e57ef66994c6196a5f5d6b9f50403',
-  license: 'CC BY 4.0',
-  licenseUrl: 'http://creativecommons.org/licenses/by/4.0/',
-};
-
-const CREDIT_SU27B = {
-  title: 'Ukrainian Su-27B',
-  author: '42manako',
-  authorUrl: 'https://sketchfab.com/42manako',
-  url: 'https://sketchfab.com/3d-models/ukrainian-su-27b-a1fa957a39bb4f3db8bb669c2dd6afdb',
-  license: 'CC BY 4.0',
-  licenseUrl: 'http://creativecommons.org/licenses/by/4.0/',
-};
-
-const CREDIT_GHOST = {
-  title: 'Ghost of Kiev MiG-29',
-  author: '42manako',
-  authorUrl: 'https://sketchfab.com/42manako',
-  url: 'https://sketchfab.com/3d-models/ghost-of-kiev-mig-29-cf0c0d3e8494460b8e4d9c579550d656',
-  license: 'CC BY 4.0',
-  licenseUrl: 'http://creativecommons.org/licenses/by/4.0/',
-};
-
 const CREDIT_USW = {
   title: 'US Weapon Pack',
   author: 'Rhine_Lab_Muelsyse',
@@ -129,16 +93,64 @@ const CREDIT_COLLECTION = {
   note: 'Ліцензія CC BY-NC-SA дозволяє лише некомерційне використання, а змінений файл (тут — один боєприпас із збірки, стиснутий для застосунку) поширюється на тих самих умовах.',
 };
 
+const CREDIT_MIG29MU1 = {
+  title: 'Ukrainian MiG-29MU1 (pixel)',
+  author: '42manako',
+  authorUrl: 'https://sketchfab.com/42manako',
+  url: 'https://sketchfab.com/3d-models/ukrainian-mig-29mu1-pixel-15201bfce51f46cdaddb28957acfac1c',
+  license: 'CC BY 4.0',
+  licenseUrl: 'http://creativecommons.org/licenses/by/4.0/',
+  note: 'Піксельний камуфляж і роундель ЗСУ нанесено на текстуру за фото, штатні підвіски моделі замінено блоками власної роботи; рульові поверхні й гальмівні щитки навішено на шарніри.',
+};
+
+const CREDIT_MI8 = {
+  title: 'helicopter mi-8',
+  author: 'mamont nikita',
+  authorUrl: 'https://sketchfab.com/mamontnikita62',
+  url: 'https://sketchfab.com/3d-models/helicopter-mi-8-aaa58674609e40feafe816909de65ff9',
+  license: 'CC BY 4.0',
+  licenseUrl: 'http://creativecommons.org/licenses/by/4.0/',
+  note: 'Текстуру перефарбовано, гвинти виділено з моделі.',
+};
+
+const CREDIT_IL76 = {
+  title: 'Ukrainian Il-76MD',
+  author: '42manako',
+  authorUrl: 'https://sketchfab.com/42manako',
+  url: 'https://sketchfab.com/3d-models/ukrainian-il-76md-1acd000e27764cddb7b9b1255de86e0c',
+  license: 'CC BY 4.0',
+  licenseUrl: 'http://creativecommons.org/licenses/by/4.0/',
+  note: 'Кабіну й салон прибрано, масштаб ×0,5, шасі відокремлено й прибирається вперед у обтічники.',
+};
+
+const CREDIT_SU24M = {
+  title: 'Su-24M (Ukraine)',
+  author: '42manako',
+  authorUrl: 'https://sketchfab.com/42manako',
+  url: 'https://sketchfab.com/3d-models/su-24m-ukraine-f51d49fa06d940f581728131a766884f',
+  license: 'CC BY-NC 4.0',
+  licenseUrl: 'http://creativecommons.org/licenses/by-nc/4.0/',
+  note: 'Фюзеляж і крила. Ліцензія CC BY-NC дозволяє лише некомерційне використання. Підвіски оригіналу прибрано, крило й шасі відокремлено; шасі — з окремої моделі нижче.',
+};
+
+const CREDIT_LANDSCAPE = {
+  title: '75 Acres Land w Creek',
+  author: 'mrwrightphoto',
+  authorUrl: 'https://sketchfab.com/mrwrightphoto',
+  license: 'CC BY 4.0',
+  licenseUrl: 'http://creativecommons.org/licenses/by/4.0/',
+  note: 'Фотограмметричний ландшафт під літаком у польоті; обрізано й спрощено.',
+};
+
+// Боєприпаси, які переглядач вішає на винищувачі (AIM-120 — на F-16, Р-27 — на МіГ-29 і Су-27, JDAM — на всі три).
+const VIEWER_WEAPONS = [CREDIT_USW, CREDIT_COLLECTION];
+
 export const ENTRIES = [
   // ---------- Засоби ----------
   {
     id: 'mig29', short: 'МіГ-29', group: 'aircraft', name: 'МіГ-29', alias: 'MiG-29, за кодифікацією НАТО — Fulcrum',
     role: 'Багатоцільовий винищувач', origin: 'СРСР', tags: ['mig29', 'миг29', 'мig-29', 'fulcrum', 'мікоян'],
-    model: { file: 'mig-29', nose: '+z' }, credit: CREDIT_MIG29,
-    variants: [
-      { id: 'falcons', label: 'Ukrainian Falcons', model: { file: 'mig-29', nose: '+z' }, credit: CREDIT_MIG29 },
-      { id: 'ghost', label: '«Привид Києва»', model: { file: 'mig-29-ghost', nose: '+z' }, credit: CREDIT_GHOST },
-    ],
+    viewer: 'mig', credits: [CREDIT_MIG29MU1, ...VIEWER_WEAPONS, CREDIT_LANDSCAPE],
     summary: 'Радянський легкий винищувач четвертого покоління (ОКБ Мікояна) з двома двигунами РД-33. У Повітряних Силах ЗСУ літає й у ударних вильотах, зокрема з адаптованими західними керованими боєприпасами.',
     facts: [
       ['Екіпаж', '1 особа'], ['Довжина', '≈ 17,4 м'], ['Розмах крила', '≈ 11,4 м'], ['Висота', '≈ 4,7 м'],
@@ -150,17 +162,13 @@ export const ENTRIES = [
     sections: [
       { title: 'Призначення', text: 'Завоювання переваги в повітрі та удари по наземних цілях керованими й некерованими боєприпасами з підкрильових вузлів.' },
       { title: 'У ударних вильотах', text: 'Літак доопрацьовано під західні боєприпаси: публічно відомо про ракети AGM-88 HARM і керовані бомби. Який саме БП був у вильоті, видно в полі «Тип БП» бази даних, а внизу статті наведено підсумок по вашій таблиці.' },
-      { title: 'Моделі в довіднику', text: 'Над сценою є перемикач «Ukrainian Falcons» і «Привид Києва»: це дві тривимірні моделі МіГ-29 із різним забарвленням. Дані картки однакові для обох.' },
+      { title: 'Про модель', text: 'Модель показує МіГ-29МУ1 (борт 05) у піксельному камуфляжі. Кнопка «Схема» (клавіша V) перемикає її на спрощену схему літака.' },
     ],
   },
   {
     id: 'su27', short: 'Су-27', group: 'aircraft', name: 'Су-27', alias: 'Su-27, за кодифікацією НАТО — Flanker',
     role: 'Важкий винищувач', origin: 'СРСР', tags: ['su27', 'су27', 'flanker', 'сухой', 'сухого', 'p1m'],
-    model: { file: 'su-27', nose: '+z' }, credit: CREDIT_SU27,
-    variants: [
-      { id: 'p1m', label: 'Су-27П1М', model: { file: 'su-27', nose: '+z' }, credit: CREDIT_SU27 },
-      { id: 'b', label: 'Су-27 (Flanker-B)', model: { file: 'su-27b', nose: '-z' }, credit: CREDIT_SU27B },
-    ],
+    viewer: 'su', credits: [CREDIT_SU27, ...VIEWER_WEAPONS, CREDIT_LANDSCAPE],
     summary: 'Двомоторний важкий винищувач завоювання переваги в повітрі (ОКБ Сухого) з великою дальністю й бойовим навантаженням.',
     facts: [
       ['Екіпаж', '1 особа'], ['Довжина', '≈ 21,9 м'], ['Розмах крила', '≈ 14,7 м'], ['Висота', '≈ 5,9 м'],
@@ -170,13 +178,13 @@ export const ENTRIES = [
     ],
     sections: [
       { title: 'Призначення', text: 'Завоювання переваги в повітрі на великих відстанях. Багато вузлів підвіски дозволяють брати різні боєприпаси, включно з керованими бомбами.' },
-      { title: 'Моделі в довіднику', text: 'Перемикач над сценою показує модернізований Су-27П1М і базовий Су-27 (за кодифікацією НАТО — Flanker-B). Картка описує планер, спільний для обох: обладнання й озброєння модифікацій відрізняються, а на моделях ще й забарвлення.' },
+      { title: 'Про модель', text: 'Модель показує модернізований Су-27П1М. Картка описує планер, спільний для модифікацій: обладнання й озброєння відрізняються.' },
     ],
   },
   {
     id: 'f16', short: 'F-16', group: 'aircraft', name: 'F-16', alias: 'F-16 Fighting Falcon, в Україні — F-16AM/BM (MLU)',
     role: 'Багатоцільовий винищувач', origin: 'США', tags: ['f16', 'ф16', 'falcon', 'fighting falcon', 'viper', 'вайпер', 'f-16am', 'f-16bm', 'mlu'],
-    model: { file: 'f-16', nose: '+x' }, credit: CREDIT_F16,
+    viewer: 'f16', credits: [CREDIT_F16, ...VIEWER_WEAPONS, CREDIT_LANDSCAPE],
     summary: 'Одномоторний легкий багатоцільовий винищувач (General Dynamics, нині Lockheed Martin), один із найпоширеніших у світі. До ПС ЗСУ надійшли F-16AM (одномісні) і F-16BM (двомісні) після модернізації MLU від Нідерландів, Данії, Норвегії та Бельгії. Це літак четвертого покоління, який несе західні керовані боєприпаси без переобладнання вузлів.',
     facts: [
       ['Екіпаж', '1 особа (AM), 2 особи (BM)'], ['Довжина', '≈ 15,0 м'], ['Розмах крила', '≈ 9,5 м без ракет на кінцях'], ['Висота', '≈ 5,1 м'],
@@ -194,13 +202,13 @@ export const ENTRIES = [
         'Проти РЛС: протирадіолокаційні ракети AGM-88 HARM.',
         'Гармата M61A1 на 20 мм для ближнього бою й обстрілу наземних цілей.',
       ] },
-      { title: 'Про модель', text: 'Тривимірна модель в довіднику — двомісний F-16E/F в іноземній розмальовці, тож деталі обладнання й забарвлення відрізняються від F-16AM/BM. Вона показує загальну форму літака й підвіску під крилами.' },
+      { title: 'Про модель', text: 'Модель — двомісний F-16E/F: текстуру перефарбовано в сірий, кокарди ОАЕ замінено на тризуби, прапор — на український. Деталі обладнання відрізняються від F-16AM/BM; модель показує загальну форму літака й підвіску під крилами.' },
     ],
   },
   {
     id: 'mirage', short: 'M2000', group: 'aircraft', name: 'Mirage 2000', alias: 'Mirage 2000-5F',
     role: 'Багатоцільовий винищувач', origin: 'Франція', tags: ['mirage', 'міраж', 'мираж', 'mirage2000', 'м2000', 'dassault'],
-    model: { file: 'mirage-2000-5f', nose: '-z' }, credit: CREDIT_MIRAGE,
+    viewer: 'm2k', credits: [CREDIT_MIRAGE, CREDIT_LANDSCAPE],
     summary: 'Французький одномоторний багатоцільовий винищувач із дельтоподібним крилом (Dassault Aviation). Надійшов до ПС ЗСУ від Франції; поруч із ним у довіднику — французька модульна бомба AASM Hammer.',
     facts: [
       ['Екіпаж', '1 особа'], ['Довжина', '≈ 14,4 м'], ['Розмах крила', '≈ 9,1 м'], ['Висота', '≈ 5,2 м'],
@@ -229,7 +237,7 @@ export const ENTRIES = [
   {
     id: 'su24', short: 'Су-24', group: 'aircraft', name: 'Су-24', alias: 'Су-24М, за кодифікацією НАТО — Fencer',
     role: 'Фронтовий бомбардувальник', origin: 'СРСР', tags: ['su24', 'су24', 'fencer', 'су-24м', 'сухой', 'сухого', 'storm shadow'],
-    model: { file: 'su-24', nose: '+z' }, credit: CREDIT_SU24,
+    viewer: 'su24', credits: [CREDIT_SU24M, CREDIT_SU24, CREDIT_LANDSCAPE],
     summary: 'Двомісний фронтовий бомбардувальник із крилом змінної стрілоподібності (ОКБ Сухого), розрахований на польоти на малих висотах. Найвідоміший як носій ракет Storm Shadow / SCALP-EG. Модель показано з двома такими ракетами під фюзеляжем.',
     facts: [
       ['Екіпаж', '2 особи'], ['Довжина', '≈ 22,6 м'], ['Розмах крила', '≈ 10,4 м зі стрілою 68° і ≈ 17,6 м із розправленим'], ['Висота', '≈ 5,0 м'],
@@ -261,7 +269,7 @@ export const ENTRIES = [
   {
     id: 'mi24', short: 'Мі-24', group: 'aircraft', name: 'Мі-24П', alias: 'Mi-24P, за кодифікацією НАТО — Hind-F',
     role: 'Ударний вертоліт', origin: 'СРСР', tags: ['mi24', 'мі24', 'ми24', 'mi-24', 'hind', 'хінд', 'мі-24п', 'крокодил', 'вертоліт', 'армійська авіація'],
-    model: { file: 'mi-24p', nose: '-z' }, credit: CREDIT_MI24,
+    viewer: 'mi24', credits: [CREDIT_MI24, CREDIT_LANDSCAPE],
     summary: 'Радянський ударний вертоліт (ОКБ Міля) з двома турбовальними двигунами, короткими півкрилами для підвісного озброєння й кабіною для десанту. Мі-24П відрізняється від ранніх Мі-24 нерухомою двоствольною гарматою на правому борту замість турелі під носом.',
     facts: [
       ['Екіпаж', '2 особи (льотчик-оператор і льотчик), десант до 8 осіб'], ['Довжина фюзеляжу', '≈ 17,5 м'], ['Діаметр несного гвинта', '≈ 17,3 м'],
@@ -281,7 +289,7 @@ export const ENTRIES = [
   {
     id: 'mi8', short: 'Мі-8', group: 'aircraft', name: 'Мі-8', alias: 'Mi-8, за кодифікацією НАТО — Hip',
     role: 'Багатоцільовий вертоліт', origin: 'СРСР', tags: ['mi8', 'мі8', 'ми8', 'mi-8', 'hip', 'хіп', 'мі-8мт', 'мі-8мтв', 'вертоліт', 'армійська авіація'],
-    model: { file: 'mi-8', nose: '+z' }, credit: CREDIT_MI8,
+    viewer: 'mi8', credits: [CREDIT_MI8, CREDIT_LANDSCAPE],
     summary: 'Двомоторний транспортно-десантний вертоліт (ОКБ Міля), один із найпоширеніших у світі. Крім перевезень, у модифікаціях із підвісним озброєнням його застосовують для ударів некерованими ракетами.',
     facts: [
       ['Екіпаж', '3 особи (два льотчики й бортовий технік)'], ['Десант', 'до 24 осіб, вантаж до ≈ 4 000 кг у кабіні'],
@@ -291,6 +299,22 @@ export const ENTRIES = [
     sections: [
       { title: 'Призначення', text: 'Перевезення десанту, вантажів і поранених, евакуація, розвідка. Це машина армійської авіації, а не Повітряних Сил. У таблицях ПВК вильоти вертольотів ведуться на аркуші «АА».' },
       { title: 'Ударне застосування', text: 'У модифікаціях із підвісними вузлами несе блоки некерованих ракет (наприклад, УБ-32 і Б-8В20) та кулемети; точний набір залежить від конкретної машини.' },
+    ],
+  },
+  {
+    id: 'il76', short: 'Іл-76', group: 'aircraft', name: 'Іл-76МД', alias: 'Il-76MD, за кодифікацією НАТО — Candid',
+    role: 'Військово-транспортний літак', origin: 'СРСР', tags: ['il76', 'іл76', 'ил76', 'il-76', 'іл-76', 'candid', 'кенді', 'транспортник', 'транспортна авіація'],
+    viewer: 'il', credits: [CREDIT_IL76, CREDIT_LANDSCAPE],
+    summary: 'Чотиримоторний важкий військово-транспортний літак (ОКБ Ілюшина) зі стрілоподібним крилом і високо розташованим хвостовим оперенням. Перевозить техніку, вантажі й десант, може садитися на ґрунтові смуги та скидати вантаж і парашутистів через хвостову рампу.',
+    facts: [
+      ['Екіпаж', '5–6 осіб'], ['Довжина', '≈ 46,6 м'], ['Розмах крила', '≈ 50,5 м'], ['Висота', '≈ 14,8 м'],
+      ['Злітна маса', 'до ≈ 190 000 кг'], ['Корисне навантаження', 'до ≈ 48 000 кг'],
+      ['Двигуни', '4 × Д-30КП, по ≈ 118 кН'], ['Крейсерська швидкість', '≈ 780–800 км/год'], ['Практична стеля', '≈ 12 000 м'],
+      ['Дальність', '≈ 4 000 км з вантажем ≈ 40 т'], ['Десант', 'до ≈ 125 парашутистів'],
+    ],
+    sections: [
+      { title: 'Призначення', text: 'Перекидання особового складу, бойової техніки й вантажів на великі відстані, десантування парашутним і посадковим способом. Підвісок для ураження цілей літак не має, тому в таблиці вильотів із боєприпасами він, як правило, не трапляється.' },
+      { title: 'Про модель', text: 'Модель показує Іл-76МД: кабіну й салон прибрано, шасі виділено з моделі й прибирається вперед у обтічники. Переглядач керує шасі, двигунами й вогнями; підвісок і механізації крила для цього літака немає.' },
     ],
   },
 
@@ -734,6 +758,10 @@ export const variantsOf = entry => (entry.variants && entry.variants.length > 1 
 const variantFor = (entry, id) => variantsOf(entry).find(v => v.id === id) || variantsOf(entry)[0] || entry;
 export const modelOf = (entry, variantId) => variantFor(entry, variantId).model;
 export const creditOf = (entry, variantId) => variantFor(entry, variantId).credit;
+// Літаки й вертольоти показує інтерактивний переглядач (aircraft-viewer.html): entry.viewer — ключ літака в ньому,
+// entry.credits — автори всіх моделей, що з'являються на сцені (літак, шасі, боєприпаси, ландшафт).
+export const viewerOf = entry => entry.viewer || '';
+export const creditsOf = entry => entry.credits || [];
 export const entryById = id => BY_ID.get(id) || null;
 export const carriersOf = id => PAIRS.filter(p => p[1] === id).map(p => p[0]);
 export const munitionsOf = id => PAIRS.filter(p => p[0] === id).map(p => p[1]);
@@ -748,6 +776,7 @@ export function aircraftId(text) {
   if (/^[SСC][UУY]24/.test(s)) return 'su24';
   if (/^[MМ][IІ]24/.test(s)) return 'mi24';
   if (/^[MМ][IІ]8/.test(s)) return 'mi8';
+  if (/^[IІ][LЛ]76/.test(s)) return 'il76';
   if (/^(JAS39|GRIPEN|ГРИПЕН)/.test(s)) return 'gripen';
   if (/^(MIRAGE|МІРАЖ|МИРАЖ|M2000)/.test(s)) return 'mirage';
   return '';

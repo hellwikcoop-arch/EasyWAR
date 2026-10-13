@@ -3,7 +3,7 @@ import { readFile, stat } from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
 import { KINDS } from '../src/munition-3d.js';
-import { ENTRIES, GROUPS, PAIRS, aircraftId, carriersOf, creditOf, entryById, modelOf, munitionId, munitionsOf, searchEntries, usageFor, variantsOf } from '../src/ref-data.js';
+import { ENTRIES, GROUPS, PAIRS, aircraftId, carriersOf, creditOf, creditsOf, entryById, modelOf, munitionId, munitionsOf, searchEntries, usageFor, variantsOf, viewerOf } from '../src/ref-data.js';
 import { MODEL_FILES, NOSE_TURN, aircraftDistance } from '../src/ref-viewer.js';
 
 const html = await readFile(new URL('../src/air.html', import.meta.url), 'utf8');
@@ -28,6 +28,7 @@ test('every munition model kind from the mission card has a munition article', (
 // Усі моделі статті: основна й варіанти (розмальовки чи модифікації), якщо вони є.
 const modelsOf = e => (e.variants && e.variants.length > 1 ? e.variants : [e]).filter(v => v.model && v.model.file);
 const LICENSES = { 'CC BY 4.0': /CC-BY-4\.0/, 'CC BY-NC-SA 4.0': /CC-BY-NC-SA-4\.0/ };
+const VIEWER_LICENSES = ['CC BY 4.0', 'CC BY-NC 4.0', 'CC BY-NC-SA 4.0'];
 
 test('glb models exist, are registered and carry a Creative Commons credit', async () => {
   const credits = await readFile(new URL('../src/models/CREDITS.md', import.meta.url), 'utf8');
@@ -70,20 +71,64 @@ test('every glb in src/models is registered and used by an article', async () =>
   for (const f of Object.keys(MODEL_FILES)) assert.ok(files.includes(f), `${f} is registered but missing`);
 });
 
-test('articles with several models list a default first and resolve model and credit per variant', () => {
-  const mig = entryById('mig29'), su = entryById('su27');
-  assert.deepEqual(variantsOf(mig).map(v => v.id), ['falcons', 'ghost']);
-  assert.deepEqual(variantsOf(su).map(v => v.id), ['p1m', 'b']);
-  assert.equal(variantsOf(entryById('f16')).length, 0);
-  // Основна модель статті збігається з першим варіантом, невідомий варіант дає основну.
-  assert.equal(mig.model.file, 'mig-29');
-  assert.equal(modelOf(mig).file, 'mig-29');
-  assert.equal(modelOf(mig, 'nope').file, 'mig-29');
-  assert.equal(modelOf(mig, 'ghost').file, 'mig-29-ghost');
-  assert.match(creditOf(mig, 'ghost').url, /ghost-of-kiev-mig-29/);
-  assert.equal(modelOf(su, 'b').file, 'su-27b');
-  assert.equal(modelOf(entryById('f16')).file, 'f-16');
+test('articles without alternative models resolve model and credit from the article itself', () => {
+  // Літаки з інтерактивного переглядача не мають ні файлу моделі, ні перемикача розмальовок.
+  for (const id of ['mig29', 'su27', 'f16', 'mirage', 'su24', 'mi24', 'mi8', 'il76']) {
+    const e = entryById(id);
+    assert.equal(variantsOf(e).length, 0, id);
+    assert.equal(e.model, undefined, `${id}: no glb in src/models`);
+    assert.equal(modelOf(e), undefined, id);
+  }
+  // Су-25 і Gripen лишилися зі своїми моделями.
+  assert.equal(modelOf(entryById('su25')).file, 'su-25');
+  assert.equal(modelOf(entryById('gripen')).file, 'gripen');
   assert.equal(creditOf(entryById('39')), undefined);
+});
+
+test('aircraft articles open the interactive viewer page, which runs offline with every model on disk', async () => {
+  const page = await readFile(new URL('../src/aircraft-viewer.html', import.meta.url), 'utf8');
+  const keys = Object.keys(/const RIG=\{([^}]*)\}/.exec(page)[1].split(',').reduce((o, p) => (o[p.split(':')[0]] = 1, o), {}));
+  const viewers = ENTRIES.filter(e => viewerOf(e));
+  assert.deepEqual(viewers.map(e => e.id).sort(), ['f16', 'il76', 'mi24', 'mi8', 'mig29', 'mirage', 'su24', 'su27']);
+  assert.deepEqual(viewers.map(e => viewerOf(e)).sort(), [...keys].sort(), 'every aircraft of the page has one article');
+  for (const e of viewers) assert.equal(e.group, 'aircraft', e.id);
+  // Жодного завантаження з мережі: бібліотеки й моделі лежать у src/public/aircraft-3d.
+  assert.doesNotMatch(page, /<script[^>]+src="https?:/);
+  assert.doesNotMatch(page, /<link[^>]+href="https?:/, 'no web fonts or stylesheets');
+  assert.doesNotMatch(page, /@import|url\(\s*['"]?https?:/, 'no remote CSS');
+  assert.doesNotMatch(page, /\bfetch\(|XMLHttpRequest|WebSocket/);
+  const data = [...page.matchAll(/(?:sc\.src|src)=['"]aircraft-3d\/([\w.]+)['"]/g)].map(m => m[1]);
+  for (const lib of ['three.r128.min.js', 'GLTFLoader.r128.js', 'meshopt_decoder.js']) assert.ok(data.includes(lib), lib);
+  for (const f of ['mig29mu1', 'su27', 'f16', 'mi8', 'il76', 'mi24', 'su24', 'm2k', 'landscape']) assert.ok(data.includes(`${f}.js`), `${f}.js is loaded by the page`);
+  for (const f of new Set(data)) assert.ok((await stat(new URL(`../src/public/aircraft-3d/${f}`, import.meta.url))).size > 1e4, f);
+  await stat(new URL('../src/public/aircraft-3d/LICENSES.txt', import.meta.url));
+  // Вбудований режим: літак задає стаття, ряд вибору літака сховано.
+  assert.match(page, /q\.has\('embed'\)/);
+  const wiki = await readFile(new URL('../src/ref-wiki.js', import.meta.url), 'utf8');
+  assert.match(wiki, /\.\/aircraft-viewer\.html\?embed=1&a=/);
+});
+
+test('every aircraft model in the viewer is credited with author and license, and listed in CREDITS.md', async () => {
+  const credits = await readFile(new URL('../src/models/CREDITS.md', import.meta.url), 'utf8');
+  for (const e of ENTRIES.filter(x => viewerOf(x))) {
+    const list = creditsOf(e);
+    assert.ok(list.length >= 2, `${e.id}: aircraft and landscape are credited`);
+    for (const c of list) {
+      assert.ok(c.title && c.author && c.authorUrl && c.license && c.licenseUrl, `${e.id}/${c.title}`);
+      assert.ok(VIEWER_LICENSES.includes(c.license), `${e.id}/${c.title}: known license ${c.license}`);
+      if (c.url) assert.ok(credits.includes(c.url), `${e.id}/${c.title}: source in CREDITS.md`);
+      else assert.ok(credits.includes(c.authorUrl), `${e.id}/${c.title}: author in CREDITS.md`);
+      // Некомерційні ліцензії названо прямо в підписі статті.
+      if (/NC/.test(c.license)) assert.match(c.note || '', /некомерційн/i, `${e.id}/${c.title}: NC license stated`);
+    }
+  }
+});
+
+test('the viewer page is built but kept out of the phone offline cache', async () => {
+  const config = await readFile(new URL('../vite.config.js', import.meta.url), 'utf8');
+  assert.match(config, /aircraftViewer: fileURLToPath\(new URL\("\.\/src\/aircraft-viewer\.html"/);
+  assert.match(config, /name !== "aircraft-viewer\.html"/);
+  assert.match(config, /aircraft-3d/);
 });
 
 test('helicopters and the added munitions have articles that the table recognisers reach', () => {
@@ -113,6 +158,8 @@ test('carrier and munition ids agree with the recognisers of the module', () => 
   assert.equal(aircraftId('Су-25'), 'su25');
   assert.equal(aircraftId('Су-24М'), 'su24');
   assert.equal(aircraftId('JAS 39C Gripen'), 'gripen');
+  assert.equal(aircraftId('Іл-76МД'), 'il76');
+  assert.equal(aircraftId('Il-76'), 'il76');
   assert.equal(aircraftId('невідомий'), '');
   assert.equal(munitionId('Storm Shadow'), 'storm');
   assert.equal(munitionId('SCALP-EG'), 'storm');

@@ -1,6 +1,7 @@
 // Вкладка «Довідник» модуля «Повітряні Сили»: вікі по засобах (літаки-носії) і боєприпасах.
 // Ліворуч список зі пошуком, праворуч стаття: 3D-модель, картка з ТТХ, опис, пов’язані статті й підсумок по вашій таблиці.
-// Дані статей — ref-data.js, 3D-переглядач — ref-viewer.js (підвантажується, коли відкривають першу статтю з моделлю).
+// Дані статей — ref-data.js. 3D-переглядач боєприпасів і наземних засобів — ref-viewer.js (підвантажується, коли відкривають першу статтю з моделлю).
+// Літаки й вертольоти показує окрема сторінка aircraft-viewer.html у кадрі: власна сцена з фазами польоту, шасі, вогнями й підвіскою.
 import * as AIR_DATA from './ref-data.js';
 
 function h(tag, props, ...kids) {
@@ -32,7 +33,7 @@ const RESULTS = [['hit', 'Уражено', 'var(--hit)'], ['part', 'Пошкод
 //   searchText(entry) — додатковий текст для пошуку (наприклад, підписи рядків таблиці).
 export function mount(host, options = {}) {
   const { rows = () => [], media = {}, motion = () => true, onSelect, groups = null, only = null, usage = true, related = true, extra = null, searchText = null } = options;
-  const { GROUPS, ENTRIES, entryById, carriersOf, munitionsOf, searchEntries, usageFor, variantsOf, modelOf, creditOf } = { ...AIR_DATA, ...(options.data || {}) };
+  const { GROUPS, ENTRIES, entryById, carriersOf, munitionsOf, searchEntries, usageFor, variantsOf, modelOf, creditOf, viewerOf, creditsOf } = { ...AIR_DATA, ...(options.data || {}) };
   const groupTitle = id => (GROUPS.find(g => g.id === id) || {}).title || '';
   // groups / only — які розділи й статті показує цей модуль (РВ бачить лише наземні засоби й ракети); usage / related — чи малювати
   // підсумок по таблиці вильотів ПС і блок «носії/боєприпаси».
@@ -144,6 +145,26 @@ export function mount(host, options = {}) {
     slot.replaceChildren(h('p', { class: 'rw-note', text: why }), photo ? h('img', { class: 'rw-photo', src: photo, alt: entry.name }) : null);
   }
 
+  // ---------- літаки: сторінка переглядача в кадрі ----------
+  // Кожна стаття літака отримує свіжий кадр: сторінка сама завантажує потрібну модель, а попередній кадр разом зі сценою звільняється.
+  let aircraftFrame = null;
+  function aircraftBox(entry) {
+    const frame = h('iframe', { class: 'rw-air-frame', src: './aircraft-viewer.html?embed=1&a=' + encodeURIComponent(viewerOf(entry)),
+      title: entry.name + ': інтерактивна тривимірна модель', allowfullscreen: true });
+    frame.addEventListener('load', () => {
+      // Сторінка того ж походження: підганяємо висоту кадру під вміст, щоб у ньому не було власної прокрутки.
+      try {
+        const doc = frame.contentDocument, fig = doc && doc.querySelector('.fig');
+        if (!fig || typeof ResizeObserver === 'undefined') return;
+        const fit = () => { frame.style.height = Math.ceil(fig.getBoundingClientRect().height) + 'px'; };
+        fit(); new ResizeObserver(fit).observe(fig);
+      } catch (e) { /* лишається висота за замовчуванням */ }
+    });
+    aircraftFrame = frame;
+    return h('div', { class: 'rw-air' }, frame,
+      h('p', { class: 'rw-fine', text: 'Фази, системи, вогні й озброєння перемикаються кнопками під сценою або клавішами, коли сцена в фокусі (клацніть по ній). Підвіска складена для моделі, це не заводська схема.' }));
+  }
+
   // ---------- стаття ----------
   const slot = h('div', { class: 'rw-slot' });
   const usageEl = h('section', { class: 'rw-sec rw-usage' });
@@ -205,6 +226,18 @@ export function mount(host, options = {}) {
       '. Джерело: ', h('span', { class: 'rw-src', text: credit.url.replace(/^https?:\/\//, '') }), '. Файл стиснуто для застосунку, форму моделі не змінено.' + (credit.note ? ' ' + credit.note : ''));
   }
 
+  // Літак у переглядачі складається з кількох моделей (літак, шасі, боєприпаси, ландшафт): показуємо автора й ліцензію кожної.
+  function creditsNode(entry) {
+    const list = creditsOf(entry);
+    if (!list.length) return null;
+    return h('div', { class: 'rw-credit' }, h('p', { class: 'rw-credit-head', text: 'Моделі в переглядачі. Файли стиснуто для застосунку.' }),
+      h('ul', {}, list.map(c => h('li', {},
+        '«' + c.title + '», автор ', h('a', { href: c.authorUrl, target: '_blank', rel: 'noopener noreferrer', text: c.author }),
+        ', ліцензія ', h('a', { href: c.licenseUrl, target: '_blank', rel: 'noopener noreferrer', text: c.license }),
+        c.url ? h('span', {}, '. Джерело: ', h('span', { class: 'rw-src', text: c.url.replace(/^https?:\/\//, '') })) : null,
+        '.' + (c.note ? ' ' + c.note : '')))));
+  }
+
   function pickVariant(entry, id) {
     if (state.variant === id || state.id !== entry.id) return;
     state.variant = id;
@@ -225,10 +258,10 @@ export function mount(host, options = {}) {
     const activeVariant = variants.find(v => v.id === state.variant) || variants[0];
     const variantBar = variants.length ? h('div', { class: 'seg rw-variants', role: 'group', 'aria-label': 'Модель' },
       variants.map(v => h('button', { type: 'button', 'data-variant': v.id, 'aria-pressed': String(v === activeVariant), text: v.label, onclick: () => pickVariant(entry, v.id) }))) : null;
-    const creditBox = h('div', { class: 'rw-creditbox' }, creditNode(entry));
+    const creditBox = h('div', { class: 'rw-creditbox' }, viewerOf(entry) ? creditsNode(entry) : creditNode(entry));
     const main = h('div', { class: 'rw-main' },
       variantBar,
-      entry.model ? stageBox : null,
+      viewerOf(entry) ? aircraftBox(entry) : entry.model ? stageBox : null,
       slot,
       h('p', { class: 'rw-summary', text: entry.summary }),
       entry.sections.map(s => h('section', { class: 'rw-sec' }, h('h3', { text: s.title }),
@@ -260,7 +293,7 @@ export function mount(host, options = {}) {
           onclick: () => select(e.id, true) },
           thumb ? h('img', { src: thumb, alt: '', draggable: 'false' }) : h('span', { class: 'rw-mono', 'aria-hidden': 'true', text: e.short || e.name }),
           h('span', { class: 'rw-it' }, h('b', { text: e.name }), h('small', { text: e.status ? e.status + ' · ' + e.role : e.role })),
-          e.model ? h('span', { class: 'rw-3d', text: '3D', title: 'Є тривимірна модель' }) : null));
+          e.model || viewerOf(e) ? h('span', { class: 'rw-3d', text: '3D', title: 'Є тривимірна модель' }) : null));
       }
     }
     if (!found.length) list.append(h('p', { class: 'rw-fine rw-empty', text: 'Нічого не знайдено. Спробуйте іншу назву.' }));
@@ -293,7 +326,7 @@ export function mount(host, options = {}) {
     select: id => select(id, false),
     refresh: () => { const e = entryById(state.id); if (e) { renderUsage(e); renderExtra(e); } },
     get id() { return state.id; },
-    dispose: () => { token++; if (viewer) viewer.dispose(); viewer = null; },
+    dispose: () => { token++; if (viewer) viewer.dispose(); viewer = null; if (aircraftFrame) aircraftFrame.src = 'about:blank'; aircraftFrame = null; },
   };
 }
 
