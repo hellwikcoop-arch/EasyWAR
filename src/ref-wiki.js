@@ -213,7 +213,7 @@ export function mount(host, options = {}) {
   }
 
   function relatedBlock(entry) {
-    if (!related || NO_TABLE.has(entry.group)) return null;
+    if (!related || NO_TABLE.has(entry.group) || entry.noTable) return null;
     const ids = entry.group === 'aircraft' ? munitionsOf(entry.id) : carriersOf(entry.id);
     if (!ids.length) return null;
     const title = entry.group === 'aircraft' ? 'Боєприпаси, показані з цим носієм' : 'Носії, показані з цим боєприпасом';
@@ -230,7 +230,7 @@ export function mount(host, options = {}) {
 
   function renderUsage(entry) {
     // Підсумок будується з таблиці вильотів ПС: для наземних засобів його немає.
-    usageEl.hidden = !usage || NO_TABLE.has(entry.group);
+    usageEl.hidden = !usage || NO_TABLE.has(entry.group) || entry.noTable;
     if (usageEl.hidden) { usageEl.replaceChildren(); return; }
     usageEl.replaceChildren(h('h3', { text: 'У вашій базі' }));
     const data = rows();

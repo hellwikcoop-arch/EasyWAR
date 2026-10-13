@@ -1,7 +1,7 @@
 // Тривимірний переглядач довідника по озброєнню (three.js). Показує або процедурну модель боєприпасу
 // (munition-3d.js), або .glb-модель літака з каталогу src/models. Завантажується лише коли вперше відкривають статтю
 // з моделлю. Сцена (світло, підлога) спільна з карткою вильоту — stage-3d.js.
-import { AnimationMixer, Box3, DoubleSide, Group, PerspectiveCamera, Raycaster, Scene, Vector3 } from 'three';
+import { AnimationMixer, Box3, CanvasTexture, DoubleSide, FrontSide, Group, Matrix4, Mesh, MeshStandardMaterial, PerspectiveCamera, PlaneGeometry, Raycaster, SRGBColorSpace, Scene, Vector3 } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { addStageEnvironment, createRenderer, FLOOR_Y } from './stage-3d.js';
@@ -19,7 +19,6 @@ export const MODEL_FILES = {
   'mi-2': new URL('./models/mi-2.glb', import.meta.url).href,
   'an-26': new URL('./models/an-26.glb', import.meta.url).href,
   'an-225': new URL('./models/an-225.glb', import.meta.url).href,
-  'mh-x': new URL('./models/mh-x.glb', import.meta.url).href,
   'fp-5-flamingo': new URL('./models/fp-5-flamingo.glb', import.meta.url).href,
   'fp-7': new URL('./models/fp-7.glb', import.meta.url).href,
   'aim-120': new URL('./models/aim-120.glb', import.meta.url).href,
@@ -133,7 +132,7 @@ export function spotAnchors(aircraft, points, rc = new Raycaster()) {
   const g = aircraft.group, prev = g.rotation.y;
   g.rotation.y = 0;
   g.updateMatrixWorld(true);
-  if (!aircraft.meshes) { aircraft.meshes = []; g.traverse(o => { if (o.isMesh) aircraft.meshes.push(o); }); }
+  if (!aircraft.meshes) { aircraft.meshes = []; g.traverse(o => { if (o.isMesh && !o.userData.decal) aircraft.meshes.push(o); }); }
   const lo = aircraft.min, hi = lo.clone().add(aircraft.size);
   const out = points.map(p => {
     const x = lo.x + (hi.x - lo.x) * p[0];
@@ -156,6 +155,75 @@ export function spotAnchors(aircraft, points, rc = new Raycaster()) {
 }
 
 const Y_AXIS = new Vector3(0, 1, 0);
+
+// Знаки на моделі (зірка, прапор, напис) без правки її текстур: пласкі наклейки лягають на обшивку за променем збоку.
+// decal = { kind: 'star' | 'flag' | 'text', text, color, p: [fx, fy], w, side }: p — частки довжини (хвіст → ніс) і висоти
+// (низ → верх), як у позначок уразливих місць; w — ширина в частках довжини; side — 'both' (за замовчуванням), 'port' чи 'starboard'.
+export const DECAL_KINDS = ['star', 'flag', 'text'];
+
+function drawStar(ctx, size) {
+  const c = size / 2, pts = (ro, ri) => Array.from({ length: 10 }, (_, i) => { const r = i % 2 ? ri : ro, a = -Math.PI / 2 + i * Math.PI / 5; return [c + r * Math.cos(a), c + r * Math.sin(a)]; });
+  const path = list => { ctx.beginPath(); list.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.closePath(); };
+  path(pts(c * .98, c * .43)); ctx.fillStyle = '#ececE8'; ctx.fill();
+  path(pts(c * .86, c * .36)); ctx.fillStyle = '#c41c24'; ctx.fill();
+}
+
+// Малює наклейку на полотні й повертає { texture, aspect } (висота / ширина). Полотно потрібне лише в браузері.
+export function decalArt(decal) {
+  const canvas = document.createElement('canvas'), ctx = canvas.getContext('2d');
+  let aspect = 1;
+  if (decal.kind === 'star') { canvas.width = canvas.height = 256; drawStar(ctx, 256); }
+  else if (decal.kind === 'flag') {
+    canvas.width = 384; canvas.height = 256; aspect = 2 / 3;
+    ctx.fillStyle = '#0057b7'; ctx.fillRect(0, 0, 384, 128); ctx.fillStyle = '#ffd700'; ctx.fillRect(0, 128, 384, 128);
+  } else {
+    const text = decal.text || '', font = 'bold 120px "Segoe UI", Arial, sans-serif';
+    ctx.font = font;
+    const w = Math.ceil(ctx.measureText(text).width) + 24;
+    canvas.width = w; canvas.height = 160; aspect = 160 / w;
+    ctx.font = font; ctx.textBaseline = 'middle'; ctx.fillStyle = decal.color || '#1d1d1d';
+    ctx.fillText(text, 12, 84);
+  }
+  const texture = new CanvasTexture(canvas);
+  texture.colorSpace = SRGBColorSpace; texture.anisotropy = 4;
+  return { texture, aspect };
+}
+
+// Кладе наклейки на обшивку літака в стандартній позі (ніс у +X). art(decal) — малює вміст (у тестах підміняється).
+export function applyDecals(aircraft, decals, art = decalArt, rc = new Raycaster()) {
+  const g = aircraft.group, prev = g.rotation.y;
+  g.rotation.y = 0;
+  g.updateMatrixWorld(true);
+  if (!aircraft.meshes) { aircraft.meshes = []; g.traverse(o => { if (o.isMesh && !o.userData.decal) aircraft.meshes.push(o); }); }
+  const lo = aircraft.min, hi = lo.clone().add(aircraft.size), length = aircraft.size.x, placed = [];
+  for (const d of decals) {
+    const x = lo.x + length * d.p[0], y = lo.y + (hi.y - lo.y) * d.p[1];
+    const sides = d.side === 'port' ? [-1] : d.side === 'starboard' ? [1] : [1, -1];
+    let drawn = null;
+    for (const side of sides) {
+      rc.set(new Vector3(x, y, side > 0 ? hi.z + 1 : lo.z - 1), new Vector3(0, 0, -side));
+      rc.far = hi.z - lo.z + 2;
+      const hit = rc.intersectObjects(aircraft.meshes, false)[0];
+      if (!hit || !hit.face) continue;
+      const n = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
+      if (n.z * side < 0) n.negate();
+      drawn = drawn || art(d);
+      const width = length * d.w, mesh = new Mesh(new PlaneGeometry(width, width * drawn.aspect),
+        new MeshStandardMaterial({ map: drawn.texture, transparent: true, roughness: .85, metalness: 0, polygonOffset: true, polygonOffsetFactor: -4, depthWrite: false, side: FrontSide }));
+      mesh.quaternion.setFromRotationMatrix(new Matrix4().lookAt(new Vector3(), n.clone().negate(), Y_AXIS));
+      // Корінь моделі масштабований: позицію й розмір переводимо в його локальні координати.
+      mesh.position.copy(g.worldToLocal(hit.point.clone().addScaledVector(n, .004 * (length / 4.6))));
+      mesh.scale.setScalar(1 / g.scale.x);
+      mesh.userData.decal = true;
+      mesh.name = 'decal-' + d.kind;
+      g.add(mesh); placed.push(mesh);
+    }
+  }
+  g.rotation.y = prev;
+  g.updateMatrixWorld(true);
+  return placed;
+}
+
 
 export class RefViewer {
   constructor(el, { motion = true } = {}) {
@@ -203,9 +271,10 @@ export class RefViewer {
         if (model.glass !== undefined) fixMaterials(gltf.scene, model);
         entry = normalizeAircraft(gltf.scene, model.nose, model.length);
         entry.action = prepareAction(gltf, entry);
+        if (model.decals && model.decals.length) applyDecals(entry, model.decals);
         const aniso = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
         entry.group.traverse(o => {
-          if (!o.isMesh) return;
+          if (!o.isMesh || o.userData.decal) return;
           o.castShadow = true;
           for (const m of [].concat(o.material)) for (const key of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap']) if (m[key]) m[key].anisotropy = aniso;
         });
