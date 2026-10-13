@@ -32,6 +32,9 @@ const RESULTS = [['hit', 'Уражено', 'var(--hit)'], ['part', 'Пошкод
 //   searchText(entry) — додатковий текст для пошуку (наприклад, підписи рядків таблиці).
 export function mount(host, options = {}) {
   const { rows = () => [], media = {}, motion = () => true, onSelect, groups = null, only = null, usage = true, related = true, extra = null, searchText = null } = options;
+  // Силует і лінійний профіль (src/ref-art): підвантажуються окремо; без них стаття й список працюють як раніше.
+  let art = {};
+  const artUrl = (id, kind) => art[`./ref-art/${id}-${kind}.webp`] || null;
   const { GROUPS, ENTRIES, entryById, carriersOf, munitionsOf, searchEntries, usageFor, variantsOf, modelOf, creditOf } = { ...AIR_DATA, ...(options.data || {}) };
   const groupTitle = id => (GROUPS.find(g => g.id === id) || {}).title || '';
   // groups / only — які розділи й статті показує цей модуль (РВ бачить лише наземні засоби й ракети); usage / related — чи малювати
@@ -147,6 +150,7 @@ export function mount(host, options = {}) {
   // ---------- стаття ----------
   const slot = h('div', { class: 'rw-slot' });
   const usageEl = h('section', { class: 'rw-sec rw-usage' });
+  const artEl = h('section', { class: 'rw-sec rw-art' });
   const extraEl = h('section', { class: 'rw-sec rw-extra' });
   function renderExtra(entry) {
     const node = extra ? extra(entry) : null;
@@ -214,6 +218,15 @@ export function mount(host, options = {}) {
     showModel(entry, ++token);
   }
 
+  function renderArt(entry) {
+    const sil = artUrl(entry.id, 'sil'), lin = artUrl(entry.id, 'lin');
+    artEl.hidden = !(sil || lin);
+    artEl.replaceChildren();
+    if (artEl.hidden) return;
+    const fig = (src, cap) => src ? h('figure', { class: 'rw-fig' }, h('img', { src, alt: entry.name + ': ' + cap.toLowerCase(), draggable: 'false', loading: 'lazy' }), h('figcaption', { text: cap })) : null;
+    artEl.append(h('h3', { text: 'Силует і контур' }), h('div', { class: 'rw-figs' }, fig(sil, 'Чорний силует'), fig(lin, 'Лінійний профіль')));
+  }
+
   function renderArticle(entry) {
     const photo = media.photo && media.photo(entry.id);
     const info = h('aside', { class: 'rw-info', 'aria-label': 'Основні дані' },
@@ -231,6 +244,7 @@ export function mount(host, options = {}) {
       entry.model ? stageBox : null,
       slot,
       h('p', { class: 'rw-summary', text: entry.summary }),
+      artEl,
       entry.sections.map(s => h('section', { class: 'rw-sec' }, h('h3', { text: s.title }),
         s.text ? h('p', { text: s.text }) : null, s.list ? h('ul', {}, s.list.map(t => h('li', { text: t }))) : null)),
       relatedBlock(entry), usageEl, extraEl,
@@ -240,6 +254,7 @@ export function mount(host, options = {}) {
         h('h2', { text: entry.name }, entry.status ? h('span', { class: 'rw-badge', text: entry.status }) : null), h('p', { class: 'rw-alias', text: entry.alias })),
       h('div', { class: 'rw-body' }, main, info));
     slot.replaceChildren();
+    renderArt(entry);
     renderUsage(entry);
     renderExtra(entry);
   }
@@ -255,10 +270,11 @@ export function mount(host, options = {}) {
       if (!items.length) continue;
       list.append(h('p', { class: 'rw-grp', role: 'presentation', text: g.title + ' · ' + items.length }));
       for (const e of items) {
-        const thumb = media.thumb && media.thumb(e.id);
+        const thumb = (media.thumb && media.thumb(e.id)) || null;
+        const sil = thumb ? null : artUrl(e.id, 'sil');
         list.append(h('button', { type: 'button', class: 'rw-item', role: 'listitem', 'data-id': e.id, 'aria-current': String(e.id === state.id),
           onclick: () => select(e.id, true) },
-          thumb ? h('img', { src: thumb, alt: '', draggable: 'false' }) : h('span', { class: 'rw-mono', 'aria-hidden': 'true', text: e.short || e.name }),
+          thumb ? h('img', { src: thumb, alt: '', draggable: 'false' }) : sil ? h('img', { class: 'rw-sil', src: sil, alt: '', draggable: 'false' }) : h('span', { class: 'rw-mono', 'aria-hidden': 'true', text: e.short || e.name }),
           h('span', { class: 'rw-it' }, h('b', { text: e.name }), h('small', { text: e.status ? e.status + ' · ' + e.role : e.role })),
           e.model ? h('span', { class: 'rw-3d', text: '3D', title: 'Є тривимірна модель' }) : null));
       }
@@ -289,6 +305,12 @@ export function mount(host, options = {}) {
 
   renderNav();
   select(options.initial);
+  import('./ref-art-urls.js').then(m => {
+    art = m.ART_URLS || {};
+    renderNav();
+    const e = entryById(state.id);
+    if (e) renderArt(e);
+  }, () => {});
   return {
     select: id => select(id, false),
     refresh: () => { const e = entryById(state.id); if (e) { renderUsage(e); renderExtra(e); } },
