@@ -3552,7 +3552,17 @@ function skeleton() {
   root.classList.add('shell');
   root.append(el.side, el.main);
   layoutInit();
+  filterToggleInit();
 }
+/* Фільтри періоду й ефективності сховані за кнопкою в шапці (як у РВ), щоб перший екран дашборда вміщався без прокручування. */
+function filterToggleInit() {
+  const theme = document.getElementById('themeBtn'); if (!theme || el.filterBtn) return;
+  el.filterBtn = h('button', { type: 'button', class: 'btn quiet filter-toggle', title: 'Період та формула ефективності', 'aria-label': 'Показати фільтри періоду та ефективності', 'aria-expanded': 'false', hidden: true,
+    onclick: () => { const on = !el.main.classList.contains('filters-open'); el.main.classList.toggle('filters-open', on); el.filterBtn.setAttribute('aria-expanded', String(on)); if (on) el.from.focus({ preventScroll: true }); } },
+    svgIc('<path d="M3 5h18M6 12h12M9 19h6" fill="none" stroke="currentColor" stroke-width="1.8"/>', 'ic'));
+  theme.before(el.filterBtn);
+}
+function syncFilterBtn() { if (el.filterBtn) el.filterBtn.hidden = !!el.toolbar.hidden; }
 /* ------------------- розташування блоків: рядки → колонки → блоки (v2) ------------------- */
 const LAYOUT_KEY = 'easywar.layout.air.reference.v1';
 const LAY_IDS = ['p-kpis', 'p-map', 'p-dyn', 'p-depth', 'p-dist', 'p-plat', 'p-mun', 'p-units', 'p-act', 'p-types', 'p-ops', 'p-repeat', 'p-hours', 'p-quality'];
@@ -5012,13 +5022,13 @@ function renderActivity(cur) {
 function renderAll() {
   if (!el.content) return; // дані прийшли раніше, ніж збудовано дашборд: init() покаже їх сам
   if (AV.S.wb && AV.S.wb.kind === 'pvk') {
-    el.empty.hidden = true; el.toolbar.hidden = true; el.content.hidden = true; el.side.hidden = true;
+    el.empty.hidden = true; el.toolbar.hidden = true; el.content.hidden = true; el.side.hidden = true; syncFilterBtn();
     window.PVKDashboard?.render(root, AV.S.wb, { downloadCSV, refresh: () => AV.refresh(true), canRefresh: !!AV.S.handle, readSheets: u8 => window.AVCORE.readAllSheets(u8) });
     return;
   }
   window.PVKDashboard?.unmount(root);
   const has = !!AV.S.wb;
-  el.empty.hidden = has; el.toolbar.hidden = !has || !ROWS.length; el.content.hidden = !has; el.side.hidden = !has || !ROWS.length;
+  el.empty.hidden = has; el.toolbar.hidden = !has || !ROWS.length; el.content.hidden = !has; el.side.hidden = !has || !ROWS.length; syncFilterBtn();
   if (!has) return;
   if (!ROWS.length) { el.content.hidden = true; el.empty.hidden = false; el.empty.querySelector('h2').textContent = 'У таблиці немає записів'; return; }
   el.empty.querySelector('h2').textContent = 'Відкрийте таблицю, щоб побачити дашборд';
