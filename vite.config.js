@@ -7,9 +7,9 @@ const host = process.env.TAURI_DEV_HOST;
 
 // Офлайн-кеш для мобільного перегляду (viewer.html): після збірки записує dist/sw.js
 // зі списком усіх файлів. Версія кешу береться з package.json, тож нова збірка
-// замінює старий кеш. 3D-моделі (.glb) і ресурси 3D-карти (map-assets, >100 МБ) у кеш не входять: у вікнах командування вони не потрібні.
-// замінює старий кеш. 3D-моделі (.glb) і відео заставки (.mp4) у кеш не входять:
-// у вікнах командування вони не потрібні, а заставка є лише в застосунку.
+// замінює старий кеш. 3D-моделі (.glb), відео заставки (.mp4) і ресурси 3D-карти
+// (map-assets, >100 МБ) у кеш не входять: у вікнах командування вони не потрібні,
+// а заставка є лише в застосунку.
 // Сервіс-воркер реєструє лише viewer.html; у застосунку Tauri його немає.
 function viewerServiceWorker() {
   return {
@@ -22,7 +22,7 @@ function viewerServiceWorker() {
         for (const name of readdirSync(dir)) {
           const full = join(dir, name);
           if (statSync(full).isDirectory()) walk(full);
-          else if (name !== "sw.js" && !name.endsWith(".map") && !name.endsWith(".glb") && !relative(out, full).split("\\").join("/").startsWith("map-assets/")) files.push("./" + relative(out, full).split("\\").join("/"));
+          else if (name !== "sw.js" && !name.endsWith(".map") && !name.endsWith(".glb") && !name.endsWith(".mp4") && !relative(out, full).split("\\").join("/").startsWith("map-assets/")) files.push("./" + relative(out, full).split("\\").join("/"));
         }
       };
       walk(out);
