@@ -3,6 +3,7 @@
 // Дані статей — ref-data.js. 3D-переглядач боєприпасів і наземних засобів — ref-viewer.js (підвантажується, коли відкривають першу статтю з моделлю).
 // Літаки й вертольоти показує окрема сторінка aircraft-viewer.html у кадрі: власна сцена з фазами польоту, шасі, вогнями й підвіскою.
 import * as AIR_DATA from './ref-data.js';
+import { thumbOf } from './ref-thumbs.js';
 
 function h(tag, props, ...kids) {
   const el = document.createElement(tag);
@@ -359,7 +360,7 @@ export function mount(host, options = {}) {
       if (!items.length) continue;
       list.append(h('p', { class: 'rw-grp', role: 'presentation', text: g.title + ' · ' + items.length }));
       for (const e of items) {
-        const thumb = media.thumb && media.thumb(e.id);
+        const thumb = (media.thumb && media.thumb(e.id)) || thumbOf(e.id);
         list.append(h('button', { type: 'button', class: 'rw-item', role: 'listitem', 'data-id': e.id, 'aria-current': String(e.id === state.id),
           onclick: () => select(e.id, true) },
           thumb ? h('img', { src: thumb, alt: '', draggable: 'false' }) : h('span', { class: 'rw-mono', 'aria-hidden': 'true', text: e.short || e.name }),

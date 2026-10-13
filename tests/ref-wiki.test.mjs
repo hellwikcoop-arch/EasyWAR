@@ -576,3 +576,22 @@ test('viewer aircraft and weak-spot models share the same files, so no second co
   assert.match(doc, /wrapper: 'aircraft-3d\/x\.js'/);
   for (const e of ENTRIES.filter(x => x.model && x.model.wrapper)) assert.ok(e.viewer, `${e.id}: wrapper models belong to viewer aircraft`);
 });
+
+test('every article has a list thumbnail: either built into the module page or rendered from the model', async () => {
+  const { THUMB_FILES, thumbOf } = await import('../src/ref-thumbs.js');
+  // Ці зображення вже вбудовані в сторінки модулів (AC_IMG, MUN_IMG), тому окремих файлів для них немає.
+  const builtIn = new Set(['mig29', 'su27', 'f16', '39', '53', '62', 'aasm', 'agm88', 'blu140', 'c13']);
+  const ids = new Set(ENTRIES.map(e => e.id));
+  for (const id of builtIn) assert.ok(ids.has(id), `${id}: built-in thumbnail belongs to an article`);
+  for (const e of ENTRIES) assert.ok(builtIn.has(e.id) || thumbOf(e.id), `${e.id}: thumbnail`);
+  for (const id of Object.keys(THUMB_FILES)) {
+    assert.ok(ids.has(id) && !builtIn.has(id), `${id}: file thumbnail only where nothing is built in`);
+    const bytes = await readFile(new URL(`../src/ref-thumbs/${id}.webp`, import.meta.url));
+    assert.equal(bytes.subarray(0, 4).toString(), 'RIFF', `${id}: webp`);
+    assert.equal(bytes.subarray(8, 12).toString(), 'WEBP', `${id}: webp`);
+    assert.ok(bytes.length < 40_000, `${id}: small enough for a list icon`);
+  }
+  assert.equal(thumbOf('нема'), null);
+  const wiki = await readFile(new URL('../src/ref-wiki.js', import.meta.url), 'utf8');
+  assert.match(wiki, /media\.thumb && media\.thumb\(e\.id\)\) \|\| thumbOf\(e\.id\)/);
+});
