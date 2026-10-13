@@ -1,0 +1,97 @@
+/* Спільний шар анімацій і мікро-взаємодій для дашбордів ПВК, УДШВ і вкладки «Наші втрати».
+   Дашборд сам перемальовується при кожній зміні фільтра, тому вхідна анімація вмикається лише атрибутом
+   data-dash-motion на корені (не плутати з атрибутом data-motion на <html> — це глобальний перемикач руху
+   застосунку, який при значенні off гасить і ці анімації) (див. dashboard-motion.js): "first" — перше відкриття, "enter" — зміна розділу.
+   Усе, що рухається, вимкнено при prefers-reduced-motion: reduce і при вимкненому перемикачі «Анімації». */
+
+/* ---------- Мікро-взаємодії (працюють завжди, не залежать від data-motion) ---------- */
+@media (prefers-reduced-motion: no-preference) {
+  #udshv-dashboard-root :is(.ud-kpi, .ud-card, .ud-btn, .ud-nav button, .ud-tabs button, .ud-seg button, .ud-multi-btn),
+  #pvk-dashboard-root :is(.pvk-kpi, .pvk-section, .pvk-seg button, .pvk-nav button, .pvk-metric),
+  .ol-root :is(.ol-kpi, .ol-card, .ol-btn, .ol-seg button) {
+    transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease, background-color .18s ease, color .18s ease;
+  }
+  #udshv-dashboard-root .ud-kpi[role="button"]:hover,
+  #pvk-dashboard-root .pvk-kpi:hover,
+  .ol-root .ol-kpi:hover { transform: translateY(-2px); box-shadow: 0 12px 26px rgba(0, 0, 0, .3); }
+  #udshv-dashboard-root .ud-kpi[role="button"]:active { transform: translateY(0); }
+  #udshv-dashboard-root .ud-card:hover,
+  #pvk-dashboard-root .pvk-section:hover,
+  .ol-root .ol-card:hover { border-color: color-mix(in srgb, var(--ud-green, var(--pvk-blue, var(--ol-red))) 45%, var(--ud-line, var(--pvk-border, var(--ol-line)))); }
+  .ud-rank-row b, .pvk-rank-row > i > b, .ol-rank-row b, .ud-week b { transition: filter .15s ease; }
+  .ud-rank-row:hover b, .pvk-rank-row:hover > i > b, .ol-rank-row:hover b, .ud-week > div:hover b { filter: brightness(1.18); }
+  .ud-cellbar { transition: background-color .15s ease; }
+  tr:hover > td > .ud-cellbar { background: color-mix(in srgb, var(--ud-green) 38%, transparent); }
+}
+
+/* Видимий фокус із клавіатури: інтерактивні картки й кнопки дашбордів. */
+#udshv-dashboard-root :is(.ud-kpi[role="button"], .ud-btn, .ud-nav button, .ud-tabs button, .ud-seg button, .ud-link, .ud-multi-btn):focus-visible,
+#pvk-dashboard-root :is(.pvk-seg button, .pvk-nav button, button):focus-visible,
+.ol-root :is(.ol-btn, .ol-seg button, .ol-link):focus-visible {
+  outline: 2px solid var(--ud-blue, var(--pvk-blue, var(--ol-blue)));
+  outline-offset: 2px;
+}
+
+#pvk-dashboard-root { font-variant-numeric: tabular-nums; }
+
+/* ---------- Вхідні анімації ---------- */
+@property --dm-p { syntax: '<percentage>'; inherits: false; initial-value: 100%; }
+
+@keyframes dm-rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+@keyframes dm-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes dm-pop { from { opacity: 0; transform: scale(.94); } to { opacity: 1; transform: none; } }
+@keyframes dm-grow-x { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes dm-grow-y { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes dm-reveal { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+@keyframes dm-sweep { from { --dm-p: 0%; } to { --dm-p: 100%; } }
+@keyframes dm-sheen { from { background-position: 160% 0; } to { background-position: -60% 0; } }
+
+@media (prefers-reduced-motion: no-preference) {
+  /* Шапка з'являється лише при відкритті дашборда, а не при кожному перемиканні розділу. */
+  [data-dash-motion="first"] :is(.ud-hero, .pvk-hero) { animation: dm-rise .5s cubic-bezier(.2, .7, .2, 1) backwards; }
+  [data-dash-motion="first"] :is(.ud-hero, .pvk-hero)::before { animation: dm-pop .7s .15s cubic-bezier(.2, .7, .2, 1) backwards; }
+  [data-dash-motion="first"] :is(.ud-banner) { animation: dm-fade .7s ease backwards; }
+  [data-dash-motion="first"] :is(.ud-period, .pvk-period, .ud-context) { animation: dm-rise .45s .08s ease backwards; }
+  [data-dash-motion="first"] :is(.ud-nav, .pvk-nav) { animation: dm-rise .45s .14s ease backwards; }
+
+  /* Сторінка розділу: картки піднімаються по черзі (--dm-d виставляє dashboard-motion.js). */
+  [data-dash-motion] :is(.ud-page, .pvk-page, .ol-root) :is(.ud-kpi, .pvk-kpi, .ol-kpi, .pvk-result-rates article) {
+    animation: dm-rise .5s cubic-bezier(.2, .7, .2, 1) var(--dm-d, 0ms) backwards;
+  }
+  [data-dash-motion] :is(.ud-page, .pvk-page, .ol-root) :is(.ud-card, .pvk-section, .ol-card, .ol-head, .pvk-page-head, .pvk-metric, .ud-issue) {
+    animation: dm-rise .55s cubic-bezier(.2, .7, .2, 1) var(--dm-d, 0ms) backwards;
+  }
+  /* Усередині сторінки панель «Наші втрати» вже в .ol-root, вона не дублює анімацію батьківського блока. */
+  [data-dash-motion] .ol-root .ol-card, [data-dash-motion] .ol-root .ol-head { animation-duration: .5s; }
+
+  /* Горизонтальні смуги рейтингів і прогрес-доріжки зростають зліва. */
+  [data-dash-motion] :is(.ud-rank-row i b, .pvk-rank-row > i > b, .ol-rank-row i b) {
+    transform-origin: left center;
+    animation: dm-grow-x .7s cubic-bezier(.2, .7, .2, 1) var(--dm-d, 0ms) backwards;
+  }
+  /* Вертикальні стовпчики («За днями тижня») зростають знизу. */
+  [data-dash-motion] .ud-week b { transform-origin: center bottom; animation: dm-grow-y .7s cubic-bezier(.2, .7, .2, 1) var(--dm-d, 0ms) backwards; }
+
+  /* SVG-стовпчики динаміки зростають від осі. */
+  [data-dash-motion] :is(.ud-bar rect:not(.ud-hit), .ol-chart svg rect:not(.ol-hit), .pvk-stacked rect, .pvk-daybars rect) {
+    transform-box: fill-box;
+    transform-origin: 50% 100%;
+    animation: dm-grow-y .6s cubic-bezier(.2, .7, .2, 1) var(--dm-d, 0ms) backwards;
+  }
+
+  /* Лінії й спарклайни «промальовуються» зліва направо. */
+  [data-dash-motion] :is(.ud-spark, .ol-spark, .pvk-spark, .pvk-lines) { animation: dm-reveal .9s cubic-bezier(.3, .6, .2, 1) var(--dm-d, 0ms) backwards; }
+
+  /* Кільцева діаграма добудовується по колу. */
+  [data-dash-motion] .pvk-donut {
+    -webkit-mask: conic-gradient(#000 var(--dm-p), transparent 0);
+    mask: conic-gradient(#000 var(--dm-p), transparent 0);
+    animation: dm-sweep .9s cubic-bezier(.3, .6, .2, 1) var(--dm-d, 0ms) backwards;
+  }
+
+  /* Клітинки теплових карт і календаря з'являються хвилею. */
+  [data-dash-motion] :is(.pvk-day, .ud-heat td:not(.ud-total)) { animation: dm-fade .5s ease var(--dm-d, 0ms) backwards; }
+
+  /* Перемикання вкладки «Наші втрати» всередині ПВК/УДШВ. */
+  [data-dash-motion] .ol-root { animation: dm-fade .35s ease backwards; }
+}

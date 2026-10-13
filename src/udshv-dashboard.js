@@ -16,6 +16,7 @@ import {
   validateWorkbook,
 } from './udshv-dashboard-core.js';
 import { consumeOwnLossesTabRequest, ownLossesHost, ownLossesPage } from './own-losses-dashboard.js';
+import { playMotion, resetMotion } from './dashboard-motion.js';
 
 const state = { workbook: null, view: 'summary', preset: 'week', anchor: '', from: '', to: '', units: [], unitsOpen: false, focusUnit: null, ovt: 'destroyed', sort: 'personnel' };
 
@@ -458,10 +459,13 @@ export function render(host, workbook, options = {}) {
       freshHint(go)),
     h('nav', { class: 'ud-nav', 'aria-label': 'Розділи дашборда УДШВ' }, nav.map(([key, label]) => h('button', { type: 'button', 'aria-pressed': String(state.view === key), onclick: () => { state.view = key; go(); }, text: label }))),
     page].filter(Boolean));
+  // «Наші втрати» отримують дані пізніше за перехід на вкладку: поява таблиці теж анімується.
+  playMotion(root, own && root.querySelector('.ol-kpi') ? 'own:data' : state.view);
 }
 
 export function unmount(host) {
   if (!host) return;
+  resetMotion(host.querySelector(':scope > #udshv-dashboard-root'));
   host.classList.remove('udshv-mode');
   host.querySelector(':scope > #udshv-dashboard-root')?.remove();
 }

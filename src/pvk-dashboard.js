@@ -9,6 +9,7 @@ import {
   searchJournal,
 } from './pvk-dashboard-core.js';
 import { consumeOwnLossesTabRequest, ownLossesHost, ownLossesPage } from './own-losses-dashboard.js';
+import { playMotion, resetMotion } from './dashboard-motion.js';
 
 const state = {
   workbook: null,
@@ -466,6 +467,8 @@ export function render(host, workbook, options = {}) {
     h('nav', { class: 'pvk-nav', 'aria-label': 'Розділи дашборда ПВК' }, nav.map(([key, label]) => h('button', { type: 'button', 'aria-pressed': String(state.view === key), onclick: () => { state.view = key; rerender(); } }, label))),
     page,
   ].filter(Boolean));
+  // «Наші втрати» отримують дані пізніше за перехід на вкладку: поява таблиці теж анімується.
+  playMotion(root, own && root.querySelector('.ol-kpi') ? 'own:data' : state.view);
 }
 
 export function renderBase(host, workbook) {

@@ -13,6 +13,21 @@ application as three same-origin pages:
 Each module isolates its `localStorage` keys and IndexedDB names by prefix
 (`easywar.air::`, `easywar.rocket::`), so both work side by side in one origin.
 
+## Dashboard motion (PVK, UDSHV, «Наші втрати»)
+
+`src/dashboard-motion.css` and `src/dashboard-motion.js` are shared by the PVK and
+UDSHV dashboards (and the «Наші втрати» tab inside them). The dashboards rebuild the
+whole page on every filter change, so entrance animations are not attached to node
+creation: `playMotion(root, viewKey)` is called at the end of `render()` and sets
+`data-dash-motion="first|enter"` on the dashboard root only when the section changed
+(or on first open); otherwise it removes the attribute and the page appears instantly.
+All animation rules are gated by that attribute and by
+`prefers-reduced-motion: no-preference`. The application toggle «Анімації»
+(`html[data-motion="off"]`, defined in `air.html` / `rocket.html`) stays the global
+switch: it neutralises these animations through the existing `animation-duration`
+override, and `playMotion` also skips the number count-up. Do not reuse the
+`data-motion` name on a dashboard root: it would match the `<html>` toggle.
+
 ## Desktop behaviour
 
 - **Tauri IPC in the iframe.** Tauri injects its bridge only into the top-level
