@@ -85,14 +85,16 @@ Object.assign(SHELLS, {
 
 
 const radiusFn = s => {
-  const x0 = -H + (s.off || 0), xb = x0 + s.bt, xn = H - s.fz, xo = xn - s.og, rn = s.r * (s.tip || .2);
+  const x0 = -H + (s.off || 0), xb = x0 + s.bt, xn = H - s.fz, xo = xn - Math.max(s.og, 2.1), rn = s.r * (s.tip || .2);
   return x => {
     if (x <= xb) return s.r * (s.base + (1 - s.base) * smooth((x - x0) / s.bt));
     if (x <= xo) return s.r;
     // Тангенціальна оживальна: дуга радіуса rho торкається циліндра (без зламу) й сходиться до носа; rn — радіус вершини під підривник.
     const L = xn - xo, rho = (L * L + s.r * s.r) / (2 * s.r), d = Math.min(Math.max(xn - x, 0), L);
     const y = Math.sqrt(Math.max(rho * rho - (L - d) * (L - d), 0)) + s.r - rho;
-    return rn + (s.r - rn) * Math.min(Math.max(y / s.r, 0), 1);
+    // Суміш із конусом (на фото ніс майже конічний від початку оживала): 55 % конуса й 45 % тангенціальної дуги.
+    const f = .55 * (d / L) + .45 * Math.min(Math.max(y / s.r, 0), 1);
+    return rn + (s.r - rn) * f;
   };
 };
 
