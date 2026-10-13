@@ -1,7 +1,7 @@
 // Тривимірний переглядач довідника по озброєнню (three.js). Показує або процедурну модель боєприпасу
 // (munition-3d.js), або .glb-модель літака з каталогу src/models. Завантажується лише коли вперше відкривають статтю
 // з моделлю. Сцена (світло, підлога) спільна з карткою вильоту — stage-3d.js.
-import { AnimationMixer, Box3, Group, PerspectiveCamera, Scene, Vector3 } from 'three';
+import { AnimationMixer, Box3, DoubleSide, Group, PerspectiveCamera, Raycaster, Scene, Vector3 } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { addStageEnvironment, createRenderer, FLOOR_Y } from './stage-3d.js';
@@ -10,6 +10,10 @@ import { SHELL_KINDS, buildShell } from './artillery-3d.js';
 
 // Файли моделей літаків. Шлях у new URL(...) має бути дослівним, щоб Vite покласти файл у збірку.
 export const MODEL_FILES = {
+  'ka-52': new URL('./models/ka-52.glb', import.meta.url).href,
+  'mi-8tv': new URL('./models/mi-8tv.glb', import.meta.url).href,
+  'fp-5-flamingo': new URL('./models/fp-5-flamingo.glb', import.meta.url).href,
+  'fp-7': new URL('./models/fp-7.glb', import.meta.url).href,
   'aim-120': new URL('./models/aim-120.glb', import.meta.url).href,
   'aim-9x': new URL('./models/aim-9x.glb', import.meta.url).href,
   'agm-65': new URL('./models/agm-65.glb', import.meta.url).href,
@@ -98,6 +102,53 @@ export function normalizeAircraft(scene, nose = '+x', length = AIRCRAFT_LENGTH) 
   return { group: root, size: fit.getSize(new Vector3()), min: fit.min.clone() };
 }
 
+// Моделі зі збірок мають прозорі матеріали, які без правки дають артефакти сортування: «скло» (назва матеріалу
+// збігається з regexp glass) лишається напівпрозорим, решта прозорих матеріалів стає непрозорою з відсічкою за альфою.
+// opaque — без відсічки (усі пікселі видно). Усі матеріали двосторонні, щоб тонкі деталі не зникали з тильного боку.
+export function fixMaterials(scene, { glass, opaque = false }) {
+  const isGlass = new RegExp(glass, 'i');
+  scene.traverse(o => {
+    if (!o.isMesh) return;
+    for (const m of [].concat(o.material)) {
+      if (m.transparent && !isGlass.test(m.name || '')) { m.transparent = false; m.alphaTest = opaque ? 0 : .5; m.depthWrite = true; }
+      if (m.name && isGlass.test(m.name)) { m.transparent = true; m.depthWrite = false; m.opacity = Math.min(m.opacity, .55); }
+      m.side = DoubleSide;
+      m.needsUpdate = true;
+    }
+  });
+}
+
+// Опорні точки позначок «уразливих місць» у координатах моделі, поставленої в стандартну позу (ніс у +X, поворот 0).
+// p = [fx, fy] — частки довжини (хвіст → ніс) і висоти (низ → верх): промінь іде збоку (з +Z) і бере першу точку обшивки;
+// p = [fx, 0, fz] — частки довжини й розмаху: промінь іде зверху, для крил та інших тонких горизонтальних частин.
+export function spotAnchors(aircraft, points, rc = new Raycaster()) {
+  const g = aircraft.group, prev = g.rotation.y;
+  g.rotation.y = 0;
+  g.updateMatrixWorld(true);
+  if (!aircraft.meshes) { aircraft.meshes = []; g.traverse(o => { if (o.isMesh) aircraft.meshes.push(o); }); }
+  const lo = aircraft.min, hi = lo.clone().add(aircraft.size);
+  const out = points.map(p => {
+    const x = lo.x + (hi.x - lo.x) * p[0];
+    if (p.length === 3) {
+      const z = lo.z + (hi.z - lo.z) * p[2];
+      rc.set(new Vector3(x, hi.y + 1, z), new Vector3(0, -1, 0));
+      rc.far = hi.y - lo.y + 2;
+      const hit = rc.intersectObjects(aircraft.meshes, false)[0];
+      return hit ? hit.point.clone() : new Vector3(x, lo.y + (hi.y - lo.y) * .6, z);
+    }
+    const y = lo.y + (hi.y - lo.y) * p[1];
+    rc.set(new Vector3(x, y, hi.z + 1), new Vector3(0, 0, -1));
+    rc.far = hi.z - lo.z + 2;
+    const hit = rc.intersectObjects(aircraft.meshes, false)[0];
+    return hit ? hit.point.clone() : new Vector3(x, y, 0);
+  });
+  g.rotation.y = prev;
+  g.updateMatrixWorld(true);
+  return out;
+}
+
+const Y_AXIS = new Vector3(0, 1, 0);
+
 export class RefViewer {
   constructor(el, { motion = true } = {}) {
     this.el = el;
@@ -114,6 +165,7 @@ export class RefViewer {
     el.prepend(this.canvas);
     this.group = null; this.wings = []; this.update = null; this.explode = null; this.action = null; this.step = 0;
     this.parts = []; this.spot = new Vector3();
+    this.spots = []; this.activeSpot = -1; this.onSpot = null; this.entry = null; this.rc = new Raycaster(); this.tmp = new Vector3(); this.dir = new Vector3(); this.occTimer = 0; this.turnRaf = 0;
     this.cache = new Map();
     Object.assign(this, VIEWS['three-quarter']);
     this.open = 1; this.apart = 0; this.zoom = 1; this.auto = false; this.token = 0;
@@ -140,6 +192,7 @@ export class RefViewer {
       let entry = this.cache.get(model.file);
       if (!entry) {
         const gltf = await gltfLoader().loadAsync(url, e => { if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total); });
+        if (model.glass !== undefined) fixMaterials(gltf.scene, model);
         entry = normalizeAircraft(gltf.scene, model.nose, model.length);
         entry.action = prepareAction(gltf, entry);
         const aniso = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
@@ -161,6 +214,7 @@ export class RefViewer {
     const { group, wings = [], update, explode, labels = [], aircraft } = built;
     this.group = group; this.wings = wings; this.update = update || null; this.explode = explode || null;
     this.aircraft = !!aircraft;
+    this.entry = aircraft || null;
     this.action = (aircraft && aircraft.action) || null; this.step = 0;
     if (this.action) this.action.seek(0);
     this.parts = labels.map(label => {
@@ -206,6 +260,7 @@ export class RefViewer {
   }
 
   clear() {
+    this.clearSpots();
     if (this.group) {
       this.holder.remove(this.group);
       // Геометрію літака лишаємо в кеші, процедурні боєприпаси звільняємо.
@@ -213,6 +268,90 @@ export class RefViewer {
     }
     for (const { el } of this.parts) el.remove();
     this.parts = []; this.group = null;
+  }
+
+  // ---------- позначки уразливих місць ----------
+  // list — [{ title, p }] (див. spotAnchors), onPick(i, fromMarker) — виклик після вибору позначки (i = -1, коли вибір знято).
+  setSpots(list = [], onPick = null) {
+    this.clearSpots();
+    this.onSpot = onPick;
+    if (!this.entry || !list.length) return;
+    const anchors = spotAnchors(this.entry, list.map(s => s.p), this.rc);
+    this.spots = list.map((s, i) => {
+      const el = document.createElement('button');
+      el.type = 'button'; el.className = 'rw-spot'; el.textContent = String(i + 1);
+      el.title = s.title; el.setAttribute('aria-label', 'Уразливе місце ' + (i + 1) + ': ' + s.title);
+      el.addEventListener('pointerdown', e => { e.stopPropagation(); cancelAnimationFrame(this.turnRaf); });
+      el.addEventListener('click', () => this.pickSpot(i, true));
+      this.el.append(el);
+      return { el, anchor: anchors[i], world: new Vector3() };
+    });
+    this.pose();
+  }
+
+  clearSpots() {
+    cancelAnimationFrame(this.turnRaf);
+    clearTimeout(this.occTimer); this.occTimer = 0;
+    for (const { el } of this.spots) el.remove();
+    this.spots = []; this.activeSpot = -1; this.onSpot = null;
+  }
+
+  setSpotsVisible(on) { for (const { el } of this.spots) el.hidden = !on; }
+
+  // Вибір позначки (повторний клік знімає вибір): модель повертається зоною до глядача.
+  pickSpot(i, fromMarker = false) {
+    const s = this.spots[i];
+    if (!s) return;
+    this.activeSpot = this.activeSpot === i ? -1 : i;
+    this.spots.forEach((x, j) => x.el.classList.toggle('on', j === this.activeSpot));
+    if (this.activeSpot >= 0) this.faceSpot(s);
+    if (this.onSpot) this.onSpot(this.activeSpot, fromMarker);
+  }
+
+  faceSpot(s) {
+    const a = s.anchor;
+    if (Math.hypot(a.x, a.z) < .15) return; // зона над віссю моделі: повертати нікуди
+    const from = this.yaw, to = Math.atan2(-a.x, a.z);
+    const delta = Math.atan2(Math.sin(to - from), Math.cos(to - from));
+    cancelAnimationFrame(this.turnRaf);
+    this.auto = false;
+    if (!this.motion) { this.yaw = from + delta; this.pose(); return; }
+    const t0 = performance.now(), span = 500;
+    const step = now => {
+      const k = Math.min((now - t0) / span, 1), e = k * k * (3 - 2 * k);
+      this.yaw = from + delta * e; this.pose();
+      if (k < 1) this.turnRaf = requestAnimationFrame(step);
+    };
+    this.turnRaf = requestAnimationFrame(step);
+  }
+
+  // Позначки — елементи HTML, що їздять за точками на моделі. Ті, що опинилися за корпусом, блякнуть;
+  // перевірка променем дорога, тож її роблять не частіше, ніж раз на ~140 мс, і вже після того, як модель зупинилась.
+  placeSpots() {
+    const g = this.group;
+    if (!g || !this.spots.length) return;
+    this.camera.updateMatrixWorld();
+    const w = this.el.clientWidth, h = this.el.clientHeight, yaw = g.rotation.y;
+    for (const s of this.spots) {
+      s.world.copy(s.anchor).applyAxisAngle(Y_AXIS, yaw);
+      this.tmp.copy(s.world).project(this.camera);
+      s.el.style.left = ((this.tmp.x + 1) / 2 * w).toFixed(1) + 'px';
+      s.el.style.top = ((1 - this.tmp.y) / 2 * h).toFixed(1) + 'px';
+    }
+    if (!this.occTimer) this.occTimer = setTimeout(() => { this.occTimer = 0; this.checkSpots(); }, 140);
+  }
+
+  checkSpots() {
+    if (!this.group || !this.entry || !this.entry.meshes || !this.spots.length) return;
+    this.group.updateMatrixWorld(true);
+    const eye = this.camera.position;
+    for (const s of this.spots) {
+      this.dir.copy(s.world).sub(eye);
+      const d = this.dir.length();
+      this.rc.set(eye, this.dir.normalize());
+      this.rc.far = d - .05;
+      s.el.classList.toggle('is-hid', this.rc.intersectObjects(this.entry.meshes, false).length > 0);
+    }
   }
 
   setOpen(v) { this.open = v; this.pose(); }
@@ -229,7 +368,7 @@ export class RefViewer {
     const el = this.el;
     let drag = null;
     el.style.touchAction = 'pan-y';
-    el.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY, mouse: e.pointerType === 'mouse' }; this.dragging = true; el.setPointerCapture?.(e.pointerId); el.classList.add('is-grab'); });
+    el.addEventListener('pointerdown', e => { cancelAnimationFrame(this.turnRaf); drag = { x: e.clientX, y: e.clientY, mouse: e.pointerType === 'mouse' }; this.dragging = true; el.setPointerCapture?.(e.pointerId); el.classList.add('is-grab'); });
     el.addEventListener('pointermove', e => {
       if (!drag) return;
       this.spin((e.clientX - drag.x) * .012, drag.mouse ? (e.clientY - drag.y) * .008 : 0);
@@ -282,6 +421,7 @@ export class RefViewer {
     this.camera.up.set(0, 1, 0);
     this.camera.lookAt(this.target);
     this.placeParts();
+    this.placeSpots();
     this.dirty = true;
   }
 
