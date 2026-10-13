@@ -1,0 +1,248 @@
+/*
+ * EasyWAR ui-kit: спільний візуальний шар дашбордів (ПС, РВ, ПВК, УДШВ).
+ *
+ * Лише дизайн, розміщення й Motion. Жодних змін логіки, метрик і даних:
+ * файл підключається ПІСЛЯ вбудованих стилів модуля й перевизначає тільки вигляд.
+ * Акцент береться з --accent модуля (ПС синій, РВ золотий), тож палітра модулів не зливається.
+ * Рух вимикається і системним «зменшити рух», і власним перемикачем html[data-motion="off"].
+ */
+
+:root {
+  --ew-r: 14px;
+  --ew-r-sm: 10px;
+  --ew-accent: var(--accent, #3d9bff);
+  --ew-card: color-mix(in srgb, var(--surface, #0e1a2e) 94%, #000 6%);
+  --ew-card-hi: color-mix(in srgb, var(--surface-2, #122340) 70%, var(--surface, #0e1a2e));
+  --ew-line: color-mix(in srgb, var(--ew-accent) 16%, var(--line, #1b2c47));
+  --ew-line-hi: color-mix(in srgb, var(--ew-accent) 42%, var(--line, #1b2c47));
+  --ew-glow: color-mix(in srgb, var(--ew-accent) 26%, transparent);
+  --ew-shadow: 0 1px 0 rgba(255, 255, 255, .035) inset, 0 10px 30px rgba(0, 0, 0, .18);
+  --ew-shadow-hi: 0 1px 0 rgba(255, 255, 255, .05) inset, 0 18px 44px rgba(0, 0, 0, .3);
+  --ew-ease: cubic-bezier(.22, 1, .36, 1);
+  --ew-ease-io: cubic-bezier(.65, 0, .35, 1);
+  --ew-t-fast: .18s;
+  --ew-t: .42s;
+  --ew-t-slow: .8s;
+}
+:root[data-theme="light"] {
+  --ew-card: var(--surface, #fff);
+  --ew-card-hi: var(--surface-2, #f2f6f4);
+  --ew-line: color-mix(in srgb, var(--ew-accent) 14%, var(--line, #cfd8d4));
+  --ew-line-hi: color-mix(in srgb, var(--ew-accent) 40%, var(--line, #cfd8d4));
+  --ew-glow: color-mix(in srgb, var(--ew-accent) 16%, transparent);
+  --ew-shadow: 0 1px 2px rgba(20, 32, 28, .06);
+  --ew-shadow-hi: 0 14px 34px rgba(20, 32, 28, .14);
+}
+
+/* ---------- Каркас сторінки: рівний фон, однакові відступи ---------- */
+.dmain, .dmain-in { gap: 16px; }
+.dmain-in > .lay-gap { height: 0; }
+
+/* ---------- Панель: одна форма для всіх модулів ---------- */
+:root .dpanel,
+:root .panel,
+:root .pvk-metric, :root .pvk-journal-card, :root .pvk-section, :root .pvk-kpi,
+:root .ud-card, :root .ud-kpi {
+  border-radius: var(--ew-r);
+  border-color: var(--ew-line);
+  box-shadow: var(--ew-shadow);
+}
+.dpanel,
+.panel {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--ew-accent) 4%, transparent), transparent 46%),
+    var(--ew-card);
+}
+.dpanel:hover { border-color: var(--ew-line-hi); box-shadow: var(--ew-shadow-hi); }
+.dpanel h2, .ph h2 { letter-spacing: 0; }
+.ph { padding-bottom: 2px; }
+
+/* ---------- Панель інструментів: один рядок-«пігулка» ---------- */
+.dmain > .toolbar {
+  gap: 10px 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--ew-line);
+  border-radius: var(--ew-r);
+  background: var(--ew-card);
+  box-shadow: var(--ew-shadow);
+}
+.toolbar .lbl { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; }
+.toolbar .grp + .grp { padding-left: 14px; border-left: 1px solid var(--ew-line); }
+.toolbar input[type=date], .toolbar select {
+  border-radius: var(--ew-r-sm);
+  border: 1px solid var(--ew-line);
+  background: color-mix(in srgb, var(--surface-2, #122340) 64%, transparent);
+}
+.toolbar input[type=date]:hover, .toolbar select:hover,
+.toolbar input[type=date]:focus-visible, .toolbar select:focus-visible { border-color: var(--ew-line-hi); }
+
+/* ---------- Сегментований перемикач ---------- */
+/* ПС/РВ: рухомий «повзунок» .seg-thumb вже створює код модуля, ми лише перефарбовуємо його. */
+:root .seg, :root .pvk-seg, :root .ud-seg {
+  position: relative;
+  border-radius: var(--ew-r-sm);
+  border: 1px solid var(--ew-line);
+  background: color-mix(in srgb, var(--surface-2, #122340) 56%, transparent);
+  isolation: isolate;
+}
+.seg button + button { border-left: 0; }
+.seg-thumb {
+  top: 2px !important; bottom: 2px !important; border-radius: calc(var(--ew-r-sm) - 2px);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--ew-accent) 88%, #fff 12%), var(--ew-accent)) !important;
+  box-shadow: 0 6px 18px var(--ew-glow) !important;
+}
+.seg.has-thumb button[aria-pressed="true"] { color: var(--accent-ink, #04111f); font-weight: 700; }
+/* ПВК і УДШВ: індикатор ставить ui-kit.js (--ew-x / --ew-w). */
+.pvk-seg button, .ud-seg button { position: relative; z-index: 1; }
+.pvk-seg.ew-ind::before, .ud-seg.ew-ind::before {
+  content: ""; position: absolute; z-index: 0; top: 2px; bottom: 2px; left: 0;
+  width: var(--ew-w, 0px); transform: translateX(var(--ew-x, 0px));
+  border-radius: calc(var(--ew-r-sm) - 2px);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--ew-accent) 88%, #fff 12%), var(--ew-accent));
+  box-shadow: 0 6px 18px var(--ew-glow);
+  transition: transform var(--ew-t) var(--ew-ease), width var(--ew-t) var(--ew-ease);
+}
+.pvk-seg.ew-ind button[aria-pressed="true"],
+.ud-seg.ew-ind button[aria-pressed="true"] { background: transparent; box-shadow: none; color: var(--accent-ink, #04111f); font-weight: 700; }
+
+/* ---------- Кнопки ---------- */
+.btn { border-radius: var(--ew-r-sm); }
+.btn.primary {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--ew-accent) 86%, #fff 14%), var(--ew-accent));
+  border-color: color-mix(in srgb, var(--ew-accent) 70%, #fff 30%);
+  box-shadow: 0 8px 22px var(--ew-glow);
+}
+
+/* ---------- Банер-шапка (ПС/РВ: «Основні показники»): назва ліворуч, арт праворуч ---------- */
+.kpipanel {
+  padding: 0; overflow: visible;
+  border: 0; background: none; box-shadow: none;
+}
+.kpipanel > .kh {
+  position: relative; isolation: isolate; overflow: hidden;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, .8fr) minmax(0, 1fr);
+  min-height: 132px; margin-bottom: 14px; padding: 22px 28px;
+  border: 1px solid var(--ew-line); border-radius: var(--ew-r);
+  background:
+    radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--ew-accent) 18%, transparent), transparent 55%),
+    linear-gradient(100deg, var(--ew-card) 38%, color-mix(in srgb, var(--ew-accent) 10%, var(--ew-card)));
+  box-shadow: var(--ew-shadow);
+}
+.kpipanel > .kh .kh-l { position: relative; z-index: 2; }
+.kpipanel > .kh h2 {
+  font: 700 clamp(28px, 3.1vw, 44px)/1.05 var(--display);
+  letter-spacing: -.01em; text-transform: none;
+}
+.kpipanel > .kh p { font-size: 15px; max-width: 54ch; }
+.kpipanel > .kh .kh-c {
+  position: relative; z-index: 0; align-self: stretch; height: auto; min-height: 88px;
+  margin: -22px 0; display: grid; place-items: end center; pointer-events: none;
+}
+.kpipanel > .kh .kh-jet {
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 50% 45%;
+  opacity: .62;
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 28%, #000 72%, transparent 100%);
+  mask-image: linear-gradient(to right, transparent 0, #000 28%, #000 72%, transparent 100%);
+  transform-origin: 50% 50%;
+  animation: ewJetDrift 24s var(--ew-ease-io) infinite alternate;
+}
+.kpipanel > .kh .kh-tag { position: relative; margin-bottom: 14px; }
+.kpipanel > .kh .kh-r { position: relative; z-index: 2; align-self: stretch; }
+.kpipanel > .kh .kh-eff {
+  border-color: var(--ew-line); background: color-mix(in srgb, var(--ew-card) 78%, transparent);
+  backdrop-filter: blur(6px);
+}
+@keyframes ewJetDrift { from { transform: scale(1) translateX(0); } to { transform: scale(1.05) translateX(-1.5%); } }
+
+/* ---------- KPI-картки: спокійніший фон, акцент лише на іконці й значенні ---------- */
+.kpipanel .kpi-grid { gap: 14px; }
+.kc {
+  border-radius: var(--ew-r);
+  border-color: color-mix(in srgb, var(--tc) 24%, var(--ew-line));
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--tc) 7%, var(--ew-card)) 0, var(--ew-card) 62%);
+  box-shadow: var(--ew-shadow);
+  transition: transform var(--ew-t) var(--ew-ease), box-shadow var(--ew-t) var(--ew-ease), border-color var(--ew-t-fast);
+}
+.kc:hover {
+  transform: translateY(-3px);
+  border-color: color-mix(in srgb, var(--tc) 55%, var(--ew-line));
+  box-shadow: var(--ew-shadow-hi), 0 0 28px color-mix(in srgb, var(--tc) 16%, transparent);
+}
+.kc .k-l { letter-spacing: .04em; }
+.kc .k-v { text-shadow: none; }
+
+/* ---------- Таблиці: легка шапка, роздільники, наведення ---------- */
+.dtbl th, .dtbl2 th, .tbl th, .pvk-table th, .ud-table th {
+  font-size: 11.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--muted);
+}
+.dtbl td, .dtbl2 td, .tbl td { border-color: var(--ew-line); }
+.tbl tbody tr, .dtbl tbody tr, .dtbl2 tbody tr, .pvk-table tbody tr, .ud-table tbody tr { transition: background-color var(--ew-t-fast); }
+
+/* ---------- Дашборди ПВК і УДШВ: той самий каркас банера та панелей ---------- */
+:root .pvk-hero, :root .pvk-base-hero, :root .ud-hero {
+  border-radius: var(--ew-r);
+  box-shadow: var(--ew-shadow);
+}
+:root .pvk-period, :root .ud-period {
+  border-radius: var(--ew-r);
+  box-shadow: var(--ew-shadow);
+}
+:root .pvk-kpi, :root .pvk-metric, :root .pvk-journal-card, :root .pvk-section, :root .ud-card, :root .ud-kpi {
+  transition: transform var(--ew-t) var(--ew-ease), box-shadow var(--ew-t) var(--ew-ease), border-color var(--ew-t-fast);
+}
+:root .pvk-kpi:hover, :root .pvk-metric:hover, :root .ud-kpi:hover, :root .ud-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--ew-shadow-hi);
+}
+
+/* ---------- Motion: поява при першому відкритті дашборда ---------- */
+/* Клас ew-boot ставить ui-kit.js на ~1.8 с після завантаження; повторні відмальовування даних не анімуються. */
+@keyframes ewRise { from { opacity: 0; transform: translateY(16px) scale(.992); } }
+@keyframes ewFade { from { opacity: 0; } }
+html.ew-boot .dmain > .toolbar { animation: ewRise .55s var(--ew-ease) both; }
+html.ew-boot .kpipanel > .kh { animation: ewRise .6s var(--ew-ease) .05s both; }
+html.ew-boot .kpi-grid > .kc { animation: ewRise .6s var(--ew-ease) both; }
+html.ew-boot .kpi-grid > .kc:nth-child(1) { animation-delay: .12s; }
+html.ew-boot .kpi-grid > .kc:nth-child(2) { animation-delay: .19s; }
+html.ew-boot .kpi-grid > .kc:nth-child(3) { animation-delay: .26s; }
+html.ew-boot .kpi-grid > .kc:nth-child(4) { animation-delay: .33s; }
+html.ew-boot .kpi-grid > .kc:nth-child(5) { animation-delay: .40s; }
+html.ew-boot .kpi-grid > .kc:nth-child(n+6) { animation-delay: .47s; }
+html.ew-boot .dmain-in .lrow > .dpanel { animation: ewRise .6s var(--ew-ease) .3s both; }
+html.ew-boot .pvk-hero, html.ew-boot .ud-hero, html.ew-boot .ud-banner { animation: ewRise .55s var(--ew-ease) both; }
+html.ew-boot .pvk-period, html.ew-boot .ud-period { animation: ewRise .55s var(--ew-ease) .08s both; }
+html.ew-boot .pvk-kpis > *, html.ew-boot .ud-kpis > * { animation: ewRise .55s var(--ew-ease) .16s both; }
+html.ew-boot .pvk-kpis > :nth-child(2), html.ew-boot .ud-kpis > :nth-child(2) { animation-delay: .22s; }
+html.ew-boot .pvk-kpis > :nth-child(3), html.ew-boot .ud-kpis > :nth-child(3) { animation-delay: .28s; }
+html.ew-boot .pvk-kpis > :nth-child(n+4), html.ew-boot .ud-kpis > :nth-child(n+4) { animation-delay: .34s; }
+
+/* Перехід між розділами бічного меню: м'яке «вливання» вмісту. */
+.dmain-in { animation: ewFade .35s var(--ew-ease) both; }
+
+/* Живий індикатор джерела даних. */
+.filechip .dot { position: relative; }
+.filechip .dot::after {
+  content: ""; position: absolute; inset: -3px; border-radius: 50%;
+  border: 1px solid currentColor; opacity: 0; animation: ewPing 2.8s ease-out infinite;
+}
+@keyframes ewPing { 0% { transform: scale(.6); opacity: .55; } 70%, 100% { transform: scale(1.7); opacity: 0; } }
+
+/* ---------- Доступність: рух вимикається системою ---------- */
+@media (prefers-reduced-motion: reduce) {
+  html.ew-boot *, .kpipanel > .kh .kh-jet, .filechip .dot::after, .dmain-in { animation: none !important; }
+  .pvk-seg.ew-ind::before, .ud-seg.ew-ind::before { transition: none; }
+}
+html[data-motion="off"] .kpipanel > .kh .kh-jet,
+html[data-motion="off"] .filechip .dot::after { animation: none !important; }
+
+/* ---------- Вузькі вікна ---------- */
+@media (max-width: 1180px) {
+  .kpipanel > .kh { grid-template-columns: minmax(0, 1fr) auto; }
+  .kpipanel > .kh .kh-c { display: none; }
+}
+@media (max-width: 900px) {
+  .kpipanel > .kh { grid-template-columns: minmax(0, 1fr); min-height: 0; padding: 18px; }
+  .toolbar .grp + .grp { padding-left: 0; border-left: 0; }
+}

@@ -86,3 +86,14 @@ The script rewrites `src/index.html` and `src/rocket.html` (adding the module
 editor hook and scripts) and saves the Air module for review. `src/air.html` is **not** overwritten: port the Air changes
 by hand with narrow anchored patches (see `AGENTS.md`), then run
 `npm run test:unit`.
+
+## Спільний шар оформлення дашбордів (`ui-kit`)
+
+`src/ui-kit.css` і `src/public/ui-kit.js` підключені в `air.html` та `rocket.html`
+останніми в `<head>`. Це лише вигляд, розміщення й Motion: логіка, метрики й дані
+дашбордів не змінюються. Акцент береться з `--accent` модуля (ПС синій, РВ золотий);
+панелі, панель інструментів, сегментовані перемикачі, таблиці, банер «Основні показники»
+і дашборди ПВК та УДШВ мають спільні радіуси, межі, тіні та рух. Поява елементів
+анімується лише при першому відкритті (клас `html.ew-boot`), рух вимикається
+`prefers-reduced-motion` і перемикачем `html[data-motion="off"]`. Фото й візуалізації
+карток не вилучаються.
