@@ -1,0 +1,274 @@
+[
+{
+"slug": "dnipro",
+"name": "Дніпро",
+"bbox": [
+34.85,
+35.25,
+48.37,
+48.56
+],
+"centre": [
+35.04,
+48.47
+],
+"count": 148347,
+"sat": "dnipro_sat.jpg",
+"bld": "dnipro_buildings.png"
+},
+{
+"slug": "kharkiv",
+"name": "Харків",
+"bbox": [
+36.08,
+36.45,
+49.9,
+50.1
+],
+"centre": [
+36.23,
+49.99
+],
+"count": 106353,
+"sat": "kharkiv_sat.jpg",
+"bld": "kharkiv_buildings.png"
+},
+{
+"slug": "donetsk",
+"name": "Донецьк і Макіївка",
+"bbox": [
+37.58,
+38.12,
+47.9,
+48.12
+],
+"centre": [
+37.8,
+48.02
+],
+"count": 144530,
+"sat": "donetsk_sat.jpg",
+"bld": "donetsk_buildings.png"
+},
+{
+"slug": "zaporizhzhia",
+"name": "Запоріжжя",
+"bbox": [
+34.95,
+35.32,
+47.74,
+47.93
+],
+"centre": [
+35.14,
+47.84
+],
+"count": 40757,
+"sat": "zaporizhzhia_sat.jpg",
+"bld": "zaporizhzhia_buildings.png"
+},
+{
+"slug": "kryvyirih",
+"name": "Кривий Ріг",
+"bbox": [
+33.25,
+33.55,
+47.78,
+48.12
+],
+"centre": [
+33.39,
+47.91
+],
+"count": 103561,
+"sat": "kryvyirih_sat.jpg",
+"bld": "kryvyirih_buildings.png"
+},
+{
+"slug": "mariupol",
+"name": "Маріуполь",
+"bbox": [
+37.44,
+37.72,
+47.02,
+47.2
+],
+"centre": [
+37.54,
+47.1
+],
+"count": 69275,
+"sat": "mariupol_sat.jpg",
+"bld": "mariupol_buildings.png"
+},
+{
+"slug": "luhansk",
+"name": "Луганськ",
+"bbox": [
+39.18,
+39.48,
+48.48,
+48.65
+],
+"centre": [
+39.31,
+48.57
+],
+"count": 61627,
+"sat": "luhansk_sat.jpg",
+"bld": "luhansk_buildings.png"
+},
+{
+"slug": "kramatorsk",
+"name": "Краматорськ і Слов’янськ",
+"bbox": [
+37.48,
+37.72,
+48.66,
+48.92
+],
+"centre": [
+37.58,
+48.76
+],
+"count": 17948,
+"sat": "kramatorsk_sat.jpg",
+"bld": "kramatorsk_buildings.png"
+},
+{
+"slug": "horlivka",
+"name": "Горлівка",
+"bbox": [
+37.95,
+38.15,
+48.24,
+48.38
+],
+"centre": [
+38.04,
+48.31
+],
+"count": 35720,
+"sat": "horlivka_sat.jpg",
+"bld": "horlivka_buildings.png"
+},
+{
+"slug": "sievierodonetsk",
+"name": "Сєвєродонецьк і Лисичанськ",
+"bbox": [
+38.34,
+38.62,
+48.84,
+49.04
+],
+"centre": [
+38.49,
+48.93
+],
+"count": 42973,
+"sat": "sievierodonetsk_sat.jpg",
+"bld": "sievierodonetsk_buildings.png"
+},
+{
+"slug": "melitopol",
+"name": "Мелітополь",
+"bbox": [
+35.3,
+35.45,
+46.8,
+46.9
+],
+"centre": [
+35.37,
+46.85
+],
+"count": 3639,
+"sat": "melitopol_sat.jpg",
+"bld": "melitopol_buildings.png"
+},
+{
+"slug": "kamianske",
+"name": "Кам’янське",
+"bbox": [
+34.52,
+34.7,
+48.44,
+48.56
+],
+"centre": [
+34.61,
+48.51
+],
+"count": 24242,
+"sat": "kamianske_sat.jpg",
+"bld": "kamianske_buildings.png"
+},
+{
+"slug": "pavlohrad",
+"name": "Павлоград",
+"bbox": [
+35.8,
+35.95,
+48.48,
+48.57
+],
+"centre": [
+35.87,
+48.53
+],
+"count": 9789,
+"sat": "pavlohrad_sat.jpg",
+"bld": "pavlohrad_buildings.png"
+},
+{
+"slug": "nikopol",
+"name": "Нікополь",
+"bbox": [
+34.33,
+34.46,
+47.54,
+47.61
+],
+"centre": [
+34.4,
+47.57
+],
+"count": 19756,
+"sat": "nikopol_sat.jpg",
+"bld": "nikopol_buildings.png"
+},
+{
+"slug": "berdiansk",
+"name": "Бердянськ",
+"bbox": [
+36.72,
+36.86,
+46.72,
+46.81
+],
+"centre": [
+36.78,
+46.76
+],
+"count": 21875,
+"sat": "berdiansk_sat.jpg",
+"bld": "berdiansk_buildings.png"
+},
+{
+"slug": "alchevsk",
+"name": "Алчевськ",
+"bbox": [
+38.74,
+38.86,
+48.43,
+48.51
+],
+"centre": [
+38.8,
+48.47
+],
+"count": 4696,
+"sat": "alchevsk_sat.jpg",
+"bld": "alchevsk_buildings.png"
+}
+]

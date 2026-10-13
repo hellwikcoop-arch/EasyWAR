@@ -1,0 +1,32 @@
+{
+ "1": {
+  "file": "fac_panel.jpg",
+  "tileW": 15.63,
+  "tileH": 14.0,
+  "roof": "#6f6a62"
+ },
+ "0": {
+  "file": "fac_house.jpg",
+  "tileW": 6.0,
+  "tileH": 3.2,
+  "roof": "#8a6b50"
+ },
+ "2": {
+  "file": "fac_ind.jpg",
+  "tileW": 8.0,
+  "tileH": 4.0,
+  "roof": "#8d8f90"
+ },
+ "3": {
+  "file": "fac_pub.jpg",
+  "tileW": 6.0,
+  "tileH": 3.6,
+  "roof": "#7d7267"
+ },
+ "4": {
+  "file": "fac_shed.jpg",
+  "tileW": 4.0,
+  "tileH": 3.0,
+  "roof": "#6e665c"
+ }
+}
