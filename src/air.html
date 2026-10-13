@@ -3832,6 +3832,7 @@ function markNav() {
   if (D.view !== 'overview') { setNav(VIEWS[D.view].id); return; }
   if (Date.now() < (el.navLock || 0)) return;
   if (el.navPin) { const pt = document.getElementById(el.navPin), r = pt && pt.getBoundingClientRect(); if (r && r.top > -60 && r.top < innerHeight - 80 && r.bottom > 60) return; el.navPin = null; }
+  if ((window.scrollY || document.documentElement.scrollTop || 0) < 24) { setNav(NAV[0][0]); return; }
   let cur = NAV[0][0], best = -Infinity;
   for (const [id] of NAV) { const t = document.getElementById(id); if (!t) continue; const top = t.getBoundingClientRect().top; if (top <= 150 && top > best) { best = top; cur = id; } }
   setNav(cur);

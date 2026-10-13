@@ -481,3 +481,68 @@ html[data-motion="off"] .filechip .dot::after { animation: none !important; }
 @media (max-width: 900px) {
   .toolbar .grp + .grp { padding-left: 0; border-left: 0; }
 }
+
+/* ---------- Адаптивність і світла тема ПС/РВ: виправлення за переглядом 1280 / 1024 / 768 / 390 px ---------- */
+/* ПС: шапка не виходить за край вікна. 1320–1365 px — один рядок зі стисненими проміжками, нижче — переноситься, як у РВ. */
+@media (max-width: 1365.98px) {
+  html[data-ew-module="air"] .appbar { gap: 8px 12px; }
+  html[data-ew-module="air"] .appbar > .brand { width: auto !important; min-width: 0 !important; flex: none; }
+  html[data-ew-module="air"] .appbar .tab { padding-left: 7px; padding-right: 7px; }
+  html[data-ew-module="air"] .appbar-right { gap: 6px; }
+}
+@media (max-width: 1319.98px) {
+  html[data-ew-module="air"] .appbar { flex-wrap: wrap; }
+  html[data-ew-module="air"] .appbar-right { flex-wrap: wrap; justify-content: flex-end; }
+}
+@media (max-width: 720px) {
+  html[data-ew-module="air"] .appbar > .tabs { flex: 1 1 100%; width: 100%; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+  html[data-ew-module="air"] .appbar > .tabs::-webkit-scrollbar { display: none; }
+  html[data-ew-module="air"] #p-map .ph, html[data-ew-module="air"] #p-map .ph-r { flex-wrap: wrap; }
+  html[data-ew-module] .appbar .filechip { flex: none; max-width: 100%; }
+  html[data-ew-module="rocket"] .appbar .filechip .cnt { display: none; }
+}
+/* РВ: рядок керування картою переноситься на другий рядок, не накриваючи карту (у старому правилі висота жорстко 36 px). */
+@media (max-width: 1279.98px) {
+  html[data-ew-module="rocket"].rocket-ref24 #p-map > .ph { height: auto; min-height: 36px; margin-bottom: 7px !important; }
+}
+/* РВ: підписи бічного меню переносяться й не обрізаються; заголовки таблиці «Топ-5» не злипаються. */
+@media (min-width: 900px) {
+  html[data-ew-module="rocket"] .snav-b { white-space: normal; line-height: 1.2; }
+}
+@media (max-width: 1399.98px) {
+  html[data-ew-module] #p-units .units-tbl th { padding-left: 4px; padding-right: 4px; letter-spacing: .02em; font-size: 10px; }
+}
+/* РВ, світла тема: картки типів цілей і показників мають темну або світлу підкладку з фото — тексту потрібен контраст. */
+html[data-theme="light"][data-ew-module="rocket"] .tt-row.ewr-tt { background-color: #151a0d; }
+html[data-theme="light"][data-ew-module="rocket"] .tt-row.ewr-tt b { color: #f6f1e2; }
+html[data-theme="light"][data-ew-module="rocket"] .tt-row.ewr-tt .tt-n span { color: #d3ccb4; }
+html[data-theme="light"][data-ew-module="rocket"] .kc.kc-blue .ewr-ksub,
+html[data-theme="light"][data-ew-module="rocket"] .kc.kc-amber .ewr-ksub { color: #5a5440; }
+/* Панель вибору (підрозділ, ціль…): колонки не розтягують сторінку на вузьких екранах, показники переносяться. */
+@media (max-width: 1100px) {
+  html[data-ew-module] .dsel { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  html[data-ew-module] .dsel > * { min-width: 0; }
+  html[data-ew-module] .ds-st { flex-wrap: wrap; gap: 10px 20px; }
+}
+@media (max-width: 720px) {
+  html[data-ew-module] .dsel { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  html[data-ew-module] .ds-st { flex-wrap: wrap; gap: 10px 20px; }
+}
+/* РВ «Цілі»: панель типу цілі з фото на 1101–1439px — колонки стискаються, показники переносяться, панель не виходить за межі. */
+@media (min-width: 1100.02px) and (max-width: 1439.98px) {
+  html[data-ew-module="rocket"] .dsel.ewr-ds-type { grid-template-columns: minmax(170px, 1fr) minmax(110px, .8fr) minmax(100px, .5fr) minmax(0, auto) minmax(120px, .7fr) !important; gap: 12px !important; }
+  html[data-ew-module="rocket"] .dsel.ewr-ds-type > * { min-width: 0; }
+  html[data-ew-module="rocket"] .dsel.ewr-ds-type .ds-st { flex-wrap: wrap; gap: 8px 16px; }
+}
+/* ПВК: на вузьких екранах текст банера лежить поверх усього рельєфу — тло під ним світлішає/темнішає по всій ширині. */
+@media (max-width: 900px) {
+  :root .pvk-hero {
+    background:
+      linear-gradient(90deg, var(--pvk-panel) 0, color-mix(in srgb, var(--pvk-panel) 90%, transparent) 55%, color-mix(in srgb, var(--pvk-panel) 72%, transparent) 100%),
+      url('./pvk-art/relief-banner.webp') right center / cover no-repeat,
+      var(--pvk-panel);
+  }
+}
+/* Легенда кільцевої діаграми: назва може переноситись і не виштовхує підсумки за межі панелі. */
+html[data-ew-module] .dl div { grid-template-columns: 12px minmax(0, 1fr) auto auto; }
+html[data-ew-module] .dl div > * { min-width: 0; overflow-wrap: anywhere; }
