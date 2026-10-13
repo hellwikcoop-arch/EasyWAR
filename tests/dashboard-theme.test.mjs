@@ -44,3 +44,13 @@ test('картки KPI з фото: кожен ключ data-photo із pvk-dash
   assert.match(css, /\.pvk-kpi\[data-photo\]::after\s*\{\s*display:\s*none/);
   assert.match(css, /\.pvk-kpi\[data-photo\] :is\(span, small\)\s*\{[^}]*text-shadow/);
 });
+
+test('фото в шапці УДШВ не розтягується, а файл лишається легким', async () => {
+  const css = (await read('dashboard-theme.css')).replace(/\/\*[\s\S]*?\*\//g, '');
+  const rule = css.match(/\.ud-hero\s*\{([^}]*)\}/);
+  assert.ok(rule, 'немає правила .ud-hero');
+  // Перший шар — фото; його розмір «auto 100%» зберігає пропорції на будь-якій ширині вікна.
+  assert.match(rule[1], /background-size:\s*auto 100%,/);
+  const { size } = await stat(new URL('../src/udshv-art/hero-photo.webp', import.meta.url));
+  assert.ok(size > 5_000 && size < 80_000, `hero-photo.webp: ${size} байт`);
+});
