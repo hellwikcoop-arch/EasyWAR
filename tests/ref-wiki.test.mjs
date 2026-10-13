@@ -80,14 +80,34 @@ test('every glb in src/models is registered and used by an article', async () =>
 });
 
 test('articles without alternative models resolve model and credit from the article itself', () => {
-  // Літаки з інтерактивного переглядача не мають ні файлу моделі, ні перемикача розмальовок.
+  // Літаки з інтерактивного переглядача не мають перемикача розмальовок; їхня модель для позначок — файл переглядача, а не src/models.
   for (const id of ['mig29', 'su27', 'f16', 'mirage', 'su24', 'mi24', 'mi8', 'il76', 'su25', 'gripen']) {
     const e = entryById(id);
     assert.equal(variantsOf(e).length, 0, id);
-    assert.equal(e.model, undefined, `${id}: no glb in src/models`);
-    assert.equal(modelOf(e), undefined, id);
+    assert.ok(e.model && (e.model.wrapper || e.model.src) && !e.model.file, `${id}: model comes from the viewer files`);
+    assert.equal(modelOf(e), e.model, id);
   }
   assert.equal(creditOf(entryById('39')), undefined);
+});
+
+test('weak-spot models of viewer aircraft are the viewer files on disk, in a known orientation', async () => {
+  for (const e of ENTRIES.filter(x => viewerOf(x) && x.model && !x.model.file)) {
+    const m = e.model;
+    assert.ok(m.nose in NOSE_TURN, `${e.id}: nose`);
+    if (m.wrapper) {
+      const text = await readFile(new URL('../src/public/' + m.wrapper, import.meta.url), 'utf8');
+      assert.ok(text.startsWith(`window.${m.global}="`), `${e.id}: wrapper defines ${m.global}`);
+    } else {
+      const bytes = await readFile(new URL('../src/public/' + m.src, import.meta.url));
+      assert.equal(bytes.subarray(0, 4).toString(), 'glTF', `${e.id}: glb`);
+    }
+    assert.ok(e.weak && e.weak.length >= 3, `${e.id}: weak spots`);
+    for (const w of e.weak) {
+      assert.ok(w.t && w.d, `${e.id}: text`);
+      assert.ok(w.p.length === 2 || w.p.length === 3, `${e.id}: anchor shape`);
+      for (const v of w.p) assert.ok(v >= 0 && v <= 1, `${e.id}: anchor inside the bounding box`);
+    }
+  }
 });
 
 test('aircraft articles open the interactive viewer page, which runs offline with every model on disk', async () => {

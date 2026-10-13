@@ -68,6 +68,38 @@ function gltfLoader() {
   return loader;
 }
 
+// Модель літака береться або з каталогу src/models ({ file }), або з файлу поруч зі сторінкою переглядача
+// ({ src: 'aircraft-3d/x.glb' }), або з обгортки aircraft-3d/x.js, де .glb лежить рядком base64 у глобальній змінній
+// ({ wrapper: 'aircraft-3d/x.js', global: 'X_GLB' }). Так позначки «слабких місць» працюють на тих самих файлах,
+// що й інтерактивний переглядач, без другої копії моделі.
+export const modelKey = model => model.file || model.src || model.wrapper || '';
+
+const wrapperLoads = new Map();
+function loadWrapper(model) {
+  if (typeof window[model.global] === 'string') return Promise.resolve(window[model.global]);
+  if (!wrapperLoads.has(model.wrapper)) {
+    wrapperLoads.set(model.wrapper, new Promise((resolve, reject) => {
+      const sc = document.createElement('script');
+      sc.src = new URL(model.wrapper, document.baseURI).href;
+      sc.onload = () => (typeof window[model.global] === 'string' ? resolve(window[model.global]) : reject(new Error('Немає даних моделі: ' + model.global)));
+      sc.onerror = () => { wrapperLoads.delete(model.wrapper); reject(new Error('Не завантажилась модель: ' + model.wrapper)); };
+      document.head.append(sc);
+    }));
+  }
+  return wrapperLoads.get(model.wrapper);
+}
+
+export async function loadGltf(model, onProgress) {
+  if (model.wrapper) {
+    const bin = atob(await loadWrapper(model)), bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return gltfLoader().parseAsync(bytes.buffer, '');
+  }
+  const url = model.file ? MODEL_FILES[model.file] : new URL(model.src, document.baseURI).href;
+  if (!url) throw new Error('Невідомий файл моделі: ' + model.file);
+  return gltfLoader().loadAsync(url, e => { if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total); });
+}
+
 // Кліп анімації з .glb (наприклад, заряджання M270), який прокручують повзунком. Заодно для кожної частки кліпу
 // рахує, скільки місця займає модель: камера відходить, коли частини виїжджають далеко від корпусу.
 const ACTION_SAMPLES = 48;
@@ -262,12 +294,11 @@ export class RefViewer {
   async show(model, { onProgress } = {}) {
     const token = ++this.token;
     let built;
-    if (model.file) {
-      const url = MODEL_FILES[model.file];
-      if (!url) throw new Error('Невідомий файл моделі: ' + model.file);
-      let entry = this.cache.get(model.file);
+    const key = modelKey(model);
+    if (key) {
+      let entry = this.cache.get(key);
       if (!entry) {
-        const gltf = await gltfLoader().loadAsync(url, e => { if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total); });
+        const gltf = await loadGltf(model, onProgress);
         if (model.glass !== undefined) fixMaterials(gltf.scene, model);
         entry = normalizeAircraft(gltf.scene, model.nose, model.length);
         entry.action = prepareAction(gltf, entry);
@@ -278,10 +309,10 @@ export class RefViewer {
           o.castShadow = true;
           for (const m of [].concat(o.material)) for (const key of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap']) if (m[key]) m[key].anisotropy = aniso;
         });
-        this.cache.set(model.file, entry);
+        this.cache.set(key, entry);
       }
-      this.cache.delete(model.file); this.cache.set(model.file, entry); // найсвіжіша — в кінці
-      this.trim(model.file);
+      this.cache.delete(key); this.cache.set(key, entry); // найсвіжіша — в кінці
+      this.trim(key);
       if (token !== this.token) return null;
       built = { group: entry.group, wings: [], aircraft: entry };
     } else {
