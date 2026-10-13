@@ -654,6 +654,74 @@ body[data-active-branch="air"] #branch-controls,body[data-active-branch="pvk"] #
   #view-start .branch-cards > .branch-card-soon{order:5;grid-column:span 2}
 }
 </style>
+<style id="easywar-start-shared-look">
+/* Спільний вигляд із модулями ПС, РВ, ПВК і УДШВ: секції «Командування» та «Роди військ», скляні картки з кадрами
+   з фонового зображення (launcher-bg.webp), м'який рух. Лише оформлення: розмітка, обробники й дані лаунчера не змінюються. */
+#view-start .branch-cards .branch-card, #view-start .branch-cards .command-tile {
+  position: relative; overflow: hidden; isolation: isolate;
+  border: 1px solid rgba(132,170,214,.26) !important; border-radius: 14px !important;
+  box-shadow: 0 14px 38px rgba(0,0,0,.36), inset 0 1px 0 rgba(255,255,255,.05) !important;
+  transition: transform .35s cubic-bezier(.2,.8,.2,1), border-color .25s, box-shadow .35s !important;
+}
+#view-start .branch-cards .branch-card > *, #view-start .branch-cards .command-tile > * { position: relative; z-index: 1; }
+#view-start .branch-cards .branch-card::before {
+  content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  background-image: linear-gradient(180deg, rgba(8,16,28,.5), rgba(8,16,28,.86)), url('./launcher-bg.webp');
+  background-repeat: no-repeat; background-size: 100% 100%, var(--sl-size, 480%) auto;
+  background-position: 0 0, var(--sl-x, 50%) var(--sl-y, 50%);
+  transition: transform .8s cubic-bezier(.2,.8,.2,1);
+}
+#view-start .branch-cards .branch-card:hover::before, #view-start .branch-cards .branch-card:focus-visible::before { transform: scale(1.06); }
+#view-start .branch-cards .branch-card h3 { text-shadow: 0 2px 10px rgba(0,0,0,.7); }
+#view-start .branch-card[data-branch="air"] { --sl-x: 99%; --sl-y: 20%; }
+#view-start .branch-card[data-branch="rocket"] { --sl-x: 99%; --sl-y: 58%; }
+#view-start .branch-card[data-branch="artillery"] { --sl-x: 3%; --sl-y: 89%; }
+#view-start .branch-card[data-soon] { --sl-x: 98%; --sl-y: 36%; }
+#view-start .cmd-slot[data-cmd="pvk"] .cmd-card { --sl-x: 46%; --sl-y: 15%; border-color: rgba(61,155,255,.5) !important; }
+#view-start .cmd-slot[data-cmd="dshv"] .cmd-card { --sl-x: 4%; --sl-y: 35%; border-color: rgba(232,93,70,.5) !important; }
+#view-start .cmd-slot .cmd-card::before { background-image: linear-gradient(90deg, rgba(8,16,28,.9), rgba(8,16,28,.58) 62%, rgba(8,16,28,.34)), url('./launcher-bg.webp'); }
+#view-start .cmd-slot .command-tile {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--ct-accent) 15%, rgba(12,22,36,.95)), rgba(9,17,29,.97)) !important;
+  border-color: color-mix(in srgb, var(--ct-accent) 52%, transparent) !important;
+}
+#view-start .branch-card.branch-card-soon:not(.branch-card-live) { opacity: .62; }
+@keyframes slRise { from { opacity: 0; transform: translateY(16px); } }
+#view-start .branch-cards .cmd-slot, #view-start .branch-cards .branch-card { animation: slRise .6s cubic-bezier(.2,.8,.2,1) backwards; }
+#view-start .branch-cards [data-col="air"] > .cmd-slot { animation-delay: .05s; }
+#view-start .branch-cards [data-col="rocket"] > .cmd-slot { animation-delay: .12s; }
+#view-start .branch-cards [data-col="air"] > .branch-card { animation-delay: .22s; }
+#view-start .branch-cards [data-col="rocket"] > .branch-card { animation-delay: .29s; }
+#view-start .branch-cards > .branch-card[data-branch="artillery"] { animation-delay: .36s; }
+#view-start .branch-cards > .branch-card[data-soon] { animation-delay: .43s; }
+@media (prefers-reduced-motion: reduce) {
+  #view-start .branch-cards .cmd-slot, #view-start .branch-cards .branch-card { animation: none !important; }
+  #view-start .branch-cards .branch-card::before { transition: none; }
+}
+@media (min-width: 1000px) and (min-aspect-ratio: 3/2) {
+  #view-start .branch-cards::before, #view-start .branch-cards::after {
+    grid-column: 1 / -1; justify-self: start; text-align: left; color: #eef4fb; font: 700 24px/1.1 var(--display); letter-spacing: .01em; text-shadow: 0 2px 12px rgba(0,0,0,.7);
+  }
+  #view-start .branch-cards::before { content: "Командування"; order: 0; }
+  #view-start .branch-cards [data-col="air"] > .cmd-slot { order: 1; grid-column: span 2; }
+  #view-start .branch-cards [data-col="rocket"] > .cmd-slot { order: 2; grid-column: span 2; }
+  #view-start .branch-cards::after { content: "Роди військ"; order: 3; }
+  #view-start .branch-cards [data-col="air"] > .branch-card { order: 4; }
+  #view-start .branch-cards [data-col="rocket"] > .branch-card { order: 5; }
+  #view-start .branch-cards > .branch-card[data-branch="artillery"] { order: 6; grid-column: span 1; }
+  #view-start .branch-cards > .branch-card[data-soon] { order: 7; grid-column: span 1; }
+  #view-start .cmd-slot[data-cmd="pvk"] .cmd-card { --sl-size: 274%; --sl-x: 51%; --sl-y: 12%; }
+  #view-start .cmd-slot[data-cmd="dshv"] .cmd-card { --sl-size: 274%; --sl-x: 3%; --sl-y: 31%; }
+  #view-start .branch-cards .cmd-card { grid-template-rows: none !important; grid-template-columns: auto minmax(0, 1fr) !important; justify-items: start !important; column-gap: 24px !important; padding: 18px 32px !important; }
+  #view-start .branch-cards .cmd-card h3 { text-align: left !important; font-size: 22px !important; }
+  #view-start .branch-cards .branch-card.branch-card-soon {
+    grid-template-columns: none !important; grid-template-rows: 88px auto auto !important; justify-items: center !important; align-content: center !important;
+    height: var(--branch-card-height) !important; min-height: var(--branch-card-height) !important; padding: 18px !important; row-gap: 8px !important;
+  }
+  #view-start .branch-cards .branch-card.branch-card-soon h3 { text-align: center !important; }
+  #view-start .branch-cards .branch-card.branch-card-soon .bc-icon { grid-row: auto !important; }
+  #view-start .branch-cards .branch-card.branch-card-soon .bc-soon, #view-start .branch-cards .branch-card.branch-card-soon .bc-live { grid-column: 1 !important; }
+}
+</style>
 </head>
 <body>
 <!-- Головний екран взято з RID VIYSK.html -->
