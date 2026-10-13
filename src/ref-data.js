@@ -363,7 +363,7 @@ export const ENTRIES = [
     id: 'an225', short: 'Ан-225', group: 'aircraft', noTable: true, status: 'Знищено', name: 'Ан-225 «Мрія»', alias: 'An-225 Mriya, за кодифікацією НАТО — Cossack',
     role: 'Надважкий транспортний літак', origin: 'Україна', tags: ['an225', 'ан225', 'an-225', 'ан-225', 'мрія', 'mriya', 'cossack', 'антонов', 'гостомель'],
     model: {
-      file: 'an-225', nose: '-z', glass: 'glass',
+      file: 'an-225', nose: '-z', glass: 'glass', opaque: true,
       // Українське забарвлення: прапор на кілях, назва й бортовий номер.
       decals: [
         { kind: 'flag', p: [.1, .6], w: .05 },
