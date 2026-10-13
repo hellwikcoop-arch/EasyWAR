@@ -12,8 +12,8 @@ test('тема дашбордів: усі правила лише для тем�
   // Коми всередині :is(...) не розділяють селектори, тому ділимо лише на нульовому рівні дужок.
   const topLevel = text => { const out = []; let depth = 0; let cur = ''; for (const ch of text) { if (ch === '(') depth += 1; if (ch === ')') depth -= 1; if (ch === ',' && depth === 0) { out.push(cur); cur = ''; } else cur += ch; } out.push(cur); return out; };
   for (const group of selectors) for (const one of topLevel(group)) assert.match(one.trim(), /^html:not\(\[data-theme="light"\]\)/, one.trim());
-  // Зображення лише локальні SVG з папок *-art (оригінальна графіка шапок), жодних растрових і зовнішніх адрес.
-  for (const [, target] of css.matchAll(/url\(([^)]*)\)/g)) assert.match(target.replace(/['"]/g, ''), /^\.\/(udshv|pvk)-art\/[\w-]+\.svg$/, target);
+  // Зображення лише локальні файли з папок *-art (фото шапок), жодних зовнішніх адрес.
+  for (const [, target] of css.matchAll(/url\(([^)]*)\)/g)) assert.match(target.replace(/['"]/g, ''), /^\.\/(udshv|pvk)-art\/[\w-]+\.(svg|webp)$/, target);
   assert.doesNotMatch(css, /animation|@keyframes/, 'рух живе в dashboard-motion.css');
   for (const marker of ['#udshv-dashboard-root', '#pvk-dashboard-root', '.ol-root', '.ud-hero', '.pvk-hero', '.ud-kpi', '.pvk-kpi']) assert.ok(css.includes(marker), marker);
 });
