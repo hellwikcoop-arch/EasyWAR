@@ -87,9 +87,11 @@ test('aircraft articles open the interactive viewer page, which runs offline wit
   const page = await readFile(new URL('../src/aircraft-viewer.html', import.meta.url), 'utf8');
   const keys = Object.keys(/const RIG=\{([^}]*)\}/.exec(page)[1].split(',').reduce((o, p) => (o[p.split(':')[0]] = 1, o), {}));
   const viewers = ENTRIES.filter(e => viewerOf(e));
-  assert.deepEqual(viewers.map(e => e.id).sort(), ['f16', 'gripen', 'il76', 'mi24', 'mi8', 'mig29', 'mirage', 'su24', 'su25', 'su27']);
+  assert.deepEqual(viewers.map(e => e.id).sort(), ['f16', 'gripen', 'il76', 'ka52', 'mi24', 'mi8', 'mig29', 'mirage', 'su24', 'su25', 'su27']);
   assert.deepEqual(viewers.map(e => viewerOf(e)).sort(), [...keys].sort(), 'every aircraft of the page has one article');
-  for (const e of viewers) assert.equal(e.group, 'aircraft', e.id);
+  for (const e of viewers) assert.ok(e.group === 'aircraft' || e.group === 'enemy', e.id);
+  // Ворожий гелікоптер із позначками уразливих місць має обидва вигляди: інтерактивний і зі списком позначок.
+  assert.ok(entryById('ka52').model && entryById('ka52').weak.length >= 3);
   // Жодного завантаження з мережі: бібліотеки й моделі лежать у src/public/aircraft-3d.
   assert.doesNotMatch(page, /<script[^>]+src="https?:/);
   assert.doesNotMatch(page, /<link[^>]+href="https?:/, 'no web fonts or stylesheets');
@@ -100,6 +102,10 @@ test('aircraft articles open the interactive viewer page, which runs offline wit
   assert.deepEqual(stFiles.sort(), ['aircraft-3d/gripen.glb', 'aircraft-3d/su25.glb']);
   for (const f of stFiles) assert.ok((await stat(new URL(`../src/public/${f}`, import.meta.url))).size > 1e5, f);
   assert.match(page, /setMeshoptDecoder\(MeshoptDecoder\)/);
+  // Ка-52 вантажиться окремо: .glb із текстурами WebP, які three r128 сам не читає.
+  assert.match(page, /fetch\('aircraft-3d\/ka52\.glb'\)/);
+  assert.match(page, /EXT_texture_webp/);
+  assert.ok((await stat(new URL('../src/public/aircraft-3d/ka52.glb', import.meta.url))).size > 1e5);
   const data = [...page.matchAll(/(?:sc\.src|src)=['"]aircraft-3d\/([\w.]+)['"]/g)].map(m => m[1]);
   for (const lib of ['three.r128.min.js', 'GLTFLoader.r128.js', 'meshopt_decoder.js']) assert.ok(data.includes(lib), lib);
   for (const f of ['mig29mu1', 'su27', 'f16', 'mi8', 'il76', 'mi24', 'su24', 'm2k', 'landscape']) assert.ok(data.includes(`${f}.js`), `${f}.js is loaded by the page`);

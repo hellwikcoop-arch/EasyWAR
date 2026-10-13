@@ -155,10 +155,25 @@ export function mount(host, options = {}) {
     const on = idx >= 0 && article.querySelector('.rw-weak[data-spot="' + idx + '"]');
     if (on && fromMarker) on.scrollIntoView({ block: 'nearest', behavior: motion() ? 'smooth' : 'auto' });
   }
-  function spotFromList(i) {
+  async function spotFromList(i) {
+    if (state.mode !== 'weak') await setMode('weak');
     if (!viewer) return;
     viewer.pickSpot(i);
     if (window.innerWidth <= 860) stageBox.scrollIntoView({ block: 'center', behavior: motion() ? 'smooth' : 'auto' });
+  }
+
+  // Стаття з інтерактивним переглядачем і моделлю для позначок має два вигляди; другий вантажиться лише на вимогу.
+  let airBox = null, modeBar = null;
+  async function setMode(m) {
+    const entry = entryById(state.id);
+    if (!entry || !modeBar || state.mode === m) return;
+    state.mode = m;
+    modeBar.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === m)));
+    if (airBox) airBox.hidden = m === 'weak';
+    if (m === 'weak') {
+      stageBox.hidden = false;
+      if (state.weakFor !== entry.id) { state.weakFor = entry.id; await showModel(entry, token); }
+    } else { stageBox.hidden = true; setAuto(false); }
   }
 
   function fallback(entry, why) {
@@ -299,9 +314,17 @@ export function mount(host, options = {}) {
     const variantBar = variants.length ? h('div', { class: 'seg rw-variants', role: 'group', 'aria-label': 'Модель' },
       variants.map(v => h('button', { type: 'button', 'data-variant': v.id, 'aria-pressed': String(v === activeVariant), text: v.label, onclick: () => pickVariant(entry, v.id) }))) : null;
     const creditBox = h('div', { class: 'rw-creditbox' }, viewerOf(entry) ? creditsNode(entry) : creditNode(entry));
+    const both = !!(viewerOf(entry) && entry.model);
+    state.mode = both ? 'live' : 'weak';
+    airBox = viewerOf(entry) ? aircraftBox(entry) : null;
+    modeBar = both ? h('div', { class: 'seg rw-modes', role: 'group', 'aria-label': 'Вигляд моделі' },
+      [['live', 'Інтерактивна модель'], ['weak', 'Уразливі місця']].map(([m, label]) =>
+        h('button', { type: 'button', 'data-mode': m, 'aria-pressed': String(m === 'live'), text: label, onclick: () => setMode(m) }))) : null;
     const main = h('div', { class: 'rw-main' },
       variantBar,
-      viewerOf(entry) ? aircraftBox(entry) : entry.model ? stageBox : null,
+      modeBar,
+      airBox,
+      entry.model ? stageBox : null,
       slot,
       h('p', { class: 'rw-summary', text: entry.summary }),
       entry.dual ? h('p', { class: 'rw-warn' }, h('b', { text: 'Увага. ' }), entry.dual) : null,
@@ -358,7 +381,8 @@ export function mount(host, options = {}) {
     const mine = ++token;
     renderNav();
     renderArticle(entry);
-    if (entry.model) showModel(entry, mine);
+    state.weakFor = '';
+    if (entry.model && !viewerOf(entry)) showModel(entry, mine);
     else stageBox.hidden = true;
     if (onSelect) onSelect(entry.id);
     if (user && article.getBoundingClientRect().top < 0) article.scrollIntoView({ block: 'start', behavior: motion() ? 'smooth' : 'auto' });

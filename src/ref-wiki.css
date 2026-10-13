@@ -133,6 +133,8 @@ button.rw-weak[aria-pressed="true"] { border-color: var(--accent); background: v
 
 /* Літаки: сторінка aircraft-viewer.html у кадрі; висоту підганяє ref-wiki.js під вміст. */
 .rw-air { display: grid; gap: 8px; }
+.rw-air[hidden] { display: none; }
+.rw-modes { justify-self: start; }
 .rw-air-frame { display: block; width: 100%; height: 560px; border: 1px solid var(--line); border-radius: 10px; background: #111214; }
 .rw-credit-head { margin: 0 0 4px; }
 .rw-credit ul { margin: 0; padding-left: 18px; display: grid; gap: 3px; }
