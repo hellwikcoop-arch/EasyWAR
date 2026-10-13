@@ -55,6 +55,30 @@ module script before `</body>`. `script/import_unified_html.mjs` rewrites
   Every committed version stays in git history and ships in each update package
   (backlog P2-6), so do not commit iterations.
 
+
+## Registration and sign-in gate
+
+After the splash the launcher is covered by a registration wizard (no profiles
+yet) or a sign-in screen (any later launch). The gate is mounted at startup under
+the splash (`z-index` 4000 vs 5000), so it is already in place when the splash
+ends, and the launcher stays `inert` until sign-in.
+
+| File | Role |
+| --- | --- |
+| `src/profile-gate-core.js` | pure rules: form validation, module list, table slots per module, retry delay, which screen to show (tested in `tests/profile-gate.test.mjs`) |
+| `src/profile-gate.js` | DOM: login, three-step registration (profile → modules → tables), error screen; `html.ew-locked` + `inert` on the page; no network, no browser storage |
+| `src/profile-gate.css` | gate styles; `.ew-module-off` hides unchosen module cards (selectors carry `#view-start` because `index.html` uses `!important` ids) |
+| `src/local-profiles.js` | creates the gate, hides unchosen modules (`applyModules`), keeps the profile dialog; sign-out sets the splash skip flag and reloads |
+| `src/startup-splash-core.js` | `requestSplashSkip` / `consumeSplashSkip`: one-shot `sessionStorage` flag so sign-out does not replay the video |
+
+- `src/index.html` is unchanged. Module cards and tiles are found by the selectors
+  in `GATE_MODULES`; `tests/profile-gate.test.mjs` fails if one disappears from
+  `index.html`, so re-check it after `script/import_unified_html.mjs`.
+- Outside Tauri (plain browser, `npm run dev`) there is no profile backend, so no
+  gate is shown.
+- The gate is a UI barrier plus the Rust unlock check of data commands, not
+  protection against file tampering; see `docs/DATABASE.md` (Local profiles).
+
 ## Desktop behaviour
 
 - **Tauri IPC in the iframe.** Tauri injects its bridge only into the top-level

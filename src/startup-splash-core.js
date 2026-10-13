@@ -81,3 +81,21 @@ export function splashClockMs({ videoTimeSec, videoEnded, msSinceEnd }, plan = S
   if (videoEnded) return plan.videoMs + Math.max(0, msSinceEnd || 0);
   return Math.min(plan.videoMs, Math.max(0, (videoTimeSec || 0) * 1000));
 }
+
+// Після виходу з профілю вікно перезавантажується, щоб екран входу відкрився на чистому стані.
+// Заставка в цьому випадку вдруге не грає: прапорець живе лише до першого читання.
+export const SPLASH_SKIP_KEY = 'ew-skip-splash';
+
+export function requestSplashSkip(storage = globalThis.sessionStorage) {
+  try { storage.setItem(SPLASH_SKIP_KEY, '1'); } catch { /* сховища немає: заставка зіграє знову */ }
+}
+
+export function consumeSplashSkip(storage = globalThis.sessionStorage) {
+  try {
+    const skip = storage.getItem(SPLASH_SKIP_KEY) === '1';
+    if (skip) storage.removeItem(SPLASH_SKIP_KEY);
+    return skip;
+  } catch {
+    return false;
+  }
+}

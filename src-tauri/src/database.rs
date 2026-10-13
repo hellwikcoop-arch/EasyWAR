@@ -92,6 +92,7 @@ pub(crate) const PROFILE_BRANCH_TABLES_SQL: &str =
 pub(crate) const COMMAND_TABLES_SQL: &str = include_str!("../migrations/0007_command_tables.sql");
 pub(crate) const OWN_LOSSES_TABLES_SQL: &str =
     include_str!("../migrations/0008_own_losses_tables.sql");
+pub(crate) const PROFILE_MODULES_SQL: &str = include_str!("../migrations/0009_profile_modules.sql");
 
 pub fn migrations() -> Vec<Migration> {
     vec![
@@ -141,6 +142,12 @@ pub fn migrations() -> Vec<Migration> {
             version: 8,
             description: "add_own_losses_tables",
             sql: OWN_LOSSES_TABLES_SQL,
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 9,
+            description: "add_profile_modules",
+            sql: PROFILE_MODULES_SQL,
             kind: MigrationKind::Up,
         },
     ]
@@ -198,9 +205,10 @@ pub(crate) async fn create_migrated_database(
 mod tests {
     use super::{
         create_migrated_database, migrations, DatabaseMigrationState, DatabaseStatusError,
-        DatabaseStatusStore, COMMAND_TABLES_SQL, DATABASE_URL, EMBEDDED_MIGRATOR, INITIAL_SCHEMA_SQL,
-        LOCAL_PROFILES_SQL, OWN_LOSSES_TABLES_SQL, PROFILE_BRANCH_TABLES_SQL, PROFILE_DETAILS_SQL,
-        WORKSPACE_TEMPLATES_SQL, XLSX_DUPLICATE_LINKS_SQL,
+        DatabaseStatusStore, COMMAND_TABLES_SQL, DATABASE_URL, EMBEDDED_MIGRATOR,
+        INITIAL_SCHEMA_SQL, LOCAL_PROFILES_SQL, OWN_LOSSES_TABLES_SQL, PROFILE_BRANCH_TABLES_SQL,
+        PROFILE_DETAILS_SQL, PROFILE_MODULES_SQL, WORKSPACE_TEMPLATES_SQL,
+        XLSX_DUPLICATE_LINKS_SQL,
     };
     use sqlx::{sqlite::SqlitePoolOptions, Row};
 
@@ -209,7 +217,7 @@ mod tests {
         assert_eq!(DATABASE_URL, "sqlite:easywar.db");
         assert!(include_str!("../tauri.conf.json").contains(DATABASE_URL));
         let registered = migrations();
-        assert_eq!(registered.len(), 8);
+        assert_eq!(registered.len(), 9);
         assert_eq!(registered[0].version, 1);
         assert_eq!(registered[0].description, "create_provenance_schema");
         assert_eq!(registered[1].version, 2);
@@ -226,6 +234,8 @@ mod tests {
         assert_eq!(registered[6].description, "add_command_tables");
         assert_eq!(registered[7].version, 8);
         assert_eq!(registered[7].description, "add_own_losses_tables");
+        assert_eq!(registered[8].version, 9);
+        assert_eq!(registered[8].description, "add_profile_modules");
         assert_eq!(
             EMBEDDED_MIGRATOR
                 .iter()
@@ -246,7 +256,7 @@ mod tests {
                 .map(|migration| migration.sql)
                 .collect::<Vec<_>>()
         );
-        assert_eq!(super::latest_schema_version(), Some(8));
+        assert_eq!(super::latest_schema_version(), Some(9));
     }
 
     #[tokio::test]
@@ -258,9 +268,9 @@ mod tests {
             DatabaseStatusStore::new(pool.clone()).load().await.unwrap(),
             super::DatabaseStatus {
                 app_version: env!("CARGO_PKG_VERSION").to_owned(),
-                schema_version: 8,
-                supported_schema_version: 8,
-                migration_count: 8,
+                schema_version: 9,
+                supported_schema_version: 9,
+                migration_count: 9,
                 migration_state: DatabaseMigrationState::Current,
             }
         );
@@ -316,6 +326,10 @@ mod tests {
             .execute(&pool)
             .await
             .expect("own losses tables migration must apply");
+        sqlx::raw_sql(PROFILE_MODULES_SQL)
+            .execute(&pool)
+            .await
+            .expect("profile modules migration must apply");
 
         pool
     }

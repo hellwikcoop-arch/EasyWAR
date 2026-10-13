@@ -6,6 +6,7 @@ import {
   SPLASH,
   SPLASH_SLOGAN,
   SPLASH_TILES,
+  consumeSplashSkip,
   progressValue,
   shouldRunSplash,
   splashClockMs,
@@ -21,7 +22,7 @@ const VIDEO_URL = new URL('./splash/easywar-intro.mp4', import.meta.url).href;
   if (!root) return;
   const launcher = document.getElementById('view-start');
   const reduced = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  if (!shouldRunSplash({ reducedMotion: reduced })) {
+  if (!shouldRunSplash({ reducedMotion: reduced }) || consumeSplashSkip()) {
     root.remove();
     return;
   }
@@ -95,7 +96,8 @@ const VIDEO_URL = new URL('./splash/easywar-intro.mp4', import.meta.url).href;
     clearTimeout(startTimer);
     document.removeEventListener('keydown', onKey, true);
     try { video.pause(); } catch (e) { /* відео вже зупинене */ }
-    if (launcher) launcher.inert = false;
+    // Поки стоїть екран входу, його власний код тримає сторінку недоступною.
+    if (launcher && !document.documentElement.classList.contains('ew-locked')) launcher.inert = false;
     const done = () => {
       root.remove();
       video.removeAttribute('src');
