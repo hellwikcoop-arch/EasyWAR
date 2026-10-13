@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>easyWAR — Карта · Рельєф України</title>
+<script>try { document.documentElement.dataset.theme = localStorage.getItem('aviahub.theme') === 'light' ? 'light' : 'dark'; } catch (e) { document.documentElement.dataset.theme = 'dark'; }</script>
+<link rel="stylesheet" href="./map.css">
+</head>
+<body>
+<div id="stage"></div>
+
+<div class="card">
+  <h1>Рельєф України<small>Інтерактивна 3D-модель · 603 628 км²</small></h1>
+  <div id="readout">
+    <span>Курсор</span><b id="r-pos">—</b>
+    <span>Висота</span><b id="r-h">—</b>
+    <span>Міста</span><b id="r-n">—</b>
+    <span>Забудова</span><b id="r-b">завантаження…</b>
+  </div>
+  <div id="legend"><i></i><span>0 → 2061 м</span></div>
+</div>
+
+<div id="credits">висоти: Mapzen Terrain Tiles (SRTM, ~600 м/px)<br>проєкція: конформна конічна Ламберта, WGS84<br>знімки: Esri World Imagery<br>кордони: geoBoundaries · OpenStreetMap<br>лінія зіткнення: DeepStateMap, <span id="front-date">—</span></div>
+
+<div class="bar"><div class="strip">
+  <div class="group"><label>Вигляд</label>
+    <div class="seg" role="group" aria-label="Режим відображення">
+      <button id="m-sat" aria-pressed="true">Супутник</button>
+      <button id="m-hyp" aria-pressed="false">Рельєф</button>
+      <button id="m-con" aria-pressed="false">Креслення</button>
+    </div>
+  </div>
+  <div class="sep"></div>
+  <div class="group"><label for="sun">Сонце</label><input id="sun" type="range" min="0" max="360" step="1" value="240"><span class="val" id="sun-v">240°</span></div>
+  <div class="sep"></div>
+  <div class="group"><label>Забудова</label>
+    <button class="tog" id="t-c3d" aria-pressed="false" aria-expanded="false" aria-controls="pop2">Міста 3D</button>
+    <button class="tog" id="t-bld" aria-pressed="true">Будівлі</button>
+  </div>
+  <div class="sep"></div>
+  <div class="group">
+    <button class="tog" id="t-wire" aria-pressed="false">Сітка</button>
+    <button class="tog" id="t-cities" aria-pressed="true">Міста</button>
+    <button class="tog" id="t-brd" aria-pressed="true">Кордони</button>
+    <button class="tog" id="t-front" aria-pressed="true">Фронт</button>
+    <button class="tog" id="t-obl" aria-pressed="false" aria-expanded="false" aria-controls="pop">Області</button>
+    <button class="tog" id="t-rot" aria-pressed="true">Обертання</button>
+    <button class="tog" id="t-reset">Скинути вид</button>
+    <button class="tog" id="t-prof" aria-pressed="false" aria-expanded="false" aria-controls="hud">Профіль</button>
+  </div>
+</div></div>
+
+<div id="pop2" class="popover" hidden>
+  <header><h2>Міста з 3D-забудовою</h2></header>
+  <ul id="cities3d"></ul>
+</div>
+
+<div id="pop" hidden>
+  <header><h2>Міста й селища за областями</h2><div class="acts"><button id="o-all" type="button">Усі</button><button id="o-none" type="button">Жодної</button></div></header>
+  <ul id="obl"></ul>
+</div>
+
+<aside id="hud" hidden aria-label="Профіль продуктивності">
+  <header><h2>Профіль кадру</h2><button class="go" id="h-close" type="button" aria-label="Закрити профіль">×</button></header>
+  <p id="h-verdict">—</p>
+  <canvas id="h-spark" aria-hidden="true"></canvas>
+  <p id="h-scale">16,7 мс</p>
+  <dl id="h-rows"></dl>
+  <h3>Шари даних</h3>
+  <ul id="h-layers"></ul>
+</aside>
+
+<div id="loader"><div><b>Рельєф України</b><span id="l-msg">Завантаження висот…</span><i id="l-bar"></i></div></div>
+
+<script type="module" src="./map-app.js"></script>
+</body>
+</html>

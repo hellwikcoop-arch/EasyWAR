@@ -1,0 +1,119 @@
+/* Компонування дашбордів ПВК і УДШВ: ліве меню розділів з іконками на широких екранах.
+   Розмітку дашборда не змінено: меню — той самий <nav>, лише розташований у лівій колонці сітки кореня.
+   Іконки — маски за атрибутом data-nav кнопки (див. pvk-dashboard.js, udshv-dashboard.js). Нижче 1200px меню лишається горизонтальним. */
+
+@media (min-width: 1200px) {
+  #udshv-dashboard-root, #pvk-dashboard-root {
+    grid-template-columns: 244px minmax(0, 1fr);
+    column-gap: 18px; row-gap: 0; align-items: start; align-content: start;
+  }
+  /* Проміжки між блоками — поля, щоб порожні неявні рядки сітки не додавали висоти. */
+  #udshv-dashboard-root > *, #pvk-dashboard-root > * { grid-column: 2; margin-bottom: 16px; min-width: 0; }
+  #udshv-dashboard-root > .ud-nav, #pvk-dashboard-root > .pvk-nav {
+    grid-column: 1; grid-row: 1 / span 12; margin-bottom: 0;
+    position: sticky; top: 12px; align-self: start;
+    display: flex; flex-direction: column; flex-wrap: nowrap; gap: 4px; padding: 10px;
+    border-radius: 16px; max-height: calc(100vh - 24px); overflow-y: auto;
+  }
+  #udshv-dashboard-root > .ud-nav { border: 1px solid var(--ud-line); background: var(--ud-panel); }
+  #udshv-dashboard-root > .ud-nav button, #pvk-dashboard-root > .pvk-nav button {
+    display: flex; align-items: center; gap: 11px; width: 100%; text-align: left; white-space: normal;
+    border-radius: 11px; padding: 10px 12px;
+  }
+  /* Рамка пігулок із горизонтального варіанта в меню не потрібна. */
+  #udshv-dashboard-root > .ud-nav button:not([aria-pressed="true"]) { border-color: transparent; background: transparent; }
+  #udshv-dashboard-root > .ud-nav button:not([aria-pressed="true"]):hover,
+  #pvk-dashboard-root > .pvk-nav button:not([aria-pressed="true"]):hover { background: rgba(127, 150, 190, .12); }
+}
+
+#udshv-dashboard-root > .ud-nav button::before, #pvk-dashboard-root > .pvk-nav button::before {
+  content: ''; display: none; flex: none; width: 18px; height: 18px; background: currentColor; opacity: .85;
+  -webkit-mask: var(--nav-icon, var(--ic-doc)) center / contain no-repeat; mask: var(--nav-icon, var(--ic-doc)) center / contain no-repeat;
+}
+#udshv-dashboard-root > .ud-nav button[aria-pressed="true"]::before, #pvk-dashboard-root > .pvk-nav button[aria-pressed="true"]::before { opacity: 1; }
+
+#udshv-dashboard-root, #pvk-dashboard-root {
+  --ic-doc: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z'/%3E%3Cpath d='M14 3v5h5M9 13h6M9 17h6'/%3E%3C/svg%3E");
+  --ic-bars: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.4' stroke-linecap='round'%3E%3Cpath d='M5 20V11M12 20V4M19 20v-6'/%3E%3C/svg%3E");
+  --ic-users: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='9' cy='8' r='3.2'/%3E%3Cpath d='M3 20c0-3.6 2.7-6 6-6s6 2.4 6 6'/%3E%3Ccircle cx='17' cy='9' r='2.4'/%3E%3Cpath d='M17 14c2.4 0 4 1.8 4 4.5'/%3E%3C/svg%3E");
+  --ic-person: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='8' r='3.6'/%3E%3Cpath d='M5 21c0-4 3.1-6.5 7-6.5s7 2.5 7 6.5'/%3E%3C/svg%3E");
+  --ic-heart: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 21s-8-5.2-8-11a4.5 4.5 0 0 1 8-2.8A4.5 4.5 0 0 1 20 10c0 5.8-8 11-8 11z'/%3E%3C/svg%3E");
+  --ic-tank: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 16h18l-2 3H5z'/%3E%3Cpath d='M6 16v-3h9l2 3M10 13v-3h4v3M14 11.5h7'/%3E%3C/svg%3E");
+  --ic-bullet: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3c2.6 2.2 3.6 4.6 3.6 7.4V18h-7.2v-7.6C8.4 7.6 9.4 5.2 12 3zM8 21h8M8.4 15h7.2'/%3E%3C/svg%3E");
+  --ic-clock: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M12 7v5l3.5 2'/%3E%3C/svg%3E");
+  --ic-grid: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linejoin='round'%3E%3Crect x='3.5' y='4' width='17' height='16' rx='2'/%3E%3Cpath d='M3.5 10h17M3.5 15h17M10 4v16'/%3E%3C/svg%3E");
+  --ic-shield: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3l7.5 3v5.5c0 4.6-3.1 8-7.5 9.5-4.4-1.5-7.5-4.9-7.5-9.5V6z'/%3E%3Cpath d='M8.6 12l2.5 2.5 4.4-5'/%3E%3C/svg%3E");
+  --ic-target: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='12' cy='12' r='8'/%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3Cpath d='M12 2v4M12 18v4M2 12h4M18 12h4'/%3E%3C/svg%3E");
+  --ic-plane: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 12L13 9V4.5a1 1 0 0 0-2 0V9l-8 3v2l8-1.5V18l-2.5 1.8V21l3.5-1 3.5 1v-1.2L13 18v-5.5l8 1.5z'/%3E%3C/svg%3E");
+  --ic-radar: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Ccircle cx='12' cy='12' r='4.5'/%3E%3Cpath d='M12 12l6.4-6.4'/%3E%3C/svg%3E");
+  --ic-pin: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z'/%3E%3Ccircle cx='12' cy='10' r='2.4'/%3E%3C/svg%3E");
+  --ic-burst: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12.0 2.0 L14.0 7.2 L19.1 4.9 L16.8 10.0 L22.0 12.0 L16.8 14.0 L19.1 19.1 L14.0 16.8 L12.0 22.0 L10.0 16.8 L4.9 19.1 L7.2 14.0 L2.0 12.0 L7.2 10.0 L4.9 4.9 L10.0 7.2z'/%3E%3C/svg%3E");
+  --ic-alert: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3.5l9.5 16.5h-19z'/%3E%3Cpath d='M12 10v4.5M12 17.4v.1'/%3E%3C/svg%3E");
+}
+.ud-nav button[data-nav="summary"], .pvk-nav button[data-nav="summary"] { --nav-icon: var(--ic-bars); }
+.ud-nav button[data-nav="units"] { --nav-icon: var(--ic-users); }
+.ud-nav button[data-nav="personnel"] { --nav-icon: var(--ic-person); }
+.ud-nav button[data-nav="own"], .pvk-nav button[data-nav="own"] { --nav-icon: var(--ic-heart); }
+.ud-nav button[data-nav="ovt"] { --nav-icon: var(--ic-tank); }
+.ud-nav button[data-nav="ammo"] { --nav-icon: var(--ic-bullet); }
+.ud-nav button[data-nav="freshness"] { --nav-icon: var(--ic-clock); }
+.ud-nav button[data-nav="table"], .pvk-nav button[data-nav="table"] { --nav-icon: var(--ic-grid); }
+.ud-nav button[data-nav="quality"], .pvk-nav button[data-nav="quality"] { --nav-icon: var(--ic-shield); }
+.pvk-nav button[data-nav="journal"] { --nav-icon: var(--ic-doc); }
+.pvk-nav button[data-nav="АА"], .pvk-nav button[data-nav="ПС"] { --nav-icon: var(--ic-plane); }
+.pvk-nav button[data-nav="Об'єкти"] { --nav-icon: var(--ic-target); }
+
+/* Іконки показуємо лише в лівому меню; правило стоїть після display: none вище, інакше програє за порядком. */
+@media (min-width: 1200px) {
+  #udshv-dashboard-root > .ud-nav button::before, #pvk-dashboard-root > .pvk-nav button::before { display: block; }
+}
+
+/* Картка внизу лівого меню (лише темна тема, лише коли меню — ліва колонка): пілот із гаслом (ПВК) і золотий знак ДШВ (УДШВ). */
+@media (min-width: 1200px) {
+  html:not([data-theme="light"]) #pvk-dashboard-root > .pvk-nav::after {
+    content: ''; display: block; flex: none; margin-top: 10px; aspect-ratio: 368 / 420; border-radius: 12px;
+    border: 1px solid var(--pvk-border); pointer-events: none;
+    background: url('./pvk-art/pilot-card.webp') center / cover no-repeat;
+  }
+  html:not([data-theme="light"]) #udshv-dashboard-root > .ud-nav::after {
+    content: ''; display: block; flex: none; margin-top: 10px; height: 170px; border-radius: 12px;
+    border: 1px solid var(--ud-line); pointer-events: none;
+    background: url('./udshv-art/badge.webp') center / auto 78% no-repeat, radial-gradient(70% 90% at 50% 45%, rgba(214, 69, 93, .3), transparent 75%), rgba(255, 255, 255, .02);
+  }
+}
+
+/* Плитки-іконки карток показників ПВК: ключ data-ic → маска (ті самі --ic-* , що й у меню). */
+.pvk-kpi-ic::before {
+  content: ''; width: 24px; height: 24px; background: currentColor;
+  -webkit-mask: var(--kpi-ic, var(--ic-doc)) center / contain no-repeat; mask: var(--kpi-ic, var(--ic-doc)) center / contain no-repeat;
+}
+.pvk-kpi-ic[data-ic="plane"] { --kpi-ic: var(--ic-plane); }
+.pvk-kpi-ic[data-ic="bullet"] { --kpi-ic: var(--ic-bullet); }
+.pvk-kpi-ic[data-ic="target"] { --kpi-ic: var(--ic-target); }
+.pvk-kpi-ic[data-ic="radar"] { --kpi-ic: var(--ic-radar); }
+.pvk-kpi-ic[data-ic="shield"] { --kpi-ic: var(--ic-shield); }
+.pvk-kpi-ic[data-ic="pin"] { --kpi-ic: var(--ic-pin); }
+.pvk-kpi-ic[data-ic="burst"] { --kpi-ic: var(--ic-burst); }
+.pvk-kpi-ic[data-ic="alert"] { --kpi-ic: var(--ic-alert); }
+.pvk-kpi-ic[data-ic="clock"] { --kpi-ic: var(--ic-clock); }
+.pvk-kpi-ic[data-ic="doc"] { --kpi-ic: var(--ic-doc); }
+
+/* З лівим меню контент вужчий на 262px: плитки показників ПВК тримаємо по 3–4 в ряд, щоб вмістилися іконка й міні-графік
+   (7–8 в ряд — лише на дуже широких екранах). Селектор із #id перекриває розкладку з pvk-dashboard.css. */
+@media (min-width: 1200px) {
+  #pvk-dashboard-root .pvk-kpis:has(> :nth-child(6):last-child) { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  #pvk-dashboard-root .pvk-kpis:has(> :nth-child(7):last-child),
+  #pvk-dashboard-root .pvk-kpis:has(> :nth-child(8):last-child) { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (min-width: 2200px) {
+  #pvk-dashboard-root .pvk-kpis:has(> :nth-child(7):last-child) { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+  #pvk-dashboard-root .pvk-kpis:has(> :nth-child(8):last-child) { grid-template-columns: repeat(8, minmax(0, 1fr)); }
+}
+
+/* Те саме для УДШВ: 9 карток у ряд тісні вже з лівим меню — тримаємо по 3, а 9 в ряд лише на дуже широких екранах. */
+@media (min-width: 1200px) {
+  #udshv-dashboard-root .ud-kpis:not(.ud-kpis-3) { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (min-width: 2400px) {
+  #udshv-dashboard-root .ud-kpis:not(.ud-kpis-3) { grid-template-columns: repeat(9, minmax(0, 1fr)); }
+}
