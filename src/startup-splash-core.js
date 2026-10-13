@@ -24,8 +24,8 @@ export const SPLASH_TILES = Object.freeze([
   Object.freeze({ id: 'air', label: 'Повітряні Сили' }),
   Object.freeze({ id: 'rocket', label: 'Ракетні Війська' }),
   Object.freeze({ id: 'artillery', label: 'Артилерія' }),
-  Object.freeze({ id: 'pvk', label: 'ПВК' }),
-  Object.freeze({ id: 'dshv', label: 'УДШВ' }),
+  Object.freeze({ id: 'pvk', label: 'Командування ПС' }),
+  Object.freeze({ id: 'dshv', label: 'Командування ДШВ' }),
 ]);
 
 // Слоган під логотипом. Змінити текст можна тут, більше ніде.
