@@ -23,7 +23,7 @@ const matte = (color, rough = .6, m = .08) => paint(color, rough, m);
 // r — радіус корпусу при довжині 4 (співвідношення довжина/калібр), bt — довжина конічного дна, base — радіус дна в частках r,
 // og — довжина оживальної головної частини, fz — довжина підривника. rings — кольорові пояси [x0, x1, колір], text — трафарети.
 const SHELLS = {
-  'shell-155-he': { r: .4, bt: .28, base: .88, og: 1.30, fz: .3, body: COL.olive, rings: [[.55, .67, COL.yellow], [.7, .76, COL.yellow]], ink: COL.yellow, fuze: 'contact', text: ['155 mm', 'HE'], lot: 'LOT 00-000', explode: ['Підривник', 'Корпус із вибухівкою', 'Дно'] },
+  'shell-155-he': { r: .4, bt: .28, base: .88, og: 1.6, fz: .3, body: COL.olive, rings: [[.55, .67, COL.yellow], [.7, .76, COL.yellow]], ink: COL.yellow, fuze: 'contact', text: ['155 mm', 'HE'], lot: 'LOT 00-000', explode: ['Підривник', 'Корпус із вибухівкою', 'Дно'] },
   'shell-155-cluster': { r: .4, off: .38, bt: .2, base: .9, og: 1.10, fz: .3, body: COL.olive, rings: [[.5, .62, COL.yellow], [.67, .73, COL.red]], ink: COL.yellow, fuze: 'time', bleed: true, text: ['155 mm', 'DPICM'], lot: 'LOT 00-000', explode: ['Підривник', 'Корпус із суббоєприпасами', 'Донний газогенератор'] },
   'shell-155-scatter': { r: .4, bt: .28, base: .88, og: 1.10, fz: .3, body: COL.olive, rings: [[.5, .62, COL.yellow], [.67, .73, COL.sand]], ink: COL.yellow, fuze: 'time', text: ['155 mm', 'MINE'], lot: 'LOT 00-000', explode: ['Підривник', 'Корпус із мінами', 'Дно'] },
   'shell-155-smoke': { r: .4, bt: .28, base: .88, og: 1.15, fz: .3, body: COL.paleGreen, rings: [[.55, .67, COL.white]], ink: '#2a2f26', fuze: 'time', text: ['155 mm', 'SMOKE'], lot: 'LOT 00-000', explode: ['Підривник', 'Корпус із димовим складом', 'Дно'] },
@@ -36,11 +36,11 @@ const SHELLS = {
   // Окремі типи 155 мм. r = R155(повна довжина, мм): радіус при нормованій довжині 4. tip — радіус носа в частках r.
   // obt — пластиковий обтюратор за провідним поясом; bleed/off — донний газогенератор; rap — ракетний двигун у дні;
   // ej — донна плита, що викидається (снаряди з викиданням корисного навантаження через дно); payload — що всередині.
-  'shell-m107': { r: R155(700), bt: .2, base: .94, og: 1.05, tip: .24, fz: .3, body: COL.olive, rings: [[.55, .67, COL.yellow]], ink: COL.yellow, fuze: 'contact', text: ['155 mm', 'HE M107'], lot: 'LOT 00-000', explode: ['Підривник (гніздо за STANAG 2916)', 'Корпус із вибухівкою', 'Дно'] },
-  'shell-m795': { r: R155(843), bt: .24, base: .92, og: 1.55, tip: .17, fz: .3, obt: true, body: COL.olive, rings: [[.55, .67, COL.yellow]], ink: COL.yellow, fuze: 'contact', text: ['155 mm', 'HE M795'], lot: 'LOT 00-000', explode: ['Підривник', 'Сталевий корпус HF-1 із вибухівкою', 'Дно'] },
-  'shell-m549a1': { r: R155(910), bt: .08, base: .99, og: 1.3, tip: .2, fz: .3, rap: true, body: COL.olive, rings: [[.55, .67, COL.yellow], [.72, .78, COL.yellow]], ink: COL.yellow, fuze: 'contact', text: ['155 mm', 'HE RAP'], lot: 'LOT 00-000', explode: ['Підривник', 'Корпус із вибухівкою й ракетним двигуном', 'Дно із соплами'] },
-  'shell-erfb-bb': { r: R155(910), off: .2, bt: .3, base: .86, og: 1.3, tip: .18, fz: .3, bleed: true, obt: true, body: COL.oliveDk, rings: [[.55, .62, COL.sand]], ink: '#d6d9c4', fuze: 'contact', text: ['155 mm', 'HE-BB'], lot: 'LOT 00-000', explode: ['Підривник', 'Корпус із вибухівкою', 'Донний газогенератор'] },
-  'shell-dm121': { r: R155(841), bt: .5, base: .78, og: 1.4, tip: .18, fz: .3, obt: true, body: COL.olive, rings: [[.55, .62, COL.yellow]], ink: COL.yellow, fuze: 'contact', text: ['155 mm', 'DM121'], lot: 'LOT 00-000', explode: ['Підривник', 'Корпус із вибухівкою', 'Конічне дно'] },
+  'shell-m107': { r: R155(700), bt: .2, base: .94, og: 1.5, tip: .24, fz: .3, body: COL.olive, rings: [[.55, .67, COL.yellow]], ink: COL.yellow, fuze: 'contact', text: ['155 mm', 'HE M107'], lot: 'LOT 00-000', explode: ['Підривник (гніздо за STANAG 2916)', 'Корпус із вибухівкою', 'Дно'] },
+  'shell-m795': { r: R155(843), bt: .24, base: .92, og: 2.3, tip: .17, fz: .3, obt: true, body: COL.olive, rings: [[.55, .67, COL.yellow]], ink: COL.yellow, fuze: 'contact', text: ['155 mm', 'HE M795'], lot: 'LOT 00-000', explode: ['Підривник', 'Сталевий корпус HF-1 із вибухівкою', 'Дно'] },
+  'shell-m549a1': { r: R155(910), bt: .08, base: .99, og: 1.9, tip: .2, fz: .3, rap: true, body: COL.olive, rings: [[.55, .67, COL.yellow], [.72, .78, COL.yellow]], ink: COL.yellow, fuze: 'contact', text: ['155 mm', 'HE RAP'], lot: 'LOT 00-000', explode: ['Підривник', 'Корпус із вибухівкою й ракетним двигуном', 'Дно із соплами'] },
+  'shell-erfb-bb': { r: R155(910), off: .2, bt: .3, base: .86, og: 2.2, tip: .18, fz: .3, bleed: true, obt: true, body: COL.oliveDk, rings: [[.55, .62, COL.sand]], ink: '#d6d9c4', fuze: 'contact', text: ['155 mm', 'HE-BB'], lot: 'LOT 00-000', explode: ['Підривник', 'Корпус із вибухівкою', 'Донний газогенератор'] },
+  'shell-dm121': { r: R155(841), bt: .5, base: .78, og: 2.3, tip: .18, fz: .3, obt: true, body: COL.olive, rings: [[.55, .62, COL.yellow]], ink: COL.yellow, fuze: 'contact', text: ['155 mm', 'DM121'], lot: 'LOT 00-000', explode: ['Підривник', 'Корпус із вибухівкою', 'Конічне дно'] },
   'shell-m483a1': { r: R155(893), bt: .22, base: .95, og: 1.15, tip: .2, fz: .5, fuze: 'mt', body: COL.olive, rings: [[.5, .62, COL.yellow], [.67, .73, COL.red]], ink: COL.yellow, text: ['155 mm', 'DPICM M483A1'], lot: 'LOT 00-000', payload: { kind: 'grenades', n: 28 }, explode: ['Часовий підривник', 'Корпус із 88 суббоєприпасами', 'Донна плита'] },
   'shell-m864': { r: R155(920), off: .22, bt: .3, base: .9, og: 1.2, tip: .2, fz: .5, fuze: 'mt', bleed: true, body: COL.olive, rings: [[.5, .62, COL.yellow], [.67, .73, COL.red]], ink: COL.yellow, text: ['155 mm', 'DPICM M864'], lot: 'LOT 00-000', payload: { kind: 'grenades', n: 21 }, explode: ['Часовий підривник', 'Корпус із 72 суббоєприпасами', 'Донний газогенератор'] },
   'shell-m718': { r: R155(905), bt: .26, base: .92, og: 1.1, tip: .2, fz: .5, fuze: 'mt', body: COL.olive, rings: [[.5, .62, COL.yellow], [.67, .73, COL.sand]], ink: COL.yellow, text: ['155 mm', 'RAAM M718'], lot: 'LOT 00-000', payload: { kind: 'mines-at' }, explode: ['Часовий підривник', 'Корпус із 9 протитанковими мінами', 'Донна плита'] },
@@ -48,9 +48,9 @@ const SHELLS = {
   'shell-m110': { r: R155(725), bt: .26, base: .9, og: 1.0, tip: .22, fz: .3, body: COL.paleGreen, rings: [[.55, .67, COL.yellow]], ink: '#2a2f26', fuze: 'contact', text: ['155 mm', 'WP M110'], lot: 'LOT 00-000', explode: ['Підривник', 'Корпус із білим фосфором і розривним зарядом', 'Дно'] },
   'shell-m825': { r: R155(899), ej: .24, bt: .28, base: .9, og: 1.2, tip: .2, fz: .5, fuze: 'mt', body: COL.paleGreen, rings: [[.55, .67, COL.white]], ink: '#2a2f26', text: ['155 mm', 'WP M825'], lot: 'LOT 00-000', payload: { kind: 'wp', n: 35 }, explode: ['Часовий підривник', 'Корпус зі 116 елементами білого фосфору', 'Донна плита (викидається)'] },
   'shell-m485': { r: R155(684), ej: .24, bt: .26, base: .9, og: 1.0, tip: .22, fz: .5, fuze: 'mt', body: COL.white, rings: [[.55, .67, COL.oliveDk]], ink: COL.oliveDk, text: ['155 mm', 'ILLUM M485A2'], lot: 'LOT 00-000', payload: { kind: 'illum' }, explode: ['Часовий підривник', 'Корпус зі світильним елементом і парашутом', 'Донна плита (викидається)'] },
-  'shell-smart': { r: R155(898), ej: .24, bt: .28, base: .9, og: 1.25, tip: .18, fz: .5, fuze: 'mt', body: COL.olive, rings: [[.55, .67, COL.yellow]], ink: COL.yellow, text: ['155 mm', 'SMArt'], lot: 'LOT 00-000', payload: { kind: 'subs', n: 2 }, explode: ['Часовий підривник', 'Корпус із двома самонавідними суббоєприпасами', 'Донна плита (викидається)'] },
-  'shell-bonus': { r: R155(898), ej: .24, bt: .28, base: .9, og: 1.2, tip: .18, fz: .5, fuze: 'mt', body: COL.olive, rings: [[.55, .67, COL.yellow], [.72, .78, COL.red]], ink: COL.yellow, text: ['155 mm', 'BONUS'], lot: 'LOT 00-000', payload: { kind: 'subs', n: 2, finned: true }, explode: ['Часовий підривник', 'Корпус із двома бронебійними боєголовками', 'Донна плита (викидається)'] },
-  'shell-m454': { r: R155(850), ej: .24, bt: .28, base: .9, og: 1.2, tip: .18, fz: .5, fuze: 'mt', body: COL.olive, rings: [[.55, .67, COL.yellow]], ink: COL.yellow, text: ['155 mm', 'S-HE'], lot: 'LOT 00-000', payload: { kind: 'warhead' }, explode: ['Дистанційний підривник', 'Корпус із бойовою частиною', 'Донна плита (викидається)'] },
+  'shell-smart': { r: R155(898), ej: .24, bt: .28, base: .9, og: 1.5, tip: .18, fz: .5, fuze: 'mt', body: COL.olive, rings: [[.55, .67, COL.yellow]], ink: COL.yellow, text: ['155 mm', 'SMArt'], lot: 'LOT 00-000', payload: { kind: 'subs', n: 2 }, explode: ['Часовий підривник', 'Корпус із двома самонавідними суббоєприпасами', 'Донна плита (викидається)'] },
+  'shell-bonus': { r: R155(898), ej: .24, bt: .28, base: .9, og: 1.5, tip: .18, fz: .5, fuze: 'mt', body: COL.olive, rings: [[.55, .67, COL.yellow], [.72, .78, COL.red]], ink: COL.yellow, text: ['155 mm', 'BONUS'], lot: 'LOT 00-000', payload: { kind: 'subs', n: 2, finned: true }, explode: ['Часовий підривник', 'Корпус із двома бронебійними боєголовками', 'Донна плита (викидається)'] },
+  'shell-m454': { r: R155(850), ej: .24, bt: .28, base: .9, og: 1.5, tip: .18, fz: .5, fuze: 'mt', body: COL.olive, rings: [[.55, .67, COL.yellow]], ink: COL.yellow, text: ['155 mm', 'S-HE'], lot: 'LOT 00-000', payload: { kind: 'warhead' }, explode: ['Дистанційний підривник', 'Корпус із бойовою частиною', 'Донна плита (викидається)'] },
 };
 
 const radiusFn = s => {
@@ -58,8 +58,10 @@ const radiusFn = s => {
   return x => {
     if (x <= xb) return s.r * (s.base + (1 - s.base) * smooth((x - x0) / s.bt));
     if (x <= xo) return s.r;
-    const t = Math.min((x - xo) / (xn - xo), 1);
-    return rn + (s.r - rn) * Math.pow(Math.max(1 - t * t, 0), .62);
+    // Тангенціальна оживальна: дуга радіуса rho торкається циліндра (без зламу) й сходиться до носа; rn — радіус вершини під підривник.
+    const L = xn - xo, rho = (L * L + s.r * s.r) / (2 * s.r), d = Math.min(Math.max(xn - x, 0), L);
+    const y = Math.sqrt(Math.max(rho * rho - (L - d) * (L - d), 0)) + s.r - rho;
+    return rn + (s.r - rn) * Math.min(Math.max(y / s.r, 0), 1);
   };
 };
 
