@@ -257,6 +257,7 @@ export function mount(host, options = {}) {
     const credit = creditOf(entry, state.variant);
     if (!credit) return null;
     if (credit.generated) return h('p', { class: 'rw-credit', text: credit.note });
+    if (credit.own) return h('p', { class: 'rw-credit', text: 'Модель «' + credit.title + '»: ' + credit.note.charAt(0).toLowerCase() + credit.note.slice(1) + ' Файл стиснуто для застосунку.' });
     return h('p', { class: 'rw-credit' }, 'Модель: «' + credit.title + '», автор ',
       h('a', { href: credit.authorUrl, target: '_blank', rel: 'noopener noreferrer', text: credit.author }),
       ', ліцензія ', h('a', { href: credit.licenseUrl, target: '_blank', rel: 'noopener noreferrer', text: credit.license }),

@@ -46,6 +46,13 @@ test('glb models exist, are registered and carry a Creative Commons credit', asy
       assert.ok(credits.includes(`${e.model.file}.glb`), `${id} in CREDITS.md`);
       continue;
     }
+    if (e.credit.own) {
+      // Власні моделі автора проєкту: без сторонньої ліцензії, але з поясненням у статті й записом у CREDITS.md.
+      assert.ok(e.credit.title && e.credit.note, `${id}: own credit text`);
+      assert.ok((await stat(new URL(`../src/models/${e.model.file}.glb`, import.meta.url))).size < 12e6, `${id}: stays compact`);
+      assert.ok(credits.includes(`${e.model.file}.glb`), `${id} in CREDITS.md`);
+      continue;
+    }
     assert.ok(LICENSES[e.credit.license], `${id}: known license ${e.credit.license}`);
     assert.ok(e.credit.author && e.credit.url && e.credit.authorUrl && e.credit.licenseUrl);
     const file = new URL(`../src/models/${e.model.file}.glb`, import.meta.url);
@@ -439,8 +446,12 @@ test('enemy articles carry recognition features, armament and numbered vulnerabl
 test('models with a glass pattern have a valid pattern and the models of the new groups are registered', () => {
   for (const e of ENTRIES) if (e.model && e.model.glass !== undefined) assert.doesNotThrow(() => new RegExp(e.model.glass, 'i'), e.id);
   for (const id of ['ka52', 'mi8tv', 'fp5', 'fp7']) assert.ok(MODEL_FILES[entryById(id).model.file], id);
-  // Без відомої ліцензії модель до довідника не потрапляє: такі статті лишаються без 3D.
-  for (const id of ['ka50', 'ka27', 'mi26', 'mi35', 'mi2', 'an26', 'an225', 'mhx']) assert.equal(entryById(id).model, undefined, id);
+  // Решта моделей — власні роботи автора проєкту; у підписі це сказано прямо.
+  for (const id of ['ka50', 'ka27', 'mi26', 'mi35', 'mi2', 'an26', 'an225', 'mhx']) {
+    const e = entryById(id);
+    assert.ok(MODEL_FILES[e.model.file], id);
+    assert.equal(e.credit.own, true, id);
+  }
 });
 
 test('fixMaterials keeps glass translucent and turns other transparent materials into cut-out opaque ones', () => {
