@@ -109,3 +109,11 @@
   #pvk-dashboard-root .pvk-kpis:has(> :nth-child(7):last-child) { grid-template-columns: repeat(7, minmax(0, 1fr)); }
   #pvk-dashboard-root .pvk-kpis:has(> :nth-child(8):last-child) { grid-template-columns: repeat(8, minmax(0, 1fr)); }
 }
+
+/* Те саме для УДШВ: 9 карток у ряд тісні вже з лівим меню — тримаємо по 3, а 9 в ряд лише на дуже широких екранах. */
+@media (min-width: 1200px) {
+  #udshv-dashboard-root .ud-kpis:not(.ud-kpis-3) { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (min-width: 2400px) {
+  #udshv-dashboard-root .ud-kpis:not(.ud-kpis-3) { grid-template-columns: repeat(9, minmax(0, 1fr)); }
+}

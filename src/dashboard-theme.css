@@ -158,3 +158,8 @@ html:not([data-theme="light"]) .pvk-kpi-ic {
   box-shadow: 0 0 18px color-mix(in srgb, var(--tone, var(--pvk-blue)) 26%, transparent), inset 0 1px 0 rgba(255, 255, 255, .1);
 }
 html:not([data-theme="light"]) .pvk-kpi-spark { filter: drop-shadow(0 0 6px color-mix(in srgb, var(--tone, var(--pvk-blue)) 55%, transparent)); }
+html:not([data-theme="light"]) .ud-kpi-ic {
+  background: linear-gradient(160deg, color-mix(in srgb, var(--tone) 26%, transparent), color-mix(in srgb, var(--tone) 8%, transparent));
+  box-shadow: 0 0 18px color-mix(in srgb, var(--tone) 26%, transparent), inset 0 1px 0 rgba(255, 255, 255, .1);
+}
+html:not([data-theme="light"]) .ud-kpi > .ud-spark { filter: drop-shadow(0 0 6px color-mix(in srgb, var(--tone) 55%, transparent)); }

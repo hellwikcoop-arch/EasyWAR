@@ -77,8 +77,11 @@ function sparkline(series, color) {
   const width = 160, height = 38;
   if (series.length < 2) return h('div', { class: 'ud-spark' });
   const max = Math.max(1, ...series.map(s => s.value));
-  const points = series.map((s, i) => `${(i / (series.length - 1) * width).toFixed(1)},${(height - 3 - s.value / max * (height - 6)).toFixed(1)}`).join(' ');
+  const xy = series.map((s, i) => `${(i / (series.length - 1) * width).toFixed(1)},${(height - 3 - s.value / max * (height - 6)).toFixed(1)}`);
+  const points = xy.join(' ');
+  // Заливка під лінією, як у референсах (колір лінії, прозорість задає fill-opacity).
   return h('svg:svg', { class: 'ud-spark', viewBox: `0 0 ${width} ${height}`, preserveAspectRatio: 'none', 'aria-hidden': 'true' },
+    h('svg:polygon', { class: 'ud-spark-area', points: `0,${height} ${points} ${width},${height}`, fill: color, 'fill-opacity': 0.16, stroke: 'none' }),
     h('svg:polyline', { points, fill: 'none', stroke: color, 'stroke-width': 2.2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round', 'vector-effect': 'non-scaling-stroke' }));
 }
 
@@ -173,8 +176,10 @@ const ICONS = {
 function kpiIcon(key) {
   const paths = ICONS[key];
   if (!paths) return null;
-  return h('svg:svg', { class: 'ud-kpi-icon', viewBox: '0 0 24 24', width: 24, height: 24, fill: 'none', stroke: 'currentColor', 'stroke-width': 1.7, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' },
-    paths.map(d => h('svg:path', { d })));
+  // Плитка-іконка (як у картках ПВК): тонований квадрат із рамкою кольору показника.
+  return h('i', { class: 'ud-kpi-ic', 'aria-hidden': 'true' },
+    h('svg:svg', { class: 'ud-kpi-icon', viewBox: '0 0 24 24', width: 24, height: 24, fill: 'none', stroke: 'currentColor', 'stroke-width': 1.7, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' },
+      paths.map(d => h('svg:path', { d }))));
 }
 
 function kpiCard(k, onClick) {

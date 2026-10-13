@@ -46,3 +46,16 @@ test('картки показників ПВК: кожен ключ icon з pvk-
   // Ряди для графіків беруться лише з summary.dynamics, який рахує ядро; вигаданих рядів на фронтенді немає.
   for (const [, series] of js.matchAll(/series:\s*summary\.dynamics\.(\w+)/g)) assert.match(core, new RegExp(`\\b${series}:\\s*(mergeDaily|summary\\.activity)`), `ядро не рахує dynamics.${series}`);
 });
+
+test('картки УДШВ: плитка-іконка, міні-графік із заливкою, число лишається прямим нащадком картки', async () => {
+  const js = await read('udshv-dashboard.js');
+  const css = await read('udshv-dashboard.css');
+  assert.match(js, /class: 'ud-kpi-ic'/);
+  assert.match(js, /class: 'ud-spark-area'/);
+  // Лічильник чисел (dashboard-motion.js) шукає '.ud-kpi > strong': розмітку не вкладаємо.
+  assert.match(css, /grid-template-areas:\s*"ic label spark" "ic value spark" "ic delta spark" "hint hint hint"/);
+  for (const area of ['ic', 'label', 'value', 'delta', 'spark', 'hint']) assert.match(css, new RegExp(`grid-area:\\s*${area}\\b`), area);
+  assert.match(css, /@container ud-kpi \(max-width: 219px\)/);
+  const layout = await read('dashboard-layout.css');
+  assert.match(layout, /#udshv-dashboard-root \.ud-kpis:not\(\.ud-kpis-3\) \{ grid-template-columns: repeat\(3/);
+});
