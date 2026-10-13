@@ -156,6 +156,59 @@ test('CSS: вхідні анімації лише під data-dash-motion і pre
   for (const marker of ['.ud-kpi', '.pvk-kpi', '.ol-kpi', '.pvk-donut', '.ud-rank-row', '.ol-rank-row']) assert.ok(css.includes(marker), marker);
 });
 
+test('бюджет: найдовша вхідна анімація разом із затримкою вкладається в 1200 мс (дизайн-система EasyWAR)', async () => {
+  const { playMotion } = await import('../src/dashboard-motion.js');
+  const css = await read('dashboard-motion.css');
+  const BUDGET = 1200;
+
+  // Реальні затримки з dashboard-motion.js на «найгіршому» вмісті (60 елементів у групі, 60 стовпчиків):
+  // кореню віддаємо вузли лише для вибраної родини селекторів, решта порожня.
+  const maxDelay = fragments => {
+    const nodes = [];
+    const track = node => { nodes.push(node); return node; };
+    const items = Array.from({ length: 60 }, () => {
+      const node = track(fakeNode());
+      node.querySelectorAll = () => [track(fakeNode())];
+      return node;
+    });
+    const host = { querySelectorAll: () => items };
+    const svg = { querySelectorAll: () => Array.from({ length: 60 }, () => track(fakeNode())) };
+    const root = {
+      setAttribute() {},
+      removeAttribute() {},
+      querySelectorAll: selector => (fragments.some(fragment => selector.includes(fragment)) ? [selector.includes('svg') ? svg : host] : []),
+    };
+    withEnv({}, () => { playMotion(root, 'summary'); });
+    return Math.max(0, ...nodes.map(node => parseInt(node.styleMap.get('--dm-d') ?? '0', 10)));
+  };
+  // Правило CSS з затримкою --dm-d → група в JS, яка її виставляє.
+  const FAMILIES = [
+    [/\.ud-kpi,/, ['.ud-kpis']],
+    [/\.ud-card,/, ['.ud-page']],
+    [/\.ud-rank-row/, ['.ud-rank,']],
+    [/\.ud-week b/, ['.ud-week']],
+    [/\.ud-bar rect/, ['.ud-chart svg']],
+    [/\.pvk-day/, ['.pvk-calendar', '.ud-heat tbody']],
+    [/spark|\.pvk-lines|\.pvk-donut/, []], // фіксована затримка 220 мс у stagger()
+  ];
+
+  let checked = 0;
+  for (const [, selector, body] of css.matchAll(/(\[data-dash-motion[^{]*)\{([^}]*)\}/g)) {
+    const match = body.match(/animation:\s*[\w-]+\s+(\.?\d*\.?\d+)s(?:\s+(\.?\d*\.?\d+)s)?/);
+    if (!match) continue;
+    const duration = Number(match[1]) * 1000;
+    let delay = Number(match[2] ?? 0) * 1000;
+    if (body.includes('var(--dm-d')) {
+      const family = FAMILIES.find(([pattern]) => pattern.test(selector));
+      assert.ok(family, `для правила ${selector.trim()} немає групи затримок у тесті`);
+      delay = family[1].length ? maxDelay(family[1]) : 220;
+    }
+    assert.ok(duration + delay <= BUDGET, `${selector.trim()}: ${duration} + ${delay} мс > ${BUDGET} мс`);
+    checked += 1;
+  }
+  assert.ok(checked >= 10, `перевірено правил: ${checked}`);
+});
+
 test('CSS підключено на сторінках ПС (ПВК) і РВ (УДШВ), модуль — у обох дашбордах', async () => {
   for (const page of ['air.html', 'rocket.html']) {
     const html = await read(page);

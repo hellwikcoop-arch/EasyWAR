@@ -67,7 +67,7 @@
   /* Горизонтальні смуги рейтингів і прогрес-доріжки зростають зліва. */
   [data-dash-motion] :is(.ud-rank-row i b, .pvk-rank-row > i > b, .ol-rank-row i b) {
     transform-origin: left center;
-    animation: dm-grow-x .7s cubic-bezier(.2, .7, .2, 1) var(--dm-d, 0ms) backwards;
+    animation: dm-grow-x .6s cubic-bezier(.2, .7, .2, 1) var(--dm-d, 0ms) backwards;
   }
   /* Вертикальні стовпчики («За днями тижня») зростають знизу. */
   [data-dash-motion] .ud-week b { transform-origin: center bottom; animation: dm-grow-y .7s cubic-bezier(.2, .7, .2, 1) var(--dm-d, 0ms) backwards; }

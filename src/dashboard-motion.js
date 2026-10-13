@@ -41,10 +41,11 @@ function stagger(root) {
       }
     }
   }
-  // Стовпчики SVG-графіків: хвиля зліва направо, не довша за ~0,5 с незалежно від кількості днів.
+  // Стовпчики SVG-графіків: хвиля зліва направо, не довша за ~0,4 с незалежно від кількості днів
+  // (уся вхідна постановка вкладається в 1200 мс — див. тест у tests/dashboard-motion.test.mjs).
   for (const svg of root.querySelectorAll(CHART_SELECTOR)) {
     const bars = [...svg.querySelectorAll('rect')].filter(rect => !rect.classList.contains('ud-hit') && !rect.classList.contains('ol-hit'));
-    const step = Math.min(18, 520 / Math.max(1, bars.length));
+    const step = Math.min(18, 400 / Math.max(1, bars.length));
     bars.forEach((rect, i) => setDelay(rect, 160 + i * step));
   }
   // Лінії, спарклайни й кільця стартують після того, як з'явилась їхня картка.

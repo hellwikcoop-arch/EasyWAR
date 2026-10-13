@@ -192,8 +192,9 @@ function sheetPage(sheet) {
       h('div', { class: 'pvk-metric-grid' }, group.widgets.map(metricCard)))));
 }
 
-function kpi(label, value, detail, tone = '') {
-  return h('article', { class: `pvk-kpi ${tone}` }, h('span', { text: label }), h('strong', { text: value }), h('small', { text: detail }));
+function kpi(label, value, detail, tone = '', photo = '') {
+  // photo — ключ фонового фото картки (див. dashboard-theme.css, [data-photo]); без нього картка як раніше.
+  return h('article', { class: `pvk-kpi ${tone}`, ...(photo ? { 'data-photo': photo } : {}) }, h('span', { text: label }), h('strong', { text: value }), h('small', { text: detail }));
 }
 
 const MONTHS = ['Січ', 'Лют', 'Бер', 'Кві', 'Тра', 'Чер', 'Лип', 'Сер', 'Вер', 'Жов', 'Лис', 'Гру'];
@@ -248,9 +249,9 @@ function summaryPage(model) {
   return h('div', { class: 'pvk-page' },
     h('header', { class: 'pvk-page-head' }, h('div', {}, h('span', { class: 'pvk-eyebrow', text: 'Усі підпорядковані підрозділи' }), h('h2', { text: 'Зведення ПВК' }))),
     h('div', { class: 'pvk-kpis' },
-      kpi('АУ · разом', number(summary.totalAu), `АА ${number(summary.aaAu)} · ПС ${number(summary.airAu)}`, 'blue'),
-      kpi('Усього БП', number(summary.munitions), `АА ${number(summary.aaMunitions)} · ПС ${number(summary.airMunitions)}`, 'amber'),
-      kpi('Уражено', number(summary.affected), `НЕ уражено ${number(summary.notAffected)}`, 'green'),
+      kpi('АУ · разом', number(summary.totalAu), `АА ${number(summary.aaAu)} · ПС ${number(summary.airAu)}`, 'blue', 'jet'),
+      kpi('Усього БП', number(summary.munitions), `АА ${number(summary.aaMunitions)} · ПС ${number(summary.airMunitions)}`, 'amber', 'munition'),
+      kpi('Уражено', number(summary.affected), `НЕ уражено ${number(summary.notAffected)}`, 'green', 'impact'),
       kpi('Дорозвідується', number(summary.reconnaissance), 'Окремий результат ПС', 'violet'),
       kpi('% уражених', percent(summary.affectedPercent), 'Уражено / (Уражено + НЕ уражено)', 'green'),
       kpi('Уражені об’єкти', number(summary.objects), 'Без показника «Витрата»', 'blue'),

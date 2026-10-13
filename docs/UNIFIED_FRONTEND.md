@@ -28,9 +28,15 @@ switch: it neutralises these animations through the existing `animation-duration
 override, and `playMotion` also skips the number count-up. Do not reuse the
 `data-motion` name on a dashboard root: it would match the `<html>` toggle.
 
+Time budget: every entrance animation plus its stagger delay (`--dm-d`, capped per group
+in `STAGGER_GROUPS`) must finish within 1200 ms (design system v1.1, motion rule 1).
+`tests/dashboard-motion.test.mjs` computes the worst-case delay of each group and fails
+when a new rule or a longer duration breaks the budget; a new rule that uses `--dm-d`
+needs an entry in the test's `FAMILIES` table.
+
 ## Dashboard theme (PVK, UDSHV, «Наші втрати»)
 
-`src/dashboard-theme.css` — шар кольорів і поверхонь поверх `pvk-dashboard.css`, `udshv-dashboard.css` і `own-losses-dashboard.css`, підключений у `air.html` і `rocket.html` після `dashboard-motion.css`. Усі правила стоять під `html:not([data-theme="light"])`, зображень і анімацій у файлі немає. Палітри задано змінними `--ud-*` / `--pvk-*` та спільними `--th-*` на коренях `#udshv-dashboard-root` і `#pvk-dashboard-root`; `.ol-root` успадковує їх.
+`src/dashboard-theme.css` — шар кольорів і поверхонь поверх `pvk-dashboard.css`, `udshv-dashboard.css` і `own-losses-dashboard.css`, підключений у `air.html` і `rocket.html` після `dashboard-motion.css`. Усі правила стоять під `html:not([data-theme="light"])`, анімацій у файлі немає, а зображення — лише локальні `webp`/`svg` з папок `udshv-art` і `pvk-art` (перевіряє `tests/dashboard-theme.test.mjs`). Картки показників ПВК із фоновим фото: `kpi(label, value, detail, tone, photo)` у `pvk-dashboard.js` ставить `data-photo="jet|munition|impact"` (зараз лише на трьох картках «Зведення ПВК»), а `dashboard-theme.css` підставляє `pvk-art/kpi-jet.webp`, `kpi-munition.webp`, `kpi-impact.webp` праворуч картки; новий ключ потребує правила в темі й файлу в `pvk-art` (тест це перевіряє). Палітри задано змінними `--ud-*` / `--pvk-*` та спільними `--th-*` на коренях `#udshv-dashboard-root` і `#pvk-dashboard-root`; `.ol-root` успадковує їх.
 
 ## Dashboard layout (PVK, UDSHV)
 

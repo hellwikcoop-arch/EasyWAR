@@ -151,3 +151,11 @@ html:not([data-theme="light"]) #udshv-dashboard-root tbody tr:hover > td,
 html:not([data-theme="light"]) #pvk-dashboard-root tbody tr:hover > td { background: color-mix(in srgb, var(--th-accent) 9%, transparent); }
 html:not([data-theme="light"]) #udshv-dashboard-root input,
 html:not([data-theme="light"]) #udshv-dashboard-root select { background: rgba(255, 255, 255, .04); }
+
+/* ---------- Картки показників ПВК з фоном-фото (в дусі Canva-концепту): літак, боєприпас, наслідки ---------- */
+html:not([data-theme="light"]) .pvk-kpi[data-photo="jet"] { background-image: url('./pvk-art/kpi-jet.webp'), radial-gradient(90% 80% at 100% 100%, color-mix(in srgb, var(--tone, var(--pvk-blue)) 20%, transparent), transparent 70%); background-repeat: no-repeat; background-position: right center, 0 0; background-size: auto 100%, auto; }
+html:not([data-theme="light"]) .pvk-kpi[data-photo="munition"] { background-image: url('./pvk-art/kpi-munition.webp'), radial-gradient(90% 80% at 100% 100%, color-mix(in srgb, var(--tone, var(--pvk-blue)) 20%, transparent), transparent 70%); background-repeat: no-repeat; background-position: right center, 0 0; background-size: auto 100%, auto; }
+html:not([data-theme="light"]) .pvk-kpi[data-photo="impact"] { background-image: url('./pvk-art/kpi-impact.webp'), radial-gradient(90% 80% at 100% 100%, color-mix(in srgb, var(--tone, var(--pvk-blue)) 20%, transparent), transparent 70%); background-repeat: no-repeat; background-position: right center, 0 0; background-size: auto 100%, auto; }
+/* Кольорове коло в куті не потрібне, коли є фото. */
+html:not([data-theme="light"]) .pvk-kpi[data-photo]::after { display: none; }
+html:not([data-theme="light"]) .pvk-kpi[data-photo] :is(span, small) { text-shadow: 0 1px 8px rgba(5, 10, 20, .85); }
