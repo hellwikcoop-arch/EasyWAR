@@ -6,8 +6,10 @@
 // Окремі типи 155 мм (M107, M795, M549A1, M483A1, M864, M718, M692, M110, M825, M485A2, M712, SMArt, BONUS, M454) і заряди
 // (M3A1, M4A2, M119A2, M203A1, BMCS) мають власну довжину, оживало, дно й підривник за габаритами з каталогу bk155.com.ua та
 // відкритих джерел; усе, що всередині (суббоєприпаси, міни, світильний баласт), видно у розкладеному вигляді.
+// Підривники (artillery-fuze-3d.js) підключено до того самого переліку SHELL_KINDS; їхня довжина теж до 4, але діаметр голівки не більший за 1,8.
 import { CylinderGeometry, Group, Mesh, Object3D, SphereGeometry, TorusGeometry } from 'three';
 import { Skin, at, castShadows, finSet, lathe, paint, plate, rod, sample, skin } from './munition-3d.js';
+import { FUZE_KINDS, buildFuze } from './artillery-fuze-3d.js';
 
 const COL = {
   olive: '#4b5329', oliveDk: '#3b4220', yellow: '#d8b21a', copper: '#b8733a', steel: '#8d9299', steelDk: '#5b6066', white: '#d8d5c8',
@@ -517,6 +519,7 @@ function buildCaseChargeModel() {
 
 const BUILDERS = { 'rocket-122': buildRocketModel, guided: buildGuidedModel, charge: buildChargeModel, copperhead: buildCopperheadModel, 'charge-m203a1': buildCaseChargeModel };
 for (const kind of Object.keys(BAGS)) BUILDERS[kind] = () => buildBagModel(kind);
+for (const kind of FUZE_KINDS) BUILDERS[kind] = () => buildFuze(kind);
 export const SHELL_KINDS = [...Object.keys(SHELLS), ...Object.keys(MORTARS), ...Object.keys(BUILDERS)];
 export function buildShell(kind) {
   if (SHELLS[kind]) return buildShellModel(kind);
