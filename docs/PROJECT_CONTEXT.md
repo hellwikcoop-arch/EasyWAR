@@ -1,33 +1,156 @@
-# Project context
+# Контекст проєкту EasyWAR
 
-## Canonical goal
-Build EasyWAR as a local-first desktop analytics and reporting product for macOS and Windows while preserving the proven behavior of the existing EasyWAR single-file application.
+Оновлено 13.10.2026, версія застосунку 1.0.7. Цей файл — стартова точка для будь-кого
+(людини чи агента), хто береться за задачу. Як працювати — у [`WORKFLOW.md`](WORKFLOW.md),
+що робити далі — у [`BACKLOG.md`](BACKLOG.md).
 
-## Required invariants
-1. Ukrainian UI.
-2. Local-first storage.
-3. Raw source remains auditable.
-4. Parsed data is not the same as approved data.
-5. Human review is the default before approval.
-6. No operational data, credentials or secrets in Git.
-7. Existing working parser/analytics behavior is migrated incrementally.
-8. macOS + Windows remain shared-core targets.
-9. Signal is an intake adapter, not a source of truth.
-10. External/cloud integrations are optional.
+## Що це
 
-## Current architecture decision
-- Tauri 2 desktop shell
-- existing HTML/CSS/JS frontend first
-- Rust application core
-- SQLite persistence with migrations
+EasyWAR — настільний застосунок для macOS і Windows для оперативного обліку й
+аналітики підрозділів: внесення доповідей, їх перевірка, зберігання, дашборди,
+довідники озброєння з 3D-моделями, презентації. Працює локально, без хмари: дані
+лишаються на комп'ютері користувача. Корені — перевірений однофайловий HTML/JS-застосунок
+EasyWAR v3.1, який поступово переноситься в Tauri 2 (Rust + SQLite) зі збереженням
+перевіреної поведінки.
 
-## Current milestone
-EasyWAR Desktop 0.5.
+Користувачі: оператори й аналітики підрозділів (Повітряні Сили, ракетні війська,
+артилерійські бригади) та командувань (ПВК, УДШВ). Інтерфейс лише українською.
 
-## Development helpers
-- Context7: current library/API documentation
-- CompText Context: bounded operational context
-- Codex Coordinator: task boundaries for parallel work
-- Context Handoff: continuity when context pressure grows
-- Build macOS Apps: macOS build/debug/signing work
-- GitHub: canonical version control and issue tracking
+## Стан на сьогодні
+
+- Версія 1.0.7 у `package.json`, `package-lock.json`, `src-tauri/Cargo.toml`,
+  `src-tauri/Cargo.lock`, `src-tauri/tauri.conf.json` — завжди однакова в усіх п'яти.
+- Код — приватний репозиторій `hellwikcoop-arch/EasyWAR`, гілка `main`. Інсталятори й
+  пакети оновлень — публічний `hellwikcoop-arch/easywar-releases` (без коду й даних).
+- Випуски «технічні»: macOS з ad-hoc підписом без нотаризації, Windows без Authenticode.
+  Застосунок оновлюється сам (підпис minisign перевіряється). Формально production
+  лишається NO-GO (`RELEASE_CHECKLIST.md`), поки немає Apple Developer ID і Authenticode.
+- Модуль «Артилерія» — beta. Signal реалізовано й протестовано синтетично; приймання
+  з реальним `signal-cli` ще не проводилось.
+- 13.10.2026 проведено аудит: [`AUDIT_2026-10-13.md`](AUDIT_2026-10-13.md).
+
+## Незмінні правила
+
+1. Інтерфейс лише українською.
+2. Local-first: дані не йдуть у хмару автоматично; зовнішні інтеграції необов'язкові,
+   явні, вимкнені за замовчуванням.
+3. Сире джерело → розібрані значення → ручні виправлення → схвалений запис — окремі
+   шари; сире джерело ніколи не переписується мовчки.
+4. Розібране не дорівнює схваленому; схвалення — лише рішення людини.
+5. У Git, чатах, тестах і артефактах немає реальних таблиць, баз, Signal-даних,
+   ключів, токенів. Тести працюють лише на синтетичних даних.
+6. Legacy-застосунок — робоча система: мігруємо поступово, не переписуємо заради
+   архітектури.
+7. macOS і Windows мають спільне ядро; платформний код лише там, де без нього не
+   обійтися.
+8. Signal — транспорт прийому, не джерело істини; за замовчуванням усе заборонено.
+9. Схема бази змінюється лише міграціями, які тільки додаються.
+
+## Архітектура коротко
+
+```text
+Фронтенд (Vite, кілька сторінок)              Rust-ядро (Tauri 2), src-tauri/src
+  index.html     стартовий екран (лаунчер)     lib.rs — 52 команди IPC
+  air.html       Повітряні Сили + дашборд ПВК   repository.rs, database.rs, migrations/
+  rocket.html    Ракетні війська + дашборд УДШВ analytics.rs — модель дашборда з SQLite
+  artillery.html Артилерія (beta)               xlsx_import.rs / xlsx_export.rs
+  viewer.html    перегляд на телефоні (PWA)     backup.rs, restore.rs, migration_startup.rs
+  src/*.js       модулі: *-core.js — чиста       local_profiles.rs (Argon2), app_update.rs
+                 логіка з тестами, решта — UI    signal_*.rs — signal-cli через loopback HTTP/SSE
+                          ↕ invoke (IPC)
+             SQLite easywar.db у каталозі конфігурації ОС
+```
+
+- Лаунчер відкриває модулі в same-origin `iframe`; Tauri-міст копіюється в кадр
+  скриптом `easywar-desktop-frame-bridge`.
+- Робочі дані модулів — таблиці `.xlsx` (головний аркуш «Зведена» та інші), прив'язані
+  до локального профілю. SQLite зберігає провенанс доповідей (Signal, staging XLSX),
+  профілі, налаштування, журнал аудиту.
+- Зовнішня мережа лише за явною дією: онлайн-карти (за згодою, за замовчуванням
+  вимкнено), dimap.live (за згодою), перевірка оновлень (кнопка або опція), локальний
+  `signal-cli` на `127.0.0.1`.
+- Політика CSP наразі `null` через inline-скрипти legacy-сторінок; усі команди ядра
+  доступні з webview. Це головний структурний ризик (аудит H1, беклог P2-1).
+
+## Карта репозиторію
+
+```text
+AGENTS.md, CLAUDE.md            правила для агентів (Codex, Claude Code)
+README.md                       огляд англійською
+docs/                           документація, індекс нижче
+src/                            фронтенд: html-сторінки, модулі js, css, арт, шрифти
+src/models/                     3D-моделі .glb і CREDITS.md з ліцензіями
+src/public/                     класичні скрипти (редактор модуля, rocket-refs), manifest PWA
+src-tauri/src/                  Rust-ядро
+src-tauri/migrations/           SQL-міграції 0001–0008 і README
+src-tauri/resources/base-tables порожні шаблони таблиць .xlsx (без даних)
+tests/                          node --test, 326 тестів; fixtures/ синтетичні
+script/                         standalone-збірка, випуск, маніфест оновлень, генерація моделей та іконок
+.github/workflows/              CI: Linux-перевірки на PR і main, macOS/Windows на тегах
+.claude/                        settings, session-start hook, скіл run-easywar
+```
+
+## Модулі та можливості
+
+- **Стартовий екран:** картки ПС, РВ, Артилерія, ПВК, УДШВ; локальні профілі (пароль,
+  посада, фото, прив'язані таблиці за родами військ); резервна копія й відновлення;
+  оновлення застосунку; «Файл для телефона».
+- **Повітряні Сили (ПС):** база даних доповідей із `.xlsx`, внесення, карта з зонами та
+  лінією зіткнення, довідник літаків і боєприпасів із 3D-моделями, презентації
+  PPTX/PDF, Signal-прийом, SQLite-джерело дашборда, імпорт/експорт XLSX.
+- **Ракетні війська (РВ):** те саме для РСЗВ і ОТРК (HIMARS, M270, ATACMS, GMLRS,
+  Вільха, Сапсан), довідник машин забезпечення.
+- **Артилерія (beta):** витрата й залишок боєприпасів бригад у спільній таблиці
+  (ведеться через Nextcloud), матриця «тип × підрозділ», довідник боєприпасів,
+  внесення лише в клітинки свого підрозділу.
+- **ПВК і УДШВ:** дашборди командувань з їхніх таблиць, вкладка «Наші втрати»,
+  презентації (УДШВ), автономний HTML для телефона.
+- **Телефон:** `viewer.html` (PWA з офлайн-кешем) або один HTML-файл з вбудованою
+  таблицею за явним вибором, без шифрування.
+- **Редактор модуля («Оформлення»):** підрозділи й озброєння доступні всім, решта —
+  за паролем власника; це захист UI, а не даних.
+
+## Словник
+
+| Термін | Значення |
+|---|---|
+| ПС | Повітряні Сили; модуль `air.html` |
+| РВ, РВіА | Ракетні війська (і артилерія); модуль `rocket.html` |
+| ПВК | Повітряне командування; дашборд `air.html?command=pvk` |
+| ДШВ, УДШВ | Десантно-штурмові війська, їх командування; дашборд `rocket.html?command=dshv` |
+| ОВТ | Озброєння й військова техніка |
+| «Зведена» | Головний аркуш таблиці доповідей, контракт з 15 полями |
+| «НАШІ ВТРАТИ» | Таблиця власних втрат для дашбордів ПВК і УДШВ |
+| Профіль | Локальний користувач застосунку на цьому комп'ютері |
+| Прив'язана таблиця | `.xlsx`, закріплений за профілем і модулем (`air`, `rocket`, `pvk`, `dshv`, `*_losses`) |
+| Базова таблиця | Порожній шаблон `.xlsx` із ресурсів застосунку |
+| Staging | Перевірений імпорт рядків XLSX у SQLite з провенансом |
+| Провенанс | Ланцюжок сире → розібране → виправлене → схвалене з журналом аудиту |
+| Allowlist | Перелік дозволених відправників і груп Signal; порожній = нічого не приймається |
+| Standalone | Один HTML-файл модуля для телефона (`npm run build:standalone`) |
+| Технічний випуск | Збірка без production-підпису, опублікована як виняток |
+| Довідник | Статті з даними й 3D-моделями про літаки, боєприпаси, машини |
+
+## Індекс документації
+
+| Файл | Про що |
+|---|---|
+| `WORKFLOW.md` | Як ставити задачі, гілки, коміти, перевірки, випуск |
+| `BACKLOG.md` | Пріоритезований список робіт |
+| `AUDIT_2026-10-13.md` | Аудит: знахідки, план дій |
+| `ARCHITECTURE.md` | Цільова архітектура й межі інтеграцій |
+| `DATABASE.md` | Контракт бази, шари провенансу, репозиторій, профілі |
+| `UNIFIED_FRONTEND.md` | Структура фронтенду, редактор модуля, імпорт нового unified HTML |
+| `USER_GUIDE.md` | Посібник користувача |
+| `UPDATES.md` | Оновлення з застосунку, ключ підпису, випуск версії |
+| `RELEASE_CHECKLIST.md` | Шлюз production-релізу (GO / NO-GO) |
+| `BACKUP_AND_RECOVERY.md` | Резервна копія й відновлення |
+| `SIGNAL_INTAKE.md` | Межа Signal-прийому |
+| `XLSX_IMPORT.md` | Контракт імпорту XLSX |
+| `ANALYTICS.md` | Модель дашборда з SQLite |
+| `MOBILE_VIEWER.md` | Перегляд на телефоні, standalone-файл |
+| `PRESENTATIONS.md` | Автоматичні презентації |
+| `MACOS_PACKAGING.md` | Підпис і пакування macOS |
+| `ROADMAP.md` | Віхи 0.5–1.1 |
+| `releases/vX.Y.Z.md` | Нотатки до випусків (потрапляють у `latest.json`) |
+| `codex/PVK_DASHBOARD.md`, `design/` | Дизайн-матеріали дашборда ПВК |
