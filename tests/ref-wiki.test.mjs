@@ -554,7 +554,7 @@ test('every article with a model has numbered spots in both modes, labelled by g
   }
   // Ворожа техніка має «Уразливі місця», решта — «Чутливі вузли»; перемикач виду бере ту саму назву.
   assert.match(wiki, /entry\.group === 'enemy' \? 'Уразливі місця' : 'Чутливі вузли'/);
-  assert.match(wiki, /\['weak', weakLabel\(entry\)\]/);
+  assert.match(wiki, /\['weak', \(entry\.weak \|\| \[\]\)\.length \? weakLabel\(entry\) : 'Огляд'\]/);
 });
 
 test('spots of procedural munitions land on the hull, not in the air', () => {

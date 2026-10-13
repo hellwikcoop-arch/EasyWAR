@@ -2,8 +2,10 @@
 // Ліворуч список зі пошуком, праворуч стаття: 3D-модель, картка з ТТХ, опис, пов’язані статті й підсумок по вашій таблиці.
 // Дані статей — ref-data.js. 3D-переглядач боєприпасів і наземних засобів — ref-viewer.js (підвантажується, коли відкривають першу статтю з моделлю).
 // Літаки й вертольоти показує окрема сторінка aircraft-viewer.html у кадрі: власна сцена з фазами польоту, шасі, вогнями й підвіскою.
+// Решта моделей у вигляді «Інтерактивна модель» отримує сценарій за типом (ref-sim-data.js, ref-sim.js): зліт і посадка, пуск, залп, постріл.
 import * as AIR_DATA from './ref-data.js';
 import { thumbOf } from './ref-thumbs.js';
+import { simOf } from './ref-sim-data.js';
 
 function h(tag, props, ...kids) {
   const el = document.createElement(tag);
@@ -57,8 +59,11 @@ export function mount(host, options = {}) {
   const stageEl = h('div', { class: 'rw-stage', tabindex: '0', role: 'img' });
   const status = h('p', { class: 'rw-status' });
   const hint = h('p', { class: 'rw-hint', text: 'Потягніть, щоб повернути. Коліщатко наближає.' });
-  stageEl.append(status, hint);
+  // Підпис поточної дії «Інтерактивної моделі» (сценарій ref-sim.js).
+  const simCap = h('p', { class: 'rw-simcap', hidden: true, 'aria-live': 'polite' });
+  stageEl.append(status, hint, simCap);
   const tools = h('div', { class: 'rw-tools' });
+  const simBar = h('div', { class: 'seg rw-simbar', role: 'group', 'aria-label': 'Що робить модель', hidden: true });
   const stageBox = h('div', { class: 'rw-stagebox' }, stageEl, tools);
 
   // dur — тривалість кнопкового переходу (мс); linear — рівномірно (для довгих покрокових анімацій).
@@ -101,7 +106,7 @@ export function mount(host, options = {}) {
   // «Позначки» — номери уразливих місць на моделі; кнопка з’являється лише в статтях, де такі місця описано.
   const marksBtn = h('button', { type: 'button', class: 'chip on', 'aria-pressed': 'true', text: 'Позначки', hidden: true, onclick: () => setMarks(marksBtn.getAttribute('aria-pressed') !== 'true') });
   const setMarks = on => { marksBtn.classList.toggle('on', on); marksBtn.setAttribute('aria-pressed', String(on)); if (viewer) viewer.setSpotsVisible(on); };
-  tools.append(h('div', { class: 'rw-toolrow' }, viewSeg, h('div', { class: 'rw-chips' }, autoBtn, marksBtn)), wingsCtl.row, apartCtl.row, actionCtl.row);
+  tools.append(simBar, h('div', { class: 'rw-toolrow' }, viewSeg, h('div', { class: 'rw-chips' }, autoBtn, marksBtn)), wingsCtl.row, apartCtl.row, actionCtl.row);
 
   async function ensureViewer() {
     if (viewer || viewerFailed) return viewer;
@@ -143,10 +148,30 @@ export function mount(host, options = {}) {
       marksBtn.hidden = !weak.length;
       v.setSpots(weak.map(w => ({ title: w.t, p: w.p })), onSpot);
       if (weak.length) setMarks(true);
+      const sim = state.mode === 'live' ? simOf(entry, viewerOf) : null;
+      if (sim) startSim(v, sim);
+      else { simBar.hidden = true; simCap.hidden = true; }
     } catch (e) {
       console.warn('Довідник: модель не завантажилась', e);
       if (mine === token) fallback(entry, 'Не вдалося завантажити модель.');
     }
+  }
+
+  // «Інтерактивна модель» для статей без окремого переглядача: кнопки фаз під сценою, підпис дії на сцені.
+  function startSim(v, sim) {
+    const phases = v.startSim(sim);
+    wingsCtl.row.hidden = true; apartCtl.row.hidden = true; actionCtl.row.hidden = true;
+    marksBtn.hidden = true; setAuto(false);
+    hint.textContent = 'Кнопки під сценою вмикають дії. Потягніть, щоб оглянути з іншого боку.';
+    const pick = id => {
+      v.setSimPhase(id);
+      simBar.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.phase === id)));
+      const ph = phases.find(p => p[0] === id);
+      simCap.textContent = ph ? ph[1] + '. ' + ph[2] : '';
+    };
+    simBar.replaceChildren(...phases.map(([id, label]) => h('button', { type: 'button', 'data-phase': id, 'aria-pressed': 'false', text: label, onclick: () => pick(id) })));
+    simBar.hidden = false; simCap.hidden = false;
+    pick(phases[0][0]);
   }
 
   // Вибір позначки на моделі (або зняття вибору, idx = -1) підсвічує пункт списку «Уразливі місця»; обертання зупиняється.
@@ -170,7 +195,8 @@ export function mount(host, options = {}) {
     if (!entry || !modeBar || state.mode === m) return;
     state.mode = m;
     modeBar.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === m)));
-    if (airBox) airBox.hidden = m === 'weak';
+    if (!airBox) { await showModel(entry, token); return; }
+    airBox.hidden = m === 'weak';
     if (m === 'weak') {
       stageBox.hidden = false;
       if (state.weakFor !== entry.id) { state.weakFor = entry.id; await showModel(entry, token); }
@@ -319,11 +345,12 @@ export function mount(host, options = {}) {
     const variantBar = variants.length ? h('div', { class: 'seg rw-variants', role: 'group', 'aria-label': 'Модель' },
       variants.map(v => h('button', { type: 'button', 'data-variant': v.id, 'aria-pressed': String(v === activeVariant), text: v.label, onclick: () => pickVariant(entry, v.id) }))) : null;
     const creditBox = h('div', { class: 'rw-creditbox' }, viewerOf(entry) ? creditsNode(entry) : creditNode(entry));
-    const both = !!(viewerOf(entry) && entry.model);
+    // Інтерактивна модель: окремий переглядач (літаки з фазами польоту) або сценарій ref-sim.js для решти моделей.
+    const both = !!(viewerOf(entry) && entry.model) || !!simOf(entry, viewerOf);
     state.mode = both ? 'live' : 'weak';
     airBox = viewerOf(entry) ? aircraftBox(entry) : null;
     modeBar = both ? h('div', { class: 'seg rw-modes', role: 'group', 'aria-label': 'Вигляд моделі' },
-      [['live', 'Інтерактивна модель'], ['weak', weakLabel(entry)]].map(([m, label]) =>
+      [['live', 'Інтерактивна модель'], ['weak', (entry.weak || []).length ? weakLabel(entry) : 'Огляд']].map(([m, label]) =>
         h('button', { type: 'button', 'data-mode': m, 'aria-pressed': String(m === 'live'), text: label, onclick: () => setMode(m) }))) : null;
     const main = h('div', { class: 'rw-main' },
       variantBar,
@@ -388,7 +415,7 @@ export function mount(host, options = {}) {
     renderArticle(entry);
     state.weakFor = '';
     if (entry.model && !viewerOf(entry)) showModel(entry, mine);
-    else stageBox.hidden = true;
+    else { stageBox.hidden = true; simBar.hidden = true; simCap.hidden = true; if (viewer) viewer.stopSim(); }
     if (onSelect) onSelect(entry.id);
     if (user && article.getBoundingClientRect().top < 0) article.scrollIntoView({ block: 'start', behavior: motion() ? 'smooth' : 'auto' });
   }

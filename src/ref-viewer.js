@@ -7,6 +7,7 @@ import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.j
 import { addStageEnvironment, createRenderer, FLOOR_Y } from './stage-3d.js';
 import { buildModel, spreadLabels } from './munition-3d.js';
 import { SHELL_KINDS, buildShell } from './artillery-3d.js';
+import { Sim } from './ref-sim.js';
 
 // Файли моделей літаків. Шлях у new URL(...) має бути дослівним, щоб Vite покласти файл у збірку.
 export const MODEL_FILES = {
@@ -275,6 +276,7 @@ export class RefViewer {
     this.parts = []; this.spot = new Vector3();
     this.spots = []; this.activeSpot = -1; this.onSpot = null; this.entry = null; this.rc = new Raycaster(); this.tmp = new Vector3(); this.dir = new Vector3(); this.occTimer = 0; this.turnRaf = 0;
     this.cache = new Map();
+    this.sim = null;
     Object.assign(this, VIEWS['three-quarter']);
     this.open = 1; this.apart = 0; this.zoom = 1; this.auto = false; this.token = 0;
     this.target = new Vector3(0, -.3, 0); this.footprint = { r: 2.8, hh: .6 }; this.aircraft = false;
@@ -374,6 +376,7 @@ export class RefViewer {
   }
 
   clear() {
+    this.stopSim();
     this.clearSpots();
     if (this.group) {
       this.holder.remove(this.group);
@@ -443,7 +446,7 @@ export class RefViewer {
   // перевірка променем дорога, тож її роблять не частіше, ніж раз на ~140 мс, і вже після того, як модель зупинилась.
   placeSpots() {
     const g = this.group;
-    if (!g || !this.spots.length) return;
+    if (!g || !this.spots.length || this.sim) return;
     this.camera.updateMatrixWorld();
     const w = this.el.clientWidth, h = this.el.clientHeight, yaw = g.rotation.y;
     for (const s of this.spots) {
@@ -466,6 +469,27 @@ export class RefViewer {
       this.rc.far = d - .05;
       s.el.classList.toggle('is-hid', this.rc.intersectObjects(this.entry.meshes, false).length > 0);
     }
+  }
+
+  // ---------- сценарій «Інтерактивної моделі» (ref-sim.js) ----------
+  // cfg — simOf(entry). Повертає список фаз; перша вмикається одразу.
+  startSim(cfg) {
+    this.stopSim();
+    if (!this.group || !this.entry || !cfg) return [];
+    this.setSpotsVisible(false);
+    this.auto = false;
+    this.sim = new Sim(this, cfg);
+    this.pose();
+    return this.sim.phases;
+  }
+
+  setSimPhase(id) { if (this.sim) this.sim.set(id); }
+
+  stopSim() {
+    if (!this.sim) return;
+    this.sim.dispose();
+    this.sim = null;
+    this.pose();
   }
 
   setOpen(v) { this.open = v; this.pose(); }
@@ -528,10 +552,18 @@ export class RefViewer {
     for (const [mesh, angle] of this.wings) mesh.rotation.y = angle * this.open;
     if (this.explode) this.explode(this.apart);
     if (this.update) this.update();
-    g.rotation.y = this.yaw;
-    g.updateMatrixWorld(true);
-    const d = this.baseDistance() * this.zoom;
-    this.camera.position.set(this.target.x, this.target.y + Math.sin(this.pitch) * d, this.target.z + Math.cos(this.pitch) * d);
+    const d = this.baseDistance() * this.zoom * (this.sim ? this.sim.distance : 1);
+    if (this.sim) {
+      // У сценарії модель тримає курс уздовж смуги, а навколо неї обертається камера.
+      this.target.set(0, this.sim.pose(), 0);
+      g.updateMatrixWorld(true);
+      const c = Math.cos(this.pitch) * d;
+      this.camera.position.set(-Math.sin(this.yaw) * c, this.target.y + Math.sin(this.pitch) * d, Math.cos(this.yaw) * c);
+    } else {
+      g.rotation.y = this.yaw;
+      g.updateMatrixWorld(true);
+      this.camera.position.set(this.target.x, this.target.y + Math.sin(this.pitch) * d, this.target.z + Math.cos(this.pitch) * d);
+    }
     this.camera.up.set(0, 1, 0);
     this.camera.lookAt(this.target);
     this.placeParts();
@@ -567,6 +599,7 @@ export class RefViewer {
     this.last = now;
     // Приховану вкладку не малюємо.
     if (this.group && this.el.offsetParent !== null) {
+      if (this.sim && this.motion) { this.sim.step(dt); this.pose(); }
       if (this.auto && this.motion && !this.dragging) { this.yaw += dt * .3; this.pose(); }
       if (this.dirty) { this.renderer.render(this.scene, this.camera); this.dirty = false; }
     }
