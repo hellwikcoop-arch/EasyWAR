@@ -59,4 +59,4 @@ Minimum expectations:
 - Reject cross-project notices and never store transcripts, reasoning, prompts, or tool output in Coordinator state.
 
 ## 3D models
-Index of all 3D model files, loaders and tests: [`docs/3D_MODELS.md`](docs/3D_MODELS.md). Read it first; do not search the whole project for models. Files live in `src/models/*.glb`, procedural munitions in `src/munition-3d.js`, the reference viewer in `src/ref-viewer.js`.
+Index of all 3D model files, loaders and tests: [`docs/3D_MODELS.md`](docs/3D_MODELS.md). Read it first; do not search the whole project for models. Files live in `src/models/*.glb`, procedural munitions in `src/munition-3d.js`, the reference viewer in `src/ref-viewer.js`. Interactive 3D guides (six pages and a hub, opened by the «3D-довідники» button) live in `src/guides/`; their model credits are kept only in `src/guides/credits.js` (regenerate the section in `src/models/CREDITS.md` with `node script/guides-credits.mjs`); details are in the last section of `docs/3D_MODELS.md`.
