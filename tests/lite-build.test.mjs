@@ -116,6 +116,8 @@ test('the check refuses reference books, models, video, missing files and a miss
   assert.ok(bad('<script>load("m.glb")</script>').some((p) => /\.glb/.test(p)));
   assert.ok(bad('<script>play("intro.mp4")</script>').some((p) => /\.mp4/.test(p)));
   assert.ok(bad('<script>import("./ref-viewer.js")</script>').some((p) => /ref-viewer/.test(p)));
+  assert.ok(bad('<script>frame.src = "guides/index.html"</script>').some((p) => /3D-довідників/.test(p)), 'the guides hub is not part of lite');
+  assert.ok(bad('<script>import("./guides-launcher.js")</script>').some((p) => /3D-довідників/.test(p)));
   assert.ok(bad('<script src="./extra.js"></script>').some((p) => /extra\.js/.test(p)));
   assert.ok(bad('<img src="./logo.png">').some((p) => /logo\.png/.test(p)));
   assert.ok(liteProblems('<!doctype html><html></html>').some((p) => /позначки lite/.test(p)));
