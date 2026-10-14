@@ -180,6 +180,39 @@ older builds keep accepting the old password. Five wrong attempts pause input fo
 This protects the in-app UI; it is not a boundary against someone who can modify
 the installed application files or the local IndexedDB on that computer.
 
+## Manual entry («Довільне внесення»)
+
+The «Внесення доповідей» tab of `air.html` and `rocket.html` has a second way to
+add rows next to «Зі звіту»: a form whose fields are the columns of the open
+table (header + Excel column letter next to each field; Rocket Forces also gets
+«Підрозділ (від кого машина)» and «Вогнева бригада» when the table has them).
+
+| File | Role |
+| --- | --- |
+| `src/manual-entry-core.js` | pure rules, no DOM: fields by table columns (`manualFields`), cleaning and normalising values (time, count, target numbers, crew, DPI/MGRS), `analyzeDraft` (errors / warnings / empty columns), `previewCells`, suggestions; takes `AVCORE` as an argument (tested in `tests/manual-entry.test.mjs` against the real CORE of both pages) |
+| `src/manual-entry.js` | DOM: mode switch, form, preview row, duplicate confirmation; loaded as a module at the end of both pages |
+| `src/manual-entry.css` | only what the pages lack (mode switch, column badge, field errors, preview row); everything else reuses `.panel .grid .f .chips .btn .notice .dupnote` |
+
+- **The write path is the page's own.** The only legacy edits are in each page's
+  `addSelected(fromAuto, explicit)` (four one-line changes: an optional list of
+  records that replaces the parsed report, and no clearing of the report text or
+  focus change when it is given) and one `<script type="module">` tag. The form
+  calls `window.__AV.addSelected(false, [record])`, so № and «Місяць», the
+  `appendRows` self-check, the duplicate rule, the session list, undo and the
+  write-through-handle behaviour are exactly those of the report path.
+- **Safety check.** The module checks `addSelected.length >= 2` and offers manual
+  entry only then: an unpatched page would add the parsed report instead of the form.
+- **Mode.** The report section and the results panel get `ew-report-only` and are
+  hidden by `#view-entry.ew-manual-on`; `#sessionWrap` (list and undo) stays.
+  The choice is kept in `localStorage` (`ew.entry.mode.air|rocket`, under the
+  module's own storage prefix); the draft is never stored. Ctrl/⌘+Enter is
+  intercepted on `window` in the capture phase so the page's own handler cannot
+  add a pending parsed report. A Signal review forces «Зі звіту».
+- **Re-importing `rocket.html`** (`script/import_unified_html.mjs`) removes both
+  edits like it removes the other module tags; `tests/manual-entry-pages.test.mjs`
+  fails until they are applied again. Keep new fields in sync with `FIELD_ORDER` of
+  the page's CORE: the form only shows columns that exist in the open table.
+
 ## Rocket Forces reference styling
 
 `src/public/rocket-refs.js` (built by `script/rocket-refs/build.py` from
