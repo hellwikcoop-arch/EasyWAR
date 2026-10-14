@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Довідник РВіА — EasyWAR</title>
+<link rel="stylesheet" href="../fonts/fonts.css">
+<link rel="stylesheet" href="../base.css">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<nav class="gx-nav"><a href="../index.html">← 3D-довідники</a></nav>
+<div class="fig">
+  <div class="stage" id="stage">
+    <canvas id="cv" aria-label="Тривимірна модель"></canvas>
+    <div class="ov tl">Довідник РВіА</div>
+    <div class="ov tr"><span id="title">Сапсан</span><span class="dims" id="dims"></span></div>
+    <div class="ov bl">Тягніть — обертання · коліщатко — масштаб · клавіші нижче</div>
+    <div class="ammo" id="ammo" aria-label="Боєкомплект"></div>
+    <div class="ov br" id="status">Стоянка</div>
+    <div class="load" id="load">Завантаження моделі</div>
+  </div>
+  <div class="rows">
+    <div class="row"><b>Ракети</b><div class="chips" id="rowC0"></div></div>
+    <div class="row"><b>РСЗВ</b><div class="chips" id="rowC1"></div></div>
+    <div class="row"><b>САУ</b><div class="chips" id="rowC2"></div></div>
+    <div class="row"><b>Гаубиці</b><div class="chips" id="rowC3"></div></div>
+    <div class="sep"></div>
+    <div class="row"><b>Фази</b><div class="chips" id="rowP"></div></div>
+    <div class="row"><b>Наведення</b><div class="chips" id="rowL"></div></div>
+    <div class="row"><b>Озброєння</b><div class="chips" id="rowW"></div></div>
+  </div>
+</div>
+<div class="foot">
+  <p class="desc" id="desc"></p>
+  <p id="how"></p>
+  <p id="credit"></p>
+  <p>Поділ моделей на рухомі частини, опори, гідроциліндри, люки, вогонь, дим і політ ракет чи снарядів — власна робота автора проєкту, спрощена; це не балістичний розрахунок, а характеристики наближені та подані за відкритими даними. «Вільха» й ракети — процедурні моделі EasyWAR. Ландшафт «75 Acres Land w Creek» — mrwrightphoto (<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>), обрізано й спрощено.</p>
+</div>
+<script type="module" src="./main.js"></script>
+</body>
+</html>

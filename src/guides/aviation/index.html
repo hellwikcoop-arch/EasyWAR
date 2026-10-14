@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Довідник ворожої авіації — EasyWAR</title>
+<link rel="stylesheet" href="../fonts/fonts.css">
+<link rel="stylesheet" href="../base.css">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<nav class="gx-nav"><a href="../index.html">← 3D-довідники</a></nav>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Довідник ворожої авіації</h1>
+      <p>Ознаки розпізнавання, тактико-технічні характеристики й уразливі місця за відкритими даними. Оберіть тип ліворуч, обертайте модель мишею або пальцем, а щоб показати уразливе місце на моделі, натисніть його номер. Гвинти, шасі й крило з перемінною стріловидністю рухаються, а кнопка «Політ» запускає модель по колу над місцевістю.</p>
+    </div>
+    <div class="tabs" role="tablist" aria-label="Розділ">
+      <button class="tab" role="tab" id="tab-enemy" aria-selected="true" data-cat="enemy">Ворожа техніка<b id="cnt-enemy"></b></button>
+      <button class="tab" role="tab" id="tab-other" aria-selected="false" data-cat="other">Своя та інше<b id="cnt-other"></b></button>
+    </div>
+  </header>
+
+  <div class="grid">
+    <nav class="idx" id="idx" aria-label="Типи техніки"></nav>
+
+    <section class="plate" aria-label="3D-модель">
+      <div class="stage" id="stage">
+        <canvas id="cv" aria-label="Тривимірна модель обраного типу"></canvas>
+        <div id="marks"></div>
+        <div class="ov tl" id="ovT"></div>
+        <div class="ov tr" id="ovR"></div>
+        <div class="ov bl">Тягніть — обертання · коліщатко — масштаб</div>
+        <div class="ov br" id="ovS" hidden></div>
+        <div class="ov c" id="load">Завантаження моделі…</div>
+      </div>
+      <div class="ctl">
+        <button class="vb" id="v-iso" data-view="iso" aria-pressed="true">3/4</button>
+        <button class="vb" id="v-side" data-view="side" aria-pressed="false">Збоку</button>
+        <button class="vb" id="v-top" data-view="top" aria-pressed="false">Зверху</button>
+        <button class="vb" id="v-front" data-view="front" aria-pressed="false">Спереду</button>
+        <span class="sp"></span>
+        <button class="vb" id="t-anim" aria-pressed="true" title="Гвинти, шасі й інші рухомі частини">Анімація</button>
+        <button class="vb" id="t-fly" aria-pressed="false" title="Політ по колу над місцевістю" hidden>Політ</button>
+        <button class="vb" id="t-spin" aria-pressed="true">Обертання</button>
+        <button class="vb" id="t-marks" aria-pressed="true">Уразливі зони</button>
+      </div>
+      <div class="ctl" id="xctl" hidden>
+        <button class="vb" id="t-gear" aria-pressed="false" hidden>Шасі: випущено</button>
+        <label class="rg" id="sw-wrap" hidden>Стріловидність крила <input type="range" id="sw" min="20" max="65" step="1" value="45"><output id="sw-o"></output></label>
+        <button class="vb" id="t-cam" hidden>Камера: слідкує</button>
+      </div>
+      <p class="credit" id="credit"></p>
+      <p class="credit" id="anote"></p>
+    </section>
+
+    <article class="sheet" id="sheet" aria-live="polite"></article>
+  </div>
+
+  <footer>
+    <p>Дані зведено з відкритих джерел (довідники виробників, Wikipedia, GlobalSecurity, профільні медіа) і подано округлено; для різних модифікацій цифри відрізняються. Уразливості описано на рівні загальновідомого відкритого аналізу. Це навчальний довідник для розпізнавання, а не бойова інструкція. Номери на моделі показують зону приблизно.</p>
+    <p>Анімація гвинтів, шасі й польоту по колу — спрощена ілюстрація для розпізнавання, а не розрахунок льотних характеристик. Авторство й ліцензію кожної моделі показано під сценою. Ландшафт для польоту — «75 Acres Land w Creek», mrwrightphoto (<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>), обрізано й спрощено.</p>
+    <p>FP-5 і FP-7 — заявлені виробником (Fire Point) дані: <a href="https://en.wikipedia.org/wiki/FP-5_Flamingo" target="_blank" rel="noopener">FP-5 Flamingo — Wikipedia</a>, <a href="https://euromaidanpress.com/?p=395865" target="_blank" rel="noopener">Euromaidan Press про FP-7 і FP-9</a>. Ка-52: <a href="https://www.globalsecurity.org/military/world/russia/ka-52-specs.htm" target="_blank" rel="noopener">GlobalSecurity</a>.</p>
+  </footer>
+</div>
+<script type="module" src="./main.js"></script>
+</body>
+</html>

@@ -122,7 +122,7 @@ On Windows, use `npm run tauri dev` from a supported developer shell.
 
 ## Current state
 
-Version 1.0.7. Technical (unsigned / ad-hoc signed) releases are published to the
+Version 2.0.0. Technical (unsigned / ad-hoc signed) releases are published to the
 public `easywar-releases` repository and installed copies update themselves
 (see [docs/UPDATES.md](docs/UPDATES.md)). Production distribution remains
 **NO-GO** until every mandatory gate in
