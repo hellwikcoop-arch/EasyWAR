@@ -1,7 +1,11 @@
 // Вкладка «Довідник» модуля «Повітряні Сили»: вікі по засобах (літаки-носії) і боєприпасах.
 // Ліворуч список зі пошуком, праворуч стаття: 3D-модель, картка з ТТХ, опис, пов’язані статті й підсумок по вашій таблиці.
-// Дані статей — ref-data.js, 3D-переглядач — ref-viewer.js (підвантажується, коли відкривають першу статтю з моделлю).
+// Дані статей — ref-data.js. 3D-переглядач боєприпасів і наземних засобів — ref-viewer.js (підвантажується, коли відкривають першу статтю з моделлю).
+// Літаки й вертольоти показує окрема сторінка aircraft-viewer.html у кадрі: власна сцена з фазами польоту, шасі, вогнями й підвіскою.
+// Решта моделей у вигляді «Інтерактивна модель» отримує сценарій за типом (ref-sim-data.js, ref-sim.js): зліт і посадка, пуск, залп, постріл.
 import * as AIR_DATA from './ref-data.js';
+import { thumbOf } from './ref-thumbs.js';
+import { simOf } from './ref-sim-data.js';
 
 function h(tag, props, ...kids) {
   const el = document.createElement(tag);
@@ -34,7 +38,7 @@ const RESULTS = [['hit', 'Уражено', 'var(--hit)'], ['part', 'Пошкод
 //   searchText(entry) — додатковий текст для пошуку (наприклад, підписи рядків таблиці).
 export function mount(host, options = {}) {
   const { rows = () => [], media = {}, motion = () => true, onSelect, groups = null, only = null, usage = true, related = true, extra = null, searchText = null } = options;
-  const { GROUPS, ENTRIES, entryById, carriersOf, munitionsOf, searchEntries, usageFor, variantsOf, modelOf, creditOf } = { ...AIR_DATA, ...(options.data || {}) };
+  const { GROUPS, ENTRIES, entryById, carriersOf, munitionsOf, searchEntries, usageFor, variantsOf, modelOf, creditOf, viewerOf, creditsOf } = { ...AIR_DATA, ...(options.data || {}) };
   const groupTitle = id => (GROUPS.find(g => g.id === id) || {}).title || '';
   // groups / only — які розділи й статті показує цей модуль (РВ бачить лише наземні засоби й ракети); usage / related — чи малювати
   // підсумок по таблиці вильотів ПС і блок «носії/боєприпаси».
@@ -55,8 +59,11 @@ export function mount(host, options = {}) {
   const stageEl = h('div', { class: 'rw-stage', tabindex: '0', role: 'img' });
   const status = h('p', { class: 'rw-status' });
   const hint = h('p', { class: 'rw-hint', text: 'Потягніть, щоб повернути. Коліщатко наближає.' });
-  stageEl.append(status, hint);
+  // Підпис поточної дії «Інтерактивної моделі» (сценарій ref-sim.js).
+  const simCap = h('p', { class: 'rw-simcap', hidden: true, 'aria-live': 'polite' });
+  stageEl.append(status, hint, simCap);
   const tools = h('div', { class: 'rw-tools' });
+  const simBar = h('div', { class: 'seg rw-simbar', role: 'group', 'aria-label': 'Що робить модель', hidden: true });
   const stageBox = h('div', { class: 'rw-stagebox' }, stageEl, tools);
 
   // dur — тривалість кнопкового переходу (мс); linear — рівномірно (для довгих покрокових анімацій).
@@ -99,7 +106,7 @@ export function mount(host, options = {}) {
   // «Позначки» — номери уразливих місць на моделі; кнопка з’являється лише в статтях, де такі місця описано.
   const marksBtn = h('button', { type: 'button', class: 'chip on', 'aria-pressed': 'true', text: 'Позначки', hidden: true, onclick: () => setMarks(marksBtn.getAttribute('aria-pressed') !== 'true') });
   const setMarks = on => { marksBtn.classList.toggle('on', on); marksBtn.setAttribute('aria-pressed', String(on)); if (viewer) viewer.setSpotsVisible(on); };
-  tools.append(h('div', { class: 'rw-toolrow' }, viewSeg, h('div', { class: 'rw-chips' }, autoBtn, marksBtn)), wingsCtl.row, apartCtl.row, actionCtl.row);
+  tools.append(simBar, h('div', { class: 'rw-toolrow' }, viewSeg, h('div', { class: 'rw-chips' }, autoBtn, marksBtn)), wingsCtl.row, apartCtl.row, actionCtl.row);
 
   async function ensureViewer() {
     if (viewer || viewerFailed) return viewer;
@@ -141,10 +148,30 @@ export function mount(host, options = {}) {
       marksBtn.hidden = !weak.length;
       v.setSpots(weak.map(w => ({ title: w.t, p: w.p })), onSpot);
       if (weak.length) setMarks(true);
+      const sim = state.mode === 'live' ? simOf(entry, viewerOf) : null;
+      if (sim) startSim(v, sim);
+      else { simBar.hidden = true; simCap.hidden = true; }
     } catch (e) {
       console.warn('Довідник: модель не завантажилась', e);
       if (mine === token) fallback(entry, 'Не вдалося завантажити модель.');
     }
+  }
+
+  // «Інтерактивна модель» для статей без окремого переглядача: кнопки фаз під сценою, підпис дії на сцені.
+  function startSim(v, sim) {
+    const phases = v.startSim(sim);
+    wingsCtl.row.hidden = true; apartCtl.row.hidden = true; actionCtl.row.hidden = true;
+    marksBtn.hidden = true; setAuto(false);
+    hint.textContent = 'Кнопки під сценою вмикають дії. Потягніть, щоб оглянути з іншого боку.';
+    const pick = id => {
+      v.setSimPhase(id);
+      simBar.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.phase === id)));
+      const ph = phases.find(p => p[0] === id);
+      simCap.textContent = ph ? ph[1] + '. ' + ph[2] : '';
+    };
+    simBar.replaceChildren(...phases.map(([id, label]) => h('button', { type: 'button', 'data-phase': id, 'aria-pressed': 'false', text: label, onclick: () => pick(id) })));
+    simBar.hidden = false; simCap.hidden = false;
+    pick(phases[0][0]);
   }
 
   // Вибір позначки на моделі (або зняття вибору, idx = -1) підсвічує пункт списку «Уразливі місця»; обертання зупиняється.
@@ -154,16 +181,52 @@ export function mount(host, options = {}) {
     const on = idx >= 0 && article.querySelector('.rw-weak[data-spot="' + idx + '"]');
     if (on && fromMarker) on.scrollIntoView({ block: 'nearest', behavior: motion() ? 'smooth' : 'auto' });
   }
-  function spotFromList(i) {
+  async function spotFromList(i) {
+    if (state.mode !== 'weak') await setMode('weak');
     if (!viewer) return;
     viewer.pickSpot(i);
     if (window.innerWidth <= 860) stageBox.scrollIntoView({ block: 'center', behavior: motion() ? 'smooth' : 'auto' });
+  }
+
+  // Стаття з інтерактивним переглядачем і моделлю для позначок має два вигляди; другий вантажиться лише на вимогу.
+  let airBox = null, modeBar = null;
+  async function setMode(m) {
+    const entry = entryById(state.id);
+    if (!entry || !modeBar || state.mode === m) return;
+    state.mode = m;
+    modeBar.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === m)));
+    if (!airBox) { await showModel(entry, token); return; }
+    airBox.hidden = m === 'weak';
+    if (m === 'weak') {
+      stageBox.hidden = false;
+      if (state.weakFor !== entry.id) { state.weakFor = entry.id; await showModel(entry, token); }
+    } else { stageBox.hidden = true; setAuto(false); }
   }
 
   function fallback(entry, why) {
     stageBox.hidden = true;
     const photo = media.photo && media.photo(entry.id);
     slot.replaceChildren(h('p', { class: 'rw-note', text: why }), photo ? h('img', { class: 'rw-photo', src: photo, alt: entry.name }) : null);
+  }
+
+  // ---------- літаки: сторінка переглядача в кадрі ----------
+  // Кожна стаття літака отримує свіжий кадр: сторінка сама завантажує потрібну модель, а попередній кадр разом зі сценою звільняється.
+  let aircraftFrame = null;
+  function aircraftBox(entry) {
+    const frame = h('iframe', { class: 'rw-air-frame', src: './aircraft-viewer.html?embed=1&a=' + encodeURIComponent(viewerOf(entry)),
+      title: entry.name + ': інтерактивна тривимірна модель', allowfullscreen: true });
+    frame.addEventListener('load', () => {
+      // Сторінка того ж походження: підганяємо висоту кадру під вміст, щоб у ньому не було власної прокрутки.
+      try {
+        const doc = frame.contentDocument, fig = doc && doc.querySelector('.fig');
+        if (!fig || typeof ResizeObserver === 'undefined') return;
+        const fit = () => { frame.style.height = Math.ceil(fig.getBoundingClientRect().height) + 'px'; };
+        fit(); new ResizeObserver(fit).observe(fig);
+      } catch (e) { /* лишається висота за замовчуванням */ }
+    });
+    aircraftFrame = frame;
+    return h('div', { class: 'rw-air' }, frame,
+      h('p', { class: 'rw-fine', text: 'Фази, системи, вогні й озброєння перемикаються кнопками під сценою або клавішами, коли сцена в фокусі (клацніть по ній). Підвіска складена для моделі, це не заводська схема.' }));
   }
 
   // ---------- стаття ----------
@@ -177,7 +240,7 @@ export function mount(host, options = {}) {
   }
 
   function relatedBlock(entry) {
-    if (!related || NO_TABLE.has(entry.group)) return null;
+    if (!related || NO_TABLE.has(entry.group) || entry.noTable) return null;
     const ids = entry.group === 'aircraft' ? munitionsOf(entry.id) : carriersOf(entry.id);
     if (!ids.length) return null;
     const title = entry.group === 'aircraft' ? 'Боєприпаси, показані з цим носієм' : 'Носії, показані з цим боєприпасом';
@@ -194,7 +257,7 @@ export function mount(host, options = {}) {
 
   function renderUsage(entry) {
     // Підсумок будується з таблиці вильотів ПС: для наземних засобів його немає.
-    usageEl.hidden = !usage || NO_TABLE.has(entry.group);
+    usageEl.hidden = !usage || NO_TABLE.has(entry.group) || entry.noTable;
     if (usageEl.hidden) { usageEl.replaceChildren(); return; }
     usageEl.replaceChildren(h('h3', { text: 'У вашій базі' }));
     const data = rows();
@@ -221,22 +284,38 @@ export function mount(host, options = {}) {
     const credit = creditOf(entry, state.variant);
     if (!credit) return null;
     if (credit.generated) return h('p', { class: 'rw-credit', text: credit.note });
+    if (credit.own) return h('p', { class: 'rw-credit', text: 'Модель «' + credit.title + '»: ' + credit.note.charAt(0).toLowerCase() + credit.note.slice(1) + ' Файл стиснуто для застосунку.' });
     return h('p', { class: 'rw-credit' }, 'Модель: «' + credit.title + '», автор ',
       h('a', { href: credit.authorUrl, target: '_blank', rel: 'noopener noreferrer', text: credit.author }),
       ', ліцензія ', h('a', { href: credit.licenseUrl, target: '_blank', rel: 'noopener noreferrer', text: credit.license }),
       '. Джерело: ', h('span', { class: 'rw-src', text: credit.url.replace(/^https?:\/\//, '') }), '. Файл стиснуто для застосунку, форму моделі не змінено.' + (credit.note ? ' ' + credit.note : ''));
   }
 
+  // Літак у переглядачі складається з кількох моделей (літак, шасі, боєприпаси, ландшафт): показуємо автора й ліцензію кожної.
+  function creditsNode(entry) {
+    const list = creditsOf(entry);
+    if (!list.length) return null;
+    return h('div', { class: 'rw-credit' }, h('p', { class: 'rw-credit-head', text: 'Моделі в переглядачі. Файли стиснуто для застосунку.' }),
+      h('ul', {}, list.map(c => h('li', {},
+        '«' + c.title + '», автор ', h('a', { href: c.authorUrl, target: '_blank', rel: 'noopener noreferrer', text: c.author }),
+        ', ліцензія ', h('a', { href: c.licenseUrl, target: '_blank', rel: 'noopener noreferrer', text: c.license }),
+        c.url ? h('span', {}, '. Джерело: ', h('span', { class: 'rw-src', text: c.url.replace(/^https?:\/\//, '') })) : null,
+        '.' + (c.note ? ' ' + c.note : '')))));
+  }
+
+  // Для ворожої техніки пункти описують уразливі місця; для своєї, боєприпасів і машин — чутливі вузли, що їх треба берегти.
+  const weakLabel = entry => (entry.group === 'enemy' ? 'Уразливі місця' : 'Чутливі вузли');
+
   // Уразливі місця: нумерований список, пов’язаний із позначками на моделі (якщо модель є, пункти — кнопки).
   function weakBlock(entry) {
     const weak = entry.weak || [];
     if (!weak.length) return null;
     const live = !!entry.model;
-    return h('section', { class: 'rw-sec rw-weaksec' }, h('h3', { text: 'Уразливі місця' }),
+    return h('section', { class: 'rw-sec rw-weaksec' }, h('h3', { text: weakLabel(entry) }),
       live ? h('p', { class: 'rw-fine', text: 'Номер на моделі й пункт списку пов’язані: натисніть, і зона підсвітиться, а модель повернеться до неї.' }) : null,
       h('ol', { class: 'rw-weaklist' }, weak.map((w, i) => h('li', {}, h(live ? 'button' : 'div', { class: 'rw-weak', type: live ? 'button' : null, 'data-spot': String(i), 'aria-pressed': live ? 'false' : null, onclick: live ? () => spotFromList(i) : null },
         h('b', { text: String(i + 1), 'aria-hidden': 'true' }), h('strong', { text: w.t }), h('span', { text: w.d }))))),
-      h('p', { class: 'rw-fine', text: 'Відкритий навчальний огляд для розпізнавання, а не бойова інструкція.' + (live ? ' Номери на моделі показують зону приблизно.' : '') }));
+      h('p', { class: 'rw-fine', text: (entry.group === 'enemy' ? 'Відкритий навчальний огляд для розпізнавання, а не бойова інструкція.' : 'Загальний довідковий огляд за відкритими даними, а не експлуатаційна чи бойова інструкція.') + (live ? ' Номери на моделі показують зону приблизно.' : '') }));
   }
 
   function sourcesNode(entry) {
@@ -276,9 +355,18 @@ export function mount(host, options = {}) {
     const activeVariant = variants.find(v => v.id === state.variant) || variants[0];
     const variantBar = variants.length ? h('div', { class: 'seg rw-variants', role: 'group', 'aria-label': 'Модель' },
       variants.map(v => h('button', { type: 'button', 'data-variant': v.id, 'aria-pressed': String(v === activeVariant), text: v.label, onclick: () => pickVariant(entry, v.id) }))) : null;
-    const creditBox = h('div', { class: 'rw-creditbox' }, creditNode(entry));
+    const creditBox = h('div', { class: 'rw-creditbox' }, viewerOf(entry) ? creditsNode(entry) : creditNode(entry));
+    // Інтерактивна модель: окремий переглядач (літаки з фазами польоту) або сценарій ref-sim.js для решти моделей.
+    const both = !!(viewerOf(entry) && entry.model) || !!simOf(entry, viewerOf);
+    state.mode = both ? 'live' : 'weak';
+    airBox = viewerOf(entry) ? aircraftBox(entry) : null;
+    modeBar = both ? h('div', { class: 'seg rw-modes', role: 'group', 'aria-label': 'Вигляд моделі' },
+      [['live', 'Інтерактивна модель'], ['weak', (entry.weak || []).length ? weakLabel(entry) : 'Огляд']].map(([m, label]) =>
+        h('button', { type: 'button', 'data-mode': m, 'aria-pressed': String(m === 'live'), text: label, onclick: () => setMode(m) }))) : null;
     const main = h('div', { class: 'rw-main' },
       variantBar,
+      modeBar,
+      airBox,
       entry.model ? stageBox : null,
       h('div', { class: 'rw-vslot' }, variantNode(entry)),
       slot,
@@ -311,12 +399,12 @@ export function mount(host, options = {}) {
       if (!items.length) continue;
       list.append(h('p', { class: 'rw-grp', role: 'presentation', text: g.title + ' · ' + items.length }));
       for (const e of items) {
-        const thumb = media.thumb && media.thumb(e.id);
+        const thumb = (media.thumb && media.thumb(e.id)) || thumbOf(e.id);
         list.append(h('button', { type: 'button', class: 'rw-item', role: 'listitem', 'data-id': e.id, 'aria-current': String(e.id === state.id),
           onclick: () => select(e.id, true) },
           thumb ? h('img', { src: thumb, alt: '', draggable: 'false' }) : h('span', { class: 'rw-mono', 'aria-hidden': 'true', text: e.short || e.name }),
           h('span', { class: 'rw-it' }, h('b', { text: e.name }), h('small', { text: (e.status ? e.status + ' · ' : '') + (e.dual ? 'Є і в ЗСУ · ' : '') + e.role })),
-          e.model ? h('span', { class: 'rw-3d', text: '3D', title: 'Є тривимірна модель' }) : null));
+          e.model || viewerOf(e) ? h('span', { class: 'rw-3d', text: '3D', title: 'Є тривимірна модель' }) : null));
       }
     }
     if (!found.length) list.append(h('p', { class: 'rw-fine rw-empty', text: 'Нічого не знайдено. Спробуйте іншу назву.' }));
@@ -337,8 +425,9 @@ export function mount(host, options = {}) {
     const mine = ++token;
     renderNav();
     renderArticle(entry);
-    if (entry.model) showModel(entry, mine);
-    else stageBox.hidden = true;
+    state.weakFor = '';
+    if (entry.model && !viewerOf(entry)) showModel(entry, mine);
+    else { stageBox.hidden = true; simBar.hidden = true; simCap.hidden = true; if (viewer) viewer.stopSim(); }
     if (onSelect) onSelect(entry.id);
     if (user && article.getBoundingClientRect().top < 0) article.scrollIntoView({ block: 'start', behavior: motion() ? 'smooth' : 'auto' });
   }
@@ -349,7 +438,7 @@ export function mount(host, options = {}) {
     select: id => select(id, false),
     refresh: () => { const e = entryById(state.id); if (e) { renderUsage(e); renderExtra(e); } },
     get id() { return state.id; },
-    dispose: () => { token++; if (viewer) viewer.dispose(); viewer = null; },
+    dispose: () => { token++; if (viewer) viewer.dispose(); viewer = null; if (aircraftFrame) aircraftFrame.src = 'about:blank'; aircraftFrame = null; },
   };
 }
 
