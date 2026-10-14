@@ -32,6 +32,7 @@ test('build emits the viewer page and a service worker that skips 3D models', as
   const config = await readFile(new URL('../vite.config.js', import.meta.url), 'utf8');
   assert.match(config, /viewer: fileURLToPath\(new URL\("\.\/src\/viewer\.html"/);
   assert.match(config, /!name\.endsWith\("\.glb"\)/, 'aircraft/munition models are not needed by the command dashboards');
+  assert.match(config, /!name\.endsWith\("\.mp4"\)/, 'the startup splash video is desktop-only and must not be precached for the phone viewer');
   assert.match(config, /easywar-viewer-\$\{version\}/, 'cache name must follow the package version so new releases replace the old cache');
 });
 

@@ -16,6 +16,7 @@ import {
   validateWorkbook,
 } from './udshv-dashboard-core.js';
 import { consumeOwnLossesTabRequest, ownLossesHost, ownLossesPage } from './own-losses-dashboard.js';
+import { playMotion, resetMotion } from './dashboard-motion.js';
 
 const state = { workbook: null, view: 'summary', preset: 'week', anchor: '', from: '', to: '', units: [], unitsOpen: false, focusUnit: null, ovt: 'destroyed', sort: 'personnel' };
 
@@ -76,8 +77,11 @@ function sparkline(series, color) {
   const width = 160, height = 38;
   if (series.length < 2) return h('div', { class: 'ud-spark' });
   const max = Math.max(1, ...series.map(s => s.value));
-  const points = series.map((s, i) => `${(i / (series.length - 1) * width).toFixed(1)},${(height - 3 - s.value / max * (height - 6)).toFixed(1)}`).join(' ');
+  const xy = series.map((s, i) => `${(i / (series.length - 1) * width).toFixed(1)},${(height - 3 - s.value / max * (height - 6)).toFixed(1)}`);
+  const points = xy.join(' ');
+  // Заливка під лінією, як у референсах (колір лінії, прозорість задає fill-opacity).
   return h('svg:svg', { class: 'ud-spark', viewBox: `0 0 ${width} ${height}`, preserveAspectRatio: 'none', 'aria-hidden': 'true' },
+    h('svg:polygon', { class: 'ud-spark-area', points: `0,${height} ${points} ${width},${height}`, fill: color, 'fill-opacity': 0.16, stroke: 'none' }),
     h('svg:polyline', { points, fill: 'none', stroke: color, 'stroke-width': 2.2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round', 'vector-effect': 'non-scaling-stroke' }));
 }
 
@@ -172,8 +176,10 @@ const ICONS = {
 function kpiIcon(key) {
   const paths = ICONS[key];
   if (!paths) return null;
-  return h('svg:svg', { class: 'ud-kpi-icon', viewBox: '0 0 24 24', width: 24, height: 24, fill: 'none', stroke: 'currentColor', 'stroke-width': 1.7, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' },
-    paths.map(d => h('svg:path', { d })));
+  // Плитка-іконка (як у картках ПВК): тонований квадрат із рамкою кольору показника.
+  return h('i', { class: 'ud-kpi-ic', 'aria-hidden': 'true' },
+    h('svg:svg', { class: 'ud-kpi-icon', viewBox: '0 0 24 24', width: 24, height: 24, fill: 'none', stroke: 'currentColor', 'stroke-width': 1.7, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' },
+      paths.map(d => h('svg:path', { d }))));
 }
 
 function kpiCard(k, onClick) {
@@ -262,7 +268,7 @@ function ovtPage(model, go) {
     h('div', { class: 'ud-kpis ud-kpis-3' }, model.kpis.filter(k => OVT_GROUPS.includes(k.key)).map(k => kpiCard(k, () => { state.ovt = k.key; go(); }))),
     h('div', { class: 'ud-tabs' }, OVT_GROUPS.map(g => h('button', { type: 'button', 'aria-pressed': String(g === key), onclick: () => { state.ovt = g; go(); }, text: groupInfo(g).name }))),
     h('div', { class: 'ud-grid-2' },
-      section(`${groupInfo(key).name}: типи ОВТ`, null, rankBars(model.groups[key], color, 24)),
+      section(`${groupInfo(key).name}: типи ОВТ`, `усього ${number(model.kpis.find(k => k.key === key).total)} за період · ${number(model.ovtOverall[key])} за весь час`, rankBars(model.groups[key], color, 24)),
       section('Динаміка', null, stackedBars(model.ovtSeries.map(s => ({ ...s, value: { [key]: s.value[key] } })), OVT_KEYS.filter(k => k.key === key), model.bucket))),
     section(`${groupInfo(key).name}: підрозділ × тип`, null, heatmap(model.matrix[key], color, unit => { state.units = [unit]; go(); })));
 }
@@ -456,12 +462,15 @@ export function render(host, workbook, options = {}) {
       h('span', { text: `${model.activeDays} з ${model.days} днів із даними · ${compare}` }),
       state.units.length ? h('button', { type: 'button', class: 'ud-link', onclick: () => { state.units = []; go(); }, text: '× усі підрозділи' }) : null,
       freshHint(go)),
-    h('nav', { class: 'ud-nav', 'aria-label': 'Розділи дашборда УДШВ' }, nav.map(([key, label]) => h('button', { type: 'button', 'aria-pressed': String(state.view === key), onclick: () => { state.view = key; go(); }, text: label }))),
+    h('nav', { class: 'ud-nav', 'aria-label': 'Розділи дашборда УДШВ' }, nav.map(([key, label]) => h('button', { type: 'button', 'data-nav': key, 'aria-pressed': String(state.view === key), onclick: () => { state.view = key; go(); }, text: label }))),
     page].filter(Boolean));
+  // «Наші втрати» отримують дані пізніше за перехід на вкладку: поява таблиці теж анімується.
+  playMotion(root, own && root.querySelector('.ol-kpi') ? 'own:data' : state.view);
 }
 
 export function unmount(host) {
   if (!host) return;
+  resetMotion(host.querySelector(':scope > #udshv-dashboard-root'));
   host.classList.remove('udshv-mode');
   host.querySelector(':scope > #udshv-dashboard-root')?.remove();
 }

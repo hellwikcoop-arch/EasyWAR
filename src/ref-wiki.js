@@ -209,12 +209,23 @@ export function mount(host, options = {}) {
       '. Джерело: ', h('span', { class: 'rw-src', text: credit.url.replace(/^https?:\/\//, '') }), '. Файл стиснуто для застосунку, форму моделі не змінено.' + (credit.note ? ' ' + credit.note : ''));
   }
 
+  // Дані вибраного варіанта (необов’язкові: variant.facts — пари «назва, значення», variant.text — короткий опис). Без них блоку немає.
+  function variantNode(entry) {
+    const v = variantsOf(entry).find(x => x.id === state.variant) || variantsOf(entry)[0];
+    if (!v || (!v.facts && !v.text)) return null;
+    return h('div', { class: 'rw-vbox' }, h('h4', { text: v.label }),
+      v.text ? h('p', { text: v.text }) : null,
+      v.facts ? h('dl', { class: 'rw-facts' }, v.facts.map(([k, val]) => h('div', {}, h('dt', { text: k }), h('dd', { text: val })))) : null);
+  }
+
   function pickVariant(entry, id) {
     if (state.variant === id || state.id !== entry.id) return;
     state.variant = id;
     article.querySelectorAll('.rw-variants button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.variant === id)));
     const box = article.querySelector('.rw-creditbox');
     if (box) box.replaceChildren(creditNode(entry));
+    const vslot = article.querySelector('.rw-vslot');
+    if (vslot) vslot.replaceChildren(...[variantNode(entry)].filter(Boolean));
     showModel(entry, ++token);
   }
 
@@ -242,6 +253,7 @@ export function mount(host, options = {}) {
     const main = h('div', { class: 'rw-main' },
       variantBar,
       entry.model ? stageBox : null,
+      h('div', { class: 'rw-vslot' }, variantNode(entry)),
       slot,
       h('p', { class: 'rw-summary', text: entry.summary }),
       artEl,

@@ -5,6 +5,7 @@
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1, viewport-fit=cover" name="viewport"/>
 <meta content="dark" name="color-scheme"/>
+<link href="./startup-splash.css" rel="stylesheet"/>
 <title>easyWAR — Рід військ</title>
 <style>
 :root {
@@ -725,6 +726,8 @@ body[data-active-branch="air"] #branch-controls,body[data-active-branch="pvk"] #
 </style>
 </head>
 <body>
+<!-- Заставка після запуску: оболонка накриває лаунчер, вміст будує startup-splash.js -->
+<div class="ew-splash" id="ew-splash"></div>
 <!-- Головний екран взято з RID VIYSK.html -->
 <main class="start-screen" id="view-start">
 <div aria-label="Профіль і налаштування EasyWAR" class="appbar-right ew-start-tools"></div>
@@ -964,5 +967,6 @@ body[data-active-branch="air"] #branch-controls,body[data-active-branch="pvk"] #
 })();
 </script>
 <script type="module" src="./launcher-tools.js"></script>
+<script type="module" src="./startup-splash.js"></script>
 </body>
 </html>

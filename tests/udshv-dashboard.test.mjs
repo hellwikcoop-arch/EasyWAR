@@ -108,6 +108,13 @@ test('builds week, month and whole-period analytics with comparison to the previ
 
   const oneUnit = createDashboardModel(wb, { range: periodRange(wb, 'all'), unit: 'РУК 148 оабр' });
   assert.equal(oneUnit.kpis.find(k => k.key === 'kia').total, 1);
+
+  // Загальний підсумок ОВТ не залежить від обраного періоду, але враховує фільтр підрозділів.
+  assert.deepEqual(month.ovtOverall, all.ovtOverall);
+  assert.equal(all.ovtOverall.destroyed, all.kpis.find(k => k.key === 'destroyed').total);
+  const augustOnly = createDashboardModel(wb, { range: periodRange(wb, 'day', '2026-08-01'), preset: 'day' });
+  assert.equal(augustOnly.ovtOverall.destroyed, all.ovtOverall.destroyed);
+  assert.equal(oneUnit.ovtOverall.destroyed, 0);
 });
 
 test('filters by several units at once', () => {
