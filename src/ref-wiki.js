@@ -18,6 +18,8 @@ function h(tag, props, ...kids) {
 
 const N0 = n => Number(n).toLocaleString('uk-UA');
 const dmy = iso => (/^(\d{4})-(\d\d)-(\d\d)/.exec(iso || '') || []).slice(1).reverse().join('.');
+// Групи, для яких таблиця вильотів нічого не каже: наземні машини, ворожа й чужа техніка (підсумок «У вашій базі» й блок носіїв не будуються).
+const NO_TABLE = new Set(['ground', 'support', 'enemy', 'other']);
 const VIEW_BUTTONS = [['three-quarter', '3/4'], ['side', 'Збоку'], ['front', 'Спереду'], ['top', 'Зверху'], ['rear', 'Ззаду']];
 const RESULTS = [['hit', 'Уражено', 'var(--hit)'], ['part', 'Пошкоджено', 'var(--part)'], ['miss', 'Не уражено', 'var(--miss)'], ['unk', 'Не відомо', 'var(--unk)']];
 
@@ -97,7 +99,10 @@ export function mount(host, options = {}) {
   const markView = v => viewSeg.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.view === v)));
   const autoBtn = h('button', { type: 'button', class: 'chip', 'aria-pressed': 'false', text: 'Обертати', onclick: () => setAuto(!(viewer && viewer.auto)) });
   const setAuto = on => { if (viewer) viewer.auto = on; autoBtn.classList.toggle('on', on); autoBtn.setAttribute('aria-pressed', String(on)); };
-  tools.append(h('div', { class: 'rw-toolrow' }, viewSeg, autoBtn), wingsCtl.row, apartCtl.row, actionCtl.row);
+  // «Позначки» — номери уразливих місць на моделі; кнопка з’являється лише в статтях, де такі місця описано.
+  const marksBtn = h('button', { type: 'button', class: 'chip on', 'aria-pressed': 'true', text: 'Позначки', hidden: true, onclick: () => setMarks(marksBtn.getAttribute('aria-pressed') !== 'true') });
+  const setMarks = on => { marksBtn.classList.toggle('on', on); marksBtn.setAttribute('aria-pressed', String(on)); if (viewer) viewer.setSpotsVisible(on); };
+  tools.append(h('div', { class: 'rw-toolrow' }, viewSeg, h('div', { class: 'rw-chips' }, autoBtn, marksBtn)), wingsCtl.row, apartCtl.row, actionCtl.row);
 
   async function ensureViewer() {
     if (viewer || viewerFailed) return viewer;
@@ -135,10 +140,27 @@ export function mount(host, options = {}) {
       else hint.textContent = 'Потягніть, щоб повернути. Коліщатко наближає.';
       markView('three-quarter');
       setAuto(motion());
+      const weak = entry.weak || [];
+      marksBtn.hidden = !weak.length;
+      v.setSpots(weak.map(w => ({ title: w.t, p: w.p })), onSpot);
+      if (weak.length) setMarks(true);
     } catch (e) {
       console.warn('Довідник: модель не завантажилась', e);
       if (mine === token) fallback(entry, 'Не вдалося завантажити модель.');
     }
+  }
+
+  // Вибір позначки на моделі (або зняття вибору, idx = -1) підсвічує пункт списку «Уразливі місця»; обертання зупиняється.
+  function onSpot(idx, fromMarker) {
+    setAuto(false);
+    article.querySelectorAll('.rw-weak').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.spot === idx)));
+    const on = idx >= 0 && article.querySelector('.rw-weak[data-spot="' + idx + '"]');
+    if (on && fromMarker) on.scrollIntoView({ block: 'nearest', behavior: motion() ? 'smooth' : 'auto' });
+  }
+  function spotFromList(i) {
+    if (!viewer) return;
+    viewer.pickSpot(i);
+    if (window.innerWidth <= 860) stageBox.scrollIntoView({ block: 'center', behavior: motion() ? 'smooth' : 'auto' });
   }
 
   function fallback(entry, why) {
@@ -159,7 +181,7 @@ export function mount(host, options = {}) {
   }
 
   function relatedBlock(entry) {
-    if (!related || entry.group === 'ground' || entry.group === 'support') return null;
+    if (!related || NO_TABLE.has(entry.group)) return null;
     const ids = entry.group === 'aircraft' ? munitionsOf(entry.id) : carriersOf(entry.id);
     if (!ids.length) return null;
     const title = entry.group === 'aircraft' ? 'Боєприпаси, показані з цим носієм' : 'Носії, показані з цим боєприпасом';
@@ -176,7 +198,7 @@ export function mount(host, options = {}) {
 
   function renderUsage(entry) {
     // Підсумок будується з таблиці вильотів ПС: для наземних засобів його немає.
-    usageEl.hidden = !usage || entry.group === 'ground' || entry.group === 'support';
+    usageEl.hidden = !usage || NO_TABLE.has(entry.group);
     if (usageEl.hidden) { usageEl.replaceChildren(); return; }
     usageEl.replaceChildren(h('h3', { text: 'У вашій базі' }));
     const data = rows();
@@ -207,6 +229,24 @@ export function mount(host, options = {}) {
       h('a', { href: credit.authorUrl, target: '_blank', rel: 'noopener noreferrer', text: credit.author }),
       ', ліцензія ', h('a', { href: credit.licenseUrl, target: '_blank', rel: 'noopener noreferrer', text: credit.license }),
       '. Джерело: ', h('span', { class: 'rw-src', text: credit.url.replace(/^https?:\/\//, '') }), '. Файл стиснуто для застосунку, форму моделі не змінено.' + (credit.note ? ' ' + credit.note : ''));
+  }
+
+  // Уразливі місця: нумерований список, пов’язаний із позначками на моделі (якщо модель є, пункти — кнопки).
+  function weakBlock(entry) {
+    const weak = entry.weak || [];
+    if (!weak.length) return null;
+    const live = !!entry.model;
+    return h('section', { class: 'rw-sec rw-weaksec' }, h('h3', { text: 'Уразливі місця' }),
+      live ? h('p', { class: 'rw-fine', text: 'Номер на моделі й пункт списку пов’язані: натисніть, і зона підсвітиться, а модель повернеться до неї.' }) : null,
+      h('ol', { class: 'rw-weaklist' }, weak.map((w, i) => h('li', {}, h(live ? 'button' : 'div', { class: 'rw-weak', type: live ? 'button' : null, 'data-spot': String(i), 'aria-pressed': live ? 'false' : null, onclick: live ? () => spotFromList(i) : null },
+        h('b', { text: String(i + 1), 'aria-hidden': 'true' }), h('strong', { text: w.t }), h('span', { text: w.d }))))),
+      h('p', { class: 'rw-fine', text: 'Відкритий навчальний огляд для розпізнавання, а не бойова інструкція.' + (live ? ' Номери на моделі показують зону приблизно.' : '') }));
+  }
+
+  function sourcesNode(entry) {
+    if (!entry.sources || !entry.sources.length) return null;
+    return h('p', { class: 'rw-fine rw-sources' }, 'Джерела: ', entry.sources.map((src, i) => [i ? ', ' : null,
+      h('a', { href: src.url, target: '_blank', rel: 'noopener noreferrer', text: src.title })]));
   }
 
   // Дані вибраного варіанта (необов’язкові: variant.facts — пари «назва, значення», variant.text — короткий опис). Без них блоку немає.
@@ -256,14 +296,17 @@ export function mount(host, options = {}) {
       h('div', { class: 'rw-vslot' }, variantNode(entry)),
       slot,
       h('p', { class: 'rw-summary', text: entry.summary }),
+      entry.dual ? h('p', { class: 'rw-warn' }, h('b', { text: 'Увага. ' }), entry.dual) : null,
+      weakBlock(entry),
       artEl,
       entry.sections.map(s => h('section', { class: 'rw-sec' }, h('h3', { text: s.title }),
         s.text ? h('p', { text: s.text }) : null, s.list ? h('ul', {}, s.list.map(t => h('li', { text: t }))) : null)),
+      sourcesNode(entry),
       relatedBlock(entry), usageEl, extraEl,
       creditBox);
     article.replaceChildren(
       h('header', { class: 'rw-head' }, h('p', { class: 'rw-eyebrow', text: groupTitle(entry.group) + ' · ' + entry.origin }),
-        h('h2', { text: entry.name }, entry.status ? h('span', { class: 'rw-badge', text: entry.status }) : null), h('p', { class: 'rw-alias', text: entry.alias })),
+        h('h2', { text: entry.name }, entry.status ? h('span', { class: 'rw-badge', text: entry.status }) : null, entry.dual ? h('span', { class: 'rw-badge rw-both', title: 'Тип є і в ЗСУ', text: 'Обидві сторони' }) : null), h('p', { class: 'rw-alias', text: entry.alias })),
       h('div', { class: 'rw-body' }, main, info));
     slot.replaceChildren();
     renderArt(entry);
@@ -273,6 +316,7 @@ export function mount(host, options = {}) {
 
   // ---------- список ----------
   function renderNav() {
+    seg.classList.toggle('rw-seg-wrap', groupList.length > 3);
     seg.replaceChildren(...[['', 'Усе'], ...groupList.map(g => [g.id, g.tab || g.title])].map(([id, label]) =>
       h('button', { type: 'button', text: label, 'aria-pressed': String(state.group === id), onclick: () => { state.group = id; renderNav(); } })));
     const found = searchEntries(state.q, state.group, searchText).filter(visible);
@@ -287,7 +331,7 @@ export function mount(host, options = {}) {
         list.append(h('button', { type: 'button', class: 'rw-item', role: 'listitem', 'data-id': e.id, 'aria-current': String(e.id === state.id),
           onclick: () => select(e.id, true) },
           thumb ? h('img', { src: thumb, alt: '', draggable: 'false' }) : sil ? h('img', { class: 'rw-sil', src: sil, alt: '', draggable: 'false' }) : h('span', { class: 'rw-mono', 'aria-hidden': 'true', text: e.short || e.name }),
-          h('span', { class: 'rw-it' }, h('b', { text: e.name }), h('small', { text: e.status ? e.status + ' · ' + e.role : e.role })),
+          h('span', { class: 'rw-it' }, h('b', { text: e.name }), h('small', { text: (e.status ? e.status + ' · ' : '') + (e.dual ? 'Є і в ЗСУ · ' : '') + e.role })),
           e.model ? h('span', { class: 'rw-3d', text: '3D', title: 'Є тривимірна модель' }) : null));
       }
     }
