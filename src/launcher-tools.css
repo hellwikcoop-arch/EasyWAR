@@ -56,11 +56,12 @@
 /* The sign-in screen covers the launcher and any open module. */
 .ew-lock { z-index: 2000; }
 
-/* «Lite-версія»: повідомлення під рядком кнопок — куди збережено файл або чому не вийшло. */
+/* «Lite-версія»: повідомлення під рядком кнопок — куди збережено файл або чому не вийшло.
+   Базис 100% і лівий відступ «ширина контейнера мінус 520px» змушують його переноситись на
+   власний рядок (з однією лише max-width воно стало б поруч із кнопками) і стискатись до 520px. */
 .ew-start-tools .ew-lite-note {
   flex: 0 1 100%;
-  max-width: 520px;
-  margin: 0 0 0 auto;
+  margin: 0 0 0 max(0px, calc(100% - 520px));
   padding: 9px 13px;
   font-size: 13px;
   line-height: 1.45;
