@@ -161,3 +161,35 @@
 Другу партію типів (L15A1, KTA 5938, LU 211, ER02A1, OFd MKM, M77B, M1A1 ERFB BT, M116, DM105, LU 214, ERFB Smoke WP, DM642, M449; 152 мм 3ОФ25 і 3ОФ61; 203 мм M106, M509A1 і 3ОФ43; 105 мм M1) побудовано так само, процедурно. Числа — зі сторінок bk155.com.ua і відкритих довідників (Вікіпедія, виробники, музейні описи); зображень і текстів звідти не копіювали. Де джерела не вказують довжину корпусу (KTA 5938, OFd MKM, M77B, M1A1 ERFB BT, M116, 3ОФ43), довжину моделі оцінено, і це позначено у статті.
 
 Підривники (23 моделі: M557, M739A1, DM211, KTA 7962, M51A5, M78, DM371, M582, M520A1, M501, M67A3, DM163, M762A1, M782, DM52A2, DM74, M8611A1, M732A2, PPD 440, FU-RALEC DE F3, OF Zonar 75B MK, FRAPPE F1 і M1156) побудовано процедурно у файлі `src/artillery-fuze-3d.js`: тіла обертання за повною й видимою довжиною, діаметром і описаними на сторінках bk155.com.ua деталями (кільце часу, ковпачок, запобіжна чека, пропелер повітрозабірника, кільце режимів). Зображень і текстів з сайту не копіювали; фотографій підривників для побудови моделей не використовували, тому форма голівки, кільця й носа та забарвлення умовні там, де сайт їх не описує. Де сайт не називає діаметр чи видиму частину, у статті сказано, що це оцінка. Ще 17 підривників з розділу сайту подано в статтях лише текстом, без моделей.
+
+## ka-52.glb — Ка-52 (Russian Ka-52 Alligator)
+
+- Автор: 42manako (<https://sketchfab.com/42manako>)
+- Джерело: <https://sketchfab.com/3d-models/russian-ka-52-alligator-9b31733ceed24be49b2f621487b35ea9>
+- Ліцензія: Creative Commons Attribution 4.0 (CC BY 4.0), <http://creativecommons.org/licenses/by/4.0/>
+
+Змінено: стиснуто для застосунку (≈ 4,2 МБ), форма моделі не змінювалася. Прозорі матеріали виправляються під час завантаження (`fixMaterials` у `ref-viewer.js`). Модель належить статті «Ворожа техніка».
+
+## mi-8tv.glb — Мі-8ТВ (Mi-8TB (War Thunder))
+
+- Автор: KojfDiscord (<https://sketchfab.com/KojfDiscord>)
+- Джерело: <https://sketchfab.com/3d-models/mi-8tb-war-thunder-war-thunder-9e8deeb240964b2eba81b462041e8967>
+- Ліцензія: Creative Commons Attribution 4.0 (CC BY 4.0), <http://creativecommons.org/licenses/by/4.0/>
+
+Змінено: конвертовано з вихідного формату в glTF і стиснуто (геометрія — meshopt, текстури — WebP, ≈ 4,9 МБ), форма моделі не змінювалася. Ліцензію й автора взято з даних, що супроводжували файл; сторінку Sketchfab не було відкрито для повторної перевірки.
+
+## fp-5-flamingo.glb — FP-5 «Фламінго» (Missile FP-5 Flamingo 3D model)
+
+- Автор: rombic991 (<https://sketchfab.com/rombic991>)
+- Джерело: <https://sketchfab.com/3d-models/missile-fp-5-flamingo-3d-model-d638fc564342416baa4480ed1900d407>
+- Ліцензія: Creative Commons Attribution 4.0 (CC BY 4.0), <http://creativecommons.org/licenses/by/4.0/>
+
+Змінено: конвертовано з вихідного формату в glTF і стиснуто (геометрія — meshopt, текстури — WebP, ≈ 0,3 МБ), форма моделі не змінювалася. Ліцензію й автора взято з даних, що супроводжували файл; сторінку Sketchfab не було відкрито для повторної перевірки.
+
+## fp-7.glb — FP-7 (Firepoint FP-7 ballistic missile)
+
+- Автор: FLIGHTCLUB UA (профіль автора не перевірено, тому посилання веде на сторінку моделі)
+- Джерело: <https://sketchfab.com/3d-models/firepoint-fp-7-ballistic-missile-a2da452aa5f94611b54b9d56757b61f0>
+- Ліцензія: Creative Commons Attribution 4.0 (CC BY 4.0), <http://creativecommons.org/licenses/by/4.0/>
+
+Змінено: конвертовано з вихідного формату в glTF і стиснуто (геометрія — meshopt, текстури — WebP, ≈ 0,4 МБ), форма моделі не змінювалася. Ліцензію й автора взято з даних, що супроводжували файл; сторінку Sketchfab не було відкрито для повторної перевірки.

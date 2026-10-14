@@ -7,6 +7,11 @@
 .rw-search:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .rw-seg { display: flex; }
 .rw-seg button { flex: 1; padding-inline: 6px; }
+/* Коли розділів більше чотирьох (разом з «Усе»), вони не вміщуються в один рядок вузької панелі: переносимо по три в ряд. */
+.rw-seg-wrap { display: grid; grid-template-columns: repeat(3, 1fr); }
+.rw-seg-wrap button + button { border-left: 0; }
+.rw-seg-wrap button:not(:nth-child(3n+1)) { border-left: 1px solid var(--line-strong); }
+.rw-seg-wrap button:nth-child(n+4) { border-top: 1px solid var(--line-strong); }
 .rw-list { display: grid; gap: 4px; }
 .rw-grp { margin: 10px 2px 2px; font-size: 11.5px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); }
 .rw-item { display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; align-items: center; gap: 10px; width: 100%; text-align: left; font: inherit; color: var(--ink); background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 6px 8px; cursor: pointer; }
@@ -76,6 +81,25 @@
 .rw-slider input[type=range] { width: 100%; accent-color: var(--accent); }
 .rw-val { font: 12px var(--mono); color: var(--muted); text-align: right; }
 .rw-slider .btn { min-height: 32px; padding: 4px 10px; font-size: 13px; }
+
+/* ворожа техніка: позначки на моделі, список уразливих місць, застереження «Обидві сторони» */
+.rw-chips { display: flex; gap: 8px; align-items: center; }
+.rw-spot { position: absolute; z-index: 2; display: grid; place-items: center; width: 26px; height: 26px; padding: 0; transform: translate(-50%, -50%); border: 2px solid #e8b04a; border-radius: 50%; background: rgba(9, 18, 24, .86); color: #fff; font: 700 12px/1 var(--mono); cursor: pointer; transition: opacity .15s, background-color .15s, color .15s; }
+.rw-spot[hidden] { display: none; }
+.rw-spot:hover, .rw-spot:focus-visible { background: #e8b04a; color: #0d0d0f; outline: none; }
+.rw-spot.on { background: #e8b04a; color: #0d0d0f; box-shadow: 0 0 0 4px rgba(232, 176, 74, .35); }
+.rw-spot.is-hid { opacity: .25; pointer-events: none; }
+.rw-warn { margin: 0; padding: 10px 12px; max-width: 72ch; border: 1px solid var(--warn-line); border-radius: 8px; background: var(--warn-soft); color: var(--ink); line-height: 1.5; }
+.rw-warn b { color: var(--warn); letter-spacing: .04em; text-transform: uppercase; font-size: 12.5px; }
+.rw-weaklist { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.rw-weak { display: grid; grid-template-columns: 28px minmax(0, 1fr); column-gap: 10px; row-gap: 2px; width: 100%; max-width: 72ch; padding: 9px 12px; text-align: left; font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+button.rw-weak { cursor: pointer; }
+button.rw-weak:hover { border-color: var(--accent); }
+button.rw-weak[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.rw-weak b { grid-row: span 2; display: grid; place-items: center; width: 24px; height: 24px; border: 2px solid #e8b04a; border-radius: 50%; font: 700 12px/1 var(--mono); }
+.rw-weak strong { font-weight: 650; }
+.rw-weak span { color: var(--muted); font-size: 13.5px; line-height: 1.45; }
+.rw-sources a { color: var(--accent); }
 
 /* пов’язані статті */
 .rw-rel { display: flex; flex-wrap: wrap; gap: 10px; }
