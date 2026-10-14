@@ -69,15 +69,26 @@ export function leftoverReferences(html) {
   return [...found];
 }
 
-export async function buildPage({ page, command, file }, outDir) {
+// Класичні скрипти з src/public (підключені як <script src="./x.js">) вкладаються в сторінку текстом.
+export function publicText(name) {
+  try { return readFileSync(src(`public/${name}`), 'utf8'); } catch { return null; }
+}
+
+export function packageVersion() {
+  return JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
+}
+
+// Збирає одну сторінку Vite у пам'яті: її HTML і файли (скрипти, стилі), які inlinePage вкладає в HTML.
+// `define` і `plugins` потрібні збіркам, що відрізняються від повного застосунку (ПВК без презентації, lite).
+export async function bundlePage(page, { define = {}, plugins = [] } = {}) {
   const result = await build({
     root: src(''),
     configFile: false,
     base: './',
     logLevel: 'warn',
     publicDir: false,
-    // ПВК (air.html) у командному режимі не має кнопки «Презентація»: код презентації в його файл не потрапляє.
-    define: page === 'air' ? { __EW_NO_MODULE_PRESENTATION__: 'true' } : {},
+    plugins,
+    define,
     build: {
       write: false,
       target: 'safari13',
@@ -100,11 +111,14 @@ export async function buildPage({ page, command, file }, outDir) {
     else if (item.fileName.endsWith('.css')) files[item.fileName] = String(item.source);
   }
   if (html === null) throw new Error(`No HTML produced for ${page}`);
-  const publicText = (name) => {
-    try { return readFileSync(src(`public/${name}`), 'utf8'); } catch { return null; }
-  };
+  return { html, files };
+}
+
+export async function buildPage({ page, command, file }, outDir) {
+  // ПВК (air.html) у командному режимі не має кнопки «Презентація»: код презентації в його файл не потрапляє.
+  const { html, files } = await bundlePage(page, { define: page === 'air' ? { __EW_NO_MODULE_PRESENTATION__: 'true' } : {} });
   let single = inlinePage(html, files, publicText, command);
-  const version = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
+  const version = packageVersion();
   single = single.replace(/^(\s*<!doctype html>)/i, `$1\n<!-- EasyWAR ${version} standalone: автономний файл, працює без інтернету -->`);
   const left = leftoverReferences(single);
   const allowed = left.filter((ref) => !ref.endsWith('.glb'));

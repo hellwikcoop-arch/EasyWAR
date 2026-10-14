@@ -186,8 +186,10 @@ function goTab(id) {
   if (id === 'entry') S.unitId = '';           // на вкладці «Внесення» спершу обирається підрозділ
   S.tab = id; renderAll();
 }
+// Lite-версія (script/build_lite.mjs) без довідників із моделями: збірка підставляє __EW_LITE__ = true, вкладки «Довідник» немає.
+const LITE = typeof __EW_LITE__ !== 'undefined' && __EW_LITE__;
 const TABS = [
-  ['summary', 'Зведення'], ['entry', 'Внесення'], ['units', 'Підрозділи'], ['ammo', 'Боєприпаси'], ['charges', 'Заряди'], ['losses', 'Втрати противника'], ['ref', 'Довідник'], ['check', 'Перевірка'],
+  ['summary', 'Зведення'], ['entry', 'Внесення'], ['units', 'Підрозділи'], ['ammo', 'Боєприпаси'], ['charges', 'Заряди'], ['losses', 'Втрати противника'], ...(LITE ? [] : [['ref', 'Довідник']]), ['check', 'Перевірка'],
 ];
 function renderTabs() {
   const nav = $('tabs'); nav.textContent = '';

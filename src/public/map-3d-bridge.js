@@ -14,6 +14,7 @@
     if (/[?&]viewer=1/.test(location.search)) return false;                   // телефонний переглядач: 100+ МБ карти йому не потрібні
     if (location.protocol === 'file:') return false;                          // автономний файл: поруч немає map.html
     if (document.getElementById('easywar-embedded-table')) return false;      // збірка для телефона
+    if (document.documentElement.hasAttribute('data-lite')) return false;     // lite-версія (script/build_lite.mjs): карти з рельєфом у файлі немає
     return hasGl();
   }
   function theme() { return document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'; }

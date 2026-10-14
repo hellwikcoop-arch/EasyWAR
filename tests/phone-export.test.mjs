@@ -58,7 +58,8 @@ test('launcher wires the button on both command tiles and the desktop build ship
   const conf = JSON.parse(await read('src-tauri/tauri.conf.json'));
   assert.equal(conf.build.beforeBuildCommand, 'npm run build:app');
   const pkg = JSON.parse(await read('package.json'));
-  assert.equal(pkg.scripts['build:app'], 'vite build && node script/build_standalone.mjs --out dist/standalone');
+  // Після файлів для телефона тим самим кроком збирається lite-версія (tests/lite-build.test.mjs).
+  assert.equal(pkg.scripts['build:app'], 'vite build && node script/build_standalone.mjs --out dist/standalone && node script/build_lite.mjs --out dist/standalone');
   const lib = await read('src-tauri/src/lib.rs');
   assert.match(lib, /async fn export_phone_file\(/);
   assert.match(lib, /^\s+export_phone_file,$/m);
