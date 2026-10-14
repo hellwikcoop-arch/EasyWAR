@@ -1,8 +1,9 @@
 // Profile, backup, updates and Signal on the start screen, next to the choice of
 // branch. Each script prepends its button to the toolbar, so this order shows
-// «Профіль», «Резервна копія», «Оновлення», «Signal».
+// «Профіль», «Резервна копія», «Оновлення», «Signal». «Lite-версія» дописується в кінець рядка.
 import './launcher-tools.css';
 import './signal-settings.js';
 import './backup.js';
 import './local-profiles.js';
 import './phone-export.js';
+import './lite-export.js';

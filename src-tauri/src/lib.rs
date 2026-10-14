@@ -4,6 +4,7 @@ pub mod backup;
 pub mod base_tables;
 mod database;
 mod desktop_shell;
+pub mod lite_export;
 pub mod local_profiles;
 mod migration_startup;
 pub mod phone_export;
@@ -493,6 +494,41 @@ async fn export_phone_file(
         path: path.to_string_lossy().into_owned(),
         table: table_name,
     }))
+}
+
+/// Зберігає lite-версію EasyWAR: один автономний HTML-файл з усіма модулями, без довідників із
+/// моделями. Файл уже зібраний разом із застосунком (`script/build_lite.mjs`), тут його лише
+/// віддають зі вбудованих ресурсів у місце, яке обрав користувач. Даних користувача у файлі немає.
+/// Повертає `None`, якщо вікно вибору закрито, інакше шлях збереженого файлу.
+#[tauri::command]
+async fn export_lite_file(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let bytes = app
+        .asset_resolver()
+        .get(lite_export::ASSET_PATH.to_string())
+        .map(|asset| asset.bytes)
+        .filter(|bytes| lite_export::is_lite_html(bytes))
+        .ok_or_else(|| lite_export::UNAVAILABLE.to_string())?;
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title(lite_export::DIALOG_TITLE)
+            .set_file_name(lite_export::FILE_NAME)
+            .add_filter("Сторінка HTML", &["html"])
+            .blocking_save_file()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let path =
+        phone_export::with_html_extension(selected.into_path().map_err(|error| error.to_string())?);
+    let target = path.clone();
+    tauri::async_runtime::spawn_blocking(move || phone_export::write_file(&target, &bytes))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| format!("Не вдалося зберегти файл: {error}"))?;
+    Ok(Some(path.to_string_lossy().into_owned()))
 }
 
 async fn bound_database_path(
@@ -1274,6 +1310,7 @@ pub fn run() {
             choose_profile_database,
             create_profile_base_table,
             export_phone_file,
+            export_lite_file,
             save_presentation,
             clear_profile_database,
             read_profile_database,

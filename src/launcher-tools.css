@@ -55,3 +55,23 @@
 
 /* The sign-in screen covers the launcher and any open module. */
 .ew-lock { z-index: 2000; }
+
+/* «Lite-версія»: повідомлення під рядком кнопок — куди збережено файл або чому не вийшло. */
+.ew-start-tools .ew-lite-note {
+  flex: 0 1 100%;
+  max-width: 520px;
+  margin: 0 0 0 auto;
+  padding: 9px 13px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink);
+  background: rgba(6, 16, 26, .86);
+  border: 1px solid rgba(255, 255, 255, .16);
+  border-radius: 10px;
+  overflow-wrap: anywhere;
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+}
+.ew-start-tools .ew-lite-note[data-kind="ok"] { border-color: var(--ok); }
+.ew-start-tools .ew-lite-note[data-kind="error"] { border-color: var(--bad); }
+.ew-start-tools .ew-lite-note[hidden] { display: none; }
