@@ -5,13 +5,14 @@
 // під моделлю, а початок файлу моделі (земля, вісь машини) лежить у групі ride, яка нахиляється за рельєфом.
 // Інтерфейс збігається з Sim (ref-sim.js): phases, distance, set(id), step(dt), pose(), dispose() — переглядач вибирає рушій за
 // cfg.machine. Числа швидкостей і часу — з артефактів автора моделей; це демонстрація роботи вузлів, а не ТТХ зразка.
-import { CircleGeometry, Color, Fog, Group, Mesh, MeshBasicMaterial, MeshStandardMaterial, PlaneGeometry, RepeatWrapping, Box3, Vector3 } from 'three';
+import { CircleGeometry, Color, Fog, Group, Matrix4, Mesh, MeshBasicMaterial, MeshStandardMaterial, PlaneGeometry, Quaternion, RepeatWrapping, Box3, Vector3 } from 'three';
 import { D2R, Fx, clamp, ease, groundTexture, softTexture } from './ref-fx.js';
 import { Terrain, groundPose } from './ref-terrain.js';
 import { Tracks, buildWheels } from './ref-gear.js';
-import { LAUNCHERS, TRACKED, WHEELED, axleGroups } from './ref-rig-data.js';
-import { Flight, ROCKETS, proceduralRocket } from './ref-flight.js';
+import { LAUNCHERS, TELS, TRACKED, WHEELED, axleGroups } from './ref-rig-data.js';
+import { Debris, Flight, ROCKETS, proceduralRocket } from './ref-flight.js';
 import { PodLauncher, buildPodRig } from './ref-launchers.js';
+import { TelLauncher, buildTelRig } from './ref-tel.js';
 import { STATUS_TEXT } from './ref-sim-data.js';
 
 // Колір туману збігається з фоном сцени: поле тоне в ньому, і край ландшафту не видно. Туман густішає до FOG_FAR метрів: бічні ряди
@@ -23,6 +24,9 @@ const TILE = 24, TILES = 15;
 const ROCKET_FILES = { gmlrs: 'gmlrs-m31', atacms: 'mgm-140-atacms' };
 const ROCKET_STUBS = { gmlrs: { length: 3.95, radius: .114 }, atacms: { length: 3.97, radius: .305 } };
 const rocketLoads = new Map();
+
+// Камера стежить за ракетою в польоті: перемикач працює на рівні машини, тож однаково для всіх пускових.
+const FOLLOW = { id: 'follow', label: 'Стежити за ракетою', key: 'C', code: 'KeyC', row: 'weapon' };
 
 // Ракета з моделі: ніс у +X, центр у нулі, метри файлу.
 export function rocketTemplate(scene) {
@@ -44,6 +48,13 @@ export const RIGS = {
     const rig = m.part('pods:' + cfg.spec, () => buildPodRig(m.scene, spec, m.clip));
     return rig ? new PodLauncher(rig, m.ctx) : null;
   },
+  // Колісна пускова з піднімним пакетом без власного кліпу (Вільха, Сапсан): опори, гідроциліндри, кришки труб.
+  tel(m, cfg) {
+    const spec = TELS[cfg.spec];
+    if (!spec) return null;
+    const rig = m.part('tel:' + cfg.spec, () => buildTelRig(m.scene, spec));
+    return rig ? new TelLauncher(rig, m.ctx) : null;
+  },
 };
 
 export class Machine {
@@ -56,7 +67,11 @@ export class Machine {
 
   get phases() { return this.cfg.phases; }
   get distance() { return { launcher: 1.45, vehicle: 1.35 }[this.kind] || 1.4; }
-  get controls() { return this.rig ? this.rig.controls : []; }
+  // Кнопки вузлів плюс перемикач камери, якщо машина стріляє й ракети літають (без анімації їм летіти нікуди).
+  get controls() {
+    if (!this.rig) return [];
+    return this.v.motion && this.rig.canFire ? [...this.rig.controls, FOLLOW] : this.rig.controls;
+  }
 
   build() {
     const v = this.v, e = v.entry, cfg = this.cfg;
@@ -91,7 +106,8 @@ export class Machine {
     this.scarMat = new MeshBasicMaterial({ map: this.fx.tex, color: '#000000', transparent: true, opacity: .75, depthWrite: false });
     this.flight = new Flight({ parent: this.world, fx: this.fx, ground: (x, z) => this.height(x, z), scar: (x, y, z, r) => this.scar(x, y, z, r) });
     this.flight.onImpact = (rec, dist) => this.toast(dist == null ? 'Ракета вийшла за межі сцени' : 'Розрив на дистанції ' + dist + ' м (масштаб сцени)', 2.5);
-    this.rockets = {}; this.stub = new Group();
+    this.debris = new Debris({ parent: this.world, ground: (x, z) => this.height(x, z) });
+    this.rockets = {}; this.procs = {}; this.stub = new Group();
     // Тінь-пляма під машиною: справжня тінь від ключового світла падає лише на запасну землю.
     const { size } = e;
     this.blob = new Mesh(new PlaneGeometry(1, 1), new MeshBasicMaterial({ map: softTexture(), color: '#000000', transparent: true, opacity: .5, depthWrite: false }));
@@ -108,9 +124,11 @@ export class Machine {
       : wheelSpec ? { ...axleGroups(wheelSpec.axles), half: wheelSpec.z } : { front: L * .3, rear: -L * .3, half: W * .35 };
     this.S = { t: 0, speed: 0, tSpeed: 0, steer: 0, dist: 0, bounce: 0, y: 0, pitch: 0, roll: 0, dust: 0 };
     this.toastText = ''; this.toastT = 0; this.sig = '';
+    this.follow = false; this.look = new Vector3(); this.want = new Vector3();
     this.ctx = {
       phase: id => this.set(id), toast: (t, s) => this.toast(t, s), rocket: kind => this.rocketFor(kind),
-      launch: (kind, tpl, p, d) => this.launch(kind, tpl, p, d), flying: () => this.flight.busy, muzzleToWorld: (p, d) => this.toWorld(p, d),
+      launch: (kind, tpl, p, d, opts) => this.launch(kind, tpl, p, d, opts), flying: () => this.flight.busy, muzzleToWorld: (p, d) => this.toWorld(p, d),
+      speed: () => this.S.speed, gap: p => this.gapAt(p), shed: (node, v, w) => this.shed(node, v, w),
     };
     const make = cfg.rig && RIGS[cfg.rig];
     if (make) this.rig = this.guard('рушій вузлів', () => make(this, cfg));
@@ -146,12 +164,34 @@ export class Machine {
     if (!this.v.motion) return this.stub;
     if (this.rockets[kind]) return this.rockets[kind];
     const pr = ROCKETS[kind];
-    return pr ? proceduralRocket(pr.procedural || ROCKET_STUBS[kind] || { length: 4, radius: .15 }) : null;
+    if (!pr) return null;
+    // Проста модель будується один раз: кожен політ клонує її, не копіюючи геометрію.
+    return this.procs[kind] || (this.procs[kind] = proceduralRocket(pr.procedural || ROCKET_STUBS[kind] || { length: 4, radius: .15 }));
   }
 
-  launch(kind, template, p, d) {
+  launch(kind, template, p, d, opts) {
     if (!this.v.motion) return;
-    this.flight.launch(template, ROCKETS[kind], p, d);
+    this.flight.launch(template, ROCKETS[kind], p, d, opts);
+  }
+
+  // Кришка труби злітає: її меші стають уламками світу (метри) з тією самою геометрією й матеріалом, що в моделі.
+  shed(node, v, w) {
+    if (!this.v.motion || !this.debris) return;
+    this.world.updateMatrixWorld(true);
+    node.updateWorldMatrix(true, true);
+    const inv = new Matrix4().copy(this.world.matrixWorld).invert(), m4 = new Matrix4(), p = new Vector3(), q = new Quaternion(), s = new Vector3();
+    node.traverse(o => {
+      if (!o.isMesh) return;
+      m4.multiplyMatrices(inv, o.matrixWorld).decompose(p, q, s);
+      this.debris.add(o.geometry, o.material, p, q, v, w).scale.copy(s);
+    });
+  }
+
+  // Висота (м) точки файлу моделі над землею під нею: корпус нахилено за рельєфом, тож точку повертає той самий кут (Rx · Rz), що й корпус.
+  gapAt(p) {
+    const S = this.S, cp = Math.cos(S.pitch), sp = Math.sin(S.pitch), cr = Math.cos(S.roll), sr = Math.sin(S.roll);
+    const x = p.x * cp - p.y * sp, y = p.x * sp + p.y * cp;
+    return y * cr - p.z * sr + S.y - this.height(S.dist + x, y * sr + p.z * cr);
   }
 
   // Точка й напрямок із системи сцени в метри світу.
@@ -178,6 +218,7 @@ export class Machine {
     if (this.rig && this.rig.busy && id !== 'position') { this.toast('Дочекайтеся кінця заряджання', 1.8); this.report(true); return; }
     this.phase = id;
     this.S.t = 0;
+    this.toastT = 0; // підказка попередньої дії (без анімації вона б висіла вічно) не переходить у нову фазу
     if (this.rig) this.rig.enter(id);
     this.S.tSpeed = id === 'march' ? this.marchSpeed() : 0;
     if (!this.v.motion) this.settle();
@@ -224,7 +265,9 @@ export class Machine {
     this.dust(dt, v);
     if (this.rig) this.rig.step(dt);
     this.flight.step(dt);
+    this.debris.step(dt);
     this.fx.step(dt);
+    this.followStep(dt);
     this.report(false);
   }
 
@@ -246,6 +289,7 @@ export class Machine {
   settle() {
     const S = this.S;
     this.fx.quiet = true;
+    if (this.phase !== 'march') S.speed = 0; // без анімації машина зупиняється одразу, тож вузли не чекають гальмування
     if (this.rig) this.rig.settle();
     S.tSpeed = this.phase === 'march' ? this.marchSpeed() : 0;
     if (this.phase === 'march') { S.dist += 40; S.speed = S.tSpeed; } else S.speed = 0;
@@ -257,6 +301,7 @@ export class Machine {
   // ---------- керування ----------
   press(id) {
     if (!this.rig) return;
+    if (id === 'follow') { this.follow = !this.follow; this.report(true); return; }
     this.rig.press(id);
     if (!this.v.motion) { this.rig.settle(); this.v.pose(); }
     this.report(true);
@@ -304,6 +349,7 @@ export class Machine {
 
   ui() {
     const base = this.rig ? this.rig.ui() : { locks: {}, on: {}, labels: {}, ammo: null };
+    if (this.controls.includes(FOLLOW)) base.on = { ...base.on, follow: this.follow };
     return { ...base, status: this.status(), phase: this.phase, toast: this.toastT > 0 ? this.toastText : null };
   }
 
@@ -315,6 +361,20 @@ export class Machine {
   }
 
   // ---------- поза й камера ----------
+  // Висота (одиниці сцени), на яку дивиться камера без стеження: корпус плюс те, що піднімає пускова.
+  focusY() { return this.k * (this.S.y + (this.rig && this.rig.focus ? this.rig.focus() : 0)); }
+
+  // Стеження: ціль камери їде до найстарішої ракети в польоті (look — зсув від звичайної цілі); ракет немає — повертається до машини.
+  followStep(dt) {
+    const r = this.follow ? this.flight.list[0] : null, want = this.want;
+    if (r) {
+      this.world.updateMatrixWorld(true);
+      want.copy(r.m.position).applyMatrix4(this.world.matrixWorld);
+      want.y -= this.focusY();
+    } else want.set(0, 0, 0);
+    this.look.addScaledVector(want.sub(this.look), 1 - Math.exp(-(r ? 4 : 2) * dt));
+  }
+
   pose() {
     const S = this.S, k = this.k, c = this.e.center, g = this.v.group;
     g.rotation.set(0, 0, 0);
@@ -324,7 +384,8 @@ export class Machine {
     this.world.position.set(-k * c.x - k * S.dist, -k * c.y, -k * c.z);
     this.wheelsAt();
     this.fogAt(this.v.baseDistance() * this.v.zoom * this.distance);
-    return k * S.y;
+    // Піднятий пакет тягне погляд камери вгору до середини своєї осі.
+    return this.focusY();
   }
 
   // Туман починається за машиною (d — відстань камери до неї), а густішає до FOG_FAR метрів: далі видно лише колір фону.
@@ -343,6 +404,8 @@ export class Machine {
     if (this.wheels) this.wheels.reset();
     if (this.tracks) this.tracks.reset();
     if (this.flight) this.flight.dispose();
+    if (this.debris) this.debris.dispose();
+    for (const g of Object.values(this.procs || {})) g.traverse(o => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } });
     if (this.fx) this.fx.dispose();
     if (this.scars) for (const m of [...this.scars.children]) m.geometry.dispose();
     if (this.scarMat) this.scarMat.dispose();

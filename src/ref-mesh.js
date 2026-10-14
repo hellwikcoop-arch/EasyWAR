@@ -65,6 +65,25 @@ export function triangleComponents(geometry, tol = 1e-4) {
   return { label, count, box, tris, center };
 }
 
+// Номери тіл (з triangleComponents), чиї обмежувальні об’єми лежать у коробці region = [мін x, y, z, макс x, y, z], розширеній на tol.
+export function componentsIn(comp, region, tol = 0) {
+  const out = [];
+  for (let i = 0; i < comp.count; i++) {
+    const b = comp.box;
+    let inside = true;
+    for (let c = 0; c < 3 && inside; c++) inside = b[i * 6 + c] >= region[c] - tol && b[i * 6 + 3 + c] <= region[3 + c] + tol;
+    if (inside) out.push(i);
+  }
+  return out;
+}
+
+// Мітки трикутників за групами тіл: groups[j] — список номерів тіл, що утворюють частину j; решта трикутників — -1.
+export function labelsOfComponents(comp, groups) {
+  const part = new Int32Array(comp.count).fill(-1);
+  groups.forEach((list, j) => list.forEach(i => { part[i] = j; }));
+  return Int32Array.from(comp.label, c => part[c]);
+}
+
 // Мітки трикутників за правилом: fn(x, y, z, t) → номер частини або -1 (лишається в корпусі).
 export function labelTriangles(geometry, fn) {
   const c = triangleCentroids(geometry), n = c.length / 3, labels = new Int32Array(n);

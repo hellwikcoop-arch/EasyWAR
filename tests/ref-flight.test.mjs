@@ -1,11 +1,11 @@
 // Політ ракет (ref-flight.js): розгін двигуном, поворот під тяжінням, влучання в рельєф, вихід за межі сцени, процедурні ракети.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { Box3, Group, Vector3 } from 'three';
+import { Box3, BoxGeometry, Group, Mesh, MeshBasicMaterial, Quaternion, Vector3 } from 'three';
 
 const ctx2d = new Proxy({}, { get: (t, k) => (k in t ? t[k] : k.startsWith('create') ? () => ({ addColorStop() {} }) : () => {}), set: (t, k, v) => { t[k] = v; return true; } });
 globalThis.document = { createElement: () => ({ width: 0, height: 0, getContext: () => ctx2d }) };
-const { Flight, ROCKETS, proceduralRocket } = await import('../src/ref-flight.js');
+const { Debris, Flight, ROCKETS, proceduralRocket } = await import('../src/ref-flight.js');
 const { Fx } = await import('../src/ref-fx.js');
 
 function setup(ground = () => 0) {
@@ -74,4 +74,81 @@ test('procedural rockets are centred, point along +X and have the requested leng
     assert.ok(size.y > spec.radius * 1.5, `${kind}: fins`);
   }
   assert.ok(ROCKETS.otrk.boost > ROCKETS.gmlrs.boost && ROCKETS.otrk.flash > ROCKETS.gmlrs.flash, 'the big rocket is bigger');
+});
+
+test('the rocket starts hidden in the tube: it sits `back` metres behind the muzzle, and the exhaust cloud reaches the ground behind it', () => {
+  const { f, fx } = setup();
+  const p = new Vector3(0, 10, 0), d = new Vector3(0, 1, 0);
+  const rec = f.launch(new Group(), ROCKETS.otrk, p, d, { back: 3.62 });
+  assert.ok(Math.abs(rec.m.position.y - (10 - 3.62)) < 1e-9, 'the centre is 3.62 m behind the muzzle');
+  // вертикальний пуск: вісь позаду дула впирається в землю за 10 м, там і здіймається пил (op .7 — клуби пилу, не дим і не спалах)
+  const dust = fx.list.filter(q => q.op === .7);
+  assert.equal(dust.length, ROCKETS.otrk.dust);
+  assert.ok(dust.every(q => q.s.position.y < 1.1), 'the dust rises from the ground, not at the muzzle');
+  assert.ok(dust.every(q => Math.abs(q.s.position.x) <= ROCKETS.otrk.spread / 2 + 1e-9 && Math.abs(q.s.position.z) <= ROCKETS.otrk.spread / 2 + 1e-9), 'inside the spread');
+  assert.ok(dust.every(q => q.size >= ROCKETS.otrk.dustSize), 'the size comes from the profile');
+  assert.equal(fx.list.filter(q => q.add).length, 1, 'one flash at the muzzle');
+  assert.equal(fx.list.length - dust.length - 1, ROCKETS.otrk.smoke, 'the smoke puffs at the muzzle');
+  // без параметра — 1,7 м, як було; горизонтальний пуск — пил за 5 м позаду
+  const other = setup();
+  const def = other.f.launch(new Group(), ROCKETS.gmlrs, p, new Vector3(1, 0, 0));
+  assert.ok(Math.abs(def.m.position.x + 1.7) < 1e-9, 'without the option the default 1.7 m applies');
+  const flat = other.fx.list.filter(q => q.op === .7);
+  assert.ok(flat.every(q => Math.abs(q.s.position.x + 5) <= 2.01 && q.s.position.y < 1.1), 'a horizontal launch kicks the dust up 5 m behind');
+});
+
+test('a rocket with a soft start and a vertical launch accelerates gently, then leans toward its range direction', () => {
+  const { f } = setup();
+  const soft = f.launch(new Group(), ROCKETS.otrk, new Vector3(0, 10, 0), new Vector3(.17, .985, 0).normalize());
+  const hard = f.launch(new Group(), ROCKETS.gmlrs, new Vector3(0, 10, 3), new Vector3(.17, .985, 0).normalize());
+  for (let i = 0; i < 15; i++) f.step(1 / 60);
+  assert.ok(Math.abs(soft.v - ROCKETS.otrk.acc * ROCKETS.otrk.soft * .25) < .6, `soft start ${soft.v.toFixed(2)} m/s`);
+  assert.ok(Math.abs(hard.v - ROCKETS.gmlrs.acc * .25) < .6, 'a rocket without the option accelerates fully');
+  const lean = () => Math.acos(soft.d.y) * 180 / Math.PI;
+  const lean0 = lean();
+  for (let i = 0; i < 60 * 1.3; i++) f.step(1 / 60); // до 1,6 с курс тримається
+  assert.ok(Math.abs(lean() - lean0) < 1, 'the course is held for the first 1.6 s');
+  for (let i = 0; i < 60 * 2.4; i++) f.step(1 / 60);
+  assert.ok(lean() > lean0 + 15 && soft.d.x > .4 && Math.abs(soft.d.z) < .1, `leans toward +X (${lean().toFixed(0)}°)`);
+  assert.ok(Math.abs(soft.d.length() - 1) < 1e-9, 'the direction stays a unit vector');
+});
+
+test('the range limit is a property of the rocket: the long one flies 330 m, the others leave the scene at 190 m', () => {
+  for (const [kind, limit] of [['gmlrs', 190], ['otrk', 330]]) {
+    const { f, hits } = setup(() => -1e5); // землі немає: ракета може лише вилетіти
+    const rec = f.launch(new Group(), ROCKETS[kind], new Vector3(0, 3, 0), new Vector3(1, 0, 0));
+    for (let i = 0; i < 60 * 14 && f.busy; i++) f.step(1 / 60);
+    assert.equal(f.busy, false, `${kind}: removed`);
+    assert.equal(hits.length, 1);
+    assert.equal(hits[0].dist, null, `${kind}: out of the scene`);
+    const flown = rec.m.position.distanceTo(rec.from);
+    assert.ok(flown >= limit && flown < limit + 4, `${kind}: removed at ${flown.toFixed(1)} m`);
+  }
+});
+
+test('debris falls under gravity, spins, and is gone after 2.5 s or on the ground', () => {
+  const parent = new Group(), geometry = new BoxGeometry(.2, .2, .05), material = new MeshBasicMaterial();
+  const d = new Debris({ parent, ground: x => (x > 10 ? 6 : 0) });
+  assert.equal(d.busy, false);
+  const m = d.add(geometry, material, new Vector3(0, 10, 0), new Quaternion(), new Vector3(2, 3, 0), new Vector3(0, 4, 0));
+  assert.equal(m.geometry, geometry, 'the geometry is shared with the model, not copied');
+  assert.equal(m.material, material);
+  assert.ok(parent.children.includes(m) && d.busy);
+  for (let i = 0; i < 60; i++) d.step(1 / 60);
+  // y(t) = 10 + 3t − g t²/2; x = 2t
+  assert.ok(Math.abs(m.position.y - (10 + 3 - 9.8 / 2)) < .2, `ballistic height ${m.position.y.toFixed(2)}`);
+  assert.ok(Math.abs(m.position.x - 2) < .05);
+  assert.ok(Math.abs(m.rotation.y - 4) < .1, 'spins at the given rate');
+  for (let i = 0; i < 60 * 2; i++) d.step(1 / 60);
+  assert.equal(d.busy, false, 'removed after 2.5 s');
+  assert.equal(parent.children.length, 0);
+  // удар об землю: поверхня на 6 м вище
+  const hit = d.add(geometry, material, new Vector3(20, 8, 0), new Quaternion(), new Vector3(0, 0, 0), new Vector3());
+  for (let i = 0; i < 60 && d.busy; i++) d.step(1 / 60);
+  assert.equal(d.busy, false, 'removed when it reaches the ground');
+  assert.ok(hit.position.y < 8);
+  d.add(geometry, material, new Vector3(0, 50, 0), new Quaternion(), new Vector3(), new Vector3());
+  d.clear();
+  assert.equal(parent.children.length, 0);
+  d.dispose();
 });

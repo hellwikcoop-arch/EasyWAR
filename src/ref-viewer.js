@@ -574,6 +574,7 @@ export class RefViewer {
     if (this.sim) {
       // У сценарії модель тримає курс уздовж смуги, а навколо неї обертається камера.
       this.target.set(0, this.sim.pose(), 0);
+      if (this.sim.look) this.target.add(this.sim.look); // камера, що стежить за ракетою, зсуває ціль разом із орбітою
       g.updateMatrixWorld(true);
       const c = Math.cos(this.pitch) * d;
       this.camera.position.set(-Math.sin(this.yaw) * c, this.target.y + Math.sin(this.pitch) * d, Math.cos(this.yaw) * c);

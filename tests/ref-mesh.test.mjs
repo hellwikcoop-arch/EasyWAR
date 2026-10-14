@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { BoxGeometry, BufferGeometry, CylinderGeometry, Float32BufferAttribute, Matrix4, Mesh, MeshBasicMaterial } from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { attach, bakeFloat, carve, labelsByBoxes, labelsByWheels, meshesOf, splitByLabels, triangleCentroids, triangleComponents, triangleCount, vertexLabels, weldMap } from '../src/ref-mesh.js';
+import { attach, bakeFloat, carve, componentsIn, labelsByBoxes, labelsByWheels, labelsOfComponents, meshesOf, splitByLabels, triangleCentroids, triangleComponents, triangleCount, vertexLabels, weldMap } from '../src/ref-mesh.js';
 import { WHEELED, WHEEL_NODES, axleGroups, wheelsOf } from '../src/ref-rig-data.js';
 import { loadGlbScene } from './helpers/glb-scene.mjs';
 
@@ -159,4 +159,27 @@ test('axle groups: the front and the rear of the wheelbase for the pitch of the 
   const h = axleGroups(WHEELED.m984.axles);
   assert.ok(h.front > 0 && h.rear < 0);
   assert.deepEqual(axleGroups([0]), { front: 0, rear: 0 });
+});
+
+test('bodies are picked by the region that holds their whole box, and grouped into parts by number', () => {
+  const g = mergeGeometries([box(1, 1, 1, 0, 0, 0), box(.2, .2, .2, 5, 1, 0), box(.2, .2, .2, 5, 1, 2), box(3, 1, 1, 9, 0, 0)]);
+  const c = triangleComponents(g);
+  const idx = f => [...Array(c.count).keys()].find(i => f(c.center.slice(i * 3, i * 3 + 3)));
+  const small = idx(p => Math.abs(p[0] - 5) < .01 && Math.abs(p[2]) < .01), farSmall = idx(p => Math.abs(p[0] - 5) < .01 && Math.abs(p[2] - 2) < .01), huge = idx(p => p[0] > 8);
+  assert.deepEqual(componentsIn(c, [4.5, .5, -.5, 5.5, 1.5, .5]), [small], 'only the body that lies wholly inside');
+  assert.deepEqual(componentsIn(c, [4.5, .5, -.5, 5.5, 1.5, 2.5]).sort(), [small, farSmall].sort());
+  assert.deepEqual(componentsIn(c, [4.95, .5, -.5, 5.05, 1.5, .5]), [], 'a box that is too tight holds nothing');
+  assert.deepEqual(componentsIn(c, [4.95, .5, -.5, 5.05, 1.5, .5], .1), [small], 'the tolerance widens the region');
+  assert.deepEqual(componentsIn(c, [-100, -100, -100, 100, 100, 100]).length, 4);
+  // група тіл стає однією частиною, решта — у корпусі (−1)
+  const labels = labelsOfComponents(c, [[small, farSmall], [huge]]);
+  assert.equal(labels.length, 48);
+  const counts = new Map();
+  for (const l of labels) counts.set(l, (counts.get(l) || 0) + 1);
+  assert.deepEqual([...counts].sort((a, b) => a[0] - b[0]), [[-1, 12], [0, 24], [1, 12]]);
+  const mesh = new Mesh(g, new MeshBasicMaterial());
+  const parts = carve(mesh, labels, 2);
+  assert.equal(triangleCount(parts[0]), 24);
+  assert.equal(triangleCount(parts[1]), 12);
+  assert.equal(triangleCount(mesh.geometry), 12, 'the first body stays');
 });

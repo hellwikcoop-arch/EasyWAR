@@ -60,7 +60,10 @@ test('every reference model without its own viewer has an interactive scenario',
   }
   assert.ok(simOf(ENTRIES.find(e => e.id === 'mi35')).phases.some(p => p[0] === 'attack'), 'armed helicopter fires rockets');
   assert.ok(!simOf(ENTRIES.find(e => e.id === 'mi26')).phases.some(p => p[0] === 'attack'), 'transport helicopter does not');
-  assert.match(simOf(ENTRIES.find(e => e.id === 'vilkha')).phases.find(p => p[0] === 'fire')[2], /умовно/);
+  // Вільху й Сапсан веде рушій техніки (піднімний пакет працює), а простий запасний сценарій чесно каже, що пуск умовний.
+  const vilkha = simOf(ENTRIES.find(e => e.id === 'vilkha'));
+  assert.equal(vilkha.phases, MACHINE_PHASES.launcher);
+  assert.match(legacySim(vilkha).phases.find(p => p[0] === 'fire')[2], /умовно/);
 });
 
 test('every scenario plays to the end: take-off and landing, hover, strike, salvo', () => {

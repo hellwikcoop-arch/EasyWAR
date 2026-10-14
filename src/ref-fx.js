@@ -6,6 +6,8 @@ export const D2R = Math.PI / 180;
 export const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
 // Плавне наближення до цілі: k — швидкість (1/с), не залежить від частоти кадрів.
 export const ease = (v, to, k, dt) => v + (to - v) * (1 - Math.exp(-k * dt));
+// Плавний вхід і вихід для ходу вузла від 0 до 1.
+export const smooth = x => { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); };
 
 export function rng(seed) { let s = seed >>> 0; return () => ((s = (Math.imul(s, 1664525) + 1013904223) >>> 0) / 4294967296); }
 

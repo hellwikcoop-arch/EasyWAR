@@ -115,8 +115,8 @@ const BY_ID = {
   fp7: { kind: 'ballistic' },
   himars: { kind: 'launcher', machine: true, rig: 'pods', spec: 'himars', wheels: 'himars', speed: 16, salvo: 6, muzzle: [.06, .97], elev: 55, back: true },
   m270: { kind: 'launcher', machine: true, rig: 'pods', spec: 'm270', tracked: 'm270', speed: 12, salvo: 12, muzzle: [.3, .97], elev: 62, back: true, tracks: true },
-  vilkha: { kind: 'launcher', salvo: 4, muzzle: [.3, .95], elev: 52, stowed: true },
-  sapsan: { kind: 'launcher', salvo: 1, muzzle: [.2, .95], elev: 80, stowed: true },
+  vilkha: { kind: 'launcher', machine: true, rig: 'tel', spec: 'vilkha', wheels: 'vilkha', speed: 16, salvo: 4, muzzle: [.3, .95], elev: 52, stowed: true },
+  sapsan: { kind: 'launcher', machine: true, rig: 'tel', spec: 'sapsan', wheels: 'sapsan', speed: 16, salvo: 1, muzzle: [.2, .95], elev: 80, stowed: true },
   m1084: { kind: 'vehicle' },
   m984: { kind: 'vehicle' },
   bpz2: { kind: 'vehicle', tracks: true },
@@ -138,21 +138,26 @@ const BY_GROUP = {
   rocket: { kind: 'shell', angle: 50, motor: true },
 };
 
+// Фази простого сценарію (без рушія техніки): НАР лише в озброєних вертольотів. Пакет моделі в похідному положенні не піднімається,
+// тож пуск із нього показуємо умовно й кажемо про це в підписі.
+function plainPhases(sim) {
+  const phases = SIM_PHASES[sim.kind].filter(([id]) => id !== 'attack' || sim.fire);
+  const note = sim.stowed ? ' Пакет на моделі в похідному положенні, тож пуск показано умовно.' : '';
+  return note ? phases.map(p => (p[0] === 'fire' ? [p[0], p[1], p[2] + note] : p)) : phases;
+}
+
 // Сценарій статті або null (немає моделі, є власний переглядач або модель нічого не вміє, як метальний заряд).
 export function simOf(entry, viewerOf = e => e.viewer) {
   if (!entry || !entry.model || viewerOf(entry)) return null;
   const sim = entry.sim || BY_ID[entry.id] || BY_GROUP[entry.group] || null;
   if (!sim || !SIM_PHASES[sim.kind]) return null;
   if (sim.machine && MACHINE_PHASES[sim.kind]) return { ...sim, phases: MACHINE_PHASES[sim.kind] };
-  const phases = SIM_PHASES[sim.kind].filter(([id]) => id !== 'attack' || sim.fire);
-  // Пакет моделі не піднімається окремо: пуск із похідного положення показуємо умовно й кажемо про це в підписі.
-  const note = sim.stowed ? ' Пакет на моделі в похідному положенні, тож пуск показано умовно.' : '';
-  return { ...sim, phases: note ? phases.map(p => (p[0] === 'fire' ? [p[0], p[1], p[2] + note] : p)) : phases };
+  return { ...sim, phases: plainPhases(sim) };
 }
 
 // Простий сценарій тієї самої статті без рушія техніки: якщо рушій не запустився, переглядач показує його.
 export function legacySim(cfg) {
-  return { ...cfg, machine: false, phases: SIM_PHASES[cfg.kind].filter(([id]) => id !== 'attack' || cfg.fire) };
+  return { ...cfg, machine: false, phases: plainPhases(cfg) };
 }
 
 // Місцевість під сценарієм: аеродром, ґрунтова дорога чи поле.

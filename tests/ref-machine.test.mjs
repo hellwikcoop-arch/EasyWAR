@@ -2,10 +2,12 @@
 // фази пускової, польоти ракет, керування з клавіатури, режим без анімації і прибирання сцени.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { Box3, BoxGeometry, Fog, Group, Mesh, MeshBasicMaterial, PerspectiveCamera, PlaneGeometry, Scene, Vector3 } from 'three';
+import { Box3, BoxGeometry, Euler, Fog, Group, Mesh, MeshBasicMaterial, PerspectiveCamera, PlaneGeometry, Scene, Vector3 } from 'three';
 import { ENTRIES, viewerOf } from '../src/ref-data.js';
 import { MACHINE_PHASES, legacySim, simOf } from '../src/ref-sim-data.js';
+import { ROCKETS } from '../src/ref-flight.js';
 import { forgetTerrain } from '../src/ref-terrain.js';
+import { TelLauncher } from '../src/ref-tel.js';
 import { loadGlbScene } from './helpers/glb-scene.mjs';
 
 const ctx2d = new Proxy({}, { get: (t, k) => (k in t ? t[k] : k.startsWith('create') ? () => ({ addColorStop() {} }) : () => {}), set: (t, k, v) => { t[k] = v; return true; } });
@@ -62,7 +64,7 @@ test('HIMARS: model and world frames agree, wheels roll on the march and the lau
   await m.terrain.loading;
   assert.ok(m.terrain.ready && !m.ground.visible, 'the terrain replaces the fallback ground');
   assert.equal(m.wheels.wheels.length, 6);
-  assert.ok(m.rig && m.controls.length === 8);
+  assert.ok(m.rig && m.controls.length === 9 && m.controls.at(-1).id === 'follow', 'eight launcher keys and the camera switch');
   assert.equal(v.group.parent, m.ride);
   m.snap();
   const focus = m.pose();
@@ -202,4 +204,177 @@ test('a model that cannot build the launcher or the wheels still drives', async 
   assert.ok(run(m, 5, x => x.S.speed > 5));
   assert.equal(m.status().startsWith('Марш'), true);
   m.dispose();
+});
+
+test('Vilkha and Sapsan are led by the machine engine with the lifting-pack rig', async () => {
+  for (const [id, wheels] of [['vilkha', 8], ['sapsan', 10]]) {
+    const cfg = cfgOf(id);
+    assert.equal(cfg.machine, true);
+    assert.equal(cfg.rig, 'tel');
+    assert.equal(cfg.phases, MACHINE_PHASES.launcher);
+    forgetTerrain();
+    const v = await viewerFor(id), m = new Machine(v, cfg);
+    v.sim = m;
+    await m.terrain.loading;
+    assert.ok(m.rig instanceof TelLauncher, `${id}: the rig is built`);
+    assert.equal(m.wheels.wheels.length, wheels);
+    assert.deepEqual(m.controls.map(c => c.id), ['up', 'down', 'left', 'right', 'fire', 'salvo', 'reload', 'follow']);
+    assert.equal(new Set(m.controls.map(c => c.code)).size, m.controls.length);
+    m.dispose();
+  }
+});
+
+test('Vilkha: the machine stops, the jacks find the sloping ground, the pack rises, a shot sheds a cap as debris and the rocket flies', async () => {
+  forgetTerrain();
+  const v = await viewerFor('vilkha'), m = new Machine(v, cfgOf('vilkha'));
+  v.sim = m;
+  await m.terrain.loading;
+  m.set('march');
+  assert.ok(run(m, 12, x => x.S.speed > 8));
+  m.set('position');
+  run(m, 1);
+  assert.equal(m.rig.S.jack, 0, 'the jacks wait for the machine to stop');
+  assert.ok(run(m, 25, x => x.rig.canFire()), 'then the launcher deploys');
+  assert.equal(m.S.speed, 0);
+  run(m, 3);
+  assert.ok(m.rig.S.lift === 1);
+  // п’яти стоять на землі: нижня площина п’яти на висоті рельєфу під нею
+  for (const leg of m.rig.r.legs) {
+    const under = new Vector3(leg.bottom.x, leg.foot.position.y - .03, leg.bottom.z);
+    assert.ok(Math.abs(m.gapAt(under)) < .06, `the foot stands on the ground (${m.gapAt(under).toFixed(3)} m above)`);
+  }
+  const body = m.pose();
+  assert.ok(body > m.k * m.S.y + .5, 'the camera is pulled up toward the raised pack');
+  // постріл: ракета, кришка-уламок з тієї ж геометрії, одна на трубу
+  const cap = m.rig.r.caps[0].group, capMesh = cap.children[0], at = cap.getWorldPosition(new Vector3());
+  v.scene.updateMatrixWorld(true);
+  m.press('fire');
+  assert.equal(m.flight.list.length, 1);
+  assert.equal(m.debris.list.length, 1);
+  const piece = m.debris.list[0].m;
+  assert.equal(piece.geometry, capMesh.geometry, 'the same geometry as in the model');
+  assert.equal(piece.material, capMesh.material);
+  assert.ok(piece.scale.distanceTo(new Vector3(1, 1, 1)) < 1e-6, 'a metre in the world is a metre in the model');
+  assert.ok(m.world.localToWorld(piece.position.clone()).distanceTo(at) < 1e-6, 'the cap starts where it sat');
+  assert.equal(cap.visible, false);
+  assert.equal(m.rocketFor('olkha'), m.rocketFor('olkha'), 'the procedural rocket is built once');
+  assert.equal(m.flight.list[0].profile, ROCKETS.olkha);
+  assert.ok(run(m, 6, x => !x.debris.busy), 'the cap falls or flies out');
+  assert.ok(run(m, 20, x => !x.flight.busy), 'the rocket is gone');
+  // Закриття сцени: нічого не лишається, геометрію процедурної ракети звільнено
+  let freed = 0;
+  m.rocketFor('olkha').traverse(o => { if (o.isMesh) o.geometry.addEventListener('dispose', () => freed++); });
+  m.dispose();
+  assert.ok(freed > 0, 'the procedural rocket is released');
+  assert.equal(m.debris.list.length, 0);
+  assert.equal(cap.visible, true, 'the cap is back on the tube');
+  assert.ok(m.rig.stowed() && m.rig.S.ammo === 12);
+});
+
+test('Sapsan: the lids open before the rocket leaves, and the vertical start leans into the range direction', async () => {
+  forgetTerrain();
+  const v = await viewerFor('sapsan', { terrain: 'fail' }), m = new Machine(v, cfgOf('sapsan'));
+  v.sim = m;
+  await m.terrain.loading;
+  m.set('position');
+  assert.ok(run(m, 25, x => x.rig.canFire()));
+  m.press('fire');
+  assert.equal(m.flight.list.length, 0, 'the lids are still opening');
+  assert.equal(m.rig.S.wait, 1);
+  assert.match(m.status(), /^Люки контейнерів відкриваються/);
+  assert.ok(run(m, 3, x => x.flight.busy));
+  const r = m.flight.list[0];
+  assert.equal(r.profile, ROCKETS.otrk);
+  assert.equal(m.debris.list.length, 0, 'there are no caps on a container');
+  assert.ok(r.d.y > .9);
+  run(m, 3.5);
+  assert.ok(r.d.y < .9 && r.d.x > .2, `the rocket leans (${r.d.toArray().map(x => x.toFixed(2))})`);
+  m.dispose();
+});
+
+test('the follow camera is a switch on the machine: it moves the look point to the rocket in flight and returns after it', async () => {
+  forgetTerrain();
+  const v = await viewerFor('sapsan', { terrain: 'fail' }), m = new Machine(v, cfgOf('sapsan'));
+  v.sim = m;
+  await m.terrain.loading;
+  m.set('position');
+  assert.ok(run(m, 25, x => x.rig.canFire()));
+  let state = null;
+  m.onState = u => { state = u; };
+  m.report(true);
+  assert.equal(state.on.follow, false);
+  assert.equal(m.keyDown({ code: 'KeyC' }), true);
+  assert.equal(m.follow, true);
+  assert.equal(state.on.follow, true, 'the button shows that it is on');
+  m.keyDown({ code: 'KeyC' });
+  assert.equal(m.follow, false);
+  m.press('follow');
+  m.press('fire');
+  assert.ok(run(m, 4, x => x.flight.busy && x.rig.S.ammo === 1));
+  run(m, 2.5);
+  const r = m.flight.list[0], want = m.world.localToWorld(r.m.position.clone());
+  assert.ok(m.look.length() > 5, `the look point moves up (${m.look.length().toFixed(1)})`);
+  assert.ok(m.look.y > 0 && Math.abs(m.look.y + m.focusY() - want.y) < want.y * .5, 'toward the rocket');
+  const focus = m.pose();
+  assert.ok(Number.isFinite(focus));
+  // ракета зникла: ціль повертається до машини
+  assert.ok(run(m, 20, x => !x.flight.busy));
+  run(m, 6);
+  assert.ok(m.look.length() < .05, `the camera comes back (${m.look.length().toFixed(3)})`);
+  // стеження вимкнено: друга ракета не рухає ціль
+  m.press('follow');
+  assert.equal(m.follow, false);
+  m.press('fire');
+  assert.ok(run(m, 4, x => x.flight.busy), 'the second container fires at once: the lids are open');
+  run(m, 2.5);
+  assert.ok(m.look.length() < .01, `the look point stays on the machine (${m.look.length().toFixed(4)})`);
+  m.dispose();
+});
+
+test('without animation Vilkha deploys at once even after a march, a shot only uses up a tube and there is no follow switch', async () => {
+  forgetTerrain();
+  const v = await viewerFor('vilkha', { motion: false, terrain: 'fail' }), m = new Machine(v, cfgOf('vilkha'));
+  v.sim = m;
+  await m.terrain.loading;
+  assert.deepEqual(m.controls.map(c => c.id), ['up', 'down', 'left', 'right', 'fire', 'salvo', 'reload']);
+  m.set('march');
+  assert.ok(m.S.speed === 16 && m.S.dist >= 40);
+  m.set('position');
+  assert.equal(m.S.speed, 0);
+  assert.ok(m.rig.S.jack === 1 && m.rig.S.lift === 1, 'the jacks and the pack are at the end of their travel');
+  assert.ok(m.rig.canFire());
+  m.press('fire');
+  assert.equal(m.rig.S.ammo, 11);
+  assert.equal(m.flight.list.length + m.debris.list.length, 0, 'nothing is drawn in flight without animation');
+  assert.equal(m.rig.r.caps[0].group.visible, false, 'but the tube is open');
+  m.press('salvo');
+  assert.equal(m.rig.S.ammo, 11, 'a salvo with no flight is not queued');
+  m.hold('up', true); m.hold('up', false);
+  assert.ok(m.rig.S.elev > 45 && m.rig.S.elev <= 65);
+  m.set('stow');
+  assert.ok(m.rig.stowed());
+  m.dispose();
+});
+
+test('the height of a point above the ground follows the tilt of the body on the slope', async () => {
+  forgetTerrain();
+  const v = await viewerFor('vilkha'), m = new Machine(v, cfgOf('vilkha'));
+  v.sim = m;
+  await m.terrain.loading;
+  const S = m.S;
+  Object.assign(S, { dist: 7, y: .3, pitch: .12, roll: -.05 });
+  for (const p of [new Vector3(-3.45, .65, 1.26), new Vector3(3, 1, -1), new Vector3(0, 0, 0)]) {
+    const q = p.clone().applyEuler(new Euler(S.roll, 0, S.pitch, 'XYZ'));
+    const want = q.y + S.y - m.height(S.dist + q.x, q.z);
+    assert.ok(Math.abs(m.gapAt(p) - want) < 1e-9, `${p.toArray()}: ${m.gapAt(p).toFixed(4)} vs ${want.toFixed(4)}`);
+  }
+  assert.ok(Math.abs(m.ctx.speed() - S.speed) < 1e-12);
+  m.dispose();
+  forgetTerrain();
+  const flat = await viewerFor('vilkha', { terrain: 'fail' }), f = new Machine(flat, cfgOf('vilkha'));
+  flat.sim = f;
+  await f.terrain.loading;
+  assert.ok(f.S.y < .05, 'the body lies on level ground');
+  assert.ok(Math.abs(f.gapAt(new Vector3(0, .65, 0)) - (.65 + f.S.y)) < 1e-12, 'level ground at y = 0: the height of a point is its height plus the lift of the body');
+  f.dispose();
 });
