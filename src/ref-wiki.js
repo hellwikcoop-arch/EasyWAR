@@ -388,12 +388,23 @@ export function mount(host, options = {}) {
       h('a', { href: src.url, target: '_blank', rel: 'noopener noreferrer', text: src.title })]));
   }
 
+  // Дані вибраного варіанта (необов’язкові: variant.facts — пари «назва, значення», variant.text — короткий опис). Без них блоку немає.
+  function variantNode(entry) {
+    const v = variantsOf(entry).find(x => x.id === state.variant) || variantsOf(entry)[0];
+    if (!v || (!v.facts && !v.text)) return null;
+    return h('div', { class: 'rw-vbox' }, h('h4', { text: v.label }),
+      v.text ? h('p', { text: v.text }) : null,
+      v.facts ? h('dl', { class: 'rw-facts' }, v.facts.map(([k, val]) => h('div', {}, h('dt', { text: k }), h('dd', { text: val })))) : null);
+  }
+
   function pickVariant(entry, id) {
     if (state.variant === id || state.id !== entry.id) return;
     state.variant = id;
     article.querySelectorAll('.rw-variants button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.variant === id)));
     const box = article.querySelector('.rw-creditbox');
     if (box) box.replaceChildren(creditNode(entry));
+    const vslot = article.querySelector('.rw-vslot');
+    if (vslot) vslot.replaceChildren(...[variantNode(entry)].filter(Boolean));
     showModel(entry, ++token);
   }
 
@@ -421,6 +432,7 @@ export function mount(host, options = {}) {
       modeBar,
       airBox,
       entry.model ? stageBox : null,
+      h('div', { class: 'rw-vslot' }, variantNode(entry)),
       slot,
       h('p', { class: 'rw-summary', text: entry.summary }),
       entry.dual ? h('p', { class: 'rw-warn' }, h('b', { text: 'Увага. ' }), entry.dual) : null,

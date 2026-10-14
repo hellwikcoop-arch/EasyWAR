@@ -470,6 +470,7 @@ const refItems = entry => {
 const refIcon = id => { const e = ART_REF.entryById(id); return e && e.icon ? AMMO_URLS[`./ammo-art/${e.icon}.webp`] || null : null; };
 
 function refExtra(entry) {
+  if (entry.noTable) return null;          // підривники: рядків таблиці немає, блок «У вашій таблиці» лишається прихованим
   const m = S.model;
   const box = h('div', { class: 'ref-live' }, h('h3', { text: 'У вашій таблиці' }));
   if (!m) { box.append(h('p', { class: 'rw-fine', text: 'Таблицю ще не завантажено. Відкрийте її, і тут з’явиться підсумок по цьому типу.' })); return box; }

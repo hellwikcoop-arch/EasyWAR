@@ -554,7 +554,7 @@ export class RefViewer {
     const aspect = this.camera.aspect;
     // Боєприпаси: та сама відстань, що в картці вильоту, з запасом для розкладеної бомби; літак — за описаною кулею.
     if (this.aircraft) return aircraftDistance(this.action ? this.reach() : this.footprint, this.pitch, this.camera.fov, aspect);
-    return Math.max(6, (6 * 2.1) / aspect) * (this.explode ? 1.14 : 1);
+    return Math.max(6, (6 * 2.1) / aspect) * (this.explode ? Math.max(1.14, this.group.userData.fit || 0) : 1);
   }
 
   // Розмір моделі в поточній частці анімації (лінійно між сусідніми зразками).

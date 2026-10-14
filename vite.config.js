@@ -7,8 +7,9 @@ const host = process.env.TAURI_DEV_HOST;
 
 // Офлайн-кеш для мобільного перегляду (viewer.html): після збірки записує dist/sw.js
 // зі списком усіх файлів. Версія кешу береться з package.json, тож нова збірка
-// замінює старий кеш. 3D-моделі (.glb) і переглядач літаків (aircraft-viewer.html, aircraft-3d/) у кеш не входять:
-// у вікнах командування вони не потрібні, а моделі важать десятки мегабайтів.
+// замінює старий кеш. 3D-моделі (.glb), відео заставки (.mp4), ресурси 3D-карти
+// (map-assets, >100 МБ) і переглядач літаків (aircraft-viewer.html, aircraft-3d/) у кеш не входять:
+// у вікнах командування вони не потрібні, а моделі й заставка є лише в застосунку.
 // Сервіс-воркер реєструє лише viewer.html; у застосунку Tauri його немає.
 function viewerServiceWorker() {
   return {
@@ -21,7 +22,7 @@ function viewerServiceWorker() {
         for (const name of readdirSync(dir)) {
           const full = join(dir, name);
           if (statSync(full).isDirectory()) walk(full);
-          else if (name !== "sw.js" && !name.endsWith(".map") && !name.endsWith(".glb") && name !== "aircraft-viewer.html" && !full.includes(`${sep}aircraft-3d${sep}`)) files.push("./" + relative(out, full).split("\\").join("/"));
+          else if (name !== "sw.js" && !name.endsWith(".map") && !name.endsWith(".glb") && !name.endsWith(".mp4") && name !== "aircraft-viewer.html" && !full.includes(`${sep}aircraft-3d${sep}`) && !relative(out, full).split("\\").join("/").startsWith("map-assets/")) files.push("./" + relative(out, full).split("\\").join("/"));
         }
       };
       walk(out);
@@ -78,13 +79,14 @@ export default defineConfig({
     // the CSS minifier rejects; keep the source styles unchanged.
     cssMinify: false,
     sourcemap: Boolean(process.env.TAURI_ENV_DEBUG),
-    // Launcher plus the two branch modules it opens in same-origin iframes.
+    // Launcher plus the branch modules it opens in same-origin iframes; map.html — 3D-карта, яку вкладки «Карта» ПС і РВ вбудовують в iframe.
     rolldownOptions: {
       input: {
         index: fileURLToPath(new URL("./src/index.html", import.meta.url)),
         air: fileURLToPath(new URL("./src/air.html", import.meta.url)),
         rocket: fileURLToPath(new URL("./src/rocket.html", import.meta.url)),
         artillery: fileURLToPath(new URL("./src/artillery.html", import.meta.url)),
+        map: fileURLToPath(new URL("./src/map.html", import.meta.url)),
         viewer: fileURLToPath(new URL("./src/viewer.html", import.meta.url)),
         // Літаки у вкладці «Довідник» (ПС): окрема сторінка зі своєю сценою, відкривається в кадрі.
         aircraftViewer: fileURLToPath(new URL("./src/aircraft-viewer.html", import.meta.url)),

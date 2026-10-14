@@ -45,7 +45,8 @@ test('every reference model without its own viewer has an interactive scenario',
   }
   for (const e of ART_ENTRIES) {
     const sim = simOf(e);
-    if (e.group === 'charge') assert.equal(sim, null, `${e.id}: a propellant charge does nothing on its own`);
+    // Метальний заряд і підривник — частини боєприпасу, самі не летять: сцени в них немає.
+    if (e.group === 'charge' || e.group === 'fuze') assert.equal(sim, null, `${e.id}: a propellant charge or a fuze does nothing on its own`);
     else if (e.model) assert.ok(sim, `${e.id}: scenario`);
   }
   for (const [kind, phases] of Object.entries(SIM_PHASES)) {

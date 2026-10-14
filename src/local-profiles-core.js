@@ -9,8 +9,23 @@ export function getLocalProfiles(invokeCommand = invoke) {
   return invokeCommand('get_local_profiles');
 }
 
-export function createLocalProfile(displayName, invokeCommand = invoke) {
-  return invokeCommand('create_local_profile', { displayName });
+/**
+ * Реєстрація: профіль, обов'язковий пароль, посада, фото й обрані модулі створюються
+ * одним кроком, а користувач одразу входить у свій профіль. Профілю без пароля
+ * застосунок не створює.
+ */
+export function registerLocalProfile({ displayName, password, position, avatarDataUrl, modules }, invokeCommand = invoke) {
+  return invokeCommand('register_local_profile', {
+    displayName,
+    password,
+    position: position || null,
+    avatarDataUrl: avatarDataUrl || null,
+    modules,
+  });
+}
+
+export function setLocalProfileModules(profileId, modules, invokeCommand = invoke) {
+  return invokeCommand('set_local_profile_modules', { profileId, modules });
 }
 
 export function renameLocalProfile(profileId, displayName, invokeCommand = invoke) {
@@ -71,6 +86,7 @@ export function updateLocalProfileDetails(profileId, position, avatarDataUrl, in
   });
 }
 
+/** Встановлює або змінює пароль. Зняти пароль не можна: він обов'язковий. */
 export function setLocalProfilePassword(profileId, currentPassword, newPassword, invokeCommand = invoke) {
   return invokeCommand('set_local_profile_password', {
     profileId,
