@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Довідник ворожої техніки — EasyWAR</title>
+<link rel="stylesheet" href="../fonts/fonts.css">
+<link rel="stylesheet" href="../base.css">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<nav class="gx-nav"><a href="../index.html">← 3D-довідники</a></nav>
+<header class="top"><h1>Довідник ворожої техніки</h1><p>Довідник · наземна техніка противника в русі</p></header>
+<div class="fig">
+  <div class="stage" id="stage">
+    <canvas id="cv" aria-label="Тривимірна модель"></canvas>
+    <div class="ov tl">Fig 7</div>
+    <div class="ov tr"><span id="title"></span><span class="dims" id="dims"></span></div>
+    <div class="ov bl">Тягніть — обертання · коліщатко — масштаб · клавіші нижче</div>
+    <div class="ammo" id="ammo" aria-label="Ракети"></div>
+    <div class="ov br" id="status">Стоянка</div>
+    <div class="load" id="load">Завантаження моделі</div>
+  </div>
+  <div class="rows">
+    <div class="row"><b>Техніка</b><div class="chips" id="rowV"></div></div>
+    <div class="row"><b>Фази</b><div class="chips" id="rowP"></div></div>
+    <div class="row"><b>Наведення</b><div class="chips" id="rowL"></div></div>
+    <div class="row"><b>Дії</b><div class="chips" id="rowW"></div></div>
+  </div>
+</div>
+<section class="info" aria-live="polite">
+  <div><h2 id="i-name"></h2><p class="role" id="i-role"></p><div id="i-desc"></div></div>
+  <div><h3>За відкритими даними, наближено</h3><dl id="i-facts"></dl><h3>Що рухається в моделі</h3><ul id="i-anim"></ul></div>
+</section>
+<p class="foot"><span id="i-cred"></span><br>Моделі — візуальні, не точні копії реальних зразків. Марш, фази, пуск і траєкторія ракет, дим, пил, опори, гідроциліндри та поділ моделей на рухомі частини виконано для довідника; траєкторії спрощені й не є балістичним розрахунком, розміри ракет умовні, характеристики — за відкритими даними, наближено. Авторство й ліцензію кожної моделі показано вище; для частини моделей права не з’ясовані — це зазначено в примітці до моделі.<br>Ландшафт «75 Acres Land w Creek» — mrwrightphoto (<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>), обрізано й спрощено.</p>
+<script type="module" src="./main.js"></script>
+</body>
+</html>
