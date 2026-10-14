@@ -155,7 +155,8 @@ function plainPhases(sim) {
   return note ? phases.map(p => (p[0] === 'fire' ? [p[0], p[1], p[2] + note] : p)) : phases;
 }
 
-// Сценарій статті або null (немає моделі, є власний переглядач або модель нічого не вміє, як метальний заряд).
+// Сценарій статті або null (немає моделі, є власний переглядач або модель нічого не вміє сама, як метальний заряд
+// чи підривник: групи «charge» і «fuze» у BY_GROUP навмисно відсутні, їхні статті лишаються зі звичайною моделлю й «Блоками»).
 // file — ключ .glb моделі статті: за ним сцена бере вузли, що крутяться (гвинти, колеса: SPINS у ref-rig-data.js).
 export function simOf(entry, viewerOf = e => e.viewer) {
   if (!entry || !entry.model || viewerOf(entry)) return null;
