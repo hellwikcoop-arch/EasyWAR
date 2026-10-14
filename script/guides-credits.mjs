@@ -43,102 +43,31 @@ function origin(c) {
 }
 
 export function renderSection(credits = CREDITS) {
-  const section = `## 3D-дові��ники (src/guides)
-
-Шість довідників і хаб лежать у \`src/guides/\`; моделі — у \`src/guides/<довідник>/models/*.glb\`.
-
-### РВіА та артилерія (\`src/guides/rvia/models\`)
-- \`sapsan.glb\`
-- \`tochka.glb\`
-- \`uragan.glb\`
-- \`bastion.glb\`
-- \`caesar.glb\`
-- \`bogdana.glb\`
-- \`m10.glb\`
-- \`giatsint.glb\`
-- \`d30.glb\`
-- \`fh70.glb\`
-- \`m198.glb\`
-- \`vilkha.glb\`
-
-### ППО (\`src/guides/ppo/models\`)
-- \`patriot.glb\`
-- \`nasams.glb\`
-- \`iris.glb\`
-- \`sky.glb\`
-- \`mamba.glb\`
-- \`shilka.glb\`
-- \`kub.glb\`
-- \`nomads.glb\`
-
-### Сухопутні війська (\`src/guides/ground-forces/models\`)
-- \`abrams.glb\`
-- \`bradley.glb\`
-- \`marder.glb\`
-- \`boxer.glb\`
-- \`hmmwv.glb\`
-- \`hemtt.glb\`
-- \`goliath.glb\`
-- \`pk_m1a1.glb\`
-- \`pk_leopard1a4.glb\`
-- \`pk_m60.glb\`
-- \`pk_m48a2.glb\`
-- \`pk_m48a3.glb\`
-- \`pk_m4a3e8.glb\`
-- \`pk_centurion8.glb\`
-- \`pk_t3485.glb\`
-- \`pk_pt76.glb\`
-- \`pk_t55.glb\`
-- \`pk_t62.glb\`
-- \`pk_t72.glb\`
-- \`pk_t80.glb\`
-- \`pk_t90.glb\`
-- \`pk_type99tank.glb\`
-- \`pk_ee9.glb\`
-
-### БпАК і вертоліт (\`src/guides/uav/models\`)
-- \`tb2.glb\`
-- \`d1l.glb\`
-- \`sky.glb\`
-- \`sh.glb\`
-
-### Ворожа авіація (\`src/guides/aviation/models\`)
-- \`ka52.glb\`
-- \`ka50.glb\`
-- \`ka27.glb\`
-- \`mi26.glb\`
-- \`mi35.glb\`
-- \`mi8tv.glb\`
-- \`mi2.glb\`
-- \`an26.glb\`
-- \`an225.glb\`
-- \`tu22.glb\`
-- \`tu95.glb\`
-- \`fp5.glb\`
-- \`fp7.glb\`
-
-### Ворожа наземна техніка (\`src/guides/enemy-ground/models\`)
-- \`pan.glb\`
-- \`tung.glb\`
-- \`buk1.glb\`
-- \`buk2.glb\`
-- \`s400.glb\`
-- \`sa12.glb\`
-- \`r96.glb\`
-- \`osa.glb\`
-- \`isk.glb\`
-- \`btr.glb\`
-- \`mtl.glb\`
-- \`rp.glb\`
-
-### Ландшафт
-«${LANDSCAPE.title}» — ${LANDSCAPE.author}, ${LANDSCAPE.license} (<${LANDSCAPE.licenseUrl}>). ${LANDSCAPE.note}
-
-### Шрифти й код
-- Шрифти Oswald, PT Sans, JetBrains Mono, IBM Plex Sans і IBM Plex Mono лежать у \`src/guides/fonts/\`.
-- \`src/guides/room-env.js\` — копія класу \`RoomEnvironment\` із three.js r160.
-`;
-  return section;
+  const out = [];
+  out.push('## 3D-довідники (src/guides)', '');
+  out.push('Шість довідників і хаб лежать у `src/guides/`; моделі — у `src/guides/<довідник>/models/*.glb`. Таблиці нижче генерує `node script/guides-credits.mjs` з `src/guides/credits.js`; ті самі записи показано під сценою кожного довідника.', '');
+  out.push('Автора, ліцензію й посилання взято з даних, що супроводжували моделі: метаданих файлів і підписів в опублікованих довідниках. Під час перенесення сторінки Sketchfab не відкривали, тож перед публічним поширенням їх варто звірити.', '');
+  out.push('Види походження:', '');
+  for (const [kind, label] of Object.entries(KINDS)) out.push(`- \`${kind}\` — ${label}`);
+  out.push('');
+  out.push('Щоб визнати модель власною, достатньо змінити її `kind` на `own` у `src/guides/credits.js` і перегенерувати цей розділ.', '');
+  for (const [guide, title] of GUIDES) {
+    const rows = Object.entries(credits).filter(([key]) => key.startsWith(`${guide}/`));
+    out.push(`### ${title} (\`src/guides/${guide}/models\`)`, '');
+    out.push('| Файл | Модель | Походження | Примітка |', '| --- | --- | --- | --- |');
+    for (const [key, c] of rows) {
+      const file = `${key.slice(guide.length + 1)}.glb`;
+      out.push(`| \`${file}\` | ${cell(c.name)} | ${cell(origin(c))} | ${cell(c.note)} |`);
+    }
+    out.push('');
+  }
+  out.push('### Ландшафт', '');
+  out.push(`«${LANDSCAPE.title}» — ${LANDSCAPE.author}, ${LANDSCAPE.license} (<${LANDSCAPE.licenseUrl}>). ${LANDSCAPE.note} Файли: \`src/guides/shared/landscape-flight.glb\` (польотні довідники: авіація, БпАК), \`src/guides/shared/landscape-ground.glb\` (наземні довідники).`, '');
+  out.push('### Шрифти й код', '');
+  out.push('- Шрифти Oswald, PT Sans, JetBrains Mono, IBM Plex Sans і IBM Plex Mono лежать у `src/guides/fonts/` (з пакетів @fontsource), ліцензія SIL OFL 1.1, тексти ліцензій — у `src/guides/fonts/licenses/`.');
+  out.push('- `src/guides/room-env.js` — копія класу `RoomEnvironment` із three.js r160 (MIT, © three.js authors): у новішому three цей клас дає інше освітлення, а довідники налаштовано під старе.');
+  out.push('');
+  return out.join('\n');
 }
 
 export function withSection(text, section = renderSection()) {
