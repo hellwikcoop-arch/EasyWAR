@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Протиповітряна оборона — EasyWAR</title>
+<link rel="stylesheet" href="../fonts/fonts.css">
+<link rel="stylesheet" href="../base.css">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<nav class="gx-nav"><a href="../index.html">← 3D-довідники</a></nav>
+<header class="top"><h1>Протиповітряна оборона</h1><p>Довідник · 8 моделей ЗРК і ЗСУ в русі</p></header>
+<div class="fig">
+  <div class="stage" id="stage">
+    <canvas id="cv" aria-label="Тривимірна модель"></canvas>
+    <div class="ov tl">Fig 5</div>
+    <div class="ov tr"><span id="title"></span><span class="dims" id="dims"></span></div>
+    <div class="ov bl">Тягніть — обертання · коліщатко — масштаб · клавіші нижче</div>
+    <div class="ammo" id="ammo" aria-label="Ракети"></div>
+    <div class="ov br" id="status">Стоянка</div>
+    <div class="load" id="load">Завантаження моделі</div>
+  </div>
+  <div class="rows">
+    <div class="row"><b>Техніка</b><div class="chips" id="rowV"></div></div>
+    <div class="row"><b>Фази</b><div class="chips" id="rowP"></div></div>
+    <div class="row"><b>Наведення</b><div class="chips" id="rowL"></div></div>
+    <div class="row"><b>Дії</b><div class="chips" id="rowW"></div></div>
+  </div>
+</div>
+<section class="info" aria-live="polite">
+  <div><h2 id="i-name"></h2><p class="role" id="i-role"></p><div id="i-desc"></div></div>
+  <div><h3>За відкритими даними, наближено</h3><dl id="i-facts"></dl><h3>Що рухається в моделі</h3><ul id="i-anim"></ul></div>
+</section>
+<p class="foot"><span id="i-cred"></span><br>Марш, фази, пуск і траєкторія ракет, дим, пил, опори, гідроциліндри та поділ моделі на рухомі частини зроблені для EasyWAR; траєкторії спрощені й не є балістичним розрахунком, розміри ракет умовні. Авторство й ліцензію кожної моделі показано вище.<br>Ландшафт «75 Acres Land w Creek» — mrwrightphoto (<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>), обрізано й спрощено.</p>
+<script type="module" src="./main.js"></script>
+</body>
+</html>
