@@ -60,6 +60,11 @@ test('at least one known module must be chosen; unknown ids are dropped', () => 
   assert.deepEqual(normalizeModules(['dshv', 'air', 'air', 'x']), ['air', 'dshv']);
 });
 
+test('module titles in the registration carry no beta label', () => {
+  assert.equal(GATE_MODULES.find(module => module.id === 'artillery').title, 'Артилерія');
+  assert.ok(GATE_MODULES.every(module => !/beta|бета/i.test(module.title)));
+});
+
 test('table slots follow the chosen modules; artillery has no own slot', () => {
   assert.deepEqual(slotsForModules(['air']).map(s => s.branch), ['air']);
   assert.deepEqual(slotsForModules(['artillery']), []);

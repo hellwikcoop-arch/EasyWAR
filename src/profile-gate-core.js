@@ -31,7 +31,7 @@ export const GATE_MODULES = Object.freeze([
   }),
   Object.freeze({
     id: 'artillery',
-    title: 'Артилерія (beta)',
+    title: 'Артилерія',
     hint: 'Витрата й залишок боєприпасів бригад у спільній таблиці',
     slots: Object.freeze([]),
     card: '.branch-card[data-branch="artillery"]',
