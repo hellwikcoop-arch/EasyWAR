@@ -53,10 +53,12 @@ test('every reference model without its own viewer has an interactive scenario',
     assert.ok(['airfield', 'road', 'field'].includes(terrainOf(kind)), kind);
     for (const [id, label, text] of phases) assert.ok(id && label && text.endsWith('.'), `${kind}.${id}`);
   }
-  for (const [kind, phases] of Object.entries(MACHINE_PHASES)) {
-    assert.ok(SIM_PHASES[kind], `${kind}: the simple scenario stays as a fallback`);
-    assert.ok(phases.length >= 2 && phases[0][0] === 'park' && phases[1][0] === 'march', kind);
-    for (const [id, label, text] of phases) assert.ok(id && label && text.endsWith('.'), `machine ${kind}.${id}`);
+  // Набір фаз машини забезпечення (support) має запасний простий сценарій техніки (vehicle).
+  const fallbackKind = { support: 'vehicle' };
+  for (const [set, phases] of Object.entries(MACHINE_PHASES)) {
+    assert.ok(SIM_PHASES[fallbackKind[set] || set], `${set}: the simple scenario stays as a fallback`);
+    assert.ok(phases.length >= 2 && phases[0][0] === 'park' && phases[1][0] === 'march', set);
+    for (const [id, label, text] of phases) assert.ok(id && label && text.endsWith('.'), `machine ${set}.${id}`);
   }
   assert.ok(simOf(ENTRIES.find(e => e.id === 'mi35')).phases.some(p => p[0] === 'attack'), 'armed helicopter fires rockets');
   assert.ok(!simOf(ENTRIES.find(e => e.id === 'mi26')).phases.some(p => p[0] === 'attack'), 'transport helicopter does not');
@@ -64,6 +66,14 @@ test('every reference model without its own viewer has an interactive scenario',
   const vilkha = simOf(ENTRIES.find(e => e.id === 'vilkha'));
   assert.equal(vilkha.phases, MACHINE_PHASES.launcher);
   assert.match(legacySim(vilkha).phases.find(p => p[0] === 'fire')[2], /умовно/);
+  // Машини забезпечення: кран, сошники й відвал працюють у фазі «Робота», а запасний сценарій лишається простим маршем.
+  for (const id of ['m984', 'm1084', 'bpz2', 'hemtt-pods']) {
+    const sim = simOf(ENTRIES.find(e => e.id === id));
+    assert.equal(sim.phases, MACHINE_PHASES.support, id);
+    assert.deepEqual(sim.phases.map(p => p[0]), ['park', 'march', 'work', 'stow'], id);
+    assert.equal(sim.rig, 'crane', id);
+    assert.deepEqual(legacySim(sim).phases.map(p => p[0]), ['park', 'march', 'rough'], id);
+  }
 });
 
 test('every scenario plays to the end: take-off and landing, hover, strike, salvo', () => {

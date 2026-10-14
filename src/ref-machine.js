@@ -9,10 +9,11 @@ import { CircleGeometry, Color, Fog, Group, Matrix4, Mesh, MeshBasicMaterial, Me
 import { D2R, Fx, clamp, ease, groundTexture, softTexture } from './ref-fx.js';
 import { Terrain, groundPose } from './ref-terrain.js';
 import { Tracks, buildWheels } from './ref-gear.js';
-import { LAUNCHERS, TELS, TRACKED, WHEELED, axleGroups } from './ref-rig-data.js';
+import { CRANES, LAUNCHERS, TELS, TRACKED, WHEELED, axleGroups } from './ref-rig-data.js';
 import { Debris, Flight, ROCKETS, proceduralRocket } from './ref-flight.js';
 import { PodLauncher, buildPodRig } from './ref-launchers.js';
 import { TelLauncher, buildTelRig } from './ref-tel.js';
+import { CraneMachine, buildCraneRig } from './ref-crane.js';
 import { STATUS_TEXT } from './ref-sim-data.js';
 
 // Колір туману збігається з фоном сцени: поле тоне в ньому, і край ландшафту не видно. Туман густішає до FOG_FAR метрів: бічні ряди
@@ -55,6 +56,13 @@ export const RIGS = {
     const rig = m.part('tel:' + cfg.spec, () => buildTelRig(m.scene, spec));
     return rig ? new TelLauncher(rig, m.ctx) : null;
   },
+  // Машини забезпечення з краном, сошниками чи відвалом (M984A2, M1084A1P2, Bergepanzer 2, пакетовоз HEMTT).
+  crane(m, cfg) {
+    const spec = CRANES[cfg.spec];
+    if (!spec) return null;
+    const rig = m.part('crane:' + cfg.spec, () => buildCraneRig(m.scene, spec));
+    return rig ? new CraneMachine(rig, m.ctx) : null;
+  },
 };
 
 export class Machine {
@@ -66,7 +74,10 @@ export class Machine {
   }
 
   get phases() { return this.cfg.phases; }
-  get distance() { return { launcher: 1.45, vehicle: 1.35 }[this.kind] || 1.4; }
+  // Піднята й висунута стріла крана відсуває камеру, щоб вона лишалася в кадрі.
+  get distance() { return ({ launcher: 1.45, vehicle: 1.35 }[this.kind] || 1.4) * (this.rig && this.rig.zoom ? this.rig.zoom() : 1); }
+  // Підказка про клавіші вузлів: [id кнопки, текст]; null — інтерфейс бере стандартний перелік (наведення, пуск, залп, заряджання).
+  get hints() { return this.rig && this.rig.hints ? this.rig.hints : null; }
   // Кнопки вузлів плюс перемикач камери, якщо машина стріляє й ракети літають (без анімації їм летіти нікуди).
   get controls() {
     if (!this.rig) return [];

@@ -212,7 +212,7 @@ export function mount(host, options = {}) {
     machineBar.hidden = !buttons.size;
     if (buttons.size) {
       // Підказка перелічує лише клавіші, що є в цієї машини.
-      const keys = [['up', '←↑↓→ наведення'], ['fire', 'X пуск'], ['salvo', 'Z залп'], ['reload', 'H заряджання'], ['type', 'T тип ракети'], ['follow', 'C камера за ракетою']];
+      const keys = machine.hints || [['up', '←↑↓→ наведення'], ['fire', 'X пуск'], ['salvo', 'Z залп'], ['reload', 'H заряджання'], ['type', 'T тип ракети'], ['follow', 'C камера за ракетою']];
       hint.textContent = 'Клавіші, коли сцена чи кнопки в фокусі: 1–' + machine.phases.length + ' фази · ' + keys.filter(([id]) => buttons.has(id)).map(k => k[1]).join(' · ') + '.';
     }
     let toast = '';

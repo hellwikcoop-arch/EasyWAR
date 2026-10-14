@@ -84,6 +84,13 @@ export const MACHINE_PHASES = {
     ['park', 'Стоянка', 'Машина на місці, двигун вимкнено.'],
     ['march', 'Марш', 'Рух ґрунтом: колеса чи гусениці крутяться, корпус іде за рельєфом.'],
   ],
+  // Машини забезпечення: кран, сошники чи відвал працюють лише на місці, а рушати можна, коли все складено.
+  support: [
+    ['park', 'Стоянка', 'Машина на місці, двигун вимкнено; кран і опори в похідному положенні.'],
+    ['march', 'Марш', 'Рух ґрунтом. Машина рушає, коли кран складено, а опори підняті; інакше спершу складає їх.'],
+    ['work', 'Робота', 'Машина зупиняється й опускає опори, кран розкладається; наводьте стрілу, поворот і гак.'],
+    ['stow', 'Згортання', 'Кран складається, опори піднімаються: машина готова до маршу.'],
+  ],
 };
 
 // Рядок стану сцени за фазою; {v} — швидкість у км/год. Вузли (пускова) підставляють свій рядок у фазі «position».
@@ -91,6 +98,7 @@ export const STATUS_TEXT = {
   park: 'Стоянка · двигун вимкнено',
   march: 'Марш · {v} км/год',
   position: 'Вогнева позиція · підйом пускової',
+  work: 'Робота · опускання опор',
   stow: 'Згортання · пускова в похідне',
 };
 
@@ -101,7 +109,8 @@ export const STATUS_TEXT = {
 //     back — пакет на моделі дивиться назад (пуск через корму), stowed — пакет на моделі в похідному положенні (пуск умовний);
 //   tracks — гусенична машина (менше розгойдування);
 //   machine — веде рушій ref-machine.js: rig — які вузли рухаються на машині (ref-machine.js, RIGS), spec — запис LAUNCHERS,
-//     wheels / tracked — запис WHEELED чи TRACKED ходової, speed — швидкість маршу (м/с).
+//     TELS чи CRANES, wheels / tracked — запис WHEELED чи TRACKED ходової, speed — швидкість маршу (м/с),
+//     phaseSet — набір фаз MACHINE_PHASES, якщо він не збігається з kind (машини забезпечення: support).
 const BY_ID = {
   an225: { kind: 'plane', size: 'heavy' },
   an26: { kind: 'plane' },
@@ -117,10 +126,10 @@ const BY_ID = {
   m270: { kind: 'launcher', machine: true, rig: 'pods', spec: 'm270', tracked: 'm270', speed: 12, salvo: 12, muzzle: [.3, .97], elev: 62, back: true, tracks: true },
   vilkha: { kind: 'launcher', machine: true, rig: 'tel', spec: 'vilkha', wheels: 'vilkha', speed: 16, salvo: 4, muzzle: [.3, .95], elev: 52, stowed: true },
   sapsan: { kind: 'launcher', machine: true, rig: 'tel', spec: 'sapsan', wheels: 'sapsan', speed: 16, salvo: 1, muzzle: [.2, .95], elev: 80, stowed: true },
-  m1084: { kind: 'vehicle' },
-  m984: { kind: 'vehicle' },
-  bpz2: { kind: 'vehicle', tracks: true },
-  'hemtt-pods': { kind: 'vehicle' },
+  m1084: { kind: 'vehicle', machine: true, phaseSet: 'support', rig: 'crane', spec: 'm1084', wheels: 'm1084', speed: 15 },
+  m984: { kind: 'vehicle', machine: true, phaseSet: 'support', rig: 'crane', spec: 'm984', wheels: 'm984', speed: 14 },
+  bpz2: { kind: 'vehicle', machine: true, phaseSet: 'support', rig: 'crane', spec: 'bpz2', tracked: 'bpz2', speed: 11, tracks: true },
+  'hemtt-pods': { kind: 'vehicle', machine: true, phaseSet: 'support', rig: 'crane', spec: 'hemtt-pods', wheels: 'hemtt-pods', speed: 11 },
   39: { kind: 'bomb' }, 53: { kind: 'bomb' }, 62: { kind: 'bomb' }, 64: { kind: 'bomb' },
   aasm: { kind: 'bomb', motor: true }, blu140: { kind: 'bomb' }, kab500: { kind: 'bomb' },
   c13: { kind: 'rocket' },
@@ -151,7 +160,8 @@ export function simOf(entry, viewerOf = e => e.viewer) {
   if (!entry || !entry.model || viewerOf(entry)) return null;
   const sim = entry.sim || BY_ID[entry.id] || BY_GROUP[entry.group] || null;
   if (!sim || !SIM_PHASES[sim.kind]) return null;
-  if (sim.machine && MACHINE_PHASES[sim.kind]) return { ...sim, phases: MACHINE_PHASES[sim.kind] };
+  const set = MACHINE_PHASES[sim.phaseSet || sim.kind];
+  if (sim.machine && set) return { ...sim, phases: set };
   return { ...sim, phases: plainPhases(sim) };
 }
 
