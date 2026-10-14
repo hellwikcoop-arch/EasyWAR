@@ -1,0 +1,72 @@
+:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}
+
+/* Layout: a technical plate: one framed 3D figure with rows of keyed chips beneath it, then a reference card for the selected machine. Single dark look by choice, same plate as the other EasyWAR reference pages. */
+:root{
+  --bg:#111214; --panel:#151619; --line:#26282d; --line-2:#3a3d44;
+  --fg:#d9dbdf; --dim:#8a8f98; --faint:#6b707a; --accent:#d8c48e;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  color-scheme:dark;
+}
+html,body{background:var(--bg);color:var(--fg)}
+body{font-family:var(--sans);padding-inline:16px;padding-block:16px}
+*{box-sizing:border-box}
+.top{max-width:1180px;margin:0 auto 12px;display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:4px 16px}
+.top h1{margin:0;font:600 20px/1.2 var(--sans);letter-spacing:.01em;text-wrap:balance}
+.top p{margin:0;font:400 11px/1.4 var(--mono);letter-spacing:.1em;color:var(--faint);text-transform:uppercase}
+.fig{max-width:1180px;margin:0 auto;border:1px solid var(--line);border-radius:18px;background:var(--panel);padding:12px;display:grid;gap:12px}
+.stage{position:relative;border:1px solid var(--line-2);border-radius:4px;aspect-ratio:16/10;width:100%;max-width:100%;overflow:hidden;background:var(--bg)}
+.stage canvas{display:block;width:100%;height:100%;touch-action:pan-y;cursor:grab}
+.stage canvas.drag{cursor:grabbing}
+.ov{position:absolute;font-family:var(--mono);font-size:11px;letter-spacing:.08em;color:var(--faint);pointer-events:none}
+.tl{top:14px;left:16px}
+.tr{top:14px;right:16px;text-align:right;text-transform:uppercase;max-width:70%}
+.tr .dims{display:block;margin-top:4px;color:var(--dim);letter-spacing:.04em;text-transform:none}
+.bl{bottom:14px;left:16px;text-transform:uppercase}
+.br{bottom:14px;right:16px;text-align:right;color:var(--dim);letter-spacing:.03em;max-width:68%}
+.br.toast{color:var(--accent)}
+.ammo{position:absolute;left:16px;bottom:38px;display:flex;flex-wrap:wrap;gap:5px;max-width:60%;pointer-events:none}
+.ammo i{width:12px;height:12px;border-radius:50%;border:1px solid var(--faint);background:transparent}
+.ammo i.on{background:var(--accent);border-color:var(--accent)}
+.load{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-family:var(--mono);font-size:11px;letter-spacing:.08em;color:var(--dim);text-transform:uppercase;pointer-events:none}
+.rows{display:grid;gap:8px}
+.row{display:grid;grid-template-columns:76px 1fr;align-items:center;gap:8px}
+.row>b{font-family:var(--mono);font-weight:400;font-size:10px;letter-spacing:.14em;color:var(--faint);text-transform:uppercase}
+.chips{display:flex;flex-wrap:wrap;gap:6px;min-width:0}
+.chip{display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 9px 0 9px;border:1px solid var(--line);border-radius:5px;background:transparent;color:var(--dim);font:500 13px/1 var(--sans);cursor:pointer;transition:border-color .15s,color .15s,background .15s}
+.chip kbd{font:500 10px/1 var(--mono);min-width:18px;height:18px;display:inline-grid;place-items:center;border-radius:3px;background:#1f2125;color:var(--dim);padding:0 3px;margin-left:-4px}
+.chip:hover{color:var(--fg);border-color:var(--line-2)}
+.chip:focus-visible{outline:1px solid var(--accent);outline-offset:2px}
+.chip.on{color:var(--fg);border-color:#6a6f78;background:#1b1d21}
+.chip.on kbd{background:#2b2e34;color:var(--fg)}
+.chip.lock{opacity:.45}
+.sel{appearance:none;-webkit-appearance:none;height:34px;max-width:100%;min-width:220px;padding:0 34px 0 12px;border:1px solid var(--line-2);border-radius:5px;background:#1b1d21 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238a8f98' stroke-width='1.5'/%3E%3C/svg%3E") no-repeat right 12px center;color:var(--fg);font:500 13px/1 var(--sans);cursor:pointer}
+.sel:focus-visible{outline:1px solid var(--accent);outline-offset:2px}
+.sel option,.sel optgroup{background:#1b1d21;color:var(--fg)}
+.info{max-width:1180px;margin:14px auto 0;display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:16px 28px;border:1px solid var(--line);border-radius:18px;background:var(--panel);padding:18px 20px}
+.info h2{margin:0;font:600 17px/1.3 var(--sans);text-wrap:balance}
+.info .role{margin:2px 0 10px;font:400 11px/1.5 var(--mono);letter-spacing:.08em;color:var(--accent);text-transform:uppercase}
+.info p{margin:0 0 9px;font-size:14px;line-height:1.55;color:var(--fg);max-width:68ch}
+.info h3{margin:0 0 8px;font:400 10px/1 var(--mono);letter-spacing:.14em;color:var(--faint);text-transform:uppercase}
+.info dl{margin:0 0 16px;display:grid;gap:0}
+.info dl div{display:grid;grid-template-columns:minmax(0,10.5em) minmax(0,1fr);gap:10px;padding:6px 0;border-top:1px solid var(--line);font-size:13px}
+.info dt{color:var(--dim)}
+.info dd{margin:0;color:var(--fg);font-variant-numeric:tabular-nums}
+.info ul{margin:0;padding-left:18px;font-size:13px;line-height:1.55;color:var(--dim)}
+.foot{max-width:1180px;margin:10px auto 0;font-size:12px;color:var(--faint);line-height:1.55}
+.foot a{color:var(--dim)}
+.foot a:hover,.foot a:focus-visible{color:var(--fg)}
+@media (max-width:760px){
+  .info{grid-template-columns:minmax(0,1fr);padding:14px}
+}
+@media (max-width:640px){
+  .stage{aspect-ratio:4/5}
+  .row{grid-template-columns:1fr;gap:6px}
+  .bl{display:none}
+  .tr{max-width:64%}
+  .tr .dims{display:none}
+  .br{left:16px;max-width:none;text-align:left;bottom:12px}
+  .ammo{bottom:44px}
+  .chip{font-size:12px;height:28px}
+}
+@media (prefers-reduced-motion:reduce){.chip{transition:none}}
