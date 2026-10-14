@@ -6,7 +6,7 @@ import test from 'node:test';
 import { Box3, BoxGeometry, Group, Mesh, MeshBasicMaterial, PerspectiveCamera, Scene, Vector3 } from 'three';
 import { ENTRIES, viewerOf } from '../src/ref-data.js';
 import { ENTRIES as ART_ENTRIES } from '../src/artillery-ref-data.js';
-import { SIM_PHASES, simOf, terrainOf } from '../src/ref-sim-data.js';
+import { MACHINE_PHASES, SIM_PHASES, legacySim, simOf, terrainOf } from '../src/ref-sim-data.js';
 
 const ctx = new Proxy({}, { get: (t, k) => (k in t ? t[k] : k.startsWith('create') ? () => ({ addColorStop() {} }) : () => {}), set: (t, k, v) => { t[k] = v; return true; } });
 globalThis.document = { createElement: () => ({ width: 0, height: 0, getContext: () => ctx }) };
@@ -45,6 +45,7 @@ test('every reference model without its own viewer has an interactive scenario',
   }
   for (const e of ART_ENTRIES) {
     const sim = simOf(e);
+    // Метальний заряд і підривник — частини боєприпасу, самі не летять: сцени в них немає.
     if (e.group === 'charge' || e.group === 'fuze') assert.equal(sim, null, `${e.id}: a propellant charge or a fuze does nothing on its own`);
     else if (e.model) assert.ok(sim, `${e.id}: scenario`);
   }
@@ -53,14 +54,34 @@ test('every reference model without its own viewer has an interactive scenario',
     assert.ok(['airfield', 'road', 'field'].includes(terrainOf(kind)), kind);
     for (const [id, label, text] of phases) assert.ok(id && label && text.endsWith('.'), `${kind}.${id}`);
   }
+  // Набір фаз машини забезпечення (support) має запасний простий сценарій техніки (vehicle).
+  const fallbackKind = { support: 'vehicle' };
+  for (const [set, phases] of Object.entries(MACHINE_PHASES)) {
+    assert.ok(SIM_PHASES[fallbackKind[set] || set], `${set}: the simple scenario stays as a fallback`);
+    assert.ok(phases.length >= 2 && phases[0][0] === 'park' && phases[1][0] === 'march', set);
+    for (const [id, label, text] of phases) assert.ok(id && label && text.endsWith('.'), `machine ${set}.${id}`);
+  }
   assert.ok(simOf(ENTRIES.find(e => e.id === 'mi35')).phases.some(p => p[0] === 'attack'), 'armed helicopter fires rockets');
   assert.ok(!simOf(ENTRIES.find(e => e.id === 'mi26')).phases.some(p => p[0] === 'attack'), 'transport helicopter does not');
-  assert.match(simOf(ENTRIES.find(e => e.id === 'vilkha')).phases.find(p => p[0] === 'fire')[2], /умовно/);
+  // Вільху й Сапсан веде рушій техніки (піднімний пакет працює), а простий запасний сценарій чесно каже, що пуск умовний.
+  const vilkha = simOf(ENTRIES.find(e => e.id === 'vilkha'));
+  assert.equal(vilkha.phases, MACHINE_PHASES.launcher);
+  assert.match(legacySim(vilkha).phases.find(p => p[0] === 'fire')[2], /умовно/);
+  // Машини забезпечення: кран, сошники й відвал працюють у фазі «Робота», а запасний сценарій лишається простим маршем.
+  for (const id of ['m984', 'm1084', 'bpz2', 'hemtt-pods']) {
+    const sim = simOf(ENTRIES.find(e => e.id === id));
+    assert.equal(sim.phases, MACHINE_PHASES.support, id);
+    assert.deepEqual(sim.phases.map(p => p[0]), ['park', 'march', 'work', 'stow'], id);
+    assert.equal(sim.rig, 'crane', id);
+    assert.deepEqual(legacySim(sim).phases.map(p => p[0]), ['park', 'march', 'rough'], id);
+  }
 });
 
 test('every scenario plays to the end: take-off and landing, hover, strike, salvo', () => {
-  for (const [e, cfg] of all) {
-    if (!cfg) continue;
+  for (const [e, full] of all) {
+    if (!full) continue;
+    // Техніка, яку веде рушій ref-machine.js, перевіряється в ref-machine.test.mjs; тут — запасний простий сценарій тієї самої статті.
+    const cfg = full.machine ? legacySim(full) : full;
     const v = fakeViewer(), sim = new Sim(v, cfg), S = sim.S, ids = cfg.phases.map(p => p[0]);
     const go = id => { assert.ok(ids.includes(id), `${e.id}: phase ${id}`); sim.set(id); };
     switch (cfg.kind) {

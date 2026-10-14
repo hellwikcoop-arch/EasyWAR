@@ -4,70 +4,16 @@
 // завжди бачить модель, а точність координат не падає на довгому шляху. Числа (висоти, швидкості) — умовні одиниці
 // сцени, а не ТТХ: сценарій показує, що модель робить, а не моделює фізику конкретного зразка.
 import {
-  AdditiveBlending, CanvasTexture, CircleGeometry, DoubleSide, Fog, Group, Mesh, MeshBasicMaterial, MeshStandardMaterial,
-  NormalBlending, PlaneGeometry, RepeatWrapping, RingGeometry, SRGBColorSpace, Sprite, SpriteMaterial, Vector3,
+  AdditiveBlending, CircleGeometry, DoubleSide, Fog, Group, Mesh, MeshBasicMaterial, MeshStandardMaterial,
+  PlaneGeometry, RepeatWrapping, RingGeometry, Sprite, SpriteMaterial, Vector3,
 } from 'three';
 import { terrainOf } from './ref-sim-data.js';
+import { D2R, Fx, canvasTexture, clamp, ease, groundTexture } from './ref-fx.js';
+import { SPINS } from './ref-rig-data.js';
+import { blurTexture, buildSpinRig } from './ref-spin.js';
 
-const D2R = Math.PI / 180;
-const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
-// Плавне наближення до цілі: k — швидкість (1/с), не залежить від частоти кадрів.
-const ease = (v, to, k, dt) => v + (to - v) * (1 - Math.exp(-k * dt));
 const TILE = 48, TILES = 7;
 const FOG = '#141c21';
-
-function rng(seed) { let s = seed >>> 0; return () => ((s = (Math.imul(s, 1664525) + 1013904223) >>> 0) / 4294967296); }
-
-function canvasTexture(w, h, draw) {
-  const c = document.createElement('canvas');
-  c.width = w; c.height = h;
-  draw(c.getContext('2d'), w, h);
-  const t = new CanvasTexture(c);
-  t.colorSpace = SRGBColorSpace;
-  return t;
-}
-
-// Плитка місцевості 512 px = TILE одиниць. Вісь X полотна — напрямок руху (ніс моделі), середина по Y — під моделлю.
-function groundTexture(type) {
-  return canvasTexture(512, 512, (x, w, h) => {
-    const r = rng(type.length * 977 + 13);
-    x.fillStyle = type === 'field' ? '#4d5636' : '#465236';
-    x.fillRect(0, 0, w, h);
-    const tones = type === 'field' ? ['#5a6139', '#6b6a42', '#44502f', '#73693f', '#525d35'] : ['#4c5a39', '#3f4b31', '#55603d'];
-    for (let i = 0; i < (type === 'field' ? 14 : 22); i++) {
-      x.fillStyle = tones[i % tones.length];
-      x.globalAlpha = type === 'field' ? .9 : .5;
-      const pw = 60 + r() * 170, ph = 50 + r() * 150;
-      x.fillRect(r() * w - pw / 2, r() * h - ph / 2, pw, ph);
-    }
-    x.globalAlpha = 1;
-    for (let i = 0; i < 2600; i++) {
-      x.fillStyle = r() < .5 ? 'rgba(0,0,0,.18)' : 'rgba(255,255,230,.07)';
-      x.fillRect(r() * w, r() * h, 2 + r() * 3, 2 + r() * 3);
-    }
-    if (type === 'airfield') {
-      x.fillStyle = '#3b3d3f'; x.fillRect(0, h / 2 - 34, w, 68);
-      x.fillStyle = 'rgba(255,255,255,.05)';
-      for (let i = 0; i < 900; i++) x.fillRect(r() * w, h / 2 - 34 + r() * 68, 2, 2);
-      x.fillStyle = '#d9d6c8';
-      x.fillRect(0, h / 2 - 32, w, 2); x.fillRect(0, h / 2 + 30, w, 2);
-      for (let i = 0; i < 8; i++) x.fillRect(i * 64 + 8, h / 2 - 2, 36, 4);
-    } else if (type === 'road') {
-      x.fillStyle = '#6e5f45'; x.fillRect(0, h / 2 - 26, w, 52);
-      x.fillStyle = 'rgba(40,30,20,.45)'; x.fillRect(0, h / 2 - 15, w, 6); x.fillRect(0, h / 2 + 9, w, 6);
-      for (let i = 0; i < 700; i++) { x.fillStyle = r() < .5 ? 'rgba(0,0,0,.2)' : 'rgba(255,240,200,.1)'; x.fillRect(r() * w, h / 2 - 26 + r() * 52, 3, 2); }
-    }
-  });
-}
-
-// М’яка пляма для диму, пилу й спалахів.
-function softTexture() {
-  return canvasTexture(64, 64, (x) => {
-    const g = x.createRadialGradient(32, 32, 0, 32, 32, 32);
-    g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(.45, 'rgba(255,255,255,.55)'); g.addColorStop(1, 'rgba(255,255,255,0)');
-    x.fillStyle = g; x.fillRect(0, 0, 64, 64);
-  });
-}
 
 // Диск несного гвинта в русі: прозорий центр, слід лопатей і світліший обід.
 function rotorTexture() {
@@ -82,52 +28,6 @@ function rotorTexture() {
       x.fillStyle = 'rgba(15,15,15,.22)'; x.fill();
     }
   });
-}
-
-// Частинки: дим, пил, вогонь. Спрайти беруться з пулу, тож довгий політ не створює тисяч об’єктів.
-class Fx {
-  constructor(parent) {
-    this.parent = parent; this.list = []; this.free = { n: [], a: [] }; this.tex = softTexture(); this.quiet = false;
-  }
-
-  puff(x, y, z, o = {}) {
-    if (this.quiet || this.list.length > 600) return;
-    const add = !!o.add, pool = this.free[add ? 'a' : 'n'];
-    let p = pool.pop();
-    if (!p) p = { s: new Sprite(new SpriteMaterial({ map: this.tex, transparent: true, depthWrite: false, blending: add ? AdditiveBlending : NormalBlending })), add };
-    p.s.material.color.set(o.color || '#cfcfcf');
-    p.s.position.set(x, y, z);
-    p.vx = o.vx || 0; p.vy = o.vy || 0; p.vz = o.vz || 0;
-    p.size = o.size || .5; p.grow = o.grow ?? 1.2; p.life = o.life || 1.6; p.t = 0; p.op = o.op ?? .55;
-    p.s.scale.setScalar(p.size); p.s.material.opacity = 0;
-    this.parent.add(p.s);
-    this.list.push(p);
-  }
-
-  step(dt) {
-    for (let i = this.list.length - 1; i >= 0; i--) {
-      const p = this.list[i];
-      p.t += dt;
-      const k = p.t / p.life;
-      if (k >= 1) { this.parent.remove(p.s); this.free[p.add ? 'a' : 'n'].push(p); this.list.splice(i, 1); continue; }
-      p.s.position.x += p.vx * dt; p.s.position.y += p.vy * dt; p.s.position.z += p.vz * dt;
-      p.vx *= 1 - .6 * dt; p.vz *= 1 - .6 * dt;
-      p.s.scale.setScalar(p.size * (1 + p.grow * k));
-      // Короткий наплив (30 мс), щоб дим біля сопла швидкої ракети був видно одразу.
-      p.s.material.opacity = p.op * (1 - k) * Math.min(1, p.t / .03);
-    }
-  }
-
-  clear() {
-    for (const p of this.list) { this.parent.remove(p.s); this.free[p.add ? 'a' : 'n'].push(p); }
-    this.list = [];
-  }
-
-  dispose() {
-    this.clear();
-    for (const pool of Object.values(this.free)) for (const p of pool) p.s.material.dispose();
-    this.tex.dispose();
-  }
 }
 
 // Диски несних гвинтів. Маточина — найвища точка моделі поза хвостовою третиною (там кіль і хвостовий гвинт),
@@ -185,9 +85,11 @@ export class Sim {
     cam.fov = 34; cam.far = 260; cam.updateProjectionMatrix();
     viewer.stage.floor.visible = false;
     this.focusY = viewer.target.y;
-    // Гвинти будуємо в координатах моделі в стандартній позі.
+    // Гвинти й колеса, вирізані з мешів моделі, крутяться по-справжньому (ref-spin.js). Лише коли їх немає, вертоліт отримує запасні
+    // прозорі диски: їх будуємо в координатах моделі в стандартній позі.
     this.rotors = [];
-    if (this.kind === 'heli') {
+    this.spin = this.kind === 'heli' || this.kind === 'plane' ? this.buildSpin() : null;
+    if (this.kind === 'heli' && !this.spin) {
       g.rotation.set(0, 0, 0); g.position.set(0, 0, 0); g.updateMatrixWorld(true);
       const plan = rotorPlan(modelPoints(g), e.size, { ...(cfg.rotor || {}), min: e.min });
       this.rotorTex = rotorTexture();
@@ -209,6 +111,21 @@ export class Sim {
   }
 
   get phases() { return this.cfg.phases; }
+
+  // Вузли, що крутяться, будуються один раз на модель і лишаються в її записі (так само, як колеса й кран у рушії техніки).
+  // Немає заявки в SPINS чи вирізання не вдалося — повертає null, і модель просто без них.
+  buildSpin() {
+    const e = this.e, spec = this.cfg.file && SPINS[this.cfg.file];
+    if (!spec || !e.scene) return null;
+    const parts = e.parts || (e.parts = {}), key = 'spin:' + this.cfg.file;
+    if (!(key in parts)) {
+      try { parts[key] = buildSpinRig(e.scene, spec); } catch (err) { console.warn('Довідник: гвинти й колеса недоступні', err); parts[key] = null; }
+      e.meshes = null; // нові меші потрапляють до перевірки видимості позначок
+    }
+    const rig = parts[key];
+    if (rig) { this.blurTex = blurTexture(); rig.addBlur(this.blurTex); }
+    return rig;
+  }
 
   // У сценарії камера стоїть далі, ніж в огляді: видно слід, землю й ціль, а не лише модель.
   get distance() { return { plane: 1.7, heli: 1.6, launcher: 1.45, vehicle: 1.35 }[this.kind] || 2.1; }
@@ -236,7 +153,7 @@ export class Sim {
 
   enter_plane(id, S) {
     if (id === 'park' || id === 'taxi' || id === 'takeoff') { if (S.air) { this.onGround(); S.speed = 0; } if (id !== 'taxi' && id !== 'takeoff') S.speed = 0; }
-    if ((id === 'cruise' || id === 'land') && !S.air) { S.air = true; S.alt = 8; S.speed = Math.max(S.speed, 30); S.pitch = 2 * D2R; }
+    if ((id === 'cruise' || id === 'land') && !S.air) { S.air = true; S.alt = 8; S.speed = Math.max(S.speed, 30); S.pitch = 2 * D2R; S.rpm = Math.max(S.rpm, .7); }
   }
 
   enter_heli(id, S) {
@@ -337,6 +254,7 @@ export class Sim {
     const S = this.S;
     S.t += dt;
     this['step_' + this.kind](dt, S);
+    if (this.spin) this.spin.step(dt, { rpm: S.rpm, ground: S.speed, air: S.air, scale: this.e.k });
     for (const r of this.rotors) {
       r.rotation.y += S.rpm * dt * 28 * r.userData.dir;
       r.children[0].material.opacity = clamp(S.rpm * 1.1, 0, .9);
@@ -424,6 +342,14 @@ export class Sim {
 
   step_plane(dt, S) {
     const p = this.phase, heavy = this.cfg.size === 'heavy';
+    // Оберти двигунів (крутять повітряні гвинти): на стоянці вимкнено, на рулінні малий газ, на зльоті повний, на посадці
+    // знижуються, а коли літак зупинився, двигуни глушать.
+    let rpmT = .35;
+    if (p === 'park') rpmT = 0;
+    if (p === 'takeoff') rpmT = 1;
+    if (p === 'cruise') rpmT = .85;
+    if (p === 'land') rpmT = S.air ? .6 : S.td > 3 && S.speed < .5 ? 0 : .35;
+    S.rpm = ease(S.rpm, rpmT, rpmT > S.rpm ? .8 : .45, dt);
     if (p === 'park') S.speed = ease(S.speed, 0, 1.5, dt);
     if (p === 'taxi') S.speed = ease(S.speed, 3, .6, dt);
     if (p === 'takeoff') {
@@ -696,6 +622,8 @@ export class Sim {
     const v = this.v, g = v.group;
     for (const r of this.rotors) { g.remove(r); r.children[0].geometry.dispose(); r.children[0].material.dispose(); }
     if (this.rotorTex) this.rotorTex.dispose();
+    if (this.spin) this.spin.dispose(); // гвинти й колеса лишаються в моделі, але стають у позу файлу
+    if (this.blurTex) this.blurTex.dispose();
     this.clearMarks();
     for (const s of this.shots) this.world.remove(s.sprite);
     this.shots = [];
