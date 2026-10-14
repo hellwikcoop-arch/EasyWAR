@@ -2,6 +2,7 @@
 // лишаються як є. Потрібно тестам, що перевіряють розрізання й риги реальних моделей довідника.
 import { readFileSync } from 'node:fs';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 
 const MODELS = new URL('../../src/models/', import.meta.url);
 const cache = new Map();
@@ -36,7 +37,7 @@ function parse(name) {
   const raw = readFileSync(new URL(name + '.glb', MODELS));
   const buf = stripTextures(raw);
   const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
-  return new GLTFLoader().parseAsync(ab, '');
+  return new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).parseAsync(ab, '');
 }
 
 // name — ім'я файлу без розширення (наприклад, 'm142-himars'). Повертає { scene, animations }; результат кешується.

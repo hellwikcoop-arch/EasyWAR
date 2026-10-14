@@ -77,6 +77,40 @@ export function componentsIn(comp, region, tol = 0) {
   return out;
 }
 
+// Осі обертання: indices координат площини, перпендикулярної до осі (u, v), і координата вздовж осі.
+export const SPIN_PLANE = { x: [1, 2, 0], y: [0, 2, 1], z: [0, 1, 2] };
+
+// Номери тіл, що лежать у циліндрі навколо осі axis ('x' | 'y' | 'z') із центром c = [u, v] у площині, перпендикулярній до осі, між
+// координатами band = [від, до] вздовж осі й радіусом r: найдальший кут обмежувального об’єму тіла не далі за r від осі. Так беруть
+// маточину й лопаті гвинта, не зачіпаючи нічого, що лежить за колом лопатей. tol розширює всі межі.
+export function componentsInCylinder(comp, { axis, c, band, r }, tol = 0) {
+  const [u, v, a] = SPIN_PLANE[axis], b = comp.box, out = [];
+  for (let i = 0; i < comp.count; i++) {
+    const o = i * 6;
+    if (b[o + a] < band[0] - tol || b[o + 3 + a] > band[1] + tol) continue;
+    const du = Math.max(Math.abs(b[o + u] - c[0]), Math.abs(b[o + 3 + u] - c[0])), dv = Math.max(Math.abs(b[o + v] - c[1]), Math.abs(b[o + 3 + v] - c[1]));
+    if (Math.hypot(du, dv) <= r + tol) out.push(i);
+  }
+  return out;
+}
+
+// Вершини кожного тіла: Map<номер тіла, [x, y, z, x, y, z, …]> лише для потрібних номерів ids.
+export function componentVertices(geometry, comp, ids) {
+  const want = new Set(ids), pos = geometry.attributes.position, nt = comp.label.length, seen = new Set(), out = new Map();
+  for (const i of want) out.set(i, []);
+  for (let t = 0; t < nt; t++) {
+    const lab = comp.label[t];
+    if (!want.has(lab)) continue;
+    for (let k = 0; k < 3; k++) {
+      const vtx = vertexOf(geometry, t, k);
+      if (seen.has(vtx)) continue;
+      seen.add(vtx);
+      out.get(lab).push(pos.getX(vtx), pos.getY(vtx), pos.getZ(vtx));
+    }
+  }
+  return out;
+}
+
 // Мітки трикутників за групами тіл: groups[j] — список номерів тіл, що утворюють частину j; решта трикутників — -1.
 export function labelsOfComponents(comp, groups) {
   const part = new Int32Array(comp.count).fill(-1);
@@ -219,6 +253,29 @@ export function bakeFloat(mesh) {
   g.setAttribute('position', new BufferAttribute(P, 3));
   if (nor) g.setAttribute('normal', new BufferAttribute(N, 3));
   mesh.position.set(0, 0, 0); mesh.quaternion.identity(); mesh.scale.set(1, 1, 1); mesh.updateMatrix();
+  g.computeBoundingBox(); g.computeBoundingSphere();
+  return mesh;
+}
+
+// Те саме, але перетворення береться від меша до root (усі предки між ними): геометрія стає float32 у системі root, а сам меш
+// переходить під root з нульовим перетворенням. Деталі з різних груп файлу опиняються в одній системі координат — у ній
+// пишуть області вирізання гвинтів і коліс (ref-spin.js).
+export function bakeToRoot(mesh, root) {
+  root.updateWorldMatrix(true, false);
+  mesh.updateWorldMatrix(true, false);
+  const m = new Matrix4().copy(root.matrixWorld).invert().multiply(mesh.matrixWorld);
+  const nm = new Matrix3().getNormalMatrix(m), g = mesh.geometry, v = new Vector3();
+  const pos = g.attributes.position, nor = g.attributes.normal;
+  const P = new Float32Array(pos.count * 3), N = nor ? new Float32Array(pos.count * 3) : null;
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i).applyMatrix4(m); P[i * 3] = v.x; P[i * 3 + 1] = v.y; P[i * 3 + 2] = v.z;
+    if (nor) { v.fromBufferAttribute(nor, i).applyMatrix3(nm).normalize(); N[i * 3] = v.x; N[i * 3 + 1] = v.y; N[i * 3 + 2] = v.z; }
+  }
+  g.setAttribute('position', new BufferAttribute(P, 3));
+  if (nor) g.setAttribute('normal', new BufferAttribute(N, 3));
+  mesh.position.set(0, 0, 0); mesh.quaternion.identity(); mesh.scale.set(1, 1, 1); mesh.updateMatrix();
+  if (mesh.parent !== root) root.add(mesh);
+  mesh.updateMatrixWorld(true);
   g.computeBoundingBox(); g.computeBoundingSphere();
   return mesh;
 }

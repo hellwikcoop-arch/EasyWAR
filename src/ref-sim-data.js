@@ -156,13 +156,15 @@ function plainPhases(sim) {
 }
 
 // Сценарій статті або null (немає моделі, є власний переглядач або модель нічого не вміє, як метальний заряд).
+// file — ключ .glb моделі статті: за ним сцена бере вузли, що крутяться (гвинти, колеса: SPINS у ref-rig-data.js).
 export function simOf(entry, viewerOf = e => e.viewer) {
   if (!entry || !entry.model || viewerOf(entry)) return null;
   const sim = entry.sim || BY_ID[entry.id] || BY_GROUP[entry.group] || null;
   if (!sim || !SIM_PHASES[sim.kind]) return null;
   const set = MACHINE_PHASES[sim.phaseSet || sim.kind];
-  if (sim.machine && set) return { ...sim, phases: set };
-  return { ...sim, phases: plainPhases(sim) };
+  const file = entry.model.file ? { file: entry.model.file } : null;
+  if (sim.machine && set) return { ...sim, phases: set, ...file };
+  return { ...sim, phases: plainPhases(sim), ...file };
 }
 
 // Простий сценарій тієї самої статті без рушія техніки: якщо рушій не запустився, переглядач показує його.

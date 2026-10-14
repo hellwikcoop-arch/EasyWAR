@@ -9,6 +9,8 @@ import {
 } from 'three';
 import { terrainOf } from './ref-sim-data.js';
 import { D2R, Fx, canvasTexture, clamp, ease, groundTexture } from './ref-fx.js';
+import { SPINS } from './ref-rig-data.js';
+import { blurTexture, buildSpinRig } from './ref-spin.js';
 
 const TILE = 48, TILES = 7;
 const FOG = '#141c21';
@@ -83,9 +85,11 @@ export class Sim {
     cam.fov = 34; cam.far = 260; cam.updateProjectionMatrix();
     viewer.stage.floor.visible = false;
     this.focusY = viewer.target.y;
-    // Гвинти будуємо в координатах моделі в стандартній позі.
+    // Гвинти й колеса, вирізані з мешів моделі, крутяться по-справжньому (ref-spin.js). Лише коли їх немає, вертоліт отримує запасні
+    // прозорі диски: їх будуємо в координатах моделі в стандартній позі.
     this.rotors = [];
-    if (this.kind === 'heli') {
+    this.spin = this.kind === 'heli' || this.kind === 'plane' ? this.buildSpin() : null;
+    if (this.kind === 'heli' && !this.spin) {
       g.rotation.set(0, 0, 0); g.position.set(0, 0, 0); g.updateMatrixWorld(true);
       const plan = rotorPlan(modelPoints(g), e.size, { ...(cfg.rotor || {}), min: e.min });
       this.rotorTex = rotorTexture();
@@ -107,6 +111,21 @@ export class Sim {
   }
 
   get phases() { return this.cfg.phases; }
+
+  // Вузли, що крутяться, будуються один раз на модель і лишаються в її записі (так само, як колеса й кран у рушії техніки).
+  // Немає заявки в SPINS чи вирізання не вдалося — повертає null, і модель просто без них.
+  buildSpin() {
+    const e = this.e, spec = this.cfg.file && SPINS[this.cfg.file];
+    if (!spec || !e.scene) return null;
+    const parts = e.parts || (e.parts = {}), key = 'spin:' + this.cfg.file;
+    if (!(key in parts)) {
+      try { parts[key] = buildSpinRig(e.scene, spec); } catch (err) { console.warn('Довідник: гвинти й колеса недоступні', err); parts[key] = null; }
+      e.meshes = null; // нові меші потрапляють до перевірки видимості позначок
+    }
+    const rig = parts[key];
+    if (rig) { this.blurTex = blurTexture(); rig.addBlur(this.blurTex); }
+    return rig;
+  }
 
   // У сценарії камера стоїть далі, ніж в огляді: видно слід, землю й ціль, а не лише модель.
   get distance() { return { plane: 1.7, heli: 1.6, launcher: 1.45, vehicle: 1.35 }[this.kind] || 2.1; }
@@ -134,7 +153,7 @@ export class Sim {
 
   enter_plane(id, S) {
     if (id === 'park' || id === 'taxi' || id === 'takeoff') { if (S.air) { this.onGround(); S.speed = 0; } if (id !== 'taxi' && id !== 'takeoff') S.speed = 0; }
-    if ((id === 'cruise' || id === 'land') && !S.air) { S.air = true; S.alt = 8; S.speed = Math.max(S.speed, 30); S.pitch = 2 * D2R; }
+    if ((id === 'cruise' || id === 'land') && !S.air) { S.air = true; S.alt = 8; S.speed = Math.max(S.speed, 30); S.pitch = 2 * D2R; S.rpm = Math.max(S.rpm, .7); }
   }
 
   enter_heli(id, S) {
@@ -235,6 +254,7 @@ export class Sim {
     const S = this.S;
     S.t += dt;
     this['step_' + this.kind](dt, S);
+    if (this.spin) this.spin.step(dt, { rpm: S.rpm, ground: S.speed, air: S.air, scale: this.e.k });
     for (const r of this.rotors) {
       r.rotation.y += S.rpm * dt * 28 * r.userData.dir;
       r.children[0].material.opacity = clamp(S.rpm * 1.1, 0, .9);
@@ -322,6 +342,14 @@ export class Sim {
 
   step_plane(dt, S) {
     const p = this.phase, heavy = this.cfg.size === 'heavy';
+    // Оберти двигунів (крутять повітряні гвинти): на стоянці вимкнено, на рулінні малий газ, на зльоті повний, на посадці
+    // знижуються, а коли літак зупинився, двигуни глушать.
+    let rpmT = .35;
+    if (p === 'park') rpmT = 0;
+    if (p === 'takeoff') rpmT = 1;
+    if (p === 'cruise') rpmT = .85;
+    if (p === 'land') rpmT = S.air ? .6 : S.td > 3 && S.speed < .5 ? 0 : .35;
+    S.rpm = ease(S.rpm, rpmT, rpmT > S.rpm ? .8 : .45, dt);
     if (p === 'park') S.speed = ease(S.speed, 0, 1.5, dt);
     if (p === 'taxi') S.speed = ease(S.speed, 3, .6, dt);
     if (p === 'takeoff') {
@@ -594,6 +622,8 @@ export class Sim {
     const v = this.v, g = v.group;
     for (const r of this.rotors) { g.remove(r); r.children[0].geometry.dispose(); r.children[0].material.dispose(); }
     if (this.rotorTex) this.rotorTex.dispose();
+    if (this.spin) this.spin.dispose(); // гвинти й колеса лишаються в моделі, але стають у позу файлу
+    if (this.blurTex) this.blurTex.dispose();
     this.clearMarks();
     for (const s of this.shots) this.world.remove(s.sprite);
     this.shots = [];

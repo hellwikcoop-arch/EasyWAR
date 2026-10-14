@@ -3,9 +3,9 @@
 // а таблиці осей (ref-rig-data.js) — збігатися з геометрією файлів.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { BoxGeometry, BufferGeometry, CylinderGeometry, Float32BufferAttribute, Matrix4, Mesh, MeshBasicMaterial } from 'three';
+import { BoxGeometry, BufferGeometry, CylinderGeometry, Float32BufferAttribute, Group, Matrix4, Mesh, MeshBasicMaterial, Vector3 } from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { attach, bakeFloat, carve, componentsIn, labelsByBoxes, labelsByWheels, labelsOfComponents, meshesOf, splitByLabels, triangleCentroids, triangleComponents, triangleCount, vertexLabels, weldMap } from '../src/ref-mesh.js';
+import { SPIN_PLANE, attach, bakeFloat, bakeToRoot, carve, componentVertices, componentsIn, componentsInCylinder, labelsByBoxes, labelsByWheels, labelsOfComponents, meshesOf, splitByLabels, triangleCentroids, triangleComponents, triangleCount, vertexLabels, weldMap } from '../src/ref-mesh.js';
 import { WHEELED, WHEEL_NODES, axleGroups, wheelsOf } from '../src/ref-rig-data.js';
 import { loadGlbScene } from './helpers/glb-scene.mjs';
 
@@ -182,4 +182,64 @@ test('bodies are picked by the region that holds their whole box, and grouped in
   assert.equal(triangleCount(parts[0]), 24);
   assert.equal(triangleCount(parts[1]), 12);
   assert.equal(triangleCount(mesh.geometry), 12, 'the first body stays');
+});
+
+test('a cylinder around an axis takes the bodies that lie wholly inside it, whichever way the axis points', () => {
+  // Маточина (0, 0) і дві лопаті вздовж x на висоті 3, потім одна лопать за межами кола й одне тіло нижче смуги.
+  const g = mergeGeometries([box(.4, .3, .4, 0, 3, 0), box(2, .05, .3, 1.5, 3, 0), box(2, .05, .3, -1.5, 3, 0), box(2, .05, .3, 6, 3, 0), box(.4, .3, .4, 0, 1, 0)]);
+  const c = triangleComponents(g);
+  assert.equal(c.count, 5);
+  const inside = componentsInCylinder(c, { axis: 'y', c: [0, 0], band: [2.8, 3.2], r: 2.6 });
+  assert.equal(inside.length, 3, 'the hub and the two blades');
+  assert.equal(componentsInCylinder(c, { axis: 'y', c: [0, 0], band: [2.8, 3.2], r: 2.4 }).length, 1, 'a blade that sticks out of the circle is not taken');
+  assert.equal(componentsInCylinder(c, { axis: 'y', c: [0, 0], band: [2.8, 3.2], r: 2.4 }, .3).length, 3, 'the tolerance widens the cylinder');
+  assert.equal(componentsInCylinder(c, { axis: 'y', c: [0, 0], band: [.5, 3.5], r: 2.6 }).length, 4, 'a wider band takes the low body too');
+  assert.equal(componentsInCylinder(c, { axis: 'y', c: [6, 0], band: [2.8, 3.2], r: 1.2 }).length, 1, 'a shifted centre finds the far blade');
+  // Той самий набір, повернутий так, що вісь гвинта дивиться вздовж x: координати (u, v, вздовж осі) беруться з SPIN_PLANE.
+  const turned = mergeGeometries([box(.4, .3, .4, 0, 3, 0), box(2, .05, .3, 1.5, 3, 0)]).applyMatrix4(new Matrix4().makeRotationZ(-Math.PI / 2));
+  const ct = triangleComponents(turned);
+  assert.deepEqual(SPIN_PLANE.x, [1, 2, 0]);
+  // Вісь тепер уздовж x на 3: маточина лежить на осі, лопать (y від −2,5 до −0,5) тягнеться вздовж u = y.
+  assert.equal(componentsInCylinder(ct, { axis: 'x', c: [0, 0], band: [2.8, 3.2], r: 2.6 }).length, 2);
+  assert.equal(componentsInCylinder(ct, { axis: 'x', c: [0, 0], band: [2.8, 3.2], r: 2.4 }).length, 1, 'the blade is out of a narrower circle');
+  assert.equal(componentsInCylinder(ct, { axis: 'x', c: [0, 0], band: [0, 1], r: 9 }).length, 0, 'nothing lies in a band along the axis where there is nothing');
+  assert.deepEqual(SPIN_PLANE.y, [0, 2, 1]);
+  assert.deepEqual(SPIN_PLANE.z, [0, 1, 2]);
+});
+
+test('vertices of chosen bodies come out one by one, welded vertices once', () => {
+  const g = mergeGeometries([box(1, 1, 1, 0, 0, 0), box(1, 1, 1, 5, 0, 0)]);
+  const c = triangleComponents(g);
+  const left = [...Array(c.count).keys()].find(i => c.center[i * 3] < 1);
+  const verts = componentVertices(g, c, [left]);
+  assert.equal(verts.size, 1);
+  const list = verts.get(left);
+  assert.equal(list.length / 3, 24, 'a box has 24 separate vertices, as many as the file stores');
+  assert.ok(list.every(v => Math.abs(v) <= .5 + 1e-6), 'only the vertices of that body, none of the box at x = 5');
+  assert.equal(componentVertices(g, c, []).size, 0);
+});
+
+test('baking to a root puts the geometry in the root frame and the mesh under the root with no transform', () => {
+  const root = new Group(), arm = new Group(), mesh = new Mesh(new BoxGeometry(1, 2, 3), new MeshBasicMaterial());
+  root.add(arm); arm.add(mesh);
+  arm.position.set(1, 2, 3); arm.rotation.y = Math.PI / 2; arm.scale.setScalar(2);
+  mesh.position.set(.5, 0, 0); mesh.rotation.x = .3;
+  root.position.set(10, 0, 0); root.updateMatrixWorld(true); // сам root не входить у перетворення: система root — його власна
+  const before = new Vector3(), after = new Vector3(), pos = mesh.geometry.attributes.position, nor = mesh.geometry.attributes.normal;
+  const inRoot = [], normals = [];
+  const toRoot = new Matrix4().copy(root.matrixWorld).invert().multiply(mesh.matrixWorld);
+  for (let i = 0; i < pos.count; i++) { inRoot.push(before.fromBufferAttribute(pos, i).applyMatrix4(toRoot).toArray()); normals.push(new Vector3().fromBufferAttribute(nor, i).transformDirection(toRoot).toArray()); }
+  bakeToRoot(mesh, root);
+  assert.equal(mesh.parent, root);
+  assert.ok(mesh.position.length() === 0 && mesh.quaternion.w === 1 && mesh.scale.x === 1);
+  const p2 = mesh.geometry.attributes.position, n2 = mesh.geometry.attributes.normal;
+  for (let i = 0; i < p2.count; i++) {
+    after.fromBufferAttribute(p2, i);
+    assert.ok(after.distanceTo(new Vector3(...inRoot[i])) < 1e-4, 'the vertex is where the chain of parents put it');
+    assert.ok(new Vector3().fromBufferAttribute(n2, i).distanceTo(new Vector3(...normals[i])) < 1e-4, 'the normal turned with it and stayed a unit one');
+  }
+  root.updateMatrixWorld(true);
+  const world = new Vector3().fromBufferAttribute(p2, 0).applyMatrix4(mesh.matrixWorld);
+  assert.ok(world.distanceTo(new Vector3(...inRoot[0]).applyMatrix4(root.matrixWorld)) < 1e-4, 'the world position does not change');
+  assert.ok(mesh.geometry.boundingBox.max.x > mesh.geometry.boundingBox.min.x, 'the bounds are recomputed');
 });
