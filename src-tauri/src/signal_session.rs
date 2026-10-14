@@ -273,6 +273,46 @@ mod tests {
         .expect("synthetic RPC reply");
     }
 
+    /// Serves the RPCs a session issues once receiving has ended. The session sends the
+    /// command reply and `unsubscribeReceive` concurrently and may open one connection
+    /// before it writes the request on the other, so each connection is read on its own
+    /// thread: a daemon that reads them in accept order would block on the connection
+    /// whose request is still pending while the session waits for the other reply.
+    /// `handle` gets every request's method and body, answers with the RPC result and
+    /// records what it saw; the returned flags are checked after all connections closed.
+    fn serve_cleanup(
+        listener: &TcpListener,
+        connections: usize,
+        handle: impl Fn(&str, &Value) -> Value + Send + Sync + 'static,
+    ) -> Vec<String> {
+        let handle = std::sync::Arc::new(handle);
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let workers: Vec<JoinHandle<()>> = (0..connections)
+            .map(|_| {
+                let (mut stream, _) = listener.accept().expect("synthetic cleanup RPC");
+                let handle = std::sync::Arc::clone(&handle);
+                let seen = std::sync::Arc::clone(&seen);
+                std::thread::spawn(move || {
+                    let (_, request) = read_request(&mut stream);
+                    let request = request.expect("synthetic cleanup JSON");
+                    let method = request["method"]
+                        .as_str()
+                        .expect("synthetic cleanup method")
+                        .to_owned();
+                    let result = handle(&method, &request);
+                    write_rpc(&mut stream, &request, result);
+                    seen.lock().expect("synthetic cleanup log").push(method);
+                })
+            })
+            .collect();
+        for worker in workers {
+            worker.join().expect("synthetic cleanup worker");
+        }
+        let mut seen = seen.lock().expect("synthetic cleanup log").clone();
+        seen.sort();
+        seen
+    }
+
     fn synthetic_daemon() -> (SignalDaemonEndpoint, JoinHandle<()>) {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("synthetic listener");
         let address = listener.local_addr().expect("synthetic address");
@@ -322,34 +362,22 @@ mod tests {
             }
             events.flush().expect("synthetic event flush");
 
-            let mut saw_send = false;
-            let mut saw_unsubscribe = false;
-            for _ in 0..2 {
-                let (mut stream, _) = listener.accept().expect("synthetic command cleanup RPC");
-                let (_, request) = read_request(&mut stream);
-                let request = request.expect("synthetic command cleanup JSON");
-                match request["method"].as_str() {
-                    Some("send") => {
-                        assert!(!saw_send, "command reply must be sent once");
-                        saw_send = true;
-                        assert_eq!(request["params"]["account"], "synthetic-account");
-                        assert_eq!(request["params"]["recipients"], json!(["synthetic-sender"]));
-                        let reply = request["params"]["message"]
-                            .as_str()
-                            .expect("synthetic command response text");
-                        assert!(reply.contains("Черга Signal: усього 0"));
-                        assert!(!reply.contains("synthetic-group"));
-                        write_rpc(&mut stream, &request, json!({"timestamp": 1_u64}));
-                    }
-                    Some("unsubscribeReceive") => {
-                        assert!(!saw_unsubscribe, "unsubscribe must run once");
-                        saw_unsubscribe = true;
-                        write_rpc(&mut stream, &request, Value::Null);
-                    }
-                    method => panic!("unexpected synthetic method: {method:?}"),
+            let seen = serve_cleanup(&listener, 2, |method, request| match method {
+                "send" => {
+                    assert_eq!(request["params"]["account"], "synthetic-account");
+                    assert_eq!(request["params"]["recipients"], json!(["synthetic-sender"]));
+                    let reply = request["params"]["message"]
+                        .as_str()
+                        .expect("synthetic command response text");
+                    assert!(reply.contains("Черга Signal: усього 0"));
+                    assert!(!reply.contains("synthetic-group"));
+                    json!({"timestamp": 1_u64})
                 }
-            }
-            assert!(saw_send && saw_unsubscribe);
+                "unsubscribeReceive" => Value::Null,
+                method => panic!("unexpected synthetic method: {method:?}"),
+            });
+            // Each of the two RPCs runs exactly once, whichever reached the daemon first.
+            assert_eq!(seen, ["send", "unsubscribeReceive"]);
         });
         (SignalDaemonEndpoint::Http { address }, handle)
     }
@@ -389,17 +417,13 @@ mod tests {
             write!(events, "data: {event}\n\n").unwrap();
             events.flush().unwrap();
 
-            let (mut send, _) = listener.accept().expect("synthetic command reply");
-            let (_, request) = read_request(&mut send);
-            let request = request.expect("synthetic command reply JSON");
-            assert_eq!(request["method"], "send");
-            write_rpc(&mut send, &request, Value::Null);
-
-            let (mut unsubscribe, _) = listener.accept().expect("synthetic unsubscribe");
-            let (_, request) = read_request(&mut unsubscribe);
-            let request = request.expect("synthetic unsubscribe JSON");
-            assert_eq!(request["method"], "unsubscribeReceive");
-            write_rpc(&mut unsubscribe, &request, Value::Null);
+            // `send` answers with `null` instead of a timestamp, which the session must treat
+            // as a failed command reply; the unsubscribe still has to go through.
+            let seen = serve_cleanup(&listener, 2, |method, _| match method {
+                "send" | "unsubscribeReceive" => Value::Null,
+                method => panic!("unexpected synthetic method: {method:?}"),
+            });
+            assert_eq!(seen, ["send", "unsubscribeReceive"]);
         });
         (SignalDaemonEndpoint::Http { address }, handle)
     }
