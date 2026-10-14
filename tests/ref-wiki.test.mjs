@@ -595,3 +595,17 @@ test('every article has a list thumbnail: either built into the module page or r
   const wiki = await readFile(new URL('../src/ref-wiki.js', import.meta.url), 'utf8');
   assert.match(wiki, /media\.thumb && media\.thumb\(e\.id\)\) \|\| thumbOf\(e\.id\)/);
 });
+
+test('every ref-art file belongs to an article and comes as a silhouette + outline pair', async () => {
+  const { readdir } = await import('node:fs/promises');
+  const files = (await readdir(new URL('../src/ref-art/', import.meta.url))).filter(f => f.endsWith('.webp'));
+  assert.ok(files.length >= 10, 'ref-art is not empty');
+  const ids = new Set(files.map(f => f.replace(/-(sil|lin)\.webp$/, '')));
+  for (const id of ids) {
+    assert.ok(entryById(id), `${id}: ref-art file has no article`);
+    assert.ok(files.includes(`${id}-sil.webp`) && files.includes(`${id}-lin.webp`), `${id}: needs both -sil and -lin`);
+  }
+  const wiki = await readFile(new URL('../src/ref-wiki.js', import.meta.url), 'utf8');
+  assert.match(wiki, /import\('\.\/ref-art-urls\.js'\)/, 'ref-wiki loads art lazily, not through a static import.meta.glob');
+  assert.doesNotMatch(wiki, /import\.meta\.glob/, 'import.meta.glob would break the Node tests');
+});

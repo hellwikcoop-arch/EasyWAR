@@ -42,7 +42,7 @@ test('artillery is a live block next to the dimmed army aviation, and the rocket
   const html = await read('index.html');
   const card = html.match(/<button class="branch-card branch-card-soon branch-card-live" data-branch="artillery"[^>]*>[\s\S]*?<\/button>/);
   assert.ok(card, 'artillery card is on the start screen');
-  assert.match(card[0], /aria-label="Артилерія — beta тестування"/);
+  assert.doesNotMatch(card[0], /тестування|bc-live/, 'no beta label on the artillery card');
   assert.match(card[0], /<h3>Артилерія<\/h3>/);
   assert.doesNotMatch(card[0], /aria-disabled/, 'the module opens now');
   assert.match(html, /artillery:'\.\/artillery\.html'/);
