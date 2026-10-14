@@ -59,7 +59,8 @@ The original source must remain auditable and must not be silently overwritten b
 ├── src/
 │   ├── index.html   # launcher: вибір роду військ
 │   ├── air.html     # Повітряні Сили + desktop-інтеграції
-│   └── rocket.html  # Ракетні Війська
+│   ├── rocket.html  # Ракетні Війська
+│   └── aircraft-viewer.html  # інтерактивні літаки у вкладці «Довідник» ПС (кадр, без мережі)
 ├── src-tauri/
 │   ├── capabilities/default.json
 │   ├── migrations/README.md
@@ -119,20 +120,22 @@ The Codex `Run` action calls the same script. Use
 `./script/build_and_run.sh --verify` for a debug build plus a process check.
 On Windows, use `npm run tauri dev` from a supported developer shell.
 
-## Current milestone
+## Current state
 
-**EasyWAR Desktop 0.5**
-
-Goal:
-- Tauri 2 shell
-- SQLite schema + migrations
-- existing Intake workflow
-- Signal inbox integration boundary
-- settings
-- audit log
-- macOS build path
-- Windows-ready project structure
-
-See [docs/ROADMAP.md](docs/ROADMAP.md). Production distribution remains
+Version 1.0.7. Technical (unsigned / ad-hoc signed) releases are published to the
+public `easywar-releases` repository and installed copies update themselves
+(see [docs/UPDATES.md](docs/UPDATES.md)). Production distribution remains
 **NO-GO** until every mandatory gate in
 [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md) has direct evidence.
+
+Start here:
+
+- [docs/PROJECT_CONTEXT.md](docs/PROJECT_CONTEXT.md) — what the project is, modules,
+  glossary, documentation index (Ukrainian);
+- [docs/WORKFLOW.md](docs/WORKFLOW.md) — how to write tasks and how work is done
+  (branches, commits, checks, releases);
+- [docs/BACKLOG.md](docs/BACKLOG.md) — prioritised work queue;
+- [docs/AUDIT_2026-10-13.md](docs/AUDIT_2026-10-13.md) — repository audit;
+- [docs/ROADMAP.md](docs/ROADMAP.md) — milestones.
+
+Agent instructions live in `AGENTS.md` (Codex) and `CLAUDE.md` (Claude Code).

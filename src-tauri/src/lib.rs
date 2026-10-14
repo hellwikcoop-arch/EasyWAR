@@ -335,11 +335,19 @@ async fn save_presentation(
     let pdf = kind.as_deref() == Some("pdf");
     let extension = if pdf { "pdf" } else { "pptx" };
     let selected = tauri::async_runtime::spawn_blocking(move || {
-        let dialog = app.dialog().file().set_title("Зберегти презентацію").set_file_name(file_name);
+        let dialog = app
+            .dialog()
+            .file()
+            .set_title("Зберегти презентацію")
+            .set_file_name(file_name);
         if pdf {
-            dialog.add_filter("Документ PDF", &["pdf"]).blocking_save_file()
+            dialog
+                .add_filter("Документ PDF", &["pdf"])
+                .blocking_save_file()
         } else {
-            dialog.add_filter("Презентація PPTX", &["pptx"]).blocking_save_file()
+            dialog
+                .add_filter("Презентація PPTX", &["pptx"])
+                .blocking_save_file()
         }
     })
     .await

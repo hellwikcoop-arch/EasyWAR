@@ -27,7 +27,9 @@ pub fn is_app_url(url: &Url) -> bool {
         "tauri" | "asset" | "ipc" | "about" | "data" | "blob" => true,
         "http" | "https" => matches!(
             url.host_str(),
-            Some("tauri.localhost" | "ipc.localhost" | "asset.localhost" | "localhost" | "127.0.0.1")
+            Some(
+                "tauri.localhost" | "ipc.localhost" | "asset.localhost" | "localhost" | "127.0.0.1"
+            )
         ),
         _ => false,
     }
@@ -97,7 +99,9 @@ pub fn create_main_window(app: &App) -> tauri::Result<()> {
                         .lock()
                         .ok()
                         .and_then(|mut map| map.remove(url.as_str()));
-                    let saved = path.filter(|path| !path.as_os_str().is_empty()).or(remembered);
+                    let saved = path
+                        .filter(|path| !path.as_os_str().is_empty())
+                        .or(remembered);
                     let (text, kind) = match (success, saved) {
                         (true, Some(path)) => (
                             format!("Файл збережено:\n{}", path.display()),
@@ -276,11 +280,20 @@ mod tests {
 
     #[test]
     fn sends_only_web_links_to_the_system_browser() {
-        for value in ["https://signal.me/#eu/abc", "https://dimap.live/?x=1", "http://example.org/"] {
+        for value in [
+            "https://signal.me/#eu/abc",
+            "https://dimap.live/?x=1",
+            "http://example.org/",
+        ] {
             assert!(!is_app_url(&url(value)), "{value}");
             assert!(is_external_link(&url(value)), "{value}");
         }
-        for value in ["file:///etc/passwd", "javascript:alert(1)", "mailto:a@b.c", "smb://host/share"] {
+        for value in [
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "mailto:a@b.c",
+            "smb://host/share",
+        ] {
             assert!(!is_app_url(&url(value)), "{value}");
             assert!(!is_external_link(&url(value)), "{value}");
         }
