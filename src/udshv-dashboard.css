@@ -226,6 +226,15 @@ html:root:has(body.udshv-open) { background-color: #12091a !important; }
 .ud-state.bad { color: var(--ud-red); border-color: var(--ud-red); }
 .ud-fresh-hint.bad { color: var(--ud-red); }
 
+/* Звірка з підсумковими блоками таблиці */
+.ud-badge { display: inline-block; margin-left: 8px; min-width: 20px; padding: 1px 7px; border-radius: 999px; background: var(--ud-red); color: #fff; font-size: 11px; font-weight: 800; line-height: 1.5; text-align: center; }
+.ud-recon { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; } /* без minmax(0, …) широка таблиця розтягує колонку, і абзаци вилазять за екран */
+.ud-recon > summary { display: block; }
+.ud-recon-hint { color: var(--ud-ink); padding-left: 10px; border-left: 3px solid var(--ud-amber); }
+.ud-recon-table th { white-space: nowrap; }
+.ud-recon-matrix th:not(:first-child), .ud-recon-matrix .ud-recon-mark { text-align: center; }
+.ud-delta-cell { font-weight: 800; }
+
 /* Презентація */
 .ud-hero-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .ud-present-dialog { max-width: 640px; width: calc(100vw - 32px); max-height: 90vh; overflow: auto; border: 1px solid var(--ud-line, #d0d7de); border-radius: 12px; padding: 20px; }

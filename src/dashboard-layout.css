@@ -22,6 +22,7 @@
   }
   /* Рамка пігулок із горизонтального варіанта в меню не потрібна. */
   #udshv-dashboard-root > .ud-nav button:not([aria-pressed="true"]) { border-color: transparent; background: transparent; }
+  #udshv-dashboard-root > .ud-nav button .ud-badge { margin-left: auto; }
   #udshv-dashboard-root > .ud-nav button:not([aria-pressed="true"]):hover,
   #pvk-dashboard-root > .pvk-nav button:not([aria-pressed="true"]):hover { background: rgba(127, 150, 190, .12); }
 }
@@ -49,6 +50,7 @@
   --ic-pin: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z'/%3E%3Ccircle cx='12' cy='10' r='2.4'/%3E%3C/svg%3E");
   --ic-burst: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12.0 2.0 L14.0 7.2 L19.1 4.9 L16.8 10.0 L22.0 12.0 L16.8 14.0 L19.1 19.1 L14.0 16.8 L12.0 22.0 L10.0 16.8 L4.9 19.1 L7.2 14.0 L2.0 12.0 L7.2 10.0 L4.9 4.9 L10.0 7.2z'/%3E%3C/svg%3E");
   --ic-alert: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3.5l9.5 16.5h-19z'/%3E%3Cpath d='M12 10v4.5M12 17.4v.1'/%3E%3C/svg%3E");
+  --ic-compare: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 8h15M15 4l4 4-4 4'/%3E%3Cpath d='M20 16H5M9 12l-4 4 4 4'/%3E%3C/svg%3E");
 }
 .ud-nav button[data-nav="summary"], .pvk-nav button[data-nav="summary"] { --nav-icon: var(--ic-bars); }
 .ud-nav button[data-nav="units"] { --nav-icon: var(--ic-users); }
@@ -59,6 +61,7 @@
 .ud-nav button[data-nav="freshness"] { --nav-icon: var(--ic-clock); }
 .ud-nav button[data-nav="table"], .pvk-nav button[data-nav="table"] { --nav-icon: var(--ic-grid); }
 .ud-nav button[data-nav="quality"], .pvk-nav button[data-nav="quality"] { --nav-icon: var(--ic-shield); }
+.ud-nav button[data-nav="reconcile"] { --nav-icon: var(--ic-compare); }
 .pvk-nav button[data-nav="journal"] { --nav-icon: var(--ic-doc); }
 .pvk-nav button[data-nav="АА"], .pvk-nav button[data-nav="ПС"] { --nav-icon: var(--ic-plane); }
 .pvk-nav button[data-nav="Об'єкти"] { --nav-icon: var(--ic-target); }

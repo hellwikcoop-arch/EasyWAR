@@ -1,9 +1,9 @@
 import {
   GROUPS,
   OVT_GROUPS,
-  allDateRange,
   createDashboardModel,
   csvRows,
+  dataDateRange,
   groupIssues,
   lastActiveDate,
   normalizeUnits,
@@ -15,6 +15,7 @@ import {
   unitFreshness,
   validateWorkbook,
 } from './udshv-dashboard-core.js';
+import { reconcileCsvRows, reconcileWorkbook } from './udshv-reconcile-core.js';
 import { consumeOwnLossesTabRequest, ownLossesHost, ownLossesPage } from './own-losses-dashboard.js';
 import { playMotion, resetMotion } from './dashboard-motion.js';
 
@@ -55,7 +56,7 @@ function ensureState(workbook) {
   state.workbook = workbook;
   if (!keep) Object.assign(state, { view: 'summary', preset: 'week', units: [] });
   state.anchor = lastActiveDate(workbook);
-  const all = allDateRange(workbook);
+  const all = dataDateRange(workbook);
   state.from = state.from || all.from;
   state.to = state.to || all.to;
 }
@@ -351,8 +352,77 @@ function qualityPage() {
           g.items.length > 40 ? h('li', { text: `… ще ${g.items.length - 40}` }) : null))) : h('p', { class: 'ud-empty', text: 'Дати, підрозділи й суми «ВСЬОГО» узгоджені.' })));
 }
 
+/* ------------------------------ звірка з підсумковими блоками таблиці ------------------------------ */
+
+const num2 = value => (Number(value) || 0).toLocaleString('uk-UA', { maximumFractionDigits: 2 });
+const signed = value => `${value > 0 ? '+' : value < 0 ? '−' : ''}${num2(Math.abs(value))}`;
+const plural = (n, one, few, many) => { const a = n % 100, b = a % 10; return a > 10 && a < 20 ? many : b === 1 ? one : b >= 2 && b <= 4 ? few : many; };
+const RECONCILE_KINDS = [['period', 'Декади й місяць'], ['opening', 'Початок місяця'], ['label', 'Підпис початку'], ['closing', '«ВСЬОГО»'], ['total', 'Підсумкові рядки']];
+const RECONCILE_SHOWN = 40;
+
+/** Аркуші × види порівнянь: ✓ або кількість розбіжностей. */
+function reconcileMatrix(result) {
+  const sheets = [...new Set(result.checks.map(c => c.sheet))];
+  const cell = (sheet, kind) => {
+    const list = result.checks.filter(c => c.sheet === sheet && c.kind === kind);
+    if (!list.length) return h('td', { class: 'ud-recon-mark', text: '—' });
+    const bad = list.filter(c => c.status === 'diff');
+    const count = bad.reduce((sum, c) => sum + (c.diffs.length || 1), 0);
+    return h('td', { class: 'ud-recon-mark' }, h('span', { class: `ud-state ${bad.length ? 'bad' : 'ok'}`, title: `${list.length} ${plural(list.length, 'порівняння', 'порівняння', 'порівнянь')}`, text: bad.length ? String(count) : '✓' }));
+  };
+  return h('div', { class: 'ud-scroll' }, h('table', { class: 'ud-table ud-recon-matrix' },
+    h('thead', {}, h('tr', {}, h('th', { text: 'Аркуш' }), RECONCILE_KINDS.map(([, label]) => h('th', { text: label })))),
+    h('tbody', {}, sheets.map(sheet => h('tr', {}, h('th', { text: sheet }), RECONCILE_KINDS.map(([kind]) => cell(sheet, kind)))))));
+}
+
+function reconcileCheck(check, open) {
+  const kindName = (RECONCILE_KINDS.find(([kind]) => kind === check.kind) || [])[1] || check.kind;
+  const count = check.diffs.length;
+  const shown = check.diffs.slice(0, RECONCILE_SHOWN);
+  const withSource = shown.some(d => d.source);
+  return h('details', { class: 'ud-issue ud-recon', open },
+    h('summary', {}, h('strong', { text: `${check.sheet} · ${kindName}` }), h('span', { text: count ? ` · ${count} ${plural(count, 'розбіжність', 'розбіжності', 'розбіжностей')}` : ' · не збігається' })),
+    h('p', { class: 'ud-note', text: check.what }),
+    check.hint ? h('p', { class: 'ud-note ud-recon-hint', text: check.hint }) : null,
+    h('p', { class: 'ud-note', text: check.rule }),
+    count ? h('div', { class: 'ud-scroll' }, h('table', { class: 'ud-table ud-recon-table' },
+      h('thead', {}, h('tr', {}, [['Клітинка'], ['Підрозділ'], ['Показник'], ['У таблиці', 'ud-num'], ['Має бути', 'ud-num'], ['Різниця', 'ud-num'], ...(withSource ? [['Де має бути']] : [])].map(([label, cls]) => h('th', { class: cls, text: label })))),
+      h('tbody', {}, shown.map(d => h('tr', {},
+        h('th', { text: d.cell || '—' }),
+        h('td', { text: d.unit }),
+        h('td', { text: `${groupInfo(d.group).short} · ${d.metric}` }),
+        h('td', { class: 'ud-num', text: num2(d.actual) }),
+        h('td', { class: 'ud-num', text: num2(d.expected) }),
+        h('td', { class: 'ud-num ud-delta-cell', text: signed(d.delta) }),
+        withSource ? h('td', { text: d.source || '' }) : null))))) : null,
+    count > shown.length ? h('p', { class: 'ud-note', text: `… ще ${count - shown.length} — усі в CSV.` }) : null);
+}
+
+/** Сторінка «Звірка з підсумками»: підсумкові блоки аркушів проти денних рядків і між собою. */
+function reconcilePage() {
+  const result = reconcileWorkbook(state.workbook);
+  const total = result.checks.length;
+  const head = !total ? 'підсумкових блоків не знайдено' : result.mismatched ? `порівнянь ${total} · з розбіжностями ${result.mismatched}` : `порівнянь ${total} · усе збігається`;
+  return h('div', { class: 'ud-page' },
+    section('Звірка з підсумковими блоками таблиці', head,
+      h('p', { class: 'ud-note', text: 'Дашборд рахує суми лише з денних рядків і не бере підсумкових блоків аркушів: декад («01-10.MM.YY»), місяця, початку місяця, «ВСЬОГО» та «ЗАГАЛЬНА». В Excel вони ведуться формулами, а подекуди й руками. Тут їх порівняно з денними рядками та між собою: якщо вони розходяться, цифри в Excel і в дашборді теж різнитимуться.' }),
+      total ? reconcileMatrix(result) : h('p', { class: 'ud-empty', text: 'У таблиці не знайдено підсумкових блоків аркушів, тож звіряти нічого.' }),
+      !result.mismatched && total ? h('p', { class: 'ud-empty', text: 'Підсумки в таблиці збігаються з денними рядками й між собою.' }) : null,
+      result.mismatched ? h('button', { class: 'ud-btn', type: 'button', onclick: () => download('УДШВ_звірка_підсумків.csv', reconcileCsvRows(result)), text: 'Вивантажити розбіжності (CSV)' }) : null,
+      result.skipped.length ? h('p', { class: 'ud-note', text: `Не звірено блоків: ${result.skipped.length} — у них немає збережених значень (відкрийте таблицю в Excel і збережіть її, щоб формули порахувалися).` }) : null),
+    result.mismatched ? section('Розбіжності', `${result.differences} ${plural(result.differences, 'клітинка', 'клітинки', 'клітинок')} у ${result.mismatched} ${plural(result.mismatched, 'порівнянні', 'порівняннях', 'порівняннях')}`,
+      result.problems.map((check, index) => reconcileCheck(check, index === 0))) : null);
+}
+
+/** Підказка в шапці: підсумки таблиці розходяться з денними рядками; веде на сторінку звірки. */
+function reconcileHint(go) {
+  const result = reconcileWorkbook(state.workbook);
+  if (!result.mismatched) return null;
+  return h('button', { type: 'button', class: 'ud-link ud-fresh-hint bad', onclick: () => { state.view = 'reconcile'; go(); }, text: `Підсумки таблиці розходяться: ${result.mismatched} з ${result.checks.length} порівнянь` });
+}
+
 function periodControls(range, go) {
-  const all = allDateRange(state.workbook);
+  const all = dataDateRange(state.workbook);
   const set = (preset) => { state.preset = preset; if (preset !== 'custom') state.anchor = lastActiveDate(state.workbook); else { state.from = range.from; state.to = range.to; } go(); };
   const nav = step => { state.anchor = shiftAnchor(state.preset, state.anchor || range.from, step); go(); };
   const canNav = state.preset === 'week' || state.preset === 'month';
@@ -432,7 +502,7 @@ export function render(host, workbook, options = {}) {
   const range = currentRange();
   const model = createDashboardModel(workbook, { range, unit: state.units, preset: state.preset });
   // «Наші втрати» — окрема таблиця з власним файлом і періодом: потребує читача xlsx від модуля.
-  const nav = [['summary', 'Зведення УДШВ'], ['units', 'Підрозділи'], ['personnel', 'Втрати о/с'], ...(options.readSheets ? [['own', 'Наші втрати']] : []), ['ovt', 'ОВТ'], ['ammo', 'Витрата БК'], ['freshness', 'Актуальність'], ['table', 'Зведена таблиця'], ['quality', 'Перевірка даних']];
+  const nav = [['summary', 'Зведення УДШВ'], ['units', 'Підрозділи'], ['personnel', 'Втрати о/с'], ...(options.readSheets ? [['own', 'Наші втрати']] : []), ['ovt', 'ОВТ'], ['ammo', 'Витрата БК'], ['freshness', 'Актуальність'], ['table', 'Зведена таблиця'], ['quality', 'Перевірка даних'], ['reconcile', 'Звірка з підсумками']];
   if (!nav.some(([k]) => k === state.view)) state.view = 'summary';
   const own = state.view === 'own';
   const page = own ? h('div', { class: 'ud-page' }, ownLossesPage({ scope: 'dshv', readSheets: options.readSheets, rerender: go }))
@@ -443,7 +513,8 @@ export function render(host, workbook, options = {}) {
           : state.view === 'freshness' ? freshnessPage(go)
           : state.view === 'table' ? tablePage(model)
             : state.view === 'quality' ? qualityPage()
-              : summaryPage(model, go);
+              : state.view === 'reconcile' ? reconcilePage()
+                : summaryPage(model, go);
   const compare = model.hasPrevious ? `порівняння з ${dateLabel(model.previousRange.from)} – ${dateLabel(model.previousRange.to)}` : 'попереднього періоду в таблиці немає';
   root.textContent = '';
   root.append(...[
@@ -451,7 +522,7 @@ export function render(host, workbook, options = {}) {
       h('div', {},
         h('span', { class: 'ud-eyebrow', text: 'Угруповання ДШВ · локальна аналітика' }),
         h('h1', { text: 'Дашборд УДШВ' }),
-        h('p', { text: `${workbook.sourceName || 'Таблиця'} · ${workbook.sheets.length} ${workbook.sheets.length === 1 ? 'аркуш' : 'аркуші(в)'} · ${dateLabel(allDateRange(workbook).from)} – ${dateLabel(allDateRange(workbook).to)} · лише читання` })),
+        h('p', { text: `${workbook.sourceName || 'Таблиця'} · ${workbook.sheets.length} ${workbook.sheets.length === 1 ? 'аркуш' : 'аркуші(в)'} · ${dateLabel(dataDateRange(workbook).from)} – ${dateLabel(dataDateRange(workbook).to)} · лише читання` })),
       h('div', { class: 'ud-hero-actions' },
         options.readSheets ? h('button', { class: 'ud-btn', type: 'button', onclick: async () => (await import('./presentation-ui.js')).openPresentationDialog(workbook, options), text: 'Презентація' }) : null,
         options.canRefresh ? h('button', { class: 'ud-btn', type: 'button', onclick: () => options.refresh?.(), text: 'Оновити з файлу' }) : null)),
@@ -461,8 +532,9 @@ export function render(host, workbook, options = {}) {
       h('span', { text: `${periodTitle(range)}${unitsLabel(state.units, ' · ')}` }),
       h('span', { text: `${model.activeDays} з ${model.days} днів із даними · ${compare}` }),
       state.units.length ? h('button', { type: 'button', class: 'ud-link', onclick: () => { state.units = []; go(); }, text: '× усі підрозділи' }) : null,
-      freshHint(go)),
-    h('nav', { class: 'ud-nav', 'aria-label': 'Розділи дашборда УДШВ' }, nav.map(([key, label]) => h('button', { type: 'button', 'data-nav': key, 'aria-pressed': String(state.view === key), onclick: () => { state.view = key; go(); }, text: label }))),
+      freshHint(go),
+      reconcileHint(go)),
+    h('nav', { class: 'ud-nav', 'aria-label': 'Розділи дашборда УДШВ' }, nav.map(([key, label]) => h('button', { type: 'button', 'data-nav': key, 'aria-pressed': String(state.view === key), onclick: () => { state.view = key; go(); } }, label, key === 'reconcile' && reconcileWorkbook(workbook).mismatched ? h('span', { class: 'ud-badge', title: 'Порівнянь з розбіжностями', text: String(reconcileWorkbook(workbook).mismatched) }) : null))),
     page].filter(Boolean));
   // «Наші втрати» отримують дані пізніше за перехід на вкладку: поява таблиці теж анімується.
   playMotion(root, own && root.querySelector('.ol-kpi') ? 'own:data' : state.view);

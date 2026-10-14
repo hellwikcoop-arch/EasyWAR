@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {
+  allDateRange,
   createDashboardModel,
   csvRows,
+  dataDateRange,
   lastActiveDate,
   metricName,
   monthRange,
@@ -104,7 +106,7 @@ test('builds week, month and whole-period analytics with comparison to the previ
 
   const all = createDashboardModel(wb, { range: periodRange(wb, 'all') });
   assert.equal(all.kpis.find(k => k.key === 'kia').total, 11);
-  assert.equal(all.bucket, 'day'); // 33 дні — ще по днях
+  assert.equal(all.bucket, 'day'); // 32 дні (до останнього дня з даними) — ще по днях
 
   const oneUnit = createDashboardModel(wb, { range: periodRange(wb, 'all'), unit: 'РУК 148 оабр' });
   assert.equal(oneUnit.kpis.find(k => k.key === 'kia').total, 1);
@@ -153,6 +155,38 @@ test('exports a pivot CSV and reports data problems', () => {
   const types = validateWorkbook(parseUdshvWorkbook(broken)).map(i => i.type);
   assert.ok(types.includes('ammo-total'));
   assert.ok(types.includes('missing-date'));
+});
+
+test('«Весь період» закінчується останнім днем з даними, а не кінцем місяця чи порожнім рядком шаблону', () => {
+  const wb = parseUdshvWorkbook(WORKBOOK);
+  // У вересні є порожній рядок за 02.09: він не продовжує період, але лишається у верхній межі дат таблиці.
+  assert.deepEqual(allDateRange(wb), { from: '2026-08-01', to: '2026-09-02' });
+  assert.deepEqual(dataDateRange(wb), { from: '2026-08-01', to: '2026-09-01' });
+  assert.deepEqual(periodRange(wb, 'all'), { from: '2026-08-01', to: '2026-09-01' });
+  assert.deepEqual(createDashboardModel(wb).range, { from: '2026-08-01', to: '2026-09-01' });
+  assert.equal(createDashboardModel(wb).days, 32);
+  assert.equal(createDashboardModel(wb).activeDays, 3);
+  // Без жодного рядка з даними лишається вся межа таблиці.
+  const empty = parseUdshvWorkbook([sheet('ВЕРЕСЕНЬ-26', [{ date: '2026-09-01', units: [{ name: 'АГ 148 оабр', cells: {} }] }])]);
+  assert.deepEqual(dataDateRange(empty), allDateRange(empty));
+});
+
+test('«Підрозділ двічі за день» лише коли дані є в обох рядках; порожній повтор не лякає', () => {
+  const issues = days => validateWorkbook(parseUdshvWorkbook([sheet('СЕРПЕНЬ-26', days)])).filter(i => i.type === 'duplicate');
+  const day = (...units) => [{ date: '2026-08-01', units }];
+  const unit = cells => ({ name: 'АГ 148 оабр', cells });
+
+  // Дані в обох рядках додаються до суми: це справжній дубль.
+  const both = issues(day(unit({ J: '3' }), unit({ K: '1' })));
+  assert.equal(both.length, 1);
+  assert.equal(both[0].unit, 'АГ 148 оабр');
+  assert.equal(both[0].raw, '2026-08-01');
+  // Повтор лише з нулями (або порожній) суми не змінює — без попередження, в обох порядках.
+  assert.deepEqual(issues(day(unit({ J: '3' }), unit({ J: '0', K: '0' }))), []);
+  assert.deepEqual(issues(day(unit({}), unit({ J: '3' }))), []);
+  assert.deepEqual(issues(day(unit({}), unit({}))), []);
+  // Три рядки: дані у двох — одне попередження, а не два.
+  assert.equal(issues(day(unit({ J: '1' }), unit({}), unit({ K: '2' }))).length, 1);
 });
 
 test('the РВ module opens UDSHV tables read-only in its own dashboard', async () => {

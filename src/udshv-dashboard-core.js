@@ -94,6 +94,9 @@ function headerRowOf(rows) {
 const WEEKDAYS = /^(?:понеділок|вівторок|віторок|середа|четвер|п'ятниця|субота|неділя|пн|вт|ср|чт|пт|сб|нд)$/;
 const TEMPLATE_SHEET = /чист|шаблон|зразок|template/i;
 
+/** Рядок без дати з підписом, що не є днем тижня, відкриває підсумковий блок («01-10.05.26», «ВСЬОГО»). */
+const isSummaryLabel = (rawDate, label) => !rawDate && !!label && !WEEKDAYS.test(norm(label));
+
 /**
  * Розбирає аркуші книги у модель УДШВ.
  * `sheets` — [{ name, rows: [{ r, cells: { A: { v } | 'значення' } }] }] (так читає rocket.html).
@@ -155,7 +158,7 @@ function parseSheet(name, rows, header) {
     if (row.r < first) continue;
     const rawDate = clean(cellText(row.cells[dateCol]));
     const label = weekdayCol ? clean(cellText(row.cells[weekdayCol])) : '';
-    if (!rawDate && label && !WEEKDAYS.test(norm(label))) {
+    if (isSummaryLabel(rawDate, label)) {
       // Підсумкові блоки («01-10.05.26», «ЗА ТРАВЕНЬ 2026», «ВСЬОГО») — не денні дані.
       date = '';
       summary = true;
@@ -184,7 +187,93 @@ function parseSheet(name, rows, header) {
     if (!date) { if (total) issues.push({ sheet: name, rowNumber: row.r, type: 'number-without-date' }); continue; }
     records.push({ sheet: name, rowNumber: row.r, date, unit: unitName(unitRaw), values });
   }
-  return { name: clean(name), title, metrics, records, issues };
+  const letters = {};
+  for (const m of metrics) { const id = `${m.group}|${m.name}`; if (!letters[id]) letters[id] = m.letter; }
+  // Підсумкові блоки аркуша лише зберігаються (для звірки); у записи й суми дашборда вони не потрапляють.
+  const blocks = collectBlocks(clean(name), rows, { first, dateCol, unitCol, weekdayCol, metrics });
+  return { name: clean(name), title, metrics, records, issues, letters, blocks };
+}
+
+/* ------------------------------ підсумкові блоки аркуша ------------------------------ */
+
+const pad2 = value => String(value).padStart(2, '0');
+const daysInMonth = (year, month) => new Date(Date.UTC(+year, +month, 0)).getUTCDate();
+const monthSpan = (year, fromIndex, toIndex) => ({
+  from: `${year}-${pad2(fromIndex + 1)}-01`,
+  to: `${year}-${pad2(toIndex + 1)}-${pad2(daysInMonth(year, toIndex + 1))}`,
+});
+
+/**
+ * Що означає підпис підсумкового блоку:
+ * decade «01-10.05.26», month «ЗА ТРАВЕНЬ 2026», range «ЗА ТРАВЕНЬ - СЕРПЕНЬ 2026», cumulative «ВСЬОГО»/«УСЬОГО».
+ * Усе інше — other (такі блоки не звіряються).
+ */
+export function classifyBlockLabel(label) {
+  const text = norm(label);
+  let m;
+  if ((m = /^(\d{1,2})\s*[-–—]\s*(\d{1,2})\.(\d{2})\.(\d{2}|\d{4})$/.exec(text))) {
+    const year = m[4].length === 2 ? `20${m[4]}` : m[4];
+    const month = +m[3];
+    if (month < 1 || month > 12) return { kind: 'other', period: null };
+    const last = daysInMonth(year, month);
+    return { kind: 'decade', period: { from: `${year}-${pad2(month)}-${pad2(Math.min(+m[1], last))}`, to: `${year}-${pad2(month)}-${pad2(Math.min(+m[2], last))}` } };
+  }
+  if ((m = /^за\s+([^\s\d\-–—]+)\s+(\d{4})$/.exec(text))) {
+    const index = monthIndex(m[1]);
+    if (index >= 0) return { kind: 'month', period: monthSpan(m[2], index, index) };
+  }
+  if ((m = /^за\s+([^\s\d\-–—]+)\s*[-–—]\s*([^\s\d\-–—]+)\s+(\d{4})$/.exec(text))) {
+    const a = monthIndex(m[1]), b = monthIndex(m[2]);
+    if (a >= 0 && b >= a) return { kind: 'range', period: { from: monthSpan(m[3], a, a).from, to: monthSpan(m[3], b, b).to } };
+  }
+  if (/^(?:всього|усього)$/.test(text)) return { kind: 'cumulative', period: null };
+  return { kind: 'other', period: null };
+}
+
+function readBlockValues(row, metrics) {
+  const values = {};
+  let count = 0; // скільки числових клітинок є (формули без збережених значень дають 0)
+  for (const m of metrics) {
+    const raw = clean(cellText(row.cells[m.letter]));
+    if (!raw) continue;
+    const n = Number(raw.replace(',', '.'));
+    if (!Number.isFinite(n)) continue;
+    count++;
+    if (n !== 0) { const id = `${m.group}|${m.name}`; values[id] = (values[id] || 0) + n; }
+  }
+  return { values, count };
+}
+
+/**
+ * Збирає підсумкові блоки аркуша: рядок із підписом і підрозділом відкриває блок, рядки з підрозділом без підпису
+ * додаються до нього, підписаний рядок без підрозділу («ВСЬОГО», «ЗАГАЛЬНА») — підсумковий рядок попереднього блоку.
+ * Межі блоків ті самі, що й у parseSheet: блок триває до першого рядка з датою.
+ */
+function collectBlocks(sheetName, rows, { first, dateCol, unitCol, weekdayCol, metrics }) {
+  const blocks = [];
+  let current = null;
+  let summary = false;
+  for (const row of rows) {
+    if (row.r < first) continue;
+    const rawDate = clean(cellText(row.cells[dateCol]));
+    const label = weekdayCol ? clean(cellText(row.cells[weekdayCol])) : '';
+    if (rawDate) { summary = false; current = null; continue; }
+    const opens = isSummaryLabel(rawDate, label);
+    if (opens) summary = true;
+    if (!summary) continue;
+    const unitRaw = clean(cellText(row.cells[unitCol]));
+    if (!opens && !unitRaw) continue;
+    const { values, count } = readBlockValues(row, metrics);
+    if (opens && unitRaw) {
+      current = { sheet: sheetName, label, ...classifyBlockLabel(label), firstRow: row.r, rows: [], total: null };
+      blocks.push(current);
+    } else if (opens) {
+      if (current && !current.total && count) current.total = { rowNumber: row.r, label, values };
+      continue;
+    }
+    if (current) current.rows.push({ rowNumber: row.r, unit: unitName(unitRaw), values, count });
+  }
+  return blocks;
 }
 
 function buildWorkbook(sheets, sourceName) {
@@ -202,11 +291,13 @@ function buildWorkbook(sheets, sourceName) {
     readOnly: true,
     sourceName,
     sheetName: sheets.map(sheet => sheet.name).join(' / '),
-    sheets: sheets.map(({ name, title, metrics, records: rs, issues }) => ({ name, title, metricCount: metrics.length, rowCount: rs.length, issues, dates: [...new Set(rs.map(r => r.date))] })),
+    sheets: sheets.map(({ name, title, metrics, records: rs, issues, letters }) => ({ name, title, metricCount: metrics.length, rowCount: rs.length, issues, letters, dates: [...new Set(rs.map(r => r.date))] })),
     metrics: [...catalog.values()],
     units,
     records,
     issues: sheets.flatMap(sheet => sheet.issues),
+    // Підсумкові блоки аркушів (початок місяця, «ВСЬОГО», «ЗАГАЛЬНА» тощо): лише для звірки, у суми не входять.
+    blocks: sheets.flatMap(sheet => sheet.blocks),
   };
 }
 
@@ -223,6 +314,14 @@ export function allDateRange(workbook) {
 export function lastActiveDate(workbook) {
   const dates = (workbook?.records || []).filter(hasData).map(r => r.date).sort();
   return dates[dates.length - 1] || allDateRange(workbook).to;
+}
+
+/**
+ * Діапазон «Весь період»: від першої дати таблиці до останньої дати з даними.
+ * Аркуш-місяць заповнений нулями до кінця місяця, тож allDateRange() закінчується днем, коли ще нічого не доповідали.
+ */
+export function dataDateRange(workbook) {
+  return { from: allDateRange(workbook).from, to: lastActiveDate(workbook) };
 }
 
 export function weekRange(anchor) {
@@ -244,7 +343,7 @@ export function periodRange(workbook, preset, anchor, custom = {}) {
   if (preset === 'week') return weekRange(anchor || lastActiveDate(workbook));
   if (preset === 'month') return monthRange(anchor || lastActiveDate(workbook));
   if (preset === 'custom' && custom.from && custom.to) return custom.from <= custom.to ? { from: custom.from, to: custom.to } : { from: custom.to, to: custom.from };
-  return allDateRange(workbook);
+  return dataDateRange(workbook);
 }
 
 /** Зсуває опорну дату на ±1 тиждень або місяць. */
@@ -379,7 +478,7 @@ export function normalizeUnits(unit) {
 }
 
 export function createDashboardModel(workbook, options = {}) {
-  const range = options.range || allDateRange(workbook);
+  const range = options.range || dataDateRange(workbook);
   const selected = normalizeUnits(options.unit);
   const unit = selected.length === 1 ? selected[0] : '';
   const scoped = (workbook?.records || []).filter(r => !selected.length || selected.includes(r.unit));
@@ -492,9 +591,12 @@ const ISSUE_TEXT = {
 };
 
 const MONTHS = ['січ', 'лют', 'берез', 'квіт', 'трав', 'черв', 'лип', 'серп', 'верес', 'жовт', 'листоп', 'груд'];
-function sheetMonth(name) {
+/** Номер місяця (0–11) за початком слова: «травень», «травня», «ТРАВЕНЬ-26»; -1, якщо це не місяць. */
+export const monthIndex = word => MONTHS.findIndex(m => norm(word).startsWith(m));
+/** «ТРАВЕНЬ-26» → «2026-05»; порожній рядок, якщо назву аркуша не розпізнано. */
+export function sheetMonth(name) {
   const key = norm(name);
-  const index = MONTHS.findIndex(m => key.startsWith(m));
+  const index = monthIndex(key);
   const year = /(\d{2,4})\s*$/.exec(key);
   if (index < 0 || !year) return '';
   return `${year[1].length === 2 ? '20' + year[1] : year[1]}-${String(index + 1).padStart(2, '0')}`;
@@ -502,13 +604,17 @@ function sheetMonth(name) {
 
 export function validateWorkbook(workbook) {
   const issues = [...(workbook.issues || [])];
-  const seen = new Map();
+  const withData = new Set(); // «дата|підрозділ», за які вже є рядок із даними
   for (const r of workbook.records) {
     const month = sheetMonth(r.sheet);
     if (month && r.date.slice(0, 7) !== month) issues.push({ sheet: r.sheet, rowNumber: r.rowNumber, type: 'date-outside-month', raw: r.date, unit: r.unit });
-    const key = `${r.date}|${r.unit}`;
-    if (seen.has(key)) issues.push({ sheet: r.sheet, rowNumber: r.rowNumber, type: 'duplicate', raw: r.date, unit: r.unit });
-    seen.set(key, r);
+    // Повтор лише з нулями (зайвий 31-й день шаблону) суми не змінює, тож про нього не попереджаємо:
+    // двічі за день — це коли дані є в обох рядках і складаються.
+    if (hasData(r)) {
+      const key = `${r.date}|${r.unit}`;
+      if (withData.has(key)) issues.push({ sheet: r.sheet, rowNumber: r.rowNumber, type: 'duplicate', raw: r.date, unit: r.unit });
+      withData.add(key);
+    }
     const own = r.values['ammo|ВСЬОГО'];
     if (own != null) {
       const sum = Object.entries(r.values).filter(([id]) => inGroup('ammo')(id)).reduce((s, [, v]) => s + v, 0);

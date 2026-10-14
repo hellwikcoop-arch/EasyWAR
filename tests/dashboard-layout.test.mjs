@@ -7,7 +7,7 @@ const read = name => readFile(new URL(`../src/${name}`, import.meta.url), 'utf8'
 test('меню дашбордів: кнопки мають data-nav, а кожен розділ УДШВ і ПВК — свою іконку', async () => {
   const css = await read('dashboard-layout.css');
   for (const file of ['udshv-dashboard.js', 'pvk-dashboard.js']) assert.match(await read(file), /'data-nav': key/, file);
-  for (const key of ['summary', 'units', 'personnel', 'own', 'ovt', 'ammo', 'freshness', 'table', 'quality']) assert.ok(css.includes(`.ud-nav button[data-nav="${key}"]`), `УДШВ: ${key}`);
+  for (const key of ['summary', 'units', 'personnel', 'own', 'ovt', 'ammo', 'freshness', 'reconcile', 'table', 'quality']) assert.ok(css.includes(`.ud-nav button[data-nav="${key}"]`), `УДШВ: ${key}`);
   for (const key of ['summary', 'journal', 'own', 'table', 'quality', 'АА', 'ПС', "Об'єкти"]) assert.ok(css.includes(`.pvk-nav button[data-nav="${key}"]`), `ПВК: ${key}`);
   // Кожна змінна --nav-icon посилається на оголошену --ic-*.
   const declared = new Set([...css.matchAll(/--(ic-[a-z]+):\s*url/g)].map(m => m[1]));
