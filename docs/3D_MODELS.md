@@ -43,6 +43,7 @@
 - Кожна стаття з моделлю без власного переглядача має вигляд «Інтерактивна модель»: `simOf(entry, viewerOf)` повертає сценарій або `null`. Сценарій — це тип дії (`plane`, `heli`, `cruise`, `ballistic`, `aam`, `asm`, `bomb`, `rocket`, `launcher`, `vehicle`, `shell`) з параметрами. Його беруть із `entry.sim`, таблиці `BY_ID` (id статей `ref-data.js`) або `BY_GROUP` (групи артилерії: `shell`, `guided`, `mortar`, `rocket`). Параметри описано коментарем над `BY_ID`.
 - Метальні заряди (група `charge`) і підривники (група `fuze`) у `BY_GROUP` навмисно відсутні: самі по собі вони нічого не вміють, тож лишаються зі звичайною моделлю, «Блоками» й переглядом «Огляд». Тест це перевіряє.
 - `ref-sim.js` (клас `Sim`) будує сцену навколо моделі `RefViewer` (аеродром, ґрунтова дорога чи поле, `terrainOf`), крокує дію й прибирає за собою (`dispose`). Керують ним `RefViewer.startSim(cfg)`, `setSimPhase(id)` і `stopSim()`; кнопки фаз (`.rw-simbar`) і підпис дії (`.rw-simcap`) малює `ref-wiki.js`. Без анімації (`prefers-reduced-motion`) фаза показується в усталеній позі.
+- Пускові (HIMARS, M270, «Вільха», «Сапсан») і машини забезпечення мають у `BY_ID` позначку `machine: true`: сцену веде рушій техніки `src/ref-machine.js` (ландшафт `ref-terrain.js`, ходова `ref-gear.js`, пускові й кран — `ref-launchers.js`, `ref-tel.js`, `ref-crane.js`), а набір фаз береться з `MACHINE_PHASES`. Простий сценарій тієї самої статті лишається запасним (`legacySim`), якщо рушій не запустився. Огляд модулів — `docs/UNIFIED_FRONTEND.md`, розділ «Довідник: сцена «Інтерактивної моделі»».
 - Як додати сценарій: запис у `BY_ID` або поле `sim` статті, далі `node --test tests/ref-sim.test.mjs`: кожна стаття з моделлю без власного переглядача має сценарій, і кожна дія доходить до кінця (зліт і посадка, зависання, ураження, залп).
 
 ## Мініатюри списку (`src/ref-thumbs.js`, `src/ref-thumbs/*.webp`)
@@ -76,6 +77,7 @@
 
 - **Картка вильоту (модуль ПС, `src/air.html`):** `mwKind(munition)` → `window.Munition3D.mount(...)` → `src/munition-3d-loader.js` (ліниво `import('./munition-3d.js')`).
 - **Довідник по озброєнню:** `src/ref-wiki.js` → ліниво `src/ref-viewer.js` (`RefViewer`; `GLTFLoader` + `MeshoptDecoder`; `MODEL_FILES` з шляхами `new URL('./models/….glb', import.meta.url)`, **шлях має бути дослівним**, інакше Vite не покладе файл у збірку) або кадр `aircraft-viewer.html` для статей із `viewer`.
+- **Інтерактивна модель статті** (сцена під моделлю: політ, їзда по ландшафту, пуск, кран): `RefViewer` (`src/ref-viewer.js`) бере сценарій з `simOf` (`src/ref-sim-data.js`) і веде його простим сценарієм `src/ref-sim.js` або рушієм техніки `src/ref-machine.js`; вузли, що рухаються (гвинти, колеса, пакети, кран), вирізають у пам'яті `src/ref-spin.js` і `src/ref-gear.js`, файли `.glb` лишаються без змін. Перелік модулів — `docs/UNIFIED_FRONTEND.md`, розділ «Довідник: сцена «Інтерактивної моделі»».
 - **Дані статей і прив'язка модель ↔ стаття:** `src/ref-data.js` (`model: { file, nose }` для `.glb` із `src/models`, `{ src }` чи `{ wrapper, global }` для файлів переглядача, `{ kind }` для процедурних; `credit`). Артилерія — `src/artillery-ref-data.js`.
 - **Спільна сцена** (рендерер, світло, підлога, тінь): `src/stage-3d.js`.
 
@@ -86,6 +88,7 @@
 - `tests/ref-sim.test.mjs`: сценарії дій (кожна стаття без власного переглядача, крім зарядів і підривників, має сценарій; кожна дія доходить до кінця).
 - `tests/ref-wiki.test.mjs`: кожен `.glb` у `src/models` має бути зареєстрований і використаний статтею; починатися з `glTF`; бути менше 12 МБ (згенеровані — менше 1 МБ, наземні машини — менше 16 МБ); вимагати лише розширень `EXT_meshopt_compression`, `KHR_mesh_quantization` або `EXT_texture_webp`; мати `asset.extras.license`, що збігається з ліцензією статті; у `CREDITS.md` має бути посилання або ім'я файлу кожної моделі. Там само: сторінка `aircraft-viewer.html` працює без мережі й має всі файли на диску, кожен літак переглядача має автора й ліцензію, групи «Ворожа» й «Інша», вирази для скла й `fixMaterials`, `spotAnchors`.
 - `tests/pwa-viewer.test.mjs`: у `vite.config.js` офлайн-кеш телефона не бере `.glb` і `.mp4` (виняток для `aircraft-viewer.html` і `aircraft-3d/` перевіряє `ref-wiki.test.mjs`).
+- `tests/ref-spin.test.mjs`, `ref-machine.test.mjs`, `ref-launchers.test.mjs`, `ref-tel.test.mjs`, `ref-crane.test.mjs`, `ref-gear.test.mjs`, `ref-terrain.test.mjs`, `ref-flight.test.mjs`, `ref-fx.test.mjs`, `ref-mesh.test.mjs`: гвинти, колеса й рушій техніки. Тести завантажують справжні `.glb` (`tests/helpers/glb-scene.mjs`) і порівнюють геометрію з файлом (`tests/helpers/mesh-compare.mjs`): у спокої кожна вершина має лежати там, де вона у файлі.
 
 ## Як додати нову .glb-модель
 
