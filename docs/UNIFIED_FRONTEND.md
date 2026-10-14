@@ -171,6 +171,35 @@ group strip. It only decorates the rendered DOM and module maps via the editor
 hook; the v3.1 source stays unchanged, and every image can be replaced in the
 editor.
 
+## Lite-версія (один файл)
+
+`script/build_lite.mjs` (`npm run build:lite`; `npm run build:app` кладе файл у
+`dist/standalone/EasyWAR-Lite.html`) збирає лаунчер і модулі `air`, `rocket`,
+`artillery` в один HTML для `file://` на будь-якому пристрої. Кнопка «Lite-версія»
+на стартовому екрані — `src/lite-export.js` (+ `lite-export-core.js`, Rust-команда
+`export_lite_file`). Подробиці й обмеження — `docs/MOBILE_VIEWER.md`. Що треба знати,
+змінюючи фронтенд:
+
+- Лаунчер відкриває модулі через `frame.src = MODULE_SRC[branch]`. У lite сценарій
+  перехоплює `iframe.src` і ставить `srcdoc`, тож **кожна адреса з `MODULE_SRC`
+  мусить відповідати `LITE_MODULES` у `build_lite.mjs`** (перевіряє
+  `tests/lite-build.test.mjs`). Новий модуль у лаунчері — додайте й туди.
+- Усе, що модуль підтягує окремим файлом (`fetch`, `new URL(…, import.meta.url)`,
+  `<img src="./…">`, Worker), у srcdoc не знайдеться: збірка падає, якщо після
+  інлайну лишилося посилання на файл (`leftoverReferences`).
+- Довідники з моделями вирізаються заглушками: `ref-wiki.js`, `ref-viewer.js`,
+  `startup-splash.js`, `launcher-tools.js` (`STUB_SOURCES`, підстановка за повним
+  шляхом файлу). Перейменували чи додали такий модуль — оновіть список; тест
+  перевіряє, що файли заглушок існують. `__EW_LITE__` (define) прибирає вкладку
+  «Довідник» Артилерії; `data-lite` на `<html>` модуля читає `map-3d-bridge.js`
+  (3D-карта вимкнена), а стилі збірки ховають `#tab-ref`, `.snav-ref`, `#view-ref`.
+- Заставка: її оболонка `#ew-splash` накриває екран, доки скрипт заставки її не
+  прибере, тому в lite її сховано стилем і видалено зі сторінки.
+- У srcdoc `location.search` порожній, а `history.replaceState` кидає виняток (він
+  уже в `try`): режим командувань задає атрибут `data-command` на `<html>`.
+- Перед змінами в `src/index.html`, `air.html`, `rocket.html` перевіряйте lite:
+  `npm run build:lite`, відкрийте файл із `file://` у Chromium, пройдіть кожен модуль.
+
 ## Importing a new unified HTML
 
 ```text
