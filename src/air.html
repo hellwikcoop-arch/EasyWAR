@@ -2947,11 +2947,11 @@ function explainWriteError(e) {
   if (n === 'NotAllowedError' || n === 'SecurityError') return 'Немає дозволу на запис у файл. Відкрийте таблицю заново кнопкою «Відкрити таблицю» і дозвольте запис.';
   return (e && e.message) ? e.message : String(e);
 }
-async function addSelected(fromAuto) {
+async function addSelected(fromAuto, explicit) {
   if (S.wb && S.wb.kind === 'pvk') { showError('Таблиця ПВК відкрита лише для читання. Вносьте дані в Excel і натисніть «Оновити».'); return; }
   if (S.signalReview) return;
   if (S.busy) return;
-  const chosen = S.parsed.filter(r => r.include);
+  const chosen = explicit || S.parsed.filter(r => r.include);
   if (!chosen.length || !S.wb) return;
   S.busy = true; renderResults(); showError('');
   let res = null, base = null;
@@ -2966,11 +2966,11 @@ async function addSelected(fromAuto) {
       try { const w = await S.handle.createWritable(); await w.write(res.bytes); await w.close(); S.dirty = false; }
       catch (e) { S.dirty = true; showError(explainWriteError(e)); }
     } else S.dirty = true;
-    $('#paste').value = ''; S.parsed = [];
+    if (!explicit) { $('#paste').value = ''; S.parsed = []; }
     const n = res.nums.length, range = n === 1 ? '№' + res.nums[0] : '№' + res.nums[0] + '–' + res.nums[n - 1];
     toast((fromAuto ? 'Додано автоматично: ' : 'Додано: ') + n + ' ' + plural(n, ['запис', 'записи', 'записів']) + ', ' + range + (S.handle && !S.dirty ? ' · файл збережено' : ''), 'ok');
   } catch (e) { showError(explainWriteError(e)); }
-  finally { S.busy = false; renderAll(); $('#paste').focus(); }
+  finally { S.busy = false; renderAll(); if (!explicit) $('#paste').focus(); }
 }
 
 function ewFileName() {
@@ -6102,6 +6102,7 @@ document.addEventListener('DOMContentLoaded', init);
 <script type="module" src="./sqlite-dashboard-source.js"></script>
 <script type="module" src="./munition-3d-loader.js"></script>
 <script type="module" src="./ref-wiki.js"></script>
+<script type="module" src="./manual-entry.js"></script>
 <script src="./module-editor-access.js"></script>
 <script src="./module-editor-core.js"></script>
 <script src="./module-editor.js"></script>

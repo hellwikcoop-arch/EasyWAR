@@ -1,0 +1,62 @@
+/* Довільне внесення у вкладці «Внесення доповідей» (ПС і РВ).
+   Форма будується з готових класів сторінки (.panel, .grid, .f, .chips, .chip, .btn, .notice, .dupnote, .switch),
+   тут лише те, чого на сторінках немає: перемикач способу внесення, підпис «стовпець X», помилки полів, рядок-перегляд. */
+
+/* У довільному внесенні текст звіту, його перевірка й перемикачі автододавання не потрібні. */
+#view-entry.ew-manual-on .ew-report-only { display: none !important; }
+
+/* ---------- Перемикач «Зі звіту / Довільне внесення» ---------- */
+.ew-me-mode { display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap; }
+.ew-me-mode-lab { font-size: 13px; font-weight: 600; color: var(--muted); }
+.ew-me-seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.ew-me-seg button { font: inherit; font-size: 13.5px; padding: 6px 14px; min-height: 36px; color: var(--muted); background: var(--surface); border: 0; cursor: pointer; }
+.ew-me-seg button + button { border-left: 1px solid var(--line-strong); }
+.ew-me-seg button:hover { color: var(--ink); }
+.ew-me-seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--ink); font-weight: 600; box-shadow: inset 0 -2px 0 var(--accent); }
+.ew-me-seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* ---------- Форма ---------- */
+/* Сторінка — сітка з одним стовпцем: без min-width:0 широкий рядок-перегляд розтягнув би всю сторінку замість прокрутки. */
+#ewManualPanel { min-width: 0; }
+.ew-me-lede { margin: 0 0 12px; color: var(--muted); max-width: 72ch; font-size: 13.5px; line-height: 1.5; }
+
+.ew-me-auto { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 20px; margin: 0 0 14px; padding: 8px 12px; background: var(--surface-2); border: 1px dashed var(--line-strong); border-radius: 8px; font-size: 13px; color: var(--muted); }
+.ew-me-auto-title { font-weight: 600; }
+.ew-me-auto b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.ew-me-auto-note { opacity: .85; }
+
+.ew-me-grid .w-9 { grid-column: span 9; }
+/* Підпис завжди в один рядок: інакше в сусідніх полях поля введення стоять на різній висоті. Повна назва — у title. */
+.ew-me-lab { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; min-width: 0; }
+.ew-me-lab > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ew-me-col { flex: none; font-size: 11px; font-weight: 500; color: var(--muted); white-space: nowrap; opacity: .85; }
+
+.f.err input, .f.err select, .f.err textarea { border-color: var(--bad); background: var(--bad-soft); }
+.f.err .chips { border: 1px solid var(--bad); border-radius: 8px; padding: 6px; background: var(--bad-soft); }
+.f.err input:focus, .f.err select:focus, .f.err textarea:focus { box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 25%, transparent); }
+.msg.err { color: var(--bad); }
+
+.ew-me-dup { margin: 14px 0 0; }
+.ew-me-dup .switch { margin-top: 0; }
+.ew-me-empty { margin: 14px 0 0; }
+.ew-me-sub { margin: 14px 0 6px; font-size: 13px; font-weight: 650; color: var(--muted); }
+
+/* ---------- Рядок, який буде записано ---------- */
+.ew-me-scroll { overflow-x: auto; max-width: 100%; border: 1px solid var(--line); border-radius: 8px; }
+.ew-me-table { border-collapse: collapse; width: max-content; min-width: 100%; font-size: 12.5px; }
+.ew-me-table th, .ew-me-table td { padding: 5px 10px; text-align: left; vertical-align: top; white-space: nowrap; max-width: 240px; overflow: hidden; text-overflow: ellipsis; border-right: 1px solid var(--line); }
+.ew-me-table th:last-child, .ew-me-table td:last-child { border-right: 0; }
+.ew-me-table thead th { background: var(--surface-2); color: var(--muted); font-weight: 600; border-bottom: 1px solid var(--line); }
+.ew-me-letter { display: block; font-size: 10.5px; font-weight: 500; opacity: .8; }
+.ew-me-table td.auto { color: var(--muted); font-style: italic; }
+.ew-me-table td.nil { color: var(--muted); opacity: .6; }
+
+.ew-me-need { margin: 12px 0 0; font-size: 13.5px; color: var(--muted); }
+.ew-me-need.ok { color: var(--ok); font-weight: 600; }
+.ew-me-need.warn { color: var(--warn); font-weight: 600; }
+.ew-me-keep { margin: 8px 0 0; }
+
+@media (max-width: 720px) {
+  .ew-me-grid .w-9 { grid-column: span 12; }
+  .ew-me-col-w { display: none; }
+}
