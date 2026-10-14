@@ -1,0 +1,548 @@
+/*
+ * EasyWAR ui-kit: спільний візуальний шар дашбордів (ПС, РВ, ПВК, УДШВ).
+ *
+ * Лише дизайн, розміщення й Motion. Жодних змін логіки, метрик і даних:
+ * файл підключається ПІСЛЯ вбудованих стилів модуля й перевизначає тільки вигляд.
+ * Акцент береться з --accent модуля (ПС синій, РВ золотий), тож палітра модулів не зливається.
+ * Рух вимикається і системним «зменшити рух», і власним перемикачем html[data-motion="off"].
+ */
+
+:root {
+  --ew-r: 14px;
+  --ew-r-sm: 10px;
+  --ew-accent: var(--accent, #3d9bff);
+  --ew-card: color-mix(in srgb, var(--surface, #0e1a2e) 94%, #000 6%);
+  --ew-card-hi: color-mix(in srgb, var(--surface-2, #122340) 70%, var(--surface, #0e1a2e));
+  --ew-line: color-mix(in srgb, var(--ew-accent) 16%, var(--line, #1b2c47));
+  --ew-line-hi: color-mix(in srgb, var(--ew-accent) 42%, var(--line, #1b2c47));
+  --ew-glow: color-mix(in srgb, var(--ew-accent) 26%, transparent);
+  --ew-shadow: 0 1px 0 rgba(255, 255, 255, .035) inset, 0 10px 30px rgba(0, 0, 0, .18);
+  --ew-shadow-hi: 0 1px 0 rgba(255, 255, 255, .05) inset, 0 18px 44px rgba(0, 0, 0, .3);
+  --ew-ease: cubic-bezier(.22, 1, .36, 1);
+  --ew-ease-io: cubic-bezier(.65, 0, .35, 1);
+  --ew-t-fast: .18s;
+  --ew-t: .42s;
+  --ew-t-slow: .8s;
+}
+:root[data-theme="light"] {
+  --ew-card: var(--surface, #fff);
+  --ew-card-hi: var(--surface-2, #f2f6f4);
+  --ew-line: color-mix(in srgb, var(--ew-accent) 14%, var(--line, #cfd8d4));
+  --ew-line-hi: color-mix(in srgb, var(--ew-accent) 40%, var(--line, #cfd8d4));
+  --ew-glow: color-mix(in srgb, var(--ew-accent) 16%, transparent);
+  --ew-shadow: 0 1px 2px rgba(20, 32, 28, .06);
+  --ew-shadow-hi: 0 14px 34px rgba(20, 32, 28, .14);
+}
+
+/* ---------- Каркас сторінки: рівний фон, однакові відступи ---------- */
+.dmain, .dmain-in { gap: 16px; }
+.dmain-in > .lay-gap { height: 0; }
+
+/* ---------- Панель: одна форма для всіх модулів ---------- */
+:root .dpanel,
+:root .panel,
+:root .pvk-metric, :root .pvk-journal-card, :root .pvk-section, :root .pvk-kpi,
+:root .ud-card, :root .ud-kpi {
+  border-radius: var(--ew-r);
+  border-color: var(--ew-line);
+  box-shadow: var(--ew-shadow);
+}
+.dpanel,
+.panel {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--ew-accent) 4%, transparent), transparent 46%),
+    var(--ew-card);
+}
+.dpanel:hover { border-color: var(--ew-line-hi); box-shadow: var(--ew-shadow-hi); }
+.dpanel h2, .ph h2 { letter-spacing: 0; }
+.ph { padding-bottom: 2px; }
+
+/* ---------- Панель інструментів: один рядок-«пігулка» ---------- */
+.dmain > .toolbar {
+  gap: 10px 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--ew-line);
+  border-radius: var(--ew-r);
+  background: var(--ew-card);
+  box-shadow: var(--ew-shadow);
+}
+.toolbar .lbl { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; }
+.toolbar .grp + .grp { padding-left: 14px; border-left: 1px solid var(--ew-line); }
+.toolbar input[type=date], .toolbar select {
+  border-radius: var(--ew-r-sm);
+  border: 1px solid var(--ew-line);
+  background: color-mix(in srgb, var(--surface-2, #122340) 64%, transparent);
+}
+.toolbar input[type=date]:hover, .toolbar select:hover,
+.toolbar input[type=date]:focus-visible, .toolbar select:focus-visible { border-color: var(--ew-line-hi); }
+
+/* ---------- Сегментований перемикач ---------- */
+/* ПС/РВ: рухомий «повзунок» .seg-thumb вже створює код модуля, ми лише перефарбовуємо його. */
+:root .seg, :root .pvk-seg, :root .ud-seg {
+  position: relative;
+  border-radius: var(--ew-r-sm);
+  border: 1px solid var(--ew-line);
+  background: color-mix(in srgb, var(--surface-2, #122340) 56%, transparent);
+  isolation: isolate;
+}
+.seg button + button { border-left: 0; }
+.seg-thumb {
+  top: 2px !important; bottom: 2px !important; border-radius: calc(var(--ew-r-sm) - 2px);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--ew-accent) 88%, #fff 12%), var(--ew-accent)) !important;
+  box-shadow: 0 6px 18px var(--ew-glow) !important;
+}
+.seg.has-thumb button[aria-pressed="true"] { color: var(--accent-ink, #04111f); font-weight: 700; }
+/* ПВК і УДШВ: індикатор ставить ui-kit.js (--ew-x / --ew-w). */
+.pvk-seg button, .ud-seg button { position: relative; z-index: 1; }
+.pvk-seg.ew-ind::before, .ud-seg.ew-ind::before {
+  content: ""; position: absolute; z-index: 0; top: 2px; bottom: 2px; left: 0;
+  width: var(--ew-w, 0px); transform: translateX(var(--ew-x, 0px));
+  border-radius: calc(var(--ew-r-sm) - 2px);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--ew-accent) 88%, #fff 12%), var(--ew-accent));
+  box-shadow: 0 6px 18px var(--ew-glow);
+  transition: transform var(--ew-t) var(--ew-ease), width var(--ew-t) var(--ew-ease);
+}
+.pvk-seg.ew-ind button[aria-pressed="true"],
+.ud-seg.ew-ind button[aria-pressed="true"] { background: transparent; box-shadow: none; color: var(--accent-ink, #04111f); font-weight: 700; }
+
+/* ---------- Кнопки ---------- */
+.btn { border-radius: var(--ew-r-sm); }
+.btn.primary {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--ew-accent) 86%, #fff 14%), var(--ew-accent));
+  border-color: color-mix(in srgb, var(--ew-accent) 70%, #fff 30%);
+  box-shadow: 0 8px 22px var(--ew-glow);
+}
+
+/* ---------- ПС: блок «Основні показники» як у РВ: одна панель, банер угорі, шість компактних карток в ряд ---------- */
+html[data-ew-module="air"] .kpipanel {
+  padding: 0 8px 8px; overflow: hidden;
+  border: 1px solid var(--ew-line); border-radius: var(--ew-r);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--ew-accent) 7%, var(--ew-card)), var(--ew-card) 60%);
+  box-shadow: var(--ew-shadow);
+}
+html[data-ew-module="air"] .kpipanel > .kh {
+  position: relative; isolation: isolate; overflow: hidden;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 112px; margin: 0 -8px; padding: 12px 18px 8px;
+  border: 0; border-bottom: 1px solid var(--ew-line); border-radius: 0; box-shadow: none;
+  background:
+    radial-gradient(90% 160% at 0% 0%, color-mix(in srgb, var(--ew-accent) 16%, transparent), transparent 60%),
+    linear-gradient(90deg, color-mix(in srgb, var(--ew-card) 96%, #000) 0%, color-mix(in srgb, var(--ew-card) 80%, var(--ew-accent) 4%) 60%, color-mix(in srgb, var(--ew-card) 92%, #000) 100%);
+}
+html[data-ew-module="air"] .kpipanel > .kh .kh-l { position: relative; z-index: 2; }
+html[data-ew-module="air"] .kpipanel > .kh h2 {
+  font: 700 clamp(26px, 2.45vw, 38px)/1.05 var(--display); letter-spacing: .025em; text-transform: uppercase;
+}
+html[data-ew-module="air"] .kpipanel > .kh p { font-size: 13px; max-width: 54ch; }
+html[data-ew-module="air"] .kpipanel > .kh { position: relative; }
+/* Літак — на всю ширину банера; текст і показники лежать поверх нього. */
+html[data-ew-module="air"] .kpipanel > .kh .kh-c {
+  position: absolute; inset: 0; z-index: 0; margin: 0; display: grid; place-items: end center; pointer-events: none; overflow: hidden;
+}
+html[data-ew-module="air"] .kpipanel > .kh .kh-jet {
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 50% 38%;
+  opacity: .85;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, rgba(0,0,0,.45) 18%, #000 42%, #000 62%, rgba(0,0,0,.5) 88%, transparent 100%);
+  mask-image: linear-gradient(90deg, transparent 0, rgba(0,0,0,.45) 18%, #000 42%, #000 62%, rgba(0,0,0,.5) 88%, transparent 100%);
+  animation: ewJetDrift 24s var(--ew-ease-io) infinite alternate;
+}
+html[data-ew-module="air"] .kpipanel > .kh .kh-tag { position: relative; z-index: 1; margin-bottom: 6px; }
+html[data-ew-module="air"] .kpipanel > .kh .kh-r { position: relative; z-index: 2; gap: 18px; }
+html[data-ew-module="air"] .kpipanel > .kh .kh-eff { border-color: var(--ew-line); background: color-mix(in srgb, var(--ew-card) 78%, transparent); padding: 7px 13px; }
+@keyframes ewJetDrift { from { transform: scale(1) translateX(0); } to { transform: scale(1.05) translateX(-1.5%); } }
+
+/* Шість карток в один ряд, однакова висота; фото й візуалізації карток лишаються. */
+html[data-ew-module="air"] .kpipanel .kpi-grid,
+html[data-ew-module="air"] .kpipanel .kpi-grid:has(> :nth-child(6):last-child) { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; padding-top: 8px; }
+html[data-ew-module="air"] .kc {
+  min-height: 234px; padding: 12px 12px 10px; border-radius: 12px;
+  box-shadow: none;
+  transition: transform var(--ew-t) var(--ew-ease), box-shadow var(--ew-t) var(--ew-ease), border-color var(--ew-t-fast);
+}
+html[data-ew-module="air"] .kc:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--tc) 62%, var(--ew-line));
+  box-shadow: 0 8px 22px rgba(0, 0, 0, .25), 0 0 24px color-mix(in srgb, var(--tc) 14%, transparent);
+}
+html[data-ew-module="air"] .kc-art { width: 78%; height: 57%; }
+html[data-ew-module="air"] .kc-top { margin-bottom: 5px; }
+html[data-ew-module="air"] .kc-top .k-ic { width: 27px; height: 27px; }
+html[data-ew-module="air"] .kc .k-l { font-size: 13.5px; letter-spacing: .04em; }
+html[data-ew-module="air"] .kc .k-v { font-size: 42px; margin: 1px 0 4px; }
+html[data-ew-module="air"] .kc-vr .k-v { font-size: clamp(34px, 3vw, 42px); }
+html[data-ew-module="air"] .kc-vr { gap: 10px; margin: 2px 0 6px; }
+html[data-ew-module="air"] .kc-vr .kc-dl { padding-left: 10px; }
+html[data-ew-module="air"] .kc-dl { min-height: 20px; margin-bottom: 2px; }
+html[data-ew-module="air"] .kc-d { font-size: 13px; }
+html[data-ew-module="air"] .kc-chart { margin: 0 0 4px; }
+html[data-ew-module="air"] .kc-tiles { gap: 6px; }
+html[data-ew-module="air"] .kc-t { padding: 6px 7px; border-radius: 7px; }
+html[data-ew-module="air"] .kc-tv { font-size: 15px; }
+html[data-ew-module="air"] .kc-tl { font-size: 9.5px; }
+html[data-ew-module="air"] .kc-vr { flex-direction: column; align-items: flex-start; gap: 3px; }
+html[data-ew-module="air"] .kc-vr .kc-dl { flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; padding-left: 0; border-left: 0; }
+html[data-ew-module="air"] .kc-dt { font-size: 10.5px; text-shadow: 0 1px 3px rgba(0, 0, 0, .75); }
+html[data-ew-module="air"] .kc .k-v { text-shadow: 0 2px 10px rgba(0, 0, 0, .6); }
+html[data-ew-module="air"] .kc-art.kc-art-photo {
+  top: 0; right: 0; left: auto; width: 80%; height: 57%;
+  -webkit-mask-image: linear-gradient(to left, #000 20%, transparent 98%), linear-gradient(to bottom, #000 40%, transparent);
+  -webkit-mask-composite: source-in;
+  mask-image: linear-gradient(to left, #000 20%, transparent 98%), linear-gradient(to bottom, #000 40%, transparent);
+  mask-composite: intersect;
+}
+html[data-ew-module="air"] .kc-art-photo .kc-photo { opacity: .5; }
+html[data-theme="light"][data-ew-module="air"] .kc-art .kc-photo { opacity: .28; }
+html[data-ew-module="air"] .kc-wide { gap: 8px; padding: 8px 9px; }
+html[data-ew-module="air"] .kc-wide .kc-ti { width: 22px; height: 22px; }
+html[data-ew-module="air"] .kc-wide span { font-size: 10.5px; gap: 2px; }
+html[data-ew-module="air"] .kc-wide b { font-size: 12.5px; }
+html[data-ew-module="air"] .kc-ringrow { margin-top: 118px; gap: 10px; }
+html[data-ew-module="air"] .kc-ring { width: 72px; height: 72px; }
+html[data-ew-module="air"] .kc-ring b { font-size: 18px; }
+html[data-ew-module="air"] .kc-rl { font-size: 12px; }
+html[data-ew-module="air"] .kc-sub { font-size: 9.5px; }
+@media (max-width: 1279px) {
+  html[data-ew-module="air"] .kpipanel .kpi-grid,
+  html[data-ew-module="air"] .kpipanel .kpi-grid:has(> :nth-child(6):last-child) { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  html[data-ew-module="air"] .kpipanel > .kh { grid-template-columns: minmax(0, 1fr) minmax(280px, .9fr); }
+  html[data-ew-module="air"] .kpipanel > .kh .kh-r { display: none; }
+}
+@media (max-width: 900px) {
+  html[data-ew-module="air"] .kpipanel .kpi-grid,
+  html[data-ew-module="air"] .kpipanel .kpi-grid:has(> :nth-child(6):last-child) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  html[data-ew-module="air"] .kpipanel > .kh { grid-template-columns: minmax(0, 1fr); }
+  html[data-ew-module="air"] .kpipanel > .kh .kh-c { display: none; }
+}
+
+
+/* ---------- ПС: компактні «Топ-5 підрозділів» і «Тип цілі» поруч із картою (як у РВ) ---------- */
+html[data-ew-module="air"] #p-units, html[data-ew-module="air"] #p-types { min-height: 172px; }
+html[data-ew-module="air"] #p-units .ph { padding-bottom: 4px; border-bottom: 1px solid var(--ew-line); }
+html[data-ew-module="air"] .units-tbl { font-size: 12.5px; }
+html[data-ew-module="air"] .units-tbl td { padding-top: 4px; padding-bottom: 4px; }
+html[data-ew-module="air"] #p-types .tt-h { padding: 12px 14px 10px; }
+html[data-ew-module="air"] #p-types .tt-h h3 { font-size: clamp(20px, 1.7vw, 26px); }
+html[data-ew-module="air"] #p-types .tt-h p { font-size: 10.5px; letter-spacing: .1em; }
+html[data-ew-module="air"] #p-types .tt-tr { width: 24px; height: 32px; }
+html[data-ew-module="air"] #p-types .tt-list { padding: 8px 8px 2px; gap: 6px; }
+html[data-ew-module="air"] #p-types .tt-row { grid-template-columns: 6px 46px minmax(0, 1fr) auto 18px; gap: 10px; min-height: 66px; padding: 0 10px 0 6px; }
+html[data-ew-module="air"] #p-types .tt-ic { width: 46px; height: 46px; border-radius: 10px; }
+html[data-ew-module="air"] #p-types .tt-ic .ti-ic { width: 30px; height: 30px; }
+html[data-ew-module="air"] #p-types .tt-tx b { font-size: clamp(15px, 1.2vw, 19px); }
+html[data-ew-module="air"] #p-types .tt-tx small { font-size: 11px; }
+html[data-ew-module="air"] #p-types .tt-n b { font-size: clamp(20px, 1.6vw, 26px); }
+html[data-ew-module="air"] #p-types .tt-n span { font-size: 11px; }
+html[data-ew-module="air"] #p-types .tt-f { min-height: 84px; padding: 14px 16px; margin: 6px 8px 8px; }
+html[data-ew-module="air"] #p-types .tt-q { font-size: clamp(13px, 1.1vw, 16px); margin-bottom: 8px; }
+html[data-ew-module="air"] #p-map { min-height: 360px; }
+
+/* ---------- ПС і РВ: перший екран (карта, праворуч підрозділи й типи цілей, банер із шістьма картками) без прокручування ---------- */
+/* Висоти рахуються від висоти вікна: картки ~26vh, банер 72px, решту займає ряд із картою. На менших вікнах (<1400×850) лишається звичайне прокручування. */
+html[data-ew-module] { --fit-top: 64px; --fit-card: clamp(240px, 30.5vh, 370px); --fit-kh: 76px; --fit-gap: 14px; }
+.filter-toggle { width: 34px; min-width: 34px; padding: 4px; border: 0; background: transparent; color: var(--muted); }
+.filter-toggle[aria-expanded="true"] { color: var(--accent); }
+.filter-toggle .ic { width: 20px; height: 20px; }
+html[data-ew-module="air"] .dmain:not(.filters-open) > .toolbar { display: none; }
+/* Шапка ПС — один рядок, як у РВ: тема іконкою, компактні вкладки й кнопки; запасу під плаваючі кнопки лаунчера немає (як у РВ). */
+html[data-ew-module="air"] .appbar { flex-wrap: nowrap; gap: 8px 22px; padding: 4px 14px !important; min-height: 56px; }
+html[data-ew-module="air"] .appbar-right { flex-wrap: nowrap; gap: 8px; margin-left: auto; min-width: 0; flex: 0 1 auto; }
+html[data-ew-module="air"] .appbar .tabs { flex: none; }
+html[data-ew-module="air"] .appbar .tab { padding-left: 9px; padding-right: 9px; height: 48px; min-height: 0; white-space: nowrap; }
+html[data-ew-module="air"] .appbar .filechip { height: 38px; min-width: 0; }
+html[data-ew-module="air"] .appbar .filechip .nm { max-width: 64px; }
+html[data-ew-module="air"] .appbar .filechip { flex: none; }
+html[data-ew-module="air"] #dashboardSourceToggle:disabled { display: none; }
+html[data-ew-module="air"] #dashboardSourceToggle { max-width: 104px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html[data-ew-module="air"] .appbar-right > * { align-self: center; white-space: nowrap; }
+html[data-ew-module="air"] .appbar-right > .btn.quiet { height: auto; min-height: 34px; }
+@media (max-width: 1560px) { html[data-ew-module="air"] .appbar .filechip .cnt { display: none; } }
+html[data-ew-module="air"] #themeBtn { font-size: 0; width: 36px; min-width: 36px; height: 36px; padding: 0; display: inline-grid; place-items: center; color: var(--accent); }
+html[data-ew-module="air"] #themeBtn::before { content: "☀"; font-size: 19px; line-height: 1; }
+html[data-theme="light"][data-ew-module="air"] #themeBtn::before { content: "☾"; }
+
+/* Бічне меню ПС — вужче й компактніше, як у РВ. */
+html[data-ew-module="air"] { --sw: 188px; }
+@media (min-width: 900px) {
+  html[data-ew-module="air"] .side { padding: 8px 8px 0 10px; background: transparent; border-right: 0; box-shadow: none; }
+  html[data-ew-module="air"] .snav { gap: 2px; }
+  html[data-ew-module="air"] .snav-b { min-height: 38px; padding: 8px 10px; font-size: 13px; gap: 10px; border-radius: 9px; border: 1px solid transparent; color: var(--ink); }
+  html[data-ew-module="air"] .snav-b svg { width: 20px; height: 20px; color: var(--accent); }
+  html[data-ew-module="air"] .snav-b.on { border-color: color-mix(in srgb, var(--accent) 55%, transparent); background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 22%, transparent), color-mix(in srgb, var(--accent) 5%, transparent)); box-shadow: inset 3px 0 0 var(--accent), 0 0 11px var(--ew-glow); }
+  html[data-ew-module="air"] .snav-b .nb { flex: none; min-width: 20px; height: 18px; padding: 0 6px; font-size: 10px; line-height: 16px; box-sizing: border-box; }
+  html[data-ew-module="air"] .snav-b { gap: 8px; padding-left: 9px; padding-right: 8px; }
+  html[data-ew-module="air"] .snav-entry { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--ew-line); }
+  html[data-ew-module="air"] .side-foot { margin: 14px 0 0; }
+  html[data-ew-module="air"] .side-foot > * { border-radius: var(--ew-r); overflow: hidden; border: 1px solid var(--ew-line); }
+}
+
+@media (min-width: 1400px) and (min-height: 850px) {
+  html[data-ew-module] .dmain-in[data-view="overview"] > .lrow:has(#p-map) {
+    height: max(320px, calc(100vh - var(--fit-top) - var(--fit-gap) - var(--fit-kh) - var(--fit-card) - 32px + 6px));
+  }
+  html[data-ew-module="air"] #view-dash.shell > .dmain { padding-top: 8px; }
+  html[data-ew-module] .dmain-in[data-view="overview"] > .lrow:has(#p-map) > .lcol { min-height: 0; }
+  html[data-ew-module] .dmain-in[data-view="overview"] > .lrow:has(#p-map) #p-map { flex: 1 1 0; min-height: 0; height: auto; }
+  html[data-ew-module] .dmain-in[data-view="overview"] > .lrow:has(#p-map) #p-map .mapwrap { flex: 1 1 0; min-height: 0; aspect-ratio: auto; }
+  html[data-ew-module] .dmain-in[data-view="overview"] > .lrow:has(#p-map) #p-map .mapwrap > svg { height: 100%; aspect-ratio: auto; }
+  html[data-ew-module] .dmain-in[data-view="overview"] > .lrow:has(#p-map) #p-units,
+  html[data-ew-module] .dmain-in[data-view="overview"] > .lrow:has(#p-map) #p-types { flex: 1 1 auto; min-height: 0; overflow: hidden; }
+  html[data-ew-module] .dmain-in[data-view="overview"] > .lrow:has(#p-map) #p-units { flex-grow: 0; }
+  html[data-ew-module] .dmain-in[data-view="overview"] > .lrow:has(#p-map) #p-types { flex-grow: 1; }
+  html[data-ew-module] .dmain-in[data-view="overview"] > .lrow:has(#p-map) #p-map .m3-hint { display: none; }
+  html[data-ew-module] .dmain-in[data-view="overview"] #p-units .ph, html[data-ew-module] .dmain-in[data-view="overview"] #p-types .ph { flex-wrap: nowrap; align-items: baseline; gap: 6px 10px; margin-bottom: 4px; }
+  html[data-ew-module] .dmain-in[data-view="overview"] #p-units .ph h2 { font-size: 14px; white-space: nowrap; }
+  html[data-ew-module] .dmain-in[data-view="overview"] #p-units .ph { flex-wrap: nowrap; }
+  html[data-ew-module] .dmain-in[data-view="overview"] #p-units .ph .sub { display: none; }
+  html[data-ew-module] .dmain-in[data-view="overview"] #p-units .ph .ph-r, html[data-ew-module] .dmain-in[data-view="overview"] #p-units .ph .ph-l { min-width: 0; }
+  html[data-ew-module] .dmain-in[data-view="overview"] #p-units .units-tbl th, html[data-ew-module] .dmain-in[data-view="overview"] #p-units .units-tbl thead { display: none; }
+  html[data-ew-module] .dmain-in[data-view="overview"] #p-units .ph .link { white-space: nowrap; }
+  html[data-ew-module] .dmain-in[data-view="overview"] #p-units .units-tbl td { padding-top: 2px; padding-bottom: 2px; height: 26px; }
+  html[data-ew-module="air"] .dmain-in[data-view="overview"] #p-units .units-tbl .emb { width: 20px; height: 20px; }
+  html[data-ew-module="air"] .dmain-in[data-view="overview"] #p-units .units-tbl td { line-height: 1.1; }
+  html[data-ew-module] .dmain-in[data-view="overview"] #p-types .tt-h { padding-top: 6px; padding-bottom: 4px; min-height: 0; }
+  html[data-ew-module] .dmain-in[data-view="overview"] #p-types .tt-h h3 { font-size: 20px; line-height: 1.1; }
+  html[data-ew-module] .dmain-in[data-view="overview"] #p-types .tt-row { min-height: 0; height: 48px; }
+  html[data-ew-module] .dmain-in[data-view="overview"] #p-types .tt-tx small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+  html[data-ew-module] .dmain-in[data-view="overview"] #p-types .tt-row img.tt-photo { height: 100%; }
+  html[data-ew-module] .dmain-in[data-view="overview"] #p-types .tt-list { gap: 5px; min-height: 0 !important; grid-template-rows: none !important; grid-auto-rows: 48px; padding-top: 2px; padding-bottom: 6px; }
+  html[data-ew-module] .dmain-in[data-view="overview"] #p-types .tt-h { flex: none; }
+  html[data-ew-module="air"] .dmain-in[data-view="overview"] #p-types .tt-f { display: none; }
+  html[data-ew-module="air"] .kpipanel > .kh { grid-template-columns: minmax(0, 1fr) auto; }
+  html[data-ew-module="air"] .kpipanel > .kh p { font-size: 12px; max-width: none; }
+  html[data-ew-module] .dmain-in[data-view="overview"] #p-units .units-tbl tr, html[data-ew-module] .dmain-in[data-view="overview"] #p-units .units-tbl td { height: 28px; }
+
+  /* РВ: власні правила модуля мають !important — перебиваємо вужче й сильніше */
+  html[data-ew-module="rocket"] .dmain-in[data-view="overview"] #p-types .tt-list.tt-list { flex: 1 1 auto !important; height: auto !important; min-height: 0 !important; max-height: none !important; padding: 2px 10px 8px !important; gap: 6px !important; overflow: hidden; grid-auto-rows: 52px; grid-template-rows: none !important; }
+  html[data-ew-module="rocket"] .dmain-in[data-view="overview"] #p-types .tt-row.tt-row { min-height: 0 !important; height: 52px !important; padding: 4px 10px !important; }
+  html[data-ew-module="rocket"] .dmain-in[data-view="overview"] #p-types .tt-row .tt-ic { height: 34px !important; }
+  html[data-ew-module="rocket"] .dmain-in[data-view="overview"] #p-types .tt-h.tt-h { padding: 8px 14px 4px !important; }
+  html[data-ew-module="rocket"] .dmain-in[data-view="overview"] #p-types .tt-h h3 { font-size: 22px !important; line-height: 1.1 !important; }
+  html[data-ew-module="rocket"] .dmain-in[data-view="overview"] #p-units .units-tbl td { padding: 1px 2px !important; }
+  html[data-ew-module="rocket"] .dmain-in[data-view="overview"] #p-units .units-tbl tr, html[data-ew-module="rocket"] .dmain-in[data-view="overview"] #p-units .units-tbl td { height: 28px !important; }
+  html[data-ew-module="rocket"] .dmain-in[data-view="overview"] #p-units .ph.ph, html[data-ew-module="rocket"] .dmain-in[data-view="overview"] #p-types .ph.ph { min-height: 0 !important; height: auto !important; margin: 0 0 2px !important; padding-bottom: 2px !important; }
+  html[data-ew-module="rocket"] .dmain-in[data-view="overview"] #p-units { padding-top: 8px; padding-bottom: 6px; }
+  html[data-ew-module="rocket"] .dmain-in[data-view="overview"] #p-units .units-tbl .emb { width: 22px; height: 24px; }
+  html[data-ew-module] .kpipanel > .kh.kh { min-height: var(--fit-kh) !important; height: var(--fit-kh) !important; padding-top: 6px !important; padding-bottom: 6px !important; }
+  html[data-ew-module] .kpipanel .kpi-grid { grid-template-columns: none !important; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 8px; }
+  html[data-ew-module] #p-kpis .kpi-grid > .kc.kc.kc.kc { min-height: 0 !important; height: var(--fit-card) !important; padding: 10px 12px 8px !important; }
+  html[data-ew-module] #p-kpis .kc.kc .kc-axis { margin: 2px 0 2px !important; }
+  html[data-ew-module] #p-kpis .kc.kc .kc-tiles { max-height: 58px; }
+  html[data-ew-module] #p-kpis .kc.kc .kc-tiles .kc-t { height: 58px; min-height: 0; padding-top: 4px; padding-bottom: 4px; }
+  html[data-ew-module] #p-kpis .kc.kc .ewr-ksub { margin-bottom: 0; }
+  html[data-ew-module="air"] #p-kpis .kc.kc .kc-ringrow { margin-top: 4px; padding-top: 4px; }
+  html[data-ew-module="air"] #p-kpis .kc.kc .kc-ring { width: 60px; height: 60px; }
+  html[data-ew-module="air"] #p-kpis .kc.kc .kc-cap { margin-top: 6px; }
+  html[data-ew-module] #p-kpis .kc.kc .kc-chart { max-height: 52px; }
+  html[data-ew-module] #p-kpis .kc.kc .kc-chart svg { height: 38px; }
+  html[data-ew-module="rocket"] #p-kpis .kc.kc .k-v.k-v { font-size: clamp(32px, 4.3vh, 46px) !important; line-height: 1 !important; }
+  html[data-ew-module="rocket"] #p-kpis .kc.kc .kc-dl { min-height: 0 !important; }
+  html[data-ew-module="rocket"] #p-kpis .kc.kc .ewr-ksub { font-size: 10.5px; line-height: 1.2; }
+  html[data-ew-module] #p-kpis .kc.kc .k-v { font-size: clamp(30px, 3.6vh, 42px); line-height: 1; }
+}
+
+/* ---------- Панель «Карта операцій» — як у РВ: компактна шапка, параметри за кнопкою ---------- */
+.map-gear { width: 28px; min-width: 28px; padding: 3px; border: 0; background: transparent; opacity: .85; display: inline-grid; place-items: center; }
+.map-gear .ic { width: 18px; height: 18px; }
+.map-gear[aria-expanded="true"] { color: var(--accent); opacity: 1; }
+.map-options { padding: 8px 2px; max-height: 350px; overflow: auto; }
+#p-map.options-open .mapwrap { flex: none !important; }
+html[data-ew-module="air"] #p-map { padding-top: 10px; padding-bottom: 10px; }
+html[data-ew-module="air"] #p-map .ph { margin-bottom: 8px; }
+html[data-ew-module="air"] #p-map .ph h2 { font-size: 17px; }
+html[data-ew-module="air"] #p-map .ph-r { gap: 6px; flex-wrap: nowrap; }
+html[data-ew-module="air"] #p-map .ph-r .btn, html[data-ew-module="air"] #p-map .ph-r select { min-height: 32px; height: 32px; padding-top: 0; padding-bottom: 0; font-size: 12.5px; }
+html[data-ew-module="air"] #p-map .ph-r .btn.map-gear { height: 32px; padding: 3px; }
+html[data-ew-module="air"] #p-map .seg button { min-height: 28px; padding-top: 3px; padding-bottom: 3px; font-size: 12.5px; }
+
+/* ---------- Таблиці: легка шапка, роздільники, наведення ---------- */
+.dtbl th, .dtbl2 th, .tbl th, .pvk-table th, .ud-table th {
+  font-size: 11.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--muted);
+}
+.dtbl td, .dtbl2 td, .tbl td { border-color: var(--ew-line); }
+.tbl tbody tr, .dtbl tbody tr, .dtbl2 tbody tr, .pvk-table tbody tr, .ud-table tbody tr { transition: background-color var(--ew-t-fast); }
+
+/* ---------- Дашборди ПВК і УДШВ: той самий каркас банера та панелей ---------- */
+:root .pvk-hero, :root .pvk-base-hero, :root .ud-hero {
+  border-radius: var(--ew-r);
+  box-shadow: var(--ew-shadow);
+}
+:root .pvk-period, :root .ud-period {
+  border-radius: var(--ew-r);
+  box-shadow: var(--ew-shadow);
+}
+:root .pvk-kpi, :root .pvk-metric, :root .pvk-journal-card, :root .pvk-section, :root .ud-card, :root .ud-kpi {
+  transition: transform var(--ew-t) var(--ew-ease), box-shadow var(--ew-t) var(--ew-ease), border-color var(--ew-t-fast);
+}
+:root .pvk-kpi:hover, :root .pvk-metric:hover, :root .ud-kpi:hover, :root .ud-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--ew-shadow-hi);
+}
+
+
+/* ---------- Локальні акценти дашбордів ПВК та УДШВ (власна палітра модуля) ---------- */
+#pvk-dashboard-root, #view-base {
+  --ew-accent: var(--pvk-blue, #2a8cff);
+  --ew-line: color-mix(in srgb, var(--ew-accent) 18%, var(--pvk-border, var(--line)));
+  --ew-line-hi: color-mix(in srgb, var(--ew-accent) 46%, var(--pvk-border, var(--line)));
+  --ew-glow: color-mix(in srgb, var(--ew-accent) 26%, transparent);
+}
+#udshv-dashboard-root {
+  --ew-accent: var(--ud-green, #c2384a);
+  --accent-ink: #fff;
+  --ew-line: color-mix(in srgb, var(--ew-accent) 20%, var(--ud-line));
+  --ew-line-hi: color-mix(in srgb, var(--ew-accent) 50%, var(--ud-line));
+  --ew-glow: color-mix(in srgb, var(--ew-accent) 28%, transparent);
+}
+#pvk-dashboard-root { --accent-ink: #04111f; }
+
+/* ---------- ПВК: банер із рельєфом (абстрактне тло), емблема зліва ---------- */
+:root .pvk-hero {
+  position: relative; overflow: hidden; min-height: 132px; align-items: center;
+  border-color: var(--ew-line);
+  background:
+    linear-gradient(90deg, var(--pvk-panel) 0, color-mix(in srgb, var(--pvk-panel) 82%, transparent) 36%, transparent 78%),
+    url('./pvk-art/relief-banner.webp') right center / cover no-repeat,
+    var(--pvk-panel);
+}
+:root .pvk-hero h1 { font-size: clamp(28px, 3vw, 42px); letter-spacing: -.01em; }
+:root .pvk-period { border-color: var(--ew-line); }
+:root .pvk-nav { border-color: var(--ew-line); border-radius: var(--ew-r); }
+
+/* ---------- УДШВ: періодичний перемикач і вкладки в одному ритмі з рештою ---------- */
+:root .ud-period { border-color: var(--ew-line); }
+:root .ud-hero { border-color: var(--ew-line); min-height: 132px; }
+
+
+/* ---------- Довідник (ref-wiki): ті самі панелі, картки списку й чіпи ---------- */
+:root .rw-nav, :root .rw-info, :root .rw-stagebox, :root .rw-tools, :root .rw-sec {
+  border-radius: var(--ew-r); border-color: var(--ew-line); box-shadow: var(--ew-shadow);
+}
+:root .rw-nav { background: linear-gradient(180deg, color-mix(in srgb, var(--ew-accent) 4%, transparent), transparent 40%), var(--ew-card); }
+:root .rw-search { border-radius: var(--ew-r-sm); border-color: var(--ew-line); transition: border-color var(--ew-t-fast), box-shadow var(--ew-t) var(--ew-ease); }
+:root .rw-search:focus-visible { outline: 0; border-color: var(--ew-line-hi); box-shadow: 0 0 0 3px var(--ew-glow); }
+:root .rw-item {
+  border-radius: var(--ew-r-sm);
+  transition: background-color var(--ew-t-fast), border-color var(--ew-t-fast), transform var(--ew-t) var(--ew-ease);
+}
+:root .rw-item:hover { transform: translateX(3px); }
+:root .rw-item[aria-current="true"] {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--ew-accent) 22%, transparent), color-mix(in srgb, var(--ew-accent) 6%, transparent));
+  border-color: var(--ew-line-hi); box-shadow: 0 6px 18px var(--ew-glow);
+}
+:root .rw-3d { border-radius: 999px; padding: 3px 8px; background: color-mix(in srgb, var(--ew-accent) 14%, transparent); border-color: var(--ew-line-hi); }
+:root .rw-head h2 { font-size: clamp(26px, 2.6vw, 38px); letter-spacing: -.01em; }
+:root .rw-eyebrow { color: var(--ew-accent); }
+:root .rw-relcard { border-radius: var(--ew-r); border-color: var(--ew-line); transition: transform var(--ew-t) var(--ew-ease), box-shadow var(--ew-t) var(--ew-ease), border-color var(--ew-t-fast); }
+:root .rw-relcard:hover { transform: translateY(-3px); box-shadow: var(--ew-shadow-hi); border-color: var(--ew-line-hi); }
+.rw-article { animation: ewFade .35s var(--ew-ease) both; }
+
+/* ---------- Motion: поява при першому відкритті дашборда ---------- */
+/* Клас ew-boot ставить ui-kit.js на ~1.8 с після завантаження; повторні відмальовування даних не анімуються. */
+@keyframes ewRise { from { opacity: 0; transform: translateY(16px) scale(.992); } }
+@keyframes ewFade { from { opacity: 0; } }
+html.ew-boot .dmain > .toolbar { animation: ewRise .55s var(--ew-ease) both; }
+html.ew-boot .kpipanel > .kh { animation: ewRise .6s var(--ew-ease) .05s both; }
+html.ew-boot .kpi-grid > .kc { animation: ewRise .6s var(--ew-ease) both; }
+html.ew-boot .kpi-grid > .kc:nth-child(1) { animation-delay: .12s; }
+html.ew-boot .kpi-grid > .kc:nth-child(2) { animation-delay: .19s; }
+html.ew-boot .kpi-grid > .kc:nth-child(3) { animation-delay: .26s; }
+html.ew-boot .kpi-grid > .kc:nth-child(4) { animation-delay: .33s; }
+html.ew-boot .kpi-grid > .kc:nth-child(5) { animation-delay: .40s; }
+html.ew-boot .kpi-grid > .kc:nth-child(n+6) { animation-delay: .47s; }
+html.ew-boot .dmain-in .lrow > .dpanel { animation: ewRise .6s var(--ew-ease) .3s both; }
+html.ew-boot .pvk-hero, html.ew-boot .ud-hero, html.ew-boot .ud-banner { animation: ewRise .55s var(--ew-ease) both; }
+html.ew-boot .pvk-period, html.ew-boot .ud-period { animation: ewRise .55s var(--ew-ease) .08s both; }
+html.ew-boot .pvk-kpis > *, html.ew-boot .ud-kpis > * { animation: ewRise .55s var(--ew-ease) .16s both; }
+html.ew-boot .pvk-kpis > :nth-child(2), html.ew-boot .ud-kpis > :nth-child(2) { animation-delay: .22s; }
+html.ew-boot .pvk-kpis > :nth-child(3), html.ew-boot .ud-kpis > :nth-child(3) { animation-delay: .28s; }
+html.ew-boot .pvk-kpis > :nth-child(n+4), html.ew-boot .ud-kpis > :nth-child(n+4) { animation-delay: .34s; }
+
+/* Перехід між розділами бічного меню: м'яке «вливання» вмісту. */
+.dmain-in { animation: ewFade .35s var(--ew-ease) both; }
+
+/* Живий індикатор джерела даних. */
+.filechip .dot { position: relative; }
+.filechip .dot::after {
+  content: ""; position: absolute; inset: -3px; border-radius: 50%;
+  border: 1px solid currentColor; opacity: 0; animation: ewPing 2.8s ease-out infinite;
+}
+@keyframes ewPing { 0% { transform: scale(.6); opacity: .55; } 70%, 100% { transform: scale(1.7); opacity: 0; } }
+
+/* ---------- Доступність: рух вимикається системою ---------- */
+@media (prefers-reduced-motion: reduce) {
+  html.ew-boot *, .kpipanel > .kh .kh-jet, .filechip .dot::after, .dmain-in, .rw-article { animation: none !important; }
+  .pvk-seg.ew-ind::before, .ud-seg.ew-ind::before { transition: none; }
+}
+html[data-motion="off"] .kpipanel > .kh .kh-jet,
+html[data-motion="off"] .filechip .dot::after { animation: none !important; }
+
+/* ---------- Вузькі вікна ---------- */
+@media (max-width: 900px) {
+  .toolbar .grp + .grp { padding-left: 0; border-left: 0; }
+}
+
+/* ---------- Адаптивність і світла тема ПС/РВ: виправлення за переглядом 1280 / 1024 / 768 / 390 px ---------- */
+/* ПС: шапка не виходить за край вікна. 1320–1365 px — один рядок зі стисненими проміжками, нижче — переноситься, як у РВ. */
+@media (max-width: 1365.98px) {
+  html[data-ew-module="air"] .appbar { gap: 8px 12px; }
+  html[data-ew-module="air"] .appbar > .brand { width: auto !important; min-width: 0 !important; flex: none; }
+  html[data-ew-module="air"] .appbar .tab { padding-left: 7px; padding-right: 7px; }
+  html[data-ew-module="air"] .appbar-right { gap: 6px; }
+}
+@media (max-width: 1319.98px) {
+  html[data-ew-module="air"] .appbar { flex-wrap: wrap; }
+  html[data-ew-module="air"] .appbar-right { flex-wrap: wrap; justify-content: flex-end; }
+}
+@media (max-width: 720px) {
+  html[data-ew-module="air"] .appbar > .tabs { flex: 1 1 100%; width: 100%; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+  html[data-ew-module="air"] .appbar > .tabs::-webkit-scrollbar { display: none; }
+  html[data-ew-module="air"] #p-map .ph, html[data-ew-module="air"] #p-map .ph-r { flex-wrap: wrap; }
+  html[data-ew-module] .appbar .filechip { flex: none; max-width: 100%; }
+  html[data-ew-module="rocket"] .appbar .filechip .cnt { display: none; }
+}
+/* РВ: рядок керування картою переноситься на другий рядок, не накриваючи карту (у старому правилі висота жорстко 36 px). */
+@media (max-width: 1279.98px) {
+  html[data-ew-module="rocket"].rocket-ref24 #p-map > .ph { height: auto; min-height: 36px; margin-bottom: 7px !important; }
+}
+/* РВ: підписи бічного меню переносяться й не обрізаються; заголовки таблиці «Топ-5» не злипаються. */
+@media (min-width: 900px) {
+  html[data-ew-module="rocket"] .snav-b { white-space: normal; line-height: 1.2; }
+}
+@media (max-width: 1399.98px) {
+  html[data-ew-module] #p-units .units-tbl th { padding-left: 4px; padding-right: 4px; letter-spacing: .02em; font-size: 10px; }
+}
+/* РВ, світла тема: картки типів цілей і показників мають темну або світлу підкладку з фото — тексту потрібен контраст. */
+html[data-theme="light"][data-ew-module="rocket"] .tt-row.ewr-tt { background-color: #151a0d; }
+html[data-theme="light"][data-ew-module="rocket"] .tt-row.ewr-tt b { color: #f6f1e2; }
+html[data-theme="light"][data-ew-module="rocket"] .tt-row.ewr-tt .tt-n span { color: #d3ccb4; }
+html[data-theme="light"][data-ew-module="rocket"] .kc.kc-blue .ewr-ksub,
+html[data-theme="light"][data-ew-module="rocket"] .kc.kc-amber .ewr-ksub { color: #5a5440; }
+/* Панель вибору (підрозділ, ціль…): колонки не розтягують сторінку на вузьких екранах, показники переносяться. */
+@media (max-width: 1100px) {
+  html[data-ew-module] .dsel { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  html[data-ew-module] .dsel > * { min-width: 0; }
+  html[data-ew-module] .ds-st { flex-wrap: wrap; gap: 10px 20px; }
+}
+@media (max-width: 720px) {
+  html[data-ew-module] .dsel { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  html[data-ew-module] .ds-st { flex-wrap: wrap; gap: 10px 20px; }
+}
+/* РВ «Цілі»: панель типу цілі з фото на 1101–1439px — колонки стискаються, показники переносяться, панель не виходить за межі. */
+@media (min-width: 1100.02px) and (max-width: 1439.98px) {
+  html[data-ew-module="rocket"] .dsel.ewr-ds-type { grid-template-columns: minmax(170px, 1fr) minmax(110px, .8fr) minmax(100px, .5fr) minmax(0, auto) minmax(120px, .7fr) !important; gap: 12px !important; }
+  html[data-ew-module="rocket"] .dsel.ewr-ds-type > * { min-width: 0; }
+  html[data-ew-module="rocket"] .dsel.ewr-ds-type .ds-st { flex-wrap: wrap; gap: 8px 16px; }
+}
+/* ПВК: на вузьких екранах текст банера лежить поверх усього рельєфу — тло під ним світлішає/темнішає по всій ширині. */
+@media (max-width: 900px) {
+  :root .pvk-hero {
+    background:
+      linear-gradient(90deg, var(--pvk-panel) 0, color-mix(in srgb, var(--pvk-panel) 90%, transparent) 55%, color-mix(in srgb, var(--pvk-panel) 72%, transparent) 100%),
+      url('./pvk-art/relief-banner.webp') right center / cover no-repeat,
+      var(--pvk-panel);
+  }
+}
+/* Легенда кільцевої діаграми: назва може переноситись і не виштовхує підсумки за межі панелі. */
+html[data-ew-module] .dl div { grid-template-columns: 12px minmax(0, 1fr) auto auto; }
+html[data-ew-module] .dl div > * { min-width: 0; overflow-wrap: anywhere; }

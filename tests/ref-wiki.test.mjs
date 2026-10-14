@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import { readFile, stat } from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
-import { KINDS } from '../src/munition-3d.js';
-import { ENTRIES, GROUPS, PAIRS, aircraftId, carriersOf, creditOf, entryById, modelOf, munitionId, munitionsOf, searchEntries, usageFor, variantsOf } from '../src/ref-data.js';
-import { MODEL_FILES, NOSE_TURN, aircraftDistance } from '../src/ref-viewer.js';
+import { KINDS, buildModel } from '../src/munition-3d.js';
+import { ENTRIES, GROUPS, PAIRS, aircraftId, carriersOf, creditOf, creditsOf, entryById, modelOf, munitionId, munitionsOf, searchEntries, usageFor, variantsOf, viewerOf } from '../src/ref-data.js';
+import { Box3, BoxGeometry, Group, Mesh, MeshStandardMaterial, Vector3 } from 'three';
+import { MODEL_FILES, NOSE_TURN, aircraftDistance, applyDecals, fixMaterials, normalizeAircraft, spotAnchors } from '../src/ref-viewer.js';
 
 const html = await readFile(new URL('../src/air.html', import.meta.url), 'utf8');
 
@@ -28,6 +29,7 @@ test('every munition model kind from the mission card has a munition article', (
 // Усі моделі статті: основна й варіанти (розмальовки чи модифікації), якщо вони є.
 const modelsOf = e => (e.variants && e.variants.length > 1 ? e.variants : [e]).filter(v => v.model && v.model.file);
 const LICENSES = { 'CC BY 4.0': /CC-BY-4\.0/, 'CC BY-NC-SA 4.0': /CC-BY-NC-SA-4\.0/ };
+const VIEWER_LICENSES = ['CC BY 4.0', 'CC BY-NC 4.0', 'CC BY-NC-SA 4.0'];
 
 test('glb models exist, are registered and carry a Creative Commons credit', async () => {
   const credits = await readFile(new URL('../src/models/CREDITS.md', import.meta.url), 'utf8');
@@ -44,6 +46,13 @@ test('glb models exist, are registered and carry a Creative Commons credit', asy
       assert.ok(credits.includes(`${e.model.file}.glb`), `${id} in CREDITS.md`);
       continue;
     }
+    if (e.credit.own) {
+      // Власні моделі автора проєкту: без сторонньої ліцензії, але з поясненням у статті й записом у CREDITS.md.
+      assert.ok(e.credit.title && e.credit.note, `${id}: own credit text`);
+      assert.ok((await stat(new URL(`../src/models/${e.model.file}.glb`, import.meta.url))).size < 12e6, `${id}: stays compact`);
+      assert.ok(credits.includes(`${e.model.file}.glb`), `${id} in CREDITS.md`);
+      continue;
+    }
     assert.ok(LICENSES[e.credit.license], `${id}: known license ${e.credit.license}`);
     assert.ok(e.credit.author && e.credit.url && e.credit.authorUrl && e.credit.licenseUrl);
     const file = new URL(`../src/models/${e.model.file}.glb`, import.meta.url);
@@ -51,8 +60,8 @@ test('glb models exist, are registered and carry a Creative Commons credit', asy
     const bytes = await readFile(file);
     assert.equal(bytes.toString('latin1', 0, 4), 'glTF');
     const len = bytes.readUInt32LE(12), json = JSON.parse(bytes.toString('utf8', 20, 20 + len));
-    // Лише розширення, які вміє читати GLTFLoader із meshopt-декодером.
-    for (const x of json.extensionsRequired || []) assert.ok(['EXT_meshopt_compression', 'KHR_mesh_quantization'].includes(x), x);
+    // Лише розширення, які вміє читати GLTFLoader із meshopt-декодером (текстури WebP читає сам браузер).
+    for (const x of json.extensionsRequired || []) assert.ok(['EXT_meshopt_compression', 'KHR_mesh_quantization', 'EXT_texture_webp'].includes(x), x);
     // Ліцензія в самому файлі збігається з ліцензією в підписі статті.
     assert.match(json.asset.extras.license, LICENSES[e.credit.license], `${id}: license inside the file`);
     assert.ok(credits.includes(e.credit.url), `${id} in CREDITS.md`);
@@ -70,20 +79,92 @@ test('every glb in src/models is registered and used by an article', async () =>
   for (const f of Object.keys(MODEL_FILES)) assert.ok(files.includes(f), `${f} is registered but missing`);
 });
 
-test('articles with several models list a default first and resolve model and credit per variant', () => {
-  const mig = entryById('mig29'), su = entryById('su27');
-  assert.deepEqual(variantsOf(mig).map(v => v.id), ['falcons', 'ghost']);
-  assert.deepEqual(variantsOf(su).map(v => v.id), ['p1m', 'b']);
-  assert.equal(variantsOf(entryById('f16')).length, 0);
-  // Основна модель статті збігається з першим варіантом, невідомий варіант дає основну.
-  assert.equal(mig.model.file, 'mig-29');
-  assert.equal(modelOf(mig).file, 'mig-29');
-  assert.equal(modelOf(mig, 'nope').file, 'mig-29');
-  assert.equal(modelOf(mig, 'ghost').file, 'mig-29-ghost');
-  assert.match(creditOf(mig, 'ghost').url, /ghost-of-kiev-mig-29/);
-  assert.equal(modelOf(su, 'b').file, 'su-27b');
-  assert.equal(modelOf(entryById('f16')).file, 'f-16');
+test('articles without alternative models resolve model and credit from the article itself', () => {
+  // Літаки з інтерактивного переглядача не мають перемикача розмальовок; їхня модель для позначок — файл переглядача, а не src/models.
+  for (const id of ['mig29', 'su27', 'f16', 'mirage', 'su24', 'mi24', 'mi8', 'il76', 'su25', 'gripen']) {
+    const e = entryById(id);
+    assert.equal(variantsOf(e).length, 0, id);
+    assert.ok(e.model && (e.model.wrapper || e.model.src) && !e.model.file, `${id}: model comes from the viewer files`);
+    assert.equal(modelOf(e), e.model, id);
+  }
   assert.equal(creditOf(entryById('39')), undefined);
+});
+
+test('weak-spot models of viewer aircraft are the viewer files on disk, in a known orientation', async () => {
+  for (const e of ENTRIES.filter(x => viewerOf(x) && x.model && !x.model.file)) {
+    const m = e.model;
+    assert.ok(m.nose in NOSE_TURN, `${e.id}: nose`);
+    if (m.wrapper) {
+      const text = await readFile(new URL('../src/public/' + m.wrapper, import.meta.url), 'utf8');
+      assert.ok(text.startsWith(`window.${m.global}="`), `${e.id}: wrapper defines ${m.global}`);
+    } else {
+      const bytes = await readFile(new URL('../src/public/' + m.src, import.meta.url));
+      assert.equal(bytes.subarray(0, 4).toString(), 'glTF', `${e.id}: glb`);
+    }
+    assert.ok(e.weak && e.weak.length >= 3, `${e.id}: weak spots`);
+    for (const w of e.weak) {
+      assert.ok(w.t && w.d, `${e.id}: text`);
+      assert.ok(w.p.length === 2 || w.p.length === 3, `${e.id}: anchor shape`);
+      for (const v of w.p) assert.ok(v >= 0 && v <= 1, `${e.id}: anchor inside the bounding box`);
+    }
+  }
+});
+
+test('aircraft articles open the interactive viewer page, which runs offline with every model on disk', async () => {
+  const page = await readFile(new URL('../src/aircraft-viewer.html', import.meta.url), 'utf8');
+  const keys = Object.keys(/const RIG=\{([^}]*)\}/.exec(page)[1].split(',').reduce((o, p) => (o[p.split(':')[0]] = 1, o), {}));
+  const viewers = ENTRIES.filter(e => viewerOf(e));
+  assert.deepEqual(viewers.map(e => e.id).sort(), ['f16', 'gripen', 'il76', 'ka52', 'mi24', 'mi8', 'mig29', 'mirage', 'su24', 'su25', 'su27']);
+  assert.deepEqual(viewers.map(e => viewerOf(e)).sort(), [...keys].sort(), 'every aircraft of the page has one article');
+  for (const e of viewers) assert.ok(e.group === 'aircraft' || e.group === 'enemy', e.id);
+  // Ворожий гелікоптер із позначками уразливих місць має обидва вигляди: інтерактивний і зі списком позначок.
+  assert.ok(entryById('ka52').model && entryById('ka52').weak.length >= 3);
+  // Жодного завантаження з мережі: бібліотеки й моделі лежать у src/public/aircraft-3d.
+  assert.doesNotMatch(page, /<script[^>]+src="https?:/);
+  assert.doesNotMatch(page, /<link[^>]+href="https?:/, 'no web fonts or stylesheets');
+  assert.doesNotMatch(page, /@import|url\(\s*['"]?https?:/, 'no remote CSS');
+  assert.doesNotMatch(page, /XMLHttpRequest|WebSocket|fetch\(\s*['"`]https?:/);
+  // Су-25 і Gripen — цільні .glb зі свого джерела, а не base64-скрипти.
+  const stFiles = [...page.matchAll(/file:'(aircraft-3d\/[\w.]+\.glb)'/g)].map(m => m[1]);
+  assert.deepEqual(stFiles.sort(), ['aircraft-3d/gripen.glb', 'aircraft-3d/su25.glb']);
+  for (const f of stFiles) assert.ok((await stat(new URL(`../src/public/${f}`, import.meta.url))).size > 1e5, f);
+  assert.match(page, /setMeshoptDecoder\(MeshoptDecoder\)/);
+  // Ка-52 вантажиться окремо: .glb із текстурами WebP, які three r128 сам не читає.
+  assert.match(page, /fetch\('aircraft-3d\/ka52\.glb'\)/);
+  assert.match(page, /EXT_texture_webp/);
+  assert.ok((await stat(new URL('../src/public/aircraft-3d/ka52.glb', import.meta.url))).size > 1e5);
+  const data = [...page.matchAll(/(?:sc\.src|src)=['"]aircraft-3d\/([\w.]+)['"]/g)].map(m => m[1]);
+  for (const lib of ['three.r128.min.js', 'GLTFLoader.r128.js', 'meshopt_decoder.js']) assert.ok(data.includes(lib), lib);
+  for (const f of ['mig29mu1', 'su27', 'f16', 'mi8', 'il76', 'mi24', 'su24', 'm2k', 'landscape']) assert.ok(data.includes(`${f}.js`), `${f}.js is loaded by the page`);
+  for (const f of new Set(data)) assert.ok((await stat(new URL(`../src/public/aircraft-3d/${f}`, import.meta.url))).size > 1e4, f);
+  await stat(new URL('../src/public/aircraft-3d/LICENSES.txt', import.meta.url));
+  // Вбудований режим: літак задає стаття, ряд вибору літака сховано.
+  assert.match(page, /q\.has\('embed'\)/);
+  const wiki = await readFile(new URL('../src/ref-wiki.js', import.meta.url), 'utf8');
+  assert.match(wiki, /\.\/aircraft-viewer\.html\?embed=1&a=/);
+});
+
+test('every aircraft model in the viewer is credited with author and license, and listed in CREDITS.md', async () => {
+  const credits = await readFile(new URL('../src/models/CREDITS.md', import.meta.url), 'utf8');
+  for (const e of ENTRIES.filter(x => viewerOf(x))) {
+    const list = creditsOf(e);
+    assert.ok(list.length >= 2, `${e.id}: aircraft and landscape are credited`);
+    for (const c of list) {
+      assert.ok(c.title && c.author && c.authorUrl && c.license && c.licenseUrl, `${e.id}/${c.title}`);
+      assert.ok(VIEWER_LICENSES.includes(c.license), `${e.id}/${c.title}: known license ${c.license}`);
+      if (c.url) assert.ok(credits.includes(c.url), `${e.id}/${c.title}: source in CREDITS.md`);
+      else assert.ok(credits.includes(c.authorUrl), `${e.id}/${c.title}: author in CREDITS.md`);
+      // Некомерційні ліцензії названо прямо в підписі статті.
+      if (/NC/.test(c.license)) assert.match(c.note || '', /некомерційн/i, `${e.id}/${c.title}: NC license stated`);
+    }
+  }
+});
+
+test('the viewer page is built but kept out of the phone offline cache', async () => {
+  const config = await readFile(new URL('../vite.config.js', import.meta.url), 'utf8');
+  assert.match(config, /aircraftViewer: fileURLToPath\(new URL\("\.\/src\/aircraft-viewer\.html"/);
+  assert.match(config, /name !== "aircraft-viewer\.html"/);
+  assert.match(config, /aircraft-3d/);
 });
 
 test('helicopters and the added munitions have articles that the table recognisers reach', () => {
@@ -113,6 +194,8 @@ test('carrier and munition ids agree with the recognisers of the module', () => 
   assert.equal(aircraftId('Су-25'), 'su25');
   assert.equal(aircraftId('Су-24М'), 'su24');
   assert.equal(aircraftId('JAS 39C Gripen'), 'gripen');
+  assert.equal(aircraftId('Іл-76МД'), 'il76');
+  assert.equal(aircraftId('Il-76'), 'il76');
   assert.equal(aircraftId('невідомий'), '');
   assert.equal(munitionId('Storm Shadow'), 'storm');
   assert.equal(munitionId('SCALP-EG'), 'storm');
@@ -123,7 +206,9 @@ test('an aircraft that is not in service yet is marked as expected', () => {
   const gripen = entryById('gripen');
   assert.equal(gripen.status, 'Очікується');
   assert.ok(gripen.facts.some(([k, v]) => k === 'Статус в Україні' && /Очікується/.test(v)));
-  assert.equal(ENTRIES.filter(e => e.status).length, 1, 'only the Gripen is marked');
+  // Статус мають лише Gripen («Очікується») і знищений Ан-225.
+  assert.deepEqual(ENTRIES.filter(e => e.status === 'Очікується').map(e => e.id), ['gripen']);
+  assert.equal(entryById('an225').status, 'Знищено');
 });
 
 test('pairs link existing carriers and munitions both ways', () => {
@@ -218,8 +303,8 @@ test('the HIMARS model is generated by a script in this repo: a wheeled carrier 
 
 test('ground articles do not show the flights summary or carrier/munition pairs', async () => {
   const wiki = await readFile(new URL('../src/ref-wiki.js', import.meta.url), 'utf8');
-  assert.match(wiki, /usageEl\.hidden = !usage \|\| entry\.group === 'ground' \|\| entry\.group === 'support';/);
-  assert.match(wiki, /function relatedBlock\(entry\) \{\s*\n\s*if \(!related \|\| entry\.group === 'ground' \|\| entry\.group === 'support'\) return null;/);
+  assert.match(wiki, /usageEl\.hidden = !usage \|\| NO_TABLE\.has\(entry\.group\) \|\| entry\.noTable;/);
+  assert.match(wiki, /function relatedBlock\(entry\) \{\s*\n\s*if \(!related \|\| NO_TABLE\.has\(entry\.group\) \|\| entry\.noTable\) return null;/);
 });
 
 test('the ATACMS article is a generated munition model recognised in mission tables', async () => {
@@ -327,7 +412,7 @@ test('support vehicles live in their own group with generated models and no air-
   assert.deepEqual(searchEntries('брем').map(e => e.id).sort(), ['bpz2', 'm984']);
   assert.ok(searchEntries('пакетовоз').some(e => e.id === 'hemtt-pods'));
   const wiki = await readFile(new URL('../src/ref-wiki.js', import.meta.url), 'utf8');
-  assert.match(wiki, /usageEl\.hidden = !usage \|\| entry\.group === 'ground' \|\| entry\.group === 'support';/);
+  assert.match(wiki, /usageEl\.hidden = !usage \|\| NO_TABLE\.has\(entry\.group\) \|\| entry\.noTable;/);
 });
 
 // Довідник у модулі РВ: та сама вікі, але лише наземні засоби й ракети, без підсумку по таблиці вильотів ПС.
@@ -349,4 +434,178 @@ test('the РВ module has its own reference tab limited to ground systems and ro
   assert.match(rocket, /html\[data-command="dshv"\] #tab-entry, html\[data-command="dshv"\] #tab-ref/);
   const wiki = await readFile(new URL('../src/ref-wiki.js', import.meta.url), 'utf8');
   for (const opt of ['groups', 'only', 'usage', 'related']) assert.match(wiki, new RegExp('\\b' + opt + '\\b'));
+});
+
+test('enemy and other equipment form their own groups, kept apart from the flight table', () => {
+  const enemy = ENTRIES.filter(e => e.group === 'enemy'), other = ENTRIES.filter(e => e.group === 'other');
+  assert.deepEqual(enemy.map(e => e.id), ['ka52', 'ka50', 'ka27', 'mi26', 'mi35', 'mi8tv', 'mi2', 'an26']);
+  assert.deepEqual(other.map(e => e.id), ['fp5', 'fp7']);
+  assert.deepEqual(GROUPS.slice(-2).map(g => g.id), ['enemy', 'other']);
+  // Розпізнавачі таблиці вильотів не чіпають нові статті: Мі-8ТВ у таблиці лишається Мі-8 з розділу «Засоби».
+  assert.equal(aircraftId('Мі-8ТВ'), 'mi8');
+  assert.equal(aircraftId('Ка-52'), '');
+  assert.deepEqual(searchEntries('hokum').map(e => e.id), ['ka52', 'ka50']);
+  assert.equal(searchEntries('', 'enemy').length, 8);
+  assert.ok(searchEntries('мрія', 'aircraft').some(e => e.id === 'an225'));
+  // Ан-225 українська машина: у «Засобах», без розділу «У вашій базі» й не серед ворожих чи чужих типів.
+  assert.equal(entryById('an225').group, 'aircraft');
+  assert.equal(entryById('an225').noTable, true);
+  assert.match(entryById('an225').summary, /відновленню він не підлягає/);
+  assert.match(JSON.stringify(entryById('an225').sections), /сестра-близнюк/);
+  assert.ok(!entryById('mhx'), 'the American helicopter is not in the catalog');
+});
+
+test('enemy articles carry recognition features, armament and numbered vulnerable spots', () => {
+  for (const e of ENTRIES.filter(x => x.group === 'enemy')) {
+    const titles = e.sections.map(s => s.title);
+    assert.ok(titles.includes('Ознаки розпізнавання') && titles.includes('Озброєння'), `${e.id}: sections`);
+    assert.ok(e.weak.length >= 3, `${e.id}: vulnerable spots`);
+    for (const w of e.weak) {
+      assert.ok(w.t && w.d, `${e.id}: spot text`);
+      assert.ok(w.p.length === 2 || w.p.length === 3, `${e.id}: spot shape`);
+      assert.ok(w.p.every(v => v >= 0 && v <= 1), `${e.id}: spot fractions`);
+    }
+  }
+  // Типи, що є і в ЗСУ, мають застереження: приналежність не визначають лише за силуетом.
+  assert.deepEqual(ENTRIES.filter(e => e.dual).map(e => e.id), ['mi35', 'mi8tv', 'mi2', 'an26']);
+  for (const e of ENTRIES.filter(x => x.dual)) assert.match(e.dual, /ЗСУ|обидві сторони/i, e.id);
+});
+
+test('models with a glass pattern have a valid pattern and the models of the new groups are registered', () => {
+  for (const e of ENTRIES) if (e.model && e.model.glass !== undefined) assert.doesNotThrow(() => new RegExp(e.model.glass, 'i'), e.id);
+  for (const id of ['ka52', 'mi8tv', 'fp5', 'fp7']) assert.ok(MODEL_FILES[entryById(id).model.file], id);
+  // Решта моделей — власні роботи автора проєкту; у підписі це сказано прямо.
+  for (const id of ['ka50', 'ka27', 'mi26', 'mi35', 'mi2', 'an26', 'an225']) {
+    const e = entryById(id);
+    assert.ok(MODEL_FILES[e.model.file], id);
+    assert.equal(e.credit.own, true, id);
+  }
+});
+
+test('fixMaterials keeps glass translucent and turns other transparent materials into cut-out opaque ones', () => {
+  const glass = new MeshStandardMaterial({ name: 'cockpit_glass', transparent: true, opacity: .9 });
+  const decal = new MeshStandardMaterial({ name: 'decal_alpha', transparent: true });
+  const body = new MeshStandardMaterial({ name: 'body' });
+  const scene = new Group();
+  for (const m of [glass, decal, body]) scene.add(new Mesh(new BoxGeometry(1, 1, 1), m));
+  fixMaterials(scene, { glass: 'glass' });
+  assert.equal(glass.transparent, true); assert.equal(glass.depthWrite, false); assert.equal(glass.opacity, .55);
+  assert.equal(decal.transparent, false); assert.equal(decal.alphaTest, .5); assert.equal(decal.depthWrite, true);
+  assert.equal(body.transparent, false); assert.equal(body.alphaTest, 0);
+  for (const m of [glass, decal, body]) assert.equal(m.side, 2, 'double-sided');
+  const cut = new MeshStandardMaterial({ name: 'decal_alpha', transparent: true });
+  const scene2 = new Group(); scene2.add(new Mesh(new BoxGeometry(1, 1, 1), cut));
+  fixMaterials(scene2, { glass: '^$', opaque: true });
+  assert.equal(cut.transparent, false); assert.equal(cut.alphaTest, 0);
+});
+
+test('spotAnchors lands vulnerable-spot markers on the skin, from the side or from above', () => {
+  // Фюзеляж 4 × 1 × 1 носом у +Z у файлі: після normalizeAircraft ніс дивиться в +X, довжина — 4,6.
+  const scene = new Group();
+  const body = new Mesh(new BoxGeometry(1, 1, 4), new MeshStandardMaterial());
+  const wing = new Mesh(new BoxGeometry(6, .1, 1), new MeshStandardMaterial());
+  wing.position.set(0, .3, 0);
+  scene.add(body, wing);
+  const entry = normalizeAircraft(scene, '+z', 4.6);
+  const [side, top] = spotAnchors(entry, [[.5, .5], [.5, 0, .9]]);
+  // Збоку: промінь із +Z зупиняється на обшивці (тут — на торці крила, що виступає найдалі).
+  assert.ok(Math.abs(side.x) < .3, 'middle of the length');
+  assert.ok(side.z > 0, 'on the viewer side');
+  // Зверху: точка лежить на верхній грані крила, близько до кінця розмаху.
+  assert.ok(top.z > entry.size.z * .25, 'near the wing tip');
+  assert.ok(top.y > entry.min.y, 'above the bottom');
+  assert.equal(entry.group.rotation.y, 0, 'pose of the group is restored');
+  // Позначка без влучання лягає на осьову площину, а не губиться.
+  const [miss] = spotAnchors(entry, [[.5, 3]]);
+  assert.equal(miss.z, 0);
+});
+
+test('decals lie on both sides of the hull, face outwards and are not taken for the hull by the spot rays', () => {
+  const scene = new Group();
+  scene.add(new Mesh(new BoxGeometry(4, 1, 1), new MeshStandardMaterial()));
+  const aircraft = normalizeAircraft(scene, '+x', 4.6);
+  const placed = applyDecals(aircraft, [{ kind: 'star', p: [.5, .5], w: .1 }], () => ({ texture: null, aspect: 1 }));
+  assert.equal(placed.length, 2, 'one per side');
+  aircraft.group.updateMatrixWorld(true);
+  const world = placed.map(m => m.getWorldPosition(new Vector3()));
+  const half = aircraft.size.z / 2;
+  assert.ok(world.every(p => Math.abs(p.z) > half && Math.abs(p.z) < half + .05), 'just above the skin');
+  assert.ok(world[0].z * world[1].z < 0, 'opposite sides');
+  const normals = placed.map(m => new Vector3(0, 0, 1).applyQuaternion(m.quaternion));
+  assert.ok(normals.every((n, i) => n.z * Math.sign(world[i].z) > .99), 'facing outwards');
+  assert.ok(placed.every(m => m.userData.decal));
+  // Промені «уразливих місць» не бачать наклейок як обшивку.
+  const anchor = spotAnchors(aircraft, [[.5, .5]])[0];
+  assert.ok(Math.abs(Math.abs(anchor.z) - half) < 1e-6, 'anchor on the hull, not on the decal');
+});
+
+test('every article with a model has numbered spots in both modes, labelled by group', async () => {
+  const wiki = await readFile(new URL('../src/ref-wiki.js', import.meta.url), 'utf8');
+  for (const e of ENTRIES) {
+    assert.ok(e.model, `${e.id}: model`);
+    assert.ok(e.weak && e.weak.length >= 3 && e.weak.length <= 4, `${e.id}: 3–4 spots`);
+    const seen = new Set();
+    for (const w of e.weak) {
+      assert.ok(w.t.length > 3 && w.d.length > 20, `${e.id}: text`);
+      assert.ok(!seen.has(w.t), `${e.id}: unique titles`);
+      seen.add(w.t);
+      assert.ok((w.p.length === 2 || w.p.length === 3) && w.p.every(v => v >= 0 && v <= 1), `${e.id}: anchor`);
+    }
+  }
+  // Ворожа техніка має «Уразливі місця», решта — «Чутливі вузли»; перемикач виду бере ту саму назву.
+  assert.match(wiki, /entry\.group === 'enemy' \? 'Уразливі місця' : 'Чутливі вузли'/);
+  assert.match(wiki, /\['weak', \(entry\.weak \|\| \[\]\)\.length \? weakLabel\(entry\) : 'Огляд'\]/);
+});
+
+test('spots of procedural munitions land on the hull, not in the air', () => {
+  for (const e of ENTRIES.filter(x => x.model && x.model.kind)) {
+    const { group } = buildModel(e.model.kind);
+    group.updateMatrixWorld(true);
+    const box = new Box3().setFromObject(group);
+    const entry = { group, size: box.getSize(new Vector3()), min: box.min.clone() };
+    const pts = spotAnchors(entry, e.weak.map(w => w.p));
+    pts.forEach((pt, i) => {
+      assert.ok(pt.x >= box.min.x - 1e-6 && pt.x <= box.max.x + 1e-6, `${e.id}#${i}: along the body`);
+      if (e.weak[i].p.length === 2) assert.ok(pt.z > 0, `${e.id}#${i}: hit the hull from the viewer side`);
+    });
+  }
+});
+
+test('viewer aircraft and weak-spot models share the same files, so no second copy is shipped', async () => {
+  const doc = await readFile(new URL('../src/ref-viewer.js', import.meta.url), 'utf8');
+  assert.match(doc, /wrapper: 'aircraft-3d\/x\.js'/);
+  for (const e of ENTRIES.filter(x => x.model && x.model.wrapper)) assert.ok(e.viewer, `${e.id}: wrapper models belong to viewer aircraft`);
+});
+
+test('every article has a list thumbnail: either built into the module page or rendered from the model', async () => {
+  const { THUMB_FILES, thumbOf } = await import('../src/ref-thumbs.js');
+  // Ці зображення вже вбудовані в сторінки модулів (AC_IMG, MUN_IMG), тому окремих файлів для них немає.
+  const builtIn = new Set(['mig29', 'su27', 'f16', '39', '53', '62', 'aasm', 'agm88', 'blu140', 'c13']);
+  const ids = new Set(ENTRIES.map(e => e.id));
+  for (const id of builtIn) assert.ok(ids.has(id), `${id}: built-in thumbnail belongs to an article`);
+  for (const e of ENTRIES) assert.ok(builtIn.has(e.id) || thumbOf(e.id), `${e.id}: thumbnail`);
+  for (const id of Object.keys(THUMB_FILES)) {
+    assert.ok(ids.has(id) && !builtIn.has(id), `${id}: file thumbnail only where nothing is built in`);
+    const bytes = await readFile(new URL(`../src/ref-thumbs/${id}.webp`, import.meta.url));
+    assert.equal(bytes.subarray(0, 4).toString(), 'RIFF', `${id}: webp`);
+    assert.equal(bytes.subarray(8, 12).toString(), 'WEBP', `${id}: webp`);
+    assert.ok(bytes.length < 40_000, `${id}: small enough for a list icon`);
+  }
+  assert.equal(thumbOf('нема'), null);
+  const wiki = await readFile(new URL('../src/ref-wiki.js', import.meta.url), 'utf8');
+  assert.match(wiki, /media\.thumb && media\.thumb\(e\.id\)\) \|\| thumbOf\(e\.id\)/);
+});
+
+test('every ref-art file belongs to an article and comes as a silhouette + outline pair', async () => {
+  const { readdir } = await import('node:fs/promises');
+  const files = (await readdir(new URL('../src/ref-art/', import.meta.url))).filter(f => f.endsWith('.webp'));
+  assert.ok(files.length >= 10, 'ref-art is not empty');
+  const ids = new Set(files.map(f => f.replace(/-(sil|lin)\.webp$/, '')));
+  for (const id of ids) {
+    assert.ok(entryById(id), `${id}: ref-art file has no article`);
+    assert.ok(files.includes(`${id}-sil.webp`) && files.includes(`${id}-lin.webp`), `${id}: needs both -sil and -lin`);
+  }
+  const wiki = await readFile(new URL('../src/ref-wiki.js', import.meta.url), 'utf8');
+  assert.match(wiki, /import\('\.\/ref-art-urls\.js'\)/, 'ref-wiki loads art lazily, not through a static import.meta.glob');
+  assert.doesNotMatch(wiki, /import\.meta\.glob/, 'import.meta.glob would break the Node tests');
 });

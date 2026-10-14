@@ -7,12 +7,19 @@
 .rw-search:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .rw-seg { display: flex; }
 .rw-seg button { flex: 1; padding-inline: 6px; }
+/* Коли розділів більше чотирьох (разом з «Усе»), вони не вміщуються в один рядок вузької панелі: переносимо по три в ряд. */
+.rw-seg-wrap { display: grid; grid-template-columns: repeat(3, 1fr); }
+.rw-seg-wrap button + button { border-left: 0; }
+.rw-seg-wrap button:not(:nth-child(3n+1)) { border-left: 1px solid var(--line-strong); }
+.rw-seg-wrap button:nth-child(n+4) { border-top: 1px solid var(--line-strong); }
 .rw-list { display: grid; gap: 4px; }
 .rw-grp { margin: 10px 2px 2px; font-size: 11.5px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); }
 .rw-item { display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; align-items: center; gap: 10px; width: 100%; text-align: left; font: inherit; color: var(--ink); background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 6px 8px; cursor: pointer; }
 .rw-item:hover { background: var(--accent-soft); }
 .rw-item[aria-current="true"] { background: var(--accent-soft); border-color: var(--accent); }
 .rw-item img, .rw-mono { width: 52px; height: 36px; border-radius: 6px; background: var(--surface-2); object-fit: contain; }
+.rw-item img.rw-sil { padding: 5px 4px; box-sizing: border-box; filter: invert(.9); background: none; }
+html[data-theme="light"] .rw-item img.rw-sil { filter: none; opacity: .8; }
 .rw-mono { display: grid; place-items: center; font: 700 10.5px/1 var(--mono); letter-spacing: -.02em; color: var(--muted); border: 1px solid var(--line); }
 .rw-it { display: grid; min-width: 0; }
 .rw-it b { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -77,6 +84,25 @@
 .rw-val { font: 12px var(--mono); color: var(--muted); text-align: right; }
 .rw-slider .btn { min-height: 32px; padding: 4px 10px; font-size: 13px; }
 
+/* ворожа техніка: позначки на моделі, список уразливих місць, застереження «Обидві сторони» */
+.rw-chips { display: flex; gap: 8px; align-items: center; }
+.rw-spot { position: absolute; z-index: 2; display: grid; place-items: center; width: 26px; height: 26px; padding: 0; transform: translate(-50%, -50%); border: 2px solid #e8b04a; border-radius: 50%; background: rgba(9, 18, 24, .86); color: #fff; font: 700 12px/1 var(--mono); cursor: pointer; transition: opacity .15s, background-color .15s, color .15s; }
+.rw-spot[hidden] { display: none; }
+.rw-spot:hover, .rw-spot:focus-visible { background: #e8b04a; color: #0d0d0f; outline: none; }
+.rw-spot.on { background: #e8b04a; color: #0d0d0f; box-shadow: 0 0 0 4px rgba(232, 176, 74, .35); }
+.rw-spot.is-hid { opacity: .25; pointer-events: none; }
+.rw-warn { margin: 0; padding: 10px 12px; max-width: 72ch; border: 1px solid var(--warn-line); border-radius: 8px; background: var(--warn-soft); color: var(--ink); line-height: 1.5; }
+.rw-warn b { color: var(--warn); letter-spacing: .04em; text-transform: uppercase; font-size: 12.5px; }
+.rw-weaklist { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.rw-weak { display: grid; grid-template-columns: 28px minmax(0, 1fr); column-gap: 10px; row-gap: 2px; width: 100%; max-width: 72ch; padding: 9px 12px; text-align: left; font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+button.rw-weak { cursor: pointer; }
+button.rw-weak:hover { border-color: var(--accent); }
+button.rw-weak[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.rw-weak b { grid-row: span 2; display: grid; place-items: center; width: 24px; height: 24px; border: 2px solid #e8b04a; border-radius: 50%; font: 700 12px/1 var(--mono); }
+.rw-weak strong { font-weight: 650; }
+.rw-weak span { color: var(--muted); font-size: 13.5px; line-height: 1.45; }
+.rw-sources a { color: var(--accent); }
+
 /* пов’язані статті */
 .rw-rel { display: flex; flex-wrap: wrap; gap: 10px; }
 .rw-relcard { display: grid; gap: 6px; justify-items: center; width: 156px; padding: 8px; font: inherit; font-weight: 600; color: var(--ink); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 10px; cursor: pointer; }
@@ -109,3 +135,23 @@
   .rw-slider { grid-template-columns: 56px minmax(0, 1fr) 42px; }
   .rw-slider .btn { grid-column: span 1; }
 }
+
+/* Літаки: сторінка aircraft-viewer.html у кадрі; висоту підганяє ref-wiki.js під вміст. */
+.rw-air { display: grid; gap: 8px; }
+.rw-air[hidden] { display: none; }
+.rw-modes { justify-self: start; }
+/* «Інтерактивна модель» без окремого переглядача: кнопки дій під сценою й підпис поточної дії на сцені. */
+.rw-simbar { display: flex; flex-wrap: wrap; justify-self: start; max-width: 100%; }
+.rw-simbar[hidden], .rw-simcap[hidden] { display: none; }
+.rw-simcap { position: absolute; left: 12px; top: 10px; right: 12px; margin: 0; max-width: 46ch; padding: 6px 10px; border-radius: 6px; background: rgba(9, 18, 24, .72); color: #d7e3e3; font-size: 12.5px; line-height: 1.35; pointer-events: none; }
+.rw-air-frame { display: block; width: 100%; height: 560px; border: 1px solid var(--line); border-radius: 10px; background: #111214; }
+.rw-credit-head { margin: 0 0 4px; }
+.rw-credit ul { margin: 0; padding-left: 18px; display: grid; gap: 3px; }
+/* «Силует і контур»: чорні зображення на прозорому тлі; у темній темі інвертуються */
+.rw-art[hidden] { display: none; }
+.rw-figs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.rw-fig { margin: 0; padding: 16px 14px 10px; display: grid; gap: 8px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); text-align: center; }
+.rw-fig img { width: 100%; height: 96px; object-fit: contain; filter: invert(.9); }
+html[data-theme="light"] .rw-fig img { filter: none; opacity: .85; }
+.rw-fig figcaption { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+@media (max-width: 640px) { .rw-figs { grid-template-columns: minmax(0, 1fr); } }

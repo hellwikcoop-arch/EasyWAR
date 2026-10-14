@@ -1,5 +1,8 @@
 # EasyWAR repository instructions
 
+See also `docs/PROJECT_CONTEXT.md` (project brief, glossary), `docs/WORKFLOW.md`
+(task format, branches, checks, release) and `docs/BACKLOG.md` (priorities).
+
 ## Communication
 - User-facing language: Ukrainian.
 - Keep status reports short and concrete: what changed, what was verified, what remains unverified.

@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 
@@ -7,9 +7,9 @@ const host = process.env.TAURI_DEV_HOST;
 
 // Офлайн-кеш для мобільного перегляду (viewer.html): після збірки записує dist/sw.js
 // зі списком усіх файлів. Версія кешу береться з package.json, тож нова збірка
-// замінює старий кеш. 3D-моделі (.glb), відео заставки (.mp4), ресурси 3D-карти
-// (map-assets, >100 МБ) і 3D-довідники (сторінки й скрипти guides*, їхні шрифти .woff2)
-// у кеш не входять: у вікнах командування вони не потрібні, а заставка є лише в застосунку.
+// замінює старий кеш. 3D-моделі (.glb), переглядач літаків (aircraft-viewer.html, aircraft-3d/),
+// відео заставки (.mp4) і ресурси 3D-карти (map-assets, >100 МБ) у кеш не входять: у вікнах
+// командування вони не потрібні, моделі важать десятки мегабайтів, а заставка є лише в застосунку.
 // Сервіс-воркер реєструє лише viewer.html; у застосунку Tauri його немає.
 function viewerServiceWorker() {
   return {
@@ -22,7 +22,7 @@ function viewerServiceWorker() {
         for (const name of readdirSync(dir)) {
           const full = join(dir, name);
           if (statSync(full).isDirectory()) walk(full);
-          else if (name !== "sw.js" && !name.endsWith(".map") && !name.endsWith(".glb") && !name.endsWith(".mp4") && !name.endsWith(".woff2") && !/(^|\/)guides[-/]/.test(relative(out, full).split("\\").join("/")) && !relative(out, full).split("\\").join("/").startsWith("map-assets/")) files.push("./" + relative(out, full).split("\\").join("/"));
+          else if (name !== "sw.js" && !name.endsWith(".map") && !name.endsWith(".glb") && !name.endsWith(".mp4") && name !== "aircraft-viewer.html" && !full.includes(`${sep}aircraft-3d${sep}`) && !relative(out, full).split("\\").join("/").startsWith("map-assets/")) files.push("./" + relative(out, full).split("\\").join("/"));
         }
       };
       walk(out);
@@ -88,14 +88,8 @@ export default defineConfig({
         artillery: fileURLToPath(new URL("./src/artillery.html", import.meta.url)),
         map: fileURLToPath(new URL("./src/map.html", import.meta.url)),
         viewer: fileURLToPath(new URL("./src/viewer.html", import.meta.url)),
-        // 3D-довідники: хаб і шість довідників; лаунчер відкриває хаб в iframe-накладці (src/guides-launcher.js).
-        guides: fileURLToPath(new URL("./src/guides/index.html", import.meta.url)),
-        "guides-aviation": fileURLToPath(new URL("./src/guides/aviation/index.html", import.meta.url)),
-        "guides-enemy-ground": fileURLToPath(new URL("./src/guides/enemy-ground/index.html", import.meta.url)),
-        "guides-ground-forces": fileURLToPath(new URL("./src/guides/ground-forces/index.html", import.meta.url)),
-        "guides-ppo": fileURLToPath(new URL("./src/guides/ppo/index.html", import.meta.url)),
-        "guides-rvia": fileURLToPath(new URL("./src/guides/rvia/index.html", import.meta.url)),
-        "guides-uav": fileURLToPath(new URL("./src/guides/uav/index.html", import.meta.url)),
+        // Літаки у вкладці «Довідник» (ПС): окрема сторінка зі своєю сценою, відкривається в кадрі.
+        aircraftViewer: fileURLToPath(new URL("./src/aircraft-viewer.html", import.meta.url)),
       },
     },
   },

@@ -1,21 +1,21 @@
 # Тривимірні моделі довідника
 
-## mig-29.glb — МіГ-29 «Ukrainian Falcons»
+## Літаки й вертольоти — інтерактивний переглядач (`src/public/aircraft-3d/`)
 
-- Автор: 42manako (<https://sketchfab.com/42manako>)
-- Джерело: <https://sketchfab.com/3d-models/mig-29-ukrainian-falcons-f53fae12952b43d8b6cc5b7af6576da5>
-- Ліцензія: Creative Commons Attribution 4.0 (CC BY 4.0), <http://creativecommons.org/licenses/by/4.0/>
+Літаки, вертольоти й Іл-76МД показує сторінка `src/aircraft-viewer.html`, а не `.glb` із цієї теки. Моделі лежать у файлах `src/public/aircraft-3d/*.js` (кожен — один `.glb` у base64, стиснутий meshopt). Бібліотеки three r128, GLTFLoader і декодер meshopt лежать там само, ліцензії (MIT) — у `LICENSES.txt`. Зовнішніх завантажень сторінка не робить.
 
-Ліцензія вимагає вказувати автора, тому в статті «МіГ-29» довідника показано посилання на автора й джерело.
-Змінено: файл стиснено для застосунку — матеріали переведено з specular-glossiness у metallic-roughness, текстури зменшено й перекодовано в JPEG, геометрію стиснуто meshopt (з 28,5 до 7,6 МБ). Форма моделі не змінювалася.
+- `mig29mu1.js` — «Ukrainian MiG-29MU1 (pixel)», 42manako (<https://sketchfab.com/42manako>), <https://sketchfab.com/3d-models/ukrainian-mig-29mu1-pixel-15201bfce51f46cdaddb28957acfac1c>, CC BY 4.0. Піксельний камуфляж і роундель ЗСУ нанесено на текстуру за фото, підвіски замінено блоками власної роботи.
+- `su27.js` — «Ukrainian Su-27P1M», 42manako, <https://sketchfab.com/3d-models/ukrainian-su-27p1m-332c0e857b0b4d568ce576644a7e2839>, CC BY 4.0.
+- `f16.js` — «Lockheed Martin F-16e/f "Fighting Falcon"», andertan (<https://sketchfab.com/andertan>), <https://sketchfab.com/3d-models/lockheed-martin-f-16ef-fighting-falcon-d54c72e055a647ad9173e01548e50db3>, CC BY 4.0. Текстуру перефарбовано в сірий, кокарди ОАЕ замінено на тризуби, прапор — на український.
+- `mi8.js` — «helicopter mi-8», mamont nikita (<https://sketchfab.com/mamontnikita62>), <https://sketchfab.com/3d-models/helicopter-mi-8-aaa58674609e40feafe816909de65ff9>, CC BY 4.0. Текстуру перефарбовано, гвинти виділено з моделі.
+- `mi24.js` — «Ukrainian Mil Mi-24P», 42manako, <https://sketchfab.com/3d-models/ukrainian-mil-mi-24p-2d8a8f13daae4757be0ff95195a6d6f3>, CC BY 4.0. Гвинти й стійки шасі виділено з моделі, блоки Б-8В20 — власної роботи.
+- `il76.js` — «Ukrainian Il-76MD», 42manako, <https://sketchfab.com/3d-models/ukrainian-il-76md-1acd000e27764cddb7b9b1255de86e0c>, CC BY 4.0. Кабіну й салон прибрано, масштаб ×0,5, шасі відокремлено.
+- `su24.js` — фюзеляж і крила: «Su-24M (Ukraine)», 42manako, <https://sketchfab.com/3d-models/su-24m-ukraine-f51d49fa06d940f581728131a766884f>, **CC BY-NC 4.0 (лише некомерційне використання)**; шасі: «Ukrainian Su-24 with Storm Shadow AGMs», 42manako, <https://sketchfab.com/3d-models/ukrainian-su-24-with-storm-shadow-agms-277154c4744c4313baab1d4011e3b872>, CC BY 4.0. Підвіски оригіналу прибрано, крило й шасі відокремлено.
+- `m2k.js` — «Ukrainian Mirage 2000-5F», 42manako, <https://sketchfab.com/3d-models/ukrainian-mirage-2000-5f-808fc97e2cc640ea90b8401348e82c5e>, CC BY 4.0. Текстуру стиснуто, шасі відокремлено.
+- `landscape.js` — «75 Acres Land w Creek», mrwrightphoto (<https://sketchfab.com/mrwrightphoto>), CC BY 4.0. Обрізано й спрощено.
+- Усередині `aircraft-viewer.html` (base64): AIM-120 — «US Weapon Pack», Rhine_Lab_Muelsyse, CC BY 4.0; JDAM і Р-27 — «Missile & Bomb Collection - Fighter Jets - Free», bohmerang, **CC BY-NC-SA 4.0** (лише некомерційне використання, зміни поширюються на тих самих умовах).
 
-## su-27.glb — Су-27П1М (Ukrainian Su-27P1M)
-
-- Автор: 42manako (<https://sketchfab.com/42manako>)
-- Джерело: <https://sketchfab.com/3d-models/ukrainian-su-27p1m-332c0e857b0b4d568ce576644a7e2839>
-- Ліцензія: Creative Commons Attribution 4.0 (CC BY 4.0), <http://creativecommons.org/licenses/by/4.0/>
-
-Змінено: стиснуто так само, як mig-29.glb (з 27,6 до 9,2 МБ), форма моделі не змінювалася.
+Шасі, форсаж, вогні, парашут, заслінки й підвіска — власної роботи; схему підвіски складено для моделі, це не заводська схема. Ліцензії CC BY-NC й CC BY-NC-SA не дозволяють комерційного використання: перед поширенням застосунку на комерційних умовах ці моделі треба замінити.
 
 ## storm-shadow.glb — згенерована модель
 
@@ -25,77 +25,21 @@
 
 Спрощена процедурна модель ракети GMLRS M31, побудована за відкритими габаритами (довжина ≈ 3,94 м, діаметр 0,227 м) і за довідковими зображеннями, які надав користувач, скриптом `script/build-gmlrs-model.py` у цьому репозиторії (раніше була простішою моделлю зі скрипта `viewer/scripts/build-munitions.py` CLOUDE). Форму й розмальовку відтворено «з нуля»: обтічник із чотирма малими стабілізаторами, корпус бойової частини з заклепками й білими лючками, жовтогаряча смуга, оливковий двигун із темною панеллю, кормова юбка з соплом і шість вигнутих хвостових стабілізаторів. Не є скануванням чи копією чужих моделей, сторонніх текстур немає, ліцензійних вимог немає. Призначена для перегляду, а не для впізнавання чи розрахунків.
 
-## mirage-2000-5f.glb — Mirage 2000-5F (Ukrainian Mirage 2000-5F)
-
-- Автор: 42manako (<https://sketchfab.com/42manako>)
-- Джерело: <https://sketchfab.com/3d-models/ukrainian-mirage-2000-5f-808fc97e2cc640ea90b8401348e82c5e>
-- Ліцензія: Creative Commons Attribution 4.0 (CC BY 4.0), <http://creativecommons.org/licenses/by/4.0/>
-
-Змінено: стиснуто так само, як mig-29.glb (з 28,2 до 9,5 МБ), форма моделі не змінювалася.
-
-## su-24.glb — Су-24 зі Storm Shadow (Ukrainian Su-24 with Storm Shadow AGMs)
-
-- Автор: 42manako (<https://sketchfab.com/42manako>)
-- Джерело: <https://sketchfab.com/3d-models/ukrainian-su-24-with-storm-shadow-agms-277154c4744c4313baab1d4011e3b872>
-- Ліцензія: Creative Commons Attribution 4.0 (CC BY 4.0), <http://creativecommons.org/licenses/by/4.0/>
-
-Змінено: стиснуто так само, як mig-29.glb (з 5,2 до 2,2 МБ), форма моделі не змінювалася.
-
-## f-16.glb — F-16E/F (Lockheed Martin F-16e/f "Fighting Falcon")
-
-- Автор: andertan (<https://sketchfab.com/andertan>)
-- Джерело: <https://sketchfab.com/3d-models/lockheed-martin-f-16ef-fighting-falcon-d54c72e055a647ad9173e01548e50db3>
-- Ліцензія: Creative Commons Attribution 4.0 (CC BY 4.0), <http://creativecommons.org/licenses/by/4.0/>
-
-Змінено: стиснуто так само, як mig-29.glb (з 4,8 до 0,75 МБ), форма моделі не змінювалася. Модель — двомісний F-16E/F в іноземній розмальовці, а не літак ПС ЗСУ.
-
-## su-25.glb — Су-25М (Ukrainian Su-25M (pixel))
+## aircraft-3d/su25.glb — Су-25М (Ukrainian Su-25M (pixel))
 
 - Автор: 42manako (<https://sketchfab.com/42manako>)
 - Джерело: <https://sketchfab.com/3d-models/ukrainian-su-25m-pixel-c96f73960f124ab7a22184008c33ea7c>
 - Ліцензія: Creative Commons Attribution 4.0 (CC BY 4.0), <http://creativecommons.org/licenses/by/4.0/>
 
-Змінено: матеріали переведено з specular-glossiness у metallic-roughness, стиснуто так само, як mig-29.glb (з 25,9 до 9,4 МБ), форма моделі не змінювалася.
+Файл лежить у `src/public/aircraft-3d/su25.glb` і показується в інтерактивному переглядачі літаків (цільна модель: шасі, механізацію й підвіски не відокремлено). Змінено: матеріали переведено з specular-glossiness у metallic-roughness, стиснуто (з 25,9 до 9,4 МБ), форма моделі не змінювалася; у переглядачі модель лише повернуто, масштабовано до довжини літака й поставлено на землю.
 
-## gripen.glb — JAS 39 Gripen (Ukrainian JAS 39 Gripen)
+## aircraft-3d/gripen.glb — JAS 39 Gripen (Ukrainian JAS 39 Gripen)
 
 - Автор: 42manako (<https://sketchfab.com/42manako>)
 - Джерело: <https://sketchfab.com/3d-models/ukrainian-jas-39-gripen-f2e45df51c4043f99c41403959e589f3>
 - Ліцензія: Creative Commons Attribution 4.0 (CC BY 4.0), <http://creativecommons.org/licenses/by/4.0/>
 
-Змінено: стиснуто так само, як mig-29.glb (з 2,0 до 0,7 МБ), форма моделі не змінювалася.
-
-## mi-24p.glb — Мі-24П (Ukrainian Mil Mi-24P)
-
-- Автор: 42manako (<https://sketchfab.com/42manako>)
-- Джерело: <https://sketchfab.com/3d-models/ukrainian-mil-mi-24p-2d8a8f13daae4757be0ff95195a6d6f3>
-- Ліцензія: Creative Commons Attribution 4.0 (CC BY 4.0), <http://creativecommons.org/licenses/by/4.0/>
-
-Змінено: геометрію стиснуто meshopt (з 1,5 до 0,55 МБ), форма моделі не змінювалася.
-
-## mi-8.glb — Мі-8 (Mi-8)
-
-- Автор: tiunov.se (<https://sketchfab.com/tiunov.se>)
-- Джерело: <https://sketchfab.com/3d-models/mi-8-5e5e57ef66994c6196a5f5d6b9f50403>
-- Ліцензія: Creative Commons Attribution 4.0 (CC BY 4.0), <http://creativecommons.org/licenses/by/4.0/>
-
-Змінено: текстури зменшено й перекодовано в JPEG (карти металу й шорсткості — до 1024 px), геометрію стиснуто meshopt (з 15,2 до 1,9 МБ), форма моделі не змінювалася.
-
-## su-27b.glb — Су-27 (Ukrainian Su-27B)
-
-- Автор: 42manako (<https://sketchfab.com/42manako>)
-- Джерело: <https://sketchfab.com/3d-models/ukrainian-su-27b-a1fa957a39bb4f3db8bb669c2dd6afdb>
-- Ліцензія: Creative Commons Attribution 4.0 (CC BY 4.0), <http://creativecommons.org/licenses/by/4.0/>
-
-Змінено: стиснуто так само, як mig-29.glb (з 5,2 до 0,9 МБ), форма моделі не змінювалася.
-
-## mig-29-ghost.glb — МіГ-29 «Привид Києва» (Ghost of Kiev MiG-29)
-
-- Автор: 42manako (<https://sketchfab.com/42manako>)
-- Джерело: <https://sketchfab.com/3d-models/ghost-of-kiev-mig-29-cf0c0d3e8494460b8e4d9c579550d656>
-- Ліцензія: Creative Commons Attribution 4.0 (CC BY 4.0), <http://creativecommons.org/licenses/by/4.0/>
-
-Змінено: матеріали переведено з specular-glossiness у metallic-roughness, стиснуто так само, як mig-29.glb (з 24,4 до 8,9 МБ), форма моделі не змінювалася.
+Файл лежить у `src/public/aircraft-3d/gripen.glb` і показується в інтерактивному переглядачі літаків (цільна модель, як і Су-25). Змінено: стиснуто (з 2,0 до 0,7 МБ), форма моделі не змінювалася; у переглядачі модель лише повернуто, масштабовано до довжини літака й поставлено на землю.
 
 ## aim-120.glb, aim-9x.glb, agm-65.glb — ракети зі збірки «US Weapon Pack»
 
@@ -162,132 +106,44 @@
 
 Підривники (23 моделі: M557, M739A1, DM211, KTA 7962, M51A5, M78, DM371, M582, M520A1, M501, M67A3, DM163, M762A1, M782, DM52A2, DM74, M8611A1, M732A2, PPD 440, FU-RALEC DE F3, OF Zonar 75B MK, FRAPPE F1 і M1156) побудовано процедурно у файлі `src/artillery-fuze-3d.js`: тіла обертання за повною й видимою довжиною, діаметром і описаними на сторінках bk155.com.ua деталями (кільце часу, ковпачок, запобіжна чека, пропелер повітрозабірника, кільце режимів). Зображень і текстів з сайту не копіювали; фотографій підривників для побудови моделей не використовували, тому форма голівки, кільця й носа та забарвлення умовні там, де сайт їх не описує. Де сайт не називає діаметр чи видиму частину, у статті сказано, що це оцінка. Ще 17 підривників з розділу сайту подано в статтях лише текстом, без моделей.
 
-<!-- guides-credits:start -->
-## 3D-довідники (src/guides)
+## ka-52.glb — Ка-52 (Russian Ka-52 Alligator)
 
-Шість довідників і хаб лежать у `src/guides/`; моделі — у `src/guides/<довідник>/models/*.glb`. Таблиці нижче генерує `node script/guides-credits.mjs` з `src/guides/credits.js`; ті самі записи показано під сценою кожного довідника.
+- Автор: 42manako (<https://sketchfab.com/42manako>)
+- Джерело: <https://sketchfab.com/3d-models/russian-ka-52-alligator-9b31733ceed24be49b2f621487b35ea9>
+- Ліцензія: Creative Commons Attribution 4.0 (CC BY 4.0), <http://creativecommons.org/licenses/by/4.0/>
 
-Автора, ліцензію й посилання взято з даних, що супроводжували моделі: метаданих файлів і підписів в опублікованих довідниках. Під час перенесення сторінки Sketchfab не відкривали, тож перед публічним поширенням їх варто звірити.
+Змінено: стиснуто для застосунку (≈ 4,2 МБ), форма моделі не змінювалася. Прозорі матеріали виправляються під час завантаження (`fixMaterials` у `ref-viewer.js`). Модель належить статті «Ворожа техніка».
 
-Види походження:
+Той самий файл лежить ще й у `src/public/aircraft-3d/ka52.glb`: його читає інтерактивний переглядач літаків (фази, обертання співвісних гвинтів, вогні). Там текстури WebP підміняються на льоту (`glbWebp` у `aircraft-viewer.html`), бо three r128 цього розширення не знає; гвинти — вбудовані в модель площини `rotorblur`, власної геометрії лопатей у файлі немає.
 
-- `cc` — Сторонній автор, відома ліцензія
-- `author` — Автор відомий, ліцензію у файлі не зазначено
-- `own` — Власна робота автора проєкту (за його запевненням)
-- `game` — Надано власником проєкту; ресурс гри, права не з’ясовані
-- `unclear` — Надано власником проєкту; походження не з’ясовано, права не з’ясовані
-- `generated` — Процедурна модель EasyWAR
+## mi-8tv.glb — Мі-8ТВ (Mi-8TB (War Thunder))
 
-Щоб визнати модель власною, достатньо змінити її `kind` на `own` у `src/guides/credits.js` і перегенерувати цей розділ.
+- Автор: KojfDiscord (<https://sketchfab.com/KojfDiscord>)
+- Джерело: <https://sketchfab.com/3d-models/mi-8tb-war-thunder-war-thunder-9e8deeb240964b2eba81b462041e8967>
+- Ліцензія: Creative Commons Attribution 4.0 (CC BY 4.0), <http://creativecommons.org/licenses/by/4.0/>
 
-### РВіА та артилерія (`src/guides/rvia/models`)
+Змінено: конвертовано з вихідного формату в glTF і стиснуто (геометрія — meshopt, текстури — WebP, ≈ 5 МБ), форма моделі не змінювалася. У текстурі `Image_2` східнонімецькі розпізнавальні ромби на фюзеляжі замінено червоною зіркою (ознака належності до РФ для довідника розпізнавання). Ліцензію й автора взято з даних, що супроводжували файл; сторінку Sketchfab не було відкрито для повторної перевірки.
 
-| Файл | Модель | Походження | Примітка |
-| --- | --- | --- | --- |
-| `sapsan.glb` | Сапсан | власна робота автора проєкту (за його запевненням) |  |
-| `tochka.glb` | Точка-У | власна робота автора проєкту (за його запевненням) |  |
-| `uragan.glb` | Ураган | власна робота автора проєкту (за його запевненням) |  |
-| `bastion.glb` | Бастіон-01 | власна робота автора проєкту (за його запевненням) |  |
-| `caesar.glb` | CAESAR | власна робота автора проєкту (за його запевненням) |  |
-| `bogdana.glb` | Богдана | власна робота автора проєкту (за його запевненням) |  |
-| `m10.glb` | М-10 | власна робота автора проєкту (за його запевненням) |  |
-| `giatsint.glb` | Гіацинт-Б | власна робота автора проєкту (за його запевненням) |  |
-| `d30.glb` | Д-30 | власна робота автора проєкту (за його запевненням) |  |
-| `fh70.glb` | FH-70 | власна робота автора проєкту (за його запевненням) |  |
-| `m198.glb` | M198 | власна робота автора проєкту (за його запевненням) |  |
-| `vilkha.glb` | Вільха | процедурна модель EasyWAR |  |
+## fp-5-flamingo.glb — FP-5 «Фламінго» (Missile FP-5 Flamingo 3D model)
 
-### ППО (`src/guides/ppo/models`)
+- Автор: rombic991 (<https://sketchfab.com/rombic991>)
+- Джерело: <https://sketchfab.com/3d-models/missile-fp-5-flamingo-3d-model-d638fc564342416baa4480ed1900d407>
+- Ліцензія: Creative Commons Attribution 4.0 (CC BY 4.0), <http://creativecommons.org/licenses/by/4.0/>
 
-| Файл | Модель | Походження | Примітка |
-| --- | --- | --- | --- |
-| `patriot.glb` | Patriot | власна робота автора проєкту (за його запевненням) |  |
-| `nasams.glb` | NASAMS | Muhamad Mirza Arrafi; CC BY 4.0; <https://sketchfab.com/3d-models/nasams-1-surface-to-air-missile-system-5fb34fab137c430988fd5642a3b87db3> |  |
-| `iris.glb` | IRIS-T SLM | власна робота автора проєкту (за його запевненням) |  |
-| `sky.glb` | Sky Sabre | власна робота автора проєкту (за його запевненням) |  |
-| `mamba.glb` | SAMP/T «Mamba» | KojfDiscord; CC BY 4.0; <https://sketchfab.com/3d-models/fr-fsaf-sampt-mamba-tel-war-thunder-1b08c28a972f4b938eea6a1c0e8d2be5> |  |
-| `shilka.glb` | ЗСУ-23-4 «Шилка» | власна робота автора проєкту (за його запевненням) |  |
-| `kub.glb` | 2Т7 «Куб» | власна робота автора проєкту (за його запевненням) |  |
-| `nomads.glb` | Nomads | власна робота автора проєкту (за його запевненням) |  |
+Змінено: конвертовано з вихідного формату в glTF і стиснуто (геометрія — meshopt, текстури — WebP, ≈ 0,3 МБ), форма моделі не змінювалася. Ліцензію й автора взято з даних, що супроводжували файл; сторінку Sketchfab не було відкрито для повторної перевірки.
 
-### Сухопутні війська (`src/guides/ground-forces/models`)
+## fp-7.glb — FP-7 (Firepoint FP-7 ballistic missile)
 
-| Файл | Модель | Походження | Примітка |
-| --- | --- | --- | --- |
-| `abrams.glb` | M1A2 Abrams | Jeyhun1985; ліцензію у файлі не зазначено; <https://sketchfab.com/Jeyhun1985> |  |
-| `bradley.glb` | M2A3 Bradley | 42manako; CC BY 4.0; <https://sketchfab.com/3d-models/ukrainian-m2a3-bradley-accfcb705d794fa3a47d008d98d6607e> |  |
-| `marder.glb` | Marder 1A3 | 42manako; CC BY 4.0; <https://sketchfab.com/3d-models/ukrainian-marder-1a3-d4df840369e7486a852871dd312a06a3> |  |
-| `boxer.glb` | Boxer (інженерний) | 42manako; CC BY-NC 4.0; <https://sketchfab.com/3d-models/boxer-afv-engineering-hmg-e159d630f4f64f2287e7d095c0bd8d92> | Ліцензія некомерційна (NC): використання лише в некомерційних цілях. |
-| `hmmwv.glb` | HMMWV M998A1 | походження не з’ясовано, можливо, ресурс гри; права не з’ясовані |  |
-| `hemtt.glb` | M978 HEMTT | походження не з’ясовано, можливо, ресурс гри; права не з’ясовані |  |
-| `goliath.glb` | Goliath | походження не з’ясовано, можливо, ресурс гри; права не з’ясовані |  |
-| `pk_m1a1.glb` | M1A1 Abrams | ресурс гри Strike Fighters; права не з’ясовані | Набір танків «strike_fighters_tanks_pack» (за назвою файлу — ресурси гри Strike Fighters). Модель розділено на корпус, башту й гармату для довідника. |
-| `pk_leopard1a4.glb` | Leopard 1A4 | ресурс гри Strike Fighters; права не з’ясовані | Набір танків «strike_fighters_tanks_pack» (за назвою файлу — ресурси гри Strike Fighters). Модель розділено на корпус, башту й гармату для довідника. |
-| `pk_m60.glb` | M60 | ресурс гри Strike Fighters; права не з’ясовані | Набір танків «strike_fighters_tanks_pack» (за назвою файлу — ресурси гри Strike Fighters). Модель розділено на корпус, башту й гармату для довідника. |
-| `pk_m48a2.glb` | M48A2 Patton | ресурс гри Strike Fighters; права не з’ясовані | Набір танків «strike_fighters_tanks_pack» (за назвою файлу — ресурси гри Strike Fighters). Модель розділено на корпус, башту й гармату для довідника. |
-| `pk_m48a3.glb` | M48A3 Patton | ресурс гри Strike Fighters; права не з’ясовані | Набір танків «strike_fighters_tanks_pack» (за назвою файлу — ресурси гри Strike Fighters). Модель розділено на корпус, башту й гармату для довідника. |
-| `pk_m4a3e8.glb` | M4A3E8 Sherman | ресурс гри Strike Fighters; права не з’ясовані | Набір танків «strike_fighters_tanks_pack» (за назвою файлу — ресурси гри Strike Fighters). Модель розділено на корпус, башту й гармату для довідника. |
-| `pk_centurion8.glb` | Centurion | ресурс гри Strike Fighters; права не з’ясовані | Набір танків «strike_fighters_tanks_pack» (за назвою файлу — ресурси гри Strike Fighters). Модель розділено на корпус, башту й гармату для довідника. |
-| `pk_t3485.glb` | Т-34-85 | ресурс гри Strike Fighters; права не з’ясовані | Набір танків «strike_fighters_tanks_pack» (за назвою файлу — ресурси гри Strike Fighters). Модель розділено на корпус, башту й гармату для довідника. |
-| `pk_pt76.glb` | ПТ-76 | ресурс гри Strike Fighters; права не з’ясовані | Набір танків «strike_fighters_tanks_pack» (за назвою файлу — ресурси гри Strike Fighters). Модель розділено на корпус, башту й гармату для довідника. |
-| `pk_t55.glb` | Т-55 | ресурс гри Strike Fighters; права не з’ясовані | Набір танків «strike_fighters_tanks_pack» (за назвою файлу — ресурси гри Strike Fighters). Модель розділено на корпус, башту й гармату для довідника. |
-| `pk_t62.glb` | Т-62 | ресурс гри Strike Fighters; права не з’ясовані | Набір танків «strike_fighters_tanks_pack» (за назвою файлу — ресурси гри Strike Fighters). Модель розділено на корпус, башту й гармату для довідника. |
-| `pk_t72.glb` | Т-72 | ресурс гри Strike Fighters; права не з’ясовані | Набір танків «strike_fighters_tanks_pack» (за назвою файлу — ресурси гри Strike Fighters). Модель розділено на корпус, башту й гармату для довідника. |
-| `pk_t80.glb` | Т-80 | ресурс гри Strike Fighters; права не з’ясовані | Набір танків «strike_fighters_tanks_pack» (за назвою файлу — ресурси гри Strike Fighters). Модель розділено на корпус, башту й гармату для довідника. |
-| `pk_t90.glb` | Т-90 | ресурс гри Strike Fighters; права не з’ясовані | Набір танків «strike_fighters_tanks_pack» (за назвою файлу — ресурси гри Strike Fighters). Модель розділено на корпус, башту й гармату для довідника. |
-| `pk_type99tank.glb` | Type 99 | ресурс гри Strike Fighters; права не з’ясовані | Набір танків «strike_fighters_tanks_pack» (за назвою файлу — ресурси гри Strike Fighters). Модель розділено на корпус, башту й гармату для довідника. |
-| `pk_ee9.glb` | EE-9 Cascavel | ресурс гри Strike Fighters; права не з’ясовані | Набір танків «strike_fighters_tanks_pack» (за назвою файлу — ресурси гри Strike Fighters). Модель розділено на корпус, башту й гармату для довідника. |
+- Автор: FLIGHTCLUB UA (профіль автора не перевірено, тому посилання веде на сторінку моделі)
+- Джерело: <https://sketchfab.com/3d-models/firepoint-fp-7-ballistic-missile-a2da452aa5f94611b54b9d56757b61f0>
+- Ліцензія: Creative Commons Attribution 4.0 (CC BY 4.0), <http://creativecommons.org/licenses/by/4.0/>
 
-### БпАК і вертоліт (`src/guides/uav/models`)
+Змінено: конвертовано з вихідного формату в glTF і стиснуто (геометрія — meshopt, текстури — WebP, ≈ 0,4 МБ), форма моделі не змінювалася. Ліцензію й автора взято з даних, що супроводжували файл; сторінку Sketchfab не було відкрито для повторної перевірки.
 
-| Файл | Модель | Походження | Примітка |
-| --- | --- | --- | --- |
-| `tb2.glb` | Bayraktar TB2 | 42manako; CC BY 4.0; <https://sketchfab.com/3d-models/ukrainian-bayraktar-tb2-9738e42238894e5bbc51646c79eadec7> |  |
-| `d1l.glb` | Duck | власна робота автора проєкту (за його запевненням) |  |
-| `sky.glb` | Skyfall | власна робота автора проєкту (за його запевненням) |  |
-| `sh.glb` | SH-60B Seahawk | власна робота автора проєкту (за його запевненням) |  |
+## Власні моделі автора проєкту — ворожа й інша техніка
 
-### Ворожа авіація (`src/guides/aviation/models`)
+Файли `ka-50.glb`, `ka-27.glb`, `mi-26.glb`, `mi-35.glb`, `mi-2.glb`, `an-26.glb` і `an-225.glb` — власні роботи автора проєкту (за його запевненням); сторонньої ліцензії на них немає. Файли стиснуто для застосунку (геометрія — meshopt, текстури — WebP), форма моделей не змінювалася. Матеріали в файлах мають назви з вихідного набору, їх не змінено. Моделі належать статтям груп «Ворожа» (Ка-50, Ка-27, Мі-26, Мі-35М, Мі-2, Ан-26) та «Засоби» (Ан-225). Зміни: у `mi-2.glb` словацький герб на фюзеляжі замінено червоною зіркою й прибрано серійний номер (змінено лише текстуру); у `mi-26.glb` зірка й в `an-225.glb` прапор, напис і бортовий номер додаються під час показу як наклейки (`applyDecals` у `ref-viewer.js`), файли їх не містять. Вони призначені для розпізнавання, а не для вимірювань.
 
-| Файл | Модель | Походження | Примітка |
-| --- | --- | --- | --- |
-| `ka52.glb` | Ка-52 «Алігатор» | 42manako; CC BY 4.0; <https://sketchfab.com/3d-models/russian-ka-52-alligator-9b31733ceed24be49b2f621487b35ea9> |  |
-| `ka50.glb` | Ка-50 «Чорна акула» | власна робота автора проєкту (за його запевненням) |  |
-| `ka27.glb` | Ка-27 | власна робота автора проєкту (за його запевненням) |  |
-| `mi26.glb` | Мі-26 | власна робота автора проєкту (за його запевненням) |  |
-| `mi35.glb` | Мі-35М | власна робота автора проєкту (за його запевненням) |  |
-| `mi8tv.glb` | Мі-8ТВ | KojfDiscord; CC BY 4.0; <https://sketchfab.com/3d-models/mi-8tb-war-thunder-war-thunder-9e8deeb240964b2eba81b462041e8967> | У текстурі східнонімецькі розпізнавальні ромби замінено червоною зіркою (ознака належності до РФ для довідника розпізнавання). |
-| `mi2.glb` | Мі-2 | власна робота автора проєкту (за його запевненням) |  |
-| `an26.glb` | Ан-26 | ресурс гри DCS World; права не з’ясовані |  |
-| `an225.glb` | Ан-225 «Мрія» | власна робота автора проєкту (за його запевненням) |  |
-| `tu22.glb` | Ту-22М3 | ресурс гри DCS World; права не з’ясовані |  |
-| `tu95.glb` | Ту-95МС | ресурс гри War Thunder; права не з’ясовані |  |
-| `fp5.glb` | FP-5 «Фламінго» | rombic991; CC BY 4.0; <https://sketchfab.com/3d-models/missile-fp-5-flamingo-3d-model-d638fc564342416baa4480ed1900d407> |  |
-| `fp7.glb` | FP-7 | FLIGHTCLUB UA; CC BY 4.0; <https://sketchfab.com/3d-models/firepoint-fp-7-ballistic-missile-a2da452aa5f94611b54b9d56757b61f0> |  |
+## Мініатюри списку довідника (`src/ref-thumbs/`)
 
-### Ворожа наземна техніка (`src/guides/enemy-ground/models`)
-
-| Файл | Модель | Походження | Примітка |
-| --- | --- | --- | --- |
-| `pan.glb` | Панцирь-С1 | JuSSSkeMDL; CC BY-NC-SA 4.0; <https://sketchfab.com/jussskemdl> | Зміни: оптимізація, анімація. Модифікації мають ту саму ліцензію (BY-NC-SA): некомерційне використання, поширення на тих самих умовах. |
-| `tung.glb` | 2К22 «Тунгуска» | власна робота автора проєкту (за його запевненням) |  |
-| `buk1.glb` | 9А317М «Бук-М3» | Jeyhun1985; CC BY 4.0; <https://sketchfab.com/3d-models/buk-m3-9k317-sam-923878eda87a4b28bae10799023086c5> |  |
-| `buk2.glb` | «Бук-М3» (станція) | власна робота автора проєкту (за його запевненням) |  |
-| `s400.glb` | С-400 «Тріумф» | походження не з’ясовано, можливо, ресурс гри; права не з’ясовані |  |
-| `sa12.glb` | С-300В (ПУ і ТЗМ) | власна робота автора проєкту (за його запевненням) |  |
-| `r96.glb` | 96Л6Е | походження не з’ясовано, можливо, ресурс гри; права не з’ясовані |  |
-| `osa.glb` | 9К33 «Оса-АКМ» | власна робота автора проєкту (за його запевненням) |  |
-| `isk.glb` | 9К720 «Іскандер» | власна робота автора проєкту (за його запевненням) |  |
-| `btr.glb` | БТР-82А | власна робота автора проєкту (за його запевненням) |  |
-| `mtl.glb` | МТ-ЛБМ 6МБ | власна робота автора проєкту (за його запевненням) |  |
-| `rp.glb` | Станції розвідки й наведення | власна робота автора проєкту (за його запевненням) |  |
-
-### Ландшафт
-
-«75 Acres Land w Creek» — mrwrightphoto, CC BY 4.0 (<https://creativecommons.org/licenses/by/4.0/>). Обрізано й спрощено для довідника. Файли: `src/guides/shared/landscape-flight.glb` (польотні довідники: авіація, БпАК), `src/guides/shared/landscape-ground.glb` (наземні довідники).
-
-### Шрифти й код
-
-- Шрифти Oswald, PT Sans, JetBrains Mono, IBM Plex Sans і IBM Plex Mono лежать у `src/guides/fonts/` (з пакетів @fontsource), ліцензія SIL OFL 1.1, тексти ліцензій — у `src/guides/fonts/licenses/`.
-- `src/guides/room-env.js` — копія класу `RoomEnvironment` із three.js r160 (MIT, © three.js authors): у новішому three цей клас дає інше освітлення, а довідники налаштовано під старе.
-<!-- guides-credits:end -->
+Знімки наших моделей (літаки й вертольоти — зверху, решта — збоку) на прозорому тлі, 256 px у ширину. Вони похідні від тих самих моделей, тож мають ті самі автора й ліцензію, що вказані вище для кожного файлу; зміна — лише зображення вигляду, форму моделей не змінено.
