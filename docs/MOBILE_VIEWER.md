@@ -139,8 +139,10 @@ npm run build:lite   # dist-standalone/EasyWAR-Lite.html
 
 Обмеження ті самі, що в файлів для телефона (Android — Chrome; iPhone не перевірено,
 сховище браузера окреме для кожного файлу), плюс розмір: сторінки РВ несуть три
-PNG-зображення ракет і презентаційні шрифти. Перевірено лише в Chromium (Playwright,
-`file://`), у Firefox і Safari не перевірялося.
+PNG-зображення ракет і презентаційні шрифти. Сам файл перевірено лише в Chromium
+(Playwright, `file://`), у Firefox і Safari не перевірялося. Кнопку й збереження перевірено
+у debug-збірці застосунку на Linux (WebKitGTK: вікно «Зберегти як», файл збігається з
+`dist/standalone/EasyWAR-Lite.html`); на macOS і Windows — ні.
 
 ## Перевірка вручну
 
