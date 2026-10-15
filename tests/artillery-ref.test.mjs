@@ -189,3 +189,18 @@ test('the artillery page mounts the shared wiki with its own data and shows the 
   assert.match(viewer, /SHELL_KINDS\.includes\(model\.kind\)/);
   assert.doesNotMatch(app, /innerHTML/);
 });
+
+test('Артилерія показує лише демонстрацію моделі, без режиму «Інтерактивна модель»', async () => {
+  const app = await read('artillery-app.js'), wiki = await read('ref-wiki.js');
+  assert.match(app, /interactive:\s*false/);
+  assert.match(wiki, /interactive = true/);
+  assert.match(wiki, /const both = interactive && /);
+});
+
+test('Артилерія: вкладка «Довідник» прихована, а емблеми є в таблицях підрозділів', async () => {
+  const app = await read('artillery-app.js');
+  assert.match(app, /const HIDDEN_TABS = new Set\(\['ref'\]\)/);
+  assert.match(app, /if \(HIDDEN_TABS\.has\(id\)\) continue;/);
+  assert.match(app, /unitCell\(r\.unit\.name\)/);
+  assert.match(app, /class: 'unit-cell'/);
+});

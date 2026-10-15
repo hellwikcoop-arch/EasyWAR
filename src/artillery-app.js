@@ -179,7 +179,7 @@ function renderHeader() {
 }
 
 function goTab(id) {
-  if (id === S.tab) return;
+  if (id === S.tab || HIDDEN_TABS.has(id)) return;
   const p = pendingEdits();
   if (p && p.edits.length && !confirm('Є незбережені зміни. Залишити внесення без збереження?')) return;
   S.form = null;
@@ -189,11 +189,14 @@ function goTab(id) {
 const TABS = [
   ['summary', 'Зведення'], ['entry', 'Внесення'], ['units', 'Підрозділи'], ['ammo', 'Боєприпаси'], ['charges', 'Заряди'], ['losses', 'Втрати противника'], ['ref', 'Довідник'], ['check', 'Перевірка'],
 ];
+// Довідник Артилерії поки сирий: вкладку приховано, дані й код збережено для повернення.
+const HIDDEN_TABS = new Set(['ref']);
 function renderTabs() {
   const nav = $('tabs'); nav.textContent = '';
   if (!S.model) return;
   const errors = S.model.issues.filter(i => i.level === 'error').length, warns = S.model.issues.filter(i => i.level === 'warn').length;
   for (const [id, label] of TABS) {
+    if (HIDDEN_TABS.has(id)) continue;
     const btn = h('button', { class: 'tab', role: 'tab', type: 'button', 'data-tab': id, 'aria-selected': String(S.tab === id), onclick: () => goTab(id) }, label);
     if (id === 'check' && (errors || warns)) btn.append(h('span', { class: 'badge' + (errors ? ' bad' : '') }, errors || warns));
     nav.append(btn);
@@ -201,6 +204,7 @@ function renderTabs() {
 }
 
 // ---------- таблиці ----------
+const unitCell = name => { const em = emblemOf(name); return h('td', { class: 'unit-cell' }, em ? h('img', { class: 'crest-s', src: em, alt: '' }) : null, h('span', null, name)); };
 function table(heads, rows, opts = {}) {
   const t = h('table', null, h('thead', null, h('tr', null, heads.map(x => h('th', { class: x.num ? 'num' : '' }, x.label || x)))), h('tbody', null, rows));
   return h('div', { class: opts.plain ? '' : 'scroll' }, t);
@@ -227,7 +231,7 @@ function viewSummary() {
     h('td', null, h('div', { class: 'bar' }, h('i', { style: `width:${Math.round(g.spent / maxSpent * 100)}%` })))));
   byGroupRows.push(h('tr', { class: 'total' }, h('td', null, 'Разом'), h('td', { class: 'num' }, fmt(t.spent)), h('td', { class: 'num' }, fmt(t.left)), h('td')));
   const unitRows = units.map(r => h('tr', { class: 'link', onclick: () => { S.detailUnit = r.unit.id; S.tab = 'units'; renderAll(); } },
-    h('td', null, r.unit.name), cellNum(r.spent), cellNum(r.left), cellNum(r.precisionSpent), cellNum(r.vgz), cellNum(r.kbb)));
+    unitCell(r.unit.name), cellNum(r.spent), cellNum(r.left), cellNum(r.precisionSpent), cellNum(r.vgz), cellNum(r.kbb)));
   wrap.append(h('div', { class: 'cols' },
     h('section', { class: 'panel' }, h('div', { class: 'panel-head' }, h('h2', null, 'За калібрами')),
       table(['Калібр', { label: 'Витрата', num: true }, { label: 'Залишок', num: true }, ''], byGroupRows)),
@@ -257,7 +261,7 @@ function viewUnits() {
   const cur = m.units.find(u => u.id === S.detailUnit) || null;
   const list = table(['Підрозділ', { label: 'Витрата', num: true }, { label: 'Залишок', num: true }, { label: 'Заряди (залишок)', num: true }],
     stats.map(r => h('tr', { class: 'link', 'aria-selected': String(cur?.id === r.unit.id), onclick: () => { S.detailUnit = r.unit.id; renderAll(); } },
-      h('td', null, h('b', null, cur?.id === r.unit.id ? '▸ ' : '', r.unit.name)), cellNum(r.spent), cellNum(r.left), cellNum(r.chargesLeft))));
+      h('td', { class: 'unit-cell' }, (em => em ? h('img', { class: 'crest-s', src: em, alt: '' }) : null)(emblemOf(r.unit.name)), h('b', null, cur?.id === r.unit.id ? '▸ ' : '', r.unit.name)), cellNum(r.spent), cellNum(r.left), cellNum(r.chargesLeft))));
   const detail = h('section', { class: 'panel' });
   if (!cur) detail.append(h('p', { class: 'muted' }, 'Оберіть підрозділ зліва.'));
   else {
@@ -498,7 +502,7 @@ function viewRef() {
   if (!REF.ctl) {
     REF.host = h('div', { class: 'ref-host' });
     REF.ctl = mountRef(REF.host, {
-      data: ART_REF, usage: false, related: false, initial: lsGet('ref') || 'g155he',
+      data: ART_REF, usage: false, related: false, interactive: false, initial: lsGet('ref') || 'g155he',
       media: { thumb: refIcon, photo: refIcon }, motion: () => !matchMedia('(prefers-reduced-motion: reduce)').matches,
       extra: refExtra,
       searchText: e => refItems(e).map(i => i.label).join(' '),

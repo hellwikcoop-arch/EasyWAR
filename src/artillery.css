@@ -317,3 +317,8 @@ html.ew-boot #view .kpis > .kpi { animation: ewRise .6s var(--ew-ease) .12s both
 html.ew-boot #view .kpis > .kpi:nth-child(2) { animation-delay: .19s; } html.ew-boot #view .kpis > .kpi:nth-child(3) { animation-delay: .26s; }
 html.ew-boot #view .kpis > .kpi:nth-child(4) { animation-delay: .33s; } html.ew-boot #view .kpis > .kpi:nth-child(n+5) { animation-delay: .4s; }
 html.ew-boot #view .panel, html.ew-boot #view .unit-card { animation: ewRise .6s var(--ew-ease) .3s both; }
+
+/* Емблема підрозділу в рядках таблиць «Зведення» і «Підрозділи». */
+td.unit-cell { display: table-cell; white-space: nowrap; }
+td.unit-cell .crest-s { display: inline-block; vertical-align: middle; margin: 0 8px 0 0; height: 24px; max-width: 28px; }
+td.unit-cell span, td.unit-cell b { vertical-align: middle; }
