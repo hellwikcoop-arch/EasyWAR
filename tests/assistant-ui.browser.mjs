@@ -105,7 +105,7 @@ try {
   await page.setViewportSize({ width: 390, height: 540 });
   await assertComposerFits();
   await page.setViewportSize({ width: 1440, height: 960 });
-  const input = panel.locator('input');
+  const input = panel.locator('.ew-assistant-input input');
   await panel.locator('[data-mode="navigate"]').click();
   assert.match(await panel.locator('.ew-assistant-update-status').textContent(), /ще не перевіряли/u);
   await page.screenshot({ path: '/tmp/easywar-shots/assistant-kombat-navigation.png', fullPage: true });
@@ -391,6 +391,21 @@ try {
   await rm(fixtureDir, { recursive: true, force: true });
   await launcher.click();
   await waitForGesture('wave');
+
+  // Пропозиція розробнику: пакет формується локально, нічого не надсилається.
+  const proposal = panel.locator('.ew-assistant-proposal');
+  await proposal.waitFor();
+  await proposal.getByRole('button', { name: 'Зберегти пакет' }).click();
+  assert.match(await proposal.innerText(), /Опишіть пропозицію/u);
+  await proposal.locator('textarea').fill('Додати експорт зведення у CSV для звіту');
+  await proposal.locator('select').selectOption('feature');
+  const [download] = await Promise.all([page.waitForEvent('download'), proposal.getByRole('button', { name: 'Зберегти пакет' }).click()]);
+  assert.match(download.suggestedFilename(), /^easywar-propozytsiia-\d{8}-\d{4}\.md$/u);
+  const saved = await readFile(await download.path(), 'utf8');
+  assert.match(saved, /Тип: Нова функція/u);
+  assert.match(saved, /Додати експорт зведення у CSV/u);
+  assert.match(saved, /Таблиці й записи в нього не входять/u);
+  assert.match(await proposal.innerText(), /Пакет збережено/u);
 
   // Locking clears the panel and pending answers immediately.
   await input.fill('Як працюють профілі?');

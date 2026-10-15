@@ -148,3 +148,12 @@
 .ew-assistant-explain .ew-assistant-lead { font-size: 11px; font-style: italic; color: #6b6f63; margin-top: 0; }
 .ew-assistant-explain-live { font-weight: 600; }
 .ew-assistant-explain-hint, .ew-assistant-explain-src { font-size: 10px !important; color: #667554 !important; }
+
+.ew-assistant-proposal { margin-top: 16px; padding-top: 12px; border-top: 1px solid rgba(103, 117, 87, .35); display: grid; gap: 8px; }
+.ew-assistant-proposal h3 { margin: 0; font-size: 13px; }
+.ew-assistant-proposal select, .ew-assistant-proposal textarea { width: 100%; box-sizing: border-box; font: inherit; font-size: 12px; padding: 6px 8px; border-radius: 8px; border: 1px solid rgba(103, 117, 87, .5); background: rgba(255, 255, 255, .6); color: inherit; }
+.ew-assistant-proposal textarea { resize: vertical; min-height: 72px; }
+.ew-assistant-proposal-check, .ew-assistant-proposal-file { display: flex; gap: 6px; align-items: center; font-size: 11px; flex-wrap: wrap; }
+.ew-assistant-proposal-preview { max-width: 100%; max-height: 140px; border-radius: 8px; object-fit: contain; border: 1px solid rgba(103, 117, 87, .35); }
+.ew-assistant-proposal-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.ew-assistant-proposal-actions button:not(.ew-assistant-primary) { font: inherit; font-size: 12px; padding: 6px 10px; border-radius: 8px; border: 1px solid rgba(103, 117, 87, .5); background: transparent; color: inherit; cursor: pointer; }

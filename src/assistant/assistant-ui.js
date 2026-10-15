@@ -8,6 +8,7 @@ import { createAssistantMotion } from './assistant-motion.js';
 import { languageReply, answerLead, reviewLead, welcomeRemark, reviewRemark, explainLead, WELCOME_TEXT } from './assistant-persona-core.js';
 import { explainElement } from './assistant-explain-core.js';
 import { createExplainController } from './assistant-explain.js';
+import { PROPOSAL_KINDS, PROPOSAL_TEXT_LIMIT, buildProposal, proposalFileNames, validateProposalImage, validateProposalText } from './assistant-proposal-core.js';
 import { appUpdateState } from '../app-update-state-core.js';
 
 // The knowledge index is large: it loads on the first question, not when the launcher starts.
@@ -61,7 +62,8 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
   // Репліка обирається один раз на показ, щоб не мінятися під час перемальовування.
   let remarkSeed = Math.floor(Math.random() * 2147483647);
   // Режим «Пояснити»: результат останнього кліку в модулі. Нічого не зберігається поза сесією профілю.
-  let explainResult = null, explainNote = '';
+  let explainResult = null, explainNote = '', explainBranch = '';
+  let proposal = { kind: 'fix', text: '', withContext: true, image: null, previewUrl: '', note: '' };
   const launcher = element('button', { type: 'button', class: 'ew-assistant-launcher', hidden: true, 'aria-label': 'Відкрити помічника КОМБАТ', 'aria-controls': 'ew-assistant-panel', 'aria-expanded': 'false' },
     element('span', { class: 'ew-assistant-avatar', 'aria-hidden': 'true' }, element('img', { src: portraitURL, alt: '', draggable: 'false' })),
     element('span', {}, element('strong', { text: 'КОМБАТ' }), element('small', { text: 'Запитати помічника' })));
@@ -81,7 +83,7 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
   const explain = createExplainController({
     onExplain(descriptor) {
       if (!descriptor || !session.state().enabled) return;
-      explainResult = explainElement(descriptor); explainNote = '';
+      explainResult = explainElement(descriptor); explainBranch = descriptor.branch || ''; explainNote = '';
       mode = 'explain';
       if (panel.hidden) { panel.hidden = false; launcher.setAttribute('aria-expanded', 'true'); }
       render(); gesture(explainResult.status === 'found' ? 'point' : 'explain');
@@ -94,7 +96,8 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
     }
   });
 
-  function clear() { explain.stop(); explainResult = null; explainNote = ''; motion.stop(); request++; history = []; pendingInput = ''; review = null; status = ''; navigationStatus = ''; busy = false; checkbox.checked = false; panel.hidden = true; launcher.hidden = true; launcher.setAttribute('aria-expanded', 'false'); panel.replaceChildren(); announcer.textContent = ''; }
+  function resetProposal() { if (proposal.previewUrl) URL.revokeObjectURL(proposal.previewUrl); proposal = { kind: 'fix', text: '', withContext: true, image: null, previewUrl: '', note: '' }; }
+  function clear() { explain.stop(); explainResult = null; explainBranch = ''; explainNote = ''; resetProposal(); motion.stop(); request++; history = []; pendingInput = ''; review = null; status = ''; navigationStatus = ''; busy = false; checkbox.checked = false; panel.hidden = true; launcher.hidden = true; launcher.setAttribute('aria-expanded', 'false'); panel.replaceChildren(); announcer.textContent = ''; }
   function updateSession(id) {
     const previous = session.state();
     const next = session.setProfile(id);
@@ -111,7 +114,7 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
   function close() { explain.stop(); motion.stop(); panel.hidden = true; launcher.setAttribute('aria-expanded', 'false'); if (!launcher.hidden) launcher.focus(); }
   // Натискання на планку «Зв'язок з розробником»: КОМБАТ показує на скроню. Посилання діє як завжди.
   document.addEventListener('click', event => { if (event.target instanceof Element && event.target.closest('.dev-banner')) gesture('attention'); });
-  function open() { if (!session.state().enabled) return; panel.hidden = false; launcher.setAttribute('aria-expanded', 'true'); render(); panel.querySelector('input')?.focus(); gesture('wave'); }
+  function open() { if (!session.state().enabled) return; panel.hidden = false; launcher.setAttribute('aria-expanded', 'true'); render(); panel.querySelector('.ew-assistant-input input')?.focus(); gesture('wave'); }
   async function allowed(token) {
     if (!session.accepts(token)) return false;
     try {
@@ -250,11 +253,71 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
       if (explainResult.sources.length) card.append(element('p', { class: 'ew-assistant-explain-src', text: `Джерело: ${explainResult.sources.map(item => `${item.file} → ${item.section}`).join('; ')}` }));
       body.append(card);
     }
+    body.append(proposalSection());
     return body;
+  }
+  function download(name, blob) {
+    const url = URL.createObjectURL(blob);
+    const link = element('a', { href: url, download: name });
+    document.body.append(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  async function proposalFiles() {
+    const verdict = validateProposalText(proposal.text);
+    if (!verdict.ok) { proposal.note = verdict.message; render(); return null; }
+    const now = new Date();
+    const names = proposalFileNames(now, proposal.image);
+    let appVersion = '';
+    try { appVersion = (await getApplicationState?.('version'))?.appVersion || ''; } catch { /* версія необов'язкова */ }
+    const context = proposal.withContext && explainResult ? { branch: explainBranch, title: explainResult.title } : null;
+    const text = buildProposal({ kind: proposal.kind, text: proposal.text, context, appVersion, createdAt: now, imageName: names.image });
+    return { names, text };
+  }
+  function proposalSection() {
+    const kinds = element('select', { 'aria-label': 'Тип пропозиції', onchange: event => { proposal.kind = event.target.value; } },
+      ...PROPOSAL_KINDS.map(item => element('option', { value: item.id, text: item.label, selected: item.id === proposal.kind })));
+    const area = element('textarea', { rows: '4', maxlength: String(PROPOSAL_TEXT_LIMIT), 'aria-label': 'Опис пропозиції', placeholder: 'Що змінити чи додати і навіщо…', oninput: event => { proposal.text = event.target.value; } });
+    area.value = proposal.text;
+    const context = element('label', { class: 'ew-assistant-proposal-check' },
+      element('input', { type: 'checkbox', checked: proposal.withContext && !!explainResult, disabled: !explainResult, onchange: event => { proposal.withContext = event.target.checked; } }),
+      element('span', { text: explainResult ? `Додати назву елемента: «${explainResult.title}»` : 'Назву елемента буде додано після пояснення' }));
+    const file = element('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp', 'aria-label': 'Скриншот', onchange: event => {
+      const picked = event.target.files?.[0] || null;
+      const verdict = validateProposalImage(picked);
+      if (proposal.previewUrl) URL.revokeObjectURL(proposal.previewUrl);
+      proposal.image = verdict.ok ? picked : null; proposal.previewUrl = verdict.ok && picked ? URL.createObjectURL(picked) : '';
+      proposal.note = verdict.message; render();
+    } });
+    const actions = element('div', { class: 'ew-assistant-proposal-actions' },
+      element('button', { type: 'button', class: 'ew-assistant-primary', text: 'Зберегти пакет', onclick: async () => {
+        const pack = await proposalFiles(); if (!pack) return;
+        download(pack.names.text, new Blob([pack.text], { type: 'text/markdown;charset=utf-8' }));
+        if (proposal.image) download(pack.names.image, proposal.image);
+        proposal.note = 'Пакет збережено у «Завантаженнях». Натисніть «Відкрити Signal» і надішліть розробнику файл' + (proposal.image ? 'и' : '') + '.'; render();
+      } }),
+      element('button', { type: 'button', text: 'Копіювати текст', onclick: async () => {
+        const pack = await proposalFiles(); if (!pack) return;
+        try { await navigator.clipboard.writeText(pack.text); proposal.note = 'Текст скопійовано. Вставте його в Signal.'; }
+        catch { proposal.note = 'Не вдалося скопіювати. Збережіть пакет файлом.'; }
+        render();
+      } }),
+      element('button', { type: 'button', text: 'Відкрити Signal', onclick: () => {
+        const banner = document.querySelector('.dev-banner');
+        if (banner) banner.click(); else { proposal.note = 'Посилання на розробника зараз недоступне.'; render(); }
+      } }));
+    return element('section', { class: 'ew-assistant-proposal', 'aria-label': 'Запропонувати правку чи функцію' },
+      element('h3', { text: 'Запропонувати правку чи функцію' }),
+      element('p', { class: 'ew-assistant-note', text: 'Опишіть, що змінити. Пакет формується на цьому пристрої й нічого не надсилає автоматично: ви самі передаєте його розробнику в Signal.' }),
+      kinds, area, context,
+      element('label', { class: 'ew-assistant-proposal-file' }, element('span', { text: 'Скриншот (необов’язково)' }), file),
+      proposal.previewUrl ? element('img', { class: 'ew-assistant-proposal-preview', src: proposal.previewUrl, alt: 'Попередній перегляд скриншота' }) : null,
+      element('p', { class: 'ew-assistant-note', text: 'Перед додаванням скриншота переконайтеся, що на ньому немає реальних оперативних даних.' }),
+      actions,
+      proposal.note ? element('p', { class: 'ew-assistant-status', role: 'status', text: proposal.note }) : null);
   }
   function render() {
     if (!session.state().enabled) return;
-    const oldInput = panel.querySelector('input');
+    const oldInput = panel.querySelector('.ew-assistant-input input');
     if (oldInput) pendingInput = oldInput.value;
     const bubble = element('section', { class: 'ew-assistant-bubble' }, element('header', { class: 'ew-assistant-head' },
       element('div', { class: 'ew-assistant-identity' }, element('small', { text: 'ПОМІЧНИК' }), element('strong', { text: 'КОМБАТ' })),
@@ -287,7 +350,7 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
     }
     const voice = answerLead(query, answer);
     history.push({ query, answer, voice }); history = history.slice(-20); busy = false; mode = 'help'; render(); gesture('explain');
-    announcer.textContent = [voice, answer.text].filter(Boolean).join('\n'); panel.querySelector('input')?.focus();
+    announcer.textContent = [voice, answer.text].filter(Boolean).join('\n'); panel.querySelector('.ew-assistant-input input')?.focus();
   }
   async function checkData() {
     if (busy || !session.state().enabled) return;
