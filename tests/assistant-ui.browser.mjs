@@ -65,7 +65,11 @@ try {
   await toggle.check();
   await page.waitForFunction(() => !document.querySelector('.ew-assistant-launcher').hidden);
   await page.locator('#ew-profile-close').click();
+  await mkdir('/tmp/easywar-shots', { recursive: true });
+  await page.screenshot({ path: '/tmp/easywar-shots/assistant-collapsed.png', fullPage: true });
+  assert.equal(/полковник/iu.test(await launcher.innerText()), false, 'launcher no longer mentions the rank');
   await launcher.click();
+  assert.equal(/полковник/iu.test(await panel.innerText()), false, 'panel no longer mentions the rank');
   await page.waitForFunction(() => {
     const image = document.querySelector('.ew-assistant-character > img');
     return image?.complete && image.naturalWidth > 0;

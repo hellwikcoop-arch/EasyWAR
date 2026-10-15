@@ -87,7 +87,7 @@ test('review remarks are pure, inspect counts only and reject incomplete or inva
   assert.equal(JSON.stringify(review), before);
   for (const value of [undefined, null, {}, { counts: { error: 0 } }, { counts: { error: -1, warning: 0, advice: 0 } }, { counts: { error: 0.5, warning: 0, advice: 0 } }, { counts: { error: '2', warning: 0, advice: 0 } }]) assert.equal(reviewLead(value), null);
   assert.equal(WELCOME_TEXT.heading, 'Так. Що цього разу?');
-  assert.equal(WELCOME_TEXT.body, 'Полковник КОМБАТ. Інновації прийняв. Безлад — ні. Запитуй українською й по суті.');
+  assert.equal(WELCOME_TEXT.body, 'КОМБАТ. Інновації прийняв. Безлад — ні. Запитуй українською й по суті.');
   assert.ok(Object.isFrozen(WELCOME_TEXT));
 });
 

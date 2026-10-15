@@ -3,7 +3,7 @@ import { UNKNOWN_ANSWER } from './assistant-knowledge-core.js';
 // Personality is presentation only: it never changes a cited answer or a finding.
 export const WELCOME_TEXT = Object.freeze({
   heading: 'Так. Що цього разу?',
-  body: 'Полковник КОМБАТ. Інновації прийняв. Безлад — ні. Запитуй українською й по суті.',
+  body: 'КОМБАТ. Інновації прийняв. Безлад — ні. Запитуй українською й по суті.',
 });
 
 const RUSSIAN_WORDS = new Set(('как какая какие какой какую какое где что почему зачем сколько чтобы пожалуйста ' +
@@ -63,7 +63,7 @@ export function reviewLead(review) {
   if (counts.error >= 2) return 'Хто б сумнівався: помилка на помилці. Гаразд, давай виправляти.';
   if (counts.error === 1) return 'Одна помилка. Майже порядок. Гаразд, розберімося.';
   if (counts.warning > 0) return 'Помилок за правилами немає, але є попередження. Розслаблятися зарано — перевірмо їх.';
-  if (counts.advice > 0) return 'Помилок і попереджень за правилами немає. Є поради — навіть полковник іноді їх слухає.';
+  if (counts.advice > 0) return 'Помилок і попереджень за правилами немає. Є поради — навіть КОМБАТ іноді їх слухає.';
   return 'Наявні правила зауважень не знайшли. Рано святкувати: це не схвалення даних.';
 }
 

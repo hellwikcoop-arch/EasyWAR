@@ -57,16 +57,16 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
   let mode = 'help', history = [], review = null, reviewLabel = '', status = '', navigationStatus = '', busy = false, request = 0, pendingInput = '';
   // Репліка обирається один раз на показ, щоб не мінятися під час перемальовування.
   let remarkSeed = Math.floor(Math.random() * 2147483647);
-  const launcher = element('button', { type: 'button', class: 'ew-assistant-launcher', hidden: true, 'aria-label': 'Відкрити помічника — полковник КОМБАТ', 'aria-controls': 'ew-assistant-panel', 'aria-expanded': 'false' },
+  const launcher = element('button', { type: 'button', class: 'ew-assistant-launcher', hidden: true, 'aria-label': 'Відкрити помічника КОМБАТ', 'aria-controls': 'ew-assistant-panel', 'aria-expanded': 'false' },
     element('span', { class: 'ew-assistant-avatar', 'aria-hidden': 'true' }, element('img', { src: portraitURL, alt: '', draggable: 'false' })),
     element('span', {}, element('strong', { text: 'КОМБАТ' }), element('small', { text: 'Запитати помічника' })));
-  const panel = element('aside', { id: 'ew-assistant-panel', class: 'ew-assistant-panel', hidden: true, 'aria-label': 'Полковник КОМБАТ — локальний помічник' });
+  const panel = element('aside', { id: 'ew-assistant-panel', class: 'ew-assistant-panel', hidden: true, 'aria-label': 'КОМБАТ — локальний помічник' });
   const characterImage = element('img', { src: portraitURL, alt: '', draggable: 'false', decoding: 'async' });
   const motion = createAssistantMotion({ image: characterImage, staticURL: portraitURL, clips: gestureClips });
   characterImage.addEventListener('error', () => { if (characterImage.hasAttribute('data-gesture')) motion.stop(); });
   const character = element('figure', { class: 'ew-assistant-character', 'aria-hidden': 'true' },
     characterImage,
-    element('figcaption', { text: 'ПОЛКОВНИК · КОМБАТ' }));
+    element('figcaption', { text: 'КОМБАТ' }));
   const announcer = element('span', { class: 'ew-assistant-sr', role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true' });
   const checkbox = element('input', { type: 'checkbox', id: 'ew-assistant-enable', disabled: true });
   const settings = element('section', { class: 'ew-assistant-setting', 'aria-label': 'Налаштування помічника' },
@@ -207,7 +207,7 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
     const oldInput = panel.querySelector('input');
     if (oldInput) pendingInput = oldInput.value;
     const bubble = element('section', { class: 'ew-assistant-bubble' }, element('header', { class: 'ew-assistant-head' },
-      element('div', { class: 'ew-assistant-identity' }, element('small', { text: 'ПОЛКОВНИК' }), element('strong', { text: 'КОМБАТ' })),
+      element('div', { class: 'ew-assistant-identity' }, element('small', { text: 'ПОМІЧНИК' }), element('strong', { text: 'КОМБАТ' })),
       element('span', { class: 'ew-assistant-offline', text: 'Офлайн' }),
       element('button', { type: 'button', class: 'ew-assistant-close', text: '×', 'aria-label': 'Згорнути помічника', onclick: close })),
       element('nav', { class: 'ew-assistant-tabs', 'aria-label': 'Режим помічника' }, ...[['help', 'Запитати'], ['navigate', 'Навігація'], ['review', 'Перевірити дані']].map(([id, label]) => element('button', { type: 'button', class: 'ew-assistant-tab', 'data-mode': id, 'aria-pressed': String(mode === id), text: label, onclick: () => { mode = id; render(); gesture(id === 'review' ? 'point' : 'explain'); panel.querySelector(`[data-mode="${id}"]`)?.focus(); } }))),
