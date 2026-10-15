@@ -14,6 +14,8 @@ function chunks(data, start = 12) {
   return result;
 }
 
+// Клипи зібрано з наданих GIF: у кожного жесту своя кількість кадрів по 100 мс.
+const FRAME_COUNT = { wave: 21, explain: 19, point: 23 };
 for (const id of ['wave', 'explain', 'point']) {
   test(`${id} replaces each complete frame without blending a previous pose`, async () => {
     const data = await readFile(new URL(`../src/assistant/assets/colonel-${id}.webp`, import.meta.url));
@@ -26,7 +28,7 @@ for (const id of ['wave', 'explain', 'point']) {
     assert.equal(header.readUIntLE(4, 3) + 1, 384);
     assert.equal(header.readUIntLE(7, 3) + 1, 576);
     const frames = parts.filter(item => item.type === 'ANMF');
-    assert.equal(frames.length, 23);
+    assert.equal(frames.length, FRAME_COUNT[id]);
     let duration = 0;
     for (const { data: frame } of frames) {
       assert.equal(frame.readUIntLE(0, 3), 0, 'full canvas starts at x=0');
@@ -37,7 +39,7 @@ for (const id of ['wave', 'explain', 'point']) {
       assert.equal(frame[15], 3, 'dispose to background and do not blend');
       assert.ok(chunks(frame, 16).some(item => item.type === 'VP8L'), 'lossless image pixels');
     }
-    assert.equal(duration, 2300);
+    assert.equal(duration, FRAME_COUNT[id] * 100);
   });
 }
 

@@ -17,8 +17,8 @@ async function loadKnowledge() {
 
 const portraitURL = new URL('./assets/colonel-kombat-stable.png', import.meta.url).href;
 const gestureClips = {
-  wave: { url: new URL('./assets/colonel-wave.webp', import.meta.url).href, durationMs: 2300 },
-  explain: { url: new URL('./assets/colonel-explain.webp', import.meta.url).href, durationMs: 2300 },
+  wave: { url: new URL('./assets/colonel-wave.webp', import.meta.url).href, durationMs: 2100 },
+  explain: { url: new URL('./assets/colonel-explain.webp', import.meta.url).href, durationMs: 1900 },
   point: { url: new URL('./assets/colonel-point.webp', import.meta.url).href, durationMs: 2300 }
 };
 
