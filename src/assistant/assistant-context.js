@@ -33,3 +33,11 @@ export async function readVisibleAssistantContext() {
   }
   return { ...reviewContext({ branch, workbook, sheets }), isCurrent };
 }
+
+/** Чи відкрито довідник у активному модулі: читає лише видимість вкладки, без даних таблиць. */
+export function referenceOpen(branch) {
+  try {
+    const view = moduleWindow(branch)?.document?.querySelector('#view-ref');
+    return Boolean(view && !view.hidden && view.getClientRects().length);
+  } catch { return false; }
+}

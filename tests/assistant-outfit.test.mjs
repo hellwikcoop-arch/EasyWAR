@@ -17,3 +17,13 @@ test('для кожного одягу є файл портрета', async () =
     await access(new URL(`../src/assistant/assets/colonel-outfit-${id}.webp`, import.meta.url));
   }
 });
+
+import { outfitFor } from '../src/assistant/assistant-outfit-core.js';
+test('у відкритому довіднику КОМБАТ — лектор, але не на стартовому екрані', () => {
+  for (const branch of ['air', 'pvk', 'dshv', 'rocket', 'artillery']) {
+    assert.equal(outfitFor(branch, true), 'lecturer');
+    assert.notEqual(outfitFor(branch, false), 'lecturer');
+  }
+  assert.equal(outfitFor(undefined, true), 'default');
+  assert.equal(outfitFor('air', 'yes'), 'pilot');
+});

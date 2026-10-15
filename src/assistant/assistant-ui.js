@@ -1,9 +1,9 @@
-import { outfitForBranch } from './assistant-outfit-core.js';
+import { outfitFor } from './assistant-outfit-core.js';
 import './assistant-ui.css';
 import { createAssistantSession } from './assistant-session-core.js';
 import { searchKnowledge, isInstructionText } from './assistant-knowledge-core.js';
 import { reviewAssistantData } from './assistant-rules-core.js';
-import { readVisibleAssistantContext } from './assistant-context.js';
+import { readVisibleAssistantContext, referenceOpen } from './assistant-context.js';
 import { stateQuestion, answerApplicationState } from './assistant-state-core.js';
 import { createAssistantMotion } from './assistant-motion.js';
 import { languageReply, answerLead, reviewLead, welcomeRemark, reviewRemark, explainLead, WELCOME_TEXT } from './assistant-persona-core.js';
@@ -26,7 +26,8 @@ const outfitPortraits = {
   dress: new URL('./assets/colonel-outfit-dress.webp', import.meta.url).href,
   dshv: new URL('./assets/colonel-outfit-dshv.webp', import.meta.url).href,
   rocket: new URL('./assets/colonel-outfit-rocket.webp', import.meta.url).href,
-  artillery: new URL('./assets/colonel-outfit-artillery.webp', import.meta.url).href
+  artillery: new URL('./assets/colonel-outfit-artillery.webp', import.meta.url).href,
+  lecturer: new URL('./assets/colonel-outfit-lecturer.webp', import.meta.url).href
 };
 let portraitURL = defaultPortraitURL;
 const gestureClips = {
@@ -84,7 +85,8 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
   // Одяг відповідає відкритому модулю; жести (вітання, вказівка) намальовані лише для базового образу.
   let outfit = 'default';
   function applyOutfit() {
-    const next = outfitForBranch(document.body.dataset.activeBranch);
+    const branch = document.body.dataset.activeBranch;
+    const next = outfitFor(branch, branch ? referenceOpen(branch) : false);
     if (next === outfit) return;
     outfit = next; portraitURL = outfitPortraits[next];
     avatarImage.src = portraitURL;
@@ -406,7 +408,9 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
   const branchObserver = new MutationObserver(() => { applyOutfit(); explain.stop('closed'); motion.stop(); session.invalidate(); request++; busy = false; review = null; status = ''; if (!panel.hidden) render(); });
   branchObserver.observe(document.body, { attributes: true, attributeFilter: ['data-active-branch'] });
   applyOutfit();
-  window.addEventListener('pagehide', () => { explain.stop(); session.reset(); clear(); motion.dispose(); unsubscribeUpdate(); });
+  // Вкладка довідника змінюється всередині модуля, тож стан перевіряємо раз на секунду (дешевий запит до DOM).
+  const outfitTimer = setInterval(applyOutfit, 1000);
+  window.addEventListener('pagehide', () => { clearInterval(outfitTimer); explain.stop(); session.reset(); clear(); motion.dispose(); unsubscribeUpdate(); });
   panel.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); if (explain.isActive()) explain.stop('escape'); else close(); } });
   return { settings, updateSession, disable: () => { session.reset(); clear(); checkbox.disabled = true; } };
 }
