@@ -10,6 +10,8 @@
 <style id="easywar-command-mode-css">
 /* У командному режимі є лише дашборд: внесення доповідей і довідник ховаємо. */
 html[data-command="dshv"] #tab-entry, html[data-command="dshv"] #tab-ref, html[data-command="dshv"] .snav-entry, html[data-command="dshv"] .snav-ref { display: none !important; }
+/* Вікно УДШВ до відкриття таблиці: маруновий акцент зверху з назвою роду військ. Після відкриття дашборда зникає. */
+html[data-command="dshv"] body:not(.udshv-open)::before { content: "Десантно-штурмові війська"; display: block; position: relative; inset: auto; z-index: 1; opacity: 1; pointer-events: none; padding: 9px 18px; background: linear-gradient(90deg, #5a1424, #7a1f31 50%, #5a1424); border-bottom: 2px solid #3d0c18; color: #f6e7d2; text-align: center; font: 700 13px/1.2 var(--sans); letter-spacing: .16em; text-transform: uppercase; }
 /* Телефон: у вікні командування лишаємо назву файлу; зайві кнопки шапки ховаємо. */
 @media (max-width: 640px) {
   html[data-command="dshv"] #ewx-open, html[data-command="dshv"] #motionBtn { display: none !important; }
