@@ -348,7 +348,7 @@ function requestTab(scope) {
 }
 
 if (typeof window !== 'undefined') {
-  window.EWOwnLosses = { connect: connectBound, disconnect: disconnectBound, showTab: requestTab, isBound: scope => Boolean(scopeState(scope).bound) };
+  window.EWOwnLosses = { connect: connectBound, disconnect: disconnectBound, showTab: requestTab, isBound: scope => Boolean(scopeState(scope).bound), snapshot: scope => scopes.get(scope)?.own || null };
   if (typeof document?.dispatchEvent === 'function') document.dispatchEvent(new Event('ownlosses:ready'));
 }
 

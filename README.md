@@ -46,6 +46,7 @@ The original source must remain auditable and must not be silently overwritten b
 │   └── environments/environment.toml
 ├── docs/
 │   ├── ARCHITECTURE.md
+│   ├── ASSISTANT.md
 │   ├── BACKUP_AND_RECOVERY.md
 │   ├── DATABASE.md
 │   ├── MACOS_PACKAGING.md
@@ -56,10 +57,12 @@ The original source must remain auditable and must not be silently overwritten b
 ├── .github/workflows/desktop-build.yml
 ├── script/build_and_run.sh
 ├── script/import_unified_html.mjs
+├── script/assistant_index.mjs  # генерація локального індексу довідки
 ├── src/
 │   ├── index.html   # launcher: вибір роду військ
 │   ├── air.html     # Повітряні Сили + desktop-інтеграції
 │   ├── rocket.html  # Ракетні Війська
+│   ├── assistant/   # локальна довідка й перевірка відкритих даних без моделі
 │   └── aircraft-viewer.html  # інтерактивні літаки у вкладці «Довідник» ПС (кадр, без мережі)
 ├── src-tauri/
 │   ├── capabilities/default.json
@@ -84,6 +87,16 @@ The Tauri content security policy is temporarily unset because the preserved
 legacy application relies on inline scripts and styles. CSP hardening must be
 done alongside the incremental frontend migration, not by silently breaking
 the existing application.
+
+Локальний помічник «КОМБАТ» (`src/assistant/`) підключений у наявному
+діалозі профілів: явне увімкнення діє лише до завершення поточного входу.
+Він шукає уривки вбудованої довідки й пояснює наявні перевірки відкритої
+таблиці, без мовної моделі, мережі, запису чи постійної історії розмов.
+Кнопки навігації відкривають штатні панелі профілів, резервних копій і
+оновлень; стан оновлення відображається з уже виконаної перевірки.
+Після зміни документів із дозволеного переліку потрібно запустити
+`node script/assistant_index.mjs`; режим `--check` перевіряє актуальність
+індексу. Деталі етапу 1 — [docs/ASSISTANT.md](docs/ASSISTANT.md).
 
 ## User documentation
 
