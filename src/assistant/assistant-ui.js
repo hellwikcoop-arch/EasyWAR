@@ -5,7 +5,9 @@ import { reviewAssistantData } from './assistant-rules-core.js';
 import { readVisibleAssistantContext } from './assistant-context.js';
 import { stateQuestion, answerApplicationState } from './assistant-state-core.js';
 import { createAssistantMotion } from './assistant-motion.js';
-import { languageReply, answerLead, reviewLead, welcomeRemark, reviewRemark, WELCOME_TEXT } from './assistant-persona-core.js';
+import { languageReply, answerLead, reviewLead, welcomeRemark, reviewRemark, explainLead, WELCOME_TEXT } from './assistant-persona-core.js';
+import { explainElement } from './assistant-explain-core.js';
+import { createExplainController } from './assistant-explain.js';
 import { appUpdateState } from '../app-update-state-core.js';
 
 // The knowledge index is large: it loads on the first question, not when the launcher starts.
@@ -58,6 +60,8 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
   let mode = 'help', history = [], review = null, reviewLabel = '', status = '', navigationStatus = '', busy = false, request = 0, pendingInput = '';
   // Репліка обирається один раз на показ, щоб не мінятися під час перемальовування.
   let remarkSeed = Math.floor(Math.random() * 2147483647);
+  // Режим «Пояснити»: результат останнього кліку в модулі. Нічого не зберігається поза сесією профілю.
+  let explainResult = null, explainNote = '';
   const launcher = element('button', { type: 'button', class: 'ew-assistant-launcher', hidden: true, 'aria-label': 'Відкрити помічника КОМБАТ', 'aria-controls': 'ew-assistant-panel', 'aria-expanded': 'false' },
     element('span', { class: 'ew-assistant-avatar', 'aria-hidden': 'true' }, element('img', { src: portraitURL, alt: '', draggable: 'false' })),
     element('span', {}, element('strong', { text: 'КОМБАТ' }), element('small', { text: 'Запитати помічника' })));
@@ -74,8 +78,23 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
     element('label', {}, checkbox, element('span', { text: 'Увімкнути локального помічника' })),
     element('small', { text: 'Лише для поточного входу в профіль. Довідка та перевірка відкритої таблиці без інтернету. Записів не створює; розмови не зберігає.' }));
   document.body.append(launcher, panel, announcer);
+  const explain = createExplainController({
+    onExplain(descriptor) {
+      if (!descriptor || !session.state().enabled) return;
+      explainResult = explainElement(descriptor); explainNote = '';
+      mode = 'explain';
+      if (panel.hidden) { panel.hidden = false; launcher.setAttribute('aria-expanded', 'true'); }
+      render(); gesture(explainResult.status === 'found' ? 'point' : 'explain');
+      announcer.textContent = [explainLead(explainResult), explainResult.title, explainResult.what, ...explainResult.basis].filter(Boolean).join('\n');
+    },
+    onStop(reason) {
+      explainNote = reason === 'escape' ? 'Режим пояснення вимкнено клавішею Esc.' : 'Режим пояснення вимкнено: модуль закрито або змінено.';
+      if (!panel.hidden && session.state().enabled) render();
+      announcer.textContent = explainNote;
+    }
+  });
 
-  function clear() { motion.stop(); request++; history = []; pendingInput = ''; review = null; status = ''; navigationStatus = ''; busy = false; checkbox.checked = false; panel.hidden = true; launcher.hidden = true; launcher.setAttribute('aria-expanded', 'false'); panel.replaceChildren(); announcer.textContent = ''; }
+  function clear() { explain.stop(); explainResult = null; explainNote = ''; motion.stop(); request++; history = []; pendingInput = ''; review = null; status = ''; navigationStatus = ''; busy = false; checkbox.checked = false; panel.hidden = true; launcher.hidden = true; launcher.setAttribute('aria-expanded', 'false'); panel.replaceChildren(); announcer.textContent = ''; }
   function updateSession(id) {
     const previous = session.state();
     const next = session.setProfile(id);
@@ -89,7 +108,7 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
     launcher.querySelector('small').textContent = appUpdateState.getSnapshot().status === 'available' ? 'Є оновлення' : 'Запитати помічника';
   }
   function gesture(id) { if (!panel.hidden && session.state().enabled) motion.play(id); }
-  function close() { motion.stop(); panel.hidden = true; launcher.setAttribute('aria-expanded', 'false'); if (!launcher.hidden) launcher.focus(); }
+  function close() { explain.stop(); motion.stop(); panel.hidden = true; launcher.setAttribute('aria-expanded', 'false'); if (!launcher.hidden) launcher.focus(); }
   // Натискання на планку «Зв'язок з розробником»: КОМБАТ показує на скроню. Посилання діє як завжди.
   document.addEventListener('click', event => { if (event.target instanceof Element && event.target.closest('.dev-banner')) gesture('attention'); });
   function open() { if (!session.state().enabled) return; panel.hidden = false; launcher.setAttribute('aria-expanded', 'true'); render(); panel.querySelector('input')?.focus(); gesture('wave'); }
@@ -205,6 +224,34 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
       target.click();
     });
   }
+  function explainContent() {
+    const on = explain.isActive();
+    const body = element('div');
+    body.append(
+      element('p', { class: 'ew-assistant-note', text: 'Увімкніть режим і клікніть по будь-якому показнику, панелі чи кнопці дашборду ПС, РВ або УДШВ. КОМБАТ скаже, що це, і на чому засновано число. Кліки в цьому режимі нічого не змінюють.' }),
+      element('button', {
+        type: 'button', class: 'ew-assistant-primary ew-assistant-explain-toggle', 'aria-pressed': String(on), text: on ? 'Вимкнути режим пояснення' : 'Увімкнути режим пояснення',
+        onclick: () => {
+          if (explain.isActive()) { explain.stop(); explainNote = 'Режим пояснення вимкнено.'; }
+          else if (explain.start()) { explainNote = 'Режим увімкнено. Клікніть по елементу дашборду. Esc у модулі — вихід.'; gesture('explain'); }
+          else explainNote = 'Відкрийте дашборд ПС, РВ або УДШВ — режим працює у відкритому модулі.';
+          render(); announcer.textContent = explainNote; if (!explain.isActive()) panel.querySelector('.ew-assistant-explain-toggle')?.focus();
+        }
+      }));
+    if (explainNote) body.append(element('p', { class: 'ew-assistant-status', role: 'status', text: explainNote }));
+    if (explainResult) {
+      const card = element('section', { class: 'ew-assistant-explain', 'aria-label': 'Пояснення елемента' },
+        element('p', { class: 'ew-assistant-lead', text: explainLead(explainResult) }),
+        element('h3', { text: explainResult.title }),
+        explainResult.live ? element('p', { class: 'ew-assistant-explain-live', text: explainResult.live }) : null,
+        element('p', { text: explainResult.what }));
+      if (explainResult.basis.length) card.append(element('h4', { text: 'На чому засновано' }), element('ul', {}, ...explainResult.basis.map(item => element('li', { text: item }))));
+      if (explainResult.hint) card.append(element('p', { class: 'ew-assistant-explain-hint', text: `Підказка модуля: ${explainResult.hint}` }));
+      if (explainResult.sources.length) card.append(element('p', { class: 'ew-assistant-explain-src', text: `Джерело: ${explainResult.sources.map(item => `${item.file} → ${item.section}`).join('; ')}` }));
+      body.append(card);
+    }
+    return body;
+  }
   function render() {
     if (!session.state().enabled) return;
     const oldInput = panel.querySelector('input');
@@ -213,8 +260,8 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
       element('div', { class: 'ew-assistant-identity' }, element('small', { text: 'ПОМІЧНИК' }), element('strong', { text: 'КОМБАТ' })),
       element('span', { class: 'ew-assistant-offline', text: 'Офлайн' }),
       element('button', { type: 'button', class: 'ew-assistant-close', text: '×', 'aria-label': 'Згорнути помічника', onclick: close })),
-      element('nav', { class: 'ew-assistant-tabs', 'aria-label': 'Режим помічника' }, ...[['help', 'Запитати'], ['navigate', 'Навігація'], ['review', 'Перевірити дані']].map(([id, label]) => element('button', { type: 'button', class: 'ew-assistant-tab', 'data-mode': id, 'aria-pressed': String(mode === id), text: label, onclick: () => { mode = id; render(); gesture(id === 'review' ? 'point' : 'explain'); panel.querySelector(`[data-mode="${id}"]`)?.focus(); } }))),
-      element('div', { class: 'ew-assistant-content' }, mode === 'help' ? helpContent() : mode === 'navigate' ? navigationContent() : reviewContent()));
+      element('nav', { class: 'ew-assistant-tabs', 'aria-label': 'Режим помічника' }, ...[['help', 'Запитати'], ['navigate', 'Навігація'], ['review', 'Перевірити дані'], ['explain', 'Пояснити']].map(([id, label]) => element('button', { type: 'button', class: 'ew-assistant-tab', 'data-mode': id, 'aria-pressed': String(mode === id), text: label, onclick: () => { mode = id; render(); gesture(id === 'review' ? 'point' : 'explain'); panel.querySelector(`[data-mode="${id}"]`)?.focus(); } }))),
+      element('div', { class: 'ew-assistant-content' }, mode === 'help' ? helpContent() : mode === 'navigate' ? navigationContent() : mode === 'explain' ? explainContent() : reviewContent()));
     panel.replaceChildren(character, bubble);
     const input = element('input', { 'aria-label': 'Запитання до КОМБАТА', placeholder: 'Запитайте українською…', maxlength: '512', autocomplete: 'off' }); input.value = pendingInput;
     const form = element('form', { class: 'ew-assistant-compose' }, element('div', { class: 'ew-assistant-input' }, input, element('button', { type: 'submit', text: '→', disabled: busy, 'aria-label': 'Надіслати запитання' })), element('small', { text: 'Локальна довідка · історія лише до виходу з профілю' }));
@@ -271,10 +318,10 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
   const unsubscribeUpdate = appUpdateState.subscribe(() => { syncUpdateBadge(); if (!panel.hidden && mode === 'navigate') render(); });
   const observer = new MutationObserver(() => { if (document.documentElement.classList.contains('ew-locked')) updateSession(null); });
   observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
-  window.addEventListener('ew:branch-open', () => { motion.stop(); session.invalidate(); request++; busy = false; review = null; status = ''; if (!panel.hidden) render(); });
-  const branchObserver = new MutationObserver(() => { motion.stop(); session.invalidate(); request++; busy = false; review = null; status = ''; if (!panel.hidden) render(); });
+  window.addEventListener('ew:branch-open', () => { explain.stop('closed'); motion.stop(); session.invalidate(); request++; busy = false; review = null; status = ''; if (!panel.hidden) render(); });
+  const branchObserver = new MutationObserver(() => { explain.stop('closed'); motion.stop(); session.invalidate(); request++; busy = false; review = null; status = ''; if (!panel.hidden) render(); });
   branchObserver.observe(document.body, { attributes: true, attributeFilter: ['data-active-branch'] });
-  window.addEventListener('pagehide', () => { session.reset(); clear(); motion.dispose(); unsubscribeUpdate(); });
-  panel.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); } });
+  window.addEventListener('pagehide', () => { explain.stop(); session.reset(); clear(); motion.dispose(); unsubscribeUpdate(); });
+  panel.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); if (explain.isActive()) explain.stop('escape'); else close(); } });
   return { settings, updateSession, disable: () => { session.reset(); clear(); checkbox.disabled = true; } };
 }

@@ -137,3 +137,14 @@
   .ew-assistant-quick button { transition: none; }
 }
 .ew-assistant-remark { margin: 8px 0 12px; color: #6b6f63; font-size: 12px; font-style: italic; line-height: 1.6; }
+.ew-assistant-explain-toggle { margin-top: 4px; }
+.ew-assistant-explain-toggle[aria-pressed="true"] { background: #ed8958; border-color: #ed8958; }
+.ew-assistant-status { font-size: 11px; line-height: 1.7; color: #677557; margin: 10px 0 0; }
+.ew-assistant-explain { border: 1px solid #dfe7d2; border-radius: 12px; padding: 14px; margin: 14px 0; background: #fff; }
+.ew-assistant-explain h3 { font-size: 13px; font-weight: 650; line-height: 1.6; margin: 6px 0; overflow-wrap: anywhere; }
+.ew-assistant-explain h4 { font-size: 10px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; color: #667554; margin: 12px 0 4px; }
+.ew-assistant-explain p, .ew-assistant-explain li { font-size: 11px; color: #435137; line-height: 1.8; margin: 6px 0; overflow-wrap: anywhere; }
+.ew-assistant-explain ul { margin: 0; padding-left: 18px; }
+.ew-assistant-explain .ew-assistant-lead { font-size: 11px; font-style: italic; color: #6b6f63; margin-top: 0; }
+.ew-assistant-explain-live { font-weight: 600; }
+.ew-assistant-explain-hint, .ew-assistant-explain-src { font-size: 10px !important; color: #667554 !important; }

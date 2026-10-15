@@ -1,7 +1,10 @@
 // Optional browser gate. Start Vite first; Playwright is a development tool only.
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { mkdir, readFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { searchKnowledge } from '../src/assistant/assistant-knowledge-core.js';
 const knowledgeIndex = JSON.parse(await readFile(new URL('../src/assistant/knowledge/index.json', import.meta.url), 'utf8'));
 const require = createRequire(import.meta.url);
@@ -316,6 +319,78 @@ try {
   await launcher.click();
   await waitForGesture('wave');
   const lockedCharacter = await characterImage.elementHandle();
+
+  // Режим «Пояснити»: без відкритого дашборду він чесно відмовляє, у справжньому модулі ПС перехоплює кліки.
+  await panel.locator('[data-mode="explain"]').click();
+  assert.match(await panel.locator('.ew-assistant-content').innerText(), /клікніть по будь-якому показнику/u);
+  // Режим можна увімкнути лише у відкритому модулі ПС/РВ; тут вхід у нього лише перевіряємо й вимикаємо.
+  await panel.locator('.ew-assistant-explain-toggle').click();
+  if (await panel.locator('.ew-assistant-explain-toggle').getAttribute('aria-pressed') === 'true') await panel.locator('.ew-assistant-explain-toggle').click();
+  assert.equal(await panel.locator('.ew-assistant-explain-toggle').getAttribute('aria-pressed'), 'false');
+  const fixtureDir = await mkdtemp(join(tmpdir(), 'easywar-explain-'));
+  execFileSync('python3', ['.claude/skills/run-easywar/fixtures.py', fixtureDir], { stdio: 'ignore' });
+  const airBytes = [...await readFile(join(fixtureDir, 'air.xlsx'))];
+  await page.evaluate(() => document.querySelector('.branch-card[data-branch="air"]')?.click());
+  await page.waitForFunction(() => document.body.dataset.activeBranch === 'air');
+  const airFrame = await (async () => {
+    for (let attempt = 0; attempt < 100; attempt++) {
+      const frame = page.frames().find(item => /\/air\.html/u.test(item.url()));
+      if (frame && await frame.evaluate(() => Boolean(window.__AV?.connect)).catch(() => false)) return frame;
+      await page.waitForTimeout(100);
+    }
+    throw new Error('Модуль ПС не завантажився');
+  })();
+  await airFrame.evaluate(bytes => window.__AV.connect(new Uint8Array(bytes), 'synthetic-air.xlsx', null, true), airBytes);
+  await airFrame.waitForFunction(() => window.__DASH?.rows?.length > 0);
+  await airFrame.locator('button.tab', { hasText: 'Дашборд' }).click();
+  await airFrame.locator('.kc').first().waitFor();
+  await panel.locator('[data-mode="explain"]').click();
+  await panel.locator('.ew-assistant-explain-toggle').click();
+  assert.equal(await panel.locator('.ew-assistant-explain-toggle').getAttribute('aria-pressed'), 'true');
+  assert.equal(await airFrame.evaluate(() => document.documentElement.classList.contains('ew-explain-on')), true);
+  const activeTab = () => airFrame.locator('.snav-b.on').getAttribute('data-t');
+  const tabBefore = await activeTab();
+  // Клік по вкладці не змінює стан модуля, а пояснюється.
+  await airFrame.locator('button[data-t="p-map"]').click();
+  assert.equal(await activeTab(), tabBefore, 'режим пояснення не виконує дію');
+  await panel.locator('.ew-assistant-explain h3', { hasText: 'Вкладка «Карта»' }).waitFor();
+  // Картка показника: заголовок, живе значення, формула; рамка стоїть навколо картки.
+  const card = airFrame.locator('.kc', { hasText: 'Вильоти' }).first();
+  await card.click();
+  await panel.locator('.ew-assistant-explain h3', { hasText: 'Вильоти' }).waitFor();
+  const liveValue = await card.locator('.k-v').innerText();
+  assert.match(await panel.locator('.ew-assistant-explain-live').innerText(), new RegExp(liveValue.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'u'));
+  assert.match(await panel.locator('.ew-assistant-explain').innerText(), /Один запис — один виліт/u);
+  // Рамка задана стилем (її рух між елементами — CSS-перехід), тому порівнюємо задані межі з межами картки.
+  const placed = await airFrame.evaluate(() => {
+    const box = document.querySelector('.ew-explain-frame'), style = box.style, kc = [...document.querySelectorAll('.kc')].find(item => /Вильоти/u.test(item.querySelector('.k-l')?.textContent || '')).getBoundingClientRect();
+    const rect = { x: parseFloat(style.left), y: parseFloat(style.top), w: parseFloat(style.width), h: parseFloat(style.height) };
+    return { rect, inside: rect.x >= kc.left - 8 && rect.y >= kc.top - 8 && rect.x + rect.w <= kc.right + 8 && rect.y + rect.h <= kc.bottom + 8, opacity: style.opacity };
+  });
+  assert.ok(placed.inside && placed.opacity === '1', 'рамка стоїть на елементі всередині картки ' + JSON.stringify(placed));
+  await page.screenshot({ path: '/tmp/easywar-shots/assistant-explain-kpi.png', fullPage: true });
+  await airFrame.locator('.kh-eff').click();
+  await panel.locator('.ew-assistant-explain h3', { hasText: 'Ефективність' }).waitFor();
+  assert.match(await panel.locator('.ew-assistant-explain').innerText(), /\(влучання \+ k × часткові\) ÷ \(усі записи − відбої\) × 100/u);
+  await airFrame.locator('.dpanel h2', { hasText: 'Час доби' }).first().scrollIntoViewIfNeeded();
+  await airFrame.locator('.dpanel h2', { hasText: 'Час доби' }).first().click();
+  await panel.locator('.ew-assistant-explain h3', { hasText: 'Час доби' }).waitFor();
+  await page.screenshot({ path: '/tmp/easywar-shots/assistant-explain-panel.png', fullPage: true });
+  // Esc у модулі виходить з режиму; після цього кліки знову виконують дії.
+  await airFrame.locator('body').press('Escape');
+  await page.waitForFunction(() => document.querySelector('.ew-assistant-explain-toggle')?.getAttribute('aria-pressed') === 'false');
+  assert.match(await panel.locator('.ew-assistant-content').innerText(), /вимкнено клавішею Esc/u);
+  assert.equal(await airFrame.evaluate(() => document.documentElement.classList.contains('ew-explain-on') || Boolean(document.querySelector('.ew-explain-frame'))), false, 'слід режиму прибрано з модуля');
+  await airFrame.locator('button[data-t="p-map"]').click();
+  await airFrame.waitForFunction(() => document.querySelector('.snav-b.on')?.dataset.t === 'p-map');
+  // Згортання панелі теж вимикає режим.
+  await panel.locator('.ew-assistant-explain-toggle').click();
+  assert.equal(await airFrame.evaluate(() => document.documentElement.classList.contains('ew-explain-on')), true);
+  await panel.locator('.ew-assistant-close').click();
+  assert.equal(await airFrame.evaluate(() => document.documentElement.classList.contains('ew-explain-on')), false);
+  await rm(fixtureDir, { recursive: true, force: true });
+  await launcher.click();
+  await waitForGesture('wave');
 
   // Locking clears the panel and pending answers immediately.
   await input.fill('Як працюють профілі?');

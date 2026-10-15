@@ -57,6 +57,11 @@ export function answerLead(query, answer) {
   return 'До справи. Ось що маємо.';
 }
 
+export function explainLead(result) {
+  if (!result) return null;
+  return result.status === 'found' ? 'Дивись сюди. Доповідаю.' : 'Цього в довідці немає, а вигадувати не буду.';
+}
+
 export function reviewLead(review) {
   const counts = review?.counts;
   if (!counts || !['error', 'warning', 'advice'].every(kind => Number.isSafeInteger(counts[kind]) && counts[kind] >= 0)) return null;
