@@ -692,6 +692,9 @@ body[data-active-branch="air"] #branch-controls,body[data-active-branch="pvk"] #
 #view-start .branch-card.branch-card-soon:not(.branch-card-live) { opacity: .62; }
 /* Артилерія без підпису під назвою: іконка й назва в одному ряду, назва по центру висоти іконки. */
 #view-start .branch-card.branch-card-soon[data-branch="artillery"] .bc-icon { grid-row: auto; }
+/* Емблема артилерії — того ж розміру, що й у сусідніх плиток. */
+#view-start .branch-card.branch-card-soon[data-branch="artillery"] .bc-icon { width: 104px !important; height: 88px !important; }
+#view-start .branch-card.branch-card-soon[data-branch="artillery"] .bc-icon img { width: 104px !important; height: 66px !important; object-fit: contain; }
 @keyframes slRise { from { opacity: 0; transform: translateY(16px); } }
 #view-start .branch-cards .cmd-slot, #view-start .branch-cards .branch-card { animation: slRise .6s cubic-bezier(.2,.8,.2,1) backwards; }
 #view-start .branch-cards [data-col="air"] > .cmd-slot { animation-delay: .05s; }
