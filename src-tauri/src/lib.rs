@@ -4,6 +4,7 @@ pub mod backup;
 pub mod base_tables;
 mod database;
 mod desktop_shell;
+pub mod local_model;
 pub mod local_profiles;
 mod migration_startup;
 pub mod phone_export;
@@ -27,6 +28,10 @@ use backup::BackupStore;
 use base_tables::BaseTable;
 use chrono::{SecondsFormat, Utc};
 use database::{DatabaseStatus, DatabaseStatusStore};
+use local_model::{
+    GenerationRequest, LocalModelRuntime, LocalModelSettings, LocalModelStatus, LocalModelStore,
+    ModelEvent,
+};
 use local_profiles::{Branch, LocalProfileStore, LocalProfilesState};
 use phone_export::PhoneDashboard;
 use position_templates::PositionDatabaseTemplate;
@@ -215,8 +220,169 @@ fn get_profile_session(session: tauri::State<'_, ProfileSession>) -> Option<Stri
 }
 
 #[tauri::command]
-fn lock_local_profile(session: tauri::State<'_, ProfileSession>) {
+fn lock_local_profile(
+    session: tauri::State<'_, ProfileSession>,
+    model: tauri::State<'_, LocalModelRuntime>,
+) {
     session.set(None);
+    // A locked profile never leaves a model answering or holding memory.
+    model.stop();
+}
+
+fn local_model_signed_in(session: &ProfileSession) -> Result<(), String> {
+    if session.get().is_none() {
+        return Err("Спершу увійдіть у профіль".to_owned());
+    }
+    Ok(())
+}
+
+async fn local_model_status_now(
+    store: &LocalModelStore,
+    runtime: &LocalModelRuntime,
+) -> Result<LocalModelStatus, String> {
+    let settings = store.load().await.map_err(|error| error.to_string())?;
+    let mut status = local_model::quick_status(&settings);
+    status.loaded = runtime.is_loaded();
+    status.busy = runtime.is_busy();
+    Ok(status)
+}
+
+/// Стан необов'язкової локальної мовної моделі. Нічого не завантажує й не запускає.
+#[tauri::command]
+async fn get_local_model_status(
+    store: tauri::State<'_, LocalModelStore>,
+    runtime: tauri::State<'_, LocalModelRuntime>,
+) -> Result<LocalModelStatus, String> {
+    local_model_status_now(&store, &runtime).await
+}
+
+/// Користувач сам обирає папку пакета моделі; перевіряються маніфест і SHA-256 файлів.
+/// Модель після цього лишається вимкненою, поки її не ввімкнуть окремо.
+#[tauri::command]
+async fn choose_local_model_package(
+    app: tauri::AppHandle,
+    store: tauri::State<'_, LocalModelStore>,
+    runtime: tauri::State<'_, LocalModelRuntime>,
+    session: tauri::State<'_, ProfileSession>,
+) -> Result<Option<LocalModelStatus>, String> {
+    local_model_signed_in(&session)?;
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title("Оберіть папку пакета локальної моделі")
+            .blocking_pick_folder()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let path = selected.into_path().map_err(|error| error.to_string())?;
+    let package = tauri::async_runtime::spawn_blocking(move || local_model::verify_package(&path))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())?;
+    runtime.stop();
+    store
+        .save(
+            &LocalModelSettings {
+                package_dir: Some(package.dir.to_string_lossy().into_owned()),
+                enabled: false,
+                manifest_sha256: Some(package.manifest_sha256),
+                model_size: package.model_size,
+                model_modified: package.model_modified,
+            },
+            Utc::now(),
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    local_model_status_now(&store, &runtime).await.map(Some)
+}
+
+#[tauri::command]
+async fn set_local_model_enabled(
+    store: tauri::State<'_, LocalModelStore>,
+    runtime: tauri::State<'_, LocalModelRuntime>,
+    session: tauri::State<'_, ProfileSession>,
+    enabled: bool,
+) -> Result<LocalModelStatus, String> {
+    local_model_signed_in(&session)?;
+    let mut settings = store.load().await.map_err(|error| error.to_string())?;
+    if enabled {
+        if settings.package_dir.is_none() {
+            return Err("Спершу оберіть пакет моделі".to_owned());
+        }
+        settings.enabled = true;
+        let status = local_model::quick_status(&settings);
+        if let Some(message) = status.message {
+            return Err(message);
+        }
+    } else {
+        settings.enabled = false;
+        runtime.stop();
+    }
+    store
+        .save(&settings, Utc::now())
+        .await
+        .map_err(|error| error.to_string())?;
+    local_model_status_now(&store, &runtime).await
+}
+
+#[tauri::command]
+async fn forget_local_model_package(
+    store: tauri::State<'_, LocalModelStore>,
+    runtime: tauri::State<'_, LocalModelRuntime>,
+    session: tauri::State<'_, ProfileSession>,
+) -> Result<LocalModelStatus, String> {
+    local_model_signed_in(&session)?;
+    runtime.stop();
+    store
+        .save(&LocalModelSettings::default(), Utc::now())
+        .await
+        .map_err(|error| error.to_string())?;
+    local_model_status_now(&store, &runtime).await
+}
+
+/// Єдиний вхід до моделі: короткий підготовлений запит із фактами. Токени йдуть
+/// у `on_event`; модель не бачить жодної іншої команди застосунку.
+#[tauri::command]
+async fn generate_local_answer(
+    store: tauri::State<'_, LocalModelStore>,
+    runtime: tauri::State<'_, LocalModelRuntime>,
+    session: tauri::State<'_, ProfileSession>,
+    request: GenerationRequest,
+    on_event: tauri::ipc::Channel<ModelEvent>,
+) -> Result<String, String> {
+    local_model_signed_in(&session)?;
+    request.validate().map_err(|error| error.to_string())?;
+    let settings = store.load().await.map_err(|error| error.to_string())?;
+    if !settings.enabled {
+        return Err(local_model::ModelError::Disabled.to_string());
+    }
+    let runtime = runtime.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let package = if runtime.is_loaded() {
+            None
+        } else {
+            Some(local_model::package_for_start(&settings)?)
+        };
+        runtime.generate(package.as_ref(), &request, &mut |event| {
+            let _ = on_event.send(event);
+        })
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn cancel_local_answer(runtime: tauri::State<'_, LocalModelRuntime>) {
+    runtime.cancel();
+}
+
+#[tauri::command]
+fn stop_local_model(runtime: tauri::State<'_, LocalModelRuntime>) {
+    runtime.stop();
 }
 
 #[tauri::command]
@@ -1255,6 +1421,8 @@ pub fn run() {
             app.manage(Repository::new(pool.clone()));
             app.manage(LocalProfileStore::new(pool.clone()));
             app.manage(ProfileSession::default());
+            app.manage(LocalModelStore::new(SettingsStore::new(pool.clone())));
+            app.manage(LocalModelRuntime::default());
             app.manage(WorkspaceTemplateStore::new(pool.clone()));
             app.manage(SignalReceiveController::default());
             app.manage(DatabaseStatusStore::new(pool.clone()));
@@ -1277,6 +1445,13 @@ pub fn run() {
             delete_local_profile,
             get_profile_session,
             lock_local_profile,
+            get_local_model_status,
+            choose_local_model_package,
+            set_local_model_enabled,
+            forget_local_model_package,
+            generate_local_answer,
+            cancel_local_answer,
+            stop_local_model,
             update_local_profile_details,
             set_local_profile_password,
             choose_profile_database,
@@ -1321,8 +1496,14 @@ pub fn run() {
             export_approved_xlsx,
             export_approved_xlsx_from_reference
         ])
-        .run(context)
-        .expect("помилка запуску EasyWAR");
+        .build(context)
+        .expect("помилка запуску EasyWAR")
+        .run(|app, event| {
+            // Рушій локальної моделі — дочірній процес: при виході із застосунку його зупиняють явно.
+            if matches!(event, tauri::RunEvent::Exit) {
+                app.state::<LocalModelRuntime>().stop();
+            }
+        });
 }
 
 #[cfg(test)]

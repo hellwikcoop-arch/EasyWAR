@@ -157,3 +157,22 @@
 .ew-assistant-proposal-preview { max-width: 100%; max-height: 140px; border-radius: 8px; object-fit: contain; border: 1px solid rgba(103, 117, 87, .35); }
 .ew-assistant-proposal-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .ew-assistant-proposal-actions button:not(.ew-assistant-primary) { font: inherit; font-size: 12px; padding: 6px 10px; border-radius: 8px; border: 1px solid rgba(103, 117, 87, .5); background: transparent; color: inherit; cursor: pointer; }
+
+/* Локальна модель: підключення в «Профілях» і елементи розмови. Колір береться з поточної теми. */
+.ew-assistant-model { display: grid; gap: 8px; margin-top: 6px; padding-top: 12px; border-top: 1px solid var(--line, #ccd4c0); }
+.ew-assistant-model strong { font-size: 12px; font-weight: 650; color: var(--ink, #243024); }
+.ew-assistant-model[hidden] { display: none; }
+.ew-assistant-model-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.ew-assistant-model-actions button { font: inherit; font-size: 12px; padding: 7px 11px; border-radius: 8px; border: 1px solid var(--line, #ccd4c0); background: transparent; color: var(--ink, #243024); cursor: pointer; }
+.ew-assistant-model-actions button:disabled { opacity: .55; cursor: default; }
+.ew-assistant-mode { display: block; margin-top: 9px; font-size: 10px; line-height: 1.6; color: #687458; white-space: normal; }
+.ew-assistant-turn-actions, .ew-assistant-suggestions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; white-space: normal; }
+.ew-assistant-turn-action, .ew-assistant-suggestion { font: inherit; font-size: 11px; line-height: 1.4; padding: 8px 12px; border-radius: 10px; cursor: pointer; text-align: left; }
+.ew-assistant-turn-action { border: 1px solid #71854f; background: #71854f; color: #fff; }
+.ew-assistant-suggestion { border: 1px solid #bac9a2; background: #fff; color: #44563a; }
+.ew-assistant-turn-action:disabled, .ew-assistant-suggestion:disabled { opacity: .55; cursor: default; }
+.ew-assistant-thinking { display: flex; align-items: center; justify-content: space-between; gap: 12px; white-space: normal; }
+.ew-assistant-thinking-text { color: #495d33; font-weight: 600; animation: ew-assistant-pulse 1.6s ease-in-out infinite; }
+.ew-assistant-stop { font: inherit; font-size: 11px; padding: 6px 12px; border-radius: 8px; border: 1px solid #bac9a2; background: #fff; color: #44563a; cursor: pointer; }
+@keyframes ew-assistant-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+@media (prefers-reduced-motion: reduce) { .ew-assistant-thinking-text { animation: none; } }
