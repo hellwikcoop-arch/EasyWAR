@@ -322,3 +322,24 @@ html.ew-boot #view .panel, html.ew-boot #view .unit-card { animation: ewRise .6s
 td.unit-cell { display: table-cell; white-space: nowrap; }
 td.unit-cell .crest-s { display: inline-block; vertical-align: middle; margin: 0 8px 0 0; height: 24px; max-width: 28px; }
 td.unit-cell span, td.unit-cell b { vertical-align: middle; }
+
+/* Заголовок картки підрозділу: емблема поруч із назвою. */
+.panel-head h2.unit-title { display: flex; align-items: center; gap: 10px; }
+.panel-head h2.unit-title .crest-s { margin: 0; height: 34px; max-width: 38px; }
+
+/* Фони плиток зведення: знімки з наявних ілюстрацій (brand-art, ammo-art), приглушені й розчинені в плитці, щоб цифри лишалися читабельними.
+   Без анімації; у світлій темі ще слабші. */
+.kpi > * { position: relative; z-index: 1; }
+.kpi[data-art]::after { content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none; opacity: .62; background-repeat: no-repeat;
+  -webkit-mask-image: linear-gradient(90deg, transparent 18%, #000 78%); mask-image: linear-gradient(90deg, transparent 18%, #000 78%); }
+.kpi[data-art="gun"]::after { background-image: url('./brand-art/artillery-gun.webp'); background-size: 135% auto; background-position: 8% 92%; }
+.kpi[data-art="crossed"]::after { background-image: url('./brand-art/artillery.webp'); background-size: auto 92%; background-position: right 10px center; opacity: .5; }
+.kpi[data-art="shells"]::after { background-size: auto 108%;
+  background-image: url('./ammo-art/155-he.webp'), url('./ammo-art/155-he.webp');
+  background-position: right 10px bottom -4px, right 50px bottom -14px; }
+.kpi[data-art="guided"]::after { background-image: url('./ammo-art/guided.webp'); background-size: auto 108%; background-position: right 24px bottom -4px; }
+.kpi[data-art="charges"]::after { background-size: auto 96%;
+  background-image: url('./ammo-art/charge-m119a2.webp'), url('./ammo-art/charge-m4a2.webp'), url('./ammo-art/charge-m3a1.webp');
+  background-position: right 12px center, right 44px center, right 88px center; }
+:root[data-theme="light"] .kpi[data-art]::after { opacity: .3; }
+@media (max-width: 640px) { .kpi[data-art]::after { opacity: .4; } }

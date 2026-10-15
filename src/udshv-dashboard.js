@@ -17,6 +17,10 @@ import {
 } from './udshv-dashboard-core.js';
 import { consumeOwnLossesTabRequest, ownLossesHost, ownLossesPage } from './own-losses-dashboard.js';
 import { playMotion, resetMotion } from './dashboard-motion.js';
+import { crestImg } from './unit-emblems.js';
+
+/** Емблема підрозділу або порожнє місце такого ж розміру (назви стоять рівно). */
+const crest = (name, cls = 'ud-crest') => crestImg(name, cls, true);
 
 const state = { workbook: null, view: 'summary', preset: 'week', anchor: '', from: '', to: '', units: [], unitsOpen: false, focusUnit: null, ovt: 'destroyed', sort: 'personnel' };
 
@@ -126,13 +130,13 @@ function stackedBars(series, keys, bucket, options = {}) {
     h('div', { class: 'ud-legend' }, keys.map(k => h('span', {}, h('i', { style: { background: k.color } }), k.label))));
 }
 
-function rankBars(items, color, limit = 14, total = null) {
+function rankBars(items, color, limit = 14, total = null, units = false) {
   const shown = items.slice(0, limit);
   if (!shown.length) return h('p', { class: 'ud-empty', text: 'За обраний період даних немає.' });
   const max = Math.max(1, ...shown.map(i => i.total));
   const sum = total == null ? items.reduce((s, i) => s + i.total, 0) : total;
   return h('div', { class: 'ud-rank' }, shown.map(item => h('div', { class: 'ud-rank-row', title: `${item.name}: ${number(item.total)}` },
-    h('span', { class: 'ud-rank-name', text: item.name }),
+    h('span', { class: 'ud-rank-name' }, units ? crest(item.name, 'ud-crest') : null, h('span', { text: item.name })),
     h('i', {}, h('b', { style: { width: `${item.total / max * 100}%`, background: color } })),
     h('strong', { text: number(item.total) }),
     h('small', { text: sum ? `${decimal(item.total / sum * 100)}%` : '' }))),
@@ -147,7 +151,7 @@ function heatmap(matrix, color, onUnit) {
   return h('div', { class: 'ud-scroll' }, h('table', { class: 'ud-heat' },
     h('thead', {}, h('tr', {}, h('th', { text: 'Підрозділ' }), cols.map(m => h('th', { title: m.name }, h('span', { text: m.name }))), h('th', { text: 'Разом' }))),
     h('tbody', {}, rows.sort((a, b) => b.total - a.total).map(r => h('tr', {},
-      h('th', {}, onUnit ? h('button', { type: 'button', class: 'ud-link', onclick: () => onUnit(r.unit), text: r.unit }) : r.unit),
+      h('th', {}, onUnit ? h('button', { type: 'button', class: 'ud-link ud-unitname', onclick: () => onUnit(r.unit) }, crest(r.unit, 'ud-crest'), h('span', { text: r.unit })) : h('span', { class: 'ud-unitname' }, crest(r.unit, 'ud-crest'), h('span', { text: r.unit }))),
       cols.map(m => { const v = r.cells[m.id] || 0; return h('td', { title: `${r.unit} · ${m.name}: ${number(v)}`, style: v ? { background: `color-mix(in srgb, ${color} ${Math.round(12 + v / max * 78)}%, transparent)` } : {} }, v ? number(v) : ''); }),
       h('td', { class: 'ud-total', text: number(r.total) }))))));
 }
@@ -224,7 +228,7 @@ function summaryPage(model, go) {
       section('ОВТ: знищено / пошкоджено / подавлено', null,
         stackedBars(model.ovtSeries, OVT_KEYS, model.bucket, { label: 'ОВТ по днях', onPick: pick }))),
     h('div', { class: 'ud-grid-3' },
-      section('Підрозділи за втратами о/с', null, rankBars(units.filter(u => u.personnel).map(u => ({ name: u.unit, total: u.personnel })), 'var(--ud-violet)', 13)),
+      section('Підрозділи за втратами о/с', null, rankBars(units.filter(u => u.personnel).map(u => ({ name: u.unit, total: u.personnel })), 'var(--ud-violet)', 13, null, true)),
       section('Знищено ОВТ — топ', null, rankBars(model.groups.destroyed, OVT_COLORS.destroyed, 10)),
       section('Втрати за категоріями', null, rankBars(model.groups.categories, 'var(--ud-green)', 10))));
 }
@@ -238,7 +242,7 @@ function unitsPage(model, go) {
     h('div', { class: 'ud-scroll' }, h('table', { class: 'ud-table' },
       h('thead', {}, h('tr', {}, h('th', { text: 'Підрозділ' }), cols.map(([k, label]) => h('th', { class: state.sort === k ? 'sorted' : '' }, h('button', { type: 'button', onclick: () => { state.sort = k; go(); }, text: label }))))),
       h('tbody', {}, rows.map(r => h('tr', {},
-        h('th', {}, h('button', { type: 'button', class: 'ud-link', onclick: () => { state.units = [r.unit]; state.view = 'summary'; go(); }, text: r.unit })),
+        h('th', {}, h('button', { type: 'button', class: 'ud-link ud-unitname', onclick: () => { state.units = [r.unit]; state.view = 'summary'; go(); } }, crest(r.unit, 'ud-crest'), h('span', { text: r.unit }))),
         cols.map(([k]) => h('td', { class: 'ud-num' }, h('span', { class: 'ud-cellbar', style: { width: `${(r[k] || 0) / max[k] * 100}%` } }), h('span', { text: k === 'days' ? `${r[k]}` : number(r[k]) })))))),
       h('tfoot', {}, h('tr', {}, h('th', { text: 'Разом' }), cols.map(([k]) => h('td', { class: 'ud-num', text: k === 'days' ? `${model.activeDays}` : number(totals[k]) }))))))));
 }
@@ -254,7 +258,7 @@ function personnelPage(model, go) {
       section('Підрозділи: 200 і 300', null, units.length ? h('div', { class: 'ud-rank' }, units.map(u => {
         const max = Math.max(1, ...units.map(x => x.personnel));
         return h('div', { class: 'ud-rank-row', title: `${u.unit}: 200 — ${u.kia}, 300 — ${u.wia}` },
-          h('span', { class: 'ud-rank-name', text: u.unit }),
+          h('span', { class: 'ud-rank-name' }, crest(u.unit, 'ud-crest'), h('span', { text: u.unit })),
           h('i', {}, h('b', { style: { width: `${u.kia / max * 100}%`, background: 'var(--ud-red)' } }), h('b', { style: { width: `${u.wia / max * 100}%`, background: 'var(--ud-amber)' } })),
           h('strong', { text: number(u.personnel) }), h('small', { text: `${u.kia} / ${u.wia}` }));
       })) : h('p', { class: 'ud-empty', text: 'За обраний період даних немає.' })),
@@ -329,7 +333,7 @@ function freshnessPage(go) {
     h('div', { class: 'ud-scroll' }, h('table', { class: 'ud-table ud-fresh' },
       h('thead', {}, h('tr', {}, ['Підрозділ', 'Останні дані', 'Стан', 'Діб із даними за 30'].map(label => h('th', { text: label })))),
       h('tbody', {}, f.rows.map(r => h('tr', { class: r.stale ? 'ud-stale' : '' },
-        h('th', {}, h('button', { type: 'button', class: 'ud-link', onclick: () => { state.units = [r.unit]; state.view = 'summary'; go(); }, text: r.unit })),
+        h('th', {}, h('button', { type: 'button', class: 'ud-link ud-unitname', onclick: () => { state.units = [r.unit]; state.view = 'summary'; go(); } }, crest(r.unit, 'ud-crest'), h('span', { text: r.unit }))),
         h('td', { text: r.lastDate ? dateLabel(r.lastDate) : '—' }),
         h('td', {}, h('span', { class: `ud-state ${r.stale ? 'bad' : 'ok'}`, text: agoText(r.lag) })),
         h('td', { class: 'ud-num', text: String(r.daysWithData30) }))))))));
@@ -404,7 +408,7 @@ function unitPicker(go) {
           state.focusUnit = u;
           go();
         } }),
-        h('span', { text: u })))));
+        h('span', { class: 'ud-unitname' }, crest(u, 'ud-crest ud-crest-sm'), h('span', { text: u }))))));
   if (state.focusUnit) {
     const target = state.focusUnit;
     queueMicrotask(() => { state.focusUnit = null; [...details.querySelectorAll('input')].find(i => i.value === target)?.focus(); });

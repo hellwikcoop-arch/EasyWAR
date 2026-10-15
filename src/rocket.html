@@ -349,6 +349,9 @@ html { scroll-padding-top: 70px; }
 .mk.c-hit, .mk.c-part, .mk.c-miss { stroke: var(--map-bg); stroke-width: 1.2; }
 .bars.wide .bar { grid-template-columns: minmax(118px, 1.7fr) 34px minmax(0, 1.3fr) 40px; }
 .dpanel.empty-state { padding: 26px 28px 24px; }
+/* без таблиці бічну панель приховано: головна колонка займає всю сітку, а картка «Відкрийте таблицю» стоїть по центру нормальної ширини */
+#view-dash.shell > .side[hidden] ~ .dmain { grid-column: 1 / -1; }
+.dmain > .dpanel.empty-state { justify-self: center; width: min(640px, 100%); box-sizing: border-box; }
 @media (max-width: 720px) {
   .issues .t { grid-column: 1 / -1; }
   .map-legend { position: static; display: flex; flex-wrap: wrap; gap: 4px 14px; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: var(--map-bg); }

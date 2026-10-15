@@ -260,6 +260,17 @@ group strip. It only decorates the rendered DOM and module maps via the editor
 hook; the v3.1 source stays unchanged, and every image can be replaced in the
 editor.
 
+## Емблеми підрозділів і значки боєприпасів
+
+- `src/unit-emblems-core.js` (чиста логіка, тест `tests/unit-emblem-names.test.mjs`): `emblemFile(name)` зіставляє назву підрозділу з
+  одним із файлів `src/unit-art/` (шаблони `PATTERNS` і загальний номер + тип `одшбр/ошп/оабр/реабр/омбр/оєбр`).
+- `src/unit-emblems.js`: `emblemOf(name)` (адреса через `import.meta.glob`, у Node-тестах обгорнуто в `try/catch`), `crestImg(name, cls, placeholder)` —
+  `img.crest` або порожній круг `span.crest.crest-ph`. Використовують `udshv-dashboard.js` (`.ud-crest`) і `artillery-app.js` (`unitCell`).
+- `src/artillery-icons-core.js`: `AMMO_BY_GROUP`, `ammoFile`, `chargeIconFile` — назва боєприпасу чи заряду → файл у `src/ammo-art/`
+  (`charge-*.webp` — знімки процедурних моделей зарядів). Плитки «Зведення» в Артилерії беруть фон з атрибута `data-art` (`artillery.css`).
+- Вкладка «Довідник» Артилерії викликає `ref-wiki.mount(..., { illustrationOnly })`: лише список, 3D-сцена й підпис про походження моделі; повну
+  статтю вмикає прапорець `REF_ILLUSTRATION_ONLY = false` в `artillery-app.js`.
+
 ## Довідник: сцена «Інтерактивної моделі»
 
 Вкладка «Довідник» (ПС і РВіА) складається з ES-модулів у `src/`, які збирає Vite (three — з npm). Усе працює без мережі:

@@ -35,9 +35,10 @@ const RESULTS = [['hit', 'Уражено', 'var(--hit)'], ['part', 'Пошкод
 //   data     — інший набір статей замість ref-data.js (наприклад, артилерійські боєприпаси): { GROUPS, ENTRIES, entryById, searchEntries,
 //              variantsOf, modelOf, creditOf }, відсутнє береться з ref-data.js;
 //   extra(entry) — вузол, який стаття показує під розділами (дані з вашої таблиці); refresh() малює його заново;
-//   searchText(entry) — додатковий текст для пошуку (наприклад, підписи рядків таблиці).
+//   searchText(entry) — додатковий текст для пошуку (наприклад, підписи рядків таблиці);
+//   illustrationOnly — стаття показує лише назву, варіанти й обертову 3D-ілюстрацію з підписом автора: без фактів, розділів, таблиць і підсумків.
 export function mount(host, options = {}) {
-  const { rows = () => [], media = {}, motion = () => true, onSelect, groups = null, only = null, usage = true, related = true, extra = null, searchText = null, interactive = true } = options;
+  const { rows = () => [], media = {}, motion = () => true, onSelect, groups = null, only = null, usage = true, related = true, extra = null, searchText = null, interactive = true, illustrationOnly = false } = options;
   // Силует і лінійний профіль (src/ref-art): підвантажуються окремо; без них стаття й список працюють як раніше.
   let art = {};
   const artUrl = (id, kind) => art[`./ref-art/${id}-${kind}.webp`] || null;
@@ -440,7 +441,7 @@ export function mount(host, options = {}) {
     modeBar = both ? h('div', { class: 'seg rw-modes', role: 'group', 'aria-label': 'Вигляд моделі' },
       [['live', 'Інтерактивна модель'], ['weak', (entry.weak || []).length ? weakLabel(entry) : 'Огляд']].map(([m, label]) =>
         h('button', { type: 'button', 'data-mode': m, 'aria-pressed': String(m === 'live'), text: label, onclick: () => setMode(m) }))) : null;
-    const main = h('div', { class: 'rw-main' },
+    const main = illustrationOnly ? h('div', { class: 'rw-main' }, variantBar, entry.model ? stageBox : null, slot, creditBox) : h('div', { class: 'rw-main' },
       variantBar,
       modeBar,
       airBox,
@@ -459,8 +460,9 @@ export function mount(host, options = {}) {
     article.replaceChildren(
       h('header', { class: 'rw-head' }, h('p', { class: 'rw-eyebrow', text: groupTitle(entry.group) + ' · ' + entry.origin }),
         h('h2', { text: entry.name }, entry.status ? h('span', { class: 'rw-badge', text: entry.status }) : null, entry.dual ? h('span', { class: 'rw-badge rw-both', title: 'Тип є і в ЗСУ', text: 'Обидві сторони' }) : null), h('p', { class: 'rw-alias', text: entry.alias })),
-      h('div', { class: 'rw-body' }, main, info));
+      h('div', { class: 'rw-body' + (illustrationOnly ? ' rw-solo' : '') }, main, illustrationOnly ? null : info));
     slot.replaceChildren();
+    if (illustrationOnly) return;
     renderArt(entry);
     renderUsage(entry);
     renderExtra(entry);
@@ -518,11 +520,11 @@ export function mount(host, options = {}) {
     art = m.ART_URLS || {};
     renderNav();
     const e = entryById(state.id);
-    if (e) renderArt(e);
+    if (e && !illustrationOnly) renderArt(e);
   }, () => {});
   return {
     select: id => select(id, false),
-    refresh: () => { const e = entryById(state.id); if (e) { renderUsage(e); renderExtra(e); } },
+    refresh: () => { const e = entryById(state.id); if (e && !illustrationOnly) { renderUsage(e); renderExtra(e); } },
     get id() { return state.id; },
     dispose: () => { token++; if (viewer) viewer.dispose(); viewer = null; if (aircraftFrame) aircraftFrame.src = 'about:blank'; aircraftFrame = null; },
   };
