@@ -1,3 +1,4 @@
+import { outfitForBranch } from './assistant-outfit-core.js';
 import './assistant-ui.css';
 import { createAssistantSession } from './assistant-session-core.js';
 import { searchKnowledge, isInstructionText } from './assistant-knowledge-core.js';
@@ -18,7 +19,16 @@ async function loadKnowledge() {
   return knowledge;
 }
 
-const portraitURL = new URL('./assets/colonel-kombat-stable.png', import.meta.url).href;
+const defaultPortraitURL = new URL('./assets/colonel-kombat-stable.png', import.meta.url).href;
+const outfitPortraits = {
+  default: defaultPortraitURL,
+  pilot: new URL('./assets/colonel-outfit-pilot.webp', import.meta.url).href,
+  dress: new URL('./assets/colonel-outfit-dress.webp', import.meta.url).href,
+  dshv: new URL('./assets/colonel-outfit-dshv.webp', import.meta.url).href,
+  rocket: new URL('./assets/colonel-outfit-rocket.webp', import.meta.url).href,
+  artillery: new URL('./assets/colonel-outfit-artillery.webp', import.meta.url).href
+};
+let portraitURL = defaultPortraitURL;
 const gestureClips = {
   wave: { url: new URL('./assets/colonel-wave.webp', import.meta.url).href, durationMs: 2100 },
   explain: { url: new URL('./assets/colonel-explain.webp', import.meta.url).href, durationMs: 1900 },
@@ -64,12 +74,23 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
   // Режим «Пояснити»: результат останнього кліку в модулі. Нічого не зберігається поза сесією профілю.
   let explainResult = null, explainNote = '', explainBranch = '';
   let proposal = { kind: 'fix', text: '', withContext: true, image: null, previewUrl: '', note: '' };
+  const avatarImage = element('img', { src: portraitURL, alt: '', draggable: 'false' });
   const launcher = element('button', { type: 'button', class: 'ew-assistant-launcher', hidden: true, 'aria-label': 'Відкрити помічника КОМБАТ', 'aria-controls': 'ew-assistant-panel', 'aria-expanded': 'false' },
-    element('span', { class: 'ew-assistant-avatar', 'aria-hidden': 'true' }, element('img', { src: portraitURL, alt: '', draggable: 'false' })),
+    element('span', { class: 'ew-assistant-avatar', 'aria-hidden': 'true' }, avatarImage),
     element('span', {}, element('strong', { text: 'КОМБАТ' }), element('small', { text: 'Запитати помічника' })));
   const panel = element('aside', { id: 'ew-assistant-panel', class: 'ew-assistant-panel', hidden: true, 'aria-label': 'КОМБАТ — локальний помічник' });
   const characterImage = element('img', { src: portraitURL, alt: '', draggable: 'false', decoding: 'async' });
   const motion = createAssistantMotion({ image: characterImage, staticURL: portraitURL, clips: gestureClips });
+  // Одяг відповідає відкритому модулю; жести (вітання, вказівка) намальовані лише для базового образу.
+  let outfit = 'default';
+  function applyOutfit() {
+    const next = outfitForBranch(document.body.dataset.activeBranch);
+    if (next === outfit) return;
+    outfit = next; portraitURL = outfitPortraits[next];
+    avatarImage.src = portraitURL;
+    motion.configure({ staticURL: portraitURL, clips: next === 'default' ? gestureClips : {} });
+    document.body.dataset.assistantOutfit = next;
+  }
   characterImage.addEventListener('error', () => { if (characterImage.hasAttribute('data-gesture')) motion.stop(); });
   const character = element('figure', { class: 'ew-assistant-character', 'aria-hidden': 'true' },
     characterImage,
@@ -381,9 +402,10 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
   const unsubscribeUpdate = appUpdateState.subscribe(() => { syncUpdateBadge(); if (!panel.hidden && mode === 'navigate') render(); });
   const observer = new MutationObserver(() => { if (document.documentElement.classList.contains('ew-locked')) updateSession(null); });
   observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
-  window.addEventListener('ew:branch-open', () => { explain.stop('closed'); motion.stop(); session.invalidate(); request++; busy = false; review = null; status = ''; if (!panel.hidden) render(); });
-  const branchObserver = new MutationObserver(() => { explain.stop('closed'); motion.stop(); session.invalidate(); request++; busy = false; review = null; status = ''; if (!panel.hidden) render(); });
+  window.addEventListener('ew:branch-open', () => { applyOutfit(); explain.stop('closed'); motion.stop(); session.invalidate(); request++; busy = false; review = null; status = ''; if (!panel.hidden) render(); });
+  const branchObserver = new MutationObserver(() => { applyOutfit(); explain.stop('closed'); motion.stop(); session.invalidate(); request++; busy = false; review = null; status = ''; if (!panel.hidden) render(); });
   branchObserver.observe(document.body, { attributes: true, attributeFilter: ['data-active-branch'] });
+  applyOutfit();
   window.addEventListener('pagehide', () => { explain.stop(); session.reset(); clear(); motion.dispose(); unsubscribeUpdate(); });
   panel.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); if (explain.isActive()) explain.stop('escape'); else close(); } });
   return { settings, updateSession, disable: () => { session.reset(); clear(); checkbox.disabled = true; } };

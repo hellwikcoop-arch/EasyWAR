@@ -153,3 +153,16 @@ test('invalid and inherited clips cannot load an image or start a timer', () => 
   assert.equal(f.active.size, 0);
   assert.ok(f.writes.every(url => url === staticURL));
 });
+
+test('configure змінює портрет і набір жестів: у чужому одязі старі жести не грають', () => {
+  const f = fixture();
+  assert.equal(f.controller.play('greet'), true);
+  f.controller.configure({ staticURL: '/synthetic/pilot.webp', clips: {} });
+  assert.equal(f.image.src, '/synthetic/pilot.webp');
+  assert.equal(f.attributes.has('data-gesture'), false);
+  assert.equal(f.controller.play('greet'), false);
+  f.controller.configure({ staticURL: staticURL, clips });
+  assert.equal(f.controller.play('greet'), true);
+  f.controller.stop();
+  assert.equal(f.image.src, staticURL);
+});

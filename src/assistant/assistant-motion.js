@@ -1,13 +1,15 @@
 // One local clip at a time; no animation, asset preload or timer until play().
 export function createAssistantMotion({
   image,
-  staticURL,
-  clips = {},
+  staticURL: initialStaticURL,
+  clips: initialClips = {},
   mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)'),
   setTimer = setTimeout,
   clearTimer = clearTimeout,
 } = {}) {
   if (!image || typeof image !== 'object') throw new TypeError('An image is required');
+  let staticURL = initialStaticURL;
+  let clips = initialClips;
   let timer = null;
   let generation = 0;
   let disposed = false;
@@ -59,5 +61,13 @@ export function createAssistantMotion({
     }
   }
 
-  return { play, stop, dispose };
+  // Зміна одягу: інший нерухомий портрет і набір жестів (порожній, якщо для цього одягу немає анімацій).
+  function configure(next = {}) {
+    if (disposed) return;
+    if (typeof next.staticURL === 'string' && next.staticURL) staticURL = next.staticURL;
+    if (next.clips && typeof next.clips === 'object') clips = next.clips;
+    stop();
+  }
+
+  return { play, stop, dispose, configure };
 }
