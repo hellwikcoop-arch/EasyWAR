@@ -136,3 +136,4 @@
   .ew-assistant-character > img { animation: none; }
   .ew-assistant-quick button { transition: none; }
 }
+.ew-assistant-remark { margin: 8px 0 12px; color: #6b6f63; font-size: 12px; font-style: italic; line-height: 1.6; }

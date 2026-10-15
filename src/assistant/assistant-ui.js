@@ -5,7 +5,7 @@ import { reviewAssistantData } from './assistant-rules-core.js';
 import { readVisibleAssistantContext } from './assistant-context.js';
 import { stateQuestion, answerApplicationState } from './assistant-state-core.js';
 import { createAssistantMotion } from './assistant-motion.js';
-import { languageReply, answerLead, reviewLead, WELCOME_TEXT } from './assistant-persona-core.js';
+import { languageReply, answerLead, reviewLead, welcomeRemark, reviewRemark, WELCOME_TEXT } from './assistant-persona-core.js';
 import { appUpdateState } from '../app-update-state-core.js';
 
 // The knowledge index is large: it loads on the first question, not when the launcher starts.
@@ -55,6 +55,8 @@ function actionIcon(kind) {
 export function createAssistantUI({ getSession, getApplicationState, readContext = readVisibleAssistantContext } = {}) {
   const session = createAssistantSession();
   let mode = 'help', history = [], review = null, reviewLabel = '', status = '', navigationStatus = '', busy = false, request = 0, pendingInput = '';
+  // Репліка обирається один раз на показ, щоб не мінятися під час перемальовування.
+  let remarkSeed = Math.floor(Math.random() * 2147483647);
   const launcher = element('button', { type: 'button', class: 'ew-assistant-launcher', hidden: true, 'aria-label': 'Відкрити помічника — полковник КОМБАТ', 'aria-controls': 'ew-assistant-panel', 'aria-expanded': 'false' },
     element('span', { class: 'ew-assistant-avatar', 'aria-hidden': 'true' }, element('img', { src: portraitURL, alt: '', draggable: 'false' })),
     element('span', {}, element('strong', { text: 'КОМБАТ' }), element('small', { text: 'Запитати помічника' })));
@@ -117,6 +119,7 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
       element('div', { class: 'ew-assistant-kicker', text: 'СВІЙ ПОМІЧНИК. ЗАВЖДИ ПОРУЧ.' }),
       element('h2', { class: 'ew-assistant-welcome', text: WELCOME_TEXT.heading }),
       element('p', { class: 'ew-assistant-note', text: WELCOME_TEXT.body }),
+      element('p', { class: 'ew-assistant-remark', text: `«${welcomeRemark(remarkSeed)}»` }),
       element('div', { class: 'ew-assistant-quick' }, ...[
         { icon: 'entry', title: 'Внести дані', detail: 'Як додати доповідь', query: 'Як внести доповідь?' },
         { icon: 'compass', title: 'Розібратися', detail: 'Профілі та робочі модулі', query: 'Як працюють профілі?' },
@@ -148,6 +151,8 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
     if (!review) return body;
     const voice = reviewLead(review);
     if (voice) body.append(element('p', { class: 'ew-assistant-review-voice', text: voice }));
+    const remark = reviewRemark(review, remarkSeed);
+    if (remark) body.append(element('p', { class: 'ew-assistant-remark', text: `«${remark}»` }));
     body.append(element('div', { class: 'ew-assistant-reviewed' }, element('span', { text: `${reviewLabel} · знімок перевірки` }), element('span', { text: `${review.counts.total} зауважень` })));
     if (review.clean) body.append(element('p', { class: 'ew-assistant-note', text: 'Наявні правила не знайшли проблем. Це не підтвердження правильності всіх даних і не схвалення записів.' }));
     for (const finding of review.items.slice(0, 100)) body.append(element('article', { class: 'ew-assistant-finding' },
@@ -242,7 +247,7 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
       const context = await readContext();
       if (!(await allowed(token)) || current !== request) return;
       if (context.isCurrent && !context.isCurrent()) status = 'Відкритий контекст змінився. Запустіть перевірку ще раз.';
-      else if (context.input) { review = reviewAssistantData(context.input); reviewLabel = context.label; }
+      else if (context.input) { review = reviewAssistantData(context.input); reviewLabel = context.label; remarkSeed = Math.floor(Math.random() * 2147483647); }
       else status = context.message;
     } catch { if (session.accepts(token) && current === request) status = 'Не вдалося перевірити відкриту таблицю. Спробуйте ще раз.'; }
     finally { if (session.accepts(token) && current === request) { busy = false; render(); gesture('point'); announcer.textContent = status || `${review?.counts.total || 0} зауважень у відкритій таблиці.`; panel.querySelector('.ew-assistant-primary')?.focus(); } }

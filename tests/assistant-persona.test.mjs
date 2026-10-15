@@ -90,3 +90,24 @@ test('review remarks are pure, inspect counts only and reject incomplete or inva
   assert.equal(WELCOME_TEXT.body, 'Полковник КОМБАТ. Інновації прийняв. Безлад — ні. Запитуй українською й по суті.');
   assert.ok(Object.isFrozen(WELCOME_TEXT));
 });
+
+test('усі фірмові репліки полковника на місці, без дублів і без підміни відповідей', async () => {
+  const { COLONEL_PHRASES, welcomeRemark, reviewRemark } = await import('../src/assistant/assistant-persona-core.js');
+  const all = Object.values(COLONEL_PHRASES).flat();
+  assert.equal(new Set(all).size, all.length);
+  assert.equal(all.length, 47);
+  for (const phrase of ['Є думка, товариші, і думка ця правильна!', 'Зауваження слушне, але несвоєчасне!', 'Винних притягнути до відповідальності!', 'З метою недопущення подібного в майбутньому…']) assert.ok(all.includes(phrase), phrase);
+  for (const phrase of all) assert.ok(!/[«»]/u.test(phrase), phrase);
+  assert.equal(welcomeRemark(0), COLONEL_PHRASES.welcome[0]);
+  assert.equal(welcomeRemark(COLONEL_PHRASES.welcome.length + 1), COLONEL_PHRASES.welcome[1]);
+  assert.equal(welcomeRemark(-1), COLONEL_PHRASES.welcome[0]);
+  assert.equal(welcomeRemark(NaN), COLONEL_PHRASES.welcome[0]);
+  const counts = (error, warning, advice) => ({ counts: { error, warning, advice, total: error + warning + advice } });
+  assert.ok(COLONEL_PHRASES.error.includes(reviewRemark(counts(1, 0, 0), 3)));
+  assert.ok(COLONEL_PHRASES.warning.includes(reviewRemark(counts(0, 1, 0), 3)));
+  assert.ok(COLONEL_PHRASES.warning.includes(reviewRemark(counts(0, 0, 2), 3)));
+  assert.ok(COLONEL_PHRASES.clean.includes(reviewRemark(counts(0, 0, 0), 3)));
+  assert.equal(reviewRemark(null, 1), null);
+  assert.equal(reviewRemark({ counts: { error: -1, warning: 0, advice: 0 } }, 1), null);
+  assert.equal(UNKNOWN_ANSWER, 'У довідці цього немає');
+});
