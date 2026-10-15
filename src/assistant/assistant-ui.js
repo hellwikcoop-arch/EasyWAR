@@ -19,7 +19,8 @@ const portraitURL = new URL('./assets/colonel-kombat-stable.png', import.meta.ur
 const gestureClips = {
   wave: { url: new URL('./assets/colonel-wave.webp', import.meta.url).href, durationMs: 2100 },
   explain: { url: new URL('./assets/colonel-explain.webp', import.meta.url).href, durationMs: 1900 },
-  point: { url: new URL('./assets/colonel-point.webp', import.meta.url).href, durationMs: 2300 }
+  point: { url: new URL('./assets/colonel-point.webp', import.meta.url).href, durationMs: 2300 },
+  attention: { url: new URL('./assets/colonel-attention.webp', import.meta.url).href, durationMs: 2300 }
 };
 
 function element(tag, props = {}, ...children) {
@@ -89,6 +90,8 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
   }
   function gesture(id) { if (!panel.hidden && session.state().enabled) motion.play(id); }
   function close() { motion.stop(); panel.hidden = true; launcher.setAttribute('aria-expanded', 'false'); if (!launcher.hidden) launcher.focus(); }
+  // Натискання на планку «Зв'язок з розробником»: КОМБАТ показує на скроню. Посилання діє як завжди.
+  document.addEventListener('click', event => { if (event.target instanceof Element && event.target.closest('.dev-banner')) gesture('attention'); });
   function open() { if (!session.state().enabled) return; panel.hidden = false; launcher.setAttribute('aria-expanded', 'true'); render(); panel.querySelector('input')?.focus(); gesture('wave'); }
   async function allowed(token) {
     if (!session.accepts(token)) return false;

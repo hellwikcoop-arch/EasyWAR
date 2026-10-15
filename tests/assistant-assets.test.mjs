@@ -15,8 +15,8 @@ function chunks(data, start = 12) {
 }
 
 // Клипи зібрано з наданих GIF: у кожного жесту своя кількість кадрів по 100 мс.
-const FRAME_COUNT = { wave: 21, explain: 19, point: 23 };
-for (const id of ['wave', 'explain', 'point']) {
+const FRAME_COUNT = { wave: 21, explain: 19, point: 23, attention: 23 };
+for (const id of ['wave', 'explain', 'point', 'attention']) {
   test(`${id} replaces each complete frame without blending a previous pose`, async () => {
     const data = await readFile(new URL(`../src/assistant/assets/colonel-${id}.webp`, import.meta.url));
     assert.equal(data.toString('ascii', 0, 4), 'RIFF');

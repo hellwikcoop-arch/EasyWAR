@@ -13,7 +13,7 @@ const errors = [], remote = [], gestureRequests = [];
 page.on('pageerror', error => errors.push(error.message));
 page.on('request', request => {
   if (/^https?:/.test(request.url()) && !/^http:\/\/(127\.0\.0\.1|localhost):/u.test(request.url())) remote.push(request.url());
-  if (/\/colonel-(wave|explain|point)\.webp(?:[?#]|$)/u.test(request.url())) gestureRequests.push(request.url());
+  if (/\/colonel-(wave|explain|point|attention)\.webp(?:[?#]|$)/u.test(request.url())) gestureRequests.push(request.url());
 });
 await page.addInitScript(() => {
   window.testSession = null;
@@ -289,6 +289,11 @@ try {
   await page.screenshot({ path: '/tmp/easywar-shots/assistant-gesture-explain.png', fullPage: true });
   await panel.locator('.ew-assistant-source button').last().click();
   await waitForGesture('point');
+  // Планка зв'язку з розробником: жест спрацьовує, а перехід за посиланням у тесті скасовано.
+  await page.evaluate(() => document.querySelector('.dev-banner').addEventListener('click', event => event.preventDefault(), true));
+  await page.locator('.dev-banner').click();
+  await waitForGesture('attention');
+  await page.screenshot({ path: '/tmp/easywar-shots/assistant-gesture-attention.png', fullPage: true });
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.waitForFunction(() => !document.querySelector('.ew-assistant-character > img')?.hasAttribute('data-gesture'), null, { timeout: 1000 });
   await assertStatic();
