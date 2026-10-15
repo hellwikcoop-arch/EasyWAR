@@ -12,11 +12,7 @@ import { longDate } from './presentation-format.js';
 const OWNER_KEY = 'easywar.presentation.owner';
 const TITLE_KEY = 'easywar.presentation.title';
 const FORMAT_KEY = 'easywar.presentation.format';
-const FONT_KEY = 'easywar.presentation.font';
-const UAF_KEY = 'easywar.presentation.uafsans';
 
-const toBase64 = bytes => { let t = ''; for (let i = 0; i < bytes.length; i += 0x8000) t += String.fromCharCode(...bytes.subarray(i, i + 0x8000)); return btoa(t); };
-const fromBase64 = text => Uint8Array.from(atob(text), c => c.charCodeAt(0));
 const SLOTS = [{ key: 'own', title: 'Наші втрати', hint: 'таблиця «НАШІ ВТРАТИ»' }, ...GROUP_SLOTS.map(g => ({ key: g.key, title: g.title, hint: `таблиця ${g.title}` }))];
 
 function h(tag, props = {}, ...children) {
@@ -55,7 +51,7 @@ function openDialog(workbook, options, profile) {
   const keyOf = key => (profile ? `${key}.${profile.key}` : key);
   const fresh = profile ? null : unitFreshness(workbook);
   const s = {
-    owner: store.get(keyOf(OWNER_KEY)), titleText: store.get(keyOf(TITLE_KEY)), focus: 'all', format: store.get(FORMAT_KEY) || 'pptx', font: store.get(FONT_KEY) || 'standard', uaf: (() => { try { return JSON.parse(store.get(UAF_KEY) || 'null'); } catch { return null; } })(), period: 'rolling', from: '', to: '',
+    owner: store.get(keyOf(OWNER_KEY)), titleText: store.get(keyOf(TITLE_KEY)), focus: 'all', format: store.get(FORMAT_KEY) || 'pptx', font: 'standard', period: 'rolling', from: '', to: '',
     files: {}, names: {}, errors: {}, excluded: new Set(),
     step: 'settings', review: null, decisions: {}, busy: false, message: '',
   };
@@ -77,17 +73,6 @@ function openDialog(workbook, options, profile) {
     draw();
   }
 
-  async function pickFont(kind, file) {
-    if (!file) return;
-    try {
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      s.uaf = { ...(s.uaf || {}), [kind]: toBase64(bytes), [`${kind}Name`]: file.name };
-      store.set(JSON.stringify(s.uaf), UAF_KEY);
-      s.message = '';
-    } catch (e) { s.message = `Не вдалося прочитати файл шрифту: ${e.message || e}`; }
-    draw();
-  }
-
   const settings = () => [
     h('h2', { text: profile ? `Створити презентацію · ${profile.short}` : 'Створити презентацію' }),
     profile ? h('p', { class: 'ud-muted', text: `Таблиця: ${workbook.sourceName || 'без назви'} · записів з датою: ${workbook.records.length}${workbook.records.length ? `, ${longDate(workbook.records[0].date)} – ${longDate(workbook.records[workbook.records.length - 1].date)}` : ''}. Презентація будується лише з неї; файл не змінюється.` }) : null,
@@ -99,14 +84,6 @@ function openDialog(workbook, options, profile) {
       FOCUS_CHOICES.map(([k, label]) => h('label', { class: 'ud-radio' }, h('input', { type: 'radio', name: 'focus', checked: s.focus === k, onchange: () => { s.focus = k; } }), ` ${label}`))),
     h('fieldset', {}, h('legend', { text: 'Формат файлу' }),
       FORMAT_CHOICES.map(([k, label]) => h('label', { class: 'ud-radio' }, h('input', { type: 'radio', name: 'format', checked: s.format === k, onchange: () => { s.format = k; } }), ` ${label}`))),
-    h('fieldset', {}, h('legend', { text: 'Шрифт' }),
-      h('label', { class: 'ud-radio' }, h('input', { type: 'radio', name: 'font', checked: s.font === 'standard', onchange: () => { s.font = 'standard'; draw(); } }), ' Стандартний (Arial у PPTX, Liberation Sans у PDF)'),
-      h('label', { class: 'ud-radio' }, h('input', { type: 'radio', name: 'font', checked: s.font === 'uaf', onchange: () => { s.font = 'uaf'; draw(); } }), ' UAF Sans (ваші файли шрифту)'),
-      s.font === 'uaf' ? h('div', { class: 'ud-slot' },
-        h('div', { class: 'ud-muted', text: 'У PDF шрифт вбудовується з ваших файлів (вони лишаються на цьому пристрої). У PPTX записується назва «UAF Sans»: на інших комп’ютерах без цього шрифту він замінюється.' }),
-        [['regular', 'Звичайний (UAF Sans Regular)'], ['bold', 'Жирний (UAF Sans OnBoard)']].map(([kind, label]) => h('div', {},
-          h('strong', { text: label }), ' ', s.uaf && s.uaf[kind] ? h('span', { text: `збережено: ${s.uaf[`${kind}Name`] || 'файл'}` }) : null,
-          h('input', { type: 'file', accept: '.ttf,.otf', onchange: e => pickFont(kind, e.target.files[0]) })))) : null),
     h('fieldset', {}, h('legend', { text: 'Період' }),
       h('label', { class: 'ud-radio' }, h('input', { type: 'radio', name: 'period', checked: s.period === 'rolling', onchange: () => { s.period = 'rolling'; draw(); } }), ' 7 діб, 30 діб і весь період'),
       h('label', { class: 'ud-radio' }, h('input', { type: 'radio', name: 'period', checked: s.period === 'custom', onchange: () => { s.period = 'custom'; draw(); } }), ' Обраний період'),
@@ -162,8 +139,6 @@ function openDialog(workbook, options, profile) {
     store.set(s.owner.trim(), keyOf(OWNER_KEY));
     store.set(s.titleText.trim(), keyOf(TITLE_KEY));
     store.set(s.format, FORMAT_KEY);
-    store.set(s.font, FONT_KEY);
-    if (s.font === 'uaf' && (s.format !== 'pptx') && !(s.uaf && s.uaf.regular && s.uaf.bold)) { s.message = 'Для PDF з UAF Sans додайте обидва файли шрифту.'; return draw(); }
     s.review = profile ? reviewForModule(workbook, profile.key) : reviewFor(workbook, s.files);
     if (s.review.clean) return generate();
     s.decisions = defaultDecisions(s.review.items);
@@ -182,13 +157,13 @@ function openDialog(workbook, options, profile) {
       const art = await artApi.loadArt();
       const saved = [];
       if (s.format === 'pptx' || s.format === 'both') {
-        const path = await saveBytes(await pptx.renderDeckToBytes(deck, { art, font: s.font === 'uaf' ? 'UAF Sans' : 'Arial' }), presentationFileName(out.owner, out.generatedOn, 'pptx', profile?.short), 'pptx');
+        const path = await saveBytes(await pptx.renderDeckToBytes(deck, { art, font: 'Arial' }), presentationFileName(out.owner, out.generatedOn, 'pptx', profile?.short), 'pptx');
         if (path) saved.push(path);
       }
       if (s.format === 'pdf' || s.format === 'both') {
         const base = await artApi.loadFonts();
-        const fonts = s.font === 'uaf' ? { regular: fromBase64(s.uaf.regular), bold: fromBase64(s.uaf.bold), fallback: base.regular, fallbackBold: base.bold } : base;
-        const path = await saveBytes(await pptx.renderDeckToPdfBytes(deck, { art, fonts, font: s.font === 'uaf' ? 'UAF Sans' : 'Arial' }), presentationFileName(out.owner, out.generatedOn, 'pdf', profile?.short), 'pdf');
+        const fonts = base;
+        const path = await saveBytes(await pptx.renderDeckToPdfBytes(deck, { art, fonts, font: 'Arial' }), presentationFileName(out.owner, out.generatedOn, 'pdf', profile?.short), 'pdf');
         if (path) saved.push(path);
       }
       if (saved.length) { s.message = ''; close(); options.toast?.(`Збережено: ${saved.join(', ')}`); return; }
