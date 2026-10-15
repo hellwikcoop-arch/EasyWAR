@@ -30,6 +30,14 @@ const outfitPortraits = {
   lecturer: new URL('./assets/colonel-outfit-lecturer.webp', import.meta.url).href
 };
 let portraitURL = defaultPortraitURL;
+// Жести нестандартного одягу: кивок («так») і похитування головою («ні»); лектор ще й тицяє указкою.
+const clipURL = (outfit, name) => new URL(`./assets/colonel-${outfit}-${name}.webp`, import.meta.url).href;
+const outfitClips = Object.fromEntries(['pilot', 'dress', 'dshv', 'rocket', 'artillery', 'lecturer'].map(outfit => [outfit, {
+  nod: { url: clipURL(outfit, 'nod'), durationMs: 2000 },
+  shake: { url: clipURL(outfit, 'shake'), durationMs: 2000 },
+  ...(outfit === 'lecturer' ? { point: { url: clipURL(outfit, 'point'), durationMs: 2000 } } : {})
+}]));
+
 const gestureClips = {
   wave: { url: new URL('./assets/colonel-wave.webp', import.meta.url).href, durationMs: 2100 },
   explain: { url: new URL('./assets/colonel-explain.webp', import.meta.url).href, durationMs: 1900 },
@@ -90,7 +98,7 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
     if (next === outfit) return;
     outfit = next; portraitURL = outfitPortraits[next];
     avatarImage.src = portraitURL;
-    motion.configure({ staticURL: portraitURL, clips: next === 'default' ? gestureClips : {} });
+    motion.configure({ staticURL: portraitURL, clips: next === 'default' ? gestureClips : outfitClips[next] });
     document.body.dataset.assistantOutfit = next;
   }
   characterImage.addEventListener('error', () => { if (characterImage.hasAttribute('data-gesture')) motion.stop(); });
@@ -109,7 +117,7 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
       explainResult = explainElement(descriptor); explainBranch = descriptor.branch || ''; explainNote = '';
       mode = 'explain';
       if (panel.hidden) { panel.hidden = false; launcher.setAttribute('aria-expanded', 'true'); }
-      render(); gesture(explainResult.status === 'found' ? 'point' : 'explain');
+      render(); gesture(...(explainResult.status === 'found' ? ['point', 'nod'] : ['shake', 'explain']));
       announcer.textContent = [explainLead(explainResult), explainResult.title, explainResult.what, ...explainResult.basis].filter(Boolean).join('\n');
     },
     onStop(reason) {
@@ -133,7 +141,7 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
   function syncUpdateBadge() {
     launcher.querySelector('small').textContent = appUpdateState.getSnapshot().status === 'available' ? 'Є оновлення' : 'Запитати помічника';
   }
-  function gesture(id) { if (!panel.hidden && session.state().enabled) motion.play(id); }
+  function gesture(id, fallback) { if (!panel.hidden && session.state().enabled && !motion.play(id) && fallback) motion.play(fallback); }
   function close() { explain.stop(); motion.stop(); panel.hidden = true; launcher.setAttribute('aria-expanded', 'false'); if (!launcher.hidden) launcher.focus(); }
   // Натискання на планку «Зв'язок з розробником»: КОМБАТ показує на скроню. Посилання діє як завжди.
   document.addEventListener('click', event => { if (event.target instanceof Element && event.target.closest('.dev-banner')) gesture('attention'); });
@@ -372,7 +380,7 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
       if (!(await allowed(token)) || current !== request) return;
     }
     const voice = answerLead(query, answer);
-    history.push({ query, answer, voice }); history = history.slice(-20); busy = false; mode = 'help'; render(); gesture('explain');
+    history.push({ query, answer, voice }); history = history.slice(-20); busy = false; mode = 'help'; render(); gesture(...(voice ? ['nod', 'explain'] : ['shake', 'explain']));
     announcer.textContent = [voice, answer.text].filter(Boolean).join('\n'); panel.querySelector('.ew-assistant-input input')?.focus();
   }
   async function checkData() {
@@ -386,7 +394,7 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
       else if (context.input) { review = reviewAssistantData(context.input); reviewLabel = context.label; remarkSeed = Math.floor(Math.random() * 2147483647); }
       else status = context.message;
     } catch { if (session.accepts(token) && current === request) status = 'Не вдалося перевірити відкриту таблицю. Спробуйте ще раз.'; }
-    finally { if (session.accepts(token) && current === request) { busy = false; render(); gesture('point'); announcer.textContent = status || `${review?.counts.total || 0} зауважень у відкритій таблиці.`; panel.querySelector('.ew-assistant-primary')?.focus(); } }
+    finally { if (session.accepts(token) && current === request) { busy = false; render(); gesture(...(status || (review?.counts.error + review?.counts.warning) > 0 ? ['shake', 'point'] : ['point'])); announcer.textContent = status || `${review?.counts.total || 0} зауважень у відкритій таблиці.`; panel.querySelector('.ew-assistant-primary')?.focus(); } }
   }
   checkbox.addEventListener('change', async () => {
     const current = ++request;

@@ -27,3 +27,20 @@ test('у відкритому довіднику КОМБАТ — лектор, 
   assert.equal(outfitFor(undefined, true), 'default');
   assert.equal(outfitFor('air', 'yes'), 'pilot');
 });
+
+import { readFile } from 'node:fs/promises';
+test('жести нестандартного одягу: прозорі анімовані WebP 384×576 по 20 кадрів', async () => {
+  const names = [];
+  for (const outfit of ['pilot', 'dress', 'dshv', 'rocket', 'artillery', 'lecturer']) names.push(`${outfit}-nod`, `${outfit}-shake`);
+  names.push('lecturer-point');
+  for (const name of names) {
+    const data = await readFile(new URL(`../src/assistant/assets/colonel-${name}.webp`, import.meta.url));
+    assert.equal(data.toString('ascii', 0, 4), 'RIFF', name);
+    assert.equal(data.toString('ascii', 8, 12), 'WEBP', name);
+    const flags = data.indexOf('VP8X') + 8;
+    assert.ok(data.indexOf('VP8X') > 0 && (data[flags] & 0x12) === 0x12, `${name}: альфа й анімація`);
+    assert.equal(data.readUIntLE(flags + 4, 3) + 1, 384, name);
+    assert.equal(data.readUIntLE(flags + 7, 3) + 1, 576, name);
+    assert.equal(data.toString('latin1').split('ANMF').length - 1, 20, `${name}: 20 кадрів`);
+  }
+});
