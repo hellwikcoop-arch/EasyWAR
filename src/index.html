@@ -676,8 +676,14 @@ body[data-active-branch="air"] #branch-controls,body[data-active-branch="pvk"] #
 #view-start .branch-card[data-branch="rocket"] { --sl-x: 99%; --sl-y: 58%; }
 #view-start .branch-card[data-branch="artillery"] { --sl-x: 3%; --sl-y: 89%; }
 #view-start .branch-card[data-soon] { --sl-x: 98%; --sl-y: 36%; }
-#view-start .cmd-slot[data-cmd="pvk"] .cmd-card { --sl-x: 46%; --sl-y: 15%; border-color: rgba(61,155,255,.5) !important; }
-#view-start .cmd-slot[data-cmd="dshv"] .cmd-card { --sl-x: 4%; --sl-y: 35%; border-color: rgba(232,93,70,.5) !important; }
+/* Артилерія: на фоні гаубиця замість фрагмента загального фону. */
+#view-start .branch-cards .branch-card[data-branch="artillery"]::before {
+  background-image: linear-gradient(180deg, rgba(8,16,28,.42), rgba(8,16,28,.78)), url('./brand-art/artillery-gun.webp');
+  background-size: 100% 100%, cover; background-position: 0 0, 50% 55%;
+}
+
+#view-start .cmd-slot[data-cmd="pvk"] .cmd-card { --sl-x: 100%; --sl-y: 30%; border-color: rgba(61,155,255,.5) !important; }
+#view-start .cmd-slot[data-cmd="dshv"] .cmd-card { --sl-x: 2%; --sl-y: 47%; border-color: rgba(232,93,70,.5) !important; }
 #view-start .cmd-slot .cmd-card::before { background-image: linear-gradient(90deg, rgba(8,16,28,.9), rgba(8,16,28,.58) 62%, rgba(8,16,28,.34)), url('./launcher-bg.webp'); }
 #view-start .cmd-slot .command-tile {
   background: linear-gradient(135deg, color-mix(in srgb, var(--ct-accent) 15%, rgba(12,22,36,.95)), rgba(9,17,29,.97)) !important;
@@ -686,6 +692,9 @@ body[data-active-branch="air"] #branch-controls,body[data-active-branch="pvk"] #
 #view-start .branch-card.branch-card-soon:not(.branch-card-live) { opacity: .62; }
 /* Артилерія без підпису під назвою: іконка й назва в одному ряду, назва по центру висоти іконки. */
 #view-start .branch-card.branch-card-soon[data-branch="artillery"] .bc-icon { grid-row: auto; }
+/* Емблема артилерії — того ж розміру, що й у сусідніх плиток. */
+#view-start .branch-card.branch-card-soon[data-branch="artillery"] .bc-icon { width: 104px !important; height: 88px !important; }
+#view-start .branch-card.branch-card-soon[data-branch="artillery"] .bc-icon img { width: 104px !important; height: 66px !important; object-fit: contain; }
 @keyframes slRise { from { opacity: 0; transform: translateY(16px); } }
 #view-start .branch-cards .cmd-slot, #view-start .branch-cards .branch-card { animation: slRise .6s cubic-bezier(.2,.8,.2,1) backwards; }
 #view-start .branch-cards [data-col="air"] > .cmd-slot { animation-delay: .05s; }
@@ -710,8 +719,8 @@ body[data-active-branch="air"] #branch-controls,body[data-active-branch="pvk"] #
   #view-start .branch-cards [data-col="rocket"] > .branch-card { order: 5; }
   #view-start .branch-cards > .branch-card[data-branch="artillery"] { order: 6; grid-column: span 1; }
   #view-start .branch-cards > .branch-card[data-soon] { order: 7; grid-column: span 1; }
-  #view-start .cmd-slot[data-cmd="pvk"] .cmd-card { --sl-size: 274%; --sl-x: 51%; --sl-y: 12%; }
-  #view-start .cmd-slot[data-cmd="dshv"] .cmd-card { --sl-size: 274%; --sl-x: 3%; --sl-y: 31%; }
+  #view-start .cmd-slot[data-cmd="pvk"] .cmd-card { --sl-size: 274%; --sl-x: 100%; --sl-y: 30%; }
+  #view-start .cmd-slot[data-cmd="dshv"] .cmd-card { --sl-size: 274%; --sl-x: 2%; --sl-y: 47%; }
   #view-start .branch-cards .cmd-card { grid-template-rows: none !important; grid-template-columns: auto minmax(0, 1fr) !important; justify-items: start !important; column-gap: 24px !important; padding: 18px 32px !important; }
   #view-start .branch-cards .cmd-card h3 { text-align: left !important; font-size: 22px !important; }
   #view-start .branch-cards .branch-card.branch-card-soon {

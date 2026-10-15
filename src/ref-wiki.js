@@ -37,7 +37,7 @@ const RESULTS = [['hit', 'Уражено', 'var(--hit)'], ['part', 'Пошкод
 //   extra(entry) — вузол, який стаття показує під розділами (дані з вашої таблиці); refresh() малює його заново;
 //   searchText(entry) — додатковий текст для пошуку (наприклад, підписи рядків таблиці).
 export function mount(host, options = {}) {
-  const { rows = () => [], media = {}, motion = () => true, onSelect, groups = null, only = null, usage = true, related = true, extra = null, searchText = null } = options;
+  const { rows = () => [], media = {}, motion = () => true, onSelect, groups = null, only = null, usage = true, related = true, extra = null, searchText = null, interactive = true } = options;
   // Силует і лінійний профіль (src/ref-art): підвантажуються окремо; без них стаття й список працюють як раніше.
   let art = {};
   const artUrl = (id, kind) => art[`./ref-art/${id}-${kind}.webp`] || null;
@@ -159,7 +159,7 @@ export function mount(host, options = {}) {
       marksBtn.hidden = !weak.length;
       v.setSpots(weak.map(w => ({ title: w.t, p: w.p })), onSpot);
       if (weak.length) setMarks(true);
-      const sim = state.mode === 'live' ? simOf(entry, viewerOf) : null;
+      const sim = interactive && state.mode === 'live' ? simOf(entry, viewerOf) : null;
       if (sim) startSim(v, sim);
       else { simBar.hidden = true; simCap.hidden = true; machineBar.hidden = true; }
     } catch (e) {
@@ -434,7 +434,7 @@ export function mount(host, options = {}) {
       variants.map(v => h('button', { type: 'button', 'data-variant': v.id, 'aria-pressed': String(v === activeVariant), text: v.label, onclick: () => pickVariant(entry, v.id) }))) : null;
     const creditBox = h('div', { class: 'rw-creditbox' }, viewerOf(entry) ? creditsNode(entry) : creditNode(entry));
     // Інтерактивна модель: окремий переглядач (літаки з фазами польоту) або сценарій ref-sim.js для решти моделей.
-    const both = !!(viewerOf(entry) && entry.model) || !!simOf(entry, viewerOf);
+    const both = interactive && (!!(viewerOf(entry) && entry.model) || !!simOf(entry, viewerOf));
     state.mode = both ? 'live' : 'weak';
     airBox = viewerOf(entry) ? aircraftBox(entry) : null;
     modeBar = both ? h('div', { class: 'seg rw-modes', role: 'group', 'aria-label': 'Вигляд моделі' },

@@ -10,6 +10,18 @@
 <style id="easywar-command-mode-css">
 /* У командному режимі є лише дашборд: внесення доповідей і довідник ховаємо. */
 html[data-command="dshv"] #tab-entry, html[data-command="dshv"] #tab-ref, html[data-command="dshv"] .snav-entry, html[data-command="dshv"] .snav-ref { display: none !important; }
+/* Вікно УДШВ до відкриття таблиці: маруновий акцент зверху з назвою роду військ. Після відкриття дашборда зникає. */
+/* ДШВ до відкриття таблиці: загальний фон і шапка марунові (після відкриття діє власна тема дашборда). */
+html[data-command="dshv"]:not(:has(body.udshv-open)), html[data-command="dshv"][data-theme]:not(:has(body.udshv-open)) {
+  --bg: #1b0a10; --surface: #26111a; --surface-2: #331822; --line: #4d2430; --line-strong: #74333f;
+  --accent-soft: #3d1d27; --map-bg: #240f17; --grid: #4d2430;
+}
+html[data-command="dshv"]:not(:has(body.udshv-open)), html[data-command="dshv"]:not(:has(body.udshv-open)) body {
+  background: radial-gradient(circle at 78% 0%, rgba(168,52,72,.18), transparent 32%), linear-gradient(180deg, #230d15 0%, #170709 100%) !important;
+}
+html[data-command="dshv"]:not(:has(body.udshv-open)) .appbar { background: linear-gradient(90deg, rgba(38,14,22,.98), rgba(46,17,27,.96) 55%, rgba(34,12,19,.98)) !important; border-bottom-color: #5a2531 !important; }
+html[data-command="dshv"]:not(:has(body.udshv-open)) .empty-state { background: linear-gradient(160deg, #2c1119, #1d0a10) !important; border-color: #5a2531 !important; }
+html[data-command="dshv"]:not(:has(body.udshv-open)) .filechip { border-color: #5a2531 !important; background: #2a1119 !important; }
 /* Телефон: у вікні командування лишаємо назву файлу; зайві кнопки шапки ховаємо. */
 @media (max-width: 640px) {
   html[data-command="dshv"] #ewx-open, html[data-command="dshv"] #motionBtn { display: none !important; }
@@ -7422,7 +7434,7 @@ document.addEventListener('DOMContentLoaded', init);
   function goDash(view){ try{ if(typeof showView==='function') showView('dash'); if(view && typeof openView==='function') setTimeout(function(){openView(view);},20); }catch(e){} }
   function decorate(){
     /* theme is controlled by the standard theme switch */
-    var brandSmall=document.querySelector('.brand small'); if(brandSmall) brandSmall.textContent='Сухопутні Війська';
+    var brandSmall=document.querySelector('.brand small'); if(brandSmall) brandSmall.textContent=document.documentElement.dataset.command==='dshv'?'Десантно-штурмові війська':'Сухопутні Війська';
     var theme=document.getElementById('themeBtn'); if(theme){ theme.textContent=''; theme.title='Тема'; theme.setAttribute('aria-label','Перемкнути тему'); }
     var tabs=document.querySelector('.tabs');
     document.querySelectorAll('.ref-tab,.ref-more,.ref-more-menu').forEach(function(x){x.remove();});

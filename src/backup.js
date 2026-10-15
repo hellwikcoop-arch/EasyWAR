@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { appUpdateState } from './app-update-state-core.js';
 import './backup.css';
 import {
   appUpdateMessage,
@@ -25,7 +26,7 @@ function initializeBackup() {
 
   const openButton = document.createElement('button');
   openButton.type = 'button';
-  openButton.className = 'btn quiet';
+  openButton.className = 'btn quiet ew-backup-open';
   openButton.textContent = 'Резервна копія';
   toolbar.prepend(openButton);
 
@@ -177,8 +178,13 @@ function initializeBackup() {
   updateRefreshButton.addEventListener('click', () => { void refreshDatabaseStatus(); });
 
   function showUpdateResult(result) {
-    availableUpdate = result.available || null;
     const message = appUpdateMessage(result);
+    availableUpdate = result.available || null;
+    appUpdateState.publish({
+      status: availableUpdate ? 'available' : result.configured === false ? 'unconfigured' : 'current',
+      currentVersion: result.currentVersion,
+      availableVersion: availableUpdate?.version,
+    });
     appUpdateStatus.textContent = message;
     if (availableUpdate) setHeaderUpdate(`Оновлення: v${String(availableUpdate.version)}`, 'available', message);
     else if (result.configured === false) setHeaderUpdate('Оновлення: вручну', 'off', message);
@@ -187,6 +193,7 @@ function initializeBackup() {
   }
 
   appUpdateCheckButton.addEventListener('click', async () => {
+    appUpdateState.publish({ status: 'checking' });
     setBusy(true);
     appUpdateInstallButton.hidden = true;
     availableUpdate = null;
@@ -195,6 +202,7 @@ function initializeBackup() {
     try {
       showUpdateResult(await checkForAppUpdate());
     } catch (error) {
+      appUpdateState.publish({ status: 'error' });
       appUpdateStatus.textContent = `Не вдалося перевірити оновлення: ${String(error)}`;
       setHeaderUpdate('Оновлення: помилка', 'error', appUpdateStatus.textContent);
     } finally {
@@ -210,6 +218,7 @@ function initializeBackup() {
       const result = await autoCheckForAppUpdate();
       if (result && !availableUpdate) showUpdateResult(result);
     } catch (error) {
+      appUpdateState.publish({ status: 'error' });
       appUpdateStatus.textContent = `Автоматична перевірка оновлень не вдалася: ${String(error)}. Можна перевірити вручну.`;
     }
   }
@@ -240,6 +249,7 @@ function initializeBackup() {
   appUpdateInstallButton.addEventListener('click', async () => {
     if (!availableUpdate) return;
     if (!window.confirm(`Встановити EasyWAR ${String(availableUpdate.version)}? Спершу буде створено копію бази, потім завантажено й перевірено підписаний пакет, після чого EasyWAR перезапуститься.`)) return;
+    appUpdateState.publish({ status: 'installing', availableVersion: availableUpdate.version });
     setBusy(true);
     appUpdateStatus.textContent = 'Створюємо копію бази й завантажуємо оновлення…';
     setHeaderUpdate('Оновлення: встановлення…', 'busy');
@@ -247,6 +257,7 @@ function initializeBackup() {
       const snapshot = await installAppUpdate();
       appUpdateStatus.textContent = `Оновлення встановлено. Копія бази: ${String(snapshot)}. EasyWAR перезапускається…`;
     } catch (error) {
+      appUpdateState.publish({ status: 'error' });
       appUpdateStatus.textContent = `Оновлення не встановлено: ${String(error)}. Поточна версія працює далі; перевірте оновлення ще раз.`;
       setHeaderUpdate('Оновлення: помилка', 'error', appUpdateStatus.textContent);
       availableUpdate = null;

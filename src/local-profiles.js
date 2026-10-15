@@ -31,6 +31,9 @@ import {
 import { createProfileGate } from './profile-gate.js';
 import { requestSplashSkip } from './startup-splash-core.js';
 import { GATE_MODULES, modulesError, moduleVisible } from './profile-gate-core.js';
+import { createAssistantUI } from './assistant/assistant-ui.js';
+import { getDatabaseStatus } from './backup-core.js';
+import { appUpdateState } from './app-update-state-core.js';
 import { airWindow, moduleWindow, ownLossesApi, trackAirWork, trackModuleWork, whenAirDashboard, whenModuleDashboard, whenOwnLosses } from './air-bridge.js';
 
 const AVATAR_SIZE = 256;
@@ -183,6 +186,13 @@ function initializeLocalProfiles() {
   let pendingDashboardSection = null;
   let busy = false;
 
+  const assistant = createAssistantUI({ getSession: getProfileSession, getApplicationState: async kind => (
+    kind === 'version' ? { appVersion: (await getDatabaseStatus()).appVersion }
+      : kind === 'updates' ? appUpdateState.getSnapshot()
+      : { boundBranches: PROFILE_SLOTS.filter(slot => profileTablePath(activeProfile(), slot.branch)).map(slot => slot.branch) }
+  ) });
+  dialog.insertBefore(assistant.settings, list);
+
   const gate = createProfileGate({ el, avatar, readAvatar });
 
   const activeProfile = () => state.profiles.find(profile => profile.id === state.activeProfileId) || null;
@@ -282,6 +292,7 @@ function initializeLocalProfiles() {
   }
 
   function render() {
+    assistant.updateSession(state.activeProfileId === sessionProfileId ? sessionProfileId : null);
     renderHeaderButton();
     renderCommandTiles();
     applyModules();
@@ -789,6 +800,7 @@ function initializeLocalProfiles() {
     class: 'btn quiet',
     text: 'Вийти з профілю',
     onclick: async () => {
+      assistant.disable();
       await lockLocalProfile();
       sessionProfileId = null;
       close();
