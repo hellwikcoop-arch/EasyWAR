@@ -179,7 +179,8 @@ test('artillery ammunition tab has a type × unit matrix, filters, low-stock mar
   for (const part of ['.matrix-t', 'td.mx.lo', 'td.mx.out', '.donut', '--c8']) assert.ok(css.includes(part), part);
 });
 
-test('вікно УДШВ до відкриття таблиці має маруновий акцент «Десантно-штурмові війська»', async () => {
+test('вікно УДШВ: підпис «Десантно-штурмові війська» під EASYWAR, без окремої верхньої смуги', async () => {
   const html = await readFile(new URL('../src/rocket.html', import.meta.url), 'utf8');
-  assert.match(html, /html\[data-command="dshv"\] body:not\(\.udshv-open\)::before \{ content: "Десантно-штурмові війська"/u);
+  assert.match(html, /dataset\.command==='dshv'\?'Десантно-штурмові війська'/u);
+  assert.doesNotMatch(html, /udshv-open\)::before \{ content:/u);
 });
