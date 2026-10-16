@@ -287,7 +287,7 @@ async fn choose_local_model_package(
         .save(
             &LocalModelSettings {
                 package_dir: Some(package.dir.to_string_lossy().into_owned()),
-                enabled: false,
+                enabled: true,
                 manifest_sha256: Some(package.manifest_sha256),
                 model_size: package.model_size,
                 model_modified: package.model_modified,
