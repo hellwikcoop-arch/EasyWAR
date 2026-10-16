@@ -1,10 +1,11 @@
 import { outfitFor } from './assistant-outfit-core.js';
 import './assistant-ui.css';
 import { createAssistantSession } from './assistant-session-core.js';
-import { searchKnowledge, isInstructionText } from './assistant-knowledge-core.js';
 import { reviewAssistantData } from './assistant-rules-core.js';
 import { readVisibleAssistantContext, referenceOpen } from './assistant-context.js';
-import { stateQuestion, answerApplicationState } from './assistant-state-core.js';
+import { answerApplicationState } from './assistant-state-core.js';
+import { DIALOGUE_ACTIONS, runDialogueTurn } from './assistant-dialogue-core.js';
+import { createLocalModelClient } from './assistant-llm.js';
 import { createAssistantMotion } from './assistant-motion.js';
 import { languageReply, answerLead, reviewLead, welcomeRemark, reviewRemark, explainLead, WELCOME_TEXT } from './assistant-persona-core.js';
 import { explainElement } from './assistant-explain-core.js';
@@ -75,9 +76,11 @@ function actionIcon(kind) {
 }
 
 // Created by the existing profile UI; never reads storage or starts background work.
-export function createAssistantUI({ getSession, getApplicationState, readContext = readVisibleAssistantContext } = {}) {
+export function createAssistantUI({ getSession, getApplicationState, readContext = readVisibleAssistantContext, llm = createLocalModelClient() } = {}) {
   const session = createAssistantSession();
   let mode = 'help', history = [], review = null, reviewLabel = '', status = '', navigationStatus = '', busy = false, request = 0, pendingInput = '';
+  // Локальна модель необов'язкова: «думає» лише поки триває її відповідь; usedModel — чи запускали її в цьому профілі.
+  let thinking = false, usedModel = false;
   // Репліка обирається один раз на показ, щоб не мінятися під час перемальовування.
   let remarkSeed = Math.floor(Math.random() * 2147483647);
   // Режим «Пояснити»: результат останнього кліку в модулі. Нічого не зберігається поза сесією профілю.
@@ -110,6 +113,41 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
   const settings = element('section', { class: 'ew-assistant-setting', 'aria-label': 'Налаштування помічника' },
     element('label', {}, checkbox, element('span', { text: 'Увімкнути локального помічника' })),
     element('small', { text: 'Лише для поточного входу в профіль. Довідка та перевірка відкритої таблиці без інтернету. Записів не створює; розмови не зберігає.' }));
+  // Підключення необов'язкової локальної моделі. Показується, лише коли помічник увімкнено; сам по собі нічого не запускає.
+  const modelBox = element('div', { class: 'ew-assistant-model', hidden: true });
+  let modelBusy = false, modelMessage = '';
+  settings.append(modelBox);
+  function modelStatusText(state) {
+    if (!state.configured) return 'Пакет моделі не підключено: КОМБАТ відповідає точно за довідкою.';
+    const label = `«${state.name || 'без назви'}»${state.sizeMb ? `, ≈${state.sizeMb} МБ` : ''}`;
+    if (!state.enabled) return `Пакет ${label} підключено, модель вимкнена.`;
+    if (!state.ready) return state.message || 'Пакет моделі змінено або пошкоджено. Підключіть його знову.';
+    return `Модель ${label} увімкнена. Якщо вона не встигне чи помилиться, працюють точні відповіді довідки.`;
+  }
+  function renderModelBox() {
+    modelBox.hidden = !checkbox.checked || checkbox.disabled;
+    if (modelBox.hidden) { modelBox.replaceChildren(); return; }
+    const state = llm.status();
+    const toggle = element('input', { type: 'checkbox', id: 'ew-assistant-model-enable', disabled: !state.configured || modelBusy });
+    toggle.checked = state.enabled;
+    const run = async action => {
+      modelBusy = true; modelMessage = ''; renderModelBox();
+      const result = await action();
+      modelBusy = false;
+      if (result && result.ok === false) modelMessage = result.message || '';
+      renderModelBox();
+    };
+    toggle.addEventListener('change', () => { const wanted = toggle.checked; void run(() => llm.setEnabled(wanted)); });
+    modelBox.replaceChildren(
+      element('strong', { text: 'Локальна мовна модель (необов’язково)' }),
+      element('small', { text: 'Невелика модель на цьому комп’ютері лише переказує відповіді довідки живою мовою. Пакет моделі ви підключаєте самі: застосунок нічого не завантажує й не надсилає. Запитання не зберігаються.' }),
+      element('label', {}, toggle, element('span', { text: 'Використовувати локальну модель' })),
+      element('small', { class: 'ew-assistant-model-status', role: 'status', text: modelMessage || modelStatusText(state) }),
+      element('div', { class: 'ew-assistant-model-actions' },
+        element('button', { type: 'button', text: 'Обрати пакет моделі…', disabled: modelBusy, onclick: () => void run(() => llm.choose()) }),
+        state.configured ? element('button', { type: 'button', text: 'Забути пакет', disabled: modelBusy, onclick: () => void run(() => llm.forget()) }) : null));
+  }
+  async function refreshModel() { await llm.refresh(); renderModelBox(); }
   document.body.append(launcher, panel, announcer);
   const explain = createExplainController({
     onExplain(descriptor) {
@@ -128,7 +166,7 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
   });
 
   function resetProposal() { if (proposal.previewUrl) URL.revokeObjectURL(proposal.previewUrl); proposal = { kind: 'fix', text: '', withContext: true, image: null, previewUrl: '', note: '' }; }
-  function clear() { explain.stop(); explainResult = null; explainBranch = ''; explainNote = ''; resetProposal(); motion.stop(); request++; history = []; pendingInput = ''; review = null; status = ''; navigationStatus = ''; busy = false; checkbox.checked = false; panel.hidden = true; launcher.hidden = true; launcher.setAttribute('aria-expanded', 'false'); panel.replaceChildren(); announcer.textContent = ''; }
+  function clear() { explain.stop(); explainResult = null; explainBranch = ''; explainNote = ''; resetProposal(); motion.stop(); request++; history = []; pendingInput = ''; review = null; status = ''; navigationStatus = ''; busy = false; thinking = false; if (usedModel) { usedModel = false; void llm.stop(); } checkbox.checked = false; modelBox.hidden = true; modelBox.replaceChildren(); panel.hidden = true; launcher.hidden = true; launcher.setAttribute('aria-expanded', 'false'); panel.replaceChildren(); announcer.textContent = ''; }
   function updateSession(id) {
     const previous = session.state();
     const next = session.setProfile(id);
@@ -137,6 +175,7 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
     checkbox.checked = next.enabled;
     launcher.hidden = !next.enabled;
     syncUpdateBadge();
+    if (next.profileId && next.enabled) void refreshModel(); else renderModelBox();
   }
   function syncUpdateBadge() {
     launcher.querySelector('small').textContent = appUpdateState.getSnapshot().status === 'available' ? 'Є оновлення' : 'Запитати помічника';
@@ -185,16 +224,30 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
         element('span', {}, element('strong', { text: action.title }), element('small', { text: action.detail })),
         element('span', { class: 'ew-assistant-action-arrow', 'aria-hidden': 'true' }, actionIcon('arrow'))))),
       element('p', { class: 'ew-assistant-footnote', text: 'Відповіді з локальної довідки, разом із джерелом. Зміни в таблицю вносите ви.' }));
-    for (const message of history) {
-      body.append(element('div', { class: 'ew-assistant-message ew-assistant-question', text: message.query }));
+    history.forEach((turn, at) => {
+      body.append(element('div', { class: 'ew-assistant-message ew-assistant-question', text: turn.query }));
+      const result = turn.result || {};
       const answer = element('div', { class: 'ew-assistant-message' });
-      if (message.voice) answer.append(element('p', { class: 'ew-assistant-voice', text: message.voice }));
-      answer.append(element('div', { class: 'ew-assistant-answer-text', text: message.answer.text }));
-      for (const warning of message.answer.warnings || []) if (warning.message !== message.answer.text) answer.append(element('p', { class: 'ew-assistant-warning', text: warning.message }));
-      for (const source of message.answer.sources || []) answer.append(sourceNode(source));
-      if (message.answer.origin === 'application-state' && message.answer.status === 'found') answer.append(element('span', { class: 'ew-assistant-source', text: 'Джерело: поточний локальний стан easyWAR' }));
+      if (turn.voice) answer.append(element('p', { class: 'ew-assistant-voice', text: turn.voice }));
+      answer.append(element('div', { class: 'ew-assistant-answer-text', text: turn.answer }));
+      for (const warning of result.warnings || []) if (warning.message !== turn.answer) answer.append(element('p', { class: 'ew-assistant-warning', text: warning.message }));
+      for (const source of result.sources || []) answer.append(sourceNode(source));
+      if (result.origin === 'application-state' && result.status === 'found') answer.append(element('span', { class: 'ew-assistant-source', text: 'Джерело: поточний локальний стан easyWAR' }));
+      if (turn.mode === 'local-model') answer.append(element('span', { class: 'ew-assistant-mode', text: 'Переказала локальна модель за довідкою' }));
+      else if (turn.fallbackReasons?.length) answer.append(element('span', { class: 'ew-assistant-mode', text: 'Модель не дала надійної відповіді: це точна відповідь з довідки' }));
+      const actions = (turn.actions || []).filter(action => Object.prototype.hasOwnProperty.call(DIALOGUE_ACTIONS, action.id));
+      if (actions.length) answer.append(element('div', { class: 'ew-assistant-turn-actions' }, ...actions.map(action => element('button', {
+        type: 'button', class: 'ew-assistant-turn-action', 'data-action': action.id, disabled: busy, text: DIALOGUE_ACTIONS[action.id].label,
+        onclick: event => { event.stopPropagation(); void navigate(DIALOGUE_ACTIONS[action.id].area); },
+      }))));
+      if (at === history.length - 1 && turn.suggestions?.length) answer.append(element('div', { class: 'ew-assistant-suggestions', role: 'group', 'aria-label': 'Можливі запитання' }, ...turn.suggestions.map(text => element('button', {
+        type: 'button', class: 'ew-assistant-suggestion', disabled: busy, text, onclick: () => ask(text),
+      }))));
       body.append(answer);
-    }
+    });
+    if (busy && thinking) body.append(element('div', { class: 'ew-assistant-message ew-assistant-thinking', role: 'status' },
+      element('span', { class: 'ew-assistant-thinking-text', text: 'КОМБАТ думає…' }),
+      element('button', { type: 'button', class: 'ew-assistant-stop', text: 'Зупинити', 'aria-label': 'Зупинити модель і показати точну відповідь з довідки', onclick: stopThinking })));
     return body;
   }
   function reviewContent() {
@@ -358,30 +411,39 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
       element('div', { class: 'ew-assistant-content' }, mode === 'help' ? helpContent() : mode === 'navigate' ? navigationContent() : mode === 'explain' ? explainContent() : reviewContent()));
     panel.replaceChildren(character, bubble);
     const input = element('input', { 'aria-label': 'Запитання до КОМБАТА', placeholder: 'Запитайте українською…', maxlength: '512', autocomplete: 'off' }); input.value = pendingInput;
-    const form = element('form', { class: 'ew-assistant-compose' }, element('div', { class: 'ew-assistant-input' }, input, element('button', { type: 'submit', text: '→', disabled: busy, 'aria-label': 'Надіслати запитання' })), element('small', { text: 'Локальна довідка · історія лише до виходу з профілю' }));
+    const form = element('form', { class: 'ew-assistant-compose' }, element('div', { class: 'ew-assistant-input' }, input, element('button', { type: 'submit', text: '→', disabled: busy, 'aria-label': 'Надіслати запитання' })), element('small', { text: `${modelReady() ? 'Довідка та локальна модель' : 'Локальна довідка'} · історія лише до виходу з профілю` }));
     form.addEventListener('submit', event => { event.preventDefault(); const query = input.value; input.value = ''; pendingInput = ''; ask(query); }); bubble.append(form);
     const content = panel.querySelector('.ew-assistant-content'); content.scrollTop = mode === 'help' && history.length ? content.scrollHeight : 0;
   }
+  function modelReady() { const state = llm.status(); return state.enabled && state.ready; }
+  // Зупинка моделі не скасовує питання: КОМБАТ одразу показує точну відповідь з довідки.
+  function stopThinking() { void llm.cancel(); }
+  function unavailableTurn(query) {
+    const text = 'Довідку не вдалося завантажити. Спробуйте ще раз.';
+    return { query, effectiveQuery: query, followUp: false, topic: 'unknown', area: null, factIds: [], answer: text, actions: [], suggestions: [],
+      mode: 'exact-fallback', result: { status: 'unknown', text, sources: [], warnings: [] }, voice: null, fallbackReasons: [] };
+  }
   async function ask(value) {
     const query = String(value || '').trim().slice(0, 512); if (!query || busy || !session.state().enabled) return;
-    const token = session.token(), current = ++request; busy = true; render();
+    const token = session.token(), current = ++request; busy = true; thinking = false; render();
     if (!(await allowed(token)) || current !== request) return;
-    const language = isInstructionText(query) ? null : languageReply(query);
-    const kind = language ? null : stateQuestion(query);
-    let answer;
-    if (language) answer = language;
-    else if (kind) {
-      try { answer = answerApplicationState(kind, await getApplicationState?.(kind)); }
-      catch { answer = answerApplicationState(kind); }
-      if (!(await allowed(token)) || current !== request) return;
-    } else {
-      try { answer = searchKnowledge(await loadKnowledge(), query, { maxResults: 1 }); }
-      catch { answer = { status: 'unknown', text: 'Довідку не вдалося завантажити. Спробуйте ще раз.', sources: [], warnings: [] }; }
-      if (!(await allowed(token)) || current !== request) return;
-    }
-    const voice = answerLead(query, answer);
-    history.push({ query, answer, voice }); history = history.slice(-20); busy = false; mode = 'help'; render(); gesture(...(voice ? ['nod', 'explain'] : ['shake', 'explain']));
-    announcer.textContent = [voice, answer.text].filter(Boolean).join('\n'); panel.querySelector('.ew-assistant-input input')?.focus();
+    let index = null;
+    try { index = await loadKnowledge(); } catch { index = null; }
+    if (current !== request || !session.accepts(token)) return;
+    const isCurrent = () => current === request && session.accepts(token);
+    // Модель отримує лише підготовлений короткий запит із фактами довідки; будь-яка її помилка веде до точної відповіді.
+    const generate = modelReady() ? async prompt => {
+      if (!isCurrent()) throw new Error('Запит застарів.');
+      usedModel = true; thinking = true; render();
+      try { return await llm.generate(prompt); } finally { if (current === request) thinking = false; }
+    } : undefined;
+    const turn = index
+      ? await runDialogueTurn({ query, history, index, readState: kind => getApplicationState?.(kind), generate, sessionRevision: session.state().revision, voiceFor: answerLead, isCurrent })
+      : unavailableTurn(query);
+    if (!turn || !(await allowed(token)) || current !== request) return;
+    history.push(turn); history = history.slice(-20); busy = false; thinking = false; mode = 'help'; render();
+    gesture(...(turn.mode === 'local-model' || turn.voice ? ['nod', 'explain'] : ['shake', 'explain']));
+    announcer.textContent = [turn.voice, turn.answer].filter(Boolean).join('\n'); panel.querySelector('.ew-assistant-input input')?.focus();
   }
   async function checkData() {
     if (busy || !session.state().enabled) return;
@@ -406,7 +468,7 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
       if (current !== request || session.token().revision !== token.revision || !checkbox.checked) return;
       if (!id || actual !== id || session.state().profileId !== id || document.documentElement.classList.contains('ew-locked')) { updateSession(null); return; }
     } catch { if (current === request) updateSession(null); return; }
-    session.setEnabled(true); checkbox.checked = true; launcher.hidden = false;
+    session.setEnabled(true); checkbox.checked = true; launcher.hidden = false; void refreshModel();
   });
   launcher.addEventListener('click', open);
   const unsubscribeUpdate = appUpdateState.subscribe(() => { syncUpdateBadge(); if (!panel.hidden && mode === 'navigate') render(); });

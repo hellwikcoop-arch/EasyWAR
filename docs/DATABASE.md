@@ -115,7 +115,9 @@ provenance. It supports:
 Callers provide the `updated_at` timestamp, and reads return it with the parsed
 JSON value. Setting changes do not create report audit events: the `audit_log`
 remains reserved for provenance and review actions. The desktop exposes only
-the validated Signal setting through dedicated Tauri commands, not the generic
+the validated Signal setting, the update settings and the optional local-model
+setting (`app.local_model.v1`: package folder, enabled flag and file checks,
+never questions or answers) through dedicated Tauri commands, not the generic
 settings store or direct SQL access.
 
 ## Local profiles

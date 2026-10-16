@@ -34,7 +34,10 @@ Each module isolates its `localStorage` keys and IndexedDB names by prefix
 | `src/assistant/assistant-rules-core.js` | Каталог постійних ID, пояснень і пропозицій; адаптер наявного `reviewData` без застосування виправлень |
 | `src/assistant/assistant-context-core.js` | Вибір підтримуваного вже відкритого контексту УДШВ, ПС/РВ або «Наші втрати» |
 | `src/assistant/assistant-context.js` | Читання активного розблокованого iframe лише після явної кнопки перевірки; знімок видимих власних втрат або вже відкриті байти в пам'яті |
-| `src/assistant/assistant-ui.js`, `assistant-ui.css` | Панель, вкладки довідки, навігації й перевірки, тимчасова розмова, очищення при вимкненні та завершенні сесії профілю |
+| `src/assistant/assistant-retrieval-core.js` | Чистий толерантний пошук (BM25 з основами слів і синонімами) поверх строгого `searchKnowledge`; пакети фактів ≤3 уривків; слабкий збіг дає лише назви розділів |
+| `src/assistant/assistant-dialogue-core.js` | Чистий контролер розмови: маршрутизація, контекст з останніх реплік, продовження й уточнення, типізовані кнопки дій, бюджет запиту, перевірка відповіді моделі, точна відповідь-запасний варіант |
+| `src/assistant/assistant-llm.js` | Клієнт семи Tauri-команд локальної моделі (`Channel`, скасування); без DOM і сховищ, `invoke` підміняється в тестах |
+| `src/assistant/assistant-ui.js`, `assistant-ui.css` | Панель, вкладки довідки, навігації й перевірки, тимчасова розмова на `runDialogueTurn` (кнопки дій, підказки, «КОМБАТ думає…» із зупинкою), блок «Локальна мовна модель» у налаштуванні помічника, очищення при вимкненні та завершенні сесії профілю |
 | `src/assistant/knowledge/index.json` | Детермінований індекс, вбудований у збірку |
 | `script/assistant_index.mjs` | Генерація індексу з дозволених документів; `--check` перевіряє відповідність джерелам |
 
@@ -256,6 +259,17 @@ banners, a unified KPI card layout, and munition/target details to the selected-
 group strip. It only decorates the rendered DOM and module maps via the editor
 hook; the v3.1 source stays unchanged, and every image can be replaced in the
 editor.
+
+## Емблеми підрозділів і значки боєприпасів
+
+- `src/unit-emblems-core.js` (чиста логіка, тест `tests/unit-emblem-names.test.mjs`): `emblemFile(name)` зіставляє назву підрозділу з
+  одним із файлів `src/unit-art/` (шаблони `PATTERNS` і загальний номер + тип `одшбр/ошп/оабр/реабр/омбр/оєбр`).
+- `src/unit-emblems.js`: `emblemOf(name)` (адреса через `import.meta.glob`, у Node-тестах обгорнуто в `try/catch`), `crestImg(name, cls, placeholder)` —
+  `img.crest` або порожній круг `span.crest.crest-ph`. Використовують `udshv-dashboard.js` (`.ud-crest`) і `artillery-app.js` (`unitCell`).
+- `src/artillery-icons-core.js`: `AMMO_BY_GROUP`, `ammoFile`, `chargeIconFile` — назва боєприпасу чи заряду → файл у `src/ammo-art/`
+  (`charge-*.webp` — знімки процедурних моделей зарядів). Плитки «Зведення» в Артилерії беруть фон з атрибута `data-art` (`artillery.css`).
+- Вкладка «Довідник» Артилерії викликає `ref-wiki.mount(..., { illustrationOnly })`: лише список, 3D-сцена й підпис про походження моделі; повну
+  статтю вмикає прапорець `REF_ILLUSTRATION_ONLY = false` в `artillery-app.js`.
 
 ## Довідник: сцена «Інтерактивної моделі»
 

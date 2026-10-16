@@ -304,7 +304,7 @@ html[data-ew-module="air"] { --sw: 188px; }
   html[data-ew-module] .dmain-in[data-view="overview"] #p-types .tt-row { min-height: 0; height: 48px; }
   html[data-ew-module] .dmain-in[data-view="overview"] #p-types .tt-tx small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
   html[data-ew-module] .dmain-in[data-view="overview"] #p-types .tt-row img.tt-photo { height: 100%; }
-  html[data-ew-module] .dmain-in[data-view="overview"] #p-types .tt-list { gap: 5px; min-height: 0 !important; grid-template-rows: none !important; grid-auto-rows: 48px; padding-top: 2px; padding-bottom: 6px; }
+  html[data-ew-module] .dmain-in[data-view="overview"] #p-types .tt-list { gap: 5px; min-height: 0 !important; grid-template-rows: none !important; grid-auto-rows: 48px; padding-top: 2px; padding-bottom: 6px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
   html[data-ew-module] .dmain-in[data-view="overview"] #p-types .tt-h { flex: none; }
   html[data-ew-module="air"] .dmain-in[data-view="overview"] #p-types .tt-f { display: none; }
   html[data-ew-module="air"] .kpipanel > .kh { grid-template-columns: minmax(0, 1fr) auto; }
@@ -312,7 +312,7 @@ html[data-ew-module="air"] { --sw: 188px; }
   html[data-ew-module] .dmain-in[data-view="overview"] #p-units .units-tbl tr, html[data-ew-module] .dmain-in[data-view="overview"] #p-units .units-tbl td { height: 28px; }
 
   /* РВ: власні правила модуля мають !important — перебиваємо вужче й сильніше */
-  html[data-ew-module="rocket"] .dmain-in[data-view="overview"] #p-types .tt-list.tt-list { flex: 1 1 auto !important; height: auto !important; min-height: 0 !important; max-height: none !important; padding: 2px 10px 8px !important; gap: 6px !important; overflow: hidden; grid-auto-rows: 52px; grid-template-rows: none !important; }
+  html[data-ew-module="rocket"] .dmain-in[data-view="overview"] #p-types .tt-list.tt-list { flex: 1 1 auto !important; height: auto !important; min-height: 0 !important; max-height: none !important; padding: 2px 10px 8px !important; gap: 6px !important; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; grid-auto-rows: 52px; grid-template-rows: none !important; }
   html[data-ew-module="rocket"] .dmain-in[data-view="overview"] #p-types .tt-row.tt-row { min-height: 0 !important; height: 52px !important; padding: 4px 10px !important; }
   html[data-ew-module="rocket"] .dmain-in[data-view="overview"] #p-types .tt-row .tt-ic { height: 34px !important; }
   html[data-ew-module="rocket"] .dmain-in[data-view="overview"] #p-types .tt-h.tt-h { padding: 8px 14px 4px !important; }

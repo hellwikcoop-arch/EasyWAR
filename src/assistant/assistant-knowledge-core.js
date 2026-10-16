@@ -335,3 +335,7 @@ export function searchKnowledge(index, query, options = {}) {
     warnings: [],
   };
 }
+
+// Internals shared with the retrieval layer; they stay pure and carry no extra capability.
+export { termsOf as knowledgeTerms, plainMarkdown as plainKnowledgeMarkdown, safeChunks as safeKnowledgeChunks,
+  excerpt as knowledgeExcerpt, isRecordDataQuestion };

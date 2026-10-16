@@ -22,8 +22,11 @@ await page.addInitScript(() => {
   window.testSession = null;
   window.testCommands = [];
   window.sessionCalls = 0;
+  window.testModel = { configured: false, enabled: false, ready: false, name: null, sizeMb: null, loaded: false, busy: false, message: null };
+  window.modelRequests = [];
+  window.modelMode = 'good';
   const profiles = { activeProfileId: 'synthetic-a', profiles: [{ id: 'synthetic-a', displayName: 'Синтетичний профіль', position: '', hasPassword: true, modules: ['air'], tables: {} }] };
-  window.__TAURI_INTERNALS__ = { invoke: async (command) => {
+  window.__TAURI_INTERNALS__ = { transformCallback: () => 1, invoke: async (command, args) => {
     window.testCommands.push(command);
     switch (command) {
       case 'get_local_profiles': return structuredClone(profiles);
@@ -42,6 +45,19 @@ await page.addInitScript(() => {
       case 'get_app_update_settings': return { enabled: false };
       case 'get_restore_startup_report': return { outcome: 'none', pendingRestoreAvailable: false, previousBackupRetained: false };
       case 'check_for_app_update': return { configured: true, currentVersion: '9.8.7', available: { version: '9.8.8', notes: 'Синтетичний випуск' } };
+      case 'get_local_model_status': return structuredClone(window.testModel);
+      case 'choose_local_model_package': window.testModel = { ...window.testModel, configured: true, name: 'Синтетична модель', sizeMb: 512 }; return structuredClone(window.testModel);
+      case 'set_local_model_enabled': window.testModel = { ...window.testModel, enabled: args.enabled, ready: args.enabled && window.testModel.configured }; return structuredClone(window.testModel);
+      case 'forget_local_model_package': window.testModel = { configured: false, enabled: false, ready: false, name: null, sizeMb: null, loaded: false, busy: false, message: null }; return structuredClone(window.testModel);
+      case 'cancel_local_answer': window.rejectModel?.('Скасовано'); return null;
+      case 'stop_local_model': return null;
+      case 'generate_local_answer': {
+        window.modelRequests.push(args.request);
+        if (window.modelMode === 'hold') return new Promise((resolve, reject) => { window.rejectModel = reject; });
+        if (window.modelMode === 'bad') return 'Вигадана відповідь без фактів [F9].';
+        const fact = args.request.messages.at(-1).content.match(/\[F1\] \([^)]*\) ([^\n]+)/u)?.[1] ?? '';
+        return `${fact.split(/(?<=[.!?])\s/u)[0]} [F1]`;
+      }
       case 'get_database_status': return { appVersion: '9.8.7' };
       case 'get_signal_settings': return { enabled: false, allowedSources: [] };
       default: return {};
@@ -183,6 +199,65 @@ try {
   await page.waitForFunction(() => [...document.querySelectorAll('.ew-assistant-message')].some(node => /Встановлена версія easyWAR: 9.8.7/.test(node.textContent)));
   await input.fill('Які таблиці прив’язані до профілю?'); await input.press('Enter');
   await page.waitForFunction(() => [...document.querySelectorAll('.ew-assistant-message')].some(node => /таблиці ще не прив’язані/.test(node.textContent)));
+
+  // Розмова: короткі продовження, уточнення, кнопки дій і природні формулювання.
+  const lastAnswer = () => panel.locator('.ew-assistant-message:not(.ew-assistant-question)').last();
+  await input.fill('Де резервні копії?'); await input.press('Enter');
+  await lastAnswer().locator('[data-action="open-backup"]').waitFor();
+  assert.match(await lastAnswer().locator('.ew-assistant-answer-text').textContent(), /окрема дія/u);
+  await input.fill('А оновлення?'); await input.press('Enter');
+  await lastAnswer().locator('[data-action="open-updates"]').waitFor();
+  assert.equal(await lastAnswer().locator('[data-action="open-updates"]').count(), 1, 'the follow-up gets its own button');
+  assert.equal(await lastAnswer().locator('[data-action]').count(), 1, 'only the button of the current topic');
+  await input.fill('Як відкрити?'); await input.press('Enter');
+  await lastAnswer().locator('.ew-assistant-suggestion').first().waitFor();
+  assert.equal(await lastAnswer().locator('.ew-assistant-suggestion').count(), 3, 'an unclear question is clarified with three suggestions');
+  assert.equal(await lastAnswer().locator('.ew-assistant-source').count(), 0);
+  await lastAnswer().locator('.ew-assistant-suggestion').first().click();
+  await page.waitForFunction(() => [...document.querySelectorAll('.ew-assistant-question')].pop()?.textContent === 'Як внести доповідь?');
+  await input.fill('як вирахувати ефективність'); await input.press('Enter');
+  await lastAnswer().locator('.ew-assistant-source button').waitFor();
+  assert.match(await lastAnswer().locator('.ew-assistant-source button').first().textContent(), /Ефективність/u, 'natural wording reaches the right section');
+  assert.equal(await page.evaluate(() => window.testCommands.some(command => /generate_local_answer/u.test(command))), false, 'without an enabled model nothing is sent to it');
+
+  // Необов'язкова локальна модель: підключення в «Профілях» і відповідь через неї (мок рушія, без реальної моделі).
+  await panel.locator('[data-mode="navigate"]').click();
+  await panel.locator('[data-area="profiles"]').click();
+  await page.locator('.ew-profile-dialog').waitFor({ state: 'visible' });
+  const modelBox = page.locator('.ew-assistant-model');
+  await modelBox.waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#ew-assistant-model-enable').isDisabled(), true, 'the model cannot be switched on before a package is chosen');
+  assert.match(await modelBox.locator('.ew-assistant-model-status').textContent(), /Пакет моделі не підключено/u);
+  await modelBox.getByRole('button', { name: /Обрати пакет/u }).click();
+  await page.waitForFunction(() => /підключено, модель вимкнена/u.test(document.querySelector('.ew-assistant-model-status')?.textContent ?? ''));
+  assert.equal(await page.evaluate(() => window.testModel.enabled), false, 'choosing a package never switches the model on');
+  await page.locator('#ew-assistant-model-enable').check();
+  await page.waitForFunction(() => /Модель .* увімкнена/u.test(document.querySelector('.ew-assistant-model-status')?.textContent ?? ''));
+  await page.screenshot({ path: '/tmp/easywar-shots/assistant-local-model-settings.png', fullPage: true });
+  await page.locator('#ew-profile-close').click();
+  await launcher.click();
+  await panel.locator('[data-mode="help"]').click();
+  await input.fill('Як створити резервну копію?'); await input.press('Enter');
+  await lastAnswer().locator('.ew-assistant-mode').waitFor();
+  assert.match(await lastAnswer().locator('.ew-assistant-mode').textContent(), /Переказала локальна модель/u);
+  assert.equal(await lastAnswer().locator('.ew-assistant-voice').count(), 0, 'a model answer carries its own character instead of a canned line');
+  assert.deepEqual(await page.evaluate(() => window.modelRequests.map(request => Object.keys(request).sort())), [['maxTokens', 'messages', 'system']], 'the model receives only the prepared prompt');
+  assert.doesNotMatch(await page.evaluate(() => JSON.stringify(window.modelRequests)), /invoke|<script|testCommands/u);
+  await page.evaluate(() => { window.modelMode = 'bad'; });
+  await input.fill('Як створити резервну копію?'); await input.press('Enter');
+  await page.waitForFunction(() => [...document.querySelectorAll('.ew-assistant-mode')].pop()?.textContent.includes('Модель не дала надійної відповіді'));
+  assert.equal(await lastAnswer().locator('.ew-assistant-source button').count() >= 1, true, 'a rejected model reply falls back to the exact cited answer');
+  await page.screenshot({ path: '/tmp/easywar-shots/assistant-local-model-answer.png', fullPage: true });
+  await page.evaluate(() => { window.modelMode = 'hold'; });
+  await input.fill('Як зробити резервну копію?'); await input.press('Enter');
+  await panel.locator('.ew-assistant-thinking').waitFor();
+  assert.match(await panel.locator('.ew-assistant-thinking').textContent(), /КОМБАТ думає/u);
+  assert.equal(await panel.locator('.ew-assistant-input button[type="submit"]').isDisabled(), true, 'a second question waits for the first');
+  await page.screenshot({ path: '/tmp/easywar-shots/assistant-local-model-thinking.png', fullPage: true });
+  await panel.locator('.ew-assistant-stop').click();
+  await page.waitForFunction(() => !document.querySelector('.ew-assistant-thinking') && [...document.querySelectorAll('.ew-assistant-mode')].pop()?.textContent.includes('Модель не дала надійної відповіді'));
+  assert.equal(await lastAnswer().locator('.ew-assistant-source button').count() >= 1, true, 'stopping the model shows the exact cited answer at once');
+  await page.evaluate(() => { window.modelMode = 'good'; });
 
   // The current frame contains only deterministic synthetic parsed values.
   await page.evaluate(async () => {

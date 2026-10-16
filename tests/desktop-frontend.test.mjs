@@ -158,17 +158,43 @@ test('artillery page is a module of its own with the shared-file entry flow', as
   assert.match(app, /file\.lastModified !== S\.lastModified/, 'merges onto a newer copy of the shared file');
   assert.match(app, /PERIODS/);
   assert.match(app, /Від якого підрозділу вносимо дані/, 'на вкладці «Внесення» спершу обирається підрозділ');
-  assert.match(app, /unit-art\/\*\.webp/, "емблеми підрозділів");
+  assert.match(app, /from '\.\/unit-emblems\.js'/, 'емблеми підрозділів — спільний модуль');
+  assert.match(await read('unit-emblems.js'), /unit-art\/\*\.webp/);
   assert.doesNotMatch(app, /innerHTML/, 'table text goes in as text, never as markup');
 });
 
-test('artillery shows an ammunition icon for every caliber group', async () => {
+test('artillery shows an ammunition icon for every caliber group and a charge icon for every charge type', async () => {
   const app = await read('artillery-app.js');
   assert.match(app, /import\.meta\.glob\('\.\/ammo-art\/\*\.webp'/);
-  for (const group of ['155 мм ОФ', '155 мм касетні', '155 мм дист. мінування', '155 мм димові й освітлювальні', '122 мм РС', '120 мм', 'Високоточні']) assert.ok(app.includes(`'${group}'`), group);
+  assert.match(app, /from '\.\/artillery-icons-core\.js'/);
+  const core = await read('artillery-icons-core.js');
+  for (const group of ['155 мм ОФ', '155 мм касетні', '155 мм дист. мінування', '155 мм димові й освітлювальні', '122 мм РС', '120 мм', 'Високоточні', 'Заряди']) assert.ok(core.includes(`'${group}'`), group);
   const { readdir } = await import('node:fs/promises');
   const files = (await readdir(new URL('../src/ammo-art/', import.meta.url))).sort();
-  assert.deepEqual(files, ['105', '120-mortar', '122', '122-rocket', '152', '155-cluster', '155-he', '155-scatter', '155-smoke', '203', '227', '60-mortar', '82-mortar', 'guided', 'other'].map((n) => `${n}.webp`).sort());
+  assert.deepEqual(files, ['105', '120-mortar', '122', '122-rocket', '152', '155-cluster', '155-he', '155-scatter', '155-smoke', '203', '227', '60-mortar', '82-mortar', 'charge-bmcs', 'charge-m119a2', 'charge-m203a1', 'charge-m3a1', 'charge-m4a2', 'guided', 'other'].map((n) => `${n}.webp`).sort());
+});
+
+test('дашборд УДШВ показує емблеми підрозділів, а плитки Артилерії мають фони з наявних ілюстрацій', async () => {
+  const dash = await read('udshv-dashboard.js');
+  assert.match(dash, /from '\.\/unit-emblems\.js'/);
+  for (const part of ["h('span', { class: 'ud-rank-name' }, units ? crest(item.name", "class: 'ud-link ud-unitname'", "crest(u, 'ud-crest ud-crest-sm')"]) assert.ok(dash.includes(part), part);
+  const css = await read('udshv-dashboard.css');
+  for (const part of ['.ud-crest', '.ud-crest.crest-ph', '.ud-unitname']) assert.ok(css.includes(part), part);
+  const art = await read('artillery.css');
+  for (const key of ['gun', 'crossed', 'shells', 'guided', 'charges']) assert.ok(art.includes(`.kpi[data-art="${key}"]::after`), key);
+  assert.match(art, /:root\[data-theme="light"\] \.kpi\[data-art\]::after/);
+  assert.match(await read('artillery-app.js'), /'data-art': art \|\| null/);
+});
+
+test('ПС і РВ: картка «Відкрийте таблицю» на всю сітку, а список «Тип цілі» в РВ прокручується', async () => {
+  for (const page of ['air.html', 'rocket.html']) {
+    const html = await read(page);
+    assert.match(html, /#view-dash\.shell > \.side\[hidden\] ~ \.dmain \{ grid-column: 1 \/ -1; \}/, page);
+    assert.match(html, /\.dmain > \.dpanel\.empty-state \{ justify-self: center; width: min\(640px, 100%\)/, page);
+  }
+  const kit = await read('ui-kit.css');
+  assert.match(kit, /#p-types \.tt-list\.tt-list \{[^}]*overflow-y: auto; overscroll-behavior: contain;/, 'РВ');
+  assert.doesNotMatch(kit, /#p-types \.tt-list\.tt-list \{[^}]*overflow: hidden/);
 });
 
 test('artillery ammunition tab has a type × unit matrix, filters, low-stock marks and distribution charts', async () => {

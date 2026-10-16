@@ -35,6 +35,8 @@ html[data-theme="light"] .rw-item img.rw-sil { filter: none; opacity: .8; }
 .rw-badge { display: inline-block; margin-left: 12px; padding: 4px 10px; vertical-align: middle; border: 1px solid var(--warn-line); border-radius: 999px; background: var(--warn-soft); color: var(--warn); font: 700 13px/1 var(--sans); letter-spacing: .04em; text-transform: uppercase; }
 .rw-alias { margin: 4px 0 0; color: var(--muted); }
 .rw-body { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; align-items: start; }
+.rw-body.rw-solo { grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 861px) { .rw-solo .rw-stage { height: clamp(340px, 52vh, 540px); } }
 .rw-main { display: grid; gap: 14px; min-width: 0; }
 .rw-summary { margin: 0; font-size: 16px; line-height: 1.55; max-width: 72ch; }
 .rw-sec { display: grid; gap: 6px; }

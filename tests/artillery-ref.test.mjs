@@ -197,10 +197,20 @@ test('Артилерія показує лише демонстрацію мод
   assert.match(wiki, /const both = interactive && /);
 });
 
-test('Артилерія: вкладка «Довідник» прихована, а емблеми є в таблицях підрозділів', async () => {
+test('Артилерія: вкладка «Довідник» повернена й показує лише обертову ілюстрацію, а емблеми є в таблицях підрозділів', async () => {
   const app = await read('artillery-app.js');
-  assert.match(app, /const HIDDEN_TABS = new Set\(\['ref'\]\)/);
-  assert.match(app, /if \(HIDDEN_TABS\.has\(id\)\) continue;/);
+  assert.doesNotMatch(app, /HIDDEN_TABS/, 'вкладка «Довідник» більше не прихована');
+  assert.match(app, /\['ref', 'Довідник'\]/);
+  assert.match(app, /const REF_ILLUSTRATION_ONLY = true/);
+  assert.match(app, /illustrationOnly: REF_ILLUSTRATION_ONLY/);
   assert.match(app, /unitCell\(r\.unit\.name\)/);
+  assert.match(app, /unitCell\(r\.c\.name/, 'у вкладці «Заряди» підрозділи теж з емблемами');
+  assert.match(app, /chargeIcon\(r\.it\.label, 'sm'\)/, 'заряди з іконками');
+  assert.match(app, /ammoIcon\(r\.it\.group, 'sm'\), r\.it\.label, r\.it\.kind === 'precision'/, 'у вкладці «Підрозділи» боєприпаси з іконками');
   assert.match(app, /class: 'unit-cell'/);
+  const wiki = await read('ref-wiki.js');
+  assert.match(wiki, /illustrationOnly = false/);
+  assert.match(wiki, /illustrationOnly \? h\('div', \{ class: 'rw-main' \}, variantBar, entry\.model \? stageBox : null, slot, creditBox\)/, 'лише варіанти, сцена й підпис автора');
+  assert.match(wiki, /illustrationOnly \? null : info/, 'без бічної панелі фактів');
+  assert.match(await read('ref-wiki.css'), /\.rw-body\.rw-solo/);
 });

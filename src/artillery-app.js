@@ -1,37 +1,22 @@
 // Модуль «Артилерія»: зведення витрати й залишку боєприпасів і внесення даних бригадою у спільну таблицю.
 import { ensureMetaSheet, openWorkbook, readMeta, saveWorkbook, setCells, writeMeta } from './artillery-xlsx.js';
 import {
-  PERIODS, buildEdits, byCaliberGroup, byUnit, classLabel, groupEdits, groupRank, parseArtilleryWorkbook, remapEntry, stampEdits, stampFromTitle, stockState, sumItems, totals, unitKey, valueOf,
+  PERIODS, buildEdits, byCaliberGroup, byUnit, classLabel, groupEdits, groupRank, parseArtilleryWorkbook, remapEntry, stampEdits, stampFromTitle, stockState, sumItems, totals, valueOf,
 } from './artillery-core.js';
 import { mount as mountRef } from './ref-wiki.js';
 import * as ART_REF from './artillery-ref-data.js';
+import { emblemOf } from './unit-emblems.js';
+import { ammoFile, chargeIconFile } from './artillery-icons-core.js';
 
-// Емблеми підрозділів: файли в unit-art, ключ — назва підрозділу без пробілів і розділових знаків.
-const EMBLEM_FILES = { '79одшбр': '79-odshbr', '80одшбр': '80-odshbr', '82одшбр': '82-odshbr', '95одшбр': '95-odshbr', '425ошп': '425-oshp', '1ошп': '1-oshp' };
-// Решта підрозділів пізнається за змістом назви: «АГр, РУК 148 оабр» і «АГр 148 оабр» — та сама емблема. «Арез №2» — зведений загін 148 і 44 оабр.
-const EMBLEM_PATTERNS = [
-  [/арез\s*№\s*2/i, 'arez2-148-44'], [/148\s*оабр/i, '148-oabr'], [/^грв.*107/i, '107-reabr'],
-  [/225\s*ошп/i, '225-oshp'], [/475\s*ошп/i, '475-oshp'], [/^78\s*од/i, '78-odshbr'], [/71\s*оє?бр/i, '71-oebr'], [/^67\s*омбр/i, '67-ombr'],
-];
-const EMBLEM_URLS = import.meta.glob('./unit-art/*.webp', { eager: true, query: '?url', import: 'default' });
-const emblemOf = name => {
-  const f = EMBLEM_FILES[unitKey(name)] || EMBLEM_PATTERNS.find(([re]) => re.test(name))?.[1];
-  return f ? EMBLEM_URLS[`./unit-art/${f}.webp`] || null : null;
-};
+// Емблеми підрозділів: спільний модуль unit-emblems.js (файли в unit-art), його ж використовує дашборд УДШВ.
 
-// Іконки боєприпасів за групою калібру (ammo-art). Групи без своєї іконки (85, 100, 128, 130, 220 мм) дістають загальну.
+// Іконки боєприпасів і зарядів (ammo-art): який файл для групи чи заряду — у artillery-icons-core.js.
 const AMMO_URLS = import.meta.glob('./ammo-art/*.webp', { eager: true, query: '?url', import: 'default' });
-const AMMO_BY_GROUP = {
-  '155 мм ОФ': '155-he', '155 мм касетні': '155-cluster', '155 мм дист. мінування': '155-scatter', '155 мм димові й освітлювальні': '155-smoke',
-  '152 мм': '152', '122 мм': '122', '122 мм РС': '122-rocket', '105 мм': '105', '203 мм': '203', '227 мм': '227',
-  '120 мм': '120-mortar', '82 мм': '82-mortar', '60 мм': '60-mortar', 'Високоточні': 'guided',
-};
-const ammoIconOf = group => {
-  if (group === 'Заряди') return null;
-  const f = AMMO_BY_GROUP[group] || 'other';
-  return AMMO_URLS[`./ammo-art/${f}.webp`] || null;
-};
-const ammoIcon = (group, cls = '') => { const src = ammoIconOf(group); return src ? h('img', { class: `ammo-ico ${cls}`.trim(), src, alt: '', loading: 'lazy' }) : null; };
+const iconUrl = file => AMMO_URLS[`./ammo-art/${file}.webp`] || null;
+const ammoIconOf = group => iconUrl(ammoFile(group));
+const iconImg = (src, cls) => (src ? h('img', { class: `ammo-ico ${cls}`.trim(), src, alt: '', loading: 'lazy' }) : null);
+const ammoIcon = (group, cls = '') => iconImg(ammoIconOf(group), cls);
+const chargeIcon = (label, cls = '') => iconImg(iconUrl(chargeIconFile(label)), cls);
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const HANDLE_KEY = 'handle';
@@ -179,7 +164,7 @@ function renderHeader() {
 }
 
 function goTab(id) {
-  if (id === S.tab || HIDDEN_TABS.has(id)) return;
+  if (id === S.tab) return;
   const p = pendingEdits();
   if (p && p.edits.length && !confirm('Є незбережені зміни. Залишити внесення без збереження?')) return;
   S.form = null;
@@ -189,14 +174,11 @@ function goTab(id) {
 const TABS = [
   ['summary', 'Зведення'], ['entry', 'Внесення'], ['units', 'Підрозділи'], ['ammo', 'Боєприпаси'], ['charges', 'Заряди'], ['losses', 'Втрати противника'], ['ref', 'Довідник'], ['check', 'Перевірка'],
 ];
-// Довідник Артилерії поки сирий: вкладку приховано, дані й код збережено для повернення.
-const HIDDEN_TABS = new Set(['ref']);
 function renderTabs() {
   const nav = $('tabs'); nav.textContent = '';
   if (!S.model) return;
   const errors = S.model.issues.filter(i => i.level === 'error').length, warns = S.model.issues.filter(i => i.level === 'warn').length;
   for (const [id, label] of TABS) {
-    if (HIDDEN_TABS.has(id)) continue;
     const btn = h('button', { class: 'tab', role: 'tab', type: 'button', 'data-tab': id, 'aria-selected': String(S.tab === id), onclick: () => goTab(id) }, label);
     if (id === 'check' && (errors || warns)) btn.append(h('span', { class: 'badge' + (errors ? ' bad' : '') }, errors || warns));
     nav.append(btn);
@@ -204,14 +186,15 @@ function renderTabs() {
 }
 
 // ---------- таблиці ----------
-const unitCell = name => { const em = emblemOf(name); return h('td', { class: 'unit-cell' }, em ? h('img', { class: 'crest-s', src: em, alt: '' }) : null, h('span', null, name)); };
+const unitCell = (name, extra = null) => { const em = emblemOf(name); return h('td', { class: 'unit-cell' }, em ? h('img', { class: 'crest-s', src: em, alt: '' }) : null, h('span', null, name), extra); };
 function table(heads, rows, opts = {}) {
   const t = h('table', null, h('thead', null, h('tr', null, heads.map(x => h('th', { class: x.num ? 'num' : '' }, x.label || x)))), h('tbody', null, rows));
   return h('div', { class: opts.plain ? '' : 'scroll' }, t);
 }
 const cellNum = (n, extra = '') => h('td', { class: `num ${n ? '' : 'zero'} ${extra}`.trim() }, n ? fmt(n) : '0');
 
-function kpi(label, value, sub, cls = '') { return h('div', { class: 'kpi ' + cls }, h('small', null, label), h('b', null, fmt(value)), sub ? h('span', null, sub) : null); }
+// art — ключ фону плитки (див. «Фони плиток» в artillery.css): знімок із наявних ілюстрацій, приглушений, щоб цифри лишалися читабельними.
+function kpi(label, value, sub, cls = '', art = '') { return h('div', { class: 'kpi ' + cls, 'data-art': art || null }, h('small', null, label), h('b', null, fmt(value)), sub ? h('span', null, sub) : null); }
 
 // ---------- вкладка «Зведення» ----------
 function viewSummary() {
@@ -221,11 +204,11 @@ function viewSummary() {
   const units = byUnit(m).filter(r => r.spent || r.left || r.precisionSpent || r.precisionLeft || r.vgz || r.kbb || r.chargesLeft);
   const wrap = h('div', { class: 'stack' });
   wrap.append(h('div', { class: 'kpis' },
-    kpi('Витрата боєприпасів', t.spent, 'за звітний період, без високоточних', 'accent'),
-    kpi('Залишок боєприпасів', t.left, 'у підрозділах'),
-    kpi('Високоточні', t.precisionSpent, `витрата · залишок ${fmt(t.precisionLeft)}`),
-    kpi('Заряди', t.chargesSpent, `витрата · залишок ${fmt(t.chargesLeft)}`),
-    kpi('Виконано ВгЗ', t.vgz, `з них КББ: ${fmt(t.kbb)}`)));
+    kpi('Витрата боєприпасів', t.spent, 'за звітний період, без високоточних', 'accent', 'gun'),
+    kpi('Залишок боєприпасів', t.left, 'у підрозділах', '', 'shells'),
+    kpi('Високоточні', t.precisionSpent, `витрата · залишок ${fmt(t.precisionLeft)}`, '', 'guided'),
+    kpi('Заряди', t.chargesSpent, `витрата · залишок ${fmt(t.chargesLeft)}`, '', 'charges'),
+    kpi('Виконано ВгЗ', t.vgz, `з них КББ: ${fmt(t.kbb)}`, '', 'crossed')));
   const byGroupRows = groups.map(g => h('tr', null,
     h('td', null, ammoIcon(g.group, 'sm'), g.group), cellNum(g.spent), cellNum(g.left),
     h('td', null, h('div', { class: 'bar' }, h('i', { style: `width:${Math.round(g.spent / maxSpent * 100)}%` })))));
@@ -266,9 +249,9 @@ function viewUnits() {
   if (!cur) detail.append(h('p', { class: 'muted' }, 'Оберіть підрозділ зліва.'));
   else {
     const rows = itemRows(m.items, [cur.id]);
-    detail.append(h('div', { class: 'panel-head' }, h('h2', null, cur.name), h('button', { class: 'btn small', type: 'button', onclick: () => { S.unitId = cur.id; lsSet('unit', cur.id); S.tab = 'entry'; S.form = null; renderAll(); } }, 'Внести дані…')));
+    detail.append(h('div', { class: 'panel-head' }, h('h2', { class: 'unit-title' }, (em => em ? h('img', { class: 'crest-s', src: em, alt: '' }) : null)(emblemOf(cur.name)), h('span', null, cur.name)), h('button', { class: 'btn small', type: 'button', onclick: () => { S.unitId = cur.id; lsSet('unit', cur.id); S.tab = 'entry'; S.form = null; renderAll(); } }, 'Внести дані…')));
     detail.append(rows.length ? table(['Боєприпас', { label: 'Витрата', num: true }, { label: 'Залишок', num: true }],
-      rows.map(r => h('tr', null, h('td', null, r.it.label, r.it.kind === 'precision' ? h('span', { class: 'muted small' }, ' · високоточні') : ''), cellNum(r.spent), cellNum(r.left))))
+      rows.map(r => h('tr', null, h('td', null, ammoIcon(r.it.group, 'sm'), r.it.label, r.it.kind === 'precision' ? h('span', { class: 'muted small' }, ' · високоточні') : ''), cellNum(r.spent), cellNum(r.left))))
       : h('p', { class: 'muted' }, 'У таблиці за цим підрозділом ще немає даних.'));
     const f = m.fire.get(cur.id);
     if (f) detail.append(h('p', { class: 'muted small' }, `Виконано ВгЗ: ${fmt(f.vgz ?? 0)} · з них КББ: ${fmt(f.kbb ?? 0)}`));
@@ -452,8 +435,8 @@ function viewCharges() {
   const m = S.model;
   if (!m.chargeItems.length) return h('section', { class: 'panel' }, h('p', { class: 'muted' }, 'У таблиці немає аркуша зарядів.'));
   const cuIds = m.chargeUnits.map(c => c.id);
-  const itemRowsEls = m.chargeItems.map(it => ({ it, ...sumItems(m, [it], cuIds) })).filter(r => r.spent || r.left).map(r => h('tr', null, h('td', null, r.it.label), cellNum(r.spent), cellNum(r.left)));
-  const unitRowsEls = m.chargeUnits.map(c => ({ c, ...sumItems(m, m.chargeItems, [c.id]) })).filter(r => r.spent || r.left).map(r => h('tr', null, h('td', null, r.c.name, r.c.unitId ? '' : h('span', { class: 'muted small' }, ' · немає в аркуші снарядів')), cellNum(r.spent), cellNum(r.left)));
+  const itemRowsEls = m.chargeItems.map(it => ({ it, ...sumItems(m, [it], cuIds) })).filter(r => r.spent || r.left).map(r => h('tr', null, h('td', null, chargeIcon(r.it.label, 'sm'), r.it.label), cellNum(r.spent), cellNum(r.left)));
+  const unitRowsEls = m.chargeUnits.map(c => ({ c, ...sumItems(m, m.chargeItems, [c.id]) })).filter(r => r.spent || r.left).map(r => h('tr', null, unitCell(r.c.name, r.c.unitId ? '' : h('span', { class: 'muted small' }, ' · немає в аркуші снарядів')), cellNum(r.spent), cellNum(r.left)));
   return h('div', { class: 'cols' },
     h('section', { class: 'panel' }, h('div', { class: 'panel-head' }, h('h2', null, 'За типами зарядів')), table(['Заряд', { label: 'Витрата', num: true }, { label: 'Залишок', num: true }], itemRowsEls)),
     h('section', { class: 'panel' }, h('div', { class: 'panel-head' }, h('h2', null, 'За підрозділами')), table(['Підрозділ', { label: 'Витрата', num: true }, { label: 'Залишок', num: true }], unitRowsEls)));
@@ -462,6 +445,8 @@ function viewCharges() {
 // ---------- вкладка «Довідник» ----------
 // Стаття про кожен тип боєприпасів: ілюстрація, 3D-модель, коротке пояснення й підсумок по вашій таблиці. Сама вікі — ref-wiki.js
 // (та сама, що в «Повітряних Силах» і «Ракетних Військах»), дані — artillery-ref-data.js, моделі — artillery-3d.js.
+// Довідник Артилерії показує лише обертову 3D-ілюстрацію виробу (без фактів, розділів і підсумку по таблиці). false повертає повну статтю.
+const REF_ILLUSTRATION_ONLY = true;
 const REF = { host: null, ctl: null };
 const refGroups = () => (S.model ? [...new Set([...S.model.items.map(i => i.group), ...(S.model.chargeItems.length ? ['Заряди'] : [])])] : []);
 const refItems = entry => {
@@ -471,7 +456,7 @@ const refItems = entry => {
   const groups = ART_REF.groupsOf(entry, refGroups());
   return m.items.filter(i => groups.includes(i.group));
 };
-const refIcon = id => { const e = ART_REF.entryById(id); return e && e.icon ? AMMO_URLS[`./ammo-art/${e.icon}.webp`] || null : null; };
+const refIcon = id => { const e = ART_REF.entryById(id); return e ? iconUrl(e.icon || (e.charges ? 'charge-bmcs' : null)) : null; };
 
 function refExtra(entry) {
   if (entry.noTable) return null;          // підривники: рядків таблиці немає, блок «У вашій таблиці» лишається прихованим
@@ -504,8 +489,9 @@ function viewRef() {
     REF.ctl = mountRef(REF.host, {
       data: ART_REF, usage: false, related: false, interactive: false, initial: lsGet('ref') || 'g155he',
       media: { thumb: refIcon, photo: refIcon }, motion: () => !matchMedia('(prefers-reduced-motion: reduce)').matches,
-      extra: refExtra,
-      searchText: e => refItems(e).map(i => i.label).join(' '),
+      illustrationOnly: REF_ILLUSTRATION_ONLY,
+      extra: REF_ILLUSTRATION_ONLY ? null : refExtra,
+      searchText: REF_ILLUSTRATION_ONLY ? null : e => refItems(e).map(i => i.label).join(' '),
       onSelect: id => lsSet('ref', id),
     });
   } else REF.ctl.refresh();                // таблицю могли перезавантажити
