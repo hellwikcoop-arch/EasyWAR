@@ -1,4 +1,5 @@
-// Session-only opt-in: no persistence, timers, commands or operational data.
+// Session-only state: no persistence, timers, commands or operational data. A verified profile starts with the
+// assistant on; the user can switch it off, and signing out or changing profile starts a new session.
 export function createAssistantSession() {
   let profileId = null;
   let enabled = false;
@@ -8,7 +9,7 @@ export function createAssistantSession() {
     state,
     setProfile(id) {
       const next = typeof id === 'string' && id ? id : null;
-      if (next !== profileId) { profileId = next; enabled = false; revision++; }
+      if (next !== profileId) { profileId = next; enabled = Boolean(next); revision++; }
       return state();
     },
     setEnabled(value) {

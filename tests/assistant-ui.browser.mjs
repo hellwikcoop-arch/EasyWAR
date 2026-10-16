@@ -46,7 +46,7 @@ await page.addInitScript(() => {
       case 'get_restore_startup_report': return { outcome: 'none', pendingRestoreAvailable: false, previousBackupRetained: false };
       case 'check_for_app_update': return { configured: true, currentVersion: '9.8.7', available: { version: '9.8.8', notes: 'Синтетичний випуск' } };
       case 'get_local_model_status': return structuredClone(window.testModel);
-      case 'choose_local_model_package': window.testModel = { ...window.testModel, configured: true, name: 'Синтетична модель', sizeMb: 512 }; return structuredClone(window.testModel);
+      case 'choose_local_model_package': window.testModel = { ...window.testModel, configured: true, enabled: true, ready: true, name: 'Синтетична модель', sizeMb: 512 }; return structuredClone(window.testModel);
       case 'set_local_model_enabled': window.testModel = { ...window.testModel, enabled: args.enabled, ready: args.enabled && window.testModel.configured }; return structuredClone(window.testModel);
       case 'forget_local_model_package': window.testModel = { configured: false, enabled: false, ready: false, name: null, sizeMb: null, loaded: false, busy: false, message: null }; return structuredClone(window.testModel);
       case 'cancel_local_answer': window.rejectModel?.('Скасовано'); return null;
@@ -71,10 +71,13 @@ try {
   await page.locator('.ew-gate button[type="submit"]').click();
   await page.waitForFunction(() => !document.documentElement.classList.contains('ew-locked'));
   const launcher = page.locator('.ew-assistant-launcher'), panel = page.locator('.ew-assistant-panel');
-  assert.equal(await launcher.isVisible(), false);
+  await page.waitForFunction(() => !document.querySelector('.ew-assistant-launcher').hidden);
+  assert.equal(await launcher.isVisible(), true, 'a verified profile starts with the assistant on');
   await page.locator('.ew-profile-open').click();
   const toggle = page.locator('#ew-assistant-enable');
-  assert.equal(await toggle.isChecked(), false);
+  assert.equal(await toggle.isChecked(), true);
+  await toggle.uncheck();
+  assert.equal(await launcher.isVisible(), false, 'the user can still switch the assistant off');
   await page.evaluate(() => { window.holdSession = true; });
   await toggle.check();
   await page.waitForFunction(() => typeof window.resumeSession === 'function');
@@ -229,9 +232,8 @@ try {
   assert.equal(await page.locator('#ew-assistant-model-enable').isDisabled(), true, 'the model cannot be switched on before a package is chosen');
   assert.match(await modelBox.locator('.ew-assistant-model-status').textContent(), /Пакет моделі не підключено/u);
   await modelBox.getByRole('button', { name: /Обрати пакет/u }).click();
-  await page.waitForFunction(() => /підключено, модель вимкнена/u.test(document.querySelector('.ew-assistant-model-status')?.textContent ?? ''));
-  assert.equal(await page.evaluate(() => window.testModel.enabled), false, 'choosing a package never switches the model on');
-  await page.locator('#ew-assistant-model-enable').check();
+  await page.waitForFunction(() => /Модель .* увімкнена/u.test(document.querySelector('.ew-assistant-model-status')?.textContent ?? ''));
+  assert.equal(await page.evaluate(() => window.testModel.enabled), true, 'choosing a package switches the model on');
   await page.waitForFunction(() => /Модель .* увімкнена/u.test(document.querySelector('.ew-assistant-model-status')?.textContent ?? ''));
   await page.screenshot({ path: '/tmp/easywar-shots/assistant-local-model-settings.png', fullPage: true });
   await page.locator('#ew-profile-close').click();
@@ -502,7 +504,7 @@ try {
   assert.equal(commands.some(command => /assistant.*(?:save|write)|sql|append|approve/u.test(command)), false);
   assert.deepEqual(remote, []);
   assert.deepEqual(errors, []);
-  console.log('Browser gate passed: real launcher/profile integration with mocked Tauri, default off, enable race, language reply without metadata IPC, separate colonel voice and unchanged FAQ quotations/fallback, accurate error/warning/advice remarks, injection, explicit read-only review, SQLite rejection, stale work suppression, local gesture loading/timer/error/close/lock cleanup, reduced motion, narrow layout, no remote requests.');
+  console.log('Browser gate passed: real launcher/profile integration with mocked Tauri, default on after a verified sign-in, enable race, language reply without metadata IPC, separate colonel voice and unchanged FAQ quotations/fallback, accurate error/warning/advice remarks, injection, explicit read-only review, SQLite rejection, stale work suppression, local gesture loading/timer/error/close/lock cleanup, reduced motion, narrow layout, no remote requests.');
 } finally {
   await browser.close();
 }
