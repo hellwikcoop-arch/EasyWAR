@@ -76,10 +76,61 @@ test('an engine error rejects so the dialogue falls back; a cancelled answer is 
   assert.ok(slow.calls.some(([command]) => command === LLM_COMMANDS.cancel));
 });
 
-test('the client talks only to the seven model commands and never to files or the DOM', async () => {
+const INFO = { id: 'qwen3-4b-q4km', title: 'Qwen3-4B (Q4_K_M)', license: 'Apache-2.0', host: 'huggingface.co', sizeBytes: 2497280256, partialBytes: 0, installed: false, runnerPresent: false, busy: false, folder: 'C:\\\\Models' };
+
+test('install info is normalised and a failing command means "nothing to install"', async () => {
+  const ok = fake({ [LLM_COMMANDS.installInfo]: () => ({ ...INFO, extra: 'ignored', title: 'x'.repeat(500), partialBytes: -5 }) });
+  const info = await ok.client.installInfo();
+  assert.equal(info.title.length, 80);
+  assert.equal(info.partialBytes, 0);
+  assert.equal(info.sizeBytes, 2497280256);
+  assert.equal('extra' in info, false);
+  assert.equal(await fake({ [LLM_COMMANDS.installInfo]: () => { throw new Error('no tauri'); } }).client.installInfo(), null);
+  assert.equal(await fake({ [LLM_COMMANDS.installInfo]: () => ({ ...INFO, sizeBytes: 0 }) }).client.installInfo(), null);
+});
+
+test('install streams only well-formed progress and reports the three outcomes', async () => {
+  const seen = [];
+  const { client } = fake({
+    [LLM_COMMANDS.install]: ({ onEvent }) => {
+      onEvent.onmessage({ type: 'progress', phase: 'download', done: 10, total: 100 });
+      onEvent.onmessage({ type: 'progress', phase: 'download', done: 500, total: 100 });
+      onEvent.onmessage({ type: 'progress', phase: 'other', done: 1, total: 100 });
+      onEvent.onmessage({ type: 'progress', phase: 'verify', done: 5, total: 0 });
+      onEvent.onmessage(null);
+      onEvent.onmessage({ type: 'progress', phase: 'verify', done: 100, total: 100 });
+      return { outcome: 'modelOnly', status: { ...READY, enabled: false, ready: false }, message: 'Потрібен рушій' };
+    },
+  });
+  const result = await client.install({ onProgress: progress => seen.push(progress) });
+  assert.deepEqual(seen, [{ phase: 'download', done: 10, total: 100 }, { phase: 'download', done: 100, total: 100 }, { phase: 'verify', done: 100, total: 100 }]);
+  assert.deepEqual({ ok: result.ok, outcome: result.outcome, message: result.message }, { ok: true, outcome: 'modelOnly', message: 'Потрібен рушій' });
+  assert.equal(client.status().configured, true);
+  const cancelled = fake({ [LLM_COMMANDS.install]: () => ({ outcome: 'cancelled', status: READY, message: 'Скасовано' }) });
+  assert.equal((await cancelled.client.install()).outcome, 'cancelled');
+  const odd = fake({ [LLM_COMMANDS.install]: () => ({ outcome: 'surprise', status: READY }) });
+  assert.equal((await odd.client.install()).outcome, 'modelOnly');
+});
+
+test('an installation failure comes back as text, and cancel and removal use their own commands', async () => {
+  const { client, calls } = fake({
+    [LLM_COMMANDS.install]: () => { throw 'Недостатньо місця на диску: потрібно ще 2400 МБ, вільно 100 МБ'; },
+    [LLM_COMMANDS.cancelInstall]: () => undefined,
+    [LLM_COMMANDS.removeFiles]: () => ({ ...READY, configured: false, enabled: false, ready: false }),
+  });
+  const failed = await client.install();
+  assert.equal(failed.ok, false);
+  assert.match(failed.message, /Недостатньо місця/u);
+  await client.cancelInstall();
+  assert.equal((await client.removeFiles()).ok, true);
+  assert.equal(client.status().configured, false);
+  assert.deepEqual(calls.map(([command]) => command), [LLM_COMMANDS.install, LLM_COMMANDS.cancelInstall, LLM_COMMANDS.removeFiles]);
+});
+
+test('the client talks only to the eleven model commands and never to files or the DOM', async () => {
   const source = await readFile(new URL('../src/assistant/assistant-llm.js', import.meta.url), 'utf8');
   assert.deepEqual([...new Set(source.match(/'[a-z_]+_(?:local_)?(?:model|answer|package)[a-z_]*'/gu))].sort(),
-    ["'cancel_local_answer'", "'choose_local_model_package'", "'forget_local_model_package'", "'generate_local_answer'", "'get_local_model_status'", "'set_local_model_enabled'", "'stop_local_model'"]);
+    ["'cancel_local_answer'", "'cancel_local_model_install'", "'choose_local_model_package'", "'forget_local_model_package'", "'generate_local_answer'", "'get_local_model_install_info'", "'get_local_model_status'", "'install_local_model'", "'remove_local_model_files'", "'set_local_model_enabled'", "'stop_local_model'"]);
   assert.doesNotMatch(source, /\b(fetch|document|window|localStorage|sessionStorage|eval)\b|new Function/u);
-  assert.equal(Object.keys(LLM_COMMANDS).length, 7);
+  assert.equal(Object.keys(LLM_COMMANDS).length, 11);
 });

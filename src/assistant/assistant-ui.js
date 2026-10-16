@@ -116,7 +116,81 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
   // Підключення необов'язкової локальної моделі. Показується, лише коли помічник увімкнено; сам по собі нічого не запускає.
   const modelBox = element('div', { class: 'ew-assistant-model', hidden: true });
   let modelBusy = false, modelMessage = '';
+  // Встановлення моделі з мережі: лише за явною кнопкою; прогрес оновлюється без перемальовування блоку.
+  let install = { info: null, phase: 'idle', progress: null, message: '', confirming: false };
+  let installRun = 0, installBar = null, installText = null;
   settings.append(modelBox);
+  function formatBytes(bytes) {
+    const gb = bytes / 1e9;
+    return gb >= 1 ? `${gb.toFixed(1).replace('.', ',')} ГБ` : `${Math.max(1, Math.round(bytes / 1e6))} МБ`;
+  }
+  function installProgressText(progress) {
+    if (!progress) return 'Підготовка до завантаження…';
+    const percent = Math.floor(progress.done / progress.total * 100);
+    return progress.phase === 'verify' ? `Перевірка файлу: ${percent}%` : `Завантажено ${formatBytes(progress.done)} з ${formatBytes(progress.total)} (${percent}%)`;
+  }
+  function updateInstallProgress() {
+    const progress = install.progress;
+    if (installBar) installBar.value = progress ? Math.floor(progress.done / progress.total * 100) : 0;
+    if (installText) installText.textContent = installProgressText(progress);
+  }
+  async function loadInstallInfo() { install.info = await llm.installInfo(); }
+  async function startInstall() {
+    const run = ++installRun;
+    install = { ...install, phase: 'running', progress: null, message: '', confirming: false };
+    renderModelBox();
+    const result = await llm.install({ onProgress: progress => { if (run === installRun) { install.progress = progress; updateInstallProgress(); } } });
+    if (run !== installRun) return;
+    install.phase = 'idle'; install.progress = null;
+    install.message = result.ok ? (result.outcome === 'ready' ? '' : result.message) : result.message || 'Не вдалося встановити модель.';
+    if (!result.ok) install.phase = 'failed';
+    await loadInstallInfo();
+    if (run === installRun) { renderModelBox(); announcer.textContent = result.ok && result.outcome === 'ready' ? 'Модель встановлено й увімкнено.' : install.message; }
+  }
+  function cancelInstall() { void llm.cancelInstall(); }
+  function installSection(state) {
+    const info = install.info;
+    if (!info) return null;
+    const running = install.phase === 'running';
+    const hasFiles = info.installed || info.partialBytes > 0;
+    if (state.configured && !hasFiles && !running) return null;
+    const section = element('div', { class: 'ew-assistant-install' });
+    section.append(element('small', { text: `Готова модель: ${info.title}, ≈${formatBytes(info.sizeBytes)}, джерело ${info.host}, ліцензія ${info.license}. Інтернет потрібен лише для завантаження; файл перевіряється за контрольною сумою. Нічого іншого не надсилається.` }));
+    installBar = installText = null;
+    if (running) {
+      installBar = element('progress', { max: '100', value: '0', 'aria-label': 'Завантаження моделі' });
+      installText = element('small', { class: 'ew-assistant-install-progress' });
+      updateInstallProgress();
+      section.append(installBar, installText, element('div', { class: 'ew-assistant-model-actions' },
+        element('button', { type: 'button', text: 'Скасувати', onclick: cancelInstall })));
+      return section;
+    }
+    if (install.message) section.append(element('small', { class: 'ew-assistant-model-status', role: 'status', text: install.message }));
+    const actions = element('div', { class: 'ew-assistant-model-actions' });
+    if (install.confirming) {
+      const left = Math.max(0, info.sizeBytes - info.partialBytes);
+      section.append(element('small', { role: 'status', text: `Буде завантажено ≈${formatBytes(left)} з ${info.host}. Продовжити?` }));
+      actions.append(
+        element('button', { type: 'button', text: 'Завантажити', onclick: () => void startInstall() }),
+        element('button', { type: 'button', text: 'Не зараз', onclick: () => { install.confirming = false; renderModelBox(); } }));
+    } else if (info.installed) {
+      if (!state.configured) actions.append(element('button', { type: 'button', text: 'Підключити встановлену модель', disabled: modelBusy, onclick: () => void startInstall() }));
+    } else {
+      const label = install.phase === 'failed' ? 'Повторити' : info.partialBytes > 0 ? `Продовжити завантаження (вже ${formatBytes(info.partialBytes)})` : 'Наділити КОМБАТА інтелектом';
+      actions.append(element('button', { type: 'button', text: label, disabled: modelBusy, onclick: () => { install.confirming = true; install.message = ''; renderModelBox(); } }));
+    }
+    if (hasFiles && !install.confirming) actions.append(element('button', { type: 'button', text: 'Видалити файли моделі', disabled: modelBusy, onclick: () => void removeInstalledFiles() }));
+    if (actions.childElementCount) section.append(actions);
+    return section;
+  }
+  async function removeInstalledFiles() {
+    modelBusy = true; install.message = ''; renderModelBox();
+    const result = await llm.removeFiles();
+    modelBusy = false;
+    if (!result.ok) install.message = result.message || 'Не вдалося видалити файли моделі.';
+    await loadInstallInfo();
+    renderModelBox();
+  }
   function modelStatusText(state) {
     if (!state.configured) return 'Пакет моделі не підключено: КОМБАТ відповідає точно за довідкою.';
     const label = `«${state.name || 'без назви'}»${state.sizeMb ? `, ≈${state.sizeMb} МБ` : ''}`;
@@ -128,7 +202,8 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
     modelBox.hidden = !checkbox.checked || checkbox.disabled;
     if (modelBox.hidden) { modelBox.replaceChildren(); return; }
     const state = llm.status();
-    const toggle = element('input', { type: 'checkbox', id: 'ew-assistant-model-enable', disabled: !state.configured || modelBusy });
+    const installing = install.phase === 'running';
+    const toggle = element('input', { type: 'checkbox', id: 'ew-assistant-model-enable', disabled: !state.configured || modelBusy || installing });
     toggle.checked = state.enabled;
     const run = async action => {
       modelBusy = true; modelMessage = ''; renderModelBox();
@@ -140,14 +215,15 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
     toggle.addEventListener('change', () => { const wanted = toggle.checked; void run(() => llm.setEnabled(wanted)); });
     modelBox.replaceChildren(
       element('strong', { text: 'Локальна мовна модель (необов’язково)' }),
-      element('small', { text: 'Невелика модель на цьому комп’ютері лише переказує відповіді довідки живою мовою. Пакет моделі ви підключаєте самі: застосунок нічого не завантажує й не надсилає. Запитання не зберігаються.' }),
+      element('small', { text: 'Невелика модель на цьому комп’ютері лише переказує відповіді довідки живою мовою. Її можна встановити кнопкою нижче (інтернет потрібен лише для завантаження) або підключити власний пакет. Запитання не зберігаються й нікуди не надсилаються.' }),
       element('label', {}, toggle, element('span', { text: 'Використовувати локальну модель' })),
       element('small', { class: 'ew-assistant-model-status', role: 'status', text: modelMessage || modelStatusText(state) }),
       element('div', { class: 'ew-assistant-model-actions' },
-        element('button', { type: 'button', text: 'Обрати пакет моделі…', disabled: modelBusy, onclick: () => void run(() => llm.choose()) }),
-        state.configured ? element('button', { type: 'button', text: 'Забути пакет', disabled: modelBusy, onclick: () => void run(() => llm.forget()) }) : null));
+        element('button', { type: 'button', text: 'Обрати пакет моделі…', disabled: modelBusy || installing, onclick: () => void run(() => llm.choose()) }),
+        state.configured ? element('button', { type: 'button', text: 'Забути пакет', disabled: modelBusy || installing, onclick: () => void run(() => llm.forget()) }) : null),
+      installSection(state));
   }
-  async function refreshModel() { await llm.refresh(); renderModelBox(); }
+  async function refreshModel() { await llm.refresh(); await loadInstallInfo(); renderModelBox(); }
   document.body.append(launcher, panel, announcer);
   const explain = createExplainController({
     onExplain(descriptor) {
@@ -166,7 +242,7 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
   });
 
   function resetProposal() { if (proposal.previewUrl) URL.revokeObjectURL(proposal.previewUrl); proposal = { kind: 'fix', text: '', withContext: true, image: null, previewUrl: '', note: '' }; }
-  function clear() { explain.stop(); explainResult = null; explainBranch = ''; explainNote = ''; resetProposal(); motion.stop(); request++; history = []; pendingInput = ''; review = null; status = ''; navigationStatus = ''; busy = false; thinking = false; if (usedModel) { usedModel = false; void llm.stop(); } checkbox.checked = false; modelBox.hidden = true; modelBox.replaceChildren(); panel.hidden = true; launcher.hidden = true; launcher.setAttribute('aria-expanded', 'false'); panel.replaceChildren(); announcer.textContent = ''; }
+  function clear() { explain.stop(); explainResult = null; explainBranch = ''; explainNote = ''; resetProposal(); motion.stop(); request++; history = []; pendingInput = ''; review = null; status = ''; navigationStatus = ''; busy = false; thinking = false; if (usedModel) { usedModel = false; void llm.stop(); } if (install.phase === 'running') void llm.cancelInstall(); installRun++; install = { info: null, phase: 'idle', progress: null, message: '', confirming: false }; installBar = installText = null; checkbox.checked = false; modelBox.hidden = true; modelBox.replaceChildren(); panel.hidden = true; launcher.hidden = true; launcher.setAttribute('aria-expanded', 'false'); panel.replaceChildren(); announcer.textContent = ''; }
   function updateSession(id) {
     const previous = session.state();
     const next = session.setProfile(id);

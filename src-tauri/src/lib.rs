@@ -7,6 +7,7 @@ mod desktop_shell;
 pub mod local_model;
 pub mod local_profiles;
 mod migration_startup;
+pub mod model_install;
 pub mod phone_export;
 pub mod position_templates;
 pub mod repository;
@@ -33,6 +34,7 @@ use local_model::{
     ModelEvent,
 };
 use local_profiles::{Branch, LocalProfileStore, LocalProfilesState};
+use model_install::{Finalized, InstallController, InstallEvent, InstallInfo};
 use phone_export::PhoneDashboard;
 use position_templates::PositionDatabaseTemplate;
 use repository::{
@@ -223,10 +225,13 @@ fn get_profile_session(session: tauri::State<'_, ProfileSession>) -> Option<Stri
 fn lock_local_profile(
     session: tauri::State<'_, ProfileSession>,
     model: tauri::State<'_, LocalModelRuntime>,
+    installer: tauri::State<'_, InstallController>,
 ) {
     session.set(None);
-    // A locked profile never leaves a model answering or holding memory.
+    // A locked profile never leaves a model answering or holding memory,
+    // and never keeps downloading in the background.
     model.stop();
+    installer.cancel();
 }
 
 fn local_model_signed_in(session: &ProfileSession) -> Result<(), String> {
@@ -284,16 +289,7 @@ async fn choose_local_model_package(
         .map_err(|error| error.to_string())?;
     runtime.stop();
     store
-        .save(
-            &LocalModelSettings {
-                package_dir: Some(package.dir.to_string_lossy().into_owned()),
-                enabled: true,
-                manifest_sha256: Some(package.manifest_sha256),
-                model_size: package.model_size,
-                model_modified: package.model_modified,
-            },
-            Utc::now(),
-        )
+        .save(&local_model_settings_for(&package), Utc::now())
         .await
         .map_err(|error| error.to_string())?;
     local_model_status_now(&store, &runtime).await.map(Some)
@@ -340,6 +336,151 @@ async fn forget_local_model_package(
         .save(&LocalModelSettings::default(), Utc::now())
         .await
         .map_err(|error| error.to_string())?;
+    local_model_status_now(&store, &runtime).await
+}
+
+fn local_model_settings_for(package: &local_model::VerifiedPackage) -> LocalModelSettings {
+    LocalModelSettings {
+        package_dir: Some(package.dir.to_string_lossy().into_owned()),
+        enabled: true,
+        manifest_sha256: Some(package.manifest_sha256.clone()),
+        model_size: package.model_size,
+        model_modified: package.model_modified,
+    }
+}
+
+/// The folder the application itself creates for the model. It lives in the
+/// local (non-roaming) data directory because the file is gigabytes in size.
+fn local_model_install_dir(
+    app: &tauri::AppHandle,
+    source: &model_install::ModelSource,
+) -> Result<std::path::PathBuf, String> {
+    app.path()
+        .app_local_data_dir()
+        .map(|dir| dir.join("local-models").join(&source.id))
+        .map_err(|error| error.to_string())
+}
+
+/// Що буде завантажено й що вже лежить на диску. Мережі не торкається.
+#[tauri::command]
+fn get_local_model_install_info(
+    app: tauri::AppHandle,
+    installer: tauri::State<'_, InstallController>,
+) -> Result<InstallInfo, String> {
+    let source = model_install::qwen3_4b_q4km();
+    let dir = local_model_install_dir(&app, &source)?;
+    Ok(model_install::info(&source, &dir, installer.is_busy()))
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct InstallResult {
+    /// `ready` — пакет підключено; `modelOnly` — модель є, бракує рушія;
+    /// `cancelled` — завантажену частину збережено.
+    outcome: &'static str,
+    status: LocalModelStatus,
+    message: Option<String>,
+}
+
+/// Явне встановлення моделі: завантаження, перевірка SHA-256, а за наявності
+/// рушія поруч — запис маніфесту й повна перевірка пакета. Починається лише з цієї команди.
+#[tauri::command]
+async fn install_local_model(
+    app: tauri::AppHandle,
+    store: tauri::State<'_, LocalModelStore>,
+    runtime: tauri::State<'_, LocalModelRuntime>,
+    installer: tauri::State<'_, InstallController>,
+    session: tauri::State<'_, ProfileSession>,
+    on_event: tauri::ipc::Channel<InstallEvent>,
+) -> Result<InstallResult, String> {
+    local_model_signed_in(&session)?;
+    let guard = installer.begin().map_err(|error| error.to_string())?;
+    let source = model_install::qwen3_4b_q4km();
+    let dir = local_model_install_dir(&app, &source)?;
+    let emit: model_install::Emit = std::sync::Arc::new(move |event| {
+        let _ = on_event.send(event);
+    });
+    match model_install::install_model(&source, &dir, &guard, emit).await {
+        Ok(_) => {}
+        Err(model_install::InstallError::Cancelled) => {
+            return Ok(InstallResult {
+                outcome: "cancelled",
+                status: local_model_status_now(&store, &runtime).await?,
+                message: Some(model_install::InstallError::Cancelled.to_string()),
+            });
+        }
+        Err(error) => return Err(error.to_string()),
+    }
+    let finalize_source = source.clone();
+    let finalize_dir = dir.clone();
+    let finalized = tauri::async_runtime::spawn_blocking(move || {
+        model_install::finalize_package(&finalize_source, &finalize_dir)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string())?;
+    match finalized {
+        Finalized::Ready(package) => {
+            runtime.stop();
+            store
+                .save(&local_model_settings_for(&package), Utc::now())
+                .await
+                .map_err(|error| error.to_string())?;
+            Ok(InstallResult {
+                outcome: "ready",
+                status: local_model_status_now(&store, &runtime).await?,
+                message: None,
+            })
+        }
+        Finalized::NeedsRunner => Ok(InstallResult {
+            outcome: "modelOnly",
+            status: local_model_status_now(&store, &runtime).await?,
+            message: Some(format!(
+                "Модель завантажено й перевірено. Щоб вона запрацювала, покладіть файл рушія runner.exe у папку {} і натисніть «Підключити встановлену модель». Поки його немає, КОМБАТ відповідає за довідкою.",
+                dir.display()
+            )),
+        }),
+    }
+}
+
+/// Зупиняє встановлення; завантажена частина лишається для повтору.
+#[tauri::command]
+fn cancel_local_model_install(installer: tauri::State<'_, InstallController>) {
+    installer.cancel();
+}
+
+/// Видаляє файли моделі, які застосунок сам завантажив, і забуває пакет, якщо він був звідти.
+#[tauri::command]
+async fn remove_local_model_files(
+    app: tauri::AppHandle,
+    store: tauri::State<'_, LocalModelStore>,
+    runtime: tauri::State<'_, LocalModelRuntime>,
+    installer: tauri::State<'_, InstallController>,
+    session: tauri::State<'_, ProfileSession>,
+) -> Result<LocalModelStatus, String> {
+    local_model_signed_in(&session)?;
+    if installer.is_busy() {
+        return Err("Спершу скасуйте встановлення моделі".to_owned());
+    }
+    let source = model_install::qwen3_4b_q4km();
+    let dir = local_model_install_dir(&app, &source)?;
+    runtime.stop();
+    let settings = store.load().await.map_err(|error| error.to_string())?;
+    let own_package = settings.package_dir.as_deref().is_some_and(|saved| {
+        std::path::Path::new(saved) == dir
+            || std::fs::canonicalize(&dir).is_ok_and(|real| std::path::Path::new(saved) == real)
+    });
+    let removal_dir = dir.clone();
+    tauri::async_runtime::spawn_blocking(move || model_install::remove_files(&removal_dir))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|_| "Не вдалося видалити файли моделі".to_owned())?;
+    if own_package {
+        store
+            .save(&LocalModelSettings::default(), Utc::now())
+            .await
+            .map_err(|error| error.to_string())?;
+    }
     local_model_status_now(&store, &runtime).await
 }
 
@@ -1423,6 +1564,7 @@ pub fn run() {
             app.manage(ProfileSession::default());
             app.manage(LocalModelStore::new(SettingsStore::new(pool.clone())));
             app.manage(LocalModelRuntime::default());
+            app.manage(InstallController::default());
             app.manage(WorkspaceTemplateStore::new(pool.clone()));
             app.manage(SignalReceiveController::default());
             app.manage(DatabaseStatusStore::new(pool.clone()));
@@ -1452,6 +1594,10 @@ pub fn run() {
             generate_local_answer,
             cancel_local_answer,
             stop_local_model,
+            get_local_model_install_info,
+            install_local_model,
+            cancel_local_model_install,
+            remove_local_model_files,
             update_local_profile_details,
             set_local_profile_password,
             choose_profile_database,
