@@ -391,13 +391,13 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
       element('h3', { class: 'ew-assistant-subhead', text: 'Чернетка доповіді' }),
       element('p', { class: 'ew-assistant-note', text: 'КОМБАТ підставить ваш текст без змін у поле «Повідомлення» вкладки «Внесення доповідей» — лише в порожнє поле й лише після вашого підтвердження. Розбір і додавання в таблицю виконує модуль за вашою командою.' }),
       target, area,
-      element('div', { class: 'ew-assistant-model-actions' },
+      element('div', { class: 'ew-assistant-draft-actions' },
         element('button', { type: 'button', class: 'ew-assistant-primary', 'data-draft': 'preview', disabled: busy, text: 'Показати, що буде внесено', onclick: () => void previewDraft() })));
     if (draft.plan?.ok) {
       section.append(element('div', { class: 'ew-assistant-draft-confirm', role: 'group', 'aria-label': 'Підтвердження чернетки' },
         element('ul', {}, ...draftSummary(draft.plan).map(line => element('li', { text: line }))),
         element('pre', { class: 'ew-assistant-draft-text', text: draft.plan.text }),
-        element('div', { class: 'ew-assistant-model-actions' },
+        element('div', { class: 'ew-assistant-draft-actions' },
           element('button', { type: 'button', class: 'ew-assistant-primary', 'data-draft': 'confirm', disabled: busy, text: 'Підставити в поле', onclick: () => void confirmDraft() }),
           element('button', { type: 'button', 'data-draft': 'cancel', text: 'Скасувати', onclick: () => { draft.plan = null; draft.note = 'Чернетку не підставлено.'; render(); } }))));
     } else if (draft.plan && !draft.plan.ok) {

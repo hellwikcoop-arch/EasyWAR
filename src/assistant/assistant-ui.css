@@ -100,6 +100,11 @@
 .ew-assistant-draft-confirm { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid #dce6ce; border-radius: 10px; background: #f0f4e9; font-size: 11px; line-height: 1.6; }
 .ew-assistant-draft-confirm ul { margin: 0; padding-left: 16px; }
 .ew-assistant-draft-text { margin: 0; max-height: 140px; overflow: auto; padding: 8px; border-radius: 8px; border: 1px dashed rgba(103, 117, 87, .6); background: rgba(255, 255, 255, .7); font: inherit; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Кнопки чернетки стоять на світлій панелі: власні кольори, а не змінні темного діалогу профілів. */
+.ew-assistant-draft-actions { display: grid; gap: 8px; }
+.ew-assistant-draft-actions button { font: inherit; font-size: 12px; padding: 9px 12px; border-radius: 10px; border: 1px solid rgba(103, 117, 87, .6); background: #fff; color: #243024; cursor: pointer; text-align: center; }
+.ew-assistant-draft-actions button.ew-assistant-primary { border-color: #667a46; background: #667a46; color: #fff; }
+.ew-assistant-draft-actions button:disabled { opacity: .55; cursor: default; }
 
 .ew-assistant-action-icon { display: grid; place-items: center; width: 35px; height: 35px; flex: none; border-radius: 9px; background: #eef2e5; color: #849568; }
 .ew-assistant-action-icon svg, .ew-assistant-action-arrow svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
