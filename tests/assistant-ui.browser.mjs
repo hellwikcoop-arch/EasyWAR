@@ -25,6 +25,8 @@ await page.addInitScript(() => {
   window.testModel = { configured: false, enabled: false, ready: false, name: null, sizeMb: null, loaded: false, busy: false, message: null };
   window.modelRequests = [];
   window.modelMode = 'good';
+  window.testInstall = { installed: false, partial: 0 };
+  window.installMode = 'normal';
   const profiles = { activeProfileId: 'synthetic-a', profiles: [{ id: 'synthetic-a', displayName: 'Синтетичний профіль', position: '', hasPassword: true, modules: ['air'], tables: {} }] };
   window.__TAURI_INTERNALS__ = { transformCallback: () => 1, invoke: async (command, args) => {
     window.testCommands.push(command);
@@ -49,6 +51,16 @@ await page.addInitScript(() => {
       case 'choose_local_model_package': window.testModel = { ...window.testModel, configured: true, enabled: true, ready: true, name: 'Синтетична модель', sizeMb: 512 }; return structuredClone(window.testModel);
       case 'set_local_model_enabled': window.testModel = { ...window.testModel, enabled: args.enabled, ready: args.enabled && window.testModel.configured }; return structuredClone(window.testModel);
       case 'forget_local_model_package': window.testModel = { configured: false, enabled: false, ready: false, name: null, sizeMb: null, loaded: false, busy: false, message: null }; return structuredClone(window.testModel);
+      case 'get_local_model_install_info': return { id: 'synthetic', title: 'Тестова модель', license: 'Apache-2.0', host: 'example.test', sizeBytes: 2500000000, partialBytes: window.testInstall.partial, installed: window.testInstall.installed, runnerPresent: false, busy: false, folder: 'C:\\Synthetic' };
+      case 'install_local_model': {
+        args.onEvent.onmessage?.({ type: 'progress', phase: 'download', done: 1000000000, total: 2500000000 });
+        if (window.installMode === 'hold') return new Promise(resolve => { window.finishInstall = resolve; });
+        window.testInstall = { installed: true, partial: 0 };
+        window.testModel = { ...window.testModel, configured: true, enabled: true, ready: true, name: 'Тестова модель', sizeMb: 2384 };
+        return { outcome: 'ready', status: structuredClone(window.testModel), message: null };
+      }
+      case 'cancel_local_model_install': window.testInstall.partial = 1000000000; window.finishInstall?.({ outcome: 'cancelled', status: structuredClone(window.testModel), message: 'Установлення скасовано; завантажену частину збережено' }); return null;
+      case 'remove_local_model_files': window.testInstall = { installed: false, partial: 0 }; window.testModel = { configured: false, enabled: false, ready: false, name: null, sizeMb: null, loaded: false, busy: false, message: null }; return structuredClone(window.testModel);
       case 'cancel_local_answer': window.rejectModel?.('Скасовано'); return null;
       case 'stop_local_model': return null;
       case 'generate_local_answer': {
@@ -231,6 +243,32 @@ try {
   await modelBox.waitFor({ state: 'visible' });
   assert.equal(await page.locator('#ew-assistant-model-enable').isDisabled(), true, 'the model cannot be switched on before a package is chosen');
   assert.match(await modelBox.locator('.ew-assistant-model-status').textContent(), /Пакет моделі не підключено/u);
+  // Установлення моделі: розмір і джерело до початку, підтвердження, прогрес, скасування, повтор, видалення.
+  const installBox = modelBox.locator('.ew-assistant-install');
+  assert.match(await installBox.textContent(), /Тестова модель.*2,5 ГБ.*example\.test.*Apache-2\.0/u);
+  const installed = () => page.evaluate(() => window.testCommands.includes('install_local_model'));
+  assert.equal(await installed(), false, 'nothing is downloaded before the explicit action');
+  await installBox.getByRole('button', { name: /Встановити модель/u }).click();
+  assert.match(await installBox.textContent(), /Буде завантажено ≈2,5 ГБ з example\.test/u);
+  await installBox.getByRole('button', { name: 'Не зараз' }).click();
+  assert.equal(await installed(), false, 'declining the confirmation downloads nothing');
+  await page.evaluate(() => { window.installMode = 'hold'; });
+  await installBox.getByRole('button', { name: /Встановити модель/u }).click();
+  await installBox.getByRole('button', { name: 'Завантажити' }).click();
+  await page.waitForFunction(() => /Завантажено 1,0 ГБ з 2,5 ГБ \(40%\)/u.test(document.querySelector('.ew-assistant-install-progress')?.textContent ?? ''));
+  assert.equal(await installBox.locator('progress').evaluate(node => node.value), 40);
+  assert.equal(await modelBox.getByRole('button', { name: /Обрати пакет/u }).isDisabled(), true, 'a package cannot be chosen while the model downloads');
+  await installBox.getByRole('button', { name: 'Скасувати' }).click();
+  await page.waitForFunction(() => /скасовано/u.test(document.querySelector('.ew-assistant-install')?.textContent ?? ''));
+  await installBox.getByRole('button', { name: /Продовжити завантаження \(вже 1,0 ГБ\)/u }).waitFor();
+  await page.evaluate(() => { window.installMode = 'normal'; });
+  await installBox.getByRole('button', { name: /Продовжити завантаження/u }).click();
+  await installBox.getByRole('button', { name: 'Завантажити' }).click();
+  await page.waitForFunction(() => /Модель .* увімкнена/u.test(document.querySelector('.ew-assistant-model-status')?.textContent ?? ''));
+  assert.equal(await page.evaluate(() => window.testModel.enabled), true, 'a finished installation switches the model on');
+  await page.screenshot({ path: '/tmp/easywar-shots/assistant-model-installed.png', fullPage: true });
+  await installBox.getByRole('button', { name: 'Видалити файли моделі' }).click();
+  await page.waitForFunction(() => /Пакет моделі не підключено/u.test(document.querySelector('.ew-assistant-model-status')?.textContent ?? ''));
   await modelBox.getByRole('button', { name: /Обрати пакет/u }).click();
   await page.waitForFunction(() => /Модель .* увімкнена/u.test(document.querySelector('.ew-assistant-model-status')?.textContent ?? ''));
   assert.equal(await page.evaluate(() => window.testModel.enabled), true, 'choosing a package switches the model on');
