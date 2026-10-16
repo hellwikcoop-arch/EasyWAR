@@ -248,12 +248,12 @@ try {
   assert.match(await installBox.textContent(), /Тестова модель.*2,5 ГБ.*example\.test.*Apache-2\.0/u);
   const installed = () => page.evaluate(() => window.testCommands.includes('install_local_model'));
   assert.equal(await installed(), false, 'nothing is downloaded before the explicit action');
-  await installBox.getByRole('button', { name: /Встановити модель/u }).click();
+  await installBox.getByRole('button', { name: /Наділити КОМБАТА інтелектом/u }).click();
   assert.match(await installBox.textContent(), /Буде завантажено ≈2,5 ГБ з example\.test/u);
   await installBox.getByRole('button', { name: 'Не зараз' }).click();
   assert.equal(await installed(), false, 'declining the confirmation downloads nothing');
   await page.evaluate(() => { window.installMode = 'hold'; });
-  await installBox.getByRole('button', { name: /Встановити модель/u }).click();
+  await installBox.getByRole('button', { name: /Наділити КОМБАТА інтелектом/u }).click();
   await installBox.getByRole('button', { name: 'Завантажити' }).click();
   await page.waitForFunction(() => /Завантажено 1,0 ГБ з 2,5 ГБ \(40%\)/u.test(document.querySelector('.ew-assistant-install-progress')?.textContent ?? ''));
   assert.equal(await installBox.locator('progress').evaluate(node => node.value), 40);

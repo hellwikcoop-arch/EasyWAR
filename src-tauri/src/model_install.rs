@@ -1,7 +1,7 @@
 //! Optional installation of the КОМБАТ language model from the network.
 //!
 //! Nothing here runs by itself: the download starts only from the explicit
-//! «Встановити модель» action after the user has seen the size and the source.
+//! «Наділити КОМБАТА інтелектом» action after the user has seen the size and the source.
 //! The model is a single pinned file (address, size and SHA-256 are compiled
 //! in), so whatever server or mirror answers, a file that does not match is
 //! deleted and never trusted. The download goes to `<name>.part`, can be

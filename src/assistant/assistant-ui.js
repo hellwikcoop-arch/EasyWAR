@@ -176,7 +176,7 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
     } else if (info.installed) {
       if (!state.configured) actions.append(element('button', { type: 'button', text: 'Підключити встановлену модель', disabled: modelBusy, onclick: () => void startInstall() }));
     } else {
-      const label = install.phase === 'failed' ? 'Повторити' : info.partialBytes > 0 ? `Продовжити завантаження (вже ${formatBytes(info.partialBytes)})` : 'Встановити модель…';
+      const label = install.phase === 'failed' ? 'Повторити' : info.partialBytes > 0 ? `Продовжити завантаження (вже ${formatBytes(info.partialBytes)})` : 'Наділити КОМБАТА інтелектом';
       actions.append(element('button', { type: 'button', text: label, disabled: modelBusy, onclick: () => { install.confirming = true; install.message = ''; renderModelBox(); } }));
     }
     if (hasFiles && !install.confirming) actions.append(element('button', { type: 'button', text: 'Видалити файли моделі', disabled: modelBusy, onclick: () => void removeInstalledFiles() }));
