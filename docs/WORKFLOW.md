@@ -100,9 +100,18 @@
 | `.github/workflows/`, `script/*release*`, `tauri*.conf.json` | `node script/release_version.mjs`, `tests/release.test.mjs` |
 | Будь-що з UI | ручна перевірка в запущеному застосунку, де можливо (локально `npm run tauri dev`; у хмарі — скіл `run-easywar` зі скриншотами) |
 
-CI (`desktop-build.yml`) виконує лише `test:unit` і `build` на Linux; Rust-перевірки,
-macOS і Windows — відповідальність того, хто змінює. Коли CI доповнять (беклог P1-1),
-цей розділ оновити.
+CI (`desktop-build.yml`) на кожен PR і push у `main` виконує на Linux: перевірку версій,
+`cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, `test:unit`, `build` (job
+`checks`) та job `audit` — `npm audit --omit=dev` через `script/npm_audit_gate.mjs`
+(прийняті невиправні advisory перелічені там із причиною) і `cargo audit` (винятки з причинами —
+у `.cargo/audit.toml`; попередження про непідтримувані крейти не блокують). `audit` також
+запускається щопонеділка за розкладом, щоб помітити нові advisory без змін у залежностях.
+Для Rust-кроків у `dist/` кладеться заглушка: справжній фронтенд збирає останній крок.
+macOS і Windows, підпис, нативні вікна та `signal-cli` CI не перевіряє —
+це відповідальність того, хто змінює, і розділу «Випуск версії».
+
+Dependabot (`.github/dependabot.yml`) щотижня відкриває PR для npm, cargo і GitHub Actions
+(minor/patch згруповані). Такі PR зливає власник за тими самими правилами, що й решту.
 
 Нестабільні тести не вимикати й не «ігнорувати»: або чинити, або заводити пункт у
 беклог із посиланням на падіння.

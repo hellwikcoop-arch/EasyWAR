@@ -12,6 +12,7 @@
     "build:windows:technical": "powershell -NoProfile -ExecutionPolicy Bypass -File script/build_windows_installer.ps1 -Configuration Debug",
     "build:windows:production": "powershell -NoProfile -ExecutionPolicy Bypass -File script/build_windows_installer.ps1 -Configuration Release -RequireProductionSignature",
     "test:unit": "node --test tests/*.test.mjs",
+    "audit:prod": "node script/npm_audit_gate.mjs",
     "preview": "vite preview",
     "tauri": "tauri"
   },
