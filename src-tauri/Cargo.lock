@@ -919,7 +919,7 @@ dependencies = [
  "fs2",
  "objc2",
  "objc2-foundation",
- "quick-xml 0.31.0",
+ "quick-xml 0.42.0",
  "regex",
  "reqwest",
  "rfd",
