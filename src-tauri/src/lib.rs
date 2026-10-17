@@ -10,6 +10,7 @@ mod migration_startup;
 pub mod model_install;
 pub mod phone_export;
 pub mod position_templates;
+pub mod profile_table;
 pub mod repository;
 pub mod restore;
 pub mod signal_commands;
@@ -843,6 +844,8 @@ async fn read_profile_database(
 
 /// Записує таблицю назад у прив'язаний файл. Тіло запиту — сирі байти XLSX,
 /// профіль і рід військ — у заголовках `x-easywar-profile` і `x-easywar-branch`.
+/// Байти перевіряються як книга, а попередній стан зберігається поруч у
+/// `<назва>.easywar-prev.xlsx` (див. `profile_table`).
 #[tauri::command]
 async fn write_profile_database(
     request: tauri::ipc::Request<'_>,
@@ -868,26 +871,13 @@ async fn write_profile_database(
     }
     let bytes = bytes.clone();
     let path = bound_database_path(&profiles, &session, &profile_id, branch).await?;
-    tauri::async_runtime::spawn_blocking(move || write_file_atomically(&path, &bytes))
-        .await
-        .map_err(|error| error.to_string())?
-}
-
-fn write_file_atomically(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    use std::io::Write;
-    let directory = path
-        .parent()
-        .ok_or_else(|| "Некоректний шлях до таблиці".to_owned())?;
-    let mut temporary = tempfile::NamedTempFile::new_in(directory)
-        .map_err(|error| format!("Не вдалося записати таблицю: {error}"))?;
-    temporary
-        .write_all(bytes)
-        .and_then(|_| temporary.as_file().sync_all())
-        .map_err(|error| format!("Не вдалося записати таблицю: {error}"))?;
-    temporary
-        .persist(path)
-        .map_err(|error| format!("Не вдалося замінити таблицю: {}", error.error))?;
-    Ok(())
+    tauri::async_runtime::spawn_blocking(move || {
+        profile_table::save(&path, branch, &bytes)
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
