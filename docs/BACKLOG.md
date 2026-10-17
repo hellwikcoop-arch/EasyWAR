@@ -6,9 +6,11 @@
 
 ## P1 — до наступного випуску
 
-- [ ] **P1-1** CI: `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test` у job
-  `checks`; `npm audit --omit=dev`, `cargo audit` (ignore RUSTSEC-2023-0071 — `rsa`
-  не компілюється); Dependabot для npm, cargo, actions. (H2)
+- [x] **P1-1** 2026-10-17 — CI: `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test` у job
+  `checks`; job `audit` (`script/npm_audit_gate.mjs` для `npm audit --omit=dev`, `cargo audit`
+  з ignore RUSTSEC-2023-0071 — `rsa` не компілюється; щотижневий запуск за розкладом);
+  Dependabot для npm, cargo, actions. (H2) Перший запуск у GitHub Actions ще не бачили. Під час налаштування оновлено `rustls` 0.23.45 → 0.23.46
+  (чотири advisory); інші знахідки прийняті з причинами (P2-5, P2-12, P2-13).
 - [x] **P1-2** 2026-10-14 — Стабілізовано
   `signal_session::tests::bounded_session_persists_allowed_synthetic_notification`:
   синтетичний демон обслуговує cleanup-запити (`send`, `unsubscribeReceive`) у
@@ -61,6 +63,14 @@
 - [ ] **P2-11** Відновлення доступу при забутому паролі (зараз немає: забутий пароль
   закриває профіль, новий створюють із екрана входу). Потребує окремого рішення:
   ключ відновлення чи скидання з видаленням профілю. (реєстрація й вхід)
+- [ ] **P2-12** `npm audit`: дві high-вразливості `image-size` (GHSA-5p2g-fcmc-qvqq,
+  GHSA-w3rx-r6r6-pgpr) через `pptxgenjs@4.0.1` (останній реліз, виправлення немає).
+  Прийняті в `script/npm_audit_gate.mjs` з причиною. З'ясувати, чи досяжний `image-size`
+  у браузерній збірці `pptxgenjs`; прибрати записи, коли вийде виправлення. (P1-1)
+- [ ] **P2-13** `cargo audit`: `zip` 2.4.2 (власна залежність і `calamine`) та 4.6.1
+  (`tauri-plugin-updater`) мають advisory RUSTSEC-2026-0367/0368/0369 лише для `extract()`;
+  виправлення — `zip >= 9.0.0`. Власний код `extract` не викликає. Прийнято в
+  `.cargo/audit.toml`; прибрати запис після оновлення залежностей (разом із P2-5). (P1-1)
 
 ## P3 — пізніше
 

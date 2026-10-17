@@ -38,8 +38,10 @@ npm run build                                       # Vite → dist/ (≈139 М�
 node script/release_version.mjs                     # узгодженість версій у 5 файлах
 ```
 
-CI (`.github/workflows/desktop-build.yml`) наразі виконує лише `test:unit` і `build`:
-Rust-перевірки запускай сам. Запуск застосунку: локально `npm run tauri dev`,
+CI (`.github/workflows/desktop-build.yml`) на Linux виконує `cargo fmt --check`, `clippy`,
+`cargo test`, `test:unit`, `build` та аудит залежностей (`npm audit`, `cargo audit`);
+macOS/Windows у ньому лише на тегах. Усе одно запускай перевірки свого шару до пушу
+(`docs/WORKFLOW.md`, розділ 5). Запуск застосунку: локально `npm run tauri dev`,
 у контейнері — скіл `run-easywar` (браузерний шлях через `vite preview` + Playwright).
 
 ## Definition of Done
@@ -75,8 +77,8 @@ Rust-перевірки запускай сам. Запуск застосунк
   dimap і сховища: правку роби в обох.
 - Хук редактора модуля вставляється всередину замикання дашборда перед
   `window.__DASH` (див. `docs/UNIFIED_FRONTEND.md`).
-- Актуальний rustfmt показує розбіжності у старому коді: форматуй лише файли, які
-  змінюєш; повне переформатування — окремим комітом (беклог P3-6).
+- `cargo fmt --check` по всьому крейту зелений і є воротами CI: форматуй свої зміни
+  (`rustfmt --edition 2021 <файл>`), не залишай розбіжностей.
 - Тест `signal_session::tests::bounded_session_persists_allowed_synthetic_notification`
   нестабільний (беклог P1-2): падіння не обов'язково твоя помилка, перезапусти.
 - Хмарна сесія — Linux: збірки macOS/Windows, Gatekeeper/SmartScreen, реальний

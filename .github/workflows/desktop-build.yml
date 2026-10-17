@@ -11,9 +11,9 @@ name: Desktop build
 #
 # Actions minutes on this private repository are limited, and macOS and Windows
 # minutes count 10x and 2x. Pull requests and pushes to main therefore run only
-# the Linux checks. The macOS and Windows builds (including the launch smoke
-# test) run on release tags, where they gate the draft release, and on demand
-# via "Run workflow".
+# the Linux checks (Rust fmt/clippy/tests, JS tests, build, dependency audit).
+# The macOS and Windows builds (including the launch smoke test) run on release
+# tags, where they gate the draft release, and on demand via "Run workflow".
 
 on:
   push:
@@ -21,6 +21,9 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+  # Weekly run so a new advisory against an unchanged lockfile is noticed (audit job).
+  schedule:
+    - cron: "17 5 * * 1"
 
 permissions:
   contents: read
@@ -78,9 +81,47 @@ jobs:
             missing=1
           fi
           exit $missing
+      # Tauri embeds ../dist at compile time. The Rust gates need only a placeholder
+      # (the real frontend is built by the last step), so they stay fast.
+      - name: Placeholder frontend for the Rust checks
+        run: |
+          mkdir -p dist
+          echo '<!doctype html><title>EasyWAR</title>' > dist/index.html
+      - name: Rust format
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+      - name: Rust clippy
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+      - name: Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
       # The XLSX contract test runs a Rust example against the legacy parser.
       - run: npm run test:unit
       - run: npm run build
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: src-tauri
+          shared-key: audit
+      # Production dependencies only; the lockfile is enough, nothing is installed.
+      # Documented, currently unfixable advisories are listed with a reason in
+      # script/npm_audit_gate.mjs; anything else fails.
+      - name: npm audit (production dependencies)
+        run: node script/npm_audit_gate.mjs
+      - name: Install cargo-audit
+        run: command -v cargo-audit >/dev/null || cargo install cargo-audit --locked
+      # Ignored advisories, each with a reason, live in .cargo/audit.toml.
+      - name: cargo audit
+        run: cargo audit --file src-tauri/Cargo.lock
 
   macos:
     needs: checks
