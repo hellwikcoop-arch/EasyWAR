@@ -63,3 +63,7 @@ app_lite.html
 # Python bytecode from script/*.py
 __pycache__/
 *.pyc
+
+# Language-model runner (runner/): CMake build trees and the sidecar built for the installer
+runner/build/
+src-tauri/binaries/easywar-llm-runner-*
