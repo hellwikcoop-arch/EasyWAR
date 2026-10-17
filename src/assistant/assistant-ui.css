@@ -88,6 +88,24 @@
 .ew-assistant-quick button:hover { background: #f3f6ed; border-color: #bac9a2; }
 .ew-assistant-quick strong { display: block; font-size: 12px; font-weight: 650; line-height: 1.5; }
 .ew-assistant-quick small { display: block; font-size: 10px; color: #687458; margin-top: 2px; line-height: 1.5; }
+/* Навігація модулями й чернетка доповіді */
+.ew-assistant-subhead { margin: 18px 0 0; font-size: 13px; }
+.ew-assistant-quick-modules { margin-top: 8px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.ew-assistant-quick-modules button:nth-child(n) .ew-assistant-action-icon { background: #eef2e5; color: #849568; }
+.ew-assistant-quick-modules .ew-assistant-action-arrow { display: none; }
+.ew-assistant-draft { margin-top: 16px; padding-top: 12px; border-top: 1px solid rgba(103, 117, 87, .35); display: grid; gap: 8px; }
+.ew-assistant-draft .ew-assistant-subhead { margin: 0; }
+.ew-assistant-draft select, .ew-assistant-draft textarea { width: 100%; box-sizing: border-box; font: inherit; font-size: 12px; padding: 6px 8px; border-radius: 8px; border: 1px solid rgba(103, 117, 87, .5); background: rgba(255, 255, 255, .6); color: inherit; }
+.ew-assistant-draft textarea { resize: vertical; min-height: 84px; }
+.ew-assistant-draft-confirm { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid #dce6ce; border-radius: 10px; background: #f0f4e9; font-size: 11px; line-height: 1.6; }
+.ew-assistant-draft-confirm ul { margin: 0; padding-left: 16px; }
+.ew-assistant-draft-text { margin: 0; max-height: 140px; overflow: auto; padding: 8px; border-radius: 8px; border: 1px dashed rgba(103, 117, 87, .6); background: rgba(255, 255, 255, .7); font: inherit; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Кнопки чернетки стоять на світлій панелі: власні кольори, а не змінні темного діалогу профілів. */
+.ew-assistant-draft-actions { display: grid; gap: 8px; }
+.ew-assistant-draft-actions button { font: inherit; font-size: 12px; padding: 9px 12px; border-radius: 10px; border: 1px solid rgba(103, 117, 87, .6); background: #fff; color: #243024; cursor: pointer; text-align: center; }
+.ew-assistant-draft-actions button.ew-assistant-primary { border-color: #667a46; background: #667a46; color: #fff; }
+.ew-assistant-draft-actions button:disabled { opacity: .55; cursor: default; }
+
 .ew-assistant-action-icon { display: grid; place-items: center; width: 35px; height: 35px; flex: none; border-radius: 9px; background: #eef2e5; color: #849568; }
 .ew-assistant-action-icon svg, .ew-assistant-action-arrow svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .ew-assistant-quick button:nth-child(2) .ew-assistant-action-icon { background: #fbefe6; color: #c49470; }

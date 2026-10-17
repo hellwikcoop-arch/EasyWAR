@@ -19,8 +19,19 @@ export const DIALOGUE_ACTIONS = Object.freeze({
   'open-profiles': Object.freeze({ id: 'open-profiles', label: 'Відкрити профілі', area: 'profiles' }),
   'open-backup': Object.freeze({ id: 'open-backup', label: 'Відкрити «Резервна копія»', area: 'backup' }),
   'open-updates': Object.freeze({ id: 'open-updates', label: 'Відкрити оновлення', area: 'updates' }),
+  // Модулі стартового екрана й вкладка внесення. Кнопка лише відкриває екран; таблицю, поля й записи не чіпає.
+  'open-air': Object.freeze({ id: 'open-air', label: 'Відкрити модуль ПС', area: 'air' }),
+  'open-rocket': Object.freeze({ id: 'open-rocket', label: 'Відкрити модуль РВ', area: 'rocket' }),
+  'open-pvk': Object.freeze({ id: 'open-pvk', label: 'Відкрити дашборд ПВК', area: 'pvk' }),
+  'open-dshv': Object.freeze({ id: 'open-dshv', label: 'Відкрити дашборд УДШВ', area: 'dshv' }),
+  'open-entry-air': Object.freeze({ id: 'open-entry-air', label: 'Внесення доповідей — ПС', area: 'entry-air' }),
+  'open-entry-rocket': Object.freeze({ id: 'open-entry-rocket', label: 'Внесення доповідей — РВ', area: 'entry-rocket' }),
 });
-const ACTION_BY_AREA = Object.freeze({ profiles: 'open-profiles', backup: 'open-backup', updates: 'open-updates' });
+const ACTION_BY_AREA = Object.freeze({
+  profiles: ['open-profiles'], backup: ['open-backup'], updates: ['open-updates'],
+  air: ['open-air'], rocket: ['open-rocket'], pvk: ['open-pvk'], dshv: ['open-dshv'],
+  'entry-air': ['open-entry-air'], 'entry-rocket': ['open-entry-rocket'], entry: ['open-entry-air', 'open-entry-rocket'],
+});
 const actionList = ids => [...new Set(ids)].filter(id => Object.prototype.hasOwnProperty.call(DIALOGUE_ACTIONS, id))
   .map(id => ({ id, label: DIALOGUE_ACTIONS[id].label }));
 
@@ -37,9 +48,23 @@ const SHORT_FOLLOW_UP = /^\s*(?:докладніше|детальніше|ще|�
 const OPEN_THE_LAST = /^\s*(?:а\s+)?(?:відкрий|покажи|де\s+це|де\s+саме|а\s+де)/u;
 const GENERIC_TERMS = new Set(['створення', 'відкриття', 'перевірка', 'збереження', 'увімкнення', 'вимкнення', 'використання']);
 
+// Модуль називають абревіатурою або словами; межі слів задаються через \p{L}, бо \b не працює з кирилицею.
+const MODULE_PATTERNS = [
+  ['air', /(?<![\p{L}])(?:пс|повітряні\s+сили|повітряних\s+сил)(?![\p{L}])/u],
+  ['rocket', /(?<![\p{L}])(?:рв|ракетні\s+війська|ракетних\s+військ)(?![\p{L}])/u],
+  ['pvk', /(?<![\p{L}])(?:пвк|повітряне\s+командування|повітряного\s+командування)(?![\p{L}])/u],
+  ['dshv', /(?<![\p{L}])(?:удшв|дшв|командування\s+дшв)(?![\p{L}])/u],
+];
+const ENTRY_PATTERN = /внесен|вноси|внести/u;
+// Довге запитання з назвою модуля — це питання до довідки, а не прохання відкрити екран.
+const MODULE_AREAS = new Set(['air', 'rocket', 'pvk', 'dshv', 'entry', 'entry-air', 'entry-rocket']);
+const asksToOpen = (area, terms) => Boolean(area) && (!MODULE_AREAS.has(area) || terms.length <= 4);
+
 function areaOf(text) {
   for (const [area, pattern] of AREA_PATTERNS) if (pattern.test(text)) return area;
-  return null;
+  const module = MODULE_PATTERNS.find(([, pattern]) => pattern.test(text))?.[0] ?? null;
+  if (ENTRY_PATTERN.test(text)) return module === 'air' || module === 'rocket' ? `entry-${module}` : module ? null : 'entry';
+  return module;
 }
 
 // The last topic that was actually answered; clarifications and unknowns never become a topic.
@@ -78,7 +103,7 @@ export function classifyQuery(query, history = []) {
   }
   const effectiveQuery = followUp && topic ? `${text} ${topic.query}`.slice(0, DIALOGUE_LIMITS.queryLength) : text;
   const own = areaOf(lower);
-  if (NAVIGATION_VERB.test(lower) && own) return { kind: 'navigation', query: text, effectiveQuery, followUp, area: own, stateKind: own === 'updates' ? 'updates' : null };
+  if (NAVIGATION_VERB.test(lower) && asksToOpen(own, terms)) return { kind: 'navigation', query: text, effectiveQuery, followUp, area: own, stateKind: own === 'updates' ? 'updates' : null };
   // «А оновлення?» right after a navigation answer keeps navigating.
   if (followUp && topic?.kind === 'navigation' && own && terms.length <= 2) return { kind: 'navigation', query: text, effectiveQuery, followUp, area: own, stateKind: own === 'updates' ? 'updates' : null };
 
@@ -95,6 +120,13 @@ const NAVIGATION_TEXT = Object.freeze({
   profiles: 'Це екран «Профілі». Відкрию його кнопкою нижче; зміни на ньому вносите ви.',
   backup: 'Це панель «Резервна копія». Відкрию її кнопкою нижче. Створення копії — окрема дія, яку запускаєте ви.',
   updates: 'Це панель «Оновлення». Відкрию її кнопкою нижче. Перевірку запускаєте ви.',
+  air: 'Це модуль «Повітряні Сили» (ПС). Відкрию його кнопкою нижче; усі дії в ньому виконуєте ви.',
+  rocket: 'Це модуль «Ракетні Війська» (РВ). Відкрию його кнопкою нижче; усі дії в ньому виконуєте ви.',
+  pvk: 'Це дашборд ПВК («Повітряне командування»). Відкрию його кнопкою нижче; таблиця там лише для читання.',
+  dshv: 'Це дашборд УДШВ («Командування ДШВ»). Відкрию його кнопкою нижче; усі дії в ньому виконуєте ви.',
+  entry: 'Внесення доповідей є в модулях ПС і РВ. Оберіть модуль кнопкою нижче: відкрию його вкладку «Внесення доповідей». Таблицю й доповідь вносите ви.',
+  'entry-air': 'Це вкладка «Внесення доповідей» модуля ПС. Відкрию її кнопкою нижче. Таблицю й доповідь вносите ви.',
+  'entry-rocket': 'Це вкладка «Внесення доповідей» модуля РВ. Відкрию її кнопкою нижче. Таблицю й доповідь вносите ви.',
 });
 
 // Buttons that follow from where the answer came from. Deterministic and independent of any model output.
@@ -105,6 +137,7 @@ function actionsForSources(sources) {
     if (/backup_and_recovery|резервн|відновлення з копії/u.test(place)) ids.push('open-backup');
     else if (/updates\.md|оновлення/u.test(place)) ids.push('open-updates');
     else if (/реєстрація та вхід|локальні профілі/u.test(place)) ids.push('open-profiles');
+    else if (/внесення доповідей|довільне внесення|внесення зі звіту/u.test(place)) ids.push('open-entry-air', 'open-entry-rocket');
   }
   return actionList(ids).slice(0, 2);
 }
@@ -128,14 +161,14 @@ export function answerExact({ plan, index, state }) {
       if (answered.status === 'found') { text = `${answered.text} ${base}`; factIds = ['S1']; }
     }
     return { ...empty, topic: 'navigation', area: plan.area, factIds,
-      actions: actionList([ACTION_BY_AREA[plan.area]]),
+      actions: actionList(ACTION_BY_AREA[plan.area] ?? []),
       result: { status: 'found', text, sources: [], warnings: [], origin: factIds.length ? 'application-state' : 'navigation' } };
   }
   if (plan.kind === 'app-state') {
     const result = answerApplicationState(plan.stateKind, state);
     const area = plan.stateKind === 'updates' ? 'updates' : plan.stateKind === 'tables' ? 'profiles' : null;
     return { ...empty, result, topic: result.status === 'found' ? 'app-state' : 'unknown', area, factIds: result.status === 'found' ? ['S1'] : [],
-      actions: result.status === 'found' && area ? actionList([ACTION_BY_AREA[area]]) : [] };
+      actions: result.status === 'found' && area ? actionList(ACTION_BY_AREA[area]) : [] };
   }
   // Help: strict first, tolerant second; follow-ups search with the confirmed topic added.
   const result = answerFromKnowledge(index, plan.effectiveQuery, searchKnowledge);

@@ -12,6 +12,9 @@ import { explainElement } from './assistant-explain-core.js';
 import { createExplainController } from './assistant-explain.js';
 import { PROPOSAL_KINDS, PROPOSAL_TEXT_LIMIT, buildProposal, proposalFileNames, validateProposalImage, validateProposalText } from './assistant-proposal-core.js';
 import { appUpdateState } from '../app-update-state-core.js';
+import { DRAFT_TARGETS, DRAFT_TEXT_LIMIT, cleanDraftText, draftSummary, planDraft } from './assistant-draft-core.js';
+import { placeDraft, readDraftField } from './assistant-draft.js';
+import { moduleWindow, whenModuleDashboard } from '../air-bridge.js';
 
 // The knowledge index is large: it loads on the first question, not when the launcher starts.
 let knowledge = null;
@@ -86,6 +89,9 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
   // Режим «Пояснити»: результат останнього кліку в модулі. Нічого не зберігається поза сесією профілю.
   let explainResult = null, explainNote = '', explainBranch = '';
   let proposal = { kind: 'fix', text: '', withContext: true, image: null, previewUrl: '', note: '' };
+  // Чернетка доповіді: текст користувача, який КОМБАТ може підставити в поле модуля лише після підтвердження.
+  const freshDraft = () => ({ branch: document.body.dataset.activeBranch === 'rocket' ? 'rocket' : 'air', text: '', plan: null, note: '' });
+  let draft = freshDraft();
   const avatarImage = element('img', { src: portraitURL, alt: '', draggable: 'false' });
   const launcher = element('button', { type: 'button', class: 'ew-assistant-launcher', hidden: true, 'aria-label': 'Відкрити помічника КОМБАТ', 'aria-controls': 'ew-assistant-panel', 'aria-expanded': 'false' },
     element('span', { class: 'ew-assistant-avatar', 'aria-hidden': 'true' }, avatarImage),
@@ -112,7 +118,7 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
   const checkbox = element('input', { type: 'checkbox', id: 'ew-assistant-enable', disabled: true });
   const settings = element('section', { class: 'ew-assistant-setting', 'aria-label': 'Налаштування помічника' },
     element('label', {}, checkbox, element('span', { text: 'Увімкнути локального помічника' })),
-    element('small', { text: 'Лише для поточного входу в профіль. Довідка та перевірка відкритої таблиці без інтернету. Записів не створює; розмови не зберігає.' }));
+    element('small', { text: 'Лише для поточного входу в профіль. Довідка та перевірка відкритої таблиці без інтернету. Сам нічого не записує: відкриває екрани й підставляє текст чернетки в поле лише після вашого підтвердження. Розмови не зберігає.' }));
   // Підключення необов'язкової локальної моделі. Показується, лише коли помічник увімкнено; сам по собі нічого не запускає.
   const modelBox = element('div', { class: 'ew-assistant-model', hidden: true });
   let modelBusy = false, modelMessage = '';
@@ -242,7 +248,7 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
   });
 
   function resetProposal() { if (proposal.previewUrl) URL.revokeObjectURL(proposal.previewUrl); proposal = { kind: 'fix', text: '', withContext: true, image: null, previewUrl: '', note: '' }; }
-  function clear() { explain.stop(); explainResult = null; explainBranch = ''; explainNote = ''; resetProposal(); motion.stop(); request++; history = []; pendingInput = ''; review = null; status = ''; navigationStatus = ''; busy = false; thinking = false; if (usedModel) { usedModel = false; void llm.stop(); } if (install.phase === 'running') void llm.cancelInstall(); installRun++; install = { info: null, phase: 'idle', progress: null, message: '', confirming: false }; installBar = installText = null; checkbox.checked = false; modelBox.hidden = true; modelBox.replaceChildren(); panel.hidden = true; launcher.hidden = true; launcher.setAttribute('aria-expanded', 'false'); panel.replaceChildren(); announcer.textContent = ''; }
+  function clear() { draft = freshDraft(); explain.stop(); explainResult = null; explainBranch = ''; explainNote = ''; resetProposal(); motion.stop(); request++; history = []; pendingInput = ''; review = null; status = ''; navigationStatus = ''; busy = false; thinking = false; if (usedModel) { usedModel = false; void llm.stop(); } if (install.phase === 'running') void llm.cancelInstall(); installRun++; install = { info: null, phase: 'idle', progress: null, message: '', confirming: false }; installBar = installText = null; checkbox.checked = false; modelBox.hidden = true; modelBox.replaceChildren(); panel.hidden = true; launcher.hidden = true; launcher.setAttribute('aria-expanded', 'false'); panel.replaceChildren(); announcer.textContent = ''; }
   function updateSession(id) {
     const previous = session.state();
     const next = session.setProfile(id);
@@ -364,17 +370,86 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
       element('span', {}, element('strong', { text: title }), element('small', { text: detail })),
       element('span', { class: 'ew-assistant-action-arrow', 'aria-hidden': 'true' }, actionIcon('arrow'))))),
       element('p', { class: 'ew-assistant-update-status', text: update.text }),
-      navigationStatus ? element('p', { class: 'ew-assistant-warning', role: 'status', text: navigationStatus }) : null);
+      element('h3', { class: 'ew-assistant-subhead', text: 'Модулі' }),
+      element('div', { class: 'ew-assistant-quick ew-assistant-quick-modules' }, ...[
+        ['air', 'ПС', 'Повітряні Сили'], ['rocket', 'РВ', 'Ракетні Війська'],
+        ['pvk', 'ПВК', 'Повітряне командування'], ['dshv', 'УДШВ', 'Командування ДШВ'],
+      ].map(([id, title, detail]) => element('button', {
+        type: 'button', 'data-area': id, onclick: event => { event.stopPropagation(); void navigate(id); },
+      }, element('span', { class: 'ew-assistant-action-icon' }, actionIcon('compass')),
+      element('span', {}, element('strong', { text: title }), element('small', { text: detail })),
+      element('span', { class: 'ew-assistant-action-arrow', 'aria-hidden': 'true' }, actionIcon('arrow'))))),
+      navigationStatus ? element('p', { class: 'ew-assistant-warning', role: 'status', text: navigationStatus }) : null,
+      draftSection());
   }
+  function draftSection() {
+    const target = element('select', { 'aria-label': 'Модуль для чернетки', 'data-draft': 'branch', onchange: event => { draft.branch = event.target.value; draft.plan = null; draft.note = ''; render(); } },
+      ...Object.values(DRAFT_TARGETS).map(item => element('option', { value: item.id, text: `${item.label} — ${item.title}`, selected: item.id === draft.branch })));
+    const area = element('textarea', { rows: '5', maxlength: String(DRAFT_TEXT_LIMIT), 'data-draft': 'text', 'aria-label': 'Текст доповіді для чернетки', placeholder: 'Вставте або надиктуйте текст доповіді…', oninput: event => { draft.text = event.target.value; if (draft.plan) { draft.plan = null; section.querySelectorAll('.ew-assistant-draft-confirm, [data-draft="blocked"]').forEach(node => node.remove()); } } });
+    area.value = draft.text;
+    const section = element('section', { class: 'ew-assistant-draft', 'aria-label': 'Чернетка доповіді' },
+      element('h3', { class: 'ew-assistant-subhead', text: 'Чернетка доповіді' }),
+      element('p', { class: 'ew-assistant-note', text: 'КОМБАТ підставить ваш текст без змін у поле «Повідомлення» вкладки «Внесення доповідей» — лише в порожнє поле й лише після вашого підтвердження. Розбір і додавання в таблицю виконує модуль за вашою командою.' }),
+      target, area,
+      element('div', { class: 'ew-assistant-draft-actions' },
+        element('button', { type: 'button', class: 'ew-assistant-primary', 'data-draft': 'preview', disabled: busy, text: 'Показати, що буде внесено', onclick: () => void previewDraft() })));
+    if (draft.plan?.ok) {
+      section.append(element('div', { class: 'ew-assistant-draft-confirm', role: 'group', 'aria-label': 'Підтвердження чернетки' },
+        element('ul', {}, ...draftSummary(draft.plan).map(line => element('li', { text: line }))),
+        element('pre', { class: 'ew-assistant-draft-text', text: draft.plan.text }),
+        element('div', { class: 'ew-assistant-draft-actions' },
+          element('button', { type: 'button', class: 'ew-assistant-primary', 'data-draft': 'confirm', disabled: busy, text: 'Підставити в поле', onclick: () => void confirmDraft() }),
+          element('button', { type: 'button', 'data-draft': 'cancel', text: 'Скасувати', onclick: () => { draft.plan = null; draft.note = 'Чернетку не підставлено.'; render(); } }))));
+    } else if (draft.plan && !draft.plan.ok) {
+      section.append(element('p', { class: 'ew-assistant-warning', role: 'status', 'data-draft': 'blocked', text: draft.plan.message }));
+    }
+    if (draft.note) section.append(element('p', { class: 'ew-assistant-status', role: 'status', text: draft.note }));
+    return section;
+  }
+  const draftInputs = () => ({ branch: draft.branch, text: draft.text, field: readDraftField(draft.branch), locked: document.documentElement.classList.contains('ew-locked') });
+  async function previewDraft() {
+    if (busy || !session.state().enabled) return;
+    const token = session.token();
+    if (!(await allowed(token))) return;
+    draft.note = ''; draft.plan = planDraft(draftInputs());
+    render();
+    announcer.textContent = draft.plan.ok ? 'Чернетка готова. Перегляньте, що буде внесено, і підтвердіть.' : draft.plan.message;
+    panel.querySelector(draft.plan.ok ? '[data-draft="confirm"]' : '[data-draft="blocked"]')?.focus();
+  }
+  async function confirmDraft() {
+    if (busy || !draft.plan?.ok || !session.state().enabled) return;
+    const token = session.token();
+    if (!(await allowed(token))) return;
+    // Стан поля міг змінитися, поки відкрито підтвердження: перевіряємо знову безпосередньо перед підстановкою.
+    const fresh = planDraft(draftInputs());
+    if (!fresh.ok) { draft.plan = fresh; render(); return; }
+    close();
+    const done = placeDraft(fresh.target.id, fresh.text);
+    draft.plan = null;
+    draft.note = done ? `Текст підставлено в поле модуля ${fresh.target.label}. Перевірте розбір у модулі й додайте записи самі.` : 'Не вдалося підставити текст: поле змінилося. Спробуйте ще раз.';
+    if (done) draft.text = '';
+    announcer.textContent = draft.note;
+  }
+  // Лише ці екрани: службові кнопки шапки й картки модулів на стартовому екрані. Нових цілей текст додати не може.
+  const SERVICE_TARGETS = { profiles: '.ew-profile-open', backup: '.ew-backup-open', updates: '.ew-header-update' };
+  const MODULE_TARGETS = { air: '.branch-card[data-branch="air"]', rocket: '.branch-card[data-branch="rocket"]', pvk: '#pvk-tile [data-act="open"]', dshv: '#dshv-tile [data-act="open"]' };
   async function navigate(area) {
-    const selectors = { profiles: '.ew-profile-open', backup: '.ew-backup-open', updates: '.ew-header-update' };
-    if (!Object.prototype.hasOwnProperty.call(selectors, area) || busy || !session.state().enabled) return;
+    const entry = /^entry-(air|rocket)$/u.exec(String(area))?.[1] ?? null;
+    const moduleId = entry ?? area;
+    const selector = Object.prototype.hasOwnProperty.call(SERVICE_TARGETS, area) ? SERVICE_TARGETS[area]
+      : Object.prototype.hasOwnProperty.call(MODULE_TARGETS, moduleId) ? MODULE_TARGETS[moduleId] : null;
+    if (!selector || busy || !session.state().enabled) return;
     const token = session.token();
     const profileId = session.state().profileId;
     if (!(await allowed(token))) return;
-    const target = document.querySelector(selectors[area]);
+    const target = document.querySelector(selector);
     if (!target || target.disabled) {
       navigationStatus = 'Цей екран зараз недоступний.';
+      render();
+      return;
+    }
+    if (target.closest('.ew-module-off')) {
+      navigationStatus = 'Цей модуль вимкнено у вашому профілі.';
       render();
       return;
     }
@@ -385,6 +460,12 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
       const ok = await allowed(session.token());
       if (!ok) return;
       target.click();
+      if (!entry) return;
+      // Вкладка «Внесення доповідей»: лише перемикання вкладки, без змін у полях і таблиці.
+      const dashboard = await whenModuleDashboard(entry);
+      if (!dashboard || !(await allowed(session.token())) || session.state().profileId !== profileId) return;
+      const doc = (() => { try { return moduleWindow(entry)?.document ?? null; } catch { return null; } })();
+      if (doc?.querySelector('#view-entry')?.hidden) doc.querySelector('#tab-entry')?.click();
     });
   }
   function explainContent() {
