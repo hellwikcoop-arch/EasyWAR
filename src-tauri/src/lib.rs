@@ -19,6 +19,7 @@ pub mod signal_ingest;
 pub mod signal_policy;
 pub mod signal_session;
 pub mod signal_settings;
+mod startup_recovery;
 pub mod update_settings;
 pub mod workspace_templates;
 pub mod xlsx_export;
@@ -1511,26 +1512,48 @@ async fn export_approved_xlsx_from_reference(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let dialogs = startup_recovery::NativeDialogs;
     let context = tauri::generate_context!();
     let database_name = database::DATABASE_URL
         .strip_prefix("sqlite:")
-        .expect("локальна база має використовувати SQLite");
-    let database_file = dirs::config_dir()
-        .expect("не вдалося визначити локальну директорію конфігурації")
+        .unwrap_or_else(|| {
+            startup_recovery::exit_with(&dialogs, "локальна база має використовувати SQLite.")
+        });
+    let config_directory = dirs::config_dir().unwrap_or_else(|| {
+        startup_recovery::exit_with(
+            &dialogs,
+            "не вдалося визначити локальну директорію конфігурації.",
+        )
+    });
+    let database_file = config_directory
         .join(&context.config().identifier)
         .join(database_name);
-    let instance_lock = restore::acquire_application_instance_lock(&database_file)
-        .expect("інший екземпляр EasyWAR уже працює або lock недоступний");
-    tauri::async_runtime::block_on(restore::recover_live_sidecars(
-        &database_file,
-        &instance_lock,
-    ))
-    .expect("не вдалося безпечно завершити відновлення SQLite після попереднього запуску");
-    let restore_startup_report =
-        tauri::async_runtime::block_on(restore::process_requested_restore(&database_file))
-            .expect("не вдалося безпечно обробити підготовлене відновлення");
-    tauri::async_runtime::block_on(migration_startup::prepare_database(&database_file))
-        .expect("не вдалося безпечно підготувати або оновити локальну SQLite-базу");
+    let instance_lock = startup_recovery::or_exit(
+        &dialogs,
+        restore::acquire_application_instance_lock(&database_file),
+        "Інший екземпляр EasyWAR уже працює або файл блокування недоступний",
+    );
+    startup_recovery::or_exit(
+        &dialogs,
+        tauri::async_runtime::block_on(restore::recover_live_sidecars(
+            &database_file,
+            &instance_lock,
+        )),
+        "Не вдалося безпечно завершити відновлення SQLite після попереднього запуску",
+    );
+    let restore_startup_report = startup_recovery::or_exit(
+        &dialogs,
+        tauri::async_runtime::block_on(restore::process_requested_restore(&database_file)),
+        "Не вдалося безпечно обробити підготовлене відновлення",
+    );
+    if startup_recovery::run_guarded_step(&database_file, &dialogs, || {
+        tauri::async_runtime::block_on(migration_startup::prepare_database(&database_file))
+            .map_err(|error| startup_recovery::Failure::from_startup(&error))
+    })
+    .is_err()
+    {
+        std::process::exit(1);
+    }
     let setup_database_file = database_file.clone();
 
     tauri::Builder::default()

@@ -289,6 +289,18 @@ There is no manually maintained schema dump:
 - a missing, altered, failed, newer or unrelated migration history fails
   closed before application repositories open the database.
 
+Startup failures do not panic. `src-tauri/src/startup_recovery.rs` shows a
+native message (the Windows build has no console) and classifies the failure:
+only an unusable database (not SQLite, failed integrity/foreign-key/migration
+checks, missing required objects) is offered for set-aside, and only after an
+explicit Yes. Set-aside renames the database and its `-wal`/`-shm`/`-journal`
+files to `<db>.damaged-<UTC stamp>` (numbered suffix when taken), never deletes
+or overwrites, then lets the normal migrator create a fresh database. A
+database from a newer schema, file-system errors, failed migrations, ambiguous
+swap states and a second running instance are reported without touching any
+file. Covered by synthetic tests (healthy start, consent, refusal, newer
+schema, name collisions, second-attempt failure).
+
 The pre-migration backup contains local data and is not encrypted. It remains
 beside the app database for explicit recovery; EasyWAR never uploads it.
 Synthetic regression tests cover clean creation, v3-to-v4 preservation of raw
