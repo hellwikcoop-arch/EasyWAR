@@ -97,6 +97,7 @@
 | `src-tauri/src/**` | `cargo test`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo fmt --check` (з `--manifest-path src-tauri/Cargo.toml`) |
 | `src-tauri/migrations/` | усе з попереднього рядка + тест міграції + `DATABASE.md` + `migrations/README.md` |
 | `vite.config.js`, `script/build_standalone.mjs`, `package.json` | `npm run build`, `npm run test:unit` (`standalone-build`, `pwa-viewer`) |
+| `runner/` (рушій мовної моделі), `script/build_runner.sh`, `tauri.runner.conf.json` | `script/build_runner.sh` для хоста + `script/runner_smoke.sh <runner>` (потрібні cmake, git, g++/MSVC/Xcode, python3); у PR це ж робить `runner.yml`. Якщо змінено протокол — також `local_model.rs` і `docs/ASSISTANT.md` |
 | `.github/workflows/`, `script/*release*`, `tauri*.conf.json` | `node script/release_version.mjs`, `tests/release.test.mjs` |
 | Будь-що з UI | ручна перевірка в запущеному застосунку, де можливо (локально `npm run tauri dev`; у хмарі — скіл `run-easywar` зі скриншотами) |
 
