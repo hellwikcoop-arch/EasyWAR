@@ -45,3 +45,10 @@ at registration (`air`, `rocket`, `artillery`, `pvk`, `dshv`), one row per
 `(profile_id, module)`. It only decides which cards the start screen shows for
 that profile; data access is still decided by the password and the bound tables.
 Profiles that exist before this migration keep all five modules.
+
+`0010_profile_recovery_key.sql` adds `local_profile_recovery`: the Argon2id hash
+(`key_hash`, checked to start with `$argon2id$`) of the recovery key a user can
+use to reset a forgotten password, one row per profile (`profile_id` is the
+primary key, so a new key replaces the old one), removed with the profile
+(`ON DELETE CASCADE`). The key itself is never stored. Profiles that exist before
+this migration get no row until their user creates a key while signed in.

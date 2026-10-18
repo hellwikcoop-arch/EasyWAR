@@ -1,17 +1,30 @@
 // Екран реєстрації й входу після заставки. Перед стартовим екраном завжди стоїть вхід у
 // профіль; поки в нього не ввійшли, решта сторінки недоступна (inert). Якщо профілів ще
-// немає, замість входу — майстер реєстрації: профіль, пароль, модулі, таблиці.
-// Усе локально: дані йдуть лише в команди ядра застосунку. Логіка — у profile-gate-core.js.
+// немає, замість входу — майстер реєстрації: профіль, пароль, модулі, ключ відновлення,
+// таблиці. Забутий пароль скидається за ключем відновлення просто на екрані входу.
+// Усе локально: дані йдуть лише в команди ядра застосунку. Логіка — у profile-gate-core.js
+// і recovery-key-core.js.
 import './profile-gate.css';
 import {
   chooseProfileDatabase,
   databaseFileName,
   getLocalProfiles,
+  issueLocalProfileRecoveryKey,
   lockLocalProfile,
+  recoverLocalProfilePassword,
   registerLocalProfile,
   setLocalProfilePassword,
   signInLocalProfile,
 } from './local-profiles-core.js';
+import {
+  KEY_SCREEN_TEXT,
+  RECOVERY_KEY_PLACEHOLDER,
+  copyRecoveryKey,
+  formatRecoveryKey,
+  noRecoveryKeyAdvice,
+  recoveryFailureMessage,
+  validateRecoveryForm,
+} from './recovery-key-core.js';
 import {
   GATE_MODULES,
   PASSWORD_MAX,
@@ -112,6 +125,87 @@ export function createProfileGate({ el, avatar, readAvatar }) {
       el('span', { text: 'Показати пароль' }));
   }
 
+  // ---------- ключ відновлення ----------
+
+  /**
+   * Екран «Ключ відновлення»: ключ показано один раз і ніде не збережено, тому далі можна
+   * пройти лише після підтвердження, що його записано. Завершується, коли користувач
+   * натискає «Продовжити» (або свою назву кнопки з `continueLabel`).
+   */
+  function keyScreen({ recoveryKey, title = KEY_SCREEN_TEXT.title, lead = KEY_SCREEN_TEXT.lead, stepper = null, continueLabel = 'Продовжити' }) {
+    return new Promise(resolve => {
+      const shown = formatRecoveryKey(recoveryKey);
+      const status = el('p', { class: 'ew-gate-hint ew-gate-copy-status', role: 'status' });
+      const copy = el('button', {
+        type: 'button',
+        class: 'ew-gate-button ew-gate-button-quiet',
+        text: KEY_SCREEN_TEXT.copy,
+        'data-autofocus': true,
+      });
+      copy.addEventListener('click', async () => {
+        status.textContent = (await copyRecoveryKey(shown)) ? KEY_SCREEN_TEXT.copied : KEY_SCREEN_TEXT.copyFailed;
+      });
+      const confirm = el('input', { type: 'checkbox' });
+      const next = el('button', { type: 'submit', class: 'ew-gate-button', text: continueLabel, disabled: true });
+      confirm.addEventListener('change', () => { next.disabled = !confirm.checked; });
+      const form = el('form', { class: 'ew-gate-form', novalidate: true },
+        el('div', { class: 'ew-gate-key-box' },
+          el('code', { class: 'ew-gate-key', 'aria-label': 'Ключ відновлення', text: shown }),
+          copy),
+        status,
+        el('p', { class: 'ew-gate-warning', text: KEY_SCREEN_TEXT.warning }),
+        el('label', { class: 'ew-gate-check' }, confirm, el('span', { text: KEY_SCREEN_TEXT.confirm })),
+        el('div', { class: 'ew-gate-actions' }, next));
+      form.addEventListener('submit', event => {
+        event.preventDefault();
+        if (confirm.checked) resolve();
+      });
+      show(
+        el('h1', { id: 'ew-gate-title', text: title }),
+        el('p', { class: 'ew-gate-lead', text: lead }),
+        stepper,
+        form,
+      );
+    });
+  }
+
+  /**
+   * Профіль без ключа відновлення (створений до появи ключів): після входу пропонуємо його
+   * створити. Вхід уже виконано, тож відмова чи помилка тут його не скасовує.
+   */
+  function offerRecoveryKey(profile, password) {
+    return new Promise(resolve => {
+      const error = el('p', { class: 'ew-gate-message', role: 'alert' });
+      const skip = el('button', { type: 'button', class: 'ew-gate-link', text: 'Не зараз', onclick: () => resolve() });
+      const create = el('button', {
+        type: 'button',
+        class: 'ew-gate-button',
+        text: 'Створити ключ відновлення',
+        'data-autofocus': true,
+      });
+      create.addEventListener('click', async () => {
+        error.textContent = '';
+        create.disabled = true;
+        skip.disabled = true;
+        try {
+          const issued = await issueLocalProfileRecoveryKey(profile.id, password);
+          await keyScreen({ recoveryKey: issued.recoveryKey });
+          resolve();
+        } catch (failure) {
+          error.textContent = `Не вдалося створити ключ: ${String(failure?.message || failure)}. Це можна зробити пізніше в налаштуваннях профілю.`;
+          create.disabled = false;
+          skip.disabled = false;
+        }
+      });
+      show(
+        el('h1', { id: 'ew-gate-title', text: 'Ключ відновлення' }),
+        el('p', { class: 'ew-gate-lead', text: `Для «${profile.displayName}» ще немає ключа відновлення. Без нього забутий пароль повернути не вдасться. Ключ показується один раз, його треба записати.` }),
+        error,
+        el('div', { class: 'ew-gate-actions' }, skip, create),
+      );
+    });
+  }
+
   // ---------- вхід ----------
 
   function loginFlow(state) {
@@ -120,13 +214,14 @@ export function createProfileGate({ el, avatar, readAvatar }) {
       let failures = 0;
       let blockedUntil = 0;
       let busy = false;
+      let recovering = false;
 
       function render() {
         const cards = state.profiles.map(profile => el('button', {
           type: 'button',
           class: `ew-gate-user${selected?.id === profile.id ? ' is-selected' : ''}`,
           'aria-pressed': selected?.id === profile.id ? 'true' : 'false',
-          onclick: () => { selected = profile; render(); },
+          onclick: () => { selected = profile; recovering = false; render(); },
         },
         avatar(profile, 'lg'),
         el('strong', { text: profile.displayName }),
@@ -140,13 +235,103 @@ export function createProfileGate({ el, avatar, readAvatar }) {
           onclick: () => resolve('add'),
         });
 
+        let lead = 'Оберіть користувача.';
+        if (selected && recovering) {
+          lead = selected.hasRecoveryKey
+            ? 'Скиньте пароль за ключем відновлення.'
+            : 'Для цього профілю відновлення пароля недоступне.';
+        } else if (selected) {
+          lead = 'Введіть пароль, щоб відкрити easyWAR.';
+        }
         show(
-          el('h1', { id: 'ew-gate-title', text: 'Вхід' }),
-          el('p', { class: 'ew-gate-lead', text: selected ? 'Введіть пароль, щоб відкрити easyWAR.' : 'Оберіть користувача.' }),
+          el('h1', { id: 'ew-gate-title', text: recovering && selected ? 'Відновлення пароля' : 'Вхід' }),
+          el('p', { class: 'ew-gate-lead', text: lead }),
           el('div', { class: 'ew-gate-users' }, cards),
-          selected ? loginForm() : null,
+          selected ? (recovering ? recoveryForm() : loginForm()) : null,
           el('div', { class: 'ew-gate-foot' }, addButton),
         );
+      }
+
+      const backToLogin = () => el('button', {
+        type: 'button',
+        class: 'ew-gate-link',
+        text: 'Назад до входу',
+        onclick: () => { recovering = false; render(); },
+      });
+
+      /** Скидання забутого пароля за ключем відновлення; після успіху показує новий ключ. */
+      function recoveryForm() {
+        if (!selected.hasRecoveryKey) {
+          const advice = noRecoveryKeyAdvice(selected);
+          return el('div', { class: 'ew-gate-form' },
+            el('p', { class: 'ew-gate-lead ew-gate-notice', role: 'status', text: advice.lead }),
+            el('p', { class: 'ew-gate-lead', text: advice.next }),
+            el('div', { class: 'ew-gate-actions' }, backToLogin()));
+        }
+        const keyInput = textInput({
+          class: 'ew-gate-key-input',
+          placeholder: RECOVERY_KEY_PLACEHOLDER,
+          autocapitalize: 'characters',
+          maxlength: '64',
+          'data-autofocus': true,
+          'aria-label': 'Ключ відновлення',
+        });
+        const password = passwordInput({ 'aria-label': 'Новий пароль' });
+        const confirm = passwordInput({ 'aria-label': 'Повторіть новий пароль' });
+        const error = el('p', { class: 'ew-gate-message', role: 'alert' });
+        const submit = el('button', { type: 'submit', class: 'ew-gate-button', text: 'Скинути пароль і увійти' });
+        const form = el('form', { class: 'ew-gate-form', novalidate: true },
+          field('Ключ відновлення', keyInput, 'recoveryKey', 'Ключ із 25 символів, який показали при створенні профілю. Регістр і дефіси не важливі.'),
+          field('Новий пароль', password, 'password', `Від ${PASSWORD_MIN} символів.`),
+          field('Повторіть новий пароль', confirm, 'confirm'),
+          showPasswordToggle([password, confirm]),
+          error,
+          el('div', { class: 'ew-gate-actions' }, backToLogin(), submit));
+
+        // Після введення показуємо ключ групами по п'ять символів, щоб легше звірити з записаним.
+        keyInput.addEventListener('blur', () => {
+          if (keyInput.value.trim()) keyInput.value = formatRecoveryKey(keyInput.value);
+        });
+
+        form.addEventListener('submit', async event => {
+          event.preventDefault();
+          if (busy) return;
+          error.textContent = '';
+          setErrors(form, {});
+          const wait = blockedUntil - Date.now();
+          if (wait > 0) {
+            error.textContent = `Забагато невдалих спроб. Зачекайте ${Math.ceil(wait / 1000)} с.`;
+            return;
+          }
+          const problems = validateRecoveryForm(
+            { recoveryKey: keyInput.value, password: password.value, confirm: confirm.value },
+            passwordError,
+          );
+          if (Object.keys(problems).length) { setErrors(form, problems); return; }
+          busy = true;
+          submit.disabled = true;
+          try {
+            const issued = await recoverLocalProfilePassword(selected.id, keyInput.value, password.value);
+            await keyScreen({
+              recoveryKey: issued.recoveryKey,
+              title: 'Пароль змінено',
+              lead: 'Ви ввійшли з новим паролем. Використаний ключ відновлення більше не діє, ось новий. Запишіть його й сховайте окремо від комп’ютера.',
+              continueLabel: 'Відкрити easyWAR',
+            });
+            resolve('signed-in');
+          } catch (failure) {
+            failures += 1;
+            blockedUntil = Date.now() + failureDelayMs(failures);
+            error.textContent = recoveryFailureMessage(failure);
+            password.value = '';
+            confirm.value = '';
+            keyInput.focus();
+          } finally {
+            busy = false;
+            submit.disabled = false;
+          }
+        });
+        return form;
       }
 
       function loginForm() {
@@ -163,6 +348,12 @@ export function createProfileGate({ el, avatar, readAvatar }) {
           class: 'ew-gate-button',
           text: needsPassword ? 'Встановити пароль і увійти' : 'Увійти',
         });
+        const forgot = needsPassword ? null : el('button', {
+          type: 'button',
+          class: 'ew-gate-link',
+          text: 'Забули пароль?',
+          onclick: () => { recovering = true; render(); },
+        });
         const form = el('form', { class: 'ew-gate-form', novalidate: true },
           needsPassword
             ? el('p', { class: 'ew-gate-lead', text: `Для «${selected.displayName}» ще не встановлено пароль. Пароль обов’язковий (від ${PASSWORD_MIN} символів).` })
@@ -171,7 +362,7 @@ export function createProfileGate({ el, avatar, readAvatar }) {
           confirm ? field('Повторіть пароль', confirm, 'confirm') : null,
           showPasswordToggle(confirm ? [password, confirm] : [password]),
           error,
-          submit);
+          el('div', { class: 'ew-gate-actions' }, forgot, submit));
 
         form.addEventListener('submit', async event => {
           event.preventDefault();
@@ -194,8 +385,20 @@ export function createProfileGate({ el, avatar, readAvatar }) {
           busy = true;
           submit.disabled = true;
           try {
-            if (needsPassword) await setLocalProfilePassword(selected.id, null, password.value);
-            await signInLocalProfile(selected.id, password.value);
+            const profile = selected;
+            const typed = password.value;
+            if (needsPassword) await setLocalProfilePassword(profile.id, null, typed);
+            await signInLocalProfile(profile.id, typed);
+            // Вхід виконано. Профілю без ключа відновлення (старі профілі, профілі без пароля)
+            // одразу пропонуємо його створити: це не блокує вхід, помилка лише лишає профіль без ключа.
+            if (needsPassword) {
+              try {
+                const issued = await issueLocalProfileRecoveryKey(profile.id, typed);
+                await keyScreen({ recoveryKey: issued.recoveryKey });
+              } catch { /* ключ можна створити в налаштуваннях профілю */ }
+            } else if (!profile.hasRecoveryKey) {
+              await offerRecoveryKey(profile, typed);
+            }
             resolve('signed-in');
           } catch (failure) {
             failures += 1;
@@ -227,7 +430,7 @@ export function createProfileGate({ el, avatar, readAvatar }) {
       let created = null;
       const bound = {};
 
-      const steps = ['Профіль', 'Модулі', 'Таблиці'];
+      const steps = ['Профіль', 'Модулі', 'Ключ', 'Таблиці'];
       const stepper = current => el('ol', { class: 'ew-gate-steps', 'aria-label': 'Кроки реєстрації' },
         steps.map((label, index) => el('li', {
           class: index === current ? 'is-current' : (index < current ? 'is-done' : ''),
@@ -276,7 +479,7 @@ export function createProfileGate({ el, avatar, readAvatar }) {
             picker),
           field('Ім’я або позивний', name, 'displayName'),
           field('Посада (необов’язково)', position, 'position'),
-          field('Пароль', password, 'password', `Від ${PASSWORD_MIN} символів. Закриває вхід у застосунок на цьому комп’ютері; файли таблиць не шифрує. Забутий пароль відновити неможливо.`),
+          field('Пароль', password, 'password', `Від ${PASSWORD_MIN} символів. Закриває вхід у застосунок на цьому комп’ютері; файли таблиць не шифрує. Якщо забудете пароль, відновити його можна лише за ключем відновлення: його покажемо після створення профілю.`),
           field('Повторіть пароль', confirm, 'confirm'),
           showPasswordToggle([password, confirm]),
           el('div', { class: 'ew-gate-actions' },
@@ -338,7 +541,7 @@ export function createProfileGate({ el, avatar, readAvatar }) {
           error.textContent = '';
           create.disabled = true;
           try {
-            const state = await registerLocalProfile({
+            const { state, recoveryKey } = await registerLocalProfile({
               displayName: data.displayName,
               password: data.password,
               position: data.position,
@@ -348,7 +551,7 @@ export function createProfileGate({ el, avatar, readAvatar }) {
             created = state.profiles.find(profile => profile.id === state.activeProfileId);
             data.password = '';
             data.confirm = '';
-            stepTables();
+            stepKey(recoveryKey);
           } catch (failure) {
             error.textContent = `Не вдалося створити профіль: ${String(failure?.message || failure)}`;
             create.disabled = false;
@@ -363,7 +566,16 @@ export function createProfileGate({ el, avatar, readAvatar }) {
         );
       }
 
-      // Крок 3: таблиці. Профіль уже створено, тож прив'язка необов'язкова й безпечна.
+      // Крок 3: ключ відновлення. Профіль уже створено; ключ показується один раз.
+      function stepKey(recoveryKey) {
+        keyScreen({
+          recoveryKey,
+          stepper: stepper(2),
+          lead: `${KEY_SCREEN_TEXT.lead} Якщо ключ загубиться, новий можна створити в налаштуваннях профілю, знаючи пароль.`,
+        }).then(stepTables);
+      }
+
+      // Крок 4: таблиці. Профіль уже створено, тож прив'язка необов'язкова й безпечна.
       function stepTables() {
         const slots = slotsForModules(data.modules);
         const error = el('p', { class: 'ew-gate-message', role: 'alert' });
@@ -400,7 +612,7 @@ export function createProfileGate({ el, avatar, readAvatar }) {
           el('p', { class: 'ew-gate-lead', text: slots.length
             ? 'Профіль створено. Можна одразу прив’язати свої таблиці .xlsx або пропустити цей крок: зробити це можна пізніше на стартовому екрані.'
             : 'Профіль створено. Для обраних модулів прив’язувати таблиці до профілю не потрібно.' }),
-          stepper(2),
+          stepper(3),
           slots.length ? el('div', { class: 'ew-gate-slots' }, rows) : null,
           error,
           el('div', { class: 'ew-gate-actions' }, done),

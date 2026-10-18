@@ -89,7 +89,7 @@ src/                            фронтенд: html-сторінки, мод�
 src/models/                     3D-моделі .glb і CREDITS.md з ліцензіями
 src/public/                     класичні скрипти (редактор модуля, rocket-refs), manifest PWA
 src-tauri/src/                  Rust-ядро
-src-tauri/migrations/           SQL-міграції 0001–0009 і README
+src-tauri/migrations/           SQL-міграції 0001–0010 і README
 src-tauri/resources/base-tables порожні шаблони таблиць .xlsx (без даних)
 tests/                          node --test, 571 тест; fixtures/ синтетичні
 script/                         standalone-збірка, випуск, маніфест оновлень, генерація моделей та іконок

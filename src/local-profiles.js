@@ -13,6 +13,7 @@ import {
   getProfileSession,
   getWorkspaceTemplates,
   isProfileLocked,
+  issueLocalProfileRecoveryKey,
   lockLocalProfile,
   ownLossesBranch,
   PROFILE_SLOTS,
@@ -31,6 +32,7 @@ import {
 import { createProfileGate } from './profile-gate.js';
 import { requestSplashSkip } from './startup-splash-core.js';
 import { GATE_MODULES, modulesError, moduleVisible } from './profile-gate-core.js';
+import { KEY_SCREEN_TEXT, copyRecoveryKey, formatRecoveryKey, recoveryStatusText } from './recovery-key-core.js';
 import { createAssistantUI } from './assistant/assistant-ui.js';
 import { getDatabaseStatus } from './backup-core.js';
 import { appUpdateState } from './app-update-state-core.js';
@@ -105,7 +107,7 @@ function readAvatar(file) {
 }
 
 /** Невелике модальне вікно для пароля (window.prompt показує пароль відкритим текстом). */
-function askPasswords({ title, fields, submitLabel }) {
+function askPasswords({ title, fields, submitLabel, description = null }) {
   return new Promise(resolve => {
     const dialog = el('dialog', { class: 'ew-password-dialog' });
     const inputs = fields.map(field => el('input', {
@@ -118,6 +120,7 @@ function askPasswords({ title, fields, submitLabel }) {
     const error = el('p', { class: 'ew-password-error', role: 'alert' });
     const form = el('form', { method: 'dialog' },
       el('h3', { text: title }),
+      description ? el('p', { class: 'ew-password-note', text: description }) : null,
       fields.map((field, index) => el('label', {}, el('span', { text: field.label }), inputs[index])),
       error,
       el('div', { class: 'ew-profile-actions' },
@@ -149,6 +152,46 @@ function askPasswords({ title, fields, submitLabel }) {
   });
 }
 
+/**
+ * Показує щойно створений ключ відновлення. Ключ видно лише тут і лише один раз, тому вікно
+ * не закривається клавішею Esc, доки користувач не підтвердить, що ключ записано.
+ */
+function showRecoveryKey(recoveryKey) {
+  return new Promise(resolve => {
+    const shown = formatRecoveryKey(recoveryKey);
+    const dialog = el('dialog', { class: 'ew-password-dialog ew-recovery-dialog', 'aria-label': KEY_SCREEN_TEXT.title });
+    const status = el('p', { class: 'ew-recovery-copy-status', role: 'status' });
+    const copy = el('button', { type: 'button', class: 'btn quiet', text: KEY_SCREEN_TEXT.copy });
+    copy.addEventListener('click', async () => {
+      status.textContent = (await copyRecoveryKey(shown)) ? KEY_SCREEN_TEXT.copied : KEY_SCREEN_TEXT.copyFailed;
+    });
+    const confirm = el('input', { type: 'checkbox' });
+    const done = el('button', { type: 'submit', class: 'btn primary', text: 'Готово', disabled: true });
+    confirm.addEventListener('change', () => { done.disabled = !confirm.checked; });
+    const form = el('form', { method: 'dialog' },
+      el('h3', { text: KEY_SCREEN_TEXT.title }),
+      el('p', { class: 'ew-password-note', text: KEY_SCREEN_TEXT.lead }),
+      el('code', { class: 'ew-recovery-key', 'aria-label': KEY_SCREEN_TEXT.title, text: shown }),
+      el('div', { class: 'ew-profile-actions' }, copy),
+      status,
+      el('p', { class: 'ew-recovery-warning', text: KEY_SCREEN_TEXT.warning }),
+      el('label', { class: 'ew-recovery-confirm' }, confirm, el('span', { text: KEY_SCREEN_TEXT.confirm })),
+      el('div', { class: 'ew-profile-actions' }, done));
+    form.addEventListener('submit', event => {
+      event.preventDefault();
+      if (!confirm.checked) return;
+      dialog.close();
+      dialog.remove();
+      resolve();
+    });
+    dialog.addEventListener('cancel', event => event.preventDefault());
+    dialog.append(form);
+    document.body.append(dialog);
+    dialog.showModal();
+    copy.focus();
+  });
+}
+
 function initializeLocalProfiles() {
   if (typeof window.__TAURI_INTERNALS__?.invoke !== 'function') return;
   const toolbar = document.querySelector('.appbar-right');
@@ -165,6 +208,7 @@ function initializeLocalProfiles() {
     </div>
     <p>Профілі зберігаються лише в локальній базі цього пристрою. Пароль обов’язковий.</p>
     <p class="ew-profile-note">Пароль закриває вхід у профіль на цьому пристрої. Файли таблиць на диску він не шифрує.</p>
+    <p class="ew-profile-note">Забутий пароль скидається на екрані входу кнопкою «Забули пароль?» за ключем відновлення. Ключ показується один раз; якщо його втрачено, створіть новий тут, поки пам’ятаєте пароль.</p>
     <p class="ew-profile-note">До профілю можна прив'язати окремо таблицю Повітряних Сил і таблицю Ракетних військ. Кожна відкривається у своєму модулі після входу в профіль і записується прямо у свій файл.</p>
     <p class="ew-profile-note">Рольовий шаблон змінює лише початковий розділ робочого простору. Він не надає і не обмежує доступ.</p>
     <p id="ew-profile-status" class="ew-profile-status" role="status" aria-live="polite"></p>
@@ -364,8 +408,20 @@ function initializeLocalProfiles() {
     const passwordButtons = profile.hasPassword
       ? [
         el('button', { type: 'button', class: 'btn quiet', text: 'Змінити пароль', onclick: () => changePassword(profile) }),
+        el('button', {
+          type: 'button',
+          class: 'btn quiet',
+          text: profile.hasRecoveryKey ? 'Новий ключ відновлення…' : 'Створити ключ відновлення…',
+          onclick: () => issueRecoveryKey(profile),
+        }),
       ]
       : [el('button', { type: 'button', class: 'btn quiet', text: 'Встановити пароль…', onclick: () => setPassword(profile) })];
+
+    const recoveryNote = profile.hasPassword
+      ? el('p', { class: `ew-profile-note ew-profile-recovery${profile.hasRecoveryKey ? '' : ' is-missing'}` },
+        el('strong', { text: 'Ключ відновлення пароля: ' }),
+        recoveryStatusText(profile))
+      : null;
 
     const actions = el('div', { class: 'ew-profile-actions' },
       saveButton,
@@ -388,6 +444,7 @@ function initializeLocalProfiles() {
           el('label', {}, el('span', { class: 'ew-profile-field-caption', text: 'Ім’я' }), nameField),
           el('label', {}, el('span', { class: 'ew-profile-field-caption', text: 'Посада' }), positionField))),
       badge,
+      recoveryNote,
       database,
       renderModules(profile),
       templateSection.label,
@@ -529,9 +586,39 @@ function initializeLocalProfiles() {
       ],
     });
     if (!values) return;
-    await run(() => setLocalProfilePassword(profile.id, null, values[0]), 'Профіль захищено паролем.');
+    const protectedNow = await run(() => setLocalProfilePassword(profile.id, null, values[0]), 'Профіль захищено паролем.');
     sessionProfileId = await getProfileSession();
     render();
+    // Новий пароль без ключа відновлення забути легко, тож ключ створюємо одразу.
+    if (protectedNow) await issueRecoveryKey(profile, values[0]);
+  }
+
+  /**
+   * Створює новий ключ відновлення (старий перестає діяти) і показує його один раз.
+   * Потрібен чинний пароль; `knownPassword` передають, коли користувач щойно його ввів.
+   */
+  async function issueRecoveryKey(profile, knownPassword = null) {
+    let password = knownPassword;
+    if (password == null) {
+      const values = await askPasswords({
+        title: `Ключ відновлення для «${profile.displayName}»`,
+        submitLabel: 'Створити ключ',
+        description: profile.hasRecoveryKey
+          ? 'Новий ключ замінить попередній: старий перестане діяти. Введіть чинний пароль.'
+          : 'Ключ потрібен, щоб скинути пароль, якщо його забути. Введіть чинний пароль.',
+        fields: [{ label: 'Поточний пароль' }],
+      });
+      if (!values) return;
+      [password] = values;
+    }
+    let recoveryKey = null;
+    const ok = await run(async () => {
+      const issued = await issueLocalProfileRecoveryKey(profile.id, password);
+      recoveryKey = issued.recoveryKey;
+      return issued.state;
+    }, 'Ключ відновлення створено.', 'Не вдалося створити ключ відновлення');
+    render();
+    if (ok && recoveryKey) await showRecoveryKey(recoveryKey);
   }
 
   async function changePassword(profile) {

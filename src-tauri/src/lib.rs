@@ -35,7 +35,7 @@ use local_model::{
     GenerationRequest, LocalModelRuntime, LocalModelSettings, LocalModelStatus, LocalModelStore,
     ModelEvent,
 };
-use local_profiles::{Branch, LocalProfileStore, LocalProfilesState};
+use local_profiles::{Branch, LocalProfileStore, LocalProfilesState, RecoveryKeyIssued};
 use model_install::{Finalized, InstallController, InstallEvent, InstallInfo};
 use phone_export::PhoneDashboard;
 use position_templates::PositionDatabaseTemplate;
@@ -130,9 +130,10 @@ async fn get_local_profiles(
     profiles.list().await.map_err(|error| error.to_string())
 }
 
-/// Реєстрація користувача: профіль, обов'язковий пароль, посада, фото й обрані модулі
-/// створюються одним кроком, а новий користувач одразу входить у свій профіль.
-/// Профілю без пароля цей шлях не створює.
+/// Реєстрація користувача: профіль, обов'язковий пароль, ключ відновлення, посада, фото й
+/// обрані модулі створюються одним кроком, а новий користувач одразу входить у свій
+/// профіль. Профілю без пароля цей шлях не створює. Ключ відновлення повертається тут
+/// єдиний раз: у базі лишається лише його хеш.
 #[tauri::command]
 async fn register_local_profile(
     profiles: tauri::State<'_, LocalProfileStore>,
@@ -142,10 +143,10 @@ async fn register_local_profile(
     position: Option<String>,
     avatar_data_url: Option<String>,
     modules: Vec<String>,
-) -> Result<LocalProfilesState, String> {
+) -> Result<RecoveryKeyIssued, String> {
     let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
     let profile_id = local_profiles::generate_profile_id(&display_name, &now);
-    let state = profiles
+    let issued = profiles
         .register(
             local_profiles::NewProfile {
                 id: &profile_id,
@@ -160,7 +161,44 @@ async fn register_local_profile(
         .await
         .map_err(|error| error.to_string())?;
     session.set(Some(profile_id));
-    Ok(state)
+    Ok(issued)
+}
+
+/// Новий ключ відновлення пароля (замінює попередній). Потрібні розблокований профіль
+/// і чинний пароль: відкритої сесії для видачі ключа недостатньо.
+#[tauri::command]
+async fn issue_local_profile_recovery_key(
+    profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
+    profile_id: String,
+    current_password: String,
+) -> Result<RecoveryKeyIssued, String> {
+    ensure_profile_unlocked(&profiles, &session, &profile_id).await?;
+    let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
+    profiles
+        .issue_recovery_key(&profile_id, &current_password, &now)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// Скидання забутого пароля за ключем відновлення. Сесія не потрібна: саме ключ доводить
+/// право на профіль. Після успіху пароль змінено, профіль активний і розблокований, а
+/// використаний ключ замінено новим (повертається тут єдиний раз).
+#[tauri::command]
+async fn recover_local_profile_password(
+    profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
+    profile_id: String,
+    recovery_key: String,
+    new_password: String,
+) -> Result<RecoveryKeyIssued, String> {
+    let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
+    let issued = profiles
+        .recover_password(&profile_id, &recovery_key, &new_password, &now)
+        .await
+        .map_err(|error| error.to_string())?;
+    session.set(Some(profile_id));
+    Ok(issued)
 }
 
 #[tauri::command]
@@ -1621,6 +1659,8 @@ pub fn run() {
             remove_local_model_files,
             update_local_profile_details,
             set_local_profile_password,
+            issue_local_profile_recovery_key,
+            recover_local_profile_password,
             choose_profile_database,
             create_profile_base_table,
             export_phone_file,

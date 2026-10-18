@@ -218,6 +218,71 @@
   font: inherit;
 }
 .ew-password-error { min-height: 1.2em; margin: 0; color: var(--bad); font-weight: 600; }
+.ew-password-note { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.45; }
+
+/* ---- ключ відновлення пароля ---- */
+.ew-profile-recovery { grid-column: 1 / -1; margin: 0; font-size: 13px; }
+.ew-profile-recovery strong { color: var(--ink); }
+.ew-profile-recovery.is-missing { color: var(--ink); }
+.ew-recovery-dialog { width: min(460px, calc(100vw - 32px)); }
+.ew-recovery-key {
+  display: block;
+  padding: 14px 10px;
+  color: var(--accent);
+  text-align: center;
+  overflow-wrap: anywhere;
+  background: var(--surface-2, var(--surface));
+  border: 1px dashed var(--accent);
+  border-radius: 10px;
+  font: 700 clamp(15px, 4.6vw, 20px)/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  letter-spacing: .06em;
+  user-select: all;
+  -webkit-user-select: all;
+}
+.ew-recovery-copy-status { min-height: 1.2em; margin: 0; color: var(--muted); font-size: 13px; }
+/* Кнопки вікна ключа завбільшки з поле вводу: їх натискають одразу після запису ключа. */
+.ew-recovery-dialog .btn {
+  min-height: 38px;
+  padding: 0 16px;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 650;
+  background: var(--surface-2, var(--surface));
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.ew-recovery-dialog .btn.primary:not(:disabled) {
+  color: var(--accent-ink, #04141a);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.ew-recovery-dialog .btn:disabled { opacity: .55; cursor: not-allowed; }
+.ew-recovery-warning {
+  margin: 0;
+  padding: 9px 11px;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.45;
+  background: color-mix(in srgb, var(--warn, #e5c06a) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warn, #e5c06a) 55%, transparent);
+  border-radius: 8px;
+}
+.ew-recovery-dialog .ew-recovery-confirm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+  font-weight: 500;
+}
+.ew-recovery-dialog .ew-recovery-confirm input[type="checkbox"] {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  min-height: 0;
+  padding: 0;
+  accent-color: var(--accent);
+}
 
 /* ---- модулі профілю ---- */
 .ew-profile-modules { display: grid; gap: 8px; margin-top: 10px; }

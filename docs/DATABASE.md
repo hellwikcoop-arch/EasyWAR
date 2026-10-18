@@ -21,7 +21,9 @@ separate XLSX table per branch module (`air`, `rocket`) to a profile and moves
 an earlier single binding to the Air Force slot. Migration
 `0009_profile_modules.sql` stores the modules (`air`, `rocket`, `artillery`,
 `pvk`, `dshv`) a profile chose at registration and backfills all five for
-profiles that already exist. Migrations contain no
+profiles that already exist. Migration `0010_profile_recovery_key.sql` adds
+`local_profile_recovery`, the hash of a profile's password recovery key.
+Migrations contain no
 operational fixtures and create no external integration.
 
 ## Provenance layers
@@ -42,6 +44,7 @@ operational fixtures and create no external integration.
 | Workspace template assignments | `local_profile_workspace_templates` | Optional local presentation preset for a profile; no authorization semantics. |
 | Profile details | `local_profile_details` | Position, small avatar and optional Argon2id sign-in hash; gates sign-in on this device only. |
 | Profile modules | `local_profile_modules` | Modules a profile chose at registration (`air`, `rocket`, `artillery`, `pvk`, `dshv`); only shown on the start screen, not an access boundary. Cascades on profile delete. |
+| Profile recovery key | `local_profile_recovery` | Argon2id hash of the profile's recovery key (one row per profile, replaced when a new key is issued); the key itself is never stored. Cascades on profile delete. |
 | Profile tables | `local_profile_tables` | One XLSX path per profile and branch module (`air`, `rocket`); the file itself is never stored or changed by binding. |
 
 The `report_current_state` view derives `NEW`, `PARSED`, or the latest review
@@ -144,11 +147,39 @@ command is removed, so a profile without a password cannot be created;
 empty new password. `set_local_profile_modules` changes the chosen modules
 (requires an unlocked profile; at least one module).
 
+Password recovery uses a one-time recovery key. Registration generates it in the
+same transaction: 25 symbols (125 bits) from a 32-symbol alphabet without `I`,
+`L`, `O` and `U`, displayed as `XXXXX-XXXXX-XXXXX-XXXXX-XXXXX`. Only its Argon2id
+hash is stored (`local_profile_recovery`); the key is returned once, as
+`recoveryKey` next to the profile state, by `register_local_profile`,
+`issue_local_profile_recovery_key` and `recover_local_profile_password`, and its
+`Debug` output is redacted. Input is normalised (case, whitespace and dashes are
+ignored, `I`/`L` read as `1`, `O` as `0`, twelve Cyrillic lookalike letters read
+as Latin); the JS copy of these rules in `src/recovery-key-core.js` is checked
+against `local_profiles.rs` by `tests/recovery-key.test.mjs`.
+
+- `recover_local_profile_password` needs no session: it verifies the key, then
+  validates the new password (a weak password does not spend the key), and in one
+  transaction stores the new password hash, replaces the key with a new one and
+  makes the profile active. The command then unlocks the session. A profile with
+  no key is refused with its own error (the UI already knows from
+  `hasRecoveryKey`); a wrong or malformed key gives the same
+  error, and the core does not rate-limit attempts (the UI delays after repeated
+  failures; guessing a 125-bit key is not practical and each try costs an Argon2id
+  verification).
+- `issue_local_profile_recovery_key` needs an unlocked profile and the current
+  password and replaces any previous key.
+- A profile that existed before migration 0010 has no key (`hasRecoveryKey` is
+  `false`) and cannot be recovered until its user creates one while signed in. A
+  destructive reset of such profiles is not implemented (backlog P2-11).
+
 Profiles are not accounts in a service, roles or permissions. The sign-in screen
 gates the UI and the unlock checks of data commands on this device only; it does
 not encrypt table files and is not a boundary against someone who can modify the
-installed application or read the disk. A forgotten password cannot be
-recovered. Profiles contain no plaintext secrets and are not transmitted to a
+installed application or read the disk. A forgotten password can be reset only
+with the recovery key; without one it cannot be recovered. Anyone who holds the
+key can reset the profile's password, so it is as sensitive as the password.
+Profiles contain no plaintext secrets and are not transmitted to a
 service. Profile changes
 do not rewrite immutable raw sources, parsed values, corrections, approved
 revisions, reviewer labels or audit events. Role binding and workspace

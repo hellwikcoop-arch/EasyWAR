@@ -107,7 +107,7 @@ test('every gate module points to an element that exists on the start screen', a
 });
 
 test('gate code stays local: no network, no storage of passwords', async () => {
-  for (const file of ['profile-gate.js', 'profile-gate-core.js']) {
+  for (const file of ['profile-gate.js', 'profile-gate-core.js', 'recovery-key-core.js']) {
     const code = await read(file);
     assert.doesNotMatch(code, /\bfetch\s*\(|XMLHttpRequest|WebSocket|sendBeacon|EventSource/, `${file}: no network`);
     assert.doesNotMatch(code, /localStorage|indexedDB|document\.cookie/, `${file}: no persistent browser storage`);

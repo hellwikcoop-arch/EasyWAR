@@ -93,6 +93,8 @@ pub(crate) const COMMAND_TABLES_SQL: &str = include_str!("../migrations/0007_com
 pub(crate) const OWN_LOSSES_TABLES_SQL: &str =
     include_str!("../migrations/0008_own_losses_tables.sql");
 pub(crate) const PROFILE_MODULES_SQL: &str = include_str!("../migrations/0009_profile_modules.sql");
+pub(crate) const PROFILE_RECOVERY_SQL: &str =
+    include_str!("../migrations/0010_profile_recovery_key.sql");
 
 pub fn migrations() -> Vec<Migration> {
     vec![
@@ -148,6 +150,12 @@ pub fn migrations() -> Vec<Migration> {
             version: 9,
             description: "add_profile_modules",
             sql: PROFILE_MODULES_SQL,
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 10,
+            description: "add_profile_recovery_key",
+            sql: PROFILE_RECOVERY_SQL,
             kind: MigrationKind::Up,
         },
     ]
@@ -207,7 +215,7 @@ mod tests {
         create_migrated_database, migrations, DatabaseMigrationState, DatabaseStatusError,
         DatabaseStatusStore, COMMAND_TABLES_SQL, DATABASE_URL, EMBEDDED_MIGRATOR,
         INITIAL_SCHEMA_SQL, LOCAL_PROFILES_SQL, OWN_LOSSES_TABLES_SQL, PROFILE_BRANCH_TABLES_SQL,
-        PROFILE_DETAILS_SQL, PROFILE_MODULES_SQL, WORKSPACE_TEMPLATES_SQL,
+        PROFILE_DETAILS_SQL, PROFILE_MODULES_SQL, PROFILE_RECOVERY_SQL, WORKSPACE_TEMPLATES_SQL,
         XLSX_DUPLICATE_LINKS_SQL,
     };
     use sqlx::{sqlite::SqlitePoolOptions, Row};
@@ -217,7 +225,7 @@ mod tests {
         assert_eq!(DATABASE_URL, "sqlite:easywar.db");
         assert!(include_str!("../tauri.conf.json").contains(DATABASE_URL));
         let registered = migrations();
-        assert_eq!(registered.len(), 9);
+        assert_eq!(registered.len(), 10);
         assert_eq!(registered[0].version, 1);
         assert_eq!(registered[0].description, "create_provenance_schema");
         assert_eq!(registered[1].version, 2);
@@ -236,6 +244,8 @@ mod tests {
         assert_eq!(registered[7].description, "add_own_losses_tables");
         assert_eq!(registered[8].version, 9);
         assert_eq!(registered[8].description, "add_profile_modules");
+        assert_eq!(registered[9].version, 10);
+        assert_eq!(registered[9].description, "add_profile_recovery_key");
         assert_eq!(
             EMBEDDED_MIGRATOR
                 .iter()
@@ -256,7 +266,7 @@ mod tests {
                 .map(|migration| migration.sql)
                 .collect::<Vec<_>>()
         );
-        assert_eq!(super::latest_schema_version(), Some(9));
+        assert_eq!(super::latest_schema_version(), Some(10));
     }
 
     #[tokio::test]
@@ -268,9 +278,9 @@ mod tests {
             DatabaseStatusStore::new(pool.clone()).load().await.unwrap(),
             super::DatabaseStatus {
                 app_version: env!("CARGO_PKG_VERSION").to_owned(),
-                schema_version: 9,
-                supported_schema_version: 9,
-                migration_count: 9,
+                schema_version: 10,
+                supported_schema_version: 10,
+                migration_count: 10,
                 migration_state: DatabaseMigrationState::Current,
             }
         );
@@ -330,8 +340,84 @@ mod tests {
             .execute(&pool)
             .await
             .expect("profile modules migration must apply");
+        sqlx::raw_sql(PROFILE_RECOVERY_SQL)
+            .execute(&pool)
+            .await
+            .expect("profile recovery migration must apply");
 
         pool
+    }
+
+    #[tokio::test]
+    async fn recovery_key_table_holds_only_argon2_hashes_and_follows_the_profile() {
+        let pool = migrated_pool().await;
+        sqlx::query("PRAGMA foreign_keys = ON")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let profile = "profile-0123456789abcdef01234567";
+        sqlx::query(
+            "INSERT INTO local_profiles (id, display_name, name_key, created_at, updated_at)
+             VALUES (?, 'Синтетичний', 'синтетичний', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .bind(profile)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Профіль без ключа — нормальний стан: таблиця порожня.
+        let none: i64 = sqlx::query_scalar("SELECT count(*) FROM local_profile_recovery")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(none, 0);
+
+        // Відкритий текст ключа в таблицю не потрапить: приймається лише хеш Argon2id.
+        let plain = sqlx::query(
+            "INSERT INTO local_profile_recovery (profile_id, key_hash, created_at)
+             VALUES (?, 'ABCDE-FGHJK-MNPQR-STVWX-YZ012', '2026-01-01T00:00:00Z')",
+        )
+        .bind(profile)
+        .execute(&pool)
+        .await;
+        assert!(plain.is_err());
+
+        sqlx::query(
+            "INSERT INTO local_profile_recovery (profile_id, key_hash, created_at)
+             VALUES (?, '$argon2id$v=19$m=19456,t=2,p=1$c2FsdA$aGFzaA', '2026-01-01T00:00:00Z')",
+        )
+        .bind(profile)
+        .execute(&pool)
+        .await
+        .unwrap();
+        // Один ключ на профіль.
+        let second = sqlx::query(
+            "INSERT INTO local_profile_recovery (profile_id, key_hash, created_at)
+             VALUES (?, '$argon2id$v=19$m=19456,t=2,p=1$c2FsdA$aGFzaA', '2026-01-02T00:00:00Z')",
+        )
+        .bind(profile)
+        .execute(&pool)
+        .await;
+        assert!(second.is_err());
+        // Ключ не може належати неіснуючому профілю.
+        let orphan = sqlx::query(
+            "INSERT INTO local_profile_recovery (profile_id, key_hash, created_at)
+             VALUES ('profile-ffffffffffffffffffffffff', '$argon2id$v=19$m=19456,t=2,p=1$c2FsdA$aGFzaA', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await;
+        assert!(orphan.is_err());
+
+        sqlx::query("DELETE FROM local_profiles WHERE id = ?")
+            .bind(profile)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let left: i64 = sqlx::query_scalar("SELECT count(*) FROM local_profile_recovery")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(left, 0);
     }
 
     #[tokio::test]

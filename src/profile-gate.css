@@ -42,7 +42,7 @@ html.ew-locked, html.ew-locked body { overflow: hidden; }
 .ew-gate-lead { margin: 0; color: var(--gate-muted); text-align: center; line-height: 1.45; }
 
 /* Кроки реєстрації */
-.ew-gate-steps { display: flex; justify-content: center; gap: 18px; margin: 0; padding: 0; list-style: none; color: var(--gate-muted); font-size: 13px; }
+.ew-gate-steps { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 18px; margin: 0; padding: 0; list-style: none; color: var(--gate-muted); font-size: 13px; }
 .ew-gate-steps li { display: inline-flex; align-items: center; gap: 7px; }
 .ew-gate-step-n {
   display: inline-grid; place-items: center; width: 22px; height: 22px;
@@ -96,6 +96,29 @@ html.ew-locked, html.ew-locked body { overflow: hidden; }
 .ew-gate-link:hover { color: var(--gate-ink); }
 .ew-gate-actions { display: flex; justify-content: flex-end; align-items: center; gap: 14px; margin-top: 4px; }
 .ew-gate-foot { display: flex; justify-content: center; }
+
+/* Ключ відновлення: показується один раз, тож його видно великим моноширинним шрифтом,
+   який не ламається посеред групи й виділяється одним кліком. */
+.ew-gate-key-box {
+  display: grid; justify-items: center; gap: 12px; padding: 16px;
+  background: #06101a; border: 1px dashed var(--gate-accent); border-radius: 10px;
+}
+.ew-gate-key {
+  max-width: 100%; color: var(--gate-accent); text-align: center; overflow-wrap: anywhere;
+  font: 700 clamp(15px, 4.6vw, 21px)/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  letter-spacing: .06em; user-select: all; -webkit-user-select: all;
+}
+.ew-gate-warning {
+  margin: 0; padding: 10px 12px; color: #e5c06a; font-size: 13px; line-height: 1.45;
+  background: rgba(229, 192, 106, .08); border: 1px solid rgba(229, 192, 106, .35); border-radius: 8px;
+}
+.ew-gate-copy-status { min-height: 1.2em; margin: 0; text-align: center; }
+.ew-gate-notice { color: var(--gate-ink); font-weight: 600; }
+.ew-gate input.ew-gate-key-input {
+  text-transform: uppercase; letter-spacing: .06em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+.ew-gate-key-input::placeholder { text-transform: none; letter-spacing: .04em; opacity: .55; }
 
 /* Користувачі на екрані входу */
 .ew-gate-users { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; }

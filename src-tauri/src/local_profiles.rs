@@ -1,5 +1,8 @@
 use argon2::{
-    password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
+    password_hash::{
+        rand_core::{OsRng, RngCore},
+        PasswordHash, PasswordHasher, PasswordVerifier, SaltString,
+    },
     Argon2,
 };
 use serde::{Deserialize, Serialize};
@@ -15,6 +18,29 @@ const MIN_PASSWORD_CHARS: usize = 6;
 /// Модулі, які користувач обирає при реєстрації, у порядку показу на стартовому екрані.
 pub const MODULES: [&str; 5] = ["air", "rocket", "artillery", "pvk", "dshv"];
 const MAX_PASSWORD_CHARS: usize = 128;
+
+/// Алфавіт ключа відновлення: цифри й латинські літери без I, L, O та U, які легко
+/// сплутати з 1, 0 і V. Символів рівно 32, тож кожен несе 5 біт.
+const RECOVERY_ALPHABET: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+/// 25 символів = 125 біт: підібрати такий ключ неможливо, а переписати з паперу можна.
+const RECOVERY_KEY_SYMBOLS: usize = 25;
+const RECOVERY_KEY_GROUP: usize = 5;
+/// Кириличні літери, схожі на латинські, які користувач міг набрати в українській
+/// розкладці: `(кирилична, латинська)`. Записано кодами символів, щоб не сплутати їх у коді.
+const RECOVERY_LOOKALIKES: [(char, char); 12] = [
+    ('\u{0410}', 'A'),
+    ('\u{0412}', 'B'),
+    ('\u{0421}', 'C'),
+    ('\u{0415}', 'E'),
+    ('\u{041D}', 'H'),
+    ('\u{041A}', 'K'),
+    ('\u{041C}', 'M'),
+    ('\u{041E}', '0'),
+    ('\u{0420}', 'P'),
+    ('\u{0422}', 'T'),
+    ('\u{0425}', 'X'),
+    ('\u{0406}', '1'),
+];
 
 #[derive(Clone, Debug)]
 pub struct LocalProfileStore {
@@ -110,6 +136,8 @@ pub struct LocalProfile {
     pub position: String,
     pub avatar_data_url: Option<String>,
     pub has_password: bool,
+    /// Чи створено ключ відновлення пароля. Сам ключ і його хеш назовні не віддаються.
+    pub has_recovery_key: bool,
     /// Модулі, обрані при реєстрації (ключі з `MODULES`), у порядку показу.
     pub modules: Vec<String>,
     pub tables: ProfileTables,
@@ -156,6 +184,29 @@ pub enum LocalProfileError {
     InvalidModules,
     #[error("пароль профілю обов'язковий")]
     PasswordRequired,
+    #[error("неправильний ключ відновлення")]
+    WrongRecoveryKey,
+    #[error("для цього профілю ключ відновлення не створювали")]
+    RecoveryKeyNotSet,
+}
+
+/// Стан профілів разом із новим ключем відновлення. Ключ показується користувачеві один
+/// раз і ніде не зберігається (у базі лише його хеш), тому в `Debug` його приховано.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecoveryKeyIssued {
+    pub state: LocalProfilesState,
+    pub recovery_key: String,
+}
+
+impl std::fmt::Debug for RecoveryKeyIssued {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RecoveryKeyIssued")
+            .field("state", &self.state)
+            .field("recovery_key", &"<приховано>")
+            .finish()
+    }
 }
 
 /// Дані реєстрації: профіль створюється разом з обов'язковим паролем і модулями.
@@ -244,16 +295,18 @@ impl LocalProfileStore {
         self.list().await
     }
 
-    /// Реєстрація: профіль, пароль, посада, фото й модулі зберігаються одним
-    /// кроком, а новий профіль стає активним. Пароль обов'язковий.
+    /// Реєстрація: профіль, пароль, ключ відновлення, посада, фото й модулі зберігаються
+    /// одним кроком, а новий профіль стає активним. Пароль обов'язковий. Ключ
+    /// відновлення повертається тут єдиний раз.
     pub async fn register(
         &self,
         new: NewProfile<'_>,
         now: &str,
-    ) -> Result<LocalProfilesState, LocalProfileError> {
+    ) -> Result<RecoveryKeyIssued, LocalProfileError> {
         validate_profile_id(new.id)?;
         let (display_name, name_key) = normalize_display_name(new.display_name)?;
         let hash = hash_password(new.password)?;
+        let (recovery_key, recovery_hash) = new_recovery_key()?;
         let position = new
             .position
             .split_whitespace()
@@ -298,6 +351,7 @@ impl LocalProfileStore {
         .bind(now)
         .execute(&mut *transaction)
         .await?;
+        store_recovery_hash(&mut transaction, new.id, &recovery_hash, now).await?;
         for module in modules {
             sqlx::query("INSERT INTO local_profile_modules (profile_id, module) VALUES (?, ?)")
                 .bind(new.id)
@@ -314,7 +368,10 @@ impl LocalProfileStore {
         .execute(&mut *transaction)
         .await?;
         transaction.commit().await?;
-        self.list().await
+        Ok(RecoveryKeyIssued {
+            state: self.list().await?,
+            recovery_key,
+        })
     }
 
     /// Змінює набір модулів профілю; потрібен щонайменше один.
@@ -508,18 +565,103 @@ impl LocalProfileStore {
         validate_profile_id(id)?;
         match self.password_hash(id).await? {
             None => Ok(true),
-            Some(stored) => {
-                let parsed =
-                    PasswordHash::new(&stored).map_err(|_| LocalProfileError::PasswordHash)?;
-                Ok(Argon2::default()
-                    .verify_password(password.as_bytes(), &parsed)
-                    .is_ok())
-            }
+            Some(stored) => verify_secret(&stored, password),
         }
     }
 
     pub async fn has_password(&self, id: &str) -> Result<bool, LocalProfileError> {
         Ok(self.password_hash(id).await?.is_some())
+    }
+
+    /// Створює новий ключ відновлення (замінює попередній). Потрібен чинний пароль:
+    /// відкрита сесія сама по собі не дає права видати ключ, яким потім можна скинути пароль.
+    pub async fn issue_recovery_key(
+        &self,
+        id: &str,
+        current_password: &str,
+        now: &str,
+    ) -> Result<RecoveryKeyIssued, LocalProfileError> {
+        validate_profile_id(id)?;
+        if !self.has_password(id).await? {
+            return Err(LocalProfileError::PasswordRequired);
+        }
+        if !self.verify_password(id, current_password).await? {
+            return Err(LocalProfileError::WrongPassword);
+        }
+        let (recovery_key, recovery_hash) = new_recovery_key()?;
+        let mut transaction = self.pool.begin().await?;
+        ensure_profile_exists(&mut transaction, id).await?;
+        store_recovery_hash(&mut transaction, id, &recovery_hash, now).await?;
+        transaction.commit().await?;
+        Ok(RecoveryKeyIssued {
+            state: self.list().await?,
+            recovery_key,
+        })
+    }
+
+    /// Скидає забутий пароль за ключем відновлення: ставить новий пароль, робить профіль
+    /// активним і одразу видає новий ключ. Використаний ключ більше не діє.
+    pub async fn recover_password(
+        &self,
+        id: &str,
+        recovery_key: &str,
+        new_password: &str,
+        now: &str,
+    ) -> Result<RecoveryKeyIssued, LocalProfileError> {
+        validate_profile_id(id)?;
+        let stored = self.recovery_hash(id).await?;
+        let Some(stored) = stored else {
+            return Err(LocalProfileError::RecoveryKeyNotSet);
+        };
+        let Some(secret) = normalize_recovery_key(recovery_key) else {
+            return Err(LocalProfileError::WrongRecoveryKey);
+        };
+        if !verify_secret(&stored, &secret)? {
+            return Err(LocalProfileError::WrongRecoveryKey);
+        }
+        let password_hash = hash_password(new_password)?;
+        let (next_key, next_hash) = new_recovery_key()?;
+        let mut transaction = self.pool.begin().await?;
+        ensure_profile_exists(&mut transaction, id).await?;
+        ensure_details_row(&mut transaction, id, now).await?;
+        sqlx::query(
+            "UPDATE local_profile_details SET password_hash = ?, updated_at = ? WHERE profile_id = ?",
+        )
+        .bind(&password_hash)
+        .bind(now)
+        .bind(id)
+        .execute(&mut *transaction)
+        .await?;
+        store_recovery_hash(&mut transaction, id, &next_hash, now).await?;
+        sqlx::query(
+            "UPDATE local_profile_state SET active_profile_id = ?, updated_at = ?
+             WHERE singleton = 1",
+        )
+        .bind(id)
+        .bind(now)
+        .execute(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        Ok(RecoveryKeyIssued {
+            state: self.list().await?,
+            recovery_key: next_key,
+        })
+    }
+
+    async fn recovery_hash(&self, id: &str) -> Result<Option<String>, LocalProfileError> {
+        let exists: i64 = sqlx::query_scalar("SELECT count(*) FROM local_profiles WHERE id = ?")
+            .bind(id)
+            .fetch_one(&self.pool)
+            .await?;
+        if exists != 1 {
+            return Err(LocalProfileError::ProfileNotFound);
+        }
+        Ok(
+            sqlx::query_scalar("SELECT key_hash FROM local_profile_recovery WHERE profile_id = ?")
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await?,
+        )
     }
 
     async fn password_hash(&self, id: &str) -> Result<Option<String>, LocalProfileError> {
@@ -601,11 +743,98 @@ fn hash_password(password: &str) -> Result<String, LocalProfileError> {
     if !(MIN_PASSWORD_CHARS..=MAX_PASSWORD_CHARS).contains(&count) {
         return Err(LocalProfileError::InvalidPassword);
     }
+    hash_secret(password)
+}
+
+fn hash_secret(secret: &str) -> Result<String, LocalProfileError> {
     let salt = SaltString::generate(&mut OsRng);
     Argon2::default()
-        .hash_password(password.as_bytes(), &salt)
+        .hash_password(secret.as_bytes(), &salt)
         .map(|hash| hash.to_string())
         .map_err(|_| LocalProfileError::PasswordHash)
+}
+
+fn verify_secret(stored: &str, secret: &str) -> Result<bool, LocalProfileError> {
+    let parsed = PasswordHash::new(stored).map_err(|_| LocalProfileError::PasswordHash)?;
+    Ok(Argon2::default()
+        .verify_password(secret.as_bytes(), &parsed)
+        .is_ok())
+}
+
+/// Новий випадковий ключ відновлення: `XXXXX-XXXXX-XXXXX-XXXXX-XXXXX` (25 символів, 125 біт).
+pub fn generate_recovery_key() -> String {
+    let mut bytes = [0_u8; RECOVERY_KEY_SYMBOLS];
+    OsRng.fill_bytes(&mut bytes);
+    let symbols: Vec<char> = bytes
+        .iter()
+        // 256 ділиться на 32 без залишку, тож зсув не дає перекосу.
+        .map(|byte| char::from(RECOVERY_ALPHABET[usize::from(byte & 31)]))
+        .collect();
+    symbols
+        .chunks(RECOVERY_KEY_GROUP)
+        .map(|group| group.iter().collect::<String>())
+        .collect::<Vec<_>>()
+        .join("-")
+}
+
+/// Приводить введений ключ до канонічного вигляду (25 символів алфавіту) або `None`.
+/// Пробіли й тире ігноруються, регістр не важить; I і L читаються як 1, O — як 0, а
+/// кириличні літери, схожі на латинські, — як латинські.
+pub fn normalize_recovery_key(input: &str) -> Option<String> {
+    let mut symbols = String::with_capacity(RECOVERY_KEY_SYMBOLS);
+    for raw in input.chars() {
+        if raw.is_whitespace() || matches!(raw, '-' | '_' | '\u{2010}'..='\u{2015}' | '\u{2212}') {
+            continue;
+        }
+        for upper in raw.to_uppercase() {
+            let mapped = RECOVERY_LOOKALIKES
+                .iter()
+                .find(|(from, _)| *from == upper)
+                .map_or(
+                    match upper {
+                        'I' | 'L' => '1',
+                        'O' => '0',
+                        other => other,
+                    },
+                    |(_, to)| *to,
+                );
+            if !mapped.is_ascii() || !RECOVERY_ALPHABET.contains(&(mapped as u8)) {
+                return None;
+            }
+            symbols.push(mapped);
+            if symbols.len() > RECOVERY_KEY_SYMBOLS {
+                return None;
+            }
+        }
+    }
+    (symbols.len() == RECOVERY_KEY_SYMBOLS).then_some(symbols)
+}
+
+/// Ключ для показу користувачеві й хеш його канонічного вигляду для бази.
+fn new_recovery_key() -> Result<(String, String), LocalProfileError> {
+    let key = generate_recovery_key();
+    let secret = normalize_recovery_key(&key).ok_or(LocalProfileError::PasswordHash)?;
+    Ok((key, hash_secret(&secret)?))
+}
+
+async fn store_recovery_hash(
+    transaction: &mut Transaction<'_, Sqlite>,
+    id: &str,
+    hash: &str,
+    now: &str,
+) -> Result<(), LocalProfileError> {
+    sqlx::query(
+        "INSERT INTO local_profile_recovery (profile_id, key_hash, created_at)
+         VALUES (?, ?, ?)
+         ON CONFLICT (profile_id)
+         DO UPDATE SET key_hash = excluded.key_hash, created_at = excluded.created_at",
+    )
+    .bind(id)
+    .bind(hash)
+    .bind(now)
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
 }
 
 fn validate_avatar(avatar: &str) -> Result<(), LocalProfileError> {
@@ -651,6 +880,7 @@ type ProfileRow = (
     Option<String>,
     Option<String>,
     Option<bool>,
+    bool,
     String,
     String,
 );
@@ -662,9 +892,11 @@ async fn load_state(pool: &SqlitePool) -> Result<LocalProfilesState, LocalProfil
             .await?;
     let rows: Vec<ProfileRow> = sqlx::query_as(
         "SELECT p.id, p.display_name, d.position, d.avatar_data_url,
-                d.password_hash IS NOT NULL, p.created_at, p.updated_at
+                d.password_hash IS NOT NULL, r.profile_id IS NOT NULL,
+                p.created_at, p.updated_at
          FROM local_profiles p
          LEFT JOIN local_profile_details d ON d.profile_id = p.id
+         LEFT JOIN local_profile_recovery r ON r.profile_id = p.id
          ORDER BY p.name_key, p.id",
     )
     .fetch_all(pool)
@@ -697,6 +929,7 @@ async fn load_state(pool: &SqlitePool) -> Result<LocalProfilesState, LocalProfil
                 position,
                 avatar_data_url,
                 has_password,
+                has_recovery_key,
                 created_at,
                 updated_at,
             )| LocalProfile {
@@ -715,6 +948,7 @@ async fn load_state(pool: &SqlitePool) -> Result<LocalProfilesState, LocalProfil
                 position: position.unwrap_or_default(),
                 avatar_data_url,
                 has_password: has_password.unwrap_or(false),
+                has_recovery_key,
                 created_at,
                 updated_at,
             },
@@ -789,7 +1023,7 @@ mod tests {
     use super::*;
     use crate::database::{
         COMMAND_TABLES_SQL, INITIAL_SCHEMA_SQL, LOCAL_PROFILES_SQL, OWN_LOSSES_TABLES_SQL,
-        PROFILE_BRANCH_TABLES_SQL, PROFILE_DETAILS_SQL, PROFILE_MODULES_SQL,
+        PROFILE_BRANCH_TABLES_SQL, PROFILE_DETAILS_SQL, PROFILE_MODULES_SQL, PROFILE_RECOVERY_SQL,
         XLSX_DUPLICATE_LINKS_SQL,
     };
     use sqlx::sqlite::SqlitePoolOptions;
@@ -832,6 +1066,10 @@ mod tests {
             .await
             .unwrap();
         sqlx::raw_sql(PROFILE_MODULES_SQL)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::raw_sql(PROFILE_RECOVERY_SQL)
             .execute(&pool)
             .await
             .unwrap();
@@ -1301,6 +1539,10 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
+        sqlx::raw_sql(PROFILE_RECOVERY_SQL)
+            .execute(&pool)
+            .await
+            .unwrap();
         let state = LocalProfileStore::new(pool.clone()).list().await.unwrap();
         assert_eq!(
             state.profiles[0].tables,
@@ -1374,6 +1616,10 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
+        sqlx::raw_sql(PROFILE_RECOVERY_SQL)
+            .execute(&pool)
+            .await
+            .unwrap();
         let state = LocalProfileStore::new(pool).list().await.unwrap();
         assert_eq!(
             state.profiles[0].tables,
@@ -1435,6 +1681,10 @@ mod tests {
             .unwrap();
 
         sqlx::raw_sql(PROFILE_MODULES_SQL)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::raw_sql(PROFILE_RECOVERY_SQL)
             .execute(&pool)
             .await
             .unwrap();
@@ -1501,7 +1751,7 @@ mod tests {
         let store = store().await;
         let profile = id("Реєстрація");
         let chosen = modules(&["pvk", "air", "air"]);
-        let state = store
+        let registered = store
             .register(
                 registration(
                     &profile,
@@ -1513,6 +1763,8 @@ mod tests {
             )
             .await
             .unwrap();
+        let recovery_key = registered.recovery_key.clone();
+        let state = registered.state;
         assert_eq!(state.active_profile_id.as_deref(), Some(profile.as_str()));
         let created = &state.profiles[0];
         assert_eq!(created.display_name, "Новий користувач");
@@ -1531,6 +1783,15 @@ mod tests {
             .unwrap();
         assert!(stored.starts_with("$argon2id$"));
         assert!(!stored.contains("синтетичний-пароль"));
+        // Ключ відновлення видано разом із профілем; у базі лише його хеш.
+        assert!(created.has_recovery_key);
+        assert!(normalize_recovery_key(&recovery_key).is_some());
+        let key_hash: String = sqlx::query_scalar("SELECT key_hash FROM local_profile_recovery")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        assert!(key_hash.starts_with("$argon2id$"));
+        assert!(!key_hash.contains(&recovery_key.replace('-', "")));
     }
 
     #[tokio::test]
@@ -1635,7 +1896,8 @@ mod tests {
                 NOW_2,
             )
             .await
-            .unwrap();
+            .unwrap()
+            .state;
         assert_eq!(state.active_profile_id.as_deref(), Some(second.as_str()));
         assert_eq!(state.profiles.len(), 2);
         // Паролі й модулі окремі для кожного користувача.
@@ -1744,6 +2006,10 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
+        sqlx::raw_sql(PROFILE_RECOVERY_SQL)
+            .execute(&pool)
+            .await
+            .unwrap();
         let state = LocalProfileStore::new(pool.clone()).list().await.unwrap();
         assert_eq!(state.profiles[0].modules, MODULES);
         // Невідомий модуль схема відхиляє.
@@ -1754,5 +2020,296 @@ mod tests {
         .execute(&pool)
         .await
         .is_err());
+    }
+
+    // ---------- ключ відновлення пароля ----------
+
+    async fn registered(store: &LocalProfileStore, seed: &str, password: &str) -> (String, String) {
+        let profile = id(seed);
+        let issued = store
+            .register(
+                registration(&profile, seed, password, &modules(&["air"])),
+                NOW_1,
+            )
+            .await
+            .unwrap();
+        (profile, issued.recovery_key)
+    }
+
+    #[test]
+    fn recovery_key_has_the_documented_shape() {
+        let first = generate_recovery_key();
+        let second = generate_recovery_key();
+        assert_ne!(first, second);
+        for key in [&first, &second] {
+            let groups: Vec<&str> = key.split('-').collect();
+            assert_eq!(groups.len(), 5, "{key}");
+            for group in groups {
+                assert_eq!(group.len(), 5, "{key}");
+                assert!(
+                    group.bytes().all(|byte| RECOVERY_ALPHABET.contains(&byte)),
+                    "{key}"
+                );
+            }
+            // Канонічний вигляд ключа — ті самі 25 символів без тире.
+            assert_eq!(normalize_recovery_key(key), Some(key.replace('-', "")));
+        }
+    }
+
+    #[test]
+    fn recovery_key_input_tolerates_typing_noise_but_not_other_symbols() {
+        let canonical = "ABCDEFGHJKMNPQRSTVWXYZ012";
+        let pretty = "ABCDE-FGHJK-MNPQR-STVWX-YZ012";
+        assert_eq!(normalize_recovery_key(pretty).as_deref(), Some(canonical));
+        // Регістр, пробіли, тире й «довге» тире не важливі.
+        assert_eq!(
+            normalize_recovery_key("  abcde fghjk\u{2013}mnpqr_stvwx-yz012 ").as_deref(),
+            Some(canonical)
+        );
+        // I, L читаються як 1, а O — як 0.
+        assert_eq!(
+            normalize_recovery_key("ABCDE-FGHJK-MNPQR-STVWX-YZOIL").as_deref(),
+            Some("ABCDEFGHJKMNPQRSTVWXYZ011")
+        );
+        // Кириличні двійники A B C E H K M O P T X І, набрані в українській розкладці.
+        let cyrillic = "\u{0410}\u{0412}\u{0421}D\u{0415}-FG\u{041D}JK-\u{041C}NPQR-S\u{0422}VW\u{0425}-YZ\u{041E}1\u{0406}";
+        assert_eq!(
+            normalize_recovery_key(cyrillic).as_deref(),
+            Some("ABCDEFGHJKMNPQRSTVWXYZ011")
+        );
+        // Неправильна довжина, літера U та сторонні символи — відмова.
+        assert_eq!(normalize_recovery_key(""), None);
+        assert_eq!(normalize_recovery_key("ABCDE-FGHJK-MNPQR-STVWX-YZ01"), None);
+        assert_eq!(
+            normalize_recovery_key("ABCDE-FGHJK-MNPQR-STVWX-YZ0123"),
+            None
+        );
+        assert_eq!(
+            normalize_recovery_key("ABCDE-FGHJK-MNPQR-STVWX-YZ01U"),
+            None
+        );
+        assert_eq!(
+            normalize_recovery_key("ABCDE-FGHJK-MNPQR-STVWX-YZ01!"),
+            None
+        );
+        assert_eq!(
+            normalize_recovery_key("ABCDE-FGHJK-MNPQR-STVWX-YZ01Ж"),
+            None
+        );
+    }
+
+    #[test]
+    fn issued_recovery_key_is_hidden_from_debug_output() {
+        let issued = RecoveryKeyIssued {
+            state: LocalProfilesState {
+                active_profile_id: None,
+                profiles: Vec::new(),
+            },
+            recovery_key: "ABCDE-FGHJK-MNPQR-STVWX-YZ012".to_owned(),
+        };
+        let printed = format!("{issued:?}");
+        assert!(!printed.contains("ABCDE"));
+        assert!(printed.contains("приховано"));
+    }
+
+    #[tokio::test]
+    async fn a_forgotten_password_is_reset_by_the_key_and_the_key_is_rotated() {
+        let store = store().await;
+        let (profile, key) = registered(&store, "Забудько", "старий-пароль").await;
+        let before = store.list().await.unwrap();
+        assert!(before.profiles[0].has_recovery_key);
+
+        // Неправильний ключ нічого не змінює.
+        let wrong = generate_recovery_key();
+        assert!(matches!(
+            store
+                .recover_password(&profile, &wrong, "новий-пароль", NOW_2)
+                .await,
+            Err(LocalProfileError::WrongRecoveryKey)
+        ));
+        assert!(matches!(
+            store
+                .recover_password(&profile, "не ключ", "новий-пароль", NOW_2)
+                .await,
+            Err(LocalProfileError::WrongRecoveryKey)
+        ));
+        assert!(store
+            .verify_password(&profile, "старий-пароль")
+            .await
+            .unwrap());
+
+        // Правильний ключ, введений як завгодно: пароль замінено, профіль активний.
+        let typed = key.replace('-', " ").to_lowercase();
+        let recovered = store
+            .recover_password(&profile, &typed, "новий-пароль", NOW_2)
+            .await
+            .unwrap();
+        assert_eq!(
+            recovered.state.active_profile_id.as_deref(),
+            Some(profile.as_str())
+        );
+        assert!(store
+            .verify_password(&profile, "новий-пароль")
+            .await
+            .unwrap());
+        assert!(!store
+            .verify_password(&profile, "старий-пароль")
+            .await
+            .unwrap());
+
+        // Використаний ключ більше не діє; виданий натомість діє.
+        assert_ne!(recovered.recovery_key, key);
+        assert!(matches!(
+            store
+                .recover_password(&profile, &key, "ще-один-пароль", NOW_2)
+                .await,
+            Err(LocalProfileError::WrongRecoveryKey)
+        ));
+        assert!(store
+            .recover_password(&profile, &recovered.recovery_key, "ще-один-пароль", NOW_2)
+            .await
+            .is_ok());
+        assert!(store
+            .verify_password(&profile, "ще-один-пароль")
+            .await
+            .unwrap());
+    }
+
+    #[tokio::test]
+    async fn a_weak_new_password_does_not_spend_the_recovery_key() {
+        let store = store().await;
+        let (profile, key) = registered(&store, "Слабкий", "старий-пароль").await;
+        assert!(matches!(
+            store.recover_password(&profile, &key, "12345", NOW_2).await,
+            Err(LocalProfileError::InvalidPassword)
+        ));
+        assert!(store
+            .verify_password(&profile, "старий-пароль")
+            .await
+            .unwrap());
+        assert!(store
+            .recover_password(&profile, &key, "достатньо-довгий", NOW_2)
+            .await
+            .is_ok());
+    }
+
+    #[tokio::test]
+    async fn recovery_is_refused_for_profiles_without_a_key_and_unknown_profiles() {
+        let store = store().await;
+        // Профіль із паролем, створений до появи ключів: рядка ключа в нього немає.
+        let legacy = id("Давній");
+        store.create(&legacy, "Давній", NOW_1).await.unwrap();
+        store
+            .set_password(&legacy, None, Some("давній-пароль"), NOW_1)
+            .await
+            .unwrap();
+        let state = store.list().await.unwrap();
+        assert!(state.profiles[0].has_password);
+        assert!(!state.profiles[0].has_recovery_key);
+        assert!(matches!(
+            store
+                .recover_password(&legacy, &generate_recovery_key(), "новий-пароль", NOW_2)
+                .await,
+            Err(LocalProfileError::RecoveryKeyNotSet)
+        ));
+        assert!(store
+            .verify_password(&legacy, "давній-пароль")
+            .await
+            .unwrap());
+
+        assert!(matches!(
+            store
+                .recover_password(
+                    &id("Невідомий"),
+                    &generate_recovery_key(),
+                    "новий-пароль",
+                    NOW_2
+                )
+                .await,
+            Err(LocalProfileError::ProfileNotFound)
+        ));
+        assert!(matches!(
+            store
+                .recover_password("profile-xyz", "ABCDE", "новий-пароль", NOW_2)
+                .await,
+            Err(LocalProfileError::InvalidProfileId)
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_new_key_needs_the_current_password_and_replaces_the_old_one() {
+        let store = store().await;
+        let (profile, first_key) = registered(&store, "Ключник", "чинний-пароль").await;
+        assert!(matches!(
+            store.issue_recovery_key(&profile, "", NOW_2).await,
+            Err(LocalProfileError::WrongPassword)
+        ));
+        assert!(matches!(
+            store
+                .issue_recovery_key(&profile, "чужий-пароль", NOW_2)
+                .await,
+            Err(LocalProfileError::WrongPassword)
+        ));
+        // Невдала спроба не замінила ключ.
+        assert!(store
+            .recover_password(&profile, &first_key, "чинний-пароль", NOW_2)
+            .await
+            .map(|issued| issued.recovery_key)
+            .is_ok());
+
+        let (profile, first_key) = registered(&store, "Ключник-2", "чинний-пароль").await;
+        let second = store
+            .issue_recovery_key(&profile, "чинний-пароль", NOW_2)
+            .await
+            .unwrap();
+        assert_ne!(second.recovery_key, first_key);
+        assert!(second
+            .state
+            .profiles
+            .iter()
+            .any(|candidate| candidate.id == profile && candidate.has_recovery_key));
+        assert!(matches!(
+            store
+                .recover_password(&profile, &first_key, "новий-пароль", NOW_2)
+                .await,
+            Err(LocalProfileError::WrongRecoveryKey)
+        ));
+        assert!(store
+            .recover_password(&profile, &second.recovery_key, "новий-пароль", NOW_2)
+            .await
+            .is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_profile_without_a_password_cannot_get_a_recovery_key() {
+        let store = store().await;
+        let bare = id("Без пароля");
+        store.create(&bare, "Без пароля", NOW_1).await.unwrap();
+        assert!(matches!(
+            store.issue_recovery_key(&bare, "", NOW_2).await,
+            Err(LocalProfileError::PasswordRequired)
+        ));
+        let left: i64 = sqlx::query_scalar("SELECT count(*) FROM local_profile_recovery")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        assert_eq!(left, 0);
+    }
+
+    #[tokio::test]
+    async fn deleting_a_profile_removes_its_recovery_key() {
+        let store = store().await;
+        let (profile, _) = registered(&store, "Тимчасовий", "тимчасовий-пароль").await;
+        let before: i64 = sqlx::query_scalar("SELECT count(*) FROM local_profile_recovery")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        assert_eq!(before, 1);
+        store.delete(&profile, NOW_2).await.unwrap();
+        let after: i64 = sqlx::query_scalar("SELECT count(*) FROM local_profile_recovery")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        assert_eq!(after, 0);
     }
 }

@@ -12,7 +12,8 @@ export function getLocalProfiles(invokeCommand = invoke) {
 /**
  * Реєстрація: профіль, обов'язковий пароль, посада, фото й обрані модулі створюються
  * одним кроком, а користувач одразу входить у свій профіль. Профілю без пароля
- * застосунок не створює.
+ * застосунок не створює. Відповідь — `{ state, recoveryKey }`: ключ відновлення пароля
+ * показується користувачеві один раз і ніде не зберігається.
  */
 export function registerLocalProfile({ displayName, password, position, avatarDataUrl, modules }, invokeCommand = invoke) {
   return invokeCommand('register_local_profile', {
@@ -93,6 +94,23 @@ export function setLocalProfilePassword(profileId, currentPassword, newPassword,
     currentPassword: currentPassword || null,
     newPassword: newPassword || null,
   });
+}
+
+/**
+ * Новий ключ відновлення пароля (замінює попередній). Потрібні розблокований профіль і
+ * чинний пароль. Відповідь — `{ state, recoveryKey }`; ключ показується один раз.
+ */
+export function issueLocalProfileRecoveryKey(profileId, currentPassword, invokeCommand = invoke) {
+  return invokeCommand('issue_local_profile_recovery_key', { profileId, currentPassword });
+}
+
+/**
+ * Скидає забутий пароль за ключем відновлення; сесія для цього не потрібна. Після успіху
+ * пароль змінено, користувач увійшов у профіль, а використаний ключ замінено новим:
+ * відповідь — `{ state, recoveryKey }` з НОВИМ ключем, який теж показується один раз.
+ */
+export function recoverLocalProfilePassword(profileId, recoveryKey, newPassword, invokeCommand = invoke) {
+  return invokeCommand('recover_local_profile_password', { profileId, recoveryKey, newPassword });
 }
 
 /**
