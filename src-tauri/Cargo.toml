@@ -15,7 +15,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 base64 = "0.22"
-calamine = { version = "=0.26.1", features = ["dates"] }
+calamine = { version = "=0.36.1", features = ["dates"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 dirs = "6"
 fs2 = "0.4"
