@@ -6,4 +6,5 @@ import './signal-settings.js';
 import './backup.js';
 import './local-profiles.js';
 import './phone-export.js';
+import './whats-new.js';
 import './guides-launcher.js';

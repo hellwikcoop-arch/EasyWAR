@@ -58,6 +58,7 @@ The original source must remain auditable and must not be silently overwritten b
 ├── script/build_and_run.sh
 ├── script/import_unified_html.mjs
 ├── script/assistant_index.mjs  # генерація локального індексу довідки
+├── script/whats_new.mjs        # нотатки docs/releases → src/whats-new/releases.json («Що нового»)
 ├── script/build_runner.sh      # збірка рушія локальної моделі (runner/) для інсталятора
 ├── runner/                     # рушій КОМБАТА: обгортка над llama.cpp, тести протоколу
 ├── src/

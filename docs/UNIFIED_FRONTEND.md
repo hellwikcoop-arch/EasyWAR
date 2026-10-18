@@ -148,6 +148,19 @@ ends, and the launcher stays `inert` until sign-in.
 - The gate is a UI barrier plus the Rust unlock check of data commands, not
   protection against file tampering; see `docs/DATABASE.md` (Local profiles).
 
+## «Що нового» (нотатки до випусків)
+
+Кнопка «Що нового» на головному екрані відкриває накладку з нотатками до випусків. Це код лише лаунчера: legacy HTML (`index.html`, `air.html`, `rocket.html`) не змінювався, модулі в iframe про накладку не знають. Джерело правди — `docs/releases/vX.Y.Z.md`; `src/whats-new/releases.json` генерується з них і лежить у репозиторії (як індекс довідки помічника), тест `whats-new-current` падає, якщо файл відстає.
+
+| Файл | Роль |
+| --- | --- |
+| `src/whats-new-core.js` | чиста логіка без DOM: `parseReleaseNotes` (вступ «Версія X — …», абзаци, виділений заголовок абзацу `splitLead`, підпис для змісту), `visibleReleases` (до встановленої версії, найновіші першими), `stepIndex`/`canStep` (‹ › на межах), `hasUnseen`, `inlineSegments` (код у зворотних лапках), `UNPUBLISHED_VERSIONS` (`2.0.0`) |
+| `script/whats_new.mjs` | генератор: `node script/whats_new.mjs` пише `src/whats-new/releases.json`, `--check` лише перевіряє актуальність |
+| `src/whats-new/releases.json` | згенеровані нотатки (схема 1); підвантажуються ліниво динамічним `import()`, окремим чанком, у стартовий пакет не входять |
+| `src/whats-new.js`, `src/whats-new.css` | кнопка (`prepend` у `.appbar-right`; імпорт у `launcher-tools.js` перед `guides-launcher.js`, тож кнопка друга ліворуч) і накладка `role="dialog"` `aria-modal` з `z-index: 1500`; поки накладка відкрита, `#view-start` стає `inert` (попередній стан повертається); текст нотаток вставляється лише через `textContent`; ключ `ew.whatsnew.seen.v1` у `localStorage` (у try/catch) керує крапкою на кнопці; версію застосунку дає `get_database_status` (поза Tauri показуються всі нотатки) |
+
+Рух (поява панелі, зміст, перехід між версіями) вмикається лише під `prefers-reduced-motion: no-preference` і зачіпає тільки `transform` та `opacity`; скло (`backdrop-filter`) має запасний суцільний фон через `@supports not`.
+
 ## 3D-довідники (хаб і шість довідників)
 
 Кнопка «3D-довідники» на головному екрані відкриває хаб інтерактивних довідників у накладці поверх лаунчера. Довідники — окремі сторінки збірки, тому legacy HTML (`index.html`, `air.html`, `rocket.html`) для них не змінювався, а `script/import_unified_html.mjs` їх не чіпає. Опис моделей, авторства й завантаження — в `docs/3D_MODELS.md` (розділ «3D-довідники»).

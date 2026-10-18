@@ -99,6 +99,7 @@
 | `vite.config.js`, `script/build_standalone.mjs`, `package.json` | `npm run build`, `npm run test:unit` (`standalone-build`, `pwa-viewer`) |
 | `runner/` (рушій мовної моделі), `script/build_runner.sh`, `tauri.runner.conf.json` | `script/build_runner.sh` для хоста + `script/runner_smoke.sh <runner>` (потрібні cmake, git, g++/MSVC/Xcode, python3); у PR це ж робить `runner.yml`. Якщо змінено протокол — також `local_model.rs` і `docs/ASSISTANT.md` |
 | `.github/workflows/`, `script/*release*`, `tauri*.conf.json` | `node script/release_version.mjs`, `tests/release.test.mjs` |
+| `docs/releases/v*.md`, `script/whats_new.mjs`, `src/whats-new*` | `node script/whats_new.mjs` (перегенерувати) і `node script/whats_new.mjs --check`; `npm run test:unit` (`whats-new-*`) |
 | Будь-що з UI | ручна перевірка в запущеному застосунку, де можливо (локально `npm run tauri dev`; у хмарі — скіл `run-easywar` зі скриншотами) |
 
 CI (`desktop-build.yml`) на кожен PR і push у `main` виконує на Linux: перевірку версій,
@@ -153,7 +154,12 @@ Dependabot (`.github/dependabot.yml`) щотижня відкриває PR дл�
    `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, `src-tauri/tauri.conf.json`;
    `node script/release_version.mjs` має сказати «версії узгоджені».
 3. Написати `docs/releases/vX.Y.Z.md` мовою користувача: що нового, що змінилося в
-   даних (міграції чи «схема бази не змінюється»), відомі обмеження.
+   даних (міграції чи «схема бази не змінюється»), відомі обмеження. Абзаци
+   розділяти порожнім рядком; перший може починатися з «Версія X.Y.Z — …», а в
+   інших короткий заголовок («КОМБАТ. Текст…») екран «Що нового» виділить жирним.
+   Далі `node script/whats_new.mjs` і закомітити `src/whats-new/releases.json`:
+   без нього падає `tests/whats-new-current.test.mjs`, а користувач не побачить
+   нотаток у застосунку.
 4. Коміт «Випуск X.Y.Z: …», PR, злиття в `main`.
 5. Тег `vX.Y.Z` на коміт злиття, `git push origin vX.Y.Z`. CI збирає macOS і
    Windows, перевіряє підписи, створює **чернетку** в `easywar-releases`.
