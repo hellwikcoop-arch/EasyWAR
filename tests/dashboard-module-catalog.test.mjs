@@ -5,6 +5,7 @@ import {
   FUEL_DENSITY_KG_PER_L,
   MAX_CREW,
   branchFromLocation,
+  columnCountLabel,
   crewCount,
   crewSummary,
   fieldHint,
@@ -27,8 +28,10 @@ import {
   parseDuration,
   parseFieldInput,
   parseHeight,
+  pluralForm,
   previewModel,
   replaceRowsRequest,
+  rowCountLabel,
   rowForStorage,
   rowForWrite,
   rowsAfterDelete,
@@ -736,6 +739,25 @@ test('the row form shows sections and carries the weather into new records only'
   for (const text of ['Підставлено з останнього запису, де вказано погоду', 'Очистити', 'ewmc-crew-total']) {
     assert.ok(source.includes(text), text);
   }
+});
+
+test('row and column counts are declined in Ukrainian', () => {
+  const rows = [[0, 'записів'], [1, 'запис'], [2, 'записи'], [4, 'записи'], [5, 'записів'], [11, 'записів'], [12, 'записів'], [14, 'записів'],
+    [21, 'запис'], [22, 'записи'], [25, 'записів'], [101, 'запис'], [111, 'записів'], [112, 'записів'], [1002, 'записи']];
+  for (const [count, word] of rows) assert.equal(rowCountLabel(count), `${count} ${word}`, String(count));
+  const columns = [[1, 'колонка'], [2, 'колонки'], [5, 'колонок'], [12, 'колонок'], [21, 'колонка'], [34, 'колонки'], [35, 'колонок']];
+  for (const [count, word] of columns) assert.equal(columnCountLabel(count), `${count} ${word}`, String(count));
+  assert.equal(pluralForm(3, 'а', 'б', 'в'), 'б');
+  // Не число й від'ємне не дають «NaN записів» чи «-1 запис».
+  for (const bad of [undefined, null, 'abc', NaN, -1]) assert.equal(rowCountLabel(bad), '0 записів', String(bad));
+});
+
+test('the module card and the table dialog use the declined counts', async () => {
+  const source = await readFile(new URL('../src/dashboard-module-catalog.js', import.meta.url), 'utf8');
+  assert.match(source, /rowCountLabel\(module\.rowCount\)/);
+  assert.match(source, /rowCountLabel\(rows\.length\)/);
+  assert.match(source, /columnCountLabel\(module\.fields\.length\)/);
+  assert.doesNotMatch(source, /\}\s*записів|\}\s*колонок/);
 });
 
 test('row deletion is confirmed inside the dialog and never uses browser dialogs', async () => {

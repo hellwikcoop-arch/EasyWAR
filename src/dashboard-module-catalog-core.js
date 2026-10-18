@@ -81,6 +81,32 @@ export function formatValue(value) {
   return String(value);
 }
 
+/**
+ * Форма слова за числом: 1 запис, 2–4 записи, 0 і 5+ записів; 11–14 — завжди «записів»,
+ * а 21 — знову «запис».
+ */
+export function pluralForm(count, one, few, many) {
+  const n = Math.abs(Math.trunc(Number(count) || 0));
+  const lastTwo = n % 100;
+  const last = n % 10;
+  if (lastTwo > 10 && lastTwo < 20) return many;
+  if (last === 1) return one;
+  if (last >= 2 && last <= 4) return few;
+  return many;
+}
+
+/** Підпис кількості записів таблиці: «1 запис», «2 записи», «5 записів». */
+export function rowCountLabel(count) {
+  const n = Math.max(0, Math.trunc(Number(count) || 0));
+  return `${n} ${pluralForm(n, 'запис', 'записи', 'записів')}`;
+}
+
+/** Підпис кількості колонок таблиці: «1 колонка», «3 колонки», «34 колонки», «35 колонок». */
+export function columnCountLabel(count) {
+  const n = Math.max(0, Math.trunc(Number(count) || 0));
+  return `${n} ${pluralForm(n, 'колонка', 'колонки', 'колонок')}`;
+}
+
 /** Густина авіаційного палива, кг/л. Кілограми лише розраховуються з літрів: у базі їх немає. */
 export const FUEL_DENSITY_KG_PER_L = 0.8;
 
@@ -538,6 +564,9 @@ export const dashboardModuleCore = {
   schemaSummary,
   matchesCatalogItem,
   formatValue,
+  pluralForm,
+  rowCountLabel,
+  columnCountLabel,
   fieldKind,
   fieldLimits,
   outsideLimits,

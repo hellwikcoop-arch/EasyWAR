@@ -1,6 +1,7 @@
 import {
   MAX_CREW,
   branchFromLocation,
+  columnCountLabel,
   crewCount,
   crewSummary,
   fieldHint,
@@ -18,6 +19,7 @@ import {
   normalizeModules,
   previewModel,
   replaceRowsRequest,
+  rowCountLabel,
   rowForWrite,
   rowsAfterDelete,
   rowsAfterSave,
@@ -122,7 +124,7 @@ function initialize() {
     const model = previewModel(module, rows);
     const card = el('article', { class: `ewmc-module span-${module.defaultSpan === 2 ? 2 : 1}`, 'data-kind': module.visualKind },
       el('header', { class: 'ewmc-module-head' },
-        el('div', {}, el('h3', { text: module.title }), el('p', { text: `${module.rowCount} записів · локальна SQLite` })),
+        el('div', {}, el('h3', { text: module.title }), el('p', { text: `${rowCountLabel(module.rowCount)} · локальна SQLite` })),
         el('span', { class: 'ewmc-live', text: module.rowCount ? 'Дані' : 'Створено' })),
       visual(module.visualKind, model),
       el('div', { class: 'ewmc-module-actions' },
@@ -258,7 +260,7 @@ function initialize() {
         el('div', {},
           el('p', { class: 'ewmc-eyebrow', text: 'Локальна SQLite-таблиця' }),
           el('h2', { id: 'ewmc-dialog-title', text: module.title }),
-          el('p', { text: `${unreadable ? 'Дані недоступні' : `${rows.length} записів`} · ${module.fields.length} колонок` })),
+          el('p', { text: `${unreadable ? 'Дані недоступні' : rowCountLabel(rows.length)} · ${columnCountLabel(module.fields.length)}` })),
         el('button', { value: 'cancel', class: 'ewmc-close', 'aria-label': 'Закрити', text: '×' })),
       el('div', { class: 'ewmc-data-toolbar' },
         el('code', { text: module.storageTable }),
