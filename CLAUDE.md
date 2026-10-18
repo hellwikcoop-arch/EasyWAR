@@ -52,6 +52,8 @@ macOS/Windows у ньому лише на тегах. Усе одно запус
   «Legacy HTML editing» з `AGENTS.md`; перевірка синтаксису кожного inline-скрипта;
   `tests/desktop-frontend.test.mjs` перевіряє текстові контракти сторінок.
 - `src-tauri/src` → `cargo test`, `clippy -D warnings`, `fmt`.
+- `runner/` (C++ рушій локальної моделі) → `script/build_runner.sh` + `script/runner_smoke.sh`
+  (докладніше — `docs/WORKFLOW.md`, розділ 5, і `docs/ASSISTANT.md`, «Вбудований рушій»).
 - Нова міграція → `src-tauri/migrations/NNNN_*.sql`, реєстрація в `database.rs`,
   тест міграції, оновити `docs/DATABASE.md` і `src-tauri/migrations/README.md`.
 - Зміна UI → `docs/USER_GUIDE.md`; зміна структури фронтенду → `docs/UNIFIED_FRONTEND.md`;

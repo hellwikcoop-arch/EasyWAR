@@ -6,9 +6,12 @@
 //! in), so whatever server or mirror answers, a file that does not match is
 //! deleted and never trusted. The download goes to `<name>.part`, can be
 //! cancelled and resumed with a `Range` request, and only a verified file is
-//! renamed to `model.gguf`. The runner program is not downloaded: when a
-//! `runner.exe` (or `runner`) sits next to the model, the package manifest is
-//! written and the ordinary full package check of [`crate::local_model`] runs.
+//! renamed to `model.gguf`. The runner program is never downloaded: the installer
+//! brings it next to the application executable (a Tauri sidecar built from
+//! `runner/`), and [`finalize_package`] copies it into the model folder as
+//! `runner.exe` (or `runner`), writes the package manifest and runs the ordinary
+//! full package check of [`crate::local_model`]. A runner a person placed beside
+//! the model by hand keeps working when the installer carries none.
 
 use std::{
     io::{Read, Seek, SeekFrom, Write},
@@ -32,6 +35,20 @@ pub const MODEL_FILE: &str = "model.gguf";
 const PART_FILE: &str = "model.gguf.part";
 const MANIFEST_FILE: &str = "manifest.json";
 const RUNNER_NAMES: [&str; 2] = ["runner.exe", "runner"];
+/// File name of the sidecar beside the application executable (see `tauri.runner.conf.json`).
+const BUNDLED_RUNNER_FILE: &str = if cfg!(windows) {
+    "easywar-llm-runner.exe"
+} else {
+    "easywar-llm-runner"
+};
+/// Name the runner has inside the model folder, as the package manifest expects it.
+const STAGED_RUNNER_FILE: &str = if cfg!(windows) {
+    "runner.exe"
+} else {
+    "runner"
+};
+const STAGED_RUNNER_TEMP: &str = "runner.tmp";
+const MAX_RUNNER_BYTES: u64 = 256 * 1024 * 1024;
 const FREE_SPACE_MARGIN: u64 = 256 * 1024 * 1024;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 const CHUNK_TIMEOUT: Duration = Duration::from_secs(30);
@@ -234,6 +251,8 @@ pub struct InstallInfo {
     pub partial_bytes: u64,
     /// The finished model file is in place (its hash was checked on download).
     pub installed: bool,
+    /// The program that runs the model is available: the installer carries it, or one
+    /// was placed beside the model by hand.
     pub runner_present: bool,
     pub busy: bool,
     pub folder: String,
@@ -251,7 +270,7 @@ fn runner_in(dir: &Path) -> Option<&'static str> {
 }
 
 /// Cheap description for the interface: no network, no hashing.
-pub fn info(source: &ModelSource, dir: &Path, busy: bool) -> InstallInfo {
+pub fn info(source: &ModelSource, dir: &Path, busy: bool, bundled: bool) -> InstallInfo {
     let partial = regular_len(&dir.join(PART_FILE)).unwrap_or(0);
     InstallInfo {
         id: source.id.clone(),
@@ -261,7 +280,7 @@ pub fn info(source: &ModelSource, dir: &Path, busy: bool) -> InstallInfo {
         size_bytes: source.size,
         partial_bytes: if partial < source.size { partial } else { 0 },
         installed: regular_len(&dir.join(MODEL_FILE)) == Some(source.size),
-        runner_present: runner_in(dir).is_some(),
+        runner_present: bundled || runner_in(dir).is_some(),
         busy,
         folder: dir.to_string_lossy().into_owned(),
     }
@@ -524,9 +543,63 @@ pub enum Finalized {
     NeedsRunner,
 }
 
-/// With a runner next to the model, writes the manifest and runs the full
-/// package check. Without one the model stays downloaded and unused.
-pub fn finalize_package(source: &ModelSource, dir: &Path) -> Result<Finalized, ModelError> {
+/// The runner the installer carries, if this build has one: a regular file beside the
+/// application executable. Development builds and builds made without
+/// `tauri.runner.conf.json` have none.
+pub fn bundled_runner() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    bundled_runner_beside(exe.parent()?)
+}
+
+fn bundled_runner_beside(dir: &Path) -> Option<PathBuf> {
+    let path = dir.join(BUNDLED_RUNNER_FILE);
+    regular_len(&path)
+        .is_some_and(|len| len > 0 && len <= MAX_RUNNER_BYTES)
+        .then_some(path)
+}
+
+/// Makes the runner in the model folder identical to the bundled one. The copy goes to a
+/// temporary name and is renamed into place, so a crash never leaves a half-written
+/// program under the name the manifest trusts. Returns whether the file was replaced.
+/// The caller must stop a running runner first: Windows cannot replace a running program.
+pub fn stage_bundled_runner(bundled: &Path, dir: &Path) -> std::io::Result<bool> {
+    let target = dir.join(STAGED_RUNNER_FILE);
+    if regular_len(&target).is_some() && regular_len(bundled) == regular_len(&target) {
+        let same = sha256_file(bundled)? == sha256_file(&target)?;
+        if same {
+            return Ok(false);
+        }
+    }
+    std::fs::create_dir_all(dir)?;
+    let temporary = dir.join(STAGED_RUNNER_TEMP);
+    let _ = std::fs::remove_file(&temporary);
+    let copied = std::fs::copy(bundled, &temporary).and_then(|_| {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&temporary, std::fs::Permissions::from_mode(0o755))?;
+        }
+        std::fs::File::open(&temporary)?.sync_all()?;
+        std::fs::rename(&temporary, &target)
+    });
+    if copied.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    copied.map(|()| true)
+}
+
+/// Writes the manifest and runs the full package check. The runner is the bundled one when
+/// the installer carries it (copied into the model folder first), otherwise one that sits
+/// beside the model. Without any runner the model stays downloaded and unused.
+pub fn finalize_package(
+    source: &ModelSource,
+    dir: &Path,
+    bundled: Option<&Path>,
+) -> Result<Finalized, ModelError> {
+    if let Some(bundled) = bundled {
+        stage_bundled_runner(bundled, dir)
+            .map_err(|_| ModelError::Package("не вдалося підготувати рушій".into()))?;
+    }
     let Some(runner) = runner_in(dir) else {
         return Ok(Finalized::NeedsRunner);
     };
@@ -785,7 +858,7 @@ mod tests {
         assert!(matches!(error, InstallError::Network(_)), "{error}");
         let kept = std::fs::metadata(dir.path().join(PART_FILE)).unwrap().len();
         assert!(kept > 0 && kept < data.len() as u64);
-        assert_eq!(info(&source, dir.path(), false).partial_bytes, kept);
+        assert_eq!(info(&source, dir.path(), false, false).partial_bytes, kept);
         drop(first);
 
         server.mode(Mode::Normal);
@@ -927,7 +1000,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(server.requests(), 0);
-        assert!(info(&source, dir.path(), false).installed);
+        assert!(info(&source, dir.path(), false, false).installed);
     }
 
     #[tokio::test]
@@ -976,20 +1049,202 @@ mod tests {
         std::fs::write(dir.path().join(MODEL_FILE), &data).unwrap();
 
         assert!(matches!(
-            finalize_package(&source, dir.path()).unwrap(),
+            finalize_package(&source, dir.path(), None).unwrap(),
             Finalized::NeedsRunner
         ));
         assert!(!dir.path().join(MANIFEST_FILE).exists());
 
         // A synthetic stand-in: finalize never starts the runner.
         std::fs::write(dir.path().join("runner.exe"), b"synthetic runner").unwrap();
-        let Finalized::Ready(package) = finalize_package(&source, dir.path()).unwrap() else {
+        let Finalized::Ready(package) = finalize_package(&source, dir.path(), None).unwrap() else {
             panic!("package expected");
         };
         assert_eq!(package.manifest.model.sha256, source.sha256);
         assert_eq!(package.manifest.context_tokens, 2048);
         assert_eq!(package.manifest.runner.file, "runner.exe");
-        assert!(info(&source, dir.path(), false).runner_present);
+        assert!(info(&source, dir.path(), false, false).runner_present);
+    }
+
+    #[test]
+    fn info_reports_a_runner_that_the_installer_carries() {
+        let data = body(1_000);
+        let server = Server::start(data.clone());
+        let source = source_for(&server, &data);
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!info(&source, dir.path(), false, false).runner_present);
+        assert!(info(&source, dir.path(), false, true).runner_present);
+    }
+
+    fn synthetic_bundle(root: &Path, bytes: &[u8]) -> PathBuf {
+        let path = root.join(BUNDLED_RUNNER_FILE);
+        std::fs::write(&path, bytes).unwrap();
+        path
+    }
+
+    #[test]
+    fn bundled_runner_is_found_only_as_a_regular_file_beside_the_executable() {
+        let root = tempfile::tempdir().unwrap();
+        assert_eq!(bundled_runner_beside(root.path()), None);
+
+        std::fs::write(root.path().join(BUNDLED_RUNNER_FILE), b"").unwrap();
+        assert_eq!(
+            bundled_runner_beside(root.path()),
+            None,
+            "an empty file is not a runner"
+        );
+
+        let path = synthetic_bundle(root.path(), b"synthetic bundled runner");
+        assert_eq!(bundled_runner_beside(root.path()), Some(path.clone()));
+
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        assert_eq!(
+            bundled_runner_beside(root.path()),
+            None,
+            "a folder is not a runner"
+        );
+    }
+
+    #[test]
+    fn finalize_installs_the_bundled_runner_and_replaces_an_outdated_one() {
+        let data = body(50_000);
+        let server = Server::start(data.clone());
+        let source = source_for(&server, &data);
+        let models = tempfile::tempdir().unwrap();
+        let installed = tempfile::tempdir().unwrap();
+        std::fs::write(models.path().join(MODEL_FILE), &data).unwrap();
+        let bundled = synthetic_bundle(installed.path(), b"synthetic runner, first build");
+
+        let Finalized::Ready(package) =
+            finalize_package(&source, models.path(), Some(&bundled)).unwrap()
+        else {
+            panic!("package expected");
+        };
+        let staged = models.path().join(STAGED_RUNNER_FILE);
+        assert_eq!(
+            std::fs::read(&staged).unwrap(),
+            b"synthetic runner, first build"
+        );
+        assert_eq!(package.manifest.runner.file, STAGED_RUNNER_FILE);
+        assert_eq!(
+            package.manifest.runner.sha256,
+            sha256_file(&bundled).unwrap(),
+            "the manifest must vouch for the bundled program"
+        );
+        assert!(!models.path().join(STAGED_RUNNER_TEMP).exists());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&staged).unwrap().permissions().mode();
+            assert_eq!(mode & 0o111, 0o111, "the staged runner must be executable");
+        }
+
+        // The application was updated: the next connect carries the new runner over.
+        std::fs::write(&bundled, b"synthetic runner, second build").unwrap();
+        let Finalized::Ready(updated) =
+            finalize_package(&source, models.path(), Some(&bundled)).unwrap()
+        else {
+            panic!("package expected");
+        };
+        assert_eq!(
+            std::fs::read(&staged).unwrap(),
+            b"synthetic runner, second build"
+        );
+        assert_eq!(
+            updated.manifest.runner.sha256,
+            sha256_file(&bundled).unwrap()
+        );
+        assert_ne!(
+            updated.manifest.runner.sha256,
+            package.manifest.runner.sha256
+        );
+    }
+
+    #[test]
+    fn staging_leaves_an_identical_runner_untouched() {
+        let models = tempfile::tempdir().unwrap();
+        let installed = tempfile::tempdir().unwrap();
+        let bundled = synthetic_bundle(installed.path(), b"synthetic runner");
+        assert!(stage_bundled_runner(&bundled, models.path()).unwrap());
+        assert!(!stage_bundled_runner(&bundled, models.path()).unwrap());
+    }
+
+    #[test]
+    fn a_failed_copy_leaves_no_temporary_file_and_keeps_the_old_runner() {
+        let models = tempfile::tempdir().unwrap();
+        let installed = tempfile::tempdir().unwrap();
+        std::fs::write(models.path().join(STAGED_RUNNER_FILE), b"previous runner").unwrap();
+        let missing = installed.path().join("absent");
+        assert!(stage_bundled_runner(&missing, models.path()).is_err());
+        assert!(!models.path().join(STAGED_RUNNER_TEMP).exists());
+        assert_eq!(
+            std::fs::read(models.path().join(STAGED_RUNNER_FILE)).unwrap(),
+            b"previous runner"
+        );
+    }
+
+    /// The real program from `runner/` against the real adapter. Needs the built runner and a
+    /// synthetic model (`runner/make_test_model.py`), so it runs only on request:
+    /// `EASYWAR_TEST_RUNNER=<runner> EASYWAR_TEST_MODEL=<model.gguf> cargo test -- --ignored real_runner`.
+    #[test]
+    #[ignore = "needs the built runner and a synthetic model"]
+    fn real_runner_answers_through_the_application_adapter() {
+        use crate::local_model::{ChatMessage, GenerationRequest, LocalModelRuntime, ModelEvent};
+
+        let runner = PathBuf::from(
+            std::env::var("EASYWAR_TEST_RUNNER").expect("EASYWAR_TEST_RUNNER is not set"),
+        );
+        let model = PathBuf::from(
+            std::env::var("EASYWAR_TEST_MODEL").expect("EASYWAR_TEST_MODEL is not set"),
+        );
+        let models = tempfile::tempdir().unwrap();
+        let folder = models.path().join("local-models").join("test");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::copy(&model, folder.join(MODEL_FILE)).unwrap();
+        let source = ModelSource {
+            id: "test".to_owned(),
+            title: "Синтетична модель".to_owned(),
+            license: "test".to_owned(),
+            url: "https://example.invalid/model.gguf".to_owned(),
+            sha256: sha256_file(&model).unwrap(),
+            size: std::fs::metadata(&model).unwrap().len(),
+            context_tokens: 512,
+            allow_insecure: false,
+        };
+
+        let Finalized::Ready(package) = finalize_package(&source, &folder, Some(&runner)).unwrap()
+        else {
+            panic!("package expected");
+        };
+        let runtime = LocalModelRuntime::default();
+        let request = GenerationRequest {
+            system: "Ти помічник застосунку. Відповідай українською.".into(),
+            messages: vec![ChatMessage {
+                role: "user".into(),
+                content: "Привіт! Що таке КОМБАТ?".into(),
+            }],
+            max_tokens: 12,
+        };
+        let mut events = Vec::new();
+        let answer = runtime
+            .generate(Some(&package), &request, &mut |event| events.push(event))
+            .expect("the real runner must answer");
+        assert!(
+            !answer.is_empty(),
+            "the synthetic model still produces tokens"
+        );
+        assert!(matches!(events.first(), Some(ModelEvent::Started)));
+        assert!(matches!(events.last(), Some(ModelEvent::Finished)));
+        assert!(events
+            .iter()
+            .any(|event| matches!(event, ModelEvent::Token { .. })));
+
+        // A second request reuses the loaded runner and gives the same answer (state is reset).
+        let again = runtime
+            .generate(Some(&package), &request, &mut |_| {})
+            .expect("the second request must answer");
+        assert_eq!(again, answer);
+        runtime.stop();
     }
 
     #[test]
