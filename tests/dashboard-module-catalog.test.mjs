@@ -4,13 +4,19 @@ import test from 'node:test';
 import {
   branchFromLocation,
   fieldInputType,
+  isConflictError,
   matchesCatalogItem,
   normalizeCatalog,
   normalizeModules,
   parseFieldInput,
   previewModel,
+  replaceRowsRequest,
+  rowForStorage,
   rowForWrite,
+  rowsAfterDelete,
+  rowsAfterSave,
   schemaSummary,
+  tableEditState,
 } from '../src/dashboard-module-catalog-core.js';
 
 const field = (key, label, dataType = 'text', role = 'note', aggregation = 'none', required = false) => (
@@ -145,4 +151,115 @@ test('the table editor writes only through the dedicated local dashboard command
   assert.match(source, /Відкрити таблицю/);
   assert.match(source, /Зберегти зміни/);
   assert.doesNotMatch(source, /\bfetch\s*\(|XMLHttpRequest|WebSocket/);
+});
+
+const savedRows = () => [
+  { rowId: 3, createdAt: '2026-10-01T08:00:00Z', aircraft_type: 'Мі-8', airborne_hours: 1.5, total_hours: 1.75, flight_count: null },
+  { rowId: 7, createdAt: '2026-10-02T08:00:00Z', aircraft_type: 'Мі-24', airborne_hours: 2, total_hours: 2.25 },
+  { rowId: 9, createdAt: '2026-10-03T08:00:00Z', aircraft_type: 'Мі-2', airborne_hours: 0.5, total_hours: 0.5 },
+];
+
+test('rows sent to storage keep their rowId but never the service columns', () => {
+  assert.deepEqual(
+    rowForStorage(flightFields, savedRows()[0]),
+    { rowId: 3, aircraft_type: 'Мі-8', airborne_hours: 1.5, total_hours: 1.75 },
+  );
+  assert.deepEqual(
+    rowForStorage(flightFields, { rowId: 4, unknown_field: 1, aircraft_type: 'Мі-8' }),
+    { rowId: 4, aircraft_type: 'Мі-8' },
+  );
+  for (const bad of [0, -1, 1.5, '3', Number.NaN, null, undefined, Number.MAX_SAFE_INTEGER + 2]) {
+    assert.equal('rowId' in rowForStorage(flightFields, { rowId: bad, aircraft_type: 'Мі-8' }), false, String(bad));
+  }
+});
+
+test('saving an edited row keeps every identity and a new row carries none', () => {
+  const rows = savedRows();
+  const edited = { aircraft_type: 'Мі-8МТ', airborne_hours: 3, total_hours: 3.5 };
+  const afterEdit = rowsAfterSave(flightFields, rows, 1, edited);
+  assert.deepEqual(afterEdit.map(row => row.rowId), [3, 7, 9]);
+  assert.equal(afterEdit[1].aircraft_type, 'Мі-8МТ');
+  assert.equal(afterEdit[0].aircraft_type, 'Мі-8');
+  assert.equal(afterEdit.some(row => 'createdAt' in row), false);
+
+  const afterAdd = rowsAfterSave(flightFields, rows, null, edited);
+  assert.equal(afterAdd.length, 4);
+  assert.equal('rowId' in afterAdd[3], false);
+  assert.equal(rowsAfterSave(flightFields, rows, 99, edited).length, 4, 'an unknown index adds a row');
+
+  const legacy = rowsAfterSave(flightFields, [{ aircraft_type: 'A', airborne_hours: 1, total_hours: 1 }], 0, edited);
+  assert.deepEqual(legacy, [edited]);
+  assert.deepEqual(rows, savedRows(), 'the rows the form was opened with are not mutated');
+});
+
+test('deleting a row sends everything else with its identity', () => {
+  const rows = savedRows();
+  const rest = rowsAfterDelete(flightFields, rows, 1);
+  assert.deepEqual(rest.map(row => row.rowId), [3, 9]);
+  assert.equal(rest.some(row => 'createdAt' in row), false);
+  assert.equal(rowsAfterDelete(flightFields, rows, 5).length, 3, 'an index past the end removes nothing');
+  assert.equal(rowsAfterDelete(flightFields, rows, -1).length, 3);
+  assert.deepEqual(rowsAfterDelete(flightFields, [rows[0]], 0), []);
+  assert.deepEqual(rows, savedRows());
+});
+
+test('the save request carries the version the table was opened with', () => {
+  const version = '2026-10-18T15:24:11.123456789Z';
+  assert.deepEqual(
+    replaceRowsRequest({ id: 'm1', updatedAt: version }, [{ aircraft_type: 'Мі-8' }]),
+    { moduleId: 'm1', rows: [{ aircraft_type: 'Мі-8' }], expectedUpdatedAt: version },
+  );
+  assert.throws(() => replaceRowsRequest({ id: 'm1' }, []), /версії/);
+  assert.throws(() => replaceRowsRequest({ id: 'm1', updatedAt: '' }, []), /версії/);
+  assert.throws(() => replaceRowsRequest({ id: 'm1', updatedAt: 5 }, []), /версії/);
+  assert.throws(() => replaceRowsRequest({ updatedAt: version }, []), /ідентифікатора/);
+});
+
+test('the module record keeps the version string the backend sent', () => {
+  const [module] = normalizeModules([{
+    id: 'm1',
+    branch: 'air',
+    visualKind: 'table',
+    title: 'Журнал',
+    storageTable: 'dashboard_data_0123456789abcdef01234567',
+    fields: [field('aircraft_type', 'Тип ПС', 'text', 'dimension')],
+    updatedAt: '2026-10-18T15:24:11.123456789Z',
+  }]);
+  assert.equal(module.updatedAt, '2026-10-18T15:24:11.123456789Z');
+});
+
+test('only the backend conflict message is treated as a stale-window conflict', () => {
+  assert.equal(isConflictError('таблицю змінено в іншому вікні; відкрийте її знову'), true);
+  assert.equal(isConflictError(new Error('Таблицю змінено в іншому вікні; відкрийте її знову')), true);
+  assert.equal(isConflictError({ message: 'таблицю змінено в іншому вікні' }), true);
+  assert.equal(isConflictError('некоректний або повторений ідентифікатор запису'), false);
+  assert.equal(isConflictError(null), false);
+  assert.equal(isConflictError(undefined), false);
+});
+
+test('a table that failed to load, was truncated or is unknown is never editable', () => {
+  assert.deepEqual(tableEditState({ rows: [] }), { editable: true, reason: '' });
+  assert.equal(tableEditState({ rows: [], failed: true }).editable, false);
+  assert.match(tableEditState({ rows: [], failed: true }).reason, /Не вдалося прочитати/);
+  assert.equal(tableEditState({ rows: [], truncated: true }).editable, false);
+  assert.match(tableEditState({ rows: [], truncated: true }).reason, /10 000/);
+  assert.equal(tableEditState(undefined).editable, false);
+  assert.equal(tableEditState(null).editable, false);
+});
+
+test('the conflict wording and the version argument match the Rust side', async () => {
+  const store = await readFile(new URL('../src-tauri/src/dashboard_modules.rs', import.meta.url), 'utf8');
+  assert.match(store, /#\[error\("[^"]*змінено в іншому вікні[^"]*"\)\]\s*Conflict/);
+  assert.match(store, /expected_updated_at: Option<&str>/);
+  const lib = await readFile(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf8');
+  assert.match(lib, /expected_updated_at: Option<String>/);
+});
+
+test('row deletion is confirmed inside the dialog and never uses browser dialogs', async () => {
+  const source = await readFile(new URL('../src/dashboard-module-catalog.js', import.meta.url), 'utf8');
+  for (const text of ['Видалити запис', 'Так, видалити', 'Ні, залишити', 'Запис видалено.', 'Прочитати знову']) {
+    assert.ok(source.includes(text), text);
+  }
+  assert.doesNotMatch(source, /\b(?:confirm|alert|prompt)\s*\(/);
+  assert.doesNotMatch(source, /innerHTML|outerHTML|insertAdjacentHTML/);
 });

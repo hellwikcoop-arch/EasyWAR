@@ -126,6 +126,74 @@ export function rowForWrite(fields, rawValues) {
   return row;
 }
 
+/**
+ * Рядок у вигляді, який приймає `replace_dashboard_module_rows`: лише поля
+ * каталогу та `rowId` — ідентифікатор запису, за яким Rust зберігає його
+ * `created_at`. Службові `createdAt` і порожні значення не передаються.
+ */
+export function rowForStorage(fields, row) {
+  const stored = {};
+  if (Number.isSafeInteger(row?.rowId) && row.rowId >= 1) stored.rowId = row.rowId;
+  for (const field of Array.isArray(fields) ? fields : []) {
+    const value = row?.[field.key];
+    if (value != null) stored[field.key] = value;
+  }
+  return stored;
+}
+
+/** Повний набір рядків після додавання (`rowIndex` не число) або правки запису. */
+export function rowsAfterSave(fields, rows, rowIndex, edited) {
+  const next = (Array.isArray(rows) ? rows : []).map(row => rowForStorage(fields, row));
+  if (Number.isInteger(rowIndex) && rowIndex >= 0 && rowIndex < next.length) {
+    const rowId = next[rowIndex].rowId;
+    next[rowIndex] = rowId == null ? edited : { ...edited, rowId };
+  } else {
+    next.push(edited);
+  }
+  return next;
+}
+
+/** Повний набір рядків без запису `rowIndex`; решта зберігає свої `rowId`. */
+export function rowsAfterDelete(fields, rows, rowIndex) {
+  return (Array.isArray(rows) ? rows : []).flatMap((row, index) => (
+    index === rowIndex ? [] : [rowForStorage(fields, row)]
+  ));
+}
+
+/**
+ * Аргументи команди збереження. `expectedUpdatedAt` — позначка змін, з якою
+ * таблицю відкрито: якщо її вже змінили деінде, Rust відхилить запис. Без
+ * позначки запис мовчки став би «останній перемагає», тому її відсутність —
+ * помилка, а не безумовне збереження.
+ */
+export function replaceRowsRequest(module, rows) {
+  if (typeof module?.id !== 'string' || !module.id) throw new Error('Немає ідентифікатора модуля.');
+  if (typeof module.updatedAt !== 'string' || !module.updatedAt) {
+    throw new Error('Немає позначки версії таблиці. Закрийте вікно й відкрийте таблицю знову.');
+  }
+  return { moduleId: module.id, rows, expectedUpdatedAt: module.updatedAt };
+}
+
+/** Відповідь Rust «таблицю змінено в іншому вікні» (див. `DashboardModuleError::Conflict`). */
+export function isConflictError(error) {
+  return /змінено в іншому вікні/i.test(String(error?.message ?? error ?? ''));
+}
+
+/**
+ * Чи можна змінювати таблицю. Збереження замінює весь набір рядків, тому після
+ * збою читання або за межею перегляду (10 000 рядків) змінювати таблицю не
+ * можна: запис стер би рядки, яких користувач не бачить.
+ */
+export function tableEditState(payload) {
+  if (!payload || typeof payload !== 'object' || payload.failed === true) {
+    return { editable: false, reason: 'Не вдалося прочитати таблицю, тому її відкрито лише для перегляду.' };
+  }
+  if (payload?.truncated === true) {
+    return { editable: false, reason: 'Таблиця перевищує межу 10 000 рядків і відкрита лише для читання.' };
+  }
+  return { editable: true, reason: '' };
+}
+
 export function previewModel(module, rows) {
   const safeRows = Array.isArray(rows) ? rows.slice(0, 10_000) : [];
   const fields = Array.isArray(module?.fields) ? module.fields : [];
@@ -194,5 +262,11 @@ export const dashboardModuleCore = {
   fieldInputType,
   parseFieldInput,
   rowForWrite,
+  rowForStorage,
+  rowsAfterSave,
+  rowsAfterDelete,
+  replaceRowsRequest,
+  isConflictError,
+  tableEditState,
   previewModel,
 };

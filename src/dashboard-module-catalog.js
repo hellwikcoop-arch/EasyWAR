@@ -2,12 +2,17 @@ import {
   branchFromLocation,
   fieldInputType,
   formatValue,
+  isConflictError,
   matchesCatalogItem,
   normalizeCatalog,
   normalizeModules,
   previewModel,
+  replaceRowsRequest,
   rowForWrite,
+  rowsAfterDelete,
+  rowsAfterSave,
   schemaSummary,
+  tableEditState,
 } from './dashboard-module-catalog-core.js';
 
 const invoke = window.__TAURI_INTERNALS__?.invoke || window.parent?.__TAURI_INTERNALS__?.invoke;
@@ -69,7 +74,8 @@ function initialize() {
       state.modules = normalizeModules(await invoke('list_dashboard_modules', { branch: state.branch }));
       const loaded = await Promise.all(state.modules.map(async module => {
         try { return [module.id, await invoke('get_dashboard_module_data', { moduleId: module.id })]; }
-        catch { return [module.id, { module, rows: [], truncated: false }]; }
+        // Порожній набір після збою не можна редагувати: збереження стерло б наявні рядки.
+        catch { return [module.id, { module, rows: [], truncated: false, failed: true }]; }
       }));
       state.data = new Map(loaded);
     } catch (error) {
@@ -203,13 +209,23 @@ function initialize() {
     title.select();
   }
 
+  async function reopenFresh(moduleId, message = '') {
+    await loadModules();
+    const fresh = state.modules.find(item => item.id === moduleId);
+    if (fresh) showDataTable(fresh);
+    else if (dialog.open) dialog.close();
+    if (message) showToast(message, true);
+  }
+
   function showDataTable(module) {
-    const payload = state.data.get(module.id) || { rows: [], truncated: false };
+    const payload = state.data.get(module.id) || { rows: [], truncated: false, failed: true };
     const rows = Array.isArray(payload.rows) ? payload.rows : [];
-    const readOnly = payload.truncated === true;
+    const access = tableEditState(payload);
+    const readOnly = !access.editable;
+    const unreadable = payload.failed === true;
     const body = el('tbody');
     if (!rows.length) {
-      body.append(el('tr', {}, el('td', { colspan: String(module.fields.length + 1), class: 'ewmc-table-empty', text: 'Записів ще немає.' })));
+      body.append(el('tr', {}, el('td', { colspan: String(module.fields.length + 1), class: 'ewmc-table-empty', text: unreadable ? 'Дані не прочитано.' : 'Записів ще немає.' })));
     } else {
       rows.forEach((row, index) => body.append(el('tr', {},
         module.fields.map(field => el('td', { text: formatValue(row?.[field.key]) })),
@@ -232,7 +248,7 @@ function initialize() {
         el('div', {},
           el('p', { class: 'ewmc-eyebrow', text: 'Локальна SQLite-таблиця' }),
           el('h2', { id: 'ewmc-dialog-title', text: module.title }),
-          el('p', { text: `${rows.length} записів · ${module.fields.length} колонок` })),
+          el('p', { text: `${unreadable ? 'Дані недоступні' : `${rows.length} записів`} · ${module.fields.length} колонок` })),
         el('button', { value: 'cancel', class: 'ewmc-close', 'aria-label': 'Закрити', text: '×' })),
       el('div', { class: 'ewmc-data-toolbar' },
         el('code', { text: module.storageTable }),
@@ -243,16 +259,23 @@ function initialize() {
           disabled: readOnly,
           onclick: () => showRowForm(module, null),
         })),
-      ...(readOnly ? [el('p', { class: 'ewmc-form-status error', text: 'Таблиця перевищує межу 10 000 рядків і відкрита лише для читання.' })] : []),
+      ...(readOnly ? [el('div', { class: 'ewmc-readonly' },
+        el('p', { class: 'ewmc-form-status error', text: access.reason }),
+        payload.failed === true
+          ? el('button', { type: 'button', class: 'btn quiet', text: 'Прочитати знову', onclick: () => reopenFresh(module.id) })
+          : null)] : []),
       el('div', { class: 'ewmc-data-scroll' }, table),
     );
     if (!dialog.open) dialog.showModal();
   }
 
   function showRowForm(module, rowIndex) {
-    const payload = state.data.get(module.id) || { rows: [] };
+    const payload = state.data.get(module.id) || { rows: [], failed: true };
+    // Запис замінює весь набір рядків: без повністю прочитаної таблиці форма не відкривається.
+    if (!tableEditState(payload).editable) { showDataTable(module); return; }
     const rows = Array.isArray(payload.rows) ? payload.rows : [];
-    const existing = Number.isInteger(rowIndex) ? rows[rowIndex] || {} : {};
+    const isEdit = Number.isInteger(rowIndex) && rows[rowIndex] != null;
+    const existing = isEdit ? rows[rowIndex] : {};
     const controls = new Map();
     const formGrid = el('div', { class: 'ewmc-row-form-grid' });
     for (const field of module.fields) {
@@ -263,45 +286,87 @@ function initialize() {
         control));
     }
     const status = el('p', { class: 'ewmc-form-status', 'aria-live': 'polite' });
+    const saveButton = el('button', { type: 'submit', class: 'btn primary', text: isEdit ? 'Зберегти зміни' : 'Додати рядок' });
+    const cancelButton = el('button', { type: 'button', class: 'btn quiet', text: 'Скасувати', onclick: () => showDataTable(module) });
+    // Видалення — лише для наявного запису й лише після підтвердження в самому вікні (без системних діалогів).
+    const removeButton = isEdit ? el('button', { type: 'button', class: 'btn ewmc-danger', text: 'Видалити запис' }) : null;
+    const keepButton = isEdit ? el('button', { type: 'button', class: 'btn quiet', text: 'Ні, залишити' }) : null;
+    const confirmButton = isEdit ? el('button', { type: 'button', class: 'btn ewmc-danger solid', text: 'Так, видалити' }) : null;
+    const confirmBox = isEdit
+      ? el('div', { class: 'ewmc-confirm', role: 'group', 'aria-labelledby': 'ewmc-confirm-text', hidden: true },
+        el('p', { id: 'ewmc-confirm-text', text: 'Видалити цей запис із локальної таблиці? Дію не можна скасувати.' }),
+        el('div', { class: 'ewmc-confirm-actions' }, keepButton, confirmButton))
+      : null;
+    const lockable = [saveButton, cancelButton, removeButton, keepButton, confirmButton].filter(Boolean);
+    const setLocked = locked => lockable.forEach(button => { button.disabled = locked; });
+    const showConfirm = asking => {
+      if (!isEdit) return;
+      confirmBox.hidden = !asking;
+      removeButton.hidden = asking;
+    };
+    const askToRemove = asking => {
+      showConfirm(asking);
+      // Фокус — на безпечній відповіді, щоб випадковий Enter не видалив запис.
+      if (isEdit) (asking ? keepButton : removeButton).focus();
+    };
     const form = el('form', { class: 'ewmc-row-form' },
       el('button', { type: 'button', class: 'ewmc-back', text: '← До таблиці', onclick: () => showDataTable(module) }),
-      el('p', { class: 'ewmc-eyebrow', text: Number.isInteger(rowIndex) ? 'Редагування запису' : 'Новий запис' }),
+      el('p', { class: 'ewmc-eyebrow', text: isEdit ? 'Редагування запису' : 'Новий запис' }),
       el('h2', { id: 'ewmc-dialog-title', text: module.title }),
       formGrid,
       status,
-      el('div', { class: 'ewmc-form-actions' },
-        el('button', { type: 'button', class: 'btn quiet', text: 'Скасувати', onclick: () => showDataTable(module) }),
-        el('button', { type: 'submit', class: 'btn primary', text: Number.isInteger(rowIndex) ? 'Зберегти зміни' : 'Додати рядок' })),
+      confirmBox,
+      el('div', { class: 'ewmc-form-actions' }, removeButton, cancelButton, saveButton),
     );
-    form.addEventListener('submit', async event => {
-      event.preventDefault();
+
+    // Запис замінює весь набір рядків; `expectedUpdatedAt` не дає перезаписати зміни з іншого вікна.
+    async function persist(nextRows, doneMessage) {
       if (state.busy) return;
-      const submit = form.querySelector('[type="submit"]');
+      state.busy = true;
+      setLocked(true);
+      status.classList.remove('error');
+      status.textContent = 'Збереження в локальній SQLite…';
       try {
-        const values = Object.fromEntries([...controls].map(([key, control]) => [key, control.value]));
-        const edited = rowForWrite(module.fields, values);
-        const nextRows = rows.map(row => rowForStorage(module.fields, row));
-        if (Number.isInteger(rowIndex)) nextRows[rowIndex] = edited;
-        else nextRows.push(edited);
-        state.busy = true;
-        submit.disabled = true;
-        status.classList.remove('error');
-        status.textContent = 'Збереження в локальній SQLite…';
-        const result = await invoke('replace_dashboard_module_rows', { moduleId: module.id, rows: nextRows });
+        const result = await invoke('replace_dashboard_module_rows', replaceRowsRequest(module, nextRows));
         const updated = normalizeModules([result?.module])[0] || module;
         state.modules = state.modules.map(item => item.id === module.id ? updated : item);
         state.data.set(module.id, { module: updated, rows: Array.isArray(result?.rows) ? result.rows : [], truncated: result?.truncated === true });
         renderHost();
         showDataTable(updated);
-        showToast(Number.isInteger(rowIndex) ? 'Запис оновлено.' : 'Рядок додано.');
+        showToast(doneMessage);
       } catch (error) {
+        if (isConflictError(error)) {
+          await reopenFresh(module.id, 'Таблицю змінено в іншому вікні. Показано актуальні дані — повторіть дію.');
+          return;
+        }
+        showConfirm(false);
         status.textContent = String(error?.message || error || 'Не вдалося зберегти запис.');
         status.classList.add('error');
       } finally {
         state.busy = false;
-        submit.disabled = false;
+        setLocked(false);
       }
+    }
+
+    form.addEventListener('submit', event => {
+      event.preventDefault();
+      if (state.busy) return;
+      let edited;
+      try {
+        const values = Object.fromEntries([...controls].map(([key, control]) => [key, control.value]));
+        edited = rowForWrite(module.fields, values);
+      } catch (error) {
+        status.textContent = String(error?.message || error || 'Не вдалося зберегти запис.');
+        status.classList.add('error');
+        return;
+      }
+      persist(rowsAfterSave(module.fields, rows, isEdit ? rowIndex : null, edited), isEdit ? 'Запис оновлено.' : 'Рядок додано.');
     });
+    if (isEdit) {
+      removeButton.addEventListener('click', () => askToRemove(true));
+      keepButton.addEventListener('click', () => askToRemove(false));
+      confirmButton.addEventListener('click', () => persist(rowsAfterDelete(module.fields, rows, rowIndex), 'Запис видалено.'));
+    }
     dialog.replaceChildren(form);
     if (!dialog.open) dialog.showModal();
     controls.values().next().value?.focus();
@@ -334,10 +399,6 @@ function initialize() {
     if (type === 'number') attributes.step = field.dataType === 'integer' ? '1' : 'any';
     if (type === 'text') attributes.maxlength = '4096';
     return el('input', attributes);
-  }
-
-  function rowForStorage(fields, row) {
-    return Object.fromEntries(fields.flatMap(field => row?.[field.key] == null ? [] : [[field.key, row[field.key]]]));
   }
 
   function showToast(message, error = false) {
