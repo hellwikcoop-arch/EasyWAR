@@ -627,6 +627,8 @@ pub fn catalog() -> Vec<DashboardModuleTemplate> {
             vec![
                 field("label", "Назва", "text", "label", "none", true),
                 metric("value", "Значення"),
+                // Виконання у відсотках — смуга в рядку таблиці (референс «Активні проєкти»).
+                field("progress", "Виконання, %", "real", "metric", "average", false),
                 field("status", "Стан", "text", "status", "none", false),
                 field("note", "Примітка", "text", "note", "none", false),
             ],
@@ -705,6 +707,68 @@ pub fn catalog() -> Vec<DashboardModuleTemplate> {
                 metric("positive_value", "Верхнє значення"),
                 metric("negative_value", "Нижнє значення"),
                 field("series", "Ряд", "text", "series", "none", false),
+            ],
+        ),
+        // Чотири шаблони за референсами власника (2026-10-19): стовпчики з лінією плану,
+        // накопичені стовпчики, приріст і втрати від спільного нуля, рейтинг зі зміною.
+        template(
+            "combo",
+            "Стовпчики з лінією",
+            "Порівняння",
+            "Факт стовпчиками й план (або середнє) лінією на одній шкалі за періодами.",
+            "combo",
+            2,
+            vec![
+                field("period", "Період", "date", "dimension", "none", true),
+                metric("value", "Значення (стовпчики)"),
+                field(
+                    "reference_value",
+                    "Лінія (план)",
+                    "real",
+                    "metric",
+                    "sum",
+                    false,
+                ),
+            ],
+        ),
+        template(
+            "stacked-columns",
+            "Накопичені стовпчики",
+            "Структура",
+            "Склад кожної категорії за рядами: сегменти один на одному, разом — підсумок.",
+            "stacked-columns",
+            2,
+            vec![
+                dimension("category", "Категорія"),
+                metric("value", "Значення"),
+                field("series", "Ряд", "text", "series", "none", true),
+            ],
+        ),
+        template(
+            "diverging-bars",
+            "Приріст і втрати",
+            "Порівняння",
+            "Додатні й від'ємні значення за категоріями від спільного нуля: що додало, що забрало.",
+            "diverging-bars",
+            2,
+            vec![
+                dimension("category", "Категорія"),
+                metric("value", "Зміна"),
+                field("note", "Примітка", "text", "note", "none", false),
+            ],
+        ),
+        template(
+            "leaderboard",
+            "Рейтинг",
+            "Показники",
+            "Особи або підрозділи за показником: місце, значення та зміна за період.",
+            "leaderboard",
+            1,
+            vec![
+                field("label", "Назва", "text", "label", "none", true),
+                field("group", "Підрозділ", "text", "dimension", "none", false),
+                metric("value", "Значення"),
+                field("delta", "Зміна, %", "real", "metric", "average", false),
             ],
         ),
     ]
@@ -1666,7 +1730,7 @@ mod tests {
     #[test]
     fn catalog_covers_reference_visualizations_and_flight_hours() {
         let items = catalog();
-        assert_eq!(items.len(), 20);
+        assert_eq!(items.len(), 24);
         for kind in [
             "kpi",
             "line",
@@ -1687,10 +1751,46 @@ mod tests {
             "cohort",
             "activity",
             "waveform",
+            "combo",
+            "stacked-columns",
+            "diverging-bars",
+            "leaderboard",
         ] {
             assert!(
                 items.iter().any(|item| item.visual_kind == kind),
                 "missing {kind}"
+            );
+        }
+        // Ідентифікатори й фізичні назви колонок унікальні в межах шаблону; підписи не повторюються.
+        let mut ids = BTreeSet::new();
+        for item in &items {
+            assert!(ids.insert(item.id), "duplicate template id {}", item.id);
+            let keys = item
+                .fields
+                .iter()
+                .map(|field| field.key)
+                .collect::<BTreeSet<_>>();
+            assert_eq!(
+                keys.len(),
+                item.fields.len(),
+                "{}: повторений ключ поля",
+                item.id
+            );
+            let labels = item
+                .fields
+                .iter()
+                .map(|field| field.label)
+                .collect::<BTreeSet<_>>();
+            assert_eq!(
+                labels.len(),
+                item.fields.len(),
+                "{}: повторений підпис поля",
+                item.id
+            );
+            assert!(
+                item.fields.iter().all(|field| valid_identifier(field.key)),
+                "{}: ключ не є ідентифікатором",
+                item.id
             );
         }
         let flight = items.iter().find(|item| item.id == "flight-hours").unwrap();
@@ -2110,6 +2210,88 @@ mod tests {
                 .collect::<BTreeSet<_>>(),
             FLIGHT_FIELD_KEYS.into_iter().collect::<BTreeSet<_>>()
         );
+    }
+
+    #[tokio::test]
+    async fn legacy_table_module_gets_the_progress_column_in_its_place() {
+        let store = store().await;
+        let module_id = "dashboard-legacy-table";
+        let table = "dashboard_data_bbbbbbbbbbbbbbbbbbbbbbbb";
+        sqlx::query(
+            "INSERT INTO dashboard_modules
+             (id, profile_id, branch, template_id, visual_kind, title, storage_table, created_at, updated_at)
+             VALUES (?, 'profile-111111111111111111111111', 'air', 'table', 'table',
+                     'Стара таблиця', ?, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .bind(module_id)
+        .bind(table)
+        .execute(&store.pool)
+        .await
+        .unwrap();
+        for (position, (key, label, data_type, role, aggregation, required)) in [
+            ("label", "Назва", "text", "label", "none", 1),
+            ("value", "Значення", "real", "metric", "sum", 1),
+            ("status", "Стан", "text", "status", "none", 0),
+            ("note", "Примітка", "text", "note", "none", 0),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            sqlx::query(
+                "INSERT INTO dashboard_module_fields
+                 (module_id, field_key, label, data_type, field_role, aggregation, required, position)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind(module_id)
+            .bind(key)
+            .bind(label)
+            .bind(data_type)
+            .bind(role)
+            .bind(aggregation)
+            .bind(required)
+            .bind(position as i64)
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        }
+        sqlx::query(&format!(
+            "CREATE TABLE {table} (
+                row_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL,
+                label TEXT NOT NULL,
+                value REAL NOT NULL,
+                status TEXT,
+                note TEXT
+             )"
+        ))
+        .execute(&store.pool)
+        .await
+        .unwrap();
+        sqlx::query(&format!(
+            "INSERT INTO {table} (created_at, label, value, status, note)
+             VALUES ('2026-01-01T00:00:00Z', 'Тестовий', 3.0, 'Готово', 'x')"
+        ))
+        .execute(&store.pool)
+        .await
+        .unwrap();
+
+        let data = store
+            .get_data("profile-111111111111111111111111", module_id)
+            .await
+            .unwrap();
+        assert_eq!(
+            data.module
+                .fields
+                .iter()
+                .map(|field| field.key.as_str())
+                .collect::<Vec<_>>(),
+            ["label", "value", "progress", "status", "note"],
+            "нове поле стає на своє місце в шаблоні, а не в кінець"
+        );
+        assert_eq!(data.rows.len(), 1);
+        assert_eq!(data.rows[0]["label"], "Тестовий");
+        assert_eq!(data.rows[0]["progress"], Value::Null);
+        assert_eq!(data.rows[0]["note"], "x");
     }
 
     #[tokio::test]

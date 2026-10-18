@@ -81,7 +81,7 @@ test('header candidates go from the exact text to the simplified one', () => {
 });
 
 test('every catalog template is read from Rust and its column labels never collide', () => {
-  assert.equal(catalog.length, 20);
+  assert.equal(catalog.length, 24);
   assert.equal(flightFields.length, 35);
   assert.deepEqual(flightFields.filter(item => item.required).map(item => item.key), ['aircraft_type', 'airborne_hours', 'total_hours']);
   for (const template of catalog) {

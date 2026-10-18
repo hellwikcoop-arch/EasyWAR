@@ -12,7 +12,6 @@ import {
   fieldPlaceholder,
   fieldSections,
   formatFieldValue,
-  formatValue,
   inheritedValues,
   isConflictError,
   matchesCatalogItem,
@@ -20,7 +19,6 @@ import {
   normalizeDensity,
   normalizeModules,
   pluralForm,
-  previewModel,
   replaceRowsRequest,
   rowCountLabel,
   rowForWrite,
@@ -32,6 +30,8 @@ import {
   tableEditState,
   visibleColumnKeys,
 } from './dashboard-module-catalog-core.js';
+import { chartModel } from './dashboard-module-charts-core.js';
+import { mountChart } from './dashboard-module-charts.js';
 import {
   buildImport,
   correctionOutcome,
@@ -185,12 +185,11 @@ function initialize() {
   }
 
   function renderModule(module, rows) {
-    const model = previewModel(module, rows);
     const card = el('article', { class: `ewmc-module span-${module.defaultSpan === 2 ? 2 : 1}`, 'data-kind': module.visualKind },
       el('header', { class: 'ewmc-module-head' },
         el('div', {}, el('h3', { text: module.title }), el('p', { text: `${rowCountLabel(module.rowCount)} · локальна SQLite` })),
         el('span', { class: 'ewmc-live', text: module.rowCount ? 'Дані' : 'Створено' })),
-      visual(module.visualKind, model),
+      visual(module, rows),
       el('div', { class: 'ewmc-module-actions' },
         el('button', {
           type: 'button',
@@ -207,7 +206,7 @@ function initialize() {
         el('code', { text: module.storageTable }),
         el('p', { text: schemaSummary(module.fields) })),
     );
-    if (model.empty) card.querySelector('.ewmc-visual')?.append(el('p', { class: 'ewmc-no-data', text: 'Таблиця готова · даних ще немає' }));
+    if (!rows.length) card.querySelector('.ewmc-visual')?.append(el('p', { class: 'ewmc-no-data', text: 'Таблиця готова · даних ще немає' }));
     return card;
   }
 
@@ -235,12 +234,11 @@ function initialize() {
   }
 
   function catalogCard(item) {
-    const model = previewModel({ visualKind: item.visualKind, fields: item.fields }, sampleRows(item));
     return el('article', { class: 'ewmc-catalog-card' },
       el('div', { class: 'ewmc-catalog-top' },
         el('span', { class: 'ewmc-category', text: item.category }),
         el('span', { class: 'ewmc-cols', text: `${item.fields.length} кол.` })),
-      visual(item.visualKind, model, true),
+      visual(item, sampleRows(item), true),
       el('h3', { text: item.title }),
       el('p', { text: item.description }),
       el('div', { class: 'ewmc-fields' },
@@ -263,7 +261,7 @@ function initialize() {
       el('h2', { id: 'ewmc-dialog-title', text: item.title }),
       // Ліва колонка: вигляд, назва й дані з таблиці; праворуч — довгий список колонок нової таблиці.
       el('div', { class: 'ewmc-create-main' },
-        visual(item.visualKind, previewModel({ visualKind: item.visualKind, fields: item.fields }, sampleRows(item)), true),
+        visual(item, sampleRows(item), true),
         el('label', { class: 'ewmc-field' }, el('span', { text: 'Назва на дашборді' }), title),
         source.node),
       el('section', { class: 'ewmc-table-plan' },
@@ -1147,61 +1145,71 @@ function correctionText(item) {
   return `Виправлено під час підтягування з таблиці: «${item.rawText || 'порожньо'}» → «${item.correctedText}» (${where}). ${item.reason}`;
 }
 
+// Синтетичні рядки для картки каталогу: вигадані підрозділи, дати 2026 року й числа, щоб прев'ю
+// показувало форму діаграми. Прізвищ немає — лише умовні назви.
 function sampleRows(item) {
-  const labels = ['ПС-1', 'ПС-2', 'ПС-3', 'ПС-4', 'ПС-5'];
-  return labels.map((label, index) => Object.fromEntries(item.fields.map(field => {
-    if (field.role === 'metric' || ['latitude', 'longitude', 'order'].includes(field.role)) {
-      if (field.key.includes('target') || field.key === 'maximum') return [field.key, 100];
-      if (field.key === 'minimum') return [field.key, 0];
-      if (field.role === 'latitude') return [field.key, 48 + index * .7];
-      if (field.role === 'longitude') return [field.key, 24 + index * 2.2];
-      return [field.key, [42, 68, 54, 88, 74][index]];
-    }
-    if (field.dataType === 'date') return [field.key, `2026-10-${String(index + 1).padStart(2, '0')}`];
-    if (field.dataType === 'datetime') return [field.key, `2026-10-0${index + 1}T12:00:00Z`];
-    if (field.dataType === 'boolean') return [field.key, index % 2 === 0];
-    if (field.role === 'status') return [field.key, index % 2 ? 'Виконується' : 'Готово'];
-    return [field.key, field.role === 'series' ? (index % 2 ? 'Серія Б' : 'Серія А') : label];
-  })));
+  const kind = item.visualKind;
+  const byKey = Object.fromEntries(item.fields.map(field => [field.key, field]));
+  const has = key => key in byKey;
+  const day = index => `2026-10-${String(1 + index).padStart(2, '0')}`;
+  const stamp = index => `2026-10-${String(1 + Math.floor(index / 4)).padStart(2, '0')}T${String(8 + (index % 4) * 3).padStart(2, '0')}:00`;
+  const values = [42, 68, 54, 88, 74, 61, 79, 95, 70, 83, 66, 90];
+  const units = ['1 АЕ', '2 АЕ', '3 АЕ', 'Ланка «Захід»', 'Ланка «Схід»', 'Резерв'];
+  const rows = [];
+  const push = row => rows.push(Object.fromEntries(Object.entries(row).filter(([key]) => has(key))));
+  if (item.id === 'flight-hours' || (has('aircraft_type') && has('airborne_hours') && has('total_hours'))) {
+    [['Мі-8', 12.5, 15.25], ['Мі-24', 9.5, 11], ['Ан-26', 4.25, 5]].forEach(([aircraft_type, airborne_hours, total_hours]) => push({ aircraft_type, airborne_hours, total_hours }));
+  } else if (['line', 'area'].includes(kind)) {
+    values.slice(0, 10).forEach((value, index) => { push({ period: day(index), value, series: 'План' }); push({ period: day(index), value: Math.round(value * 0.8 + (index % 3) * 6), series: 'Факт' }); });
+  } else if (kind === 'combo') {
+    values.slice(0, 8).forEach((value, index) => push({ period: day(index), value, reference_value: 72 }));
+  } else if (['columns', 'horizontal-bar'].includes(kind)) {
+    units.slice(0, 5).forEach((category, index) => push({ category, value: values[index], series: 'Разом' }));
+  } else if (kind === 'stacked-columns') {
+    units.slice(0, 5).forEach((category, index) => ['День', 'Ніч', 'СМУ'].forEach((series, order) => push({ category, value: Math.round(values[index + order] / (order + 1)), series })));
+  } else if (kind === 'grouped-columns') {
+    units.slice(0, 5).forEach((category, index) => push({ category, primary_value: values[index], secondary_value: Math.round(values[index] * 0.7) }));
+  } else if (kind === 'diverging-bars') {
+    [['Поповнення', 24], ['Повернуто з ремонту', 9], ['Передано', 4], ['У ремонті', -7], ['Втрати', -12]].forEach(([category, value]) => push({ category, value }));
+  } else if (kind === 'donut') {
+    ['Мі-8', 'Мі-24', 'Ан-26', 'Мі-2'].forEach((category, index) => push({ category, value: values[index] }));
+  } else if (['radial-progress', 'multi-ring', 'progress-bars'].includes(kind)) {
+    ['Наліт', 'Вправи', 'Стрільби', 'Готовність'].slice(0, kind === 'radial-progress' ? 3 : 4).forEach((label, index) => push({ label, current_value: values[index], target_value: 100, ring_order: index + 1 }));
+  } else if (kind === 'gauge') {
+    push({ label: 'Готовність', value: 72, minimum: 0, maximum: 100 });
+  } else if (kind === 'kpi') {
+    values.slice(0, 8).forEach((value, index) => push({ label: 'Наліт за місяць', value: value * 3, delta: index === 7 ? 6.4 : 1, unit: 'год' }));
+  } else if (kind === 'radar') {
+    ['Наліт', 'Стрільби', 'Навігація', 'Зв’язок', 'Злагодженість'].forEach((axis, index) => { push({ axis, value: values[index], series: '1 АЕ' }); push({ axis, value: values[index + 3], series: '2 АЕ' }); });
+  } else if (kind === 'calendar') {
+    [1, 2, 3, 6, 7, 8, 9, 13, 14, 15, 16, 20, 21, 22, 27, 28].forEach((dayOfMonth, index) => push({ date: `2026-10-${String(dayOfMonth).padStart(2, '0')}`, value: values[index % values.length] / 10 }));
+  } else if (kind === 'cohort') {
+    ['Січень', 'Лютий', 'Березень', 'Квітень'].forEach((cohort, row) => [1, 2, 3, 4, 5].slice(0, 5 - row).forEach(period => push({ cohort, period: String(period), value: Math.round(100 - period * (6 + row * 2)) })));
+  } else if (kind === 'table') {
+    [['Платформа аналітики', 12, 80, 'Готово'], ['Міграція даних', 4, 35, 'Увага'], ['Навчання екіпажів', 9, 60, 'Виконується'], ['Ремонт техніки', 2, 15, 'Затримка']].forEach(([label, value, progress, status]) => push({ label, value, progress, status, note: '' }));
+  } else if (kind === 'funnel') {
+    [['Заплановано', 120, 1], ['Підготовлено', 96, 2], ['Виконано', 64, 3], ['Зараховано', 40, 4]].forEach(([stage, value, order]) => push({ stage, value, stage_order: order }));
+  } else if (kind === 'map') {
+    [['Київ', 50.45, 30.52, 88, 'Готово'], ['Львів', 49.84, 24.03, 54, 'Готово'], ['Одеса', 46.48, 30.73, 61, 'Увага'], ['Харків', 49.99, 36.23, 42, 'Готово'], ['Дніпро', 48.46, 35.04, 70, 'Готово']]
+      .forEach(([label, latitude, longitude, value, status]) => push({ label, latitude, longitude, value, status }));
+  } else if (kind === 'activity') {
+    [['Виліт пари', 'Готово', 2], ['Доповідь прийнято', 'Готово', 1], ['Затримка вильоту', 'Увага', 1], ['Повернення на базу', 'Готово', 2]].forEach(([label, status, value], index) => push({ occurred_at: stamp(index), label, status, value }));
+  } else if (kind === 'waveform') {
+    values.forEach((value, index) => push({ occurred_at: stamp(index), positive_value: value, negative_value: values[(index + 5) % values.length] * 0.6, series: 'Разом' }));
+  } else if (kind === 'leaderboard') {
+    units.slice(0, 5).forEach((label, index) => push({ label, group: index < 3 ? 'Ескадрилья' : 'Ланка', value: values[index], delta: [8, -2, 3, 0, 5][index] }));
+  } else {
+    units.slice(0, 5).forEach((label, index) => push({ label, category: label, value: values[index], status: index % 2 ? 'Виконується' : 'Готово' }));
+  }
+  return rows;
 }
 
-function visual(kind, model, compact = false) {
-  const box = el('div', { class: `ewmc-visual ${compact ? 'compact' : ''}`, 'data-visual': kind, 'aria-hidden': 'true' });
-  const points = model.points.length ? model.points : [{ label: '—', values: [0] }];
-  if (kind === 'kpi') {
-    box.append(el('strong', { class: 'ewmc-kpi', text: formatValue(points[0]?.values[0] || model.total) }), el('small', { text: points[0]?.label || 'Показник' }));
-  } else if (['line', 'area', 'waveform'].includes(kind)) {
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('viewBox', '0 0 220 92');
-    const line = document.createElementNS(svg.namespaceURI, 'polyline');
-    const max = model.max || 1;
-    line.setAttribute('points', points.slice(0, 10).map((point, index, all) => `${10 + index * (200 / Math.max(1, all.length - 1))},${82 - (point.values[0] || 0) / max * 66}`).join(' '));
-    line.setAttribute('class', 'ewmc-line');
-    svg.append(line); box.append(svg);
-  } else if (['columns', 'grouped-columns'].includes(kind)) {
-    const bars = points.slice(0, 8).flatMap(point => point.values.slice(0, 2).map(value =>
-      el('i', { style: { height: `${12 + (value / (model.max || 1)) * 72}%` } })));
-    box.append(el('div', { class: 'ewmc-columns' }, bars));
-  } else if (['horizontal-bar', 'progress-bars'].includes(kind)) {
-    const bars = points.slice(0, 6).map(point => el('div', {},
-      el('span', { text: point.label }),
-      point.values.slice(0, 2).map(value => el('i', { style: { width: `${8 + (value / (model.max || 1)) * 88}%` } }))));
-    box.append(el('div', { class: 'ewmc-bars' }, bars));
-  } else if (['donut', 'radial-progress', 'multi-ring', 'gauge'].includes(kind)) {
-    const percent = model.percent || (model.total ? 68 : 0);
-    box.append(el('div', { class: `ewmc-ring ${kind}`, style: { '--pct': `${percent}%` } }, el('b', { text: `${Math.round(percent)}%` })));
-  } else if (kind === 'radar') {
-    box.append(el('div', { class: 'ewmc-radar' }, el('i'), el('i'), el('i')));
-  } else if (['calendar', 'cohort'].includes(kind)) {
-    box.append(el('div', { class: 'ewmc-cells' }, Array.from({ length: kind === 'calendar' ? 35 : 24 }, (_, index) => el('i', { style: { opacity: String(.2 + ((index * 7) % 9) / 11) } }))));
-  } else if (kind === 'funnel') {
-    box.append(el('div', { class: 'ewmc-funnel' }, [100, 78, 56, 34].map(width => el('i', { style: { width: `${width}%` } }))));
-  } else if (kind === 'map') {
-    box.append(el('div', { class: 'ewmc-map' }, points.slice(0, 5).map((_, index) => el('i', { style: { left: `${18 + index * 15}%`, top: `${25 + (index % 3) * 18}%` } }))));
-  } else if (kind === 'activity') {
-    box.append(el('div', { class: 'ewmc-activity' }, points.slice(0, 4).map(point => el('p', {}, el('i'), el('span', { text: point.label }))))) ;
-  } else {
-    box.append(el('div', { class: 'ewmc-mini-table' }, points.slice(0, 4).map(point => el('p', {}, el('span', { text: point.label }), el('b', { text: formatValue(point.values[0]) }))))) ;
-  }
+/** Картка з діаграмою модуля (або шаблону) з його рядків; перемальовується під ширину картки. */
+function visual(moduleOrTemplate, rows, compact = false) {
+  const template = moduleOrTemplate.templateId ? moduleOrTemplate : { ...moduleOrTemplate, templateId: moduleOrTemplate.id };
+  // Діаграма живе у вкладеному вузлі: позначка «даних ще немає» поруч із ним не стирається при перемальовуванні.
+  const host = el('div', { class: 'ewmc-chart-host' });
+  const box = el('div', { class: `ewmc-visual ${compact ? 'compact' : ''}`, 'data-visual': template.visualKind }, host);
+  mountChart(host, chartModel(template, rows), { height: compact ? 120 : 168, compact });
   return box;
 }
