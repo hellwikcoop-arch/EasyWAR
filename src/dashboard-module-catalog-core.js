@@ -87,23 +87,51 @@ export const FUEL_DENSITY_KG_PER_L = 0.8;
 /**
  * Поля журналу польотів із власним форматом введення й показу. Ключі — з вбудованого
  * каталогу Rust. У базі всі вони лишаються числами: тривалість — десятковими годинами,
- * висота — метрами, паливо — літрами, тому схема й міграції не змінюються.
+ * висота (польоту, нижньої й верхньої межі хмар) — метрами, паливо — літрами, тому
+ * схема й міграції не змінюються.
  */
 const MEASURED_FIELDS = new Map([
   ['airborne_hours', 'duration'],
   ['total_hours', 'duration'],
   ['time_in_clouds', 'duration'],
   ['hood_time', 'duration'],
-  ['flight_altitude', 'altitude'],
+  ['flight_altitude', 'height'],
+  ['cloud_base_upper', 'height'],
+  ['cloud_base_lower', 'height'],
   ['fuel_consumption', 'fuel'],
 ]);
 const DURATION_PATTERN = /^(\d{1,4}):([0-5]\d)$/;
-const ALTITUDE_PATTERN = /^(\d+(?:[.,]\d+)?)\s*(км|km|м|m)?$/iu;
+const HEIGHT_PATTERN = /^(\d+(?:[.,]\d+)?)\s*(км|km|м|m)?$/iu;
 const kilogramsFormat = new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 1 });
 
-/** `'duration'` | `'altitude'` | `'fuel'` для полів із власним форматом, інакше `null`. */
+/**
+ * Допустимі межі числових полів. Хмарність — за 10-бальною шкалою; видимість і витрата
+ * палива не бувають від'ємними. Межі перевіряє лише форма: Rust приймає значення як є,
+ * щоб старий запис із «неправильним» числом не блокував збереження всієї таблиці.
+ */
+const FIELD_LIMITS = new Map([
+  ['cloud_cover', { min: 0, max: 10 }],
+  ['visibility', { min: 0 }],
+  ['fuel_consumption', { min: 0 }],
+]);
+
+/** `'duration'` | `'height'` | `'fuel'` для полів із власним форматом, інакше `null`. */
 export function fieldKind(field) {
   return field?.dataType === 'real' ? MEASURED_FIELDS.get(field.key) ?? null : null;
+}
+
+/** `{ min?, max? }` для числового поля з межами, інакше `null`. */
+export function fieldLimits(field) {
+  return field?.dataType === 'integer' || field?.dataType === 'real'
+    ? FIELD_LIMITS.get(field.key) ?? null
+    : null;
+}
+
+/** Чи лежить збережене значення поза межами поля (старий запис до введення меж). */
+export function outsideLimits(field, value) {
+  const limits = fieldLimits(field);
+  if (!limits || !finite(value)) return false;
+  return (limits.min != null && value < limits.min) || (limits.max != null && value > limits.max);
 }
 
 /**
@@ -124,11 +152,12 @@ export function formatDuration(hours) {
 }
 
 /**
- * Висота в метрах: «300» і «300 м» — метри, «0,3 км» — кілометри. Дробове число менше
- * за 1 без одиниці («0,3») неоднозначне — це метри чи кілометри, — тому його не приймаємо.
+ * Висота в метрах (висота польоту, нижня й верхня межа хмар): «300» і «300 м» — метри,
+ * «0,3 км» — кілометри. Дробове число менше за 1 без одиниці («0,3») неоднозначне —
+ * це метри чи кілометри, — тому його не приймаємо.
  */
-export function parseAltitude(raw) {
-  const match = ALTITUDE_PATTERN.exec(typeof raw === 'string' ? raw.trim() : '');
+export function parseHeight(raw) {
+  const match = HEIGHT_PATTERN.exec(typeof raw === 'string' ? raw.trim() : '');
   if (!match) return null;
   const amount = Number(match[1].replace(',', '.'));
   const unit = (match[2] || '').toLowerCase();
@@ -162,16 +191,24 @@ export function fieldInputText(field, value) {
   if (field?.dataType === 'boolean') return value === true ? 'true' : value === false ? 'false' : '';
   const kind = fieldKind(field);
   if (kind === 'duration' && finite(value) && value >= 0) return formatDuration(value);
-  if (kind === 'altitude' && finite(value) && value > 0 && value < 1) return `${value} м`;
+  if (kind === 'height' && finite(value) && value > 0 && value < 1) return `${value} м`;
   return String(value);
 }
+
+/** Підказки в порожніх текстових полях екіпажу. */
+const TEXT_PLACEHOLDERS = new Map([
+  ['crew_ke', 'прізвище'],
+  ['crew_lsh', 'прізвище'],
+  ['crew_bt', 'прізвище'],
+  ['crew_other', 'прізвища через кому'],
+]);
 
 export function fieldPlaceholder(field) {
   switch (fieldKind(field)) {
     case 'duration': return '0:32';
-    case 'altitude': return '300 або 0,3 км';
+    case 'height': return '300 або 0,3 км';
     case 'fuel': return 'літри';
-    default: return '';
+    default: return field?.dataType === 'text' ? TEXT_PLACEHOLDERS.get(field.key) ?? '' : '';
   }
 }
 
@@ -186,8 +223,8 @@ export function fieldHint(field, rawText) {
       ? `≈ ${kilogramsFormat.format(fuelKilograms(litres))} кг (густина ${FUEL_DENSITY_KG_PER_L.toLocaleString('uk-UA')} кг/л)`
       : '';
   }
-  if (kind === 'altitude' && /км|km/iu.test(raw)) {
-    const metres = parseAltitude(raw);
+  if (kind === 'height' && /км|km/iu.test(raw)) {
+    const metres = parseHeight(raw);
     return metres == null ? '' : `= ${formatValue(metres)} м`;
   }
   return '';
@@ -196,7 +233,7 @@ export function fieldHint(field, rawText) {
 export function fieldInputType(field) {
   if (field?.dataType === 'boolean') return 'select';
   const kind = fieldKind(field);
-  if (kind === 'duration' || kind === 'altitude') return 'text';
+  if (kind === 'duration' || kind === 'height') return 'text';
   if (field?.dataType === 'integer' || field?.dataType === 'real') return 'number';
   if (field?.dataType === 'date') return 'date';
   if (field?.dataType === 'datetime') return 'datetime-local';
@@ -207,11 +244,24 @@ export function fieldInputType(field) {
 function parseMeasured(kind, label, raw) {
   const value = typeof raw === 'number'
     ? (finite(raw) && raw >= 0 ? raw : null)
-    : kind === 'duration' ? parseDuration(raw) : parseAltitude(raw);
+    : kind === 'duration' ? parseDuration(raw) : parseHeight(raw);
   if (value != null) return value;
   throw new Error(kind === 'duration'
     ? `Поле «${label}» має містити час у форматі год:хв, наприклад 0:32.`
     : `Поле «${label}» має містити метри (300) або кілометри з позначкою (0,3 км).`);
+}
+
+function limitsMessage(label, { min, max }) {
+  if (min != null && max != null) return `Поле «${label}» має бути від ${min} до ${max}.`;
+  if (min === 0) return `Поле «${label}» не може бути від'ємним.`;
+  return min != null
+    ? `Поле «${label}» не може бути меншим за ${min}.`
+    : `Поле «${label}» не може бути більшим за ${max}.`;
+}
+
+function withinLimits(field, label, value) {
+  if (outsideLimits(field, value)) throw new Error(limitsMessage(label, fieldLimits(field)));
+  return value;
 }
 
 export function parseFieldInput(field, rawValue) {
@@ -229,19 +279,105 @@ export function parseFieldInput(field, rawValue) {
   if (field?.dataType === 'integer') {
     const value = typeof raw === 'number' ? raw : Number(raw);
     if (!Number.isSafeInteger(value)) throw new Error(`Поле «${label}» має містити ціле число.`);
-    return value;
+    return withinLimits(field, label, value);
   }
   if (field?.dataType === 'real') {
     const kind = fieldKind(field);
-    if (kind === 'duration' || kind === 'altitude') return parseMeasured(kind, label, raw);
+    if (kind === 'duration' || kind === 'height') return parseMeasured(kind, label, raw);
     const value = typeof raw === 'number' ? raw : Number(String(raw).replace(',', '.'));
     if (!Number.isFinite(value)) throw new Error(`Поле «${label}» має містити число.`);
-    if (kind === 'fuel' && value < 0) throw new Error(`Поле «${label}» не може бути від'ємним.`);
-    return value;
+    return withinLimits(field, label, value);
   }
   const value = String(raw);
   if (value.length > 4096) throw new Error(`Поле «${label}» перевищує 4096 символів.`);
   return value;
+}
+
+/**
+ * Групи полів у формі запису. Метеоумови записують не щоразу, а раз на 5–10 записів
+ * однієї льотної зміни, тому нові записи беруть їх із попереднього (`inherit`). Екіпаж —
+ * окремий блок: КЕ, ЛШ і БТ окремими полями, решта через кому. «Політ у СМУ» — ознака
+ * самого польоту, а не погоди, тому лишається серед основних полів.
+ */
+const FIELD_GROUPS = [
+  {
+    id: 'meteo',
+    title: 'Метеоумови',
+    note: '',
+    inherit: true,
+    keys: ['cloud_base_upper', 'cloud_base_lower', 'cloud_cover', 'visibility'],
+  },
+  {
+    id: 'crew',
+    title: 'Екіпаж',
+    note: 'Прізвища. Разом до 8 осіб: КЕ, ЛШ, БТ і до 5 інших через кому (інструктор, ПКЕ, штурман, бортмеханік, радист…). Посаду можна дописати: «інструктор Прізвище».',
+    inherit: false,
+    keys: ['crew_ke', 'crew_lsh', 'crew_bt', 'crew_other'],
+  },
+];
+
+/**
+ * Поля форми за розділами: спершу основні (без заголовка), далі групи з наявних полів.
+ * Для модуля без згрупованих полів — один основний розділ, тобто звичайна форма.
+ */
+export function fieldSections(fields) {
+  const list = Array.isArray(fields) ? fields : [];
+  const grouped = new Set(FIELD_GROUPS.flatMap(group => group.keys));
+  const main = list.filter(field => !grouped.has(field.key));
+  const sections = main.length ? [{ id: 'main', title: '', note: '', inherit: false, fields: main }] : [];
+  for (const group of FIELD_GROUPS) {
+    const members = list.filter(field => group.keys.includes(field.key));
+    if (members.length) {
+      sections.push({ id: group.id, title: group.title, note: group.note, inherit: group.inherit, fields: members });
+    }
+  }
+  return sections;
+}
+
+/**
+ * Метеоумови для нового запису: поля групи з найновішого запису, де вказано хоч одне з
+ * них, — цілим набором, щоб не змішувати погоду з різних моментів. `null`, якщо
+ * переносити нічого.
+ */
+export function inheritedValues(fields, rows) {
+  const keys = fieldSections(fields).filter(section => section.inherit).flatMap(section => section.fields.map(field => field.key));
+  const list = Array.isArray(rows) ? rows : [];
+  if (!keys.length) return null;
+  for (let rowIndex = list.length - 1; rowIndex >= 0; rowIndex -= 1) {
+    const found = keys.filter(key => list[rowIndex]?.[key] != null);
+    if (found.length) return { rowIndex, values: Object.fromEntries(found.map(key => [key, list[rowIndex][key]])) };
+  }
+  return null;
+}
+
+/** Найбільший склад екіпажу з інструкторами: КЕ, ЛШ, БТ і до 5 інших. */
+export const MAX_CREW = 8;
+const CREW_KEYS = ['crew_ke', 'crew_lsh', 'crew_bt', 'crew_other'];
+
+/** Скільки осіб записано в екіпажі: прізвища в кожному з полів рахуються за комами. */
+export function crewCount(values) {
+  return CREW_KEYS.reduce((sum, key) => {
+    const value = values?.[key];
+    return sum + (typeof value === 'string' ? value.split(/[,;]/).filter(name => name.trim()).length : 0);
+  }, 0);
+}
+
+/** Підпис під полями екіпажу: «Екіпаж: 3 з 8 осіб»; порожній, поки прізвищ немає. */
+export function crewSummary(values) {
+  const count = crewCount(values);
+  if (!count) return '';
+  return count > MAX_CREW
+    ? `Екіпаж: ${count} з ${MAX_CREW} осіб — забагато`
+    : `Екіпаж: ${count} з ${MAX_CREW} осіб`;
+}
+
+/** Правила, що зв'язують кілька полів одного запису. */
+function checkRowRules(row) {
+  if (finite(row.cloud_base_lower) && finite(row.cloud_base_upper) && row.cloud_base_lower > row.cloud_base_upper) {
+    throw new Error('Нижня межа хмар (НМХ) не може бути вищою за верхню (ВМХ).');
+  }
+  const crew = crewCount(row);
+  if (crew > MAX_CREW) throw new Error(`В екіпажі ${crew} осіб, а може бути не більше ${MAX_CREW}.`);
 }
 
 /**
@@ -259,6 +395,7 @@ export function rowForWrite(fields, rawValues, original = {}) {
       : parseFieldInput(field, raw);
     if (value !== null) row[field.key] = value;
   }
+  checkRowRules(row);
   return row;
 }
 
@@ -396,9 +533,11 @@ export const dashboardModuleCore = {
   matchesCatalogItem,
   formatValue,
   fieldKind,
+  fieldLimits,
+  outsideLimits,
   parseDuration,
   formatDuration,
-  parseAltitude,
+  parseHeight,
   fuelKilograms,
   formatFuel,
   formatFieldValue,
@@ -406,6 +545,10 @@ export const dashboardModuleCore = {
   fieldPlaceholder,
   fieldHint,
   fieldInputType,
+  fieldSections,
+  inheritedValues,
+  crewCount,
+  crewSummary,
   parseFieldInput,
   rowForWrite,
   rowForStorage,

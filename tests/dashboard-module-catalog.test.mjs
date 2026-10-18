@@ -3,23 +3,30 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {
   FUEL_DENSITY_KG_PER_L,
+  MAX_CREW,
   branchFromLocation,
+  crewCount,
+  crewSummary,
   fieldHint,
   fieldInputText,
   fieldInputType,
   fieldKind,
+  fieldLimits,
   fieldPlaceholder,
+  fieldSections,
   formatDuration,
   formatFieldValue,
   formatFuel,
   fuelKilograms,
+  inheritedValues,
   isConflictError,
   matchesCatalogItem,
   normalizeCatalog,
   normalizeModules,
-  parseAltitude,
+  outsideLimits,
   parseDuration,
   parseFieldInput,
+  parseHeight,
   previewModel,
   replaceRowsRequest,
   rowForStorage,
@@ -50,14 +57,18 @@ const flightFields = [
   field('flight_altitude', 'Висота польоту, м', 'real', 'metric', 'average'),
   field('combat_application_grade', 'Оцінка бойового застосування', 'text', 'status'),
   field('flight_grade', 'Оцінка за політ', 'text', 'status'),
-  field('cloud_base_upper', 'Верхня межа хмар', 'real', 'metric', 'average'),
-  field('cloud_base_lower', 'Нижня межа хмар', 'real', 'metric', 'average'),
-  field('cloud_cover', 'Хмарність', 'integer', 'metric', 'average'),
+  field('cloud_base_upper', 'Верхня межа хмар (ВМХ), м', 'real', 'metric', 'average'),
+  field('cloud_base_lower', 'Нижня межа хмар (НМХ), м', 'real', 'metric', 'average'),
+  field('cloud_cover', 'Хмарність, 0–10', 'integer', 'metric', 'average'),
   field('visibility', 'Видимість, км', 'real', 'metric', 'average'),
   field('instrument_meteorological_conditions', 'Політ у СМУ', 'boolean', 'status'),
   field('time_in_clouds', 'Час у хмарах, год:хв', 'real', 'metric', 'sum'),
   field('hood_time', 'Час під шторкою, год:хв', 'real', 'metric', 'sum'),
   field('fuel_consumption', 'Витрата палива, л', 'real', 'metric', 'sum'),
+  field('crew_ke', 'Екіпаж: КЕ', 'text', 'dimension'),
+  field('crew_lsh', 'Екіпаж: ЛШ', 'text', 'dimension'),
+  field('crew_bt', 'Екіпаж: БТ', 'text', 'dimension'),
+  field('crew_other', 'Екіпаж: інші (до 5)', 'text', 'dimension'),
 ];
 const flightField = key => flightFields.find(item => item.key === key);
 const flightFieldKeys = flightFields.map(item => item.key);
@@ -191,20 +202,20 @@ test('the owner examples: 0:32 total, 0:22 airborne, 255 litres, 300 metres, 10 
   assert.equal(formatFieldValue(flightField('fuel_consumption'), row.fuel_consumption), '255 л (204 кг)');
 });
 
-test('altitude is read as metres, and kilometres only with an explicit unit', () => {
-  assert.equal(parseAltitude('300'), 300);
-  assert.equal(parseAltitude('300 м'), 300);
-  assert.equal(parseAltitude('300м'), 300);
-  assert.equal(parseAltitude('0,3 км'), 300);
-  assert.equal(parseAltitude('0.3км'), 300);
-  assert.equal(parseAltitude('1,5 КМ'), 1500);
-  assert.equal(parseAltitude('1.1 km'), 1100);
-  assert.equal(parseAltitude('0,5 м'), 0.5);
-  assert.equal(parseAltitude('0'), 0);
-  assert.equal(parseAltitude('1500.5'), 1500.5);
+test('heights are read as metres, and kilometres only with an explicit unit', () => {
+  assert.equal(parseHeight('300'), 300);
+  assert.equal(parseHeight('300 м'), 300);
+  assert.equal(parseHeight('300м'), 300);
+  assert.equal(parseHeight('0,3 км'), 300);
+  assert.equal(parseHeight('0.3км'), 300);
+  assert.equal(parseHeight('1,5 КМ'), 1500);
+  assert.equal(parseHeight('1.1 km'), 1100);
+  assert.equal(parseHeight('0,5 м'), 0.5);
+  assert.equal(parseHeight('0'), 0);
+  assert.equal(parseHeight('1500.5'), 1500.5);
   // «0,3» без одиниці — метри чи кілометри? Мовчки вгадувати не можна.
   for (const bad of ['', '0,3', '0.75', 'висота', '300 фут', '-5', '1 000', '3км2', null, undefined, 300]) {
-    assert.equal(parseAltitude(bad), null, String(bad));
+    assert.equal(parseHeight(bad), null, String(bad));
   }
   const altitude = flightField('flight_altitude');
   assert.throws(() => parseFieldInput(altitude, '0,3'), /метри \(300\) або кілометри з позначкою \(0,3 км\)/);
@@ -241,7 +252,9 @@ test('only known real fields get a special format', () => {
   assert.equal(fieldKind(flightField('airborne_hours')), 'duration');
   assert.equal(fieldKind(flightField('time_in_clouds')), 'duration');
   assert.equal(fieldKind(flightField('hood_time')), 'duration');
-  assert.equal(fieldKind(flightField('flight_altitude')), 'altitude');
+  assert.equal(fieldKind(flightField('flight_altitude')), 'height');
+  assert.equal(fieldKind(flightField('cloud_base_upper')), 'height');
+  assert.equal(fieldKind(flightField('cloud_base_lower')), 'height');
   assert.equal(fieldKind(flightField('fuel_consumption')), 'fuel');
   assert.equal(fieldKind(flightField('visibility')), null);
   assert.equal(fieldKind({ key: 'airborne_hours', dataType: 'text' }), null);
@@ -304,7 +317,8 @@ test('the text a field is opened with always reads back to the same value', () =
   const cases = [
     ['airborne_hours', 0], ['airborne_hours', 85 / 60], ['total_hours', 1.75],
     ['flight_altitude', 300], ['flight_altitude', 0.5], ['flight_altitude', 1500.5],
-    ['fuel_consumption', 255], ['fuel_consumption', 255.5], ['visibility', 10], ['cloud_cover', 3],
+    ['cloud_base_upper', 1200], ['cloud_base_lower', 300], ['cloud_base_lower', 0.5],
+    ['fuel_consumption', 255], ['fuel_consumption', 255.5], ['visibility', 10], ['cloud_cover', 3], ['cloud_cover', 0],
     ['aircraft_type', 'Мі-8'], ['instrument_meteorological_conditions', false],
   ];
   for (const [key, value] of cases) {
@@ -317,10 +331,186 @@ test('the text a field is opened with always reads back to the same value', () =
 
 test('the unit labels in the JS fixtures are the ones the Rust catalog ships', async () => {
   const store = await readFile(new URL('../src-tauri/src/dashboard_modules.rs', import.meta.url), 'utf8');
-  for (const key of ['airborne_hours', 'total_hours', 'flight_altitude', 'visibility', 'time_in_clouds', 'hood_time', 'fuel_consumption']) {
+  const keys = [
+    'airborne_hours', 'total_hours', 'flight_altitude', 'cloud_base_upper', 'cloud_base_lower', 'cloud_cover',
+    'visibility', 'time_in_clouds', 'hood_time', 'fuel_consumption',
+    'crew_ke', 'crew_lsh', 'crew_bt', 'crew_other',
+  ];
+  const escape = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  for (const key of keys) {
     const label = flightField(key).label;
-    assert.ok(store.includes(`"${label}"`), `${key}: «${label}»`);
+    // Ключ і підпис стоять поруч у шаблоні Rust (в одному рядку або на сусідніх).
+    assert.match(store, new RegExp(`"${key}",\\s*"${escape(label)}"`), `${key}: «${label}»`);
   }
+});
+
+test('cloud bases take metres or kilometres with a unit, like the flight altitude', () => {
+  const upper = flightField('cloud_base_upper');
+  const lower = flightField('cloud_base_lower');
+  assert.equal(parseFieldInput(lower, '300'), 300);
+  assert.equal(parseFieldInput(lower, '0,3 км'), 300);
+  assert.equal(parseFieldInput(upper, '1200 м'), 1200);
+  assert.equal(parseFieldInput(upper, '1,5 км'), 1500);
+  assert.equal(parseFieldInput(upper, ''), null);
+  assert.throws(() => parseFieldInput(lower, '0,3'), /метри \(300\) або кілометри з позначкою \(0,3 км\)/);
+  assert.throws(() => parseFieldInput(upper, 'низько'), /метри/);
+  assert.equal(fieldInputType(lower), 'text');
+  assert.equal(fieldPlaceholder(upper), '300 або 0,3 км');
+  assert.equal(fieldHint(lower, '0,3 км'), '= 300 м');
+  assert.equal(formatFieldValue(lower, 300), '300');
+});
+
+test('cloud cover is a whole number from 0 to 10', () => {
+  const cover = flightField('cloud_cover');
+  assert.deepEqual(fieldLimits(cover), { min: 0, max: 10 });
+  for (const ok of ['0', '5', '10', ' 7 ']) assert.equal(parseFieldInput(cover, ok), Number(ok), ok);
+  for (const bad of ['-1', '11', '100', '75']) {
+    assert.throws(() => parseFieldInput(cover, bad), /має бути від 0 до 10/, bad);
+  }
+  for (const bad of ['5.5', '10,5', 'ясно']) assert.throws(() => parseFieldInput(cover, bad), /ціле число/, bad);
+  assert.equal(parseFieldInput(cover, ''), null);
+  assert.equal(parseFieldInput(cover, 4), 4);
+  assert.throws(() => parseFieldInput(cover, 12), /від 0 до 10/);
+});
+
+test('visibility and fuel cannot be negative, and other fields get no limits', () => {
+  assert.deepEqual(fieldLimits(flightField('visibility')), { min: 0 });
+  assert.deepEqual(fieldLimits(flightField('fuel_consumption')), { min: 0 });
+  assert.equal(fieldLimits(flightField('flight_count')), null);
+  assert.equal(fieldLimits(flightField('aircraft_type')), null);
+  assert.equal(fieldLimits({ key: 'cloud_cover', dataType: 'text' }), null);
+  assert.equal(fieldLimits({ key: 'constructor', dataType: 'real' }), null);
+  assert.equal(fieldLimits(null), null);
+  const visibility = flightField('visibility');
+  assert.equal(parseFieldInput(visibility, '0'), 0);
+  assert.equal(parseFieldInput(visibility, '0,5'), 0.5);
+  assert.throws(() => parseFieldInput(visibility, '-1'), /від'ємним/);
+});
+
+test('a stored value outside the limits is detected but never blocks an unchanged field', () => {
+  const cover = flightField('cloud_cover');
+  assert.equal(outsideLimits(cover, 75), true);
+  assert.equal(outsideLimits(cover, -1), true);
+  assert.equal(outsideLimits(cover, 10), false);
+  assert.equal(outsideLimits(cover, null), false);
+  assert.equal(outsideLimits(flightField('aircraft_type'), 75), false);
+  // Старий запис із хмарністю 75: правка іншого поля його не чіпає, нове значення вже перевіряється.
+  const original = { rowId: 4, aircraft_type: 'Мі-8', airborne_hours: 1, total_hours: 1, cloud_cover: 75 };
+  const form = { aircraft_type: 'Мі-8МТ', airborne_hours: '1:00', total_hours: '1:00', cloud_cover: '75' };
+  assert.equal(rowForWrite(flightFields, form, original).cloud_cover, 75);
+  assert.throws(() => rowForWrite(flightFields, { ...form, cloud_cover: '76' }, original), /від 0 до 10/);
+  assert.throws(() => rowForWrite(flightFields, form), /від 0 до 10/, 'a new row is always checked');
+});
+
+test('the lower cloud base cannot be above the upper one', () => {
+  const base = { aircraft_type: 'Мі-8', airborne_hours: '0:22', total_hours: '0:32' };
+  assert.throws(
+    () => rowForWrite(flightFields, { ...base, cloud_base_upper: '300', cloud_base_lower: '1200' }),
+    /Нижня межа хмар \(НМХ\) не може бути вищою за верхню \(ВМХ\)/,
+  );
+  assert.equal(rowForWrite(flightFields, { ...base, cloud_base_upper: '800', cloud_base_lower: '800' }).cloud_base_lower, 800);
+  const row = rowForWrite(flightFields, { ...base, cloud_base_upper: '1,2 км', cloud_base_lower: '300' });
+  assert.deepEqual([row.cloud_base_upper, row.cloud_base_lower], [1200, 300]);
+  // З однією межею порівнювати нема з чим.
+  assert.equal(rowForWrite(flightFields, { ...base, cloud_base_lower: '300' }).cloud_base_lower, 300);
+  assert.equal(rowForWrite(flightFields, { ...base, cloud_base_upper: '300' }).cloud_base_upper, 300);
+});
+
+test('the form groups the meteo and crew fields and keeps the rest in catalog order', () => {
+  const sections = fieldSections(flightFields);
+  assert.deepEqual(sections.map(section => section.id), ['main', 'meteo', 'crew']);
+  assert.deepEqual(sections.map(section => section.title), ['', 'Метеоумови', 'Екіпаж']);
+  const keys = id => sections.find(section => section.id === id).fields.map(item => item.key);
+  assert.deepEqual(keys('meteo'), ['cloud_base_upper', 'cloud_base_lower', 'cloud_cover', 'visibility']);
+  assert.deepEqual(keys('crew'), ['crew_ke', 'crew_lsh', 'crew_bt', 'crew_other']);
+  assert.ok(keys('main').includes('instrument_meteorological_conditions'), 'the СМУ flag describes the flight, not the weather');
+  assert.equal(keys('main')[0], 'list_number');
+  assert.deepEqual(
+    sections.flatMap(section => section.fields.map(item => item.key)).sort(),
+    [...flightFieldKeys].sort(),
+    'every catalog field appears in the form exactly once',
+  );
+  assert.equal(sections[1].inherit, true);
+  assert.equal(sections[2].inherit, false);
+  assert.match(sections[2].note, /до 8 осіб/);
+  assert.match(sections[2].note, /інструктор/, 'an instructor is possible for any crew member, not only on an aircraft');
+  assert.doesNotMatch(sections[2].note, /^Літак/u, 'the limit of 8 is not tied to one aircraft type');
+});
+
+test('a module without grouped fields keeps one plain section, and empty groups vanish', () => {
+  const plain = [field('label', 'Показник', 'text', 'label', 'none', true), field('value', 'Значення', 'real', 'metric', 'sum')];
+  const sections = fieldSections(plain);
+  assert.equal(sections.length, 1);
+  assert.deepEqual(sections[0], { id: 'main', title: '', note: '', inherit: false, fields: plain });
+  assert.deepEqual(fieldSections([]), []);
+  assert.deepEqual(fieldSections(null), []);
+  assert.deepEqual(fieldSections([flightField('visibility')]).map(section => section.id), ['meteo']);
+});
+
+test('a new record takes the weather from the latest record that has any', () => {
+  const rows = [
+    { rowId: 1, aircraft_type: 'Мі-8', cloud_base_upper: 1500, cloud_base_lower: 400, cloud_cover: 6, visibility: 8 },
+    { rowId: 2, aircraft_type: 'Мі-8', cloud_base_upper: 900, cloud_cover: 3 },
+    { rowId: 3, aircraft_type: 'Мі-8', airborne_hours: 1 },
+  ];
+  const result = inheritedValues(flightFields, rows);
+  assert.equal(result.rowIndex, 1, 'row 3 has no weather, row 2 is the latest with some');
+  assert.deepEqual(result.values, { cloud_base_upper: 900, cloud_cover: 3 }, 'the set of one record, not a mix with older ones');
+  assert.deepEqual(inheritedValues(flightFields, [{ aircraft_type: 'A', cloud_cover: 0 }]).values, { cloud_cover: 0 }, 'zero is a value: clear sky');
+  assert.equal(inheritedValues(flightFields, []), null);
+  assert.equal(inheritedValues(flightFields, [{ aircraft_type: 'A' }]), null);
+  assert.equal(inheritedValues(flightFields, undefined), null);
+  assert.equal(inheritedValues([field('value', 'Значення', 'real')], [{ value: 1 }]), null, 'no weather fields, nothing to inherit');
+  // Переноситься лише погода: час, наліт, екіпаж і ознака СМУ — дані самого польоту.
+  const mixed = inheritedValues(flightFields, [{
+    cloud_cover: 5, airborne_hours: 1, crew_ke: 'Тестенко', instrument_meteorological_conditions: true,
+  }]);
+  assert.deepEqual(Object.keys(mixed.values), ['cloud_cover']);
+});
+
+test('the crew is counted by surnames and capped at eight', () => {
+  assert.equal(MAX_CREW, 8);
+  assert.equal(crewCount({}), 0);
+  assert.equal(crewCount(null), 0);
+  assert.equal(crewCount({ crew_ke: 'Тестенко' }), 1);
+  assert.equal(crewCount({ crew_ke: 'Тестенко', crew_lsh: 'Зразкович', crew_bt: 'Умовний' }), 3);
+  assert.equal(crewCount({ crew_other: 'Пробенко, Прикладний,Вигаданий ; Макетенко' }), 4);
+  assert.equal(crewCount({ crew_other: ' , ,, ' }), 0, 'separators alone are not people');
+  assert.equal(crewCount({ crew_ke: 'Тестенко, Зразкович' }), 2, 'two surnames in one field count twice');
+  assert.equal(crewCount({ crew_ke: 5, crew_other: null }), 0);
+
+  const base = { aircraft_type: 'Ан-26', airborne_hours: '0:22', total_hours: '0:32' };
+  const eight = {
+    crew_ke: 'Тестенко',
+    crew_lsh: 'Зразкович',
+    crew_bt: 'Умовний',
+    crew_other: 'Пробенко, Прикладний, Вигаданий, Макетенко, Фіктивний',
+  };
+  const saved = rowForWrite(flightFields, { ...base, ...eight });
+  assert.equal(crewCount(saved), 8);
+  assert.equal(saved.crew_other, eight.crew_other, 'the surnames are stored as typed');
+  assert.throws(
+    () => rowForWrite(flightFields, { ...base, ...eight, crew_other: `${eight.crew_other}, Шаблонний` }),
+    /В екіпажі 9 осіб, а може бути не більше 8/,
+  );
+});
+
+test('the crew counter says how many of eight are written', () => {
+  assert.equal(crewSummary({}), '');
+  assert.equal(crewSummary({ crew_ke: '' }), '');
+  assert.equal(crewSummary({ crew_ke: 'Тестенко', crew_lsh: 'Зразкович' }), 'Екіпаж: 2 з 8 осіб');
+  assert.equal(crewSummary({ crew_other: 'А, Б, В, Г, Д, Е, Ж, З, И' }), 'Екіпаж: 9 з 8 осіб — забагато');
+});
+
+test('crew fields are plain text with their own placeholders', () => {
+  assert.equal(fieldPlaceholder(flightField('crew_ke')), 'прізвище');
+  assert.equal(fieldPlaceholder(flightField('crew_other')), 'прізвища через кому');
+  assert.equal(fieldPlaceholder(flightField('aircraft_type')), '');
+  assert.equal(fieldPlaceholder({ key: 'crew_ke', dataType: 'integer' }), '', 'only text fields get them');
+  assert.equal(fieldKind(flightField('crew_ke')), null);
+  assert.equal(fieldInputType(flightField('crew_ke')), 'text');
+  assert.equal(parseFieldInput(flightField('crew_ke'), '  Тестенко '), 'Тестенко');
+  assert.equal(parseFieldInput(flightField('crew_ke'), ''), null);
 });
 
 test('both operational dashboards load the shared module catalog', async () => {
@@ -439,6 +629,15 @@ test('the conflict wording and the version argument match the Rust side', async 
   assert.match(store, /expected_updated_at: Option<&str>/);
   const lib = await readFile(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf8');
   assert.match(lib, /expected_updated_at: Option<String>/);
+});
+
+test('the row form shows sections and carries the weather into new records only', async () => {
+  const source = await readFile(new URL('../src/dashboard-module-catalog.js', import.meta.url), 'utf8');
+  assert.match(source, /fieldSections\(module\.fields\)/);
+  assert.match(source, /const inherited = isEdit \? null : inheritedValues\(module\.fields, rows\)/);
+  for (const text of ['Підставлено з останнього запису, де вказано погоду', 'Очистити', 'ewmc-crew-total']) {
+    assert.ok(source.includes(text), text);
+  }
 });
 
 test('row deletion is confirmed inside the dialog and never uses browser dialogs', async () => {

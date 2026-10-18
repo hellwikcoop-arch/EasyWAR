@@ -1,12 +1,17 @@
 import {
+  MAX_CREW,
   branchFromLocation,
+  crewCount,
+  crewSummary,
   fieldHint,
   fieldInputText,
   fieldInputType,
   fieldKind,
   fieldPlaceholder,
+  fieldSections,
   formatFieldValue,
   formatValue,
+  inheritedValues,
   isConflictError,
   matchesCatalogItem,
   normalizeCatalog,
@@ -281,21 +286,65 @@ function initialize() {
     const rows = Array.isArray(payload.rows) ? payload.rows : [];
     const isEdit = Number.isInteger(rowIndex) && rows[rowIndex] != null;
     const existing = isEdit ? rows[rowIndex] : {};
+    // Погоду записують раз на 5–10 записів льотної зміни: новий запис бере її з попереднього.
+    const inherited = isEdit ? null : inheritedValues(module.fields, rows);
     const controls = new Map();
-    const formGrid = el('div', { class: 'ewmc-row-form-grid' });
-    for (const field of module.fields) {
-      const control = createFieldControl(field, existing[field.key]);
-      controls.set(field.key, control);
-      // Підказка (кілограми для літрів, метри для «0,3 км») оновлюється під час введення; порожня — прихована.
-      const hint = el('small', { class: 'ewmc-hint', id: `ewmc-hint-${field.key}` });
-      const paintHint = () => { hint.textContent = fieldHint(field, control.value); };
-      paintHint();
-      control.addEventListener('input', paintHint);
-      control.setAttribute('aria-describedby', hint.id);
-      formGrid.append(el('label', { class: 'ewmc-field' },
-        el('span', { text: `${field.label}${field.required ? ' *' : ''}` }),
-        control,
-        hint));
+    const currentValues = () => Object.fromEntries([...controls].map(([key, control]) => [key, control.value]));
+    const sections = fieldSections(module.fields).map(section => {
+      const grid = el('div', { class: 'ewmc-row-form-grid' });
+      for (const field of section.fields) {
+        const control = createFieldControl(field, existing[field.key] ?? inherited?.values[field.key]);
+        controls.set(field.key, control);
+        // Підказка (кілограми для літрів, метри для «0,3 км») оновлюється під час введення; порожня — прихована.
+        const hint = el('small', { class: 'ewmc-hint', id: `ewmc-hint-${field.key}` });
+        const paintHint = () => { hint.textContent = fieldHint(field, control.value); };
+        paintHint();
+        control.addEventListener('input', paintHint);
+        control.setAttribute('aria-describedby', hint.id);
+        // Список прізвищ довший за одну колонку, тому поле «інші» займає весь рядок групи.
+        grid.append(el('label', { class: field.key === 'crew_other' ? 'ewmc-field ewmc-wide' : 'ewmc-field' },
+          el('span', { text: `${field.label}${field.required ? ' *' : ''}` }),
+          control,
+          hint));
+      }
+      if (!section.title) return grid;
+      const parts = [el('legend', { text: section.title })];
+      if (section.note) parts.push(el('p', { class: 'ewmc-group-note', text: section.note }));
+      if (section.inherit && inherited) parts.push(inheritedNote(section));
+      parts.push(grid);
+      if (section.id === 'crew') parts.push(crewSummaryNote(grid));
+      return el('fieldset', { class: 'ewmc-group', 'data-group': section.id }, parts);
+    });
+
+    // Підставлена погода позначена окремо й очищається одним натисканням: стару погоду легко не помітити.
+    function inheritedNote(section) {
+      const clear = el('button', { type: 'button', class: 'btn quiet', text: 'Очистити' });
+      const note = el('p', { class: 'ewmc-inherit' },
+        el('span', { text: 'Підставлено з останнього запису, де вказано погоду. Змініть значення, якщо погода інша.' }),
+        clear);
+      clear.addEventListener('click', () => {
+        for (const field of section.fields) {
+          const control = controls.get(field.key);
+          control.value = '';
+          control.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        note.hidden = true;
+        controls.get(section.fields[0].key)?.focus();
+      });
+      return note;
+    }
+
+    // Лічильник складу екіпажу, щоб ліміт був видно до збереження, а не лише в помилці.
+    function crewSummaryNote(grid) {
+      const note = el('small', { class: 'ewmc-hint ewmc-crew-total' });
+      const paint = () => {
+        const values = currentValues();
+        note.textContent = crewSummary(values);
+        note.classList.toggle('over', crewCount(values) > MAX_CREW);
+      };
+      grid.addEventListener('input', paint);
+      paint();
+      return note;
     }
     const status = el('p', { class: 'ewmc-form-status', 'aria-live': 'polite' });
     const saveButton = el('button', { type: 'submit', class: 'btn primary', text: isEdit ? 'Зберегти зміни' : 'Додати рядок' });
@@ -325,7 +374,7 @@ function initialize() {
       el('button', { type: 'button', class: 'ewmc-back', text: '← До таблиці', onclick: () => showDataTable(module) }),
       el('p', { class: 'ewmc-eyebrow', text: isEdit ? 'Редагування запису' : 'Новий запис' }),
       el('h2', { id: 'ewmc-dialog-title', text: module.title }),
-      formGrid,
+      sections,
       status,
       confirmBox,
       el('div', { class: 'ewmc-form-actions' }, removeButton, cancelButton, saveButton),
@@ -365,8 +414,7 @@ function initialize() {
       if (state.busy) return;
       let edited;
       try {
-        const values = Object.fromEntries([...controls].map(([key, control]) => [key, control.value]));
-        edited = rowForWrite(module.fields, values, existing);
+        edited = rowForWrite(module.fields, currentValues(), existing);
       } catch (error) {
         status.textContent = String(error?.message || error || 'Не вдалося зберегти запис.');
         status.classList.add('error');
@@ -417,7 +465,8 @@ function initialize() {
       placeholder: fieldPlaceholder(field) || false,
     };
     if (type === 'number') attributes.step = field.dataType === 'integer' ? '1' : 'any';
-    if (type === 'number' && kind === 'fuel') attributes.min = '0';
+    // Межі полів (хмарність 0–10, не менше 0) перевіряє parseFieldInput із повідомленням у формі:
+    // вбудована перевірка min/max не в усіх WebView показує причину відмови, а старий запис поза межами заблокувала б.
     if (type === 'text') attributes.maxlength = kind ? '16' : '4096';
     return el('input', attributes);
   }
