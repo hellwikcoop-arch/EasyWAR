@@ -36,6 +36,9 @@ export const SHAPES = Object.freeze(['bars', 'ring', 'top']);
 /** Одиниця, в якій зберігаються й сумуються значення стовпця типу «тривалість». */
 export const DURATION_UNITS = Object.freeze(['хв', 'год']);
 
+/** Перша вкладка меню виду завжди веде на дашборд, а її підпис користувач не змінює. */
+export const NAV_HOME = Object.freeze({ target: 'dashboard', label: 'Дашборд' });
+
 export const LIMITS = Object.freeze({
   maxBytes: 512 * 1024,
   maxErrors: 50,
@@ -57,6 +60,7 @@ export const LIMITS = Object.freeze({
   maxKindColumns: 100,
   maxKindTiles: 60,
   maxKindBlocks: 40,
+  maxNav: 12,
   layoutMaxRows: 20,
   layoutMaxCols: 4,
   layoutMaxStack: 6,
@@ -65,6 +69,7 @@ export const LIMITS = Object.freeze({
   titleLength: 80,
   labelLength: 60,
   tileLabelLength: 40,
+  navLabelLength: 32,
   subLength: 60,
   descriptionLength: 300,
   groupLength: 40,
@@ -634,6 +639,13 @@ function validateColumn(ctx, raw, path) {
   return out;
 }
 
+/** Ідентифікатор іконки з набору застосунку: лише шаблон, самі іконки каталог не містить. */
+function iconId(ctx, value, path) {
+  if (typeof value === 'string' && ICON_PATTERN.test(value)) return value;
+  ctx.err(path, 'bad_icon', 'Ідентифікатор іконки: малі латинські літери, цифри й «-».');
+  return undefined;
+}
+
 function validateTile(ctx, raw, path) {
   const o = obj(ctx, raw, path, {
     req: ['id', 'label', 'measure', 'visual', 'tone'],
@@ -657,10 +669,7 @@ function validateTile(ctx, raw, path) {
     put(out, 'delta', oneOf(ctx, o.delta, join(path, 'delta'), DELTA_MODES));
     if (!Object.hasOwn(o, 'by')) ctx.err(join(path, 'delta'), 'delta_needs_by', 'Зміну до попереднього періоду можна рахувати лише за стовпцем дати («by»).');
   }
-  if (Object.hasOwn(o, 'icon')) {
-    if (typeof o.icon === 'string' && ICON_PATTERN.test(o.icon)) out.icon = o.icon;
-    else ctx.err(join(path, 'icon'), 'bad_icon', 'Ідентифікатор іконки: малі латинські літери, цифри й «-».');
-  }
+  if (Object.hasOwn(o, 'icon')) put(out, 'icon', iconId(ctx, o.icon, join(path, 'icon')));
 
   let extras = [];
   if (Object.hasOwn(o, 'extras')) {
@@ -820,10 +829,65 @@ function validateLayout(ctx, raw, path, offeredBlocks) {
   return out;
 }
 
+/**
+ * Вкладки лівого меню виду. Перша завжди «Дашборд» (підпис незмінний), решта веде до блоків виду,
+ * а підписи вільні: це налаштування користувача, яке зберігається в його профілі.
+ */
+function validateNav(ctx, raw, path, offeredBlocks) {
+  const items = arr(ctx, raw, path, 1, LIMITS.maxNav);
+  if (!items) return undefined;
+  const out = [];
+  const targets = new Set();
+  const labels = new Set([foldLabel(NAV_HOME.label)]);
+  items.forEach((rawItem, i) => {
+    const at = `${path}[${i}]`;
+    const o = obj(ctx, rawItem, at, { req: ['target'], opt: ['label', 'icon'] });
+    if (!o) return;
+    const item = {};
+    if (i === 0) {
+      if (o.target === NAV_HOME.target) item.target = NAV_HOME.target;
+      else ctx.err(join(at, 'target'), 'nav_home_first', `Перша вкладка меню веде на «${NAV_HOME.target}» і має підпис «${NAV_HOME.label}».`);
+      if (Object.hasOwn(o, 'label')) {
+        const label = str(ctx, o.label, join(at, 'label'), LIMITS.navLabelLength);
+        if (label !== undefined && foldLabel(label) !== foldLabel(NAV_HOME.label)) {
+          ctx.err(join(at, 'label'), 'nav_home_locked', `Підпис першої вкладки не змінюється: «${NAV_HOME.label}».`);
+        }
+      }
+      item.label = NAV_HOME.label;
+    } else {
+      if (o.target === NAV_HOME.target) {
+        ctx.err(join(at, 'target'), 'nav_home_first', `Вкладка «${NAV_HOME.label}» може бути лише першою.`);
+      } else {
+        const blockId = ident(ctx, o.target, join(at, 'target'), 'block');
+        if (blockId !== undefined) {
+          if (!offeredBlocks.has(blockId)) ctx.err(join(at, 'target'), 'block_not_offered', `Блок «${blockId}» не входить до блоків цього виду журналу.`);
+          else if (targets.has(blockId)) ctx.err(join(at, 'target'), 'duplicate_ref', `Блок «${blockId}» вже має вкладку в меню.`);
+          targets.add(blockId);
+          item.target = blockId;
+        }
+      }
+      if (!Object.hasOwn(o, 'label')) {
+        ctx.err(join(at, 'label'), 'missing', 'Вкладка потребує підпису.');
+      } else {
+        const label = str(ctx, o.label, join(at, 'label'), LIMITS.navLabelLength);
+        if (label !== undefined) {
+          const key = foldLabel(label);
+          if (labels.has(key)) ctx.err(join(at, 'label'), 'duplicate_label', `Підпис «${label}» у меню вже є (регістр, пробіли й апострофи не розрізняються).`);
+          labels.add(key);
+          item.label = label;
+        }
+      }
+    }
+    if (Object.hasOwn(o, 'icon')) put(item, 'icon', iconId(ctx, o.icon, join(at, 'icon')));
+    out.push(item);
+  });
+  return out;
+}
+
 function validateKind(ctx, raw, path) {
   const o = obj(ctx, raw, path, {
     req: ['id', 'title', 'sheet', 'columns'],
-    opt: ['description', 'tiles', 'blocks', 'layout', 'based_on'],
+    opt: ['description', 'tiles', 'blocks', 'layout', 'nav', 'based_on'],
   });
   if (!o) return undefined;
   const id = ident(ctx, o.id, join(path, 'id'), 'kind');
@@ -892,6 +956,7 @@ function validateKind(ctx, raw, path) {
   });
 
   if (Object.hasOwn(o, 'layout')) put(out, 'layout', validateLayout(ctx, o.layout, join(path, 'layout'), new Set(blockIds)));
+  if (Object.hasOwn(o, 'nav')) put(out, 'nav', validateNav(ctx, o.nav, join(path, 'nav'), new Set(blockIds)));
   if (Object.hasOwn(o, 'based_on')) put(out, 'based_on', basedOn(ctx, o.based_on, join(path, 'based_on'), 'kind', id));
   if (id !== undefined && claim(ctx, 'kind', id, join(path, 'id'))) ctx.index.kind.set(id, out);
   return out;
@@ -986,4 +1051,80 @@ export function validateCatalog(input, { base = [] } = {}) {
   const catalog = deepFreeze({ format: CATALOG_FORMAT, version: CATALOG_VERSION, id, title, layer, lists, columns, tiles, blocks, kinds });
   VALIDATED.add(catalog);
   return { ok: true, errors: [], truncated: false, catalog };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Таблиця з обраних модулів                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Які стовпці потрібні таблиці виду, щоб обрані модулі дашборда (блоки) працювали.
+ *
+ * Модуль не додає «свій» стовпець, а вимагає всі, які читає: плитка з розрахунком «години на борт»
+ * потребує дати, годин і бортового номера. Тому до таблиці потрапляє об’єднання вимог усіх обраних
+ * блоків (`blockColumns`), ядро виду (`core`) і стовпці, які користувач додав сам (`selection.columns`).
+ * Прибрали модуль — стовпці, потрібні лише йому, зникають; це чиста функція вибору, а не дія над
+ * даними: чи можна прибрати стовпець із уже заповненої таблиці, вирішує той, хто її викликає.
+ *
+ * Порядок завжди такий, як у `kind.columns`: автор виду ставить пов’язані стовпці поруч, і форма
+ * довільного внесення, що йде за стовпцями таблиці, лишається зручною.
+ *
+ * @param catalogs перевірений каталог або масив перевірених шарів (нижній шар першим)
+ * @param kindId   id виду журналу
+ * @param selection { blocks: id обраних блоків, columns: id стовпців, доданих вручну }
+ * @returns {{ ok: boolean, columns: string[], reasons: {column, core, pinned, blocks}[], problems: {code, id}[] }}
+ */
+export function deriveTable(catalogs, kindId, selection = {}) {
+  const layers = Array.isArray(catalogs) ? catalogs : [catalogs];
+  if (!layers.length || layers.some((layer) => !VALIDATED.has(layer))) {
+    throw new TypeError('deriveTable приймає лише каталоги, які пройшли validateCatalog.');
+  }
+  const find = (section, id) => {
+    for (const layer of layers) {
+      const hit = (layer[section] || []).find((item) => item.id === id);
+      if (hit) return hit;
+    }
+    return undefined;
+  };
+  const problems = [];
+  const fail = (code, id) => problems.push({ code, id: typeof id === 'string' ? id : '' });
+  const finish = (columns, reasons) => deepFreeze({ ok: problems.length === 0, columns, reasons, problems });
+
+  const kind = find('kinds', kindId);
+  if (!kind) {
+    fail('unknown_kind', kindId);
+    return finish([], []);
+  }
+
+  const asList = (value) => [...new Set(Array.isArray(value) ? value : [])];
+  const inKind = new Set(kind.columns.map((entry) => entry.column));
+  const needs = new Map();
+  const need = (columnId) => {
+    if (!needs.has(columnId)) needs.set(columnId, { core: false, pinned: false, blocks: [] });
+    return needs.get(columnId);
+  };
+
+  for (const entry of kind.columns) if (entry.core) need(entry.column).core = true;
+
+  for (const columnId of asList(selection && selection.columns)) {
+    if (typeof columnId !== 'string') fail('bad_id', columnId);
+    else if (inKind.has(columnId)) need(columnId).pinned = true;
+    else fail(find('columns', columnId) ? 'column_not_in_kind' : 'unknown_column', columnId);
+  }
+
+  const offered = new Set(kind.blocks || []);
+  for (const blockId of asList(selection && selection.blocks)) {
+    if (typeof blockId !== 'string') {
+      fail('bad_id', blockId);
+      continue;
+    }
+    const block = find('blocks', blockId);
+    if (!block) fail('unknown_block', blockId);
+    else if (!offered.has(blockId)) fail('block_not_offered', blockId);
+    else for (const columnId of blockColumns(block, (tileId) => find('tiles', tileId))) need(columnId).blocks.push(blockId);
+  }
+
+  const columns = kind.columns.map((entry) => entry.column).filter((columnId) => needs.has(columnId));
+  const reasons = columns.map((columnId) => ({ column: columnId, ...needs.get(columnId) }));
+  return finish(columns, reasons);
 }

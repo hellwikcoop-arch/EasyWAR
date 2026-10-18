@@ -12,10 +12,12 @@ import {
   GRAINS,
   LAYERS,
   LIMITS,
+  NAV_HOME,
   SHAPES,
   TILE_VISUALS,
   TONES,
   blockColumns,
+  deriveTable,
   foldLabel,
   parseCatalogText,
   tileColumns,
@@ -467,10 +469,181 @@ test('no single-field corruption of a valid catalog makes the validator throw', 
       if (result.ok) {
         accepted += 1;
         assert.ok(Object.isFrozen(result.catalog));
+        for (const kind of result.catalog.kinds) {
+          const table = deriveTable(result.catalog, kind.id, { blocks: kind.blocks || [] });
+          assert.equal(table.ok, true, `${trail.join('.')}: усі блоки виду мають давати таблицю без проблем`);
+          const inKind = new Set(kind.columns.map((entry) => entry.column));
+          const lookup = (tileId) => result.catalog.tiles.find((tile) => tile.id === tileId);
+          for (const blockId of kind.blocks || []) {
+            for (const columnId of blockColumns(result.catalog.blocks.find((block) => block.id === blockId), lookup)) {
+              assert.ok(table.columns.includes(columnId), `${trail.join('.')}: блоку ${blockId} бракує стовпця ${columnId}`);
+            }
+          }
+          assert.ok(table.columns.every((columnId) => inKind.has(columnId)));
+        }
       }
     }
   }
   assert.ok(accepted > 0, 'частина змін (наприклад, прибрати необов’язкове поле) лишає каталог дійсним');
+});
+
+/* ------------------------------------------------------------------ */
+/*  Вкладки меню                                                       */
+/* ------------------------------------------------------------------ */
+
+test('nav: the first tab is the locked dashboard, the rest are free labels for blocks', () => {
+  const ok = validateCatalog(EXAMPLE);
+  assert.deepEqual(ok.catalog.kinds[0].nav[0], { target: 'dashboard', label: 'Дашборд' }, 'підпис першої вкладки підставляється');
+  assert.deepEqual(ok.catalog.kinds[0].nav[1], { target: 'block.dynamics', label: 'Наліт', icon: 'plane' });
+  assert.deepEqual({ ...NAV_HOME }, { target: 'dashboard', label: 'Дашборд' });
+  assert.ok(Object.isFrozen(NAV_HOME));
+
+  expectAccepted([
+    ['first tab with its own label spelled differently by case', (c) => { c.kinds[0].nav[0].label = '  дашБОРД '; }],
+    ['only the dashboard tab', (c) => { c.kinds[0].nav = [{ target: 'dashboard' }]; }],
+    ['label with an apostrophe and spaces', (c) => { c.kinds[0].nav[1].label = "Об'єкти та цілі"; }],
+    ['label of the maximum length', (c) => { c.kinds[0].nav[1].label = 'я'.repeat(LIMITS.navLabelLength); }],
+    ['no nav at all', (c) => { delete c.kinds[0].nav; }],
+    ['the same label in another kind of the same catalog', (c) => {
+      c.kinds.push({ ...structuredClone(c.kinds[0]), id: 'kind.flights-copy' });
+    }],
+  ]);
+  const renamed = run((c) => { c.kinds[0].nav[0].label = '  дашБОРД '; });
+  assert.equal(renamed.catalog.kinds[0].nav[0].label, 'Дашборд');
+
+  const nav = 'kinds[0].nav';
+  expectRejected([
+    ['first tab leads elsewhere', (c) => { c.kinds[0].nav[0] = { target: 'block.dynamics', label: 'Наліт' }; }, `${nav}[0].target:nav_home_first`],
+    ['first tab renamed', (c) => { c.kinds[0].nav[0].label = 'Головна'; }, `${nav}[0].label:nav_home_locked`],
+    ['dashboard is not first', (c) => { c.kinds[0].nav[2] = { target: 'dashboard', label: 'Ще один' }; }, `${nav}[2].target:nav_home_first`],
+    ['label is required for blocks', (c) => { delete c.kinds[0].nav[1].label; }, `${nav}[1].label:missing`],
+    ['label equals the dashboard one', (c) => { c.kinds[0].nav[1].label = 'ДАШБОРД'; }, `${nav}[1].label:duplicate_label`],
+    ['labels repeat', (c) => { c.kinds[0].nav[2].label = c.kinds[0].nav[1].label.toUpperCase(); }, `${nav}[2].label:duplicate_label`],
+    ['label too long', (c) => { c.kinds[0].nav[1].label = 'я'.repeat(LIMITS.navLabelLength + 1); }, `${nav}[1].label:too_long`],
+    ['blank label', (c) => { c.kinds[0].nav[1].label = '  '; }, `${nav}[1].label:empty`],
+    ['bidi label', (c) => { c.kinds[0].nav[1].label = `Наліт${chars(0x202e)}`; }, `${nav}[1].label:forbidden_char`],
+    ['block that the kind does not offer', (c) => { c.kinds[0].blocks = c.kinds[0].blocks.filter((id) => id !== 'block.journal'); c.kinds[0].layout.rows[2].cols.pop(); }, `${nav}[4].target:block_not_offered`],
+    ['block without a tab twice', (c) => { c.kinds[0].nav[2].target = 'block.dynamics'; }, `${nav}[2].target:duplicate_ref`],
+    ['target is not a block id', (c) => { c.kinds[0].nav[1].target = 'tile.flights'; }, `${nav}[1].target:bad_id`],
+    ['target is a path', (c) => { c.kinds[0].nav[1].target = '../x'; }, `${nav}[1].target:bad_id`],
+    ['no tabs', (c) => { c.kinds[0].nav = []; }, `${nav}:too_few`],
+    ['too many tabs', (c) => {
+      c.kinds[0].nav = [{ target: 'dashboard' }, ...Array.from({ length: LIMITS.maxNav }, (_, i) => ({ target: 'block.dynamics', label: `В${i}` }))];
+    }, `${nav}:too_many`],
+    ['unknown key', (c) => { c.kinds[0].nav[1].color = 'red'; }, `${nav}[1].color:unknown_key`],
+    ['bad icon', (c) => { c.kinds[0].nav[1].icon = 'Plane!'; }, `${nav}[1].icon:bad_icon`],
+    ['nav is not an array', (c) => { c.kinds[0].nav = { target: 'dashboard' }; }, `${nav}:not_array`],
+    ['missing target', (c) => { delete c.kinds[0].nav[1].target; }, `${nav}[1].target:missing`],
+  ]);
+});
+
+/* ------------------------------------------------------------------ */
+/*  Таблиця з обраних модулів                                          */
+/* ------------------------------------------------------------------ */
+
+test('deriveTable: columns come from the chosen modules, in the order of the kind', () => {
+  const { catalog } = validateCatalog(EXAMPLE);
+  const KIND = 'kind.flights';
+
+  const none = deriveTable(catalog, KIND);
+  assert.equal(none.ok, true);
+  assert.deepEqual(none.columns, ['col.date', 'col.hours'], 'без модулів лишається лише ядро виду');
+  assert.deepEqual(none.reasons.map((r) => [r.column, r.core, r.pinned, r.blocks]), [['col.date', true, false, []], ['col.hours', true, false, []]]);
+
+  const heat = deriveTable(catalog, KIND, { blocks: ['block.by-hour'] });
+  assert.deepEqual(heat.columns, ['col.date', 'col.hours', 'col.takeoff'], 'години доби додають час зльоту');
+  assert.deepEqual(heat.reasons.find((r) => r.column === 'col.takeoff'), { column: 'col.takeoff', core: false, pinned: false, blocks: ['block.by-hour'] });
+
+  const all = deriveTable(catalog, KIND, { blocks: ['block.summary'] });
+  assert.deepEqual(all.columns, ['col.date', 'col.hours', 'col.aircraft', 'col.tail', 'col.mission', 'col.night'], 'залежності плиток зведені докупи, порядок — з виду');
+  const date = all.reasons.find((r) => r.column === 'col.date');
+  assert.equal(date.core, true);
+  assert.deepEqual(date.blocks, ['block.summary']);
+
+  const whole = deriveTable(catalog, KIND, { blocks: catalog.kinds[0].blocks });
+  assert.deepEqual(whole.columns, ['col.date', 'col.hours', 'col.aircraft', 'col.tail', 'col.takeoff', 'col.mission', 'col.night'], 'усі модулі разом; стовпці без модуля (екіпаж, посадки) не додаються');
+
+  const forward = deriveTable(catalog, KIND, { blocks: ['block.by-hour', 'block.summary'] });
+  const backward = deriveTable(catalog, KIND, { blocks: ['block.summary', 'block.by-hour'] });
+  assert.deepEqual(forward.columns, backward.columns, 'порядок вибору модулів не міняє порядок стовпців');
+
+  const without = deriveTable(catalog, KIND, { blocks: ['block.by-hour'] });
+  assert.ok(!without.columns.includes('col.mission'), 'прибраний модуль забирає свої стовпці');
+  const twice = deriveTable(catalog, KIND, { blocks: ['block.by-hour', 'block.by-hour'] });
+  assert.deepEqual(twice, heat, 'повтор у виборі нічого не міняє');
+
+  const pinned = deriveTable(catalog, KIND, { blocks: ['block.by-hour'], columns: ['col.crew', 'col.takeoff'] });
+  assert.deepEqual(pinned.columns, ['col.date', 'col.hours', 'col.takeoff', 'col.crew']);
+  assert.deepEqual(pinned.reasons.find((r) => r.column === 'col.takeoff'), { column: 'col.takeoff', core: false, pinned: true, blocks: ['block.by-hour'] });
+  assert.deepEqual(pinned.reasons.find((r) => r.column === 'col.crew'), { column: 'col.crew', core: false, pinned: true, blocks: [] });
+
+  assert.ok(Object.isFrozen(all) && Object.isFrozen(all.reasons[0]) && Object.isFrozen(all.reasons[0].blocks));
+  assert.throws(() => { 'use strict'; all.columns.push('x'); }, TypeError);
+});
+
+test('deriveTable: an empty selection on a kind without a core gives an empty table, not an error', () => {
+  const result = run((c) => { for (const entry of c.kinds[0].columns) delete entry.core; });
+  assert.equal(result.ok, true);
+  const table = deriveTable(result.catalog, 'kind.flights');
+  assert.equal(table.ok, true);
+  assert.deepEqual(table.columns, []);
+  assert.deepEqual(table.reasons, []);
+});
+
+test('deriveTable: wrong choices come back as problems and never throw', () => {
+  const extra = run((c) => {
+    c.columns.push({ id: 'col.fuel', type: 'number', labels: ['Пальне'] });
+    c.blocks.push({ id: 'block.spare', title: 'Запасний', kind: 'quality' });
+  });
+  assert.equal(extra.ok, true, codes(extra).join(', '));
+  const { catalog } = extra;
+  const problems = (selection, kind = 'kind.flights') => deriveTable(catalog, kind, selection).problems.map((p) => `${p.code}:${p.id}`);
+
+  assert.deepEqual(problems({}, 'kind.nothing'), ['unknown_kind:kind.nothing']);
+  assert.equal(deriveTable(catalog, 'kind.nothing').ok, false);
+  assert.deepEqual(deriveTable(catalog, 'kind.nothing').columns, []);
+  assert.deepEqual(problems({ blocks: ['block.nothing'] }), ['unknown_block:block.nothing']);
+  assert.deepEqual(problems({ blocks: ['block.spare'] }), ['block_not_offered:block.spare'], 'блок є в каталозі, але вид його не пропонує');
+  assert.deepEqual(problems({ columns: ['col.nothing'] }), ['unknown_column:col.nothing']);
+  assert.deepEqual(problems({ columns: ['col.fuel'] }), ['column_not_in_kind:col.fuel']);
+  assert.deepEqual(problems({ blocks: [7, null, {}], columns: [false] }), ['bad_id:', 'bad_id:', 'bad_id:', 'bad_id:']);
+  // хороша частина вибору не пропадає через погану
+  const mixed = deriveTable(catalog, 'kind.flights', { blocks: ['block.by-hour', 'block.nothing'] });
+  assert.equal(mixed.ok, false);
+  assert.ok(mixed.columns.includes('col.takeoff'));
+
+  for (const selection of [undefined, null, {}, { blocks: 'block.summary', columns: 5 }, { blocks: null }]) {
+    assert.doesNotThrow(() => deriveTable(catalog, 'kind.flights', selection));
+  }
+  assert.deepEqual(deriveTable(catalog, 'kind.flights', { blocks: 'block.summary' }).columns, ['col.date', 'col.hours'], 'не масив — те саме, що порожній вибір');
+});
+
+test('deriveTable accepts only validated catalogs and merges layers', () => {
+  const builtin = validateCatalog(EXAMPLE).catalog;
+  assert.throws(() => deriveTable(structuredClone(EXAMPLE), 'kind.flights'), TypeError);
+  assert.throws(() => deriveTable({ ...builtin }, 'kind.flights'), TypeError, 'копія результату вже не є перевіреною');
+  assert.throws(() => deriveTable([], 'kind.flights'), TypeError);
+  assert.throws(() => deriveTable(null, 'kind.flights'), TypeError);
+  assert.throws(() => deriveTable([builtin, {}], 'kind.flights'), TypeError);
+
+  const mine = {
+    format: 'easywar.catalog', version: 1, id: 'cat.profile.fuel', title: 'Паливо', layer: 'profile',
+    columns: [{ id: 'col.fuel', type: 'number', unit: 'кг', min: 0, labels: ['Пальне, кг'] }],
+    tiles: [{ id: 'tile.fuel', label: 'Пальне, кг', measure: { agg: 'sum', column: 'col.fuel' }, visual: 'bars', by: 'col.date', tone: 'orange' }],
+    blocks: [{ id: 'block.fuel', title: 'Пальне', kind: 'tiles', tiles: ['tile.fuel'] }],
+    kinds: [{
+      id: 'kind.flights-fuel', title: 'Польоти з пальним', sheet: 'Польоти', based_on: 'kind.flights',
+      columns: [{ column: 'col.date' }, { column: 'col.hours' }, { column: 'col.fuel' }],
+      tiles: ['tile.fuel'], blocks: ['block.fuel'],
+    }],
+  };
+  const profile = validateCatalog(mine, { base: [builtin] });
+  assert.deepEqual(profile.errors, []);
+  const table = deriveTable([builtin, profile.catalog], 'kind.flights-fuel', { blocks: ['block.fuel'] });
+  assert.equal(table.ok, true);
+  assert.deepEqual(table.columns, ['col.date', 'col.fuel'], 'профільний модуль бере дату з вбудованого шару');
+  assert.equal(deriveTable(profile.catalog, 'kind.flights-fuel', { blocks: ['block.fuel'] }).ok, true, 'власний вид знайдений і без нижнього шару');
+  assert.equal(deriveTable(builtin, 'kind.flights-fuel').ok, false, 'вид профілю невідомий нижньому шару');
 });
 
 /* ------------------------------------------------------------------ */
@@ -634,4 +807,9 @@ test('the documentation names every keyword and limit the validator knows', () =
   assert.ok(DOC.includes(`не більше ${LIMITS.maxErrors} повідомлень`));
   assert.ok(DOC.includes(`${LIMITS.maxLists} списків, ${LIMITS.maxColumns} стовпців, ${LIMITS.maxTiles} плиток, ${LIMITS.maxBlocks} блоків`));
   assert.ok(DOC.includes(`${LIMITS.maxKinds} видів`));
+  assert.ok(DOC.includes(`від 1 до ${LIMITS.maxNav} вкладок`));
+  assert.ok(DOC.includes(`до ${LIMITS.navLabelLength} символів`));
+  for (const word of ['deriveTable', 'NAV_HOME', 'nav_home_first', 'nav_home_locked', NAV_HOME.label]) {
+    assert.ok(DOC.includes(word), `docs/CATALOG.md не згадує ${word}`);
+  }
 });
