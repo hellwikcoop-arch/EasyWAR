@@ -1057,63 +1057,82 @@ export function validateCatalog(input, { base = [] } = {}) {
 /*  Таблиця з обраних модулів                                          */
 /* ------------------------------------------------------------------ */
 
-/**
- * Які стовпці потрібні таблиці виду, щоб обрані модулі дашборда (блоки) працювали.
- *
- * Модуль не додає «свій» стовпець, а вимагає всі, які читає: плитка з розрахунком «години на борт»
- * потребує дати, годин і бортового номера. Тому до таблиці потрапляє об’єднання вимог усіх обраних
- * блоків (`blockColumns`), ядро виду (`core`) і стовпці, які користувач додав сам (`selection.columns`).
- * Прибрали модуль — стовпці, потрібні лише йому, зникають; це чиста функція вибору, а не дія над
- * даними: чи можна прибрати стовпець із уже заповненої таблиці, вирішує той, хто її викликає.
- *
- * Порядок завжди такий, як у `kind.columns`: автор виду ставить пов’язані стовпці поруч, і форма
- * довільного внесення, що йде за стовпцями таблиці, лишається зручною.
- *
- * @param catalogs перевірений каталог або масив перевірених шарів (нижній шар першим)
- * @param kindId   id виду журналу
- * @param selection { blocks: id обраних блоків, columns: id стовпців, доданих вручну }
- * @returns {{ ok: boolean, columns: string[], reasons: {column, core, pinned, blocks}[], problems: {code, id}[] }}
- */
-export function deriveTable(catalogs, kindId, selection = {}) {
+/** Лише перевірені каталоги: масив шарів (нижній першим) або один каталог. */
+function validatedLayers(catalogs, who) {
   const layers = Array.isArray(catalogs) ? catalogs : [catalogs];
   if (!layers.length || layers.some((layer) => !VALIDATED.has(layer))) {
-    throw new TypeError('deriveTable приймає лише каталоги, які пройшли validateCatalog.');
+    throw new TypeError(`${who} приймає лише каталоги, які пройшли validateCatalog.`);
   }
-  const find = (section, id) => {
+  return layers;
+}
+
+function layerFinder(layers) {
+  return (section, id) => {
     for (const layer of layers) {
       const hit = (layer[section] || []).find((item) => item.id === id);
       if (hit) return hit;
     }
     return undefined;
   };
+}
+
+/**
+ * Які стовпці має мати таблиця виду, щоб обрані модулі дашборда (блоки) працювали.
+ *
+ * Модуль не додає «свій» стовпець, а вимагає всі, які читає: плитка з розрахунком «години на борт»
+ * потребує дати, годин і бортового номера. Тому до таблиці потрапляє об’єднання вимог усіх обраних
+ * блоків (`blockColumns`), ядро виду (`core`) і стовпці, які користувач додав сам (`selection.columns`).
+ *
+ * Порядок і дані належать користувачеві:
+ *  - нова таблиця (без `selection.current`) отримує стартовий порядок виду (`kind.columns`);
+ *  - наявна зберігає порядок користувача, а нові стовпці стають у кінець у порядку виду;
+ *  - стовпець, який більше не потрібен жодному модулю, але має дані (`selection.withData`), лишається
+ *    з позначкою `orphan`, щоб його можна було застосувати в складнішому чи попередньому модулі;
+ *  - порожній зайвий стовпець потрапляє в `dropped` і з `columns` зникає.
+ * Функція нічого не змінює і не видаляє: результат застосовує викликач, і лише коли `ok` — `true`.
+ *
+ * @param catalogs перевірений каталог або масив перевірених шарів (нижній шар першим)
+ * @param kindId   id виду журналу
+ * @param selection { blocks: id обраних блоків, columns: id доданих вручну,
+ *                    current: id стовпців таблиці зараз у порядку користувача,
+ *                    withData: id стовпців, у яких є дані }
+ * @returns {{ ok, columns: string[], added: string[], dropped: string[],
+ *             reasons: {column, core, pinned, blocks, orphan}[], problems: {code, id}[] }}
+ */
+export function deriveTable(catalogs, kindId, selection = {}) {
+  const layers = validatedLayers(catalogs, 'deriveTable');
+  const find = layerFinder(layers);
   const problems = [];
   const fail = (code, id) => problems.push({ code, id: typeof id === 'string' ? id : '' });
-  const finish = (columns, reasons) => deepFreeze({ ok: problems.length === 0, columns, reasons, problems });
+  const finish = (columns, added, dropped, reasons) => deepFreeze({ ok: problems.length === 0, columns, added, dropped, reasons, problems });
 
   const kind = find('kinds', kindId);
   if (!kind) {
     fail('unknown_kind', kindId);
-    return finish([], []);
+    return finish([], [], [], []);
   }
 
+  const sel = selection && typeof selection === 'object' ? selection : {};
   const asList = (value) => [...new Set(Array.isArray(value) ? value : [])];
-  const inKind = new Set(kind.columns.map((entry) => entry.column));
+  const kindOrder = kind.columns.map((entry) => entry.column);
+  const inKind = new Set(kindOrder);
   const needs = new Map();
   const need = (columnId) => {
     if (!needs.has(columnId)) needs.set(columnId, { core: false, pinned: false, blocks: [] });
     return needs.get(columnId);
   };
+  const known = (list) => list.filter((columnId) => {
+    if (typeof columnId !== 'string') fail('bad_id', columnId);
+    else if (!inKind.has(columnId)) fail(find('columns', columnId) ? 'column_not_in_kind' : 'unknown_column', columnId);
+    else return true;
+    return false;
+  });
 
   for (const entry of kind.columns) if (entry.core) need(entry.column).core = true;
-
-  for (const columnId of asList(selection && selection.columns)) {
-    if (typeof columnId !== 'string') fail('bad_id', columnId);
-    else if (inKind.has(columnId)) need(columnId).pinned = true;
-    else fail(find('columns', columnId) ? 'column_not_in_kind' : 'unknown_column', columnId);
-  }
+  for (const columnId of known(asList(sel.columns))) need(columnId).pinned = true;
 
   const offered = new Set(kind.blocks || []);
-  for (const blockId of asList(selection && selection.blocks)) {
+  for (const blockId of asList(sel.blocks)) {
     if (typeof blockId !== 'string') {
       fail('bad_id', blockId);
       continue;
@@ -1124,7 +1143,113 @@ export function deriveTable(catalogs, kindId, selection = {}) {
     else for (const columnId of blockColumns(block, (tileId) => find('tiles', tileId))) need(columnId).blocks.push(blockId);
   }
 
-  const columns = kind.columns.map((entry) => entry.column).filter((columnId) => needs.has(columnId));
-  const reasons = columns.map((columnId) => ({ column: columnId, ...needs.get(columnId) }));
-  return finish(columns, reasons);
+  const existing = Array.isArray(sel.current);
+  const current = existing ? known(asList(sel.current)) : [];
+  const currentSet = new Set(current);
+  const withData = new Set(asList(sel.withData).filter((columnId) => typeof columnId === 'string'));
+
+  const kept = [];
+  const dropped = [];
+  for (const columnId of current) {
+    if (needs.has(columnId)) kept.push(columnId);
+    else if (withData.has(columnId)) {
+      need(columnId);
+      kept.push(columnId);
+    } else dropped.push(columnId);
+  }
+  const added = kindOrder.filter((columnId) => needs.has(columnId) && !currentSet.has(columnId));
+  const columns = existing ? [...kept, ...added] : added;
+
+  const reasons = columns.map((columnId) => {
+    const why = needs.get(columnId);
+    return { column: columnId, ...why, orphan: !why.core && !why.pinned && why.blocks.length === 0 };
+  });
+  return finish(columns, added, dropped, reasons);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Схема таблиці                                                      */
+/* ------------------------------------------------------------------ */
+
+export const TABLE_FORMAT = 'easywar.table';
+export const TABLE_VERSION = 1;
+
+/**
+ * Схема таблиці користувача: вид журналу, стовпці в порядку користувача й заголовок кожного, обраний
+ * із запропонованих (`labels`). Саме її зберігає база профілю й копія на прихованому аркуші XLSX.
+ * Дашборд зіставляє стовпці за заголовками зі схеми, а не за позицією, тому порядок може бути довільним.
+ *
+ * Правила: стовпці існують у каталозі й входять до виду; кожен — один раз; заголовки різні (інакше
+ * читання неоднозначне); ядро виду є в таблиці. Без `header` береться перший з `labels`.
+ *
+ * @param input    об’єкт або текст схеми
+ * @param catalogs перевірений каталог або масив перевірених шарів
+ */
+export function validateTableSchema(input, catalogs) {
+  const layers = validatedLayers(catalogs, 'validateTableSchema');
+  const find = layerFinder(layers);
+  let value = input;
+  if (typeof input === 'string') {
+    const parsed = parseCatalogText(input);
+    if (parsed.error) return { ok: false, errors: [{ path: '', ...parsed.error }], truncated: false, schema: null };
+    value = parsed.value;
+  }
+  const ctx = makeContext([]);
+  const bad = () => ({ ok: false, errors: ctx.errors, truncated: ctx.truncated, schema: null });
+
+  const root = obj(ctx, value, '', { req: ['format', 'version', 'kind', 'columns'], opt: ['title'] });
+  if (!root) return bad();
+  if (Object.hasOwn(root, 'format') && root.format !== TABLE_FORMAT) ctx.err('format', 'bad_format', `Очікується format «${TABLE_FORMAT}».`);
+  if (Object.hasOwn(root, 'version')) {
+    if (!Number.isInteger(root.version) || root.version < 1) ctx.err('version', 'bad_version', 'Версія — додатне ціле число.');
+    else if (root.version > TABLE_VERSION) ctx.err('version', 'unsupported_version', 'Схему створено новішою версією застосунку.');
+    else if (root.version !== TABLE_VERSION) ctx.err('version', 'bad_version', 'Непідтримувана версія формату.');
+  }
+  const kindId = ident(ctx, root.kind, 'kind', 'kind');
+  const kind = kindId === undefined ? undefined : find('kinds', kindId);
+  if (kindId !== undefined && !kind) ctx.err('kind', 'unknown_kind', `Виду «${kindId}» немає в каталогах.`);
+  const out = { format: TABLE_FORMAT, version: TABLE_VERSION, kind: kindId };
+  if (Object.hasOwn(root, 'title')) put(out, 'title', str(ctx, root.title, 'title', LIMITS.titleLength));
+
+  const inKind = new Set(kind ? kind.columns.map((entry) => entry.column) : []);
+  const seen = new Set();
+  const headers = new Set();
+  const items = arr(ctx, root.columns, 'columns', 1, LIMITS.maxKindColumns);
+  out.columns = [];
+  (items || []).forEach((rawEntry, i) => {
+    const at = `columns[${i}]`;
+    const entry = obj(ctx, rawEntry, at, { req: ['column'], opt: ['header'] });
+    if (!entry) return;
+    const columnId = ident(ctx, entry.column, join(at, 'column'), 'col');
+    const column = columnId === undefined ? undefined : find('columns', columnId);
+    if (columnId !== undefined) {
+      if (!column) ctx.err(join(at, 'column'), 'unknown_column', `Стовпця «${columnId}» немає в каталогах.`);
+      else if (kind && !inKind.has(columnId)) ctx.err(join(at, 'column'), 'column_not_in_kind', `Стовпець «${columnId}» не входить до виду «${kindId}».`);
+      if (seen.has(columnId)) ctx.err(join(at, 'column'), 'duplicate_ref', `Стовпець «${columnId}» вказано двічі.`);
+      seen.add(columnId);
+    }
+    let header;
+    if (Object.hasOwn(entry, 'header')) {
+      const text = str(ctx, entry.header, join(at, 'header'), LIMITS.labelLength);
+      if (text !== undefined && column) {
+        header = column.labels.find((label) => foldLabel(label) === foldLabel(text));
+        if (header === undefined) ctx.err(join(at, 'header'), 'header_not_offered', `Заголовок «${text}» не входить до запропонованих для стовпця «${columnId}».`);
+      }
+    } else if (column) {
+      header = column.labels[0];
+    }
+    if (header !== undefined) {
+      const key = foldLabel(header);
+      if (headers.has(key)) ctx.err(join(at, Object.hasOwn(entry, 'header') ? 'header' : 'column'), 'duplicate_label', `Заголовок «${header}» уже є в таблиці: читання було б неоднозначним.`);
+      headers.add(key);
+    }
+    out.columns.push({ column: columnId, header });
+  });
+  if (kind && items) {
+    const missing = kind.columns.filter((entry) => entry.core && !seen.has(entry.column)).map((entry) => entry.column);
+    if (missing.length) ctx.err('columns', 'missing_core', `У таблиці бракує обов’язкових стовпців виду: ${missing.join(', ')}.`);
+  }
+
+  if (ctx.errors.length) return bad();
+  return { ok: true, errors: [], truncated: false, schema: deepFreeze(out) };
 }

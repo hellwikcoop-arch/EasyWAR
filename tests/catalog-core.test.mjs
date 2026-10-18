@@ -14,6 +14,7 @@ import {
   LIMITS,
   NAV_HOME,
   SHAPES,
+  TABLE_FORMAT,
   TILE_VISUALS,
   TONES,
   blockColumns,
@@ -22,6 +23,7 @@ import {
   parseCatalogText,
   tileColumns,
   validateCatalog,
+  validateTableSchema,
 } from '../src/catalog-core.js';
 
 const DOC = await readFile(new URL('../docs/CATALOG.md', import.meta.url), 'utf8');
@@ -552,7 +554,7 @@ test('deriveTable: columns come from the chosen modules, in the order of the kin
 
   const heat = deriveTable(catalog, KIND, { blocks: ['block.by-hour'] });
   assert.deepEqual(heat.columns, ['col.date', 'col.hours', 'col.takeoff'], 'години доби додають час зльоту');
-  assert.deepEqual(heat.reasons.find((r) => r.column === 'col.takeoff'), { column: 'col.takeoff', core: false, pinned: false, blocks: ['block.by-hour'] });
+  assert.deepEqual(heat.reasons.find((r) => r.column === 'col.takeoff'), { column: 'col.takeoff', core: false, pinned: false, blocks: ['block.by-hour'], orphan: false });
 
   const all = deriveTable(catalog, KIND, { blocks: ['block.summary'] });
   assert.deepEqual(all.columns, ['col.date', 'col.hours', 'col.aircraft', 'col.tail', 'col.mission', 'col.night'], 'залежності плиток зведені докупи, порядок — з виду');
@@ -574,8 +576,8 @@ test('deriveTable: columns come from the chosen modules, in the order of the kin
 
   const pinned = deriveTable(catalog, KIND, { blocks: ['block.by-hour'], columns: ['col.crew', 'col.takeoff'] });
   assert.deepEqual(pinned.columns, ['col.date', 'col.hours', 'col.takeoff', 'col.crew']);
-  assert.deepEqual(pinned.reasons.find((r) => r.column === 'col.takeoff'), { column: 'col.takeoff', core: false, pinned: true, blocks: ['block.by-hour'] });
-  assert.deepEqual(pinned.reasons.find((r) => r.column === 'col.crew'), { column: 'col.crew', core: false, pinned: true, blocks: [] });
+  assert.deepEqual(pinned.reasons.find((r) => r.column === 'col.takeoff'), { column: 'col.takeoff', core: false, pinned: true, blocks: ['block.by-hour'], orphan: false });
+  assert.deepEqual(pinned.reasons.find((r) => r.column === 'col.crew'), { column: 'col.crew', core: false, pinned: true, blocks: [], orphan: false });
 
   assert.ok(Object.isFrozen(all) && Object.isFrozen(all.reasons[0]) && Object.isFrozen(all.reasons[0].blocks));
   assert.throws(() => { 'use strict'; all.columns.push('x'); }, TypeError);
@@ -616,6 +618,188 @@ test('deriveTable: wrong choices come back as problems and never throw', () => {
     assert.doesNotThrow(() => deriveTable(catalog, 'kind.flights', selection));
   }
   assert.deepEqual(deriveTable(catalog, 'kind.flights', { blocks: 'block.summary' }).columns, ['col.date', 'col.hours'], 'не масив — те саме, що порожній вибір');
+});
+
+test('deriveTable: the order belongs to the user and columns with data are never lost', () => {
+  const { catalog } = validateCatalog(EXAMPLE);
+  const KIND = 'kind.flights';
+  const derive = (selection) => deriveTable(catalog, KIND, selection);
+
+  const fresh1 = derive({ blocks: ['block.by-hour'] });
+  assert.deepEqual(fresh1.columns, ['col.date', 'col.hours', 'col.takeoff']);
+  assert.deepEqual(fresh1.added, fresh1.columns, 'у новій таблиці все додане');
+  assert.deepEqual(fresh1.dropped, []);
+
+  // користувач переставив стовпці — порядок зберігається, нічого не додається й не зникає
+  const mine = ['col.takeoff', 'col.date', 'col.hours'];
+  const same = derive({ blocks: ['block.by-hour'], current: mine });
+  assert.deepEqual(same.columns, mine);
+  assert.deepEqual(same.added, []);
+  assert.deepEqual(same.dropped, []);
+
+  // новий модуль додає свої стовпці в кінець, у порядку виду
+  const more = derive({ blocks: ['block.by-hour', 'block.summary'], current: mine });
+  assert.deepEqual(more.columns, [...mine, 'col.aircraft', 'col.tail', 'col.mission', 'col.night']);
+  assert.deepEqual(more.added, ['col.aircraft', 'col.tail', 'col.mission', 'col.night']);
+
+  // прибрали модуль: порожній стовпець зникає, ...
+  const gone = derive({ blocks: [], current: mine });
+  assert.deepEqual(gone.columns, ['col.date', 'col.hours']);
+  assert.deepEqual(gone.dropped, ['col.takeoff']);
+  // ... а стовпець з даними лишається і чекає на інший модуль
+  const kept = derive({ blocks: [], current: mine, withData: ['col.takeoff'] });
+  assert.deepEqual(kept.columns, mine);
+  assert.deepEqual(kept.dropped, []);
+  assert.deepEqual(kept.reasons.find((r) => r.column === 'col.takeoff'), { column: 'col.takeoff', core: false, pinned: false, blocks: [], orphan: true });
+  assert.equal(kept.reasons.filter((r) => r.orphan).length, 1);
+  // повернули модуль — стовпець знову потрібен, а не «осиротілий»
+  const back = derive({ blocks: ['block.by-hour'], current: mine, withData: ['col.takeoff'] });
+  assert.deepEqual(back.reasons.find((r) => r.column === 'col.takeoff'), { column: 'col.takeoff', core: false, pinned: false, blocks: ['block.by-hour'], orphan: false });
+  // складніший модуль бере осиротілий стовпець з даними без нових
+  const other = derive({ blocks: ['block.journal'], current: mine, withData: ['col.takeoff'] });
+  assert.ok(other.columns.includes('col.takeoff') && other.columns.includes('col.aircraft'));
+
+  // ядро повертається, якщо його прибрали
+  const core = derive({ blocks: [], current: ['col.date'] });
+  assert.deepEqual(core.columns, ['col.date', 'col.hours']);
+  assert.deepEqual(core.added, ['col.hours']);
+  // доданий вручну стовпець без даних лишається, поки його не відкріплять
+  assert.deepEqual(derive({ blocks: [], current: ['col.date', 'col.hours', 'col.crew'], columns: ['col.crew'] }).dropped, []);
+  assert.deepEqual(derive({ blocks: [], current: ['col.date', 'col.hours', 'col.crew'] }).dropped, ['col.crew']);
+  // дані в стовпці, якого немає в таблиці, нічого не додають
+  assert.deepEqual(derive({ blocks: [], current: ['col.date', 'col.hours'], withData: ['col.crew'] }).columns, ['col.date', 'col.hours']);
+
+  // повтори й не масив
+  assert.deepEqual(derive({ current: ['col.hours', 'col.date', 'col.hours'] }).columns, ['col.hours', 'col.date']);
+  assert.deepEqual(derive({ blocks: ['block.by-hour'], current: 'col.date' }), derive({ blocks: ['block.by-hour'] }), 'не масив — те саме, що немає таблиці');
+  assert.deepEqual(derive({ current: [] }).columns, ['col.date', 'col.hours'], 'порожня наявна таблиця добирає ядро');
+  assert.deepEqual(derive({ current: [] }).added, ['col.date', 'col.hours']);
+
+  // стовпці, невідомі виду, — проблема, і застосовувати результат не можна
+  const odd = derive({ current: ['col.date', 'col.hours', 'col.nothing', 5] });
+  assert.equal(odd.ok, false);
+  assert.deepEqual(odd.problems.map((p) => p.code), ['unknown_column', 'bad_id']);
+  assert.deepEqual(odd.columns, ['col.date', 'col.hours']);
+  assert.ok(Object.isFrozen(odd) && Object.isFrozen(odd.added) && Object.isFrozen(odd.dropped));
+});
+
+test('table schema: user order, headers chosen from the offered ones, core present', () => {
+  const { catalog } = validateCatalog(EXAMPLE);
+  const schema = {
+    format: 'easywar.table', version: 1, kind: 'kind.flights', title: 'Мій журнал',
+    columns: [
+      { column: 'col.hours', header: 'тривалість  польоту' },
+      { column: 'col.date' },
+      { column: 'col.takeoff', header: 'Час зльоту' },
+    ],
+  };
+  const result = validateTableSchema(schema, catalog);
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.ok, true);
+  assert.equal(TABLE_FORMAT, 'easywar.table');
+  assert.deepEqual(result.schema.columns, [
+    { column: 'col.hours', header: 'Тривалість польоту' },
+    { column: 'col.date', header: 'Дата' },
+    { column: 'col.takeoff', header: 'Час зльоту' },
+  ], 'порядок користувача; заголовок береться із запропонованих у їхньому написанні; без header — перший');
+  assert.ok(Object.isFrozen(result.schema) && Object.isFrozen(result.schema.columns[0]));
+  assert.equal(validateTableSchema(JSON.stringify(schema), catalog).ok, true);
+  assert.equal(validateTableSchema(`${chars(0xfeff)}${JSON.stringify(schema)}`, [catalog]).ok, true);
+
+  // схема й вибір модулів сходяться: порядок користувача переходить у deriveTable
+  const order = result.schema.columns.map((entry) => entry.column);
+  assert.deepEqual(deriveTable(catalog, 'kind.flights', { blocks: ['block.by-hour'], current: order }).columns, order);
+
+  const withBirth = run((c) => {
+    c.columns.push({ id: 'col.birth', type: 'date', labels: ['Дата'] }, { id: 'col.fuel', type: 'number', labels: ['Пальне'] });
+    c.kinds[0].columns.push({ column: 'col.birth' });
+  }).catalog;
+  const base = () => structuredClone(schema);
+  const check = (mutate, expected, layers = catalog) => {
+    const input = base();
+    mutate(input);
+    const outcome = validateTableSchema(input, layers);
+    assert.equal(outcome.ok, false, `очікувалась відмова: ${expected}`);
+    assert.equal(outcome.schema, null);
+    assert.ok(outcome.errors.map((e) => `${e.path}:${e.code}`).includes(expected), `${expected}; є: ${outcome.errors.map((e) => `${e.path}:${e.code}`).join(', ')}`);
+  };
+  check((x) => { x.extra = 1; }, 'extra:unknown_key');
+  check((x) => { delete x.kind; }, 'kind:missing');
+  check((x) => { x.kind = 'tile.flights'; }, 'kind:bad_id');
+  check((x) => { x.kind = 'kind.nothing'; }, 'kind:unknown_kind');
+  check((x) => { x.format = 'easywar.catalog'; }, 'format:bad_format');
+  check((x) => { x.version = 2; }, 'version:unsupported_version');
+  check((x) => { x.version = 0; }, 'version:bad_version');
+  check((x) => { x.title = 'я'.repeat(LIMITS.titleLength + 1); }, 'title:too_long');
+  check((x) => { x.columns = []; }, 'columns:too_few');
+  check((x) => { x.columns = {}; }, 'columns:not_array');
+  check((x) => { x.columns = Array.from({ length: LIMITS.maxKindColumns + 1 }, () => ({ column: 'col.date' })); }, 'columns:too_many');
+  check((x) => { x.columns[1].column = 'col.nothing'; }, 'columns[1].column:unknown_column');
+  check((x) => { x.columns[1].column = 'col.fuel'; }, 'columns[1].column:column_not_in_kind', withBirth);
+  check((x) => { x.columns[2].column = 'col.date'; }, 'columns[2].column:duplicate_ref');
+  check((x) => { x.columns[1].column = 'hours'; }, 'columns[1].column:bad_id');
+  check((x) => { x.columns[2].header = 'Моя назва'; }, 'columns[2].header:header_not_offered');
+  check((x) => { x.columns[2].header = 12; }, 'columns[2].header:not_string');
+  check((x) => { x.columns[2].header = `Зліт${chars(0x202e)}`; }, 'columns[2].header:forbidden_char');
+  check((x) => { x.columns[2].extra = true; }, 'columns[2].extra:unknown_key');
+  check((x) => { x.columns[0] = 'col.hours'; }, 'columns[0]:not_object');
+  check((x) => { delete x.columns[0].column; }, 'columns[0].column:missing');
+  check((x) => { x.columns.splice(0, 1); }, 'columns:missing_core');
+  check((x) => { x.columns.splice(1, 1); }, 'columns:missing_core');
+  check((x) => { x.columns.push({ column: 'col.birth' }); }, 'columns[3].column:duplicate_label', withBirth);
+  check((x) => { x.columns.push({ column: 'col.birth', header: 'ДАТА' }); }, 'columns[3].header:duplicate_label', withBirth);
+
+  for (const bad of [null, 5, 'x', [], '{ not json', '[]']) assert.equal(validateTableSchema(bad, catalog).ok, false);
+  assert.equal(validateTableSchema(' '.repeat(LIMITS.maxBytes + 1), catalog).errors[0].code, 'too_large');
+  assert.throws(() => validateTableSchema(schema, structuredClone(EXAMPLE)), TypeError);
+  assert.throws(() => validateTableSchema(schema, []), TypeError);
+  assert.throws(() => validateTableSchema(schema, { ...catalog }), TypeError);
+  const polluted = validateTableSchema(JSON.parse('{"__proto__": {"polluted": true}, "format": "easywar.table", "version": 1, "kind": "kind.flights", "columns": []}'), catalog);
+  assert.equal(polluted.ok, false);
+  assert.equal({}.polluted, undefined);
+});
+
+test('table schema: no single-field corruption makes the validator throw', () => {
+  const { catalog } = validateCatalog(EXAMPLE);
+  const schema = {
+    format: 'easywar.table', version: 1, kind: 'kind.flights', title: 'Мій журнал',
+    columns: [{ column: 'col.hours', header: 'Наліт, год' }, { column: 'col.date' }, { column: 'col.takeoff', header: 'Зліт' }],
+  };
+  const junk = [undefined, null, 0, -1, Number.NaN, '', 'x', true, [], {}, [null], { column: 1 }];
+  const paths = [];
+  const walk = (node, trail) => {
+    if (node === null || typeof node !== 'object') return;
+    for (const key of Object.keys(node)) {
+      paths.push([...trail, key]);
+      walk(node[key], [...trail, key]);
+    }
+  };
+  walk(schema, []);
+  let accepted = 0;
+  for (const trail of paths) {
+    for (const value of junk) {
+      const copy = structuredClone(schema);
+      let holder = copy;
+      for (const key of trail.slice(0, -1)) holder = holder[key];
+      const last = trail.at(-1);
+      if (value === undefined) {
+        if (Array.isArray(holder)) holder.splice(Number(last), 1);
+        else delete holder[last];
+      } else {
+        holder[last] = structuredClone(value);
+      }
+      let outcome;
+      assert.doesNotThrow(() => { outcome = validateTableSchema(copy, catalog); }, `${trail.join('.')} = ${String(value)}`);
+      assert.equal(outcome.ok, outcome.errors.length === 0);
+      assert.equal(outcome.schema === null, !outcome.ok);
+      if (outcome.ok) {
+        accepted += 1;
+        const current = outcome.schema.columns.map((entry) => entry.column);
+        assert.equal(deriveTable(catalog, 'kind.flights', { current }).ok, true, 'схема, що пройшла перевірку, завжди сумісна з виводом таблиці');
+      }
+    }
+  }
+  assert.ok(accepted > 0);
 });
 
 test('deriveTable accepts only validated catalogs and merges layers', () => {
@@ -809,7 +993,7 @@ test('the documentation names every keyword and limit the validator knows', () =
   assert.ok(DOC.includes(`${LIMITS.maxKinds} видів`));
   assert.ok(DOC.includes(`від 1 до ${LIMITS.maxNav} вкладок`));
   assert.ok(DOC.includes(`до ${LIMITS.navLabelLength} символів`));
-  for (const word of ['deriveTable', 'NAV_HOME', 'nav_home_first', 'nav_home_locked', NAV_HOME.label]) {
+  for (const word of ['deriveTable', 'NAV_HOME', 'nav_home_first', 'nav_home_locked', NAV_HOME.label, 'validateTableSchema', TABLE_FORMAT, 'header_not_offered', 'missing_core', 'orphan']) {
     assert.ok(DOC.includes(word), `docs/CATALOG.md не згадує ${word}`);
   }
 });
