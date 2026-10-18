@@ -47,6 +47,7 @@ const flightFields = [
   field('list_number', 'Номер за списком', 'integer', 'order'),
   field('aircraft_type', 'Тип ПС', 'text', 'dimension', 'none', true),
   field('aircraft_number', 'Номер ПС', 'text', 'dimension'),
+  field('crew_ke_callsign', 'Позивний командира екіпажу', 'text', 'dimension'),
   field('day_night', 'День / ніч', 'text', 'dimension'),
   field('flight_shift_number', 'Номер льотної зміни', 'integer', 'dimension'),
   field('training_program_fuel', 'Програма підготовки (паливо)'),
@@ -96,8 +97,10 @@ test('catalog normalization preserves the exact flight-hours schema', () => {
   }]);
   assert.equal(catalog.length, 1);
   assert.deepEqual(catalog[0].fields.map(item => item.key), flightFieldKeys);
-  assert.equal(catalog[0].fields[7].label, 'Номер вправи у комплексі №1');
-  assert.equal(catalog[0].fields[8].label, 'Номер вправи у комплексі №2');
+  const label = key => catalog[0].fields.find(item => item.key === key).label;
+  assert.equal(label('complex_exercise_number_1'), 'Номер вправи у комплексі №1');
+  assert.equal(label('complex_exercise_number_2'), 'Номер вправи у комплексі №2');
+  assert.equal(label('crew_ke_callsign'), 'Позивний командира екіпажу');
   assert.match(schemaSummary(catalog[0].fields), /Тип ПС · text/);
   assert.equal(matchesCatalogItem(catalog[0], 'повітря'), true);
   assert.equal(matchesCatalogItem(catalog[0], 'воронка'), false);
@@ -343,7 +346,7 @@ test('the unit labels in the JS fixtures are the ones the Rust catalog ships', a
   const keys = [
     'airborne_hours', 'total_hours', 'flight_altitude', 'cloud_base_upper', 'cloud_base_lower', 'cloud_cover',
     'visibility', 'time_in_clouds', 'hood_time', 'fuel_consumption',
-    'crew_ke', 'crew_lsh', 'crew_bt', 'crew_other',
+    'crew_ke', 'crew_ke_callsign', 'crew_lsh', 'crew_bt', 'crew_other',
     'aircraft_number', 'engine_test_time', 'passengers', 'cargo_kg', 'rsp_approaches', 'rsp_landings',
   ];
   const escape = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -523,7 +526,12 @@ test('the form groups the meteo and crew fields and keeps the rest in catalog or
   assert.deepEqual(keys('crew'), ['crew_ke', 'crew_lsh', 'crew_bt', 'crew_other']);
   assert.ok(keys('main').includes('instrument_meteorological_conditions'), 'the СМУ flag describes the flight, not the weather');
   assert.equal(keys('main')[0], 'list_number');
-  assert.deepEqual(keys('main').slice(1, 3), ['aircraft_type', 'aircraft_number'], 'the board number follows the type');
+  assert.deepEqual(
+    keys('main').slice(1, 4),
+    ['aircraft_type', 'aircraft_number', 'crew_ke_callsign'],
+    'the board number follows the type, and the commander call sign follows the board number',
+  );
+  assert.equal(keys('crew').includes('crew_ke_callsign'), false, 'the call sign is not a crew member');
   assert.ok(keys('main').indexOf('engine_test_time') < keys('main').indexOf('takeoff_time'), 'start/test comes before take-off');
   assert.deepEqual(keys('main').slice(-4), ['passengers', 'cargo_kg', 'rsp_approaches', 'rsp_landings']);
   assert.deepEqual(
@@ -612,6 +620,39 @@ test('crew fields are plain text with their own placeholders', () => {
   assert.equal(fieldInputType(flightField('crew_ke')), 'text');
   assert.equal(parseFieldInput(flightField('crew_ke'), '  Тестенко '), 'Тестенко');
   assert.equal(parseFieldInput(flightField('crew_ke'), ''), null);
+});
+
+test('the commander call sign is a plain text field after the board number, not a crew member', () => {
+  const callsign = flightField('crew_ke_callsign');
+  assert.equal(callsign.label, 'Позивний командира екіпажу');
+  assert.equal(callsign.dataType, 'text');
+  assert.equal(callsign.required, false);
+  assert.equal(fieldKind(callsign), null);
+  assert.equal(fieldInputType(callsign), 'text', 'a number input would drop the leading zeros');
+  assert.equal(fieldPlaceholder(callsign), '');
+  assert.equal(parseFieldInput(callsign, ' 12345 '), '12345');
+  assert.equal(parseFieldInput(callsign, '00123'), '00123', 'it is text, so the leading zeros stay');
+  assert.equal(parseFieldInput(callsign, 'Беркут-1'), 'Беркут-1');
+  assert.equal(parseFieldInput(callsign, ''), null);
+  assert.equal(formatFieldValue(callsign, '00123'), '00123');
+  assert.equal(parseFieldInput(callsign, fieldInputText(callsign, '00123')), '00123', 'an opened value reads back unchanged');
+  // Це не особа: у склад екіпажу не входить і лічильник сам не запускає.
+  assert.equal(crewCount({ crew_ke_callsign: '12345' }), 0);
+  assert.equal(crewSummary({ crew_ke_callsign: '12345' }), '');
+  const base = { aircraft_type: 'Ан-26', airborne_hours: '0:22', total_hours: '0:32' };
+  const eight = {
+    crew_ke: 'Тестенко',
+    crew_lsh: 'Зразкович',
+    crew_bt: 'Умовний',
+    crew_other: 'Пробенко, Прикладний, Вигаданий, Макетенко, Фіктивний',
+  };
+  const saved = rowForWrite(flightFields, { ...base, ...eight, crew_ke_callsign: '12345' });
+  assert.equal(crewCount(saved), 8, 'eight people and a call sign are still within the limit');
+  assert.equal(saved.crew_ke_callsign, '12345');
+  assert.equal('crew_ke_callsign' in rowForWrite(flightFields, base), false, 'an empty call sign is not written');
+  // Це не погода: новий запис її не підставляє з попереднього.
+  const inherited = inheritedValues(flightFields, [{ aircraft_type: 'Мі-8', crew_ke_callsign: '12345', cloud_cover: 4 }]);
+  assert.deepEqual(Object.keys(inherited.values), ['cloud_cover']);
 });
 
 test('both operational dashboards load the shared module catalog', async () => {

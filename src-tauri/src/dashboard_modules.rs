@@ -186,6 +186,16 @@ pub fn catalog() -> Vec<DashboardModuleTemplate> {
                     "none",
                     false,
                 ),
+                // Позивний командира екіпажу стоїть одразу після номера ПС. Це текст
+                // (число чи слово; нулі на початку зберігаються), а не особа екіпажу.
+                field(
+                    "crew_ke_callsign",
+                    "Позивний командира екіпажу",
+                    "text",
+                    "dimension",
+                    "none",
+                    false,
+                ),
                 field(
                     "day_night",
                     "День / ніч",
@@ -1323,10 +1333,11 @@ mod tests {
     use sqlx::sqlite::SqlitePoolOptions;
     use std::collections::BTreeSet;
 
-    const FLIGHT_FIELD_KEYS: [&str; 34] = [
+    const FLIGHT_FIELD_KEYS: [&str; 35] = [
         "list_number",
         "aircraft_type",
         "aircraft_number",
+        "crew_ke_callsign",
         "day_night",
         "flight_shift_number",
         "training_program_fuel",
@@ -1487,7 +1498,9 @@ mod tests {
             "cloud_cover": 5,
             "visibility": 10.0,
             "instrument_meteorological_conditions": true,
-            "fuel_consumption": 420.5
+            "fuel_consumption": 420.5,
+            "crew_ke": "Тестенко",
+            "crew_ke_callsign": "00123"
         })
         .as_object()
         .unwrap()
@@ -1507,6 +1520,9 @@ mod tests {
         assert_eq!(data.rows[0]["airborne_hours"], 18.5);
         assert_eq!(data.rows[0]["cloud_cover"], 5);
         assert_eq!(data.rows[0]["instrument_meteorological_conditions"], true);
+        // Позивний — текст: нулі на початку не зникають, як було б у числовій колонці.
+        assert_eq!(data.rows[0]["crew_ke"], "Тестенко");
+        assert_eq!(data.rows[0]["crew_ke_callsign"], "00123");
 
         let invalid = vec![json!({
             "aircraft_type": "F-16",
@@ -1618,6 +1634,7 @@ mod tests {
         assert_eq!(data.rows[0]["airborne_hours"], 1.5);
         assert_eq!(data.rows[0]["cloud_cover"], Value::Null);
         assert_eq!(data.rows[0]["crew_ke"], Value::Null);
+        assert_eq!(data.rows[0]["crew_ke_callsign"], Value::Null);
         assert_eq!(data.rows[0]["aircraft_number"], Value::Null);
         assert_eq!(data.rows[0]["rsp_landings"], Value::Null);
         // Старі підписи без одиниць замінюються підписами з одиницями вимірювання,
@@ -1644,6 +1661,7 @@ mod tests {
             ("crew_bt", "Екіпаж: БТ"),
             ("crew_other", "Екіпаж: інші (до 5)"),
             ("aircraft_number", "Номер ПС"),
+            ("crew_ke_callsign", "Позивний командира екіпажу"),
             ("engine_test_time", "Запуск, проба, год:хв"),
             ("passengers", "Пасажири"),
             ("cargo_kg", "Вантаж, кг"),
