@@ -8,6 +8,9 @@ const MAX_MODULES_PER_BRANCH: i64 = 64;
 const MAX_ROWS_PER_WRITE: usize = 10_000;
 const MAX_ROWS_PER_READ: i64 = 10_000;
 const MAX_TEXT_LENGTH: usize = 4096;
+/// Службове поле рядка: ідентифікатор запису, який клієнт отримав від `get_data`.
+/// Це не колонка каталогу, тому в DDL воно не потрапляє.
+const ROW_ID_KEY: &str = "rowId";
 
 #[derive(Clone, Debug)]
 pub struct DashboardModuleStore {
@@ -101,6 +104,10 @@ pub enum DashboardModuleError {
     InvalidValue(String, String),
     #[error("текст у полі «{0}» перевищує 4096 символів")]
     TextTooLong(String),
+    #[error("таблицю змінено в іншому вікні; відкрийте її знову")]
+    Conflict,
+    #[error("некоректний або повторений ідентифікатор запису")]
+    InvalidRowId,
 }
 
 fn field(
@@ -838,11 +845,21 @@ impl DashboardModuleStore {
         })
     }
 
+    /// Замінює весь набір рядків модуля однією транзакцією. Рядок із полем
+    /// `rowId` зберігає свій ідентифікатор і час створення; рядок без нього
+    /// вважається новим, а рядки, яких немає у списку, видаляються (їхні
+    /// ідентифікатори не використовуються повторно).
+    ///
+    /// `expected_updated_at` — позначка змін, яку клієнт отримав разом із
+    /// таблицею. Якщо модуль уже змінено (наприклад, в іншому вікні), запис
+    /// відхиляється з `Conflict` і нічого не змінює. Без позначки запис
+    /// безумовний, як і раніше.
     pub async fn replace_rows(
         &self,
         profile_id: &str,
         module_id: &str,
         rows: Vec<Map<String, Value>>,
+        expected_updated_at: Option<&str>,
         updated_at: &str,
     ) -> Result<DashboardModuleData, DashboardModuleError> {
         if rows.len() > MAX_ROWS_PER_WRITE {
@@ -854,10 +871,29 @@ impl DashboardModuleStore {
             .iter()
             .map(|field| field.key.as_str())
             .collect::<BTreeSet<_>>();
+        let mut requested_ids = BTreeSet::new();
+        let mut row_ids = Vec::with_capacity(rows.len());
         for row in &rows {
-            if let Some(key) = row.keys().find(|key| !allowed.contains(key.as_str())) {
+            if let Some(key) = row
+                .keys()
+                .find(|key| key.as_str() != ROW_ID_KEY && !allowed.contains(key.as_str()))
+            {
                 return Err(DashboardModuleError::UnknownField(key.clone()));
             }
+            let row_id = match row.get(ROW_ID_KEY).filter(|value| !value.is_null()) {
+                None => None,
+                Some(value) => {
+                    let id = value
+                        .as_i64()
+                        .filter(|id| *id >= 1)
+                        .ok_or(DashboardModuleError::InvalidRowId)?;
+                    if !requested_ids.insert(id) {
+                        return Err(DashboardModuleError::InvalidRowId);
+                    }
+                    Some(id)
+                }
+            };
+            row_ids.push(row_id);
             for field in &module.fields {
                 validate_value(field, row.get(&field.key))?;
             }
@@ -873,17 +909,73 @@ impl DashboardModuleStore {
             .chain(field_columns)
             .collect::<Vec<_>>();
         let placeholders = vec!["?"; columns.len()].join(", ");
-        let insert = format!(
+        let insert_new = format!(
             "INSERT INTO {table} ({}) VALUES ({placeholders})",
+            columns.join(", ")
+        );
+        let insert_kept = format!(
+            "INSERT INTO {table} (\"row_id\", {}) VALUES (?, {placeholders})",
             columns.join(", ")
         );
 
         let mut transaction = self.pool.begin().await?;
+        // Перша операція транзакції — умовне оновлення позначки змін: воно
+        // одночасно звіряє версію клієнта й бере блокування запису.
+        let claimed = if let Some(expected) = expected_updated_at {
+            sqlx::query(
+                "UPDATE dashboard_modules SET updated_at = ?
+                 WHERE id = ? AND profile_id = ? AND updated_at = ?",
+            )
+            .bind(updated_at)
+            .bind(module_id)
+            .bind(profile_id)
+            .bind(expected)
+            .execute(&mut *transaction)
+            .await?
+            .rows_affected()
+        } else {
+            sqlx::query(
+                "UPDATE dashboard_modules SET updated_at = ?
+                 WHERE id = ? AND profile_id = ?",
+            )
+            .bind(updated_at)
+            .bind(module_id)
+            .bind(profile_id)
+            .execute(&mut *transaction)
+            .await?
+            .rows_affected()
+        };
+        if claimed != 1 {
+            return Err(if expected_updated_at.is_some() {
+                DashboardModuleError::Conflict
+            } else {
+                DashboardModuleError::ModuleNotFound
+            });
+        }
+        let existing = sqlx::query(&format!("SELECT \"row_id\", \"created_at\" FROM {table}"))
+            .fetch_all(&mut *transaction)
+            .await?
+            .into_iter()
+            .map(|row| {
+                Ok::<_, sqlx::Error>((
+                    row.try_get::<i64, _>("row_id")?,
+                    row.try_get::<String, _>("created_at")?,
+                ))
+            })
+            .collect::<Result<BTreeMap<i64, String>, _>>()?;
+        if requested_ids.iter().any(|id| !existing.contains_key(id)) {
+            return Err(DashboardModuleError::Conflict);
+        }
         sqlx::query(&format!("DELETE FROM {table}"))
             .execute(&mut *transaction)
             .await?;
-        for row in rows {
-            let mut query = sqlx::query(&insert).bind(updated_at);
+        for (row, row_id) in rows.into_iter().zip(row_ids) {
+            let mut query = match row_id {
+                Some(id) => sqlx::query(&insert_kept)
+                    .bind(id)
+                    .bind(existing[&id].clone()),
+                None => sqlx::query(&insert_new).bind(updated_at),
+            };
             for field in &module.fields {
                 let value = row.get(&field.key).filter(|value| !value.is_null());
                 query = match field.data_type.as_str() {
@@ -904,11 +996,6 @@ impl DashboardModuleStore {
             }
             query.execute(&mut *transaction).await?;
         }
-        sqlx::query("UPDATE dashboard_modules SET updated_at = ? WHERE id = ?")
-            .bind(updated_at)
-            .bind(module_id)
-            .execute(&mut *transaction)
-            .await?;
         transaction.commit().await?;
         self.get_data(profile_id, module_id).await
     }
@@ -1083,6 +1170,28 @@ impl DashboardModuleStore {
         transaction.commit().await?;
         Ok(())
     }
+}
+
+/// Видаляє фізичні таблиці даних усіх модулів профілю. Викликається в тій
+/// самій транзакції, що й видалення профілю: каскад прибирає лише метадані,
+/// а самі таблиці `dashboard_data_<id>` інакше лишилися б у базі без власника.
+/// Імена беруться з метаданих, але скидаються лише ті, що пройшли перевірку
+/// шаблону; будь-яке інше ім'я в DDL не потрапляє.
+pub(crate) async fn drop_profile_data_tables(
+    transaction: &mut Transaction<'_, Sqlite>,
+    profile_id: &str,
+) -> Result<(), sqlx::Error> {
+    let tables: Vec<String> =
+        sqlx::query_scalar("SELECT storage_table FROM dashboard_modules WHERE profile_id = ?")
+            .bind(profile_id)
+            .fetch_all(&mut **transaction)
+            .await?;
+    for table in tables.iter().filter(|table| valid_storage_table(table)) {
+        sqlx::query(&format!("DROP TABLE IF EXISTS \"{table}\""))
+            .execute(&mut **transaction)
+            .await?;
+    }
+    Ok(())
 }
 
 async fn create_data_table(
@@ -1325,6 +1434,7 @@ mod tests {
                 "profile-111111111111111111111111",
                 &module.id,
                 rows,
+                None,
                 "2026-01-02T00:00:00Z",
             )
             .await
@@ -1349,6 +1459,7 @@ mod tests {
                     "profile-111111111111111111111111",
                     &module.id,
                     invalid,
+                    None,
                     "2026-01-03T00:00:00Z"
                 )
                 .await,
@@ -1492,5 +1603,340 @@ mod tests {
                 .await,
             Err(DashboardModuleError::ModuleNotFound)
         ));
+    }
+
+    const PROFILE: &str = "profile-111111111111111111111111";
+    const T2: &str = "2026-01-02T00:00:00Z";
+    const T3: &str = "2026-01-03T00:00:00Z";
+    const T4: &str = "2026-01-04T00:00:00Z";
+
+    fn row(value: Value) -> Map<String, Value> {
+        value.as_object().expect("a JSON object").clone()
+    }
+
+    fn flight(aircraft: &str, airborne: f64, total: f64) -> Value {
+        json!({ "aircraft_type": aircraft, "airborne_hours": airborne, "total_hours": total })
+    }
+
+    fn with_row_id(mut value: Value, row_id: Value) -> Value {
+        value["rowId"] = row_id;
+        value
+    }
+
+    async fn flight_module(store: &DashboardModuleStore) -> DashboardModule {
+        store
+            .create(PROFILE, "air", "flight-hours", None, "2026-01-01T00:00:01Z")
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn saved_rows_keep_their_identity_and_creation_time() {
+        let store = store().await;
+        let module = flight_module(&store).await;
+        let first = store
+            .replace_rows(
+                PROFILE,
+                &module.id,
+                vec![
+                    row(flight("F-16", 1.0, 2.0)),
+                    row(flight("МіГ-29", 3.0, 4.0)),
+                ],
+                None,
+                T2,
+            )
+            .await
+            .unwrap();
+        let a = first.rows[0]["rowId"].as_i64().unwrap();
+        let b = first.rows[1]["rowId"].as_i64().unwrap();
+        assert!(a < b);
+        assert_eq!(first.rows[0]["createdAt"], T2);
+
+        let second = store
+            .replace_rows(
+                PROFILE,
+                &module.id,
+                vec![
+                    row(with_row_id(flight("F-16", 1.5, 2.0), json!(a))),
+                    row(with_row_id(flight("МіГ-29", 3.0, 4.0), json!(b))),
+                    row(flight("Су-27", 5.0, 6.0)),
+                ],
+                None,
+                T3,
+            )
+            .await
+            .unwrap();
+        assert_eq!(second.rows.len(), 3);
+        assert_eq!(second.rows[0]["rowId"], a);
+        assert_eq!(second.rows[0]["airborne_hours"], 1.5);
+        assert_eq!(second.rows[0]["createdAt"], T2);
+        assert_eq!(second.rows[1]["rowId"], b);
+        assert_eq!(second.rows[1]["createdAt"], T2);
+        assert!(second.rows[2]["rowId"].as_i64().unwrap() > b);
+        assert_eq!(second.rows[2]["createdAt"], T3);
+        assert_eq!(second.module.updated_at, T3);
+    }
+
+    #[tokio::test]
+    async fn a_removed_row_never_gets_its_id_back() {
+        let store = store().await;
+        let module = flight_module(&store).await;
+        let first = store
+            .replace_rows(
+                PROFILE,
+                &module.id,
+                vec![
+                    row(flight("F-16", 1.0, 2.0)),
+                    row(flight("МіГ-29", 3.0, 4.0)),
+                ],
+                None,
+                T2,
+            )
+            .await
+            .unwrap();
+        let a = first.rows[0]["rowId"].as_i64().unwrap();
+        let b = first.rows[1]["rowId"].as_i64().unwrap();
+
+        let keep = with_row_id(flight("F-16", 1.0, 2.0), json!(a));
+        let after_delete = store
+            .replace_rows(PROFILE, &module.id, vec![row(keep.clone())], None, T3)
+            .await
+            .unwrap();
+        assert_eq!(after_delete.rows.len(), 1);
+        assert_eq!(after_delete.module.row_count, 1);
+
+        let with_new = store
+            .replace_rows(
+                PROFILE,
+                &module.id,
+                vec![row(keep), row(flight("Су-27", 5.0, 6.0))],
+                None,
+                T4,
+            )
+            .await
+            .unwrap();
+        assert!(
+            with_new.rows[1]["rowId"].as_i64().unwrap() > b,
+            "the id of a deleted row must not be reused"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_stale_version_is_rejected_and_changes_nothing() {
+        let store = store().await;
+        let module = flight_module(&store).await;
+        let opened = module.updated_at.clone();
+        let saved = store
+            .replace_rows(
+                PROFILE,
+                &module.id,
+                vec![row(flight("F-16", 1.0, 2.0))],
+                Some(&opened),
+                T2,
+            )
+            .await
+            .unwrap();
+        assert_eq!(saved.module.updated_at, T2);
+
+        // Друге вікно ще тримає позначку, отриману до цього запису.
+        let stale = store
+            .replace_rows(
+                PROFILE,
+                &module.id,
+                vec![row(flight("МіГ-29", 9.0, 9.0))],
+                Some(&opened),
+                T3,
+            )
+            .await;
+        assert!(matches!(stale, Err(DashboardModuleError::Conflict)));
+        let current = store.get_data(PROFILE, &module.id).await.unwrap();
+        assert_eq!(current.rows.len(), 1);
+        assert_eq!(current.rows[0]["aircraft_type"], "F-16");
+        assert_eq!(current.module.updated_at, T2);
+
+        // Актуальна позначка проходить; запис без позначки лишається безумовним.
+        store
+            .replace_rows(
+                PROFILE,
+                &module.id,
+                vec![row(flight("Су-27", 5.0, 6.0))],
+                Some(T2),
+                T3,
+            )
+            .await
+            .unwrap();
+        store
+            .replace_rows(PROFILE, &module.id, vec![], None, T4)
+            .await
+            .unwrap();
+        assert!(store
+            .get_data(PROFILE, &module.id)
+            .await
+            .unwrap()
+            .rows
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn unknown_or_malformed_row_ids_are_rejected_without_changes() {
+        let store = store().await;
+        let module = flight_module(&store).await;
+        let saved = store
+            .replace_rows(
+                PROFILE,
+                &module.id,
+                vec![row(flight("F-16", 1.0, 2.0))],
+                None,
+                T2,
+            )
+            .await
+            .unwrap();
+        let id = saved.rows[0]["rowId"].as_i64().unwrap();
+
+        // Такого запису в таблиці немає: клієнт тримає застарілий стан.
+        assert!(matches!(
+            store
+                .replace_rows(
+                    PROFILE,
+                    &module.id,
+                    vec![row(with_row_id(flight("F-16", 1.0, 2.0), json!(id + 100)))],
+                    None,
+                    T3
+                )
+                .await,
+            Err(DashboardModuleError::Conflict)
+        ));
+        for bad in [json!(0), json!(-1), json!("1"), json!(1.5), json!(true)] {
+            assert!(matches!(
+                store
+                    .replace_rows(
+                        PROFILE,
+                        &module.id,
+                        vec![row(with_row_id(flight("F-16", 1.0, 2.0), bad))],
+                        None,
+                        T3
+                    )
+                    .await,
+                Err(DashboardModuleError::InvalidRowId)
+            ));
+        }
+        assert!(matches!(
+            store
+                .replace_rows(
+                    PROFILE,
+                    &module.id,
+                    vec![
+                        row(with_row_id(flight("F-16", 1.0, 2.0), json!(id))),
+                        row(with_row_id(flight("F-16", 1.0, 2.0), json!(id)))
+                    ],
+                    None,
+                    T3
+                )
+                .await,
+            Err(DashboardModuleError::InvalidRowId)
+        ));
+
+        let current = store.get_data(PROFILE, &module.id).await.unwrap();
+        assert_eq!(current.rows.len(), 1);
+        assert_eq!(current.module.updated_at, T2);
+    }
+
+    #[tokio::test]
+    async fn deleting_a_profile_drops_only_its_module_tables() {
+        use crate::local_profiles::LocalProfileStore;
+
+        let store = store().await;
+        const OTHER: &str = "profile-222222222222222222222222";
+        sqlx::query(
+            "INSERT INTO local_profiles (id, display_name, name_key, created_at, updated_at)
+             VALUES (?, 'Інший', 'інший', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .bind(OTHER)
+        .execute(&store.pool)
+        .await
+        .unwrap();
+        let mine = flight_module(&store).await;
+        let theirs = store
+            .create(OTHER, "air", "flight-hours", None, "2026-01-01T00:00:02Z")
+            .await
+            .unwrap();
+        store
+            .replace_rows(
+                PROFILE,
+                &mine.id,
+                vec![row(flight("МіГ-29", 3.0, 4.0))],
+                None,
+                T2,
+            )
+            .await
+            .unwrap();
+        store
+            .replace_rows(
+                OTHER,
+                &theirs.id,
+                vec![row(flight("F-16", 1.0, 2.0))],
+                None,
+                T2,
+            )
+            .await
+            .unwrap();
+
+        LocalProfileStore::new(store.pool.clone())
+            .delete(PROFILE, T3)
+            .await
+            .unwrap();
+
+        let tables: Vec<String> = sqlx::query_scalar(
+            "SELECT name FROM sqlite_master
+             WHERE type = 'table' AND name LIKE 'dashboard_data_%' ORDER BY name",
+        )
+        .fetch_all(&store.pool)
+        .await
+        .unwrap();
+        assert_eq!(tables, std::slice::from_ref(&theirs.storage_table));
+        let modules: i64 = sqlx::query_scalar("SELECT count(*) FROM dashboard_modules")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        assert_eq!(modules, 1);
+        assert!(store.list(PROFILE, "air").await.unwrap().is_empty());
+        assert_eq!(
+            store.get_data(OTHER, &theirs.id).await.unwrap().rows.len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn profile_deletion_never_drops_a_table_that_was_not_generated() {
+        use crate::local_profiles::LocalProfileStore;
+
+        let store = store().await;
+        sqlx::query("CREATE TABLE keep_this_table_untouched_1 (value INTEGER)")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO dashboard_modules
+             (id, profile_id, branch, template_id, visual_kind, title, storage_table, created_at, updated_at)
+             VALUES ('dashboard-foreign', ?, 'air', 'kpi', 'kpi', 'Чужа', 'keep_this_table_untouched_1',
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .bind(PROFILE)
+        .execute(&store.pool)
+        .await
+        .unwrap();
+
+        LocalProfileStore::new(store.pool.clone())
+            .delete(PROFILE, T3)
+            .await
+            .unwrap();
+
+        let left: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM sqlite_master WHERE name = 'keep_this_table_untouched_1'",
+        )
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        assert_eq!(left, 1);
     }
 }

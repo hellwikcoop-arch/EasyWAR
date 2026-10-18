@@ -189,10 +189,17 @@ async fn replace_dashboard_module_rows(
     session: tauri::State<'_, ProfileSession>,
     module_id: String,
     rows: Vec<serde_json::Map<String, Value>>,
+    expected_updated_at: Option<String>,
 ) -> Result<DashboardModuleData, String> {
     let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
     modules
-        .replace_rows(&active_profile_id(&session)?, &module_id, rows, &now)
+        .replace_rows(
+            &active_profile_id(&session)?,
+            &module_id,
+            rows,
+            expected_updated_at.as_deref(),
+            &now,
+        )
         .await
         .map_err(|error| error.to_string())
 }
