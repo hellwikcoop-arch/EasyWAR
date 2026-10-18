@@ -277,7 +277,7 @@ pub fn catalog() -> Vec<DashboardModuleTemplate> {
                 ),
                 field(
                     "cloud_base_upper",
-                    "Верхня межа хмар",
+                    "Верхня межа хмар (ВМХ), м",
                     "real",
                     "metric",
                     "average",
@@ -285,7 +285,7 @@ pub fn catalog() -> Vec<DashboardModuleTemplate> {
                 ),
                 field(
                     "cloud_base_lower",
-                    "Нижня межа хмар",
+                    "Нижня межа хмар (НМХ), м",
                     "real",
                     "metric",
                     "average",
@@ -293,7 +293,7 @@ pub fn catalog() -> Vec<DashboardModuleTemplate> {
                 ),
                 field(
                     "cloud_cover",
-                    "Хмарність",
+                    "Хмарність, 0–10",
                     "integer",
                     "metric",
                     "average",
@@ -337,6 +337,20 @@ pub fn catalog() -> Vec<DashboardModuleTemplate> {
                     "real",
                     "metric",
                     "sum",
+                    false,
+                ),
+                // Екіпаж: у полях пишуть прізвища. КЕ, ЛШ і БТ — окремі поля, решта
+                // (разом до 8 осіб: інструктор у будь-кого з екіпажу, на літаку ще
+                // ПКЕ, штурман, бортмеханік, радист) — одне поле з прізвищами через кому.
+                field("crew_ke", "Екіпаж: КЕ", "text", "dimension", "none", false),
+                field("crew_lsh", "Екіпаж: ЛШ", "text", "dimension", "none", false),
+                field("crew_bt", "Екіпаж: БТ", "text", "dimension", "none", false),
+                field(
+                    "crew_other",
+                    "Екіпаж: інші (до 5)",
+                    "text",
+                    "dimension",
+                    "none",
                     false,
                 ),
             ],
@@ -1270,7 +1284,7 @@ mod tests {
     use sqlx::sqlite::SqlitePoolOptions;
     use std::collections::BTreeSet;
 
-    const FLIGHT_FIELD_KEYS: [&str; 24] = [
+    const FLIGHT_FIELD_KEYS: [&str; 28] = [
         "list_number",
         "aircraft_type",
         "day_night",
@@ -1295,6 +1309,10 @@ mod tests {
         "time_in_clouds",
         "hood_time",
         "fuel_consumption",
+        "crew_ke",
+        "crew_lsh",
+        "crew_bt",
+        "crew_other",
     ];
 
     async fn store() -> DashboardModuleStore {
@@ -1554,6 +1572,7 @@ mod tests {
         assert_eq!(data.rows[0]["aircraft_type"], "МіГ-29");
         assert_eq!(data.rows[0]["airborne_hours"], 1.5);
         assert_eq!(data.rows[0]["cloud_cover"], Value::Null);
+        assert_eq!(data.rows[0]["crew_ke"], Value::Null);
         // Старі підписи без одиниць замінюються підписами з одиницями вимірювання,
         // а збережені значення (десяткові години) лишаються без змін.
         let labels = data
@@ -1567,9 +1586,16 @@ mod tests {
             ("total_hours", "Наліт (загальний), год:хв"),
             ("flight_altitude", "Висота польоту, м"),
             ("visibility", "Видимість, км"),
+            ("cloud_base_upper", "Верхня межа хмар (ВМХ), м"),
+            ("cloud_base_lower", "Нижня межа хмар (НМХ), м"),
+            ("cloud_cover", "Хмарність, 0–10"),
             ("time_in_clouds", "Час у хмарах, год:хв"),
             ("hood_time", "Час під шторкою, год:хв"),
             ("fuel_consumption", "Витрата палива, л"),
+            ("crew_ke", "Екіпаж: КЕ"),
+            ("crew_lsh", "Екіпаж: ЛШ"),
+            ("crew_bt", "Екіпаж: БТ"),
+            ("crew_other", "Екіпаж: інші (до 5)"),
         ] {
             assert_eq!(labels[key], label, "підпис поля {key}");
         }
