@@ -2,12 +2,23 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {
+  FUEL_DENSITY_KG_PER_L,
   branchFromLocation,
+  fieldHint,
+  fieldInputText,
   fieldInputType,
+  fieldKind,
+  fieldPlaceholder,
+  formatDuration,
+  formatFieldValue,
+  formatFuel,
+  fuelKilograms,
   isConflictError,
   matchesCatalogItem,
   normalizeCatalog,
   normalizeModules,
+  parseAltitude,
+  parseDuration,
   parseFieldInput,
   previewModel,
   replaceRowsRequest,
@@ -34,20 +45,21 @@ const flightFields = [
   field('flight_count', 'Кількість польотів', 'integer', 'metric', 'sum'),
   field('takeoff_time', 'Час зльоту', 'text', 'dimension'),
   field('landing_time', 'Час посадки', 'text', 'dimension'),
-  field('airborne_hours', 'Наліт (повітря)', 'real', 'metric', 'sum', true),
-  field('total_hours', 'Наліт (загальний)', 'real', 'metric', 'sum', true),
-  field('flight_altitude', 'Висота польоту', 'real', 'metric', 'average'),
+  field('airborne_hours', 'Наліт (повітря), год:хв', 'real', 'metric', 'sum', true),
+  field('total_hours', 'Наліт (загальний), год:хв', 'real', 'metric', 'sum', true),
+  field('flight_altitude', 'Висота польоту, м', 'real', 'metric', 'average'),
   field('combat_application_grade', 'Оцінка бойового застосування', 'text', 'status'),
   field('flight_grade', 'Оцінка за політ', 'text', 'status'),
   field('cloud_base_upper', 'Верхня межа хмар', 'real', 'metric', 'average'),
   field('cloud_base_lower', 'Нижня межа хмар', 'real', 'metric', 'average'),
   field('cloud_cover', 'Хмарність', 'integer', 'metric', 'average'),
-  field('visibility', 'Видимість', 'real', 'metric', 'average'),
+  field('visibility', 'Видимість, км', 'real', 'metric', 'average'),
   field('instrument_meteorological_conditions', 'Політ у СМУ', 'boolean', 'status'),
-  field('time_in_clouds', 'Час у хмарах', 'real', 'metric', 'sum'),
-  field('hood_time', 'Час під шторкою', 'real', 'metric', 'sum'),
-  field('fuel_consumption', 'Витрата палива', 'real', 'metric', 'sum'),
+  field('time_in_clouds', 'Час у хмарах, год:хв', 'real', 'metric', 'sum'),
+  field('hood_time', 'Час під шторкою, год:хв', 'real', 'metric', 'sum'),
+  field('fuel_consumption', 'Витрата палива, л', 'real', 'metric', 'sum'),
 ];
+const flightField = key => flightFields.find(item => item.key === key);
 const flightFieldKeys = flightFields.map(item => item.key);
 
 test('branch follows command dashboards and module pages', () => {
@@ -114,7 +126,7 @@ test('preview model aggregates the complete backend row limit', () => {
   });
 });
 
-test('flight log editor converts all supported input types without inventing units', () => {
+test('flight log editor converts all supported input types', () => {
   const row = rowForWrite(flightFields, {
     list_number: '7',
     aircraft_type: 'F-16',
@@ -122,19 +134,193 @@ test('flight log editor converts all supported input types without inventing uni
     flight_count: '2',
     takeoff_time: '21:10',
     landing_time: '22:35',
-    airborne_hours: '1,42',
-    total_hours: '1.75',
+    airborne_hours: '1:25',
+    total_hours: '1:45',
+    flight_altitude: '0,3 км',
     visibility: '10',
+    fuel_consumption: '255',
     instrument_meteorological_conditions: 'false',
   });
   assert.equal(row.list_number, 7);
-  assert.equal(row.airborne_hours, 1.42);
+  assert.equal(row.airborne_hours, 85 / 60);
+  assert.equal(row.total_hours, 1.75);
+  assert.equal(row.flight_altitude, 300);
+  assert.equal(row.visibility, 10);
+  assert.equal(row.fuel_consumption, 255);
   assert.equal(row.instrument_meteorological_conditions, false);
   assert.equal('hood_time' in row, false);
   assert.equal(fieldInputType(flightFields.find(item => item.key === 'takeoff_time')), 'time');
   assert.equal(fieldInputType(flightFields.find(item => item.key === 'instrument_meteorological_conditions')), 'select');
   assert.throws(() => parseFieldInput(flightFields[1], ''), /обов'язковим/);
   assert.throws(() => parseFieldInput(flightFields[18], '5.5'), /ціле число/);
+});
+
+test('durations are typed and shown as год:хв and stored as decimal hours', () => {
+  assert.equal(parseDuration('0:32'), 32 / 60);
+  assert.equal(parseDuration(' 1:05 '), 65 / 60);
+  assert.equal(parseDuration('0:00'), 0);
+  assert.equal(parseDuration('100:59'), (100 * 60 + 59) / 60);
+  for (const bad of ['', '0:5', '0:60', '1,5', '1.30', '-0:30', '1:2:3', '0 :32', ':30', 'abc', '12345:00', null, undefined, 1.5]) {
+    assert.equal(parseDuration(bad), null, String(bad));
+  }
+  assert.equal(formatDuration(32 / 60), '0:32');
+  assert.equal(formatDuration(0), '0:00');
+  assert.equal(formatDuration(1.5), '1:30');
+  assert.equal(formatDuration(1.42), '1:25');
+  assert.equal(formatDuration(59.9 / 60), '1:00', 'a rounded-up minute carries into the hour');
+  assert.equal(formatDuration(null), '—');
+  // Кожна хвилина до 100 годин читається назад у те саме число годин.
+  for (let minutes = 0; minutes <= 6000; minutes += 1) {
+    assert.equal(parseDuration(formatDuration(minutes / 60)), minutes / 60, `${minutes} хв`);
+  }
+});
+
+test('the owner examples: 0:32 total, 0:22 airborne, 255 litres, 300 metres, 10 km', () => {
+  const row = rowForWrite(flightFields, {
+    aircraft_type: 'Мі-8',
+    airborne_hours: '0:22',
+    total_hours: '0:32',
+    flight_altitude: '0,3 км',
+    visibility: '10',
+    fuel_consumption: '255',
+  });
+  assert.equal(formatFieldValue(flightField('total_hours'), row.total_hours), '0:32');
+  assert.equal(formatFieldValue(flightField('airborne_hours'), row.airborne_hours), '0:22');
+  assert.equal(formatFieldValue(flightField('flight_altitude'), row.flight_altitude), '300');
+  assert.equal(formatFieldValue(flightField('visibility'), row.visibility), '10');
+  assert.equal(formatFieldValue(flightField('fuel_consumption'), row.fuel_consumption), '255 л (204 кг)');
+});
+
+test('altitude is read as metres, and kilometres only with an explicit unit', () => {
+  assert.equal(parseAltitude('300'), 300);
+  assert.equal(parseAltitude('300 м'), 300);
+  assert.equal(parseAltitude('300м'), 300);
+  assert.equal(parseAltitude('0,3 км'), 300);
+  assert.equal(parseAltitude('0.3км'), 300);
+  assert.equal(parseAltitude('1,5 КМ'), 1500);
+  assert.equal(parseAltitude('1.1 km'), 1100);
+  assert.equal(parseAltitude('0,5 м'), 0.5);
+  assert.equal(parseAltitude('0'), 0);
+  assert.equal(parseAltitude('1500.5'), 1500.5);
+  // «0,3» без одиниці — метри чи кілометри? Мовчки вгадувати не можна.
+  for (const bad of ['', '0,3', '0.75', 'висота', '300 фут', '-5', '1 000', '3км2', null, undefined, 300]) {
+    assert.equal(parseAltitude(bad), null, String(bad));
+  }
+  const altitude = flightField('flight_altitude');
+  assert.throws(() => parseFieldInput(altitude, '0,3'), /метри \(300\) або кілометри з позначкою \(0,3 км\)/);
+  assert.equal(parseFieldInput(altitude, '0,3 км'), 300);
+});
+
+test('fuel is stored in litres and shown with kilograms at density 0.8', () => {
+  const fuel = flightField('fuel_consumption');
+  assert.equal(FUEL_DENSITY_KG_PER_L, 0.8);
+  assert.ok(Math.abs(fuelKilograms(255) - 204) < 1e-9);
+  assert.equal(formatFuel(255), '255 л (204 кг)');
+  assert.equal(formatFuel(333), '333 л (266,4 кг)');
+  assert.equal(formatFuel(0), '0 л (0 кг)');
+  assert.equal(formatFieldValue(fuel, 255), '255 л (204 кг)');
+  assert.equal(formatFieldValue(fuel, null), '—');
+  assert.equal(parseFieldInput(fuel, '255'), 255);
+  assert.equal(parseFieldInput(fuel, '255,5'), 255.5);
+  assert.throws(() => parseFieldInput(fuel, '-1'), /від'ємним/);
+  assert.throws(() => parseFieldInput(fuel, 'багато'), /число/);
+});
+
+test('other numbers keep their plain format and the old behaviour', () => {
+  const visibility = flightField('visibility');
+  assert.equal(formatFieldValue(visibility, 10), '10');
+  assert.equal(formatFieldValue(visibility, 7.5), '7,5');
+  assert.equal(formatFieldValue(flightField('cloud_cover'), 5), '5');
+  assert.equal(formatFieldValue(flightField('aircraft_type'), 'Мі-8'), 'Мі-8');
+  assert.equal(formatFieldValue(flightField('instrument_meteorological_conditions'), true), 'Так');
+  assert.equal(parseFieldInput(visibility, '7,5'), 7.5);
+  assert.equal(parseFieldInput(visibility, '10'), 10);
+});
+
+test('only known real fields get a special format', () => {
+  assert.equal(fieldKind(flightField('airborne_hours')), 'duration');
+  assert.equal(fieldKind(flightField('time_in_clouds')), 'duration');
+  assert.equal(fieldKind(flightField('hood_time')), 'duration');
+  assert.equal(fieldKind(flightField('flight_altitude')), 'altitude');
+  assert.equal(fieldKind(flightField('fuel_consumption')), 'fuel');
+  assert.equal(fieldKind(flightField('visibility')), null);
+  assert.equal(fieldKind({ key: 'airborne_hours', dataType: 'text' }), null);
+  assert.equal(fieldKind({ key: 'constructor', dataType: 'real' }), null);
+  assert.equal(fieldKind({ key: '__proto__', dataType: 'real' }), null);
+  assert.equal(fieldKind(null), null);
+});
+
+test('duration fields reject decimal hours and impossible minutes', () => {
+  const hours = flightField('airborne_hours');
+  assert.equal(parseFieldInput(hours, '0:32'), 32 / 60);
+  assert.equal(parseFieldInput(hours, 1.5), 1.5, 'a number from code is already hours');
+  for (const bad of ['1,42', '1.30', '0:60', '90', '-0:10']) {
+    assert.throws(() => parseFieldInput(hours, bad), /форматі год:хв/, bad);
+  }
+  for (const bad of [-1, Number.NaN, Number.POSITIVE_INFINITY]) {
+    assert.throws(() => parseFieldInput(hours, bad), /год:хв/, String(bad));
+  }
+  assert.throws(() => parseFieldInput(hours, ''), /обов'язковим/);
+});
+
+test('inputs, placeholders and hints match the special formats', () => {
+  const fuel = flightField('fuel_consumption');
+  const altitude = flightField('flight_altitude');
+  assert.equal(fieldInputType(flightField('airborne_hours')), 'text');
+  assert.equal(fieldInputType(flightField('hood_time')), 'text');
+  assert.equal(fieldInputType(altitude), 'text');
+  assert.equal(fieldInputType(fuel), 'number');
+  assert.equal(fieldInputType(flightField('visibility')), 'number');
+  assert.equal(fieldPlaceholder(flightField('total_hours')), '0:32');
+  assert.equal(fieldPlaceholder(altitude), '300 або 0,3 км');
+  assert.equal(fieldPlaceholder(flightField('visibility')), '');
+  assert.equal(fieldHint(fuel, '255'), '≈ 204 кг (густина 0,8 кг/л)');
+  assert.equal(fieldHint(fuel, '255,5'), '≈ 204,4 кг (густина 0,8 кг/л)');
+  for (const text of ['', ' ', 'abc', '-5', undefined]) assert.equal(fieldHint(fuel, text), '', String(text));
+  assert.equal(fieldHint(altitude, '0,3 км'), '= 300 м');
+  assert.equal(fieldHint(altitude, '300'), '');
+  assert.equal(fieldHint(altitude, 'abc км'), '');
+  assert.equal(fieldHint(flightField('visibility'), '10'), '');
+  assert.equal(fieldHint(flightField('airborne_hours'), '0:32'), '');
+});
+
+test('a row opened for editing is not rewritten where the text was not changed', () => {
+  const hours = flightField('airborne_hours');
+  const original = { rowId: 3, aircraft_type: 'Мі-8', airborne_hours: 1.42, total_hours: 1.75, fuel_consumption: 255 };
+  assert.equal(fieldInputText(hours, 1.42), '1:25');
+  const form = { aircraft_type: 'Мі-8МТ', airborne_hours: '1:25', total_hours: '1:45', fuel_consumption: '255' };
+
+  const untouched = rowForWrite(flightFields, form, original);
+  assert.equal(untouched.airborne_hours, 1.42, 'the shown 1:25 is not written back over 1.42');
+  assert.equal(untouched.total_hours, 1.75);
+  assert.equal(untouched.aircraft_type, 'Мі-8МТ');
+
+  assert.equal(rowForWrite(flightFields, { ...form, airborne_hours: '1:26' }, original).airborne_hours, 86 / 60);
+  assert.equal('fuel_consumption' in rowForWrite(flightFields, { ...form, fuel_consumption: '' }, original), false);
+  assert.equal(rowForWrite(flightFields, form).airborne_hours, 85 / 60, 'without the original the text is converted');
+});
+
+test('the text a field is opened with always reads back to the same value', () => {
+  const cases = [
+    ['airborne_hours', 0], ['airborne_hours', 85 / 60], ['total_hours', 1.75],
+    ['flight_altitude', 300], ['flight_altitude', 0.5], ['flight_altitude', 1500.5],
+    ['fuel_consumption', 255], ['fuel_consumption', 255.5], ['visibility', 10], ['cloud_cover', 3],
+    ['aircraft_type', 'Мі-8'], ['instrument_meteorological_conditions', false],
+  ];
+  for (const [key, value] of cases) {
+    const item = flightField(key);
+    assert.deepEqual(parseFieldInput(item, fieldInputText(item, value)), value, `${key}=${value}`);
+  }
+  assert.equal(fieldInputText(flightField('flight_altitude'), 0.5), '0.5 м');
+  assert.equal(fieldInputText(flightField('airborne_hours'), null), '');
+});
+
+test('the unit labels in the JS fixtures are the ones the Rust catalog ships', async () => {
+  const store = await readFile(new URL('../src-tauri/src/dashboard_modules.rs', import.meta.url), 'utf8');
+  for (const key of ['airborne_hours', 'total_hours', 'flight_altitude', 'visibility', 'time_in_clouds', 'hood_time', 'fuel_consumption']) {
+    const label = flightField(key).label;
+    assert.ok(store.includes(`"${label}"`), `${key}: «${label}»`);
+  }
 });
 
 test('both operational dashboards load the shared module catalog', async () => {

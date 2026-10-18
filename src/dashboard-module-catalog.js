@@ -1,6 +1,11 @@
 import {
   branchFromLocation,
+  fieldHint,
+  fieldInputText,
   fieldInputType,
+  fieldKind,
+  fieldPlaceholder,
+  formatFieldValue,
   formatValue,
   isConflictError,
   matchesCatalogItem,
@@ -228,7 +233,7 @@ function initialize() {
       body.append(el('tr', {}, el('td', { colspan: String(module.fields.length + 1), class: 'ewmc-table-empty', text: unreadable ? 'Дані не прочитано.' : 'Записів ще немає.' })));
     } else {
       rows.forEach((row, index) => body.append(el('tr', {},
-        module.fields.map(field => el('td', { text: formatValue(row?.[field.key]) })),
+        module.fields.map(field => el('td', { text: formatFieldValue(field, row?.[field.key]) })),
         el('td', { class: 'ewmc-row-actions' },
           el('button', {
             type: 'button',
@@ -281,9 +286,16 @@ function initialize() {
     for (const field of module.fields) {
       const control = createFieldControl(field, existing[field.key]);
       controls.set(field.key, control);
+      // Підказка (кілограми для літрів, метри для «0,3 км») оновлюється під час введення; порожня — прихована.
+      const hint = el('small', { class: 'ewmc-hint', id: `ewmc-hint-${field.key}` });
+      const paintHint = () => { hint.textContent = fieldHint(field, control.value); };
+      paintHint();
+      control.addEventListener('input', paintHint);
+      control.setAttribute('aria-describedby', hint.id);
       formGrid.append(el('label', { class: 'ewmc-field' },
         el('span', { text: `${field.label}${field.required ? ' *' : ''}` }),
-        control));
+        control,
+        hint));
     }
     const status = el('p', { class: 'ewmc-form-status', 'aria-live': 'polite' });
     const saveButton = el('button', { type: 'submit', class: 'btn primary', text: isEdit ? 'Зберегти зміни' : 'Додати рядок' });
@@ -354,13 +366,19 @@ function initialize() {
       let edited;
       try {
         const values = Object.fromEntries([...controls].map(([key, control]) => [key, control.value]));
-        edited = rowForWrite(module.fields, values);
+        edited = rowForWrite(module.fields, values, existing);
       } catch (error) {
         status.textContent = String(error?.message || error || 'Не вдалося зберегти запис.');
         status.classList.add('error');
         return;
       }
       persist(rowsAfterSave(module.fields, rows, isEdit ? rowIndex : null, edited), isEdit ? 'Запис оновлено.' : 'Рядок додано.');
+    });
+    // Повідомлення про помилку зникає, щойно користувач береться виправляти поле, і не висить поруч із уже виправленим.
+    form.addEventListener('input', () => {
+      if (state.busy || !status.classList.contains('error')) return;
+      status.textContent = '';
+      status.classList.remove('error');
     });
     if (isEdit) {
       removeButton.addEventListener('click', () => askToRemove(true));
@@ -390,14 +408,17 @@ function initialize() {
       select.value = value === true ? 'true' : value === false ? 'false' : '';
       return select;
     }
+    const kind = fieldKind(field);
     const attributes = {
       type,
-      value: value == null ? '' : String(value),
+      value: fieldInputText(field, value),
       required: field.required,
       'aria-label': field.label,
+      placeholder: fieldPlaceholder(field) || false,
     };
     if (type === 'number') attributes.step = field.dataType === 'integer' ? '1' : 'any';
-    if (type === 'text') attributes.maxlength = '4096';
+    if (type === 'number' && kind === 'fuel') attributes.min = '0';
+    if (type === 'text') attributes.maxlength = kind ? '16' : '4096';
     return el('input', attributes);
   }
 

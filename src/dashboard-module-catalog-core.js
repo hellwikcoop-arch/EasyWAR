@@ -81,13 +81,137 @@ export function formatValue(value) {
   return String(value);
 }
 
+/** Густина авіаційного палива, кг/л. Кілограми лише розраховуються з літрів: у базі їх немає. */
+export const FUEL_DENSITY_KG_PER_L = 0.8;
+
+/**
+ * Поля журналу польотів із власним форматом введення й показу. Ключі — з вбудованого
+ * каталогу Rust. У базі всі вони лишаються числами: тривалість — десятковими годинами,
+ * висота — метрами, паливо — літрами, тому схема й міграції не змінюються.
+ */
+const MEASURED_FIELDS = new Map([
+  ['airborne_hours', 'duration'],
+  ['total_hours', 'duration'],
+  ['time_in_clouds', 'duration'],
+  ['hood_time', 'duration'],
+  ['flight_altitude', 'altitude'],
+  ['fuel_consumption', 'fuel'],
+]);
+const DURATION_PATTERN = /^(\d{1,4}):([0-5]\d)$/;
+const ALTITUDE_PATTERN = /^(\d+(?:[.,]\d+)?)\s*(км|km|м|m)?$/iu;
+const kilogramsFormat = new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 1 });
+
+/** `'duration'` | `'altitude'` | `'fuel'` для полів із власним форматом, інакше `null`. */
+export function fieldKind(field) {
+  return field?.dataType === 'real' ? MEASURED_FIELDS.get(field.key) ?? null : null;
+}
+
+/**
+ * «1:25» → 1,4166… год. Хвилини завжди двоцифрові, щоб «1:5» не читалося двояко;
+ * десятковий запис («1,5», «1.30») тут свідомо не приймається — його легко сплутати
+ * з годинами й хвилинами. Будь-що інше — `null`.
+ */
+export function parseDuration(raw) {
+  const match = DURATION_PATTERN.exec(typeof raw === 'string' ? raw.trim() : '');
+  return match ? (Number(match[1]) * 60 + Number(match[2])) / 60 : null;
+}
+
+/** Десяткові години → «год:хв», округлено до хвилини. */
+export function formatDuration(hours) {
+  if (!finite(hours) || hours < 0) return formatValue(hours);
+  const minutes = Math.round(hours * 60);
+  return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, '0')}`;
+}
+
+/**
+ * Висота в метрах: «300» і «300 м» — метри, «0,3 км» — кілометри. Дробове число менше
+ * за 1 без одиниці («0,3») неоднозначне — це метри чи кілометри, — тому його не приймаємо.
+ */
+export function parseAltitude(raw) {
+  const match = ALTITUDE_PATTERN.exec(typeof raw === 'string' ? raw.trim() : '');
+  if (!match) return null;
+  const amount = Number(match[1].replace(',', '.'));
+  const unit = (match[2] || '').toLowerCase();
+  if (unit === 'км' || unit === 'km') return Math.round(amount * 100_000) / 100;
+  if (!unit && amount > 0 && amount < 1) return null;
+  return amount;
+}
+
+export function fuelKilograms(litres) {
+  return litres * FUEL_DENSITY_KG_PER_L;
+}
+
+/** «255 л (204 кг)»: літри зберігаються, кілограми розраховуються за густиною. */
+export function formatFuel(litres) {
+  return `${formatValue(litres)} л (${kilogramsFormat.format(fuelKilograms(litres))} кг)`;
+}
+
+/** Значення поля в таблиці: «0:32» для тривалості, «255 л (204 кг)» для палива. */
+export function formatFieldValue(field, value) {
+  if (!finite(value)) return formatValue(value);
+  switch (fieldKind(field)) {
+    case 'duration': return formatDuration(value);
+    case 'fuel': return formatFuel(value);
+    default: return formatValue(value);
+  }
+}
+
+/** Текст, з яким поле відкривається у формі; `parseFieldInput` читає його назад без втрат. */
+export function fieldInputText(field, value) {
+  if (value == null) return '';
+  if (field?.dataType === 'boolean') return value === true ? 'true' : value === false ? 'false' : '';
+  const kind = fieldKind(field);
+  if (kind === 'duration' && finite(value) && value >= 0) return formatDuration(value);
+  if (kind === 'altitude' && finite(value) && value > 0 && value < 1) return `${value} м`;
+  return String(value);
+}
+
+export function fieldPlaceholder(field) {
+  switch (fieldKind(field)) {
+    case 'duration': return '0:32';
+    case 'altitude': return '300 або 0,3 км';
+    case 'fuel': return 'літри';
+    default: return '';
+  }
+}
+
+/** Підказка під полем під час введення: кілограми для літрів, метри для «0,3 км». */
+export function fieldHint(field, rawText) {
+  const raw = typeof rawText === 'string' ? rawText.trim() : '';
+  if (!raw) return '';
+  const kind = fieldKind(field);
+  if (kind === 'fuel') {
+    const litres = Number(raw.replace(',', '.'));
+    return finite(litres) && litres >= 0
+      ? `≈ ${kilogramsFormat.format(fuelKilograms(litres))} кг (густина ${FUEL_DENSITY_KG_PER_L.toLocaleString('uk-UA')} кг/л)`
+      : '';
+  }
+  if (kind === 'altitude' && /км|km/iu.test(raw)) {
+    const metres = parseAltitude(raw);
+    return metres == null ? '' : `= ${formatValue(metres)} м`;
+  }
+  return '';
+}
+
 export function fieldInputType(field) {
   if (field?.dataType === 'boolean') return 'select';
+  const kind = fieldKind(field);
+  if (kind === 'duration' || kind === 'altitude') return 'text';
   if (field?.dataType === 'integer' || field?.dataType === 'real') return 'number';
   if (field?.dataType === 'date') return 'date';
   if (field?.dataType === 'datetime') return 'datetime-local';
   if (['takeoff_time', 'landing_time'].includes(field?.key)) return 'time';
   return 'text';
+}
+
+function parseMeasured(kind, label, raw) {
+  const value = typeof raw === 'number'
+    ? (finite(raw) && raw >= 0 ? raw : null)
+    : kind === 'duration' ? parseDuration(raw) : parseAltitude(raw);
+  if (value != null) return value;
+  throw new Error(kind === 'duration'
+    ? `Поле «${label}» має містити час у форматі год:хв, наприклад 0:32.`
+    : `Поле «${label}» має містити метри (300) або кілометри з позначкою (0,3 км).`);
 }
 
 export function parseFieldInput(field, rawValue) {
@@ -108,8 +232,11 @@ export function parseFieldInput(field, rawValue) {
     return value;
   }
   if (field?.dataType === 'real') {
+    const kind = fieldKind(field);
+    if (kind === 'duration' || kind === 'altitude') return parseMeasured(kind, label, raw);
     const value = typeof raw === 'number' ? raw : Number(String(raw).replace(',', '.'));
     if (!Number.isFinite(value)) throw new Error(`Поле «${label}» має містити число.`);
+    if (kind === 'fuel' && value < 0) throw new Error(`Поле «${label}» не може бути від'ємним.`);
     return value;
   }
   const value = String(raw);
@@ -117,10 +244,19 @@ export function parseFieldInput(field, rawValue) {
   return value;
 }
 
-export function rowForWrite(fields, rawValues) {
+/**
+ * Рядок для запису з текстів форми. `original` — запис, який відкрито для правки:
+ * якщо текст поля не змінено, лишається збережене значення, а не його повторне
+ * перетворення (так «1,42 год» зі старого запису не округлюється до «1:25» мовчки).
+ */
+export function rowForWrite(fields, rawValues, original = {}) {
   const row = {};
   for (const field of Array.isArray(fields) ? fields : []) {
-    const value = parseFieldInput(field, rawValues?.[field.key]);
+    const raw = rawValues?.[field.key];
+    const before = original?.[field.key];
+    const value = before != null && raw === fieldInputText(field, before)
+      ? before
+      : parseFieldInput(field, raw);
     if (value !== null) row[field.key] = value;
   }
   return row;
@@ -259,6 +395,16 @@ export const dashboardModuleCore = {
   schemaSummary,
   matchesCatalogItem,
   formatValue,
+  fieldKind,
+  parseDuration,
+  formatDuration,
+  parseAltitude,
+  fuelKilograms,
+  formatFuel,
+  formatFieldValue,
+  fieldInputText,
+  fieldPlaceholder,
+  fieldHint,
   fieldInputType,
   parseFieldInput,
   rowForWrite,
