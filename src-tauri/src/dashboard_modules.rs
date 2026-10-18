@@ -249,11 +249,11 @@ pub fn catalog() -> Vec<DashboardModuleTemplate> {
                     "none",
                     false,
                 ),
-                metric("airborne_hours", "Наліт (повітря)"),
-                metric("total_hours", "Наліт (загальний)"),
+                metric("airborne_hours", "Наліт (повітря), год:хв"),
+                metric("total_hours", "Наліт (загальний), год:хв"),
                 field(
                     "flight_altitude",
-                    "Висота польоту",
+                    "Висота польоту, м",
                     "real",
                     "metric",
                     "average",
@@ -301,7 +301,7 @@ pub fn catalog() -> Vec<DashboardModuleTemplate> {
                 ),
                 field(
                     "visibility",
-                    "Видимість",
+                    "Видимість, км",
                     "real",
                     "metric",
                     "average",
@@ -317,7 +317,7 @@ pub fn catalog() -> Vec<DashboardModuleTemplate> {
                 ),
                 field(
                     "time_in_clouds",
-                    "Час у хмарах",
+                    "Час у хмарах, год:хв",
                     "real",
                     "metric",
                     "sum",
@@ -325,7 +325,7 @@ pub fn catalog() -> Vec<DashboardModuleTemplate> {
                 ),
                 field(
                     "hood_time",
-                    "Час під шторкою",
+                    "Час під шторкою, год:хв",
                     "real",
                     "metric",
                     "sum",
@@ -333,7 +333,7 @@ pub fn catalog() -> Vec<DashboardModuleTemplate> {
                 ),
                 field(
                     "fuel_consumption",
-                    "Витрата палива",
+                    "Витрата палива, л",
                     "real",
                     "metric",
                     "sum",
@@ -1554,6 +1554,25 @@ mod tests {
         assert_eq!(data.rows[0]["aircraft_type"], "МіГ-29");
         assert_eq!(data.rows[0]["airborne_hours"], 1.5);
         assert_eq!(data.rows[0]["cloud_cover"], Value::Null);
+        // Старі підписи без одиниць замінюються підписами з одиницями вимірювання,
+        // а збережені значення (десяткові години) лишаються без змін.
+        let labels = data
+            .module
+            .fields
+            .iter()
+            .map(|field| (field.key.as_str(), field.label.as_str()))
+            .collect::<BTreeMap<_, _>>();
+        for (key, label) in [
+            ("airborne_hours", "Наліт (повітря), год:хв"),
+            ("total_hours", "Наліт (загальний), год:хв"),
+            ("flight_altitude", "Висота польоту, м"),
+            ("visibility", "Видимість, км"),
+            ("time_in_clouds", "Час у хмарах, год:хв"),
+            ("hood_time", "Час під шторкою, год:хв"),
+            ("fuel_consumption", "Витрата палива, л"),
+        ] {
+            assert_eq!(labels[key], label, "підпис поля {key}");
+        }
         let columns = sqlx::query(&format!("PRAGMA table_info({table})"))
             .fetch_all(&store.pool)
             .await
