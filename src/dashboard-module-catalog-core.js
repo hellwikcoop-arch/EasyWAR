@@ -93,6 +93,7 @@ export const FUEL_DENSITY_KG_PER_L = 0.8;
 const MEASURED_FIELDS = new Map([
   ['airborne_hours', 'duration'],
   ['total_hours', 'duration'],
+  ['engine_test_time', 'duration'],
   ['time_in_clouds', 'duration'],
   ['hood_time', 'duration'],
   ['flight_altitude', 'height'],
@@ -105,14 +106,19 @@ const HEIGHT_PATTERN = /^(\d+(?:[.,]\d+)?)\s*(км|km|м|m)?$/iu;
 const kilogramsFormat = new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 1 });
 
 /**
- * Допустимі межі числових полів. Хмарність — за 10-бальною шкалою; видимість і витрата
- * палива не бувають від'ємними. Межі перевіряє лише форма: Rust приймає значення як є,
- * щоб старий запис із «неправильним» числом не блокував збереження всієї таблиці.
+ * Допустимі межі числових полів. Хмарність — за 10-бальною шкалою; видимість, витрата
+ * палива, вантаж, пасажири й заходи/посадки за РСП не бувають від'ємними. Межі
+ * перевіряє лише форма: Rust приймає значення як є, щоб старий запис із
+ * «неправильним» числом не блокував збереження всієї таблиці.
  */
 const FIELD_LIMITS = new Map([
   ['cloud_cover', { min: 0, max: 10 }],
   ['visibility', { min: 0 }],
   ['fuel_consumption', { min: 0 }],
+  ['cargo_kg', { min: 0 }],
+  ['passengers', { min: 0 }],
+  ['rsp_approaches', { min: 0 }],
+  ['rsp_landings', { min: 0 }],
 ]);
 
 /** `'duration'` | `'height'` | `'fuel'` для полів із власним форматом, інакше `null`. */

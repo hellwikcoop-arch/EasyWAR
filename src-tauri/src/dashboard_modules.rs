@@ -177,6 +177,15 @@ pub fn catalog() -> Vec<DashboardModuleTemplate> {
                     false,
                 ),
                 dimension("aircraft_type", "Тип ПС"),
+                // Бортовий номер: цифри або текст, тому текстове поле.
+                field(
+                    "aircraft_number",
+                    "Номер ПС",
+                    "text",
+                    "dimension",
+                    "none",
+                    false,
+                ),
                 field(
                     "day_night",
                     "День / ніч",
@@ -229,6 +238,16 @@ pub fn catalog() -> Vec<DashboardModuleTemplate> {
                     "flight_count",
                     "Кількість польотів",
                     "integer",
+                    "metric",
+                    "sum",
+                    false,
+                ),
+                // «Запуск проба» з таблиці власника — тривалість, як наліт: вводять і
+                // показують год:хв, у базі десяткові години.
+                field(
+                    "engine_test_time",
+                    "Запуск, проба, год:хв",
+                    "real",
                     "metric",
                     "sum",
                     false,
@@ -351,6 +370,26 @@ pub fn catalog() -> Vec<DashboardModuleTemplate> {
                     "text",
                     "dimension",
                     "none",
+                    false,
+                ),
+                // Решта колонок таблиці власника: пасажири, вантаж і заходи/посадки
+                // за РСП — кількості, тому цілі числа; вантаж — кілограми.
+                field("passengers", "Пасажири", "integer", "metric", "sum", false),
+                field("cargo_kg", "Вантаж, кг", "real", "metric", "sum", false),
+                field(
+                    "rsp_approaches",
+                    "Заходів РСП",
+                    "integer",
+                    "metric",
+                    "sum",
+                    false,
+                ),
+                field(
+                    "rsp_landings",
+                    "Посадок РСП",
+                    "integer",
+                    "metric",
+                    "sum",
                     false,
                 ),
             ],
@@ -1284,9 +1323,10 @@ mod tests {
     use sqlx::sqlite::SqlitePoolOptions;
     use std::collections::BTreeSet;
 
-    const FLIGHT_FIELD_KEYS: [&str; 28] = [
+    const FLIGHT_FIELD_KEYS: [&str; 34] = [
         "list_number",
         "aircraft_type",
+        "aircraft_number",
         "day_night",
         "flight_shift_number",
         "training_program_fuel",
@@ -1294,6 +1334,7 @@ mod tests {
         "complex_exercise_number_1",
         "complex_exercise_number_2",
         "flight_count",
+        "engine_test_time",
         "takeoff_time",
         "landing_time",
         "airborne_hours",
@@ -1313,6 +1354,10 @@ mod tests {
         "crew_lsh",
         "crew_bt",
         "crew_other",
+        "passengers",
+        "cargo_kg",
+        "rsp_approaches",
+        "rsp_landings",
     ];
 
     async fn store() -> DashboardModuleStore {
@@ -1573,6 +1618,8 @@ mod tests {
         assert_eq!(data.rows[0]["airborne_hours"], 1.5);
         assert_eq!(data.rows[0]["cloud_cover"], Value::Null);
         assert_eq!(data.rows[0]["crew_ke"], Value::Null);
+        assert_eq!(data.rows[0]["aircraft_number"], Value::Null);
+        assert_eq!(data.rows[0]["rsp_landings"], Value::Null);
         // Старі підписи без одиниць замінюються підписами з одиницями вимірювання,
         // а збережені значення (десяткові години) лишаються без змін.
         let labels = data
@@ -1596,6 +1643,12 @@ mod tests {
             ("crew_lsh", "Екіпаж: ЛШ"),
             ("crew_bt", "Екіпаж: БТ"),
             ("crew_other", "Екіпаж: інші (до 5)"),
+            ("aircraft_number", "Номер ПС"),
+            ("engine_test_time", "Запуск, проба, год:хв"),
+            ("passengers", "Пасажири"),
+            ("cargo_kg", "Вантаж, кг"),
+            ("rsp_approaches", "Заходів РСП"),
+            ("rsp_landings", "Посадок РСП"),
         ] {
             assert_eq!(labels[key], label, "підпис поля {key}");
         }

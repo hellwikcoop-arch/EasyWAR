@@ -43,6 +43,7 @@ const field = (key, label, dataType = 'text', role = 'note', aggregation = 'none
 const flightFields = [
   field('list_number', 'Номер за списком', 'integer', 'order'),
   field('aircraft_type', 'Тип ПС', 'text', 'dimension', 'none', true),
+  field('aircraft_number', 'Номер ПС', 'text', 'dimension'),
   field('day_night', 'День / ніч', 'text', 'dimension'),
   field('flight_shift_number', 'Номер льотної зміни', 'integer', 'dimension'),
   field('training_program_fuel', 'Програма підготовки (паливо)'),
@@ -50,6 +51,7 @@ const flightFields = [
   field('complex_exercise_number_1', 'Номер вправи у комплексі №1'),
   field('complex_exercise_number_2', 'Номер вправи у комплексі №2'),
   field('flight_count', 'Кількість польотів', 'integer', 'metric', 'sum'),
+  field('engine_test_time', 'Запуск, проба, год:хв', 'real', 'metric', 'sum'),
   field('takeoff_time', 'Час зльоту', 'text', 'dimension'),
   field('landing_time', 'Час посадки', 'text', 'dimension'),
   field('airborne_hours', 'Наліт (повітря), год:хв', 'real', 'metric', 'sum', true),
@@ -69,6 +71,10 @@ const flightFields = [
   field('crew_lsh', 'Екіпаж: ЛШ', 'text', 'dimension'),
   field('crew_bt', 'Екіпаж: БТ', 'text', 'dimension'),
   field('crew_other', 'Екіпаж: інші (до 5)', 'text', 'dimension'),
+  field('passengers', 'Пасажири', 'integer', 'metric', 'sum'),
+  field('cargo_kg', 'Вантаж, кг', 'real', 'metric', 'sum'),
+  field('rsp_approaches', 'Заходів РСП', 'integer', 'metric', 'sum'),
+  field('rsp_landings', 'Посадок РСП', 'integer', 'metric', 'sum'),
 ];
 const flightField = key => flightFields.find(item => item.key === key);
 const flightFieldKeys = flightFields.map(item => item.key);
@@ -87,8 +93,8 @@ test('catalog normalization preserves the exact flight-hours schema', () => {
   }]);
   assert.equal(catalog.length, 1);
   assert.deepEqual(catalog[0].fields.map(item => item.key), flightFieldKeys);
-  assert.equal(catalog[0].fields[6].label, 'Номер вправи у комплексі №1');
-  assert.equal(catalog[0].fields[7].label, 'Номер вправи у комплексі №2');
+  assert.equal(catalog[0].fields[7].label, 'Номер вправи у комплексі №1');
+  assert.equal(catalog[0].fields[8].label, 'Номер вправи у комплексі №2');
   assert.match(schemaSummary(catalog[0].fields), /Тип ПС · text/);
   assert.equal(matchesCatalogItem(catalog[0], 'повітря'), true);
   assert.equal(matchesCatalogItem(catalog[0], 'воронка'), false);
@@ -162,8 +168,8 @@ test('flight log editor converts all supported input types', () => {
   assert.equal('hood_time' in row, false);
   assert.equal(fieldInputType(flightFields.find(item => item.key === 'takeoff_time')), 'time');
   assert.equal(fieldInputType(flightFields.find(item => item.key === 'instrument_meteorological_conditions')), 'select');
-  assert.throws(() => parseFieldInput(flightFields[1], ''), /обов'язковим/);
-  assert.throws(() => parseFieldInput(flightFields[18], '5.5'), /ціле число/);
+  assert.throws(() => parseFieldInput(flightField('aircraft_type'), ''), /обов'язковим/);
+  assert.throws(() => parseFieldInput(flightField('cloud_cover'), '5.5'), /ціле число/);
 });
 
 test('durations are typed and shown as год:хв and stored as decimal hours', () => {
@@ -335,6 +341,7 @@ test('the unit labels in the JS fixtures are the ones the Rust catalog ships', a
     'airborne_hours', 'total_hours', 'flight_altitude', 'cloud_base_upper', 'cloud_base_lower', 'cloud_cover',
     'visibility', 'time_in_clouds', 'hood_time', 'fuel_consumption',
     'crew_ke', 'crew_lsh', 'crew_bt', 'crew_other',
+    'aircraft_number', 'engine_test_time', 'passengers', 'cargo_kg', 'rsp_approaches', 'rsp_landings',
   ];
   const escape = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   for (const key of keys) {
@@ -387,6 +394,94 @@ test('visibility and fuel cannot be negative, and other fields get no limits', (
   assert.throws(() => parseFieldInput(visibility, '-1'), /від'ємним/);
 });
 
+test('the columns taken from the owner table: start/test is a duration, counts and cargo are not negative', () => {
+  const start = flightField('engine_test_time');
+  assert.equal(fieldKind(start), 'duration');
+  assert.equal(fieldInputType(start), 'text');
+  assert.equal(fieldPlaceholder(start), '0:32');
+  assert.equal(parseFieldInput(start, '0:10'), 10 / 60);
+  assert.equal(formatFieldValue(start, 10 / 60), '0:10');
+  assert.equal(parseFieldInput(start, ''), null, 'the field is optional');
+  assert.throws(() => parseFieldInput(start, '10'), /форматі год:хв/);
+  assert.throws(() => parseFieldInput(start, '0,17'), /форматі год:хв/);
+
+  for (const key of ['passengers', 'rsp_approaches', 'rsp_landings']) {
+    const item = flightField(key);
+    assert.equal(fieldKind(item), null, key);
+    assert.deepEqual(fieldLimits(item), { min: 0 }, key);
+    assert.equal(parseFieldInput(item, '3'), 3, key);
+    assert.equal(parseFieldInput(item, '0'), 0, key);
+    assert.equal(parseFieldInput(item, ''), null, key);
+    assert.throws(() => parseFieldInput(item, '-1'), /від'ємним/, key);
+    assert.throws(() => parseFieldInput(item, '1,5'), /ціле число/, key);
+  }
+
+  const cargo = flightField('cargo_kg');
+  assert.deepEqual(fieldLimits(cargo), { min: 0 });
+  assert.equal(parseFieldInput(cargo, '500'), 500);
+  assert.equal(parseFieldInput(cargo, '12,5'), 12.5);
+  assert.throws(() => parseFieldInput(cargo, '-5'), /від'ємним/);
+
+  const board = flightField('aircraft_number');
+  assert.equal(fieldInputType(board), 'text');
+  assert.equal(parseFieldInput(board, ' 41 '), '41');
+  assert.equal(parseFieldInput(board, 'Б-12'), 'Б-12', 'a board number may contain letters');
+});
+
+test('a record with every column of the owner table is accepted field by field', () => {
+  // Синтетичний запис: значення вигадані, лише порядок і формати — як у таблиці власника.
+  const row = rowForWrite(flightFields, {
+    list_number: '1',
+    flight_shift_number: '1',
+    aircraft_type: 'Мі-8',
+    aircraft_number: '71',
+    engine_test_time: '0:10',
+    day_night: 'Д',
+    instrument_meteorological_conditions: 'false',
+    flight_count: '1',
+    combat_training_exercise_number: '2',
+    complex_exercise_number_1: '3',
+    complex_exercise_number_2: '6',
+    takeoff_time: '10:05',
+    landing_time: '10:27',
+    airborne_hours: '0:22',
+    total_hours: '0:32',
+    time_in_clouds: '',
+    hood_time: '',
+    flight_altitude: '300м',
+    fuel_consumption: '255',
+    training_program_fuel: '12',
+    crew_ke: 'Тестенко',
+    crew_lsh: 'Зразкович',
+    crew_bt: 'Прикладний',
+    crew_other: '',
+    passengers: '0',
+    cargo_kg: '500',
+    combat_application_grade: '5',
+    flight_grade: '5',
+    cloud_cover: '6',
+    cloud_base_lower: '600',
+    cloud_base_upper: '1500',
+    visibility: '8',
+    rsp_approaches: '',
+    rsp_landings: '',
+  });
+  assert.equal(row.aircraft_number, '71');
+  assert.equal(row.engine_test_time, 10 / 60);
+  assert.ok(Math.abs(row.total_hours - row.airborne_hours - row.engine_test_time) < 1e-9, 'start/test is the difference of the two flight times');
+  assert.equal(row.flight_altitude, 300);
+  assert.equal(row.instrument_meteorological_conditions, false);
+  assert.equal(row.passengers, 0);
+  assert.equal(row.cargo_kg, 500);
+  assert.equal('rsp_approaches' in row, false, 'empty fields are not written');
+  assert.equal(crewCount(row), 3);
+  assert.deepEqual(
+    Object.keys(row).filter(key => !flightFieldKeys.includes(key)),
+    [],
+    'every written key is a catalog field',
+  );
+});
+
 test('a stored value outside the limits is detected but never blocks an unchanged field', () => {
   const cover = flightField('cloud_cover');
   assert.equal(outsideLimits(cover, 75), true);
@@ -425,6 +520,9 @@ test('the form groups the meteo and crew fields and keeps the rest in catalog or
   assert.deepEqual(keys('crew'), ['crew_ke', 'crew_lsh', 'crew_bt', 'crew_other']);
   assert.ok(keys('main').includes('instrument_meteorological_conditions'), 'the СМУ flag describes the flight, not the weather');
   assert.equal(keys('main')[0], 'list_number');
+  assert.deepEqual(keys('main').slice(1, 3), ['aircraft_type', 'aircraft_number'], 'the board number follows the type');
+  assert.ok(keys('main').indexOf('engine_test_time') < keys('main').indexOf('takeoff_time'), 'start/test comes before take-off');
+  assert.deepEqual(keys('main').slice(-4), ['passengers', 'cargo_kg', 'rsp_approaches', 'rsp_landings']);
   assert.deepEqual(
     sections.flatMap(section => section.fields.map(item => item.key)).sort(),
     [...flightFieldKeys].sort(),
