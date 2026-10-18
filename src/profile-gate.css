@@ -112,7 +112,13 @@ html.ew-locked, html.ew-locked body { overflow: hidden; }
   margin: 0; padding: 10px 12px; color: #e5c06a; font-size: 13px; line-height: 1.45;
   background: rgba(229, 192, 106, .08); border: 1px solid rgba(229, 192, 106, .35); border-radius: 8px;
 }
-.ew-gate-copy-status { min-height: 1.2em; margin: 0; text-align: center; }
+.ew-gate-key-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+.ew-gate-copy-status { min-height: 1.2em; margin: 0; text-align: center; overflow-wrap: anywhere; }
+.ew-gate-copy-status.is-bad { color: var(--gate-bad); font-weight: 600; }
+.ew-gate-file-hint { margin: 0; text-align: center; }
+/* «Взяти ключ із файлу» під полем ключа: кнопка й, після вибору, підтвердження поруч. */
+.ew-gate-key-file { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: -6px 0 2px; }
+.ew-gate-file-note { color: var(--gate-accent); }
 .ew-gate-notice { color: var(--gate-ink); font-weight: 600; }
 .ew-gate input.ew-gate-key-input {
   text-transform: uppercase; letter-spacing: .06em;

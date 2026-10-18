@@ -92,13 +92,60 @@ export function noRecoveryKeyAdvice(profile) {
 /** Тексти екрана «Ключ відновлення» (реєстрація, скидання пароля, новий ключ). */
 export const KEY_SCREEN_TEXT = Object.freeze({
   title: 'Ключ відновлення',
-  lead: 'Якщо ви забудете пароль, відновити доступ можна лише за цим ключем. Його показано один раз і ніде не збережено в застосунку: запишіть ключ на папері й сховайте окремо від комп’ютера.',
+  lead: 'Якщо ви забудете пароль, відновити доступ можна лише за цим ключем. Його показано один раз і ніде не збережено в застосунку: запишіть ключ на папері або збережіть файлом на флешку й сховайте окремо від комп’ютера.',
   warning: 'Ключ дає право скинути пароль цього профілю, тож зберігайте його так само ретельно, як пароль, і не кладіть поруч із таблицями.',
   confirm: 'Я записав(ла) ключ і зберіг(ла) його в надійному місці',
   copy: 'Копіювати ключ',
   copied: 'Ключ скопійовано. Не залишайте його в буфері обміну довше, ніж потрібно.',
   copyFailed: 'Не вдалося скопіювати: перепишіть ключ вручну.',
+  saveFile: 'Зберегти на флешку',
+  fileHint: 'У вікні збереження оберіть флешку. Файл не зашифрований, тож тримайте флешку окремо від комп’ютера.',
+  fromFile: 'Взяти ключ із файлу',
+  fromFileHint: 'Файл, який застосунок зберіг на флешку, містить ключ у своєму тексті.',
+  fromFileDone: 'Ключ узято з файлу. Задайте новий пароль.',
 });
+
+/** Відповідь ядра як речення: з великої літери й із крапкою. */
+export function failureSentence(failure) {
+  const text = String(failure?.message || failure || '').trim();
+  if (!text) return 'Не вдалося виконати дію.';
+  const sentence = text.charAt(0).toLocaleUpperCase('uk') + text.slice(1);
+  return /[.!?]$/u.test(sentence) ? sentence : `${sentence}.`;
+}
+
+export function keyFileSavedMessage(path) {
+  return `Ключ збережено у файл «${path}» і перевірено читанням.`;
+}
+
+/**
+ * Зберігає ключ у файл і повертає результат для рядка стану: `{ saved, message }`.
+ * `save` — виклик команди ядра, яка повертає шлях або null, якщо вікно збереження закрили.
+ * Закрите вікно — не помилка (message порожнє). Сама ніколи не кидає помилку.
+ */
+export async function saveRecoveryKeyToFile(save) {
+  try {
+    const path = await save();
+    return path ? { saved: true, message: keyFileSavedMessage(path) } : { saved: false, message: '' };
+  } catch (failure) {
+    return { saved: false, message: failureSentence(failure) };
+  }
+}
+
+/**
+ * Бере ключ із файлу: `{ key, error }`. `read` — виклик команди ядра, яка повертає ключ або
+ * null, якщо вікно вибору файлу закрили. Закрите вікно — `{ key: null, error: null }`.
+ * Ключ, який форма не прийняла б, не підставляється. Сама ніколи не кидає помилку.
+ */
+export async function loadRecoveryKeyFromFile(read) {
+  try {
+    const found = await read();
+    if (!found) return { key: null, error: null };
+    if (!normalizeRecoveryKey(found)) return { key: null, error: 'У файлі немає чинного ключа відновлення.' };
+    return { key: formatRecoveryKey(found), error: null };
+  } catch (failure) {
+    return { key: null, error: failureSentence(failure) };
+  }
+}
 
 /** Перекладає відповідь ядра на коротке повідомлення для форми скидання пароля. */
 export function recoveryFailureMessage(failure) {

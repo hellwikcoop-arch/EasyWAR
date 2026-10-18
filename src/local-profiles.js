@@ -21,6 +21,7 @@ import {
   profileTablePath,
   readProfileDatabase,
   renameLocalProfile,
+  saveRecoveryKeyFile,
   setLocalProfileModules,
   setLocalProfilePassword,
   setProfileWorkspaceTemplate,
@@ -32,7 +33,13 @@ import {
 import { createProfileGate } from './profile-gate.js';
 import { requestSplashSkip } from './startup-splash-core.js';
 import { GATE_MODULES, modulesError, moduleVisible } from './profile-gate-core.js';
-import { KEY_SCREEN_TEXT, copyRecoveryKey, formatRecoveryKey, recoveryStatusText } from './recovery-key-core.js';
+import {
+  KEY_SCREEN_TEXT,
+  copyRecoveryKey,
+  formatRecoveryKey,
+  recoveryStatusText,
+  saveRecoveryKeyToFile,
+} from './recovery-key-core.js';
 import { createAssistantUI } from './assistant/assistant-ui.js';
 import { getDatabaseStatus } from './backup-core.js';
 import { appUpdateState } from './app-update-state-core.js';
@@ -154,16 +161,31 @@ function askPasswords({ title, fields, submitLabel, description = null }) {
 
 /**
  * Показує щойно створений ключ відновлення. Ключ видно лише тут і лише один раз, тому вікно
- * не закривається клавішею Esc, доки користувач не підтвердить, що ключ записано.
+ * не закривається клавішею Esc, доки користувач не підтвердить, що ключ записано. `profileId`
+ * потрібен для кнопки «Зберегти на флешку»: ядро бере з нього ім'я профілю для файлу.
  */
-function showRecoveryKey(recoveryKey) {
+function showRecoveryKey(recoveryKey, profileId) {
   return new Promise(resolve => {
     const shown = formatRecoveryKey(recoveryKey);
     const dialog = el('dialog', { class: 'ew-password-dialog ew-recovery-dialog', 'aria-label': KEY_SCREEN_TEXT.title });
     const status = el('p', { class: 'ew-recovery-copy-status', role: 'status' });
+    const say = (message, bad = false) => {
+      status.textContent = message;
+      status.classList.toggle('is-bad', bad && Boolean(message));
+    };
     const copy = el('button', { type: 'button', class: 'btn quiet', text: KEY_SCREEN_TEXT.copy });
     copy.addEventListener('click', async () => {
-      status.textContent = (await copyRecoveryKey(shown)) ? KEY_SCREEN_TEXT.copied : KEY_SCREEN_TEXT.copyFailed;
+      const copied = await copyRecoveryKey(shown);
+      say(copied ? KEY_SCREEN_TEXT.copied : KEY_SCREEN_TEXT.copyFailed, !copied);
+    });
+    const save = profileId ? el('button', { type: 'button', class: 'btn quiet', text: KEY_SCREEN_TEXT.saveFile }) : null;
+    save?.addEventListener('click', async () => {
+      save.disabled = true;
+      say('');
+      const result = await saveRecoveryKeyToFile(() => saveRecoveryKeyFile(profileId, shown));
+      say(result.message, !result.saved);
+      save.disabled = false;
+      save.focus(); // вимкнена кнопка втрачає фокус: повертаємо його, щоб Tab ішов далі звідси
     });
     const confirm = el('input', { type: 'checkbox' });
     const done = el('button', { type: 'submit', class: 'btn primary', text: 'Готово', disabled: true });
@@ -172,8 +194,9 @@ function showRecoveryKey(recoveryKey) {
       el('h3', { text: KEY_SCREEN_TEXT.title }),
       el('p', { class: 'ew-password-note', text: KEY_SCREEN_TEXT.lead }),
       el('code', { class: 'ew-recovery-key', 'aria-label': KEY_SCREEN_TEXT.title, text: shown }),
-      el('div', { class: 'ew-profile-actions' }, copy),
+      el('div', { class: 'ew-profile-actions' }, copy, save),
       status,
+      save ? el('p', { class: 'ew-recovery-file-hint', text: KEY_SCREEN_TEXT.fileHint }) : null,
       el('p', { class: 'ew-recovery-warning', text: KEY_SCREEN_TEXT.warning }),
       el('label', { class: 'ew-recovery-confirm' }, confirm, el('span', { text: KEY_SCREEN_TEXT.confirm })),
       el('div', { class: 'ew-profile-actions' }, done));
@@ -618,7 +641,7 @@ function initializeLocalProfiles() {
       return issued.state;
     }, 'Ключ відновлення створено.', 'Не вдалося створити ключ відновлення');
     render();
-    if (ok && recoveryKey) await showRecoveryKey(recoveryKey);
+    if (ok && recoveryKey) await showRecoveryKey(recoveryKey, profile.id);
   }
 
   async function changePassword(profile) {

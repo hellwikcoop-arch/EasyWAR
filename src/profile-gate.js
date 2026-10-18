@@ -11,8 +11,10 @@ import {
   getLocalProfiles,
   issueLocalProfileRecoveryKey,
   lockLocalProfile,
+  readRecoveryKeyFile,
   recoverLocalProfilePassword,
   registerLocalProfile,
+  saveRecoveryKeyFile,
   setLocalProfilePassword,
   signInLocalProfile,
 } from './local-profiles-core.js';
@@ -21,8 +23,10 @@ import {
   RECOVERY_KEY_PLACEHOLDER,
   copyRecoveryKey,
   formatRecoveryKey,
+  loadRecoveryKeyFromFile,
   noRecoveryKeyAdvice,
   recoveryFailureMessage,
+  saveRecoveryKeyToFile,
   validateRecoveryForm,
 } from './recovery-key-core.js';
 import {
@@ -130,12 +134,17 @@ export function createProfileGate({ el, avatar, readAvatar }) {
   /**
    * Екран «Ключ відновлення»: ключ показано один раз і ніде не збережено, тому далі можна
    * пройти лише після підтвердження, що його записано. Завершується, коли користувач
-   * натискає «Продовжити» (або свою назву кнопки з `continueLabel`).
+   * натискає «Продовжити» (або свою назву кнопки з `continueLabel`). `profileId` потрібен
+   * для кнопки «Зберегти на флешку»: ядро бере з нього ім'я профілю для файлу.
    */
-  function keyScreen({ recoveryKey, title = KEY_SCREEN_TEXT.title, lead = KEY_SCREEN_TEXT.lead, stepper = null, continueLabel = 'Продовжити' }) {
+  function keyScreen({ recoveryKey, profileId = null, title = KEY_SCREEN_TEXT.title, lead = KEY_SCREEN_TEXT.lead, stepper = null, continueLabel = 'Продовжити' }) {
     return new Promise(resolve => {
       const shown = formatRecoveryKey(recoveryKey);
       const status = el('p', { class: 'ew-gate-hint ew-gate-copy-status', role: 'status' });
+      const say = (message, bad = false) => {
+        status.textContent = message;
+        status.classList.toggle('is-bad', bad && Boolean(message));
+      };
       const copy = el('button', {
         type: 'button',
         class: 'ew-gate-button ew-gate-button-quiet',
@@ -143,7 +152,22 @@ export function createProfileGate({ el, avatar, readAvatar }) {
         'data-autofocus': true,
       });
       copy.addEventListener('click', async () => {
-        status.textContent = (await copyRecoveryKey(shown)) ? KEY_SCREEN_TEXT.copied : KEY_SCREEN_TEXT.copyFailed;
+        const copied = await copyRecoveryKey(shown);
+        say(copied ? KEY_SCREEN_TEXT.copied : KEY_SCREEN_TEXT.copyFailed, !copied);
+      });
+      // Файл на флешку: вікно збереження відкриває ядро, воно ж перевіряє запис читанням.
+      const save = profileId ? el('button', {
+        type: 'button',
+        class: 'ew-gate-button ew-gate-button-quiet',
+        text: KEY_SCREEN_TEXT.saveFile,
+      }) : null;
+      save?.addEventListener('click', async () => {
+        save.disabled = true;
+        say('');
+        const result = await saveRecoveryKeyToFile(() => saveRecoveryKeyFile(profileId, shown));
+        say(result.message, !result.saved);
+        save.disabled = false;
+        save.focus(); // вимкнена кнопка втрачає фокус: повертаємо його, щоб Tab ішов далі звідси
       });
       const confirm = el('input', { type: 'checkbox' });
       const next = el('button', { type: 'submit', class: 'ew-gate-button', text: continueLabel, disabled: true });
@@ -151,8 +175,9 @@ export function createProfileGate({ el, avatar, readAvatar }) {
       const form = el('form', { class: 'ew-gate-form', novalidate: true },
         el('div', { class: 'ew-gate-key-box' },
           el('code', { class: 'ew-gate-key', 'aria-label': 'Ключ відновлення', text: shown }),
-          copy),
+          el('div', { class: 'ew-gate-key-actions' }, copy, save)),
         status,
+        save ? el('p', { class: 'ew-gate-hint ew-gate-file-hint', text: KEY_SCREEN_TEXT.fileHint }) : null,
         el('p', { class: 'ew-gate-warning', text: KEY_SCREEN_TEXT.warning }),
         el('label', { class: 'ew-gate-check' }, confirm, el('span', { text: KEY_SCREEN_TEXT.confirm })),
         el('div', { class: 'ew-gate-actions' }, next));
@@ -189,7 +214,7 @@ export function createProfileGate({ el, avatar, readAvatar }) {
         skip.disabled = true;
         try {
           const issued = await issueLocalProfileRecoveryKey(profile.id, password);
-          await keyScreen({ recoveryKey: issued.recoveryKey });
+          await keyScreen({ recoveryKey: issued.recoveryKey, profileId: profile.id });
           resolve();
         } catch (failure) {
           error.textContent = `Не вдалося створити ключ: ${String(failure?.message || failure)}. Це можна зробити пізніше в налаштуваннях профілю.`;
@@ -280,8 +305,16 @@ export function createProfileGate({ el, avatar, readAvatar }) {
         const confirm = passwordInput({ 'aria-label': 'Повторіть новий пароль' });
         const error = el('p', { class: 'ew-gate-message', role: 'alert' });
         const submit = el('button', { type: 'submit', class: 'ew-gate-button', text: 'Скинути пароль і увійти' });
+        // Ключ можна взяти з файлу, який застосунок зберіг на флешку: вікно відкриває ядро.
+        const fromFile = el('button', {
+          type: 'button',
+          class: 'ew-gate-button ew-gate-button-quiet',
+          text: KEY_SCREEN_TEXT.fromFile,
+        });
+        const fileNote = el('small', { class: 'ew-gate-hint ew-gate-file-note', role: 'status' });
         const form = el('form', { class: 'ew-gate-form', novalidate: true },
           field('Ключ відновлення', keyInput, 'recoveryKey', 'Ключ із 25 символів, який показали при створенні профілю. Регістр і дефіси не важливі.'),
+          el('div', { class: 'ew-gate-key-file' }, fromFile, fileNote),
           field('Новий пароль', password, 'password', `Від ${PASSWORD_MIN} символів.`),
           field('Повторіть новий пароль', confirm, 'confirm'),
           showPasswordToggle([password, confirm]),
@@ -291,6 +324,19 @@ export function createProfileGate({ el, avatar, readAvatar }) {
         // Після введення показуємо ключ групами по п'ять символів, щоб легше звірити з записаним.
         keyInput.addEventListener('blur', () => {
           if (keyInput.value.trim()) keyInput.value = formatRecoveryKey(keyInput.value);
+        });
+
+        fromFile.addEventListener('click', async () => {
+          fromFile.disabled = true;
+          fileNote.textContent = '';
+          const loaded = await loadRecoveryKeyFromFile(() => readRecoveryKeyFile());
+          fromFile.disabled = false;
+          if (loaded.error) { setErrors(form, { recoveryKey: loaded.error }); return; }
+          if (!loaded.key) { fromFile.focus(); return; }
+          setErrors(form, {});
+          keyInput.value = loaded.key;
+          fileNote.textContent = KEY_SCREEN_TEXT.fromFileDone;
+          password.focus();
         });
 
         form.addEventListener('submit', async event => {
@@ -311,9 +357,11 @@ export function createProfileGate({ el, avatar, readAvatar }) {
           busy = true;
           submit.disabled = true;
           try {
-            const issued = await recoverLocalProfilePassword(selected.id, keyInput.value, password.value);
+            const profileId = selected.id;
+            const issued = await recoverLocalProfilePassword(profileId, keyInput.value, password.value);
             await keyScreen({
               recoveryKey: issued.recoveryKey,
+              profileId,
               title: 'Пароль змінено',
               lead: 'Ви ввійшли з новим паролем. Використаний ключ відновлення більше не діє, ось новий. Запишіть його й сховайте окремо від комп’ютера.',
               continueLabel: 'Відкрити easyWAR',
@@ -394,7 +442,7 @@ export function createProfileGate({ el, avatar, readAvatar }) {
             if (needsPassword) {
               try {
                 const issued = await issueLocalProfileRecoveryKey(profile.id, typed);
-                await keyScreen({ recoveryKey: issued.recoveryKey });
+                await keyScreen({ recoveryKey: issued.recoveryKey, profileId: profile.id });
               } catch { /* ключ можна створити в налаштуваннях профілю */ }
             } else if (!profile.hasRecoveryKey) {
               await offerRecoveryKey(profile, typed);
@@ -570,6 +618,7 @@ export function createProfileGate({ el, avatar, readAvatar }) {
       function stepKey(recoveryKey) {
         keyScreen({
           recoveryKey,
+          profileId: created?.id,
           stepper: stepper(2),
           lead: `${KEY_SCREEN_TEXT.lead} Якщо ключ загубиться, новий можна створити в налаштуваннях профілю, знаючи пароль.`,
         }).then(stepTables);

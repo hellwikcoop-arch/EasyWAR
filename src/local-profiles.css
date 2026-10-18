@@ -239,7 +239,9 @@
   user-select: all;
   -webkit-user-select: all;
 }
-.ew-recovery-copy-status { min-height: 1.2em; margin: 0; color: var(--muted); font-size: 13px; }
+.ew-recovery-copy-status { min-height: 1.2em; margin: 0; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.ew-recovery-copy-status.is-bad { color: var(--bad); font-weight: 600; }
+.ew-recovery-file-hint { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.4; }
 /* Кнопки вікна ключа завбільшки з поле вводу: їх натискають одразу після запису ключа. */
 .ew-recovery-dialog .btn {
   min-height: 38px;

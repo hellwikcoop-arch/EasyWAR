@@ -11,6 +11,7 @@ pub mod model_install;
 pub mod phone_export;
 pub mod position_templates;
 pub mod profile_table;
+pub mod recovery_key_file;
 pub mod repository;
 pub mod restore;
 pub mod signal_commands;
@@ -199,6 +200,84 @@ async fn recover_local_profile_password(
         .map_err(|error| error.to_string())?;
     session.set(Some(profile_id));
     Ok(issued)
+}
+
+/// Зберігає ключ відновлення в текстовий файл; місце (зазвичай флешку) користувач обирає у
+/// вікні збереження. Вміст файлу будує ядро з ключа та імені профілю, а запис перевіряється
+/// читанням. Повертає шлях або `None`, якщо вікно закрили без вибору. Потрібен розблокований
+/// профіль: ключ видають лише йому.
+#[tauri::command]
+async fn save_recovery_key_file(
+    app: tauri::AppHandle,
+    profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
+    profile_id: String,
+    recovery_key: String,
+) -> Result<Option<String>, String> {
+    ensure_profile_unlocked(&profiles, &session, &profile_id).await?;
+    let display_name = profiles
+        .list()
+        .await
+        .map_err(|error| error.to_string())?
+        .profiles
+        .into_iter()
+        .find(|profile| profile.id == profile_id)
+        .map(|profile| profile.display_name)
+        .ok_or_else(|| "Профіль не знайдено.".to_string())?;
+    // Текст і ключ перевіряємо до вікна збереження: хибний ключ не має дійти до вибору файлу.
+    let created = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
+    let text = recovery_key_file::file_text(&display_name, &recovery_key, &created)
+        .map_err(|error| error.to_string())?;
+    let file_name = recovery_key_file::default_file_name(&display_name);
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title("Зберегти ключ відновлення (краще на флешку)")
+            .set_file_name(file_name)
+            .add_filter("Текстовий файл", &["txt"])
+            .blocking_save_file()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let path = recovery_key_file::with_txt_extension(
+        selected.into_path().map_err(|error| error.to_string())?,
+    );
+    let target = path.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        recovery_key_file::write_file(&target, &text, &recovery_key)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string())?;
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+/// Читає ключ відновлення з файлу, який користувач обирає у вікні відкриття. Сесія не
+/// потрібна: ключ шукають, коли пароль забуто. Повертає лише ключ у групах по п'ять символів
+/// (решту файлу не віддає) або `None`, якщо вікно закрили без вибору.
+#[tauri::command]
+async fn read_recovery_key_file(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title("Обрати файл із ключем відновлення")
+            .add_filter("Текстовий файл", &["txt"])
+            .blocking_pick_file()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let path = selected.into_path().map_err(|error| error.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || recovery_key_file::read_key(&path))
+        .await
+        .map_err(|error| error.to_string())?
+        .map(Some)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -1661,6 +1740,8 @@ pub fn run() {
             set_local_profile_password,
             issue_local_profile_recovery_key,
             recover_local_profile_password,
+            save_recovery_key_file,
+            read_recovery_key_file,
             choose_profile_database,
             create_profile_base_table,
             export_phone_file,

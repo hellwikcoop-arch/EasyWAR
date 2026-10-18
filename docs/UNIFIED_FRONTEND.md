@@ -135,10 +135,10 @@ ends, and the launcher stays `inert` until sign-in.
 | File | Role |
 | --- | --- |
 | `src/profile-gate-core.js` | pure rules: form validation, module list, table slots per module, retry delay, which screen to show (tested in `tests/profile-gate.test.mjs`) |
-| `src/recovery-key-core.js` | pure rules for the password recovery key: input normalisation (mirrors `local_profiles.rs`, checked by `tests/recovery-key.test.mjs`), reset-form validation, status/advice/error texts, clipboard copy |
-| `src/profile-gate.js` | DOM: login with «Забули пароль?» (reset by recovery key), four-step registration (profile → modules → recovery key → tables), the one-time key screen, key offer for profiles without a key, error screen; `html.ew-locked` + `inert` on the page; no network, no browser storage |
+| `src/recovery-key-core.js` | pure rules for the password recovery key: input normalisation (mirrors `local_profiles.rs`, checked by `tests/recovery-key.test.mjs`), reset-form validation, status/advice/error texts, clipboard copy, and the thin wrappers around the key file (`saveRecoveryKeyToFile`, `loadRecoveryKeyFromFile`, `failureSentence`; the file itself is written and read by `src-tauri/src/recovery_key_file.rs`, tested in `tests/recovery-key-file.test.mjs`) |
+| `src/profile-gate.js` | DOM: login with «Забули пароль?» (reset by recovery key), four-step registration (profile → modules → recovery key → tables), the one-time key screen (copy and «Зберегти на флешку»; `keyScreen` takes `profileId` for the file), «Взяти ключ із файлу» in the reset form, key offer for profiles without a key, error screen; `html.ew-locked` + `inert` on the page; no network, no browser storage |
 | `src/profile-gate.css` | gate styles; `.ew-module-off` hides unchosen module cards (selectors carry `#view-start` because `index.html` uses `!important` ids) |
-| `src/local-profiles.js` | creates the gate, hides unchosen modules (`applyModules`), keeps the profile dialog (recovery key status, «Створити/Новий ключ відновлення…», the one-time key dialog that ignores Esc); sign-out sets the splash skip flag and reloads |
+| `src/local-profiles.js` | creates the gate, hides unchosen modules (`applyModules`), keeps the profile dialog (recovery key status, «Створити/Новий ключ відновлення…», the one-time key dialog that ignores Esc and offers «Зберегти на флешку»); sign-out sets the splash skip flag and reloads |
 | `src/startup-splash-core.js` | `requestSplashSkip` / `consumeSplashSkip`: one-shot `sessionStorage` flag so sign-out does not replay the video |
 
 - `src/index.html` is unchanged. Module cards and tiles are found by the selectors

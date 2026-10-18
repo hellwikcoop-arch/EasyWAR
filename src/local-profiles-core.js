@@ -114,6 +114,23 @@ export function recoverLocalProfilePassword(profileId, recoveryKey, newPassword,
 }
 
 /**
+ * Зберігає ключ відновлення в текстовий файл; місце (флешку) користувач обирає у вікні
+ * збереження. Потрібен розблокований профіль. Відповідь — шлях до файлу або null, якщо вікно
+ * закрили без вибору; запис ядро перевіряє читанням.
+ */
+export function saveRecoveryKeyFile(profileId, recoveryKey, invokeCommand = invoke) {
+  return invokeCommand('save_recovery_key_file', { profileId, recoveryKey });
+}
+
+/**
+ * Бере ключ відновлення з файлу, який користувач обирає у вікні відкриття; сесія не потрібна.
+ * Відповідь — ключ у групах по п'ять символів або null, якщо вікно закрили без вибору.
+ */
+export function readRecoveryKeyFile(invokeCommand = invoke) {
+  return invokeCommand('read_recovery_key_file');
+}
+
+/**
  * Роди військ і командування, для яких профіль тримає окрему таблицю. ПВК і УДШВ —
  * дашборди командувань: вони відкриваються у власних вікнах над модулями ПС і РВ.
  */

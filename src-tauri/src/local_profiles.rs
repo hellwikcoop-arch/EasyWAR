@@ -765,14 +765,21 @@ fn verify_secret(stored: &str, secret: &str) -> Result<bool, LocalProfileError> 
 pub fn generate_recovery_key() -> String {
     let mut bytes = [0_u8; RECOVERY_KEY_SYMBOLS];
     OsRng.fill_bytes(&mut bytes);
-    let symbols: Vec<char> = bytes
+    let symbols: String = bytes
         .iter()
         // 256 ділиться на 32 без залишку, тож зсув не дає перекосу.
         .map(|byte| char::from(RECOVERY_ALPHABET[usize::from(byte & 31)]))
         .collect();
-    symbols
+    format_recovery_key(&symbols)
+}
+
+/// Канонічні 25 символів ключа в групах по п'ять: `XXXXX-XXXXX-XXXXX-XXXXX-XXXXX`.
+/// Символи алфавіту ASCII, тож розрізати за байтами безпечно.
+pub fn format_recovery_key(canonical: &str) -> String {
+    canonical
+        .as_bytes()
         .chunks(RECOVERY_KEY_GROUP)
-        .map(|group| group.iter().collect::<String>())
+        .map(|group| String::from_utf8_lossy(group).into_owned())
         .collect::<Vec<_>>()
         .join("-")
 }
