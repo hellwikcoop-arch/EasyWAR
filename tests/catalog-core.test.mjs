@@ -80,7 +80,7 @@ test('the example from the documentation is a valid catalog and comes back froze
   assert.equal(catalog.version, CATALOG_VERSION);
   assert.equal(catalog.lists.length, 2);
   assert.equal(catalog.columns.length, 9);
-  assert.equal(catalog.tiles.length, 5);
+  assert.equal(catalog.tiles.length, 6);
   assert.equal(catalog.blocks.length, 6);
   assert.equal(catalog.kinds.length, 1);
   assert.ok(Object.isFrozen(catalog) && Object.isFrozen(catalog.kinds[0].layout.rows[0].cols[0].cards));
@@ -345,6 +345,105 @@ test('tiles: visual forms, deltas, extras and references', () => {
     ['label too long', (c) => { c.tiles[0].label = 'я'.repeat(LIMITS.tileLabelLength + 1); }, 'tiles[0].label:too_long'],
     ['missing tone', (c) => { delete c.tiles[0].tone; }, 'tiles[0].tone:missing'],
   ]);
+});
+
+test('measures days, low and weighted top: what they accept', () => {
+  const per = (c) => c.tiles[TILE.perAircraft];
+  const extra0 = (c) => c.tiles[TILE.hours].extras[0];
+  const ring = (c) => c.tiles[TILE.night];
+  expectAccepted([
+    ['days as a denominator', (c) => { per(c).per = { agg: 'days' }; }],
+    ['days in an extra', (c) => { extra0(c).measure = { agg: 'days' }; }],
+    ['low by a grain, with a column', (c) => { extra0(c).measure = { agg: 'low', column: 'col.hours', by: 'col.date', grain: 'month' }; }],
+    ['low counting filtered records', (c) => { extra0(c).measure = { agg: 'low', by: 'col.date', grain: 'week', filter: [{ column: 'col.night', op: 'eq', value: true }] }; }],
+    ['low as the tile measure', (c) => { c.tiles[TILE.hours].measure = { agg: 'low', by: 'col.date', grain: 'day' }; }],
+    ['top weighted by a number with a limit', (c) => { c.tiles[TILE.combat].extras[1].measure = { agg: 'top', column: 'col.aircraft', weight: 'col.hours', limit: 2 }; }],
+    ['a weighted top as an info fact without a label', (c) => { ring(c).info = { facts: [{ measure: { agg: 'top', column: 'col.aircraft', weight: 'col.hours', limit: LIMITS.maxTopValues } }] }; }],
+  ]);
+  expectRejected([
+    ['days with a filter', (c) => { per(c).per = { agg: 'days', filter: [{ column: 'col.night', op: 'eq', value: true }] }; }, `tiles[${TILE.perAircraft}].per.filter:not_allowed_for_agg`],
+    ['days with a column', (c) => { per(c).per = { agg: 'days', column: 'col.hours' }; }, `tiles[${TILE.perAircraft}].per.column:not_allowed_for_agg`],
+    ['days with a grain', (c) => { per(c).per = { agg: 'days', by: 'col.date', grain: 'day' }; }, `tiles[${TILE.perAircraft}].per.by:not_allowed_for_agg`],
+    ['days as the tile measure', (c) => { c.tiles[TILE.hours].measure = { agg: 'days' }; }, `tiles[${TILE.hours}].measure.agg:bad_value`],
+    ['low without by and grain', (c) => { extra0(c).measure = { agg: 'low' }; }, [`tiles[${TILE.hours}].extras[0].measure.by:missing`, `tiles[${TILE.hours}].extras[0].measure.grain:missing`]],
+    ['low over text', (c) => { extra0(c).measure = { agg: 'low', column: 'col.tail', by: 'col.date', grain: 'day' }; }, `tiles[${TILE.hours}].extras[0].measure.column:wrong_type`],
+    ['top weighted by text', (c) => { c.tiles[TILE.combat].extras[1].measure.weight = 'col.tail'; }, `tiles[${TILE.combat}].extras[1].measure.weight:wrong_type`],
+    ['top weighted by an unknown column', (c) => { c.tiles[TILE.combat].extras[1].measure.weight = 'col.nothing'; }, `tiles[${TILE.combat}].extras[1].measure.weight:unknown_column`],
+    ['top limit zero', (c) => { c.tiles[TILE.combat].extras[1].measure.limit = 0; }, `tiles[${TILE.combat}].extras[1].measure.limit:bad_integer`],
+    ['top limit too large', (c) => { c.tiles[TILE.combat].extras[1].measure.limit = LIMITS.maxTopValues + 1; }, `tiles[${TILE.combat}].extras[1].measure.limit:bad_integer`],
+    ['top limit fractional', (c) => { c.tiles[TILE.combat].extras[1].measure.limit = 1.5; }, `tiles[${TILE.combat}].extras[1].measure.limit:bad_integer`],
+    ['weight on a sum', (c) => { c.tiles[TILE.hours].measure.weight = 'col.hours'; }, `tiles[${TILE.hours}].measure.weight:not_allowed_for_agg`],
+    ['limit on a count', (c) => { c.tiles[0].measure.limit = 2; }, 'tiles[0].measure.limit:not_allowed_for_agg'],
+  ]);
+});
+
+test('tiles of the strike journal: ring with a count, captions, info facts, ratios and units', () => {
+  // межі з docs/CATALOG.md: «до чотирьох фактів», «top: від 1 до 10 значень»
+  assert.equal(LIMITS.maxFacts, 4);
+  assert.equal(LIMITS.maxTopValues, 10);
+  const night = `tiles[${TILE.night}]`;
+  const hours = `tiles[${TILE.hours}]`;
+  const nightFilter = [{ column: 'col.night', op: 'eq', value: true }];
+  expectAccepted([
+    ['ring with a filtered count', (c) => { c.tiles[TILE.night].measure = { agg: 'count', filter: nightFilter }; }],
+    ['ring with a caption and a label', (c) => { Object.assign(c.tiles[TILE.night], { caption: 'Підпис', ringLabel: 'Частка нічних' }); }],
+    ['info with text only', (c) => { c.tiles[TILE.night].info = { text: 'Пояснення.' }; }],
+    ['info with facts only', (c) => { c.tiles[TILE.night].info = { facts: [{ label: 'Макс. за добу', measure: { agg: 'peak', by: 'col.date', grain: 'day' } }] }; }],
+    ['info with text and four facts', (c) => {
+      c.tiles[TILE.night].info = { text: 'Пояснення', facts: Array.from({ length: LIMITS.maxFacts }, (_, i) => ({ label: `Факт ${i}`, measure: { agg: 'count' } })) };
+    }],
+    ['extra with a ratio, icon and unit forms', (c) => {
+      Object.assign(c.tiles[TILE.hours].extras[0], { per: { agg: 'days' }, icon: 'avg', unit: { one: 'виліт', few: 'вильоти', many: 'вильотів', fraction: 'вильоту' }, suffix: '/день' });
+    }],
+    ['extra with a plain unit', (c) => { c.tiles[TILE.hours].extras[0].unit = 'БП на виліт'; }],
+    ['tile hidden while zero', (c) => { c.tiles[TILE.night].hideWhenZero = true; }],
+    ['tile that is never hidden', (c) => { c.tiles[TILE.night].hideWhenZero = false; }],
+  ]);
+  expectRejected([
+    ['ring with a count and no filter', (c) => { c.tiles[TILE.night].measure = { agg: 'count' }; }, `${night}.visual:visual_mismatch`],
+    ['ring with a sum', (c) => { c.tiles[TILE.night].measure = { agg: 'sum', column: 'col.hours', filter: nightFilter }; }, `${night}.visual:visual_mismatch`],
+    ['caption on bars', (c) => { c.tiles[0].caption = 'Підпис'; }, 'tiles[0].caption:visual_mismatch'],
+    ['ring label on pair', (c) => { c.tiles[TILE.combat].ringLabel = 'Частка'; }, `tiles[${TILE.combat}].ringLabel:visual_mismatch`],
+    ['caption too long', (c) => { c.tiles[TILE.night].caption = 'я'.repeat(LIMITS.captionLength + 1); }, `${night}.caption:too_long`],
+    ['caption with a bidi character', (c) => { c.tiles[TILE.night].caption = `Підпис${chars(0x202e)}`; }, `${night}.caption:forbidden_char`],
+    ['empty info', (c) => { c.tiles[TILE.night].info = {}; }, `${night}.info:missing`],
+    ['info text too long', (c) => { c.tiles[TILE.night].info = { text: 'я'.repeat(LIMITS.infoLength + 1) }; }, `${night}.info.text:too_long`],
+    ['info with unknown key', (c) => { c.tiles[TILE.night].info = { text: 'x', html: '<b>' }; }, `${night}.info.html:unknown_key`],
+    ['info with no facts listed', (c) => { c.tiles[TILE.night].info = { facts: [] }; }, `${night}.info.facts:too_few`],
+    ['info with too many facts', (c) => {
+      c.tiles[TILE.night].info = { facts: Array.from({ length: LIMITS.maxFacts + 1 }, (_, i) => ({ label: `Факт ${i}`, measure: { agg: 'count' } })) };
+    }, `${night}.info.facts:too_many`],
+    ['info fact without a label', (c) => { c.tiles[TILE.night].info = { facts: [{ measure: { agg: 'count' } }] }; }, `${night}.info.facts[0].label:missing`],
+    ['info fact without a measure', (c) => { c.tiles[TILE.night].info = { facts: [{ label: 'Факт' }] }; }, `${night}.info.facts[0].measure:missing`],
+    ['info fact with a share', (c) => { c.tiles[TILE.night].info = { facts: [{ label: 'Частка', measure: { agg: 'share', filter: nightFilter } }] }; }, `${night}.info.facts[0].measure.agg:bad_value`],
+    ['info fact with days', (c) => { c.tiles[TILE.night].info = { facts: [{ label: 'Діб', measure: { agg: 'days' } }] }; }, `${night}.info.facts[0].measure.agg:bad_value`],
+    ['info fact reading an unknown column', (c) => { c.tiles[TILE.night].info = { facts: [{ label: 'Факт', measure: { agg: 'sum', column: 'col.nothing' } }] }; }, `${night}.info.facts[0].measure.column:unknown_column`],
+    ['extra with an unknown key', (c) => { c.tiles[TILE.hours].extras[0].colour = 'red'; }, `${hours}.extras[0].colour:unknown_key`],
+    ['extra per with a share', (c) => { c.tiles[TILE.hours].extras[0].per = { agg: 'share', filter: nightFilter }; }, `${hours}.extras[0].per.agg:bad_value`],
+    ['extra icon as a path', (c) => { c.tiles[TILE.hours].extras[0].icon = '../x'; }, `${hours}.extras[0].icon:bad_icon`],
+    ['unit forms without one', (c) => { c.tiles[TILE.hours].extras[0].unit = { few: 'a', many: 'b' }; }, `${hours}.extras[0].unit.one:missing`],
+    ['unit with an unknown form', (c) => { c.tiles[TILE.hours].extras[0].unit = { one: 'a', few: 'b', many: 'c', other: 'd' }; }, `${hours}.extras[0].unit.other:unknown_key`],
+    ['unit too long', (c) => { c.tiles[TILE.hours].extras[0].unit = 'я'.repeat(LIMITS.unitLength + 1); }, `${hours}.extras[0].unit:too_long`],
+    ['unit of the wrong type', (c) => { c.tiles[TILE.hours].extras[0].unit = 5; }, `${hours}.extras[0].unit:not_object`],
+    ['suffix too long', (c) => { c.tiles[TILE.hours].extras[0].suffix = 'я'.repeat(LIMITS.unitLength + 1); }, `${hours}.extras[0].suffix:too_long`],
+    ['hideWhenZero as text', (c) => { c.tiles[TILE.night].hideWhenZero = 'так'; }, `${night}.hideWhenZero:not_boolean`],
+    ['hideWhenZero as a number', (c) => { c.tiles[TILE.night].hideWhenZero = 1; }, `${night}.hideWhenZero:not_boolean`],
+  ]);
+  // нові поля плитки читають стовпці — конструктор має знати про них
+  const { catalog } = validateCatalog(EXAMPLE);
+  const probe = run((c) => {
+    Object.assign(c.tiles[TILE.hours].extras[0], { per: { agg: 'sum', column: 'col.landings' } });
+    c.tiles[TILE.hours].info = { text: 'x', facts: [{ measure: { agg: 'top', column: 'col.mission', weight: 'col.crew' } }] };
+  });
+  assert.equal(probe.ok, false, 'вага з текстового стовпця має бути відхилена');
+  const ok = run((c) => {
+    c.tiles[TILE.hours].extras[0].per = { agg: 'sum', column: 'col.landings' };
+    c.tiles[TILE.hours].info = { text: 'x', facts: [{ measure: { agg: 'top', column: 'col.mission', weight: 'col.hours' } }] };
+  });
+  assert.equal(ok.ok, true, codes(ok).join(', '));
+  const reads = tileColumns(byId(ok.catalog.tiles, 'tile.hours'));
+  for (const id of ['col.landings', 'col.hours', 'col.mission']) assert.ok(reads.includes(id), `плитка має читати ${id}: ${reads.join(', ')}`);
+  assert.ok(catalog);
 });
 
 test('blocks: keys depend on the kind, references must resolve', () => {
@@ -934,7 +1033,8 @@ test('requirement helpers list exactly the columns an element reads', () => {
   const { catalog } = validateCatalog(EXAMPLE);
   const tile = (id) => byId(catalog.tiles, id);
   const sorted = (items) => [...items].sort();
-  assert.deepEqual(sorted(tileColumns(tile('tile.flights'))), ['col.date']);
+  assert.deepEqual(sorted(tileColumns(tile('tile.flights'))), ['col.aircraft', 'col.date', 'col.hours', 'col.night'], 'факти підказки й вага «top» теж читають стовпці');
+  assert.deepEqual(sorted(tileColumns(tile('tile.night-count'))), ['col.date', 'col.night']);
   assert.deepEqual(sorted(tileColumns(tile('tile.hours'))), ['col.date', 'col.hours']);
   assert.deepEqual(sorted(tileColumns(tile('tile.night'))), ['col.night']);
   assert.deepEqual(sorted(tileColumns(tile('tile.hours-per-aircraft'))), ['col.date', 'col.hours', 'col.tail']);

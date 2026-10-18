@@ -11,7 +11,8 @@
 // перевірки — новий заморожений об’єкт лише з дозволених ключів.
 //
 // Формат описано в docs/CATALOG.md. Версія 1 ще не заморожена: крок «шість поточних карток як
-// описи» може додати способи підрахунку.
+// описи» додав міри «days» і «low», зважений «top», підказки плиток («info»), підпис кільця й
+// додаткові показники з відношенням та одиницею.
 
 /* ------------------------------------------------------------------ */
 /*  Словники формату                                                   */
@@ -23,7 +24,7 @@ export const CATALOG_VERSION = 1;
 /** Від вбудованого до профільного: каталог шару може посилатися лише на свій шар і нижчі. */
 export const LAYERS = Object.freeze(['builtin', 'owner', 'profile']);
 export const COLUMN_TYPES = Object.freeze(['text', 'number', 'date', 'time', 'duration', 'choice', 'multichoice', 'flag', 'coordinates']);
-export const AGGREGATES = Object.freeze(['count', 'share', 'sum', 'avg', 'max', 'min', 'distinct', 'top', 'peak']);
+export const AGGREGATES = Object.freeze(['count', 'share', 'sum', 'avg', 'max', 'min', 'distinct', 'top', 'peak', 'low', 'days']);
 export const FILTER_OPS = Object.freeze(['eq', 'ne', 'in', 'notin', 'gt', 'gte', 'lt', 'lte', 'empty', 'notempty']);
 export const TILE_VISUALS = Object.freeze(['bars', 'ring', 'pair']);
 /** Палітра плиток дашборда ПС (blue, amber, green, orange, red, grey): довільних кольорів немає. */
@@ -57,6 +58,8 @@ export const LIMITS = Object.freeze({
   maxBlockTiles: 12,
   maxTableColumns: 30,
   maxTopLimit: 50,
+  maxTopValues: 10,
+  maxFacts: 4,
   maxKindColumns: 100,
   maxKindTiles: 60,
   maxKindBlocks: 40,
@@ -71,6 +74,8 @@ export const LIMITS = Object.freeze({
   tileLabelLength: 40,
   navLabelLength: 32,
   subLength: 60,
+  captionLength: 80,
+  infoLength: 200,
   descriptionLength: 300,
   groupLength: 40,
   unitLength: 16,
@@ -97,11 +102,16 @@ const AGG_RULES = Object.freeze({
   distinct: { column: NOT_COORDINATES },
   top: { column: CATEGORY },
   peak: { column: NUMERIC, columnOptional: true, by: true },
+  low: { column: NUMERIC, columnOptional: true, by: true },
+  days: { column: null, noFilter: true },
 });
 
-const TILE_AGGS = Object.freeze(['count', 'share', 'sum', 'avg', 'max', 'min', 'distinct', 'peak']);
-const PER_AGGS = Object.freeze(['count', 'sum', 'avg', 'max', 'min', 'distinct']);
-const BLOCK_AGGS = PER_AGGS;
+const TILE_AGGS = Object.freeze(['count', 'share', 'sum', 'avg', 'max', 'min', 'distinct', 'peak', 'low']);
+const BLOCK_AGGS = Object.freeze(['count', 'sum', 'avg', 'max', 'min', 'distinct']);
+/** Знаменник «per»: підрахунок записів або кількість діб вибраного періоду. */
+const PER_AGGS = Object.freeze([...BLOCK_AGGS, 'days']);
+/** Факти підказки плитки: усе, що дає одне число чи рядок (без частки). */
+const INFO_AGGS = Object.freeze(['count', 'sum', 'avg', 'max', 'min', 'distinct', 'peak', 'low', 'top']);
 
 /** Ключі блоків за видом: req — обов’язкові, opt — необов’язкові. Решта ключів — помилка. */
 const BLOCK_SPEC = Object.freeze({
@@ -439,7 +449,7 @@ function validateFilter(ctx, value, path) {
 /* ------------------------------------------------------------------ */
 
 function validateMeasure(ctx, value, path, allowedAggs) {
-  const o = obj(ctx, value, path, { req: ['agg'], opt: ['column', 'filter', 'by', 'grain'] });
+  const o = obj(ctx, value, path, { req: ['agg'], opt: ['column', 'filter', 'by', 'grain', 'weight', 'limit'] });
   if (!o) return undefined;
   const agg = oneOf(ctx, o.agg, join(path, 'agg'), allowedAggs);
   if (!agg) return undefined;
@@ -470,7 +480,21 @@ function validateMeasure(ctx, value, path, allowedAggs) {
     }
   }
 
-  if (Object.hasOwn(o, 'filter')) put(out, 'filter', validateFilter(ctx, o.filter, join(path, 'filter')));
+  if (agg === 'top') {
+    if (Object.hasOwn(o, 'weight')) {
+      const column = columnRef(ctx, o.weight, join(path, 'weight'), NUMERIC);
+      if (column) out.weight = column.id;
+    }
+    if (Object.hasOwn(o, 'limit')) put(out, 'limit', integer(ctx, o.limit, join(path, 'limit'), 1, LIMITS.maxTopValues));
+  } else {
+    for (const key of ['weight', 'limit']) {
+      if (Object.hasOwn(o, key)) ctx.err(join(path, key), 'not_allowed_for_agg', `Підрахунок «${agg}» не приймає «${key}».`);
+    }
+  }
+
+  if (rule.noFilter) {
+    if (Object.hasOwn(o, 'filter')) ctx.err(join(path, 'filter'), 'not_allowed_for_agg', `Підрахунок «${agg}» не приймає відбору.`);
+  } else if (Object.hasOwn(o, 'filter')) put(out, 'filter', validateFilter(ctx, o.filter, join(path, 'filter')));
   else if (rule.filter) ctx.err(join(path, 'filter'), 'missing', `Підрахунок «${agg}» потребує відбору («filter»).`);
   return out;
 }
@@ -480,6 +504,7 @@ export function measureColumns(measure) {
   const out = [];
   if (!measure) return out;
   if (measure.column) out.push(measure.column);
+  if (measure.weight) out.push(measure.weight);
   if (measure.by) out.push(measure.by);
   for (const term of Array.isArray(measure.filter) ? measure.filter : []) if (term && term.column) out.push(term.column);
   return out;
@@ -490,7 +515,12 @@ export function tileColumns(tile) {
   const set = new Set(measureColumns(tile.measure));
   for (const id of measureColumns(tile.per)) set.add(id);
   if (tile.by) set.add(tile.by);
-  for (const extra of Array.isArray(tile.extras) ? tile.extras : []) for (const id of measureColumns(extra && extra.measure)) set.add(id);
+  for (const extra of Array.isArray(tile.extras) ? tile.extras : []) {
+    for (const id of measureColumns(extra && extra.measure)) set.add(id);
+    for (const id of measureColumns(extra && extra.per)) set.add(id);
+  }
+  const facts = tile.info && Array.isArray(tile.info.facts) ? tile.info.facts : [];
+  for (const fact of facts) for (const id of measureColumns(fact && fact.measure)) set.add(id);
   return [...set];
 }
 
@@ -646,10 +676,45 @@ function iconId(ctx, value, path) {
   return undefined;
 }
 
+/** Одиниця показника: рядок (незмінний) або форми відмінювання для «1 / 2–4 / 5+» і дробових значень. */
+function validateUnit(ctx, value, path) {
+  if (typeof value === 'string') return str(ctx, value, path, LIMITS.unitLength);
+  const o = obj(ctx, value, path, { req: ['one', 'few', 'many'], opt: ['fraction'] });
+  if (!o) return undefined;
+  const out = {};
+  for (const key of ['one', 'few', 'many']) out[key] = str(ctx, o[key], join(path, key), LIMITS.unitLength);
+  if (Object.hasOwn(o, 'fraction')) put(out, 'fraction', str(ctx, o.fraction, join(path, 'fraction'), LIMITS.unitLength));
+  return out;
+}
+
+/** Підказка плитки: речення й до чотирьох фактів «підпис: число». Факт без підпису — лише для «top». */
+function validateInfo(ctx, value, path) {
+  const o = obj(ctx, value, path, { req: [], opt: ['text', 'facts'] });
+  if (!o) return undefined;
+  const out = {};
+  if (Object.hasOwn(o, 'text')) put(out, 'text', str(ctx, o.text, join(path, 'text'), LIMITS.infoLength));
+  if (Object.hasOwn(o, 'facts')) {
+    const list = arr(ctx, o.facts, join(path, 'facts'), 1, LIMITS.maxFacts);
+    if (list) {
+      out.facts = list.map((rawFact, i) => {
+        const at = `${join(path, 'facts')}[${i}]`;
+        const fact = obj(ctx, rawFact, at, { req: ['measure'], opt: ['label'] });
+        if (!fact) return undefined;
+        const item = { measure: validateMeasure(ctx, fact.measure, join(at, 'measure'), INFO_AGGS) };
+        if (Object.hasOwn(fact, 'label')) put(item, 'label', str(ctx, fact.label, join(at, 'label'), LIMITS.tileLabelLength));
+        else if (item.measure && item.measure.agg !== 'top') ctx.err(join(at, 'label'), 'missing', 'Факт без підпису допустимий лише для підрахунку «top».');
+        return item;
+      });
+    }
+  }
+  if (!Object.hasOwn(o, 'text') && !Object.hasOwn(o, 'facts')) ctx.err(path, 'missing', 'Підказка потребує «text» або «facts».');
+  return out;
+}
+
 function validateTile(ctx, raw, path) {
   const o = obj(ctx, raw, path, {
     req: ['id', 'label', 'measure', 'visual', 'tone'],
-    opt: ['sub', 'per', 'by', 'delta', 'icon', 'extras', 'opens', 'based_on'],
+    opt: ['sub', 'per', 'by', 'delta', 'icon', 'extras', 'caption', 'ringLabel', 'info', 'hideWhenZero', 'opens', 'based_on'],
   });
   if (!o) return undefined;
   const id = ident(ctx, o.id, join(path, 'id'), 'tile');
@@ -676,19 +741,34 @@ function validateTile(ctx, raw, path) {
     const list = arr(ctx, o.extras, join(path, 'extras'), 1, LIMITS.maxExtras);
     extras = (list || []).map((rawExtra, i) => {
       const at = `${join(path, 'extras')}[${i}]`;
-      const extra = obj(ctx, rawExtra, at, { req: ['label', 'measure'], opt: [] });
+      const extra = obj(ctx, rawExtra, at, { req: ['label', 'measure'], opt: ['per', 'icon', 'unit', 'suffix'] });
       if (!extra) return undefined;
-      return {
+      const item = {
         label: str(ctx, extra.label, join(at, 'label'), LIMITS.tileLabelLength),
         measure: validateMeasure(ctx, extra.measure, join(at, 'measure'), AGGREGATES),
       };
+      if (Object.hasOwn(extra, 'per')) put(item, 'per', validateMeasure(ctx, extra.per, join(at, 'per'), PER_AGGS));
+      if (Object.hasOwn(extra, 'icon')) put(item, 'icon', iconId(ctx, extra.icon, join(at, 'icon')));
+      if (Object.hasOwn(extra, 'unit')) put(item, 'unit', validateUnit(ctx, extra.unit, join(at, 'unit')));
+      if (Object.hasOwn(extra, 'suffix')) put(item, 'suffix', str(ctx, extra.suffix, join(at, 'suffix'), LIMITS.unitLength));
+      return item;
     });
     out.extras = extras;
   }
 
+  for (const key of ['caption', 'ringLabel']) {
+    if (Object.hasOwn(o, key)) {
+      put(out, key, str(ctx, o[key], join(path, key), LIMITS.captionLength));
+      if (visual && visual !== 'ring') ctx.err(join(path, key), 'visual_mismatch', `Ключ «${key}» належить кільцю.`);
+    }
+  }
+  if (Object.hasOwn(o, 'info')) put(out, 'info', validateInfo(ctx, o.info, join(path, 'info')));
+  if (Object.hasOwn(o, 'hideWhenZero')) put(out, 'hideWhenZero', bool(ctx, o.hideWhenZero, join(path, 'hideWhenZero')));
+
   const agg = out.measure && out.measure.agg;
   if (visual === 'ring') {
-    if (agg && agg !== 'share') ctx.err(join(path, 'visual'), 'visual_mismatch', 'Кільце показує частку: потрібен підрахунок «share».');
+    const ringOk = agg === 'share' || (agg === 'count' && out.measure.filter);
+    if (agg && !ringOk) ctx.err(join(path, 'visual'), 'visual_mismatch', 'Кільце показує частку: потрібен підрахунок «share» або «count» з відбором.');
     if (Object.hasOwn(o, 'per')) ctx.err(join(path, 'per'), 'visual_mismatch', 'Кільце не поєднується з «per».');
     if (extras.length) ctx.err(join(path, 'extras'), 'visual_mismatch', 'Кільце не має додаткових показників.');
   } else if (visual) {
@@ -1064,6 +1144,15 @@ function validatedLayers(catalogs, who) {
     throw new TypeError(`${who} приймає лише каталоги, які пройшли validateCatalog.`);
   }
   return layers;
+}
+
+/**
+ * Пошук елемента за розділом (`columns`, `lists`, `tiles`, `blocks`, `kinds`) і id по перевірених
+ * шарах (id не повторюються між шарами). Для ядер, яким треба читати каталог (підрахунок плиток).
+ * Неперевірений каталог — `TypeError`.
+ */
+export function catalogFinder(catalogs, who = 'catalogFinder') {
+  return layerFinder(validatedLayers(catalogs, who));
 }
 
 function layerFinder(layers) {
