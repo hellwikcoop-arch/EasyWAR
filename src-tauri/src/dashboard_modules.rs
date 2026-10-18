@@ -1,0 +1,1496 @@
+use serde::Serialize;
+use serde_json::{Map, Number, Value};
+use sha2::{Digest, Sha256};
+use sqlx::{Row, Sqlite, SqlitePool, Transaction};
+use std::collections::{BTreeMap, BTreeSet};
+
+const MAX_MODULES_PER_BRANCH: i64 = 64;
+const MAX_ROWS_PER_WRITE: usize = 10_000;
+const MAX_ROWS_PER_READ: i64 = 10_000;
+const MAX_TEXT_LENGTH: usize = 4096;
+
+#[derive(Clone, Debug)]
+pub struct DashboardModuleStore {
+    pool: SqlitePool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DashboardModuleFieldTemplate {
+    pub key: &'static str,
+    pub label: &'static str,
+    pub data_type: &'static str,
+    pub role: &'static str,
+    pub aggregation: &'static str,
+    pub required: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DashboardModuleTemplate {
+    pub id: &'static str,
+    pub title: &'static str,
+    pub category: &'static str,
+    pub description: &'static str,
+    pub visual_kind: &'static str,
+    pub default_span: u8,
+    pub fields: Vec<DashboardModuleFieldTemplate>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DashboardModuleField {
+    pub key: String,
+    pub label: String,
+    pub data_type: String,
+    pub role: String,
+    pub aggregation: String,
+    pub required: bool,
+    pub position: i64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DashboardModule {
+    pub id: String,
+    pub branch: String,
+    pub template_id: String,
+    pub visual_kind: String,
+    pub default_span: u8,
+    pub title: String,
+    pub storage_table: String,
+    pub fields: Vec<DashboardModuleField>,
+    pub row_count: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DashboardModuleData {
+    pub module: DashboardModule,
+    pub rows: Vec<BTreeMap<String, Value>>,
+    pub truncated: bool,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum DashboardModuleError {
+    #[error("не вдалося прочитати або зберегти модуль дашборда")]
+    Storage(#[from] sqlx::Error),
+    #[error("спершу увійдіть у локальний профіль")]
+    ProfileRequired,
+    #[error("невідома гілка дашборда")]
+    InvalidBranch,
+    #[error("невідомий тип модуля")]
+    UnknownTemplate,
+    #[error("назва модуля має містити від 1 до 80 символів")]
+    InvalidTitle,
+    #[error("досягнуто межі 64 модулі для цього дашборда")]
+    ModuleLimit,
+    #[error("модуль дашборда не знайдено")]
+    ModuleNotFound,
+    #[error("службова схема модуля пошкоджена")]
+    InvalidStoredSchema,
+    #[error("за один раз можна записати не більше 10000 рядків")]
+    TooManyRows,
+    #[error("рядок містить невідоме поле: {0}")]
+    UnknownField(String),
+    #[error("поле «{0}» є обов'язковим")]
+    RequiredField(String),
+    #[error("значення поля «{0}» не відповідає типу {1}")]
+    InvalidValue(String, String),
+    #[error("текст у полі «{0}» перевищує 4096 символів")]
+    TextTooLong(String),
+}
+
+fn field(
+    key: &'static str,
+    label: &'static str,
+    data_type: &'static str,
+    role: &'static str,
+    aggregation: &'static str,
+    required: bool,
+) -> DashboardModuleFieldTemplate {
+    DashboardModuleFieldTemplate {
+        key,
+        label,
+        data_type,
+        role,
+        aggregation,
+        required,
+    }
+}
+
+fn dimension(key: &'static str, label: &'static str) -> DashboardModuleFieldTemplate {
+    field(key, label, "text", "dimension", "none", true)
+}
+
+fn metric(key: &'static str, label: &'static str) -> DashboardModuleFieldTemplate {
+    field(key, label, "real", "metric", "sum", true)
+}
+
+fn template(
+    id: &'static str,
+    title: &'static str,
+    category: &'static str,
+    description: &'static str,
+    visual_kind: &'static str,
+    default_span: u8,
+    fields: Vec<DashboardModuleFieldTemplate>,
+) -> DashboardModuleTemplate {
+    DashboardModuleTemplate {
+        id,
+        title,
+        category,
+        description,
+        visual_kind,
+        default_span,
+        fields,
+    }
+}
+
+/// Вбудований каталог покриває всі сім наданих референсів. Він є єдиним
+/// джерелом фізичних назв колонок: довільний текст користувача у DDL не потрапляє.
+pub fn catalog() -> Vec<DashboardModuleTemplate> {
+    vec![
+        template(
+            "flight-hours",
+            "Загальний наліт за типом ПС",
+            "Авіація",
+            "Порівнює наліт у повітрі із загальним нальотом для кожного типу ПС.",
+            "horizontal-bar",
+            2,
+            vec![
+                field(
+                    "list_number",
+                    "Номер за списком",
+                    "integer",
+                    "order",
+                    "none",
+                    false,
+                ),
+                dimension("aircraft_type", "Тип ПС"),
+                field(
+                    "day_night",
+                    "День / ніч",
+                    "text",
+                    "dimension",
+                    "none",
+                    false,
+                ),
+                field(
+                    "flight_shift_number",
+                    "Номер льотної зміни",
+                    "integer",
+                    "dimension",
+                    "none",
+                    false,
+                ),
+                field(
+                    "training_program_fuel",
+                    "Програма підготовки (паливо)",
+                    "text",
+                    "note",
+                    "none",
+                    false,
+                ),
+                field(
+                    "combat_training_exercise_number",
+                    "Номер вправи за курсом бойової підготовки",
+                    "text",
+                    "note",
+                    "none",
+                    false,
+                ),
+                field(
+                    "complex_exercise_number_1",
+                    "Номер вправи у комплексі №1",
+                    "text",
+                    "note",
+                    "none",
+                    false,
+                ),
+                field(
+                    "complex_exercise_number_2",
+                    "Номер вправи у комплексі №2",
+                    "text",
+                    "note",
+                    "none",
+                    false,
+                ),
+                field(
+                    "flight_count",
+                    "Кількість польотів",
+                    "integer",
+                    "metric",
+                    "sum",
+                    false,
+                ),
+                field(
+                    "takeoff_time",
+                    "Час зльоту",
+                    "text",
+                    "dimension",
+                    "none",
+                    false,
+                ),
+                field(
+                    "landing_time",
+                    "Час посадки",
+                    "text",
+                    "dimension",
+                    "none",
+                    false,
+                ),
+                metric("airborne_hours", "Наліт (повітря)"),
+                metric("total_hours", "Наліт (загальний)"),
+                field(
+                    "flight_altitude",
+                    "Висота польоту",
+                    "real",
+                    "metric",
+                    "average",
+                    false,
+                ),
+                field(
+                    "combat_application_grade",
+                    "Оцінка бойового застосування",
+                    "text",
+                    "status",
+                    "none",
+                    false,
+                ),
+                field(
+                    "flight_grade",
+                    "Оцінка за політ",
+                    "text",
+                    "status",
+                    "none",
+                    false,
+                ),
+                field(
+                    "cloud_base_upper",
+                    "Верхня межа хмар",
+                    "real",
+                    "metric",
+                    "average",
+                    false,
+                ),
+                field(
+                    "cloud_base_lower",
+                    "Нижня межа хмар",
+                    "real",
+                    "metric",
+                    "average",
+                    false,
+                ),
+                field(
+                    "cloud_cover",
+                    "Хмарність",
+                    "integer",
+                    "metric",
+                    "average",
+                    false,
+                ),
+                field(
+                    "visibility",
+                    "Видимість",
+                    "real",
+                    "metric",
+                    "average",
+                    false,
+                ),
+                field(
+                    "instrument_meteorological_conditions",
+                    "Політ у СМУ",
+                    "boolean",
+                    "status",
+                    "none",
+                    false,
+                ),
+                field(
+                    "time_in_clouds",
+                    "Час у хмарах",
+                    "real",
+                    "metric",
+                    "sum",
+                    false,
+                ),
+                field(
+                    "hood_time",
+                    "Час під шторкою",
+                    "real",
+                    "metric",
+                    "sum",
+                    false,
+                ),
+                field(
+                    "fuel_consumption",
+                    "Витрата палива",
+                    "real",
+                    "metric",
+                    "sum",
+                    false,
+                ),
+            ],
+        ),
+        template(
+            "kpi",
+            "Ключовий показник",
+            "Показники",
+            "Одне велике значення, одиниця виміру та зміна за період.",
+            "kpi",
+            1,
+            vec![
+                field("label", "Показник", "text", "label", "none", true),
+                metric("value", "Значення"),
+                field("delta", "Зміна, %", "real", "metric", "average", false),
+                field("unit", "Одиниця", "text", "note", "none", false),
+            ],
+        ),
+        template(
+            "line",
+            "Лінійний графік",
+            "Динаміка",
+            "Зміна одного або кількох показників у часі.",
+            "line",
+            2,
+            vec![
+                field("period", "Період", "date", "dimension", "none", true),
+                metric("value", "Значення"),
+                field("series", "Ряд", "text", "series", "none", false),
+            ],
+        ),
+        template(
+            "area",
+            "Графік із площею",
+            "Динаміка",
+            "Тренд із заповненою областю для акценту на обсязі.",
+            "area",
+            2,
+            vec![
+                field("period", "Період", "date", "dimension", "none", true),
+                metric("value", "Значення"),
+                field("series", "Ряд", "text", "series", "none", false),
+            ],
+        ),
+        template(
+            "columns",
+            "Вертикальні стовпчики",
+            "Порівняння",
+            "Порівнює категорії за висотою стовпчиків.",
+            "columns",
+            2,
+            vec![
+                dimension("category", "Категорія"),
+                metric("value", "Значення"),
+                field("series", "Ряд", "text", "series", "none", false),
+            ],
+        ),
+        template(
+            "horizontal-bars",
+            "Горизонтальні смуги",
+            "Порівняння",
+            "Рейтинг категорій із довгими підписами.",
+            "horizontal-bar",
+            2,
+            vec![
+                dimension("category", "Категорія"),
+                metric("value", "Значення"),
+                field("series", "Ряд", "text", "series", "none", false),
+            ],
+        ),
+        template(
+            "grouped-columns",
+            "Згруповані стовпчики",
+            "Порівняння",
+            "Два порівнювані значення для кожної категорії.",
+            "grouped-columns",
+            2,
+            vec![
+                dimension("category", "Категорія"),
+                metric("primary_value", "Основне значення"),
+                metric("secondary_value", "Порівняльне значення"),
+            ],
+        ),
+        template(
+            "donut",
+            "Кільцева діаграма",
+            "Структура",
+            "Частки категорій у загальному підсумку.",
+            "donut",
+            1,
+            vec![
+                dimension("category", "Категорія"),
+                metric("value", "Значення"),
+            ],
+        ),
+        template(
+            "radial-progress",
+            "Радіальний прогрес",
+            "Показники",
+            "Виконання одного показника відносно цілі.",
+            "radial-progress",
+            1,
+            vec![
+                field("label", "Показник", "text", "label", "none", true),
+                metric("current_value", "Поточне значення"),
+                metric("target_value", "Цільове значення"),
+            ],
+        ),
+        template(
+            "multi-ring",
+            "Кілька радіальних шкал",
+            "Показники",
+            "Кілька вкладених показників виконання.",
+            "multi-ring",
+            1,
+            vec![
+                field("label", "Показник", "text", "label", "none", true),
+                metric("current_value", "Поточне значення"),
+                metric("target_value", "Цільове значення"),
+                field("ring_order", "Порядок", "integer", "order", "none", false),
+            ],
+        ),
+        template(
+            "radar",
+            "Радарна діаграма",
+            "Порівняння",
+            "Профіль за кількома осями з підтримкою серій.",
+            "radar",
+            1,
+            vec![
+                dimension("axis", "Вісь"),
+                metric("value", "Значення"),
+                field("series", "Ряд", "text", "series", "none", false),
+            ],
+        ),
+        template(
+            "gauge",
+            "Шкала-прилад",
+            "Показники",
+            "Поточний рівень у заданому мінімумі й максимумі.",
+            "gauge",
+            1,
+            vec![
+                field("label", "Показник", "text", "label", "none", true),
+                metric("value", "Значення"),
+                field("minimum", "Мінімум", "real", "metric", "minimum", false),
+                field("maximum", "Максимум", "real", "metric", "maximum", true),
+            ],
+        ),
+        template(
+            "progress-bars",
+            "Смуги виконання",
+            "Показники",
+            "Кілька показників із прогресом до цілі.",
+            "progress-bars",
+            1,
+            vec![
+                field("label", "Показник", "text", "label", "none", true),
+                metric("current_value", "Поточне значення"),
+                metric("target_value", "Цільове значення"),
+            ],
+        ),
+        template(
+            "calendar",
+            "Календар активності",
+            "Час",
+            "Щільність подій або значення за днями.",
+            "calendar",
+            1,
+            vec![
+                field("date", "Дата", "date", "dimension", "none", true),
+                metric("value", "Значення"),
+            ],
+        ),
+        template(
+            "table",
+            "Оперативна таблиця",
+            "Реєстр",
+            "Рядки з показником, станом і приміткою.",
+            "table",
+            2,
+            vec![
+                field("label", "Назва", "text", "label", "none", true),
+                metric("value", "Значення"),
+                field("status", "Стан", "text", "status", "none", false),
+                field("note", "Примітка", "text", "note", "none", false),
+            ],
+        ),
+        template(
+            "funnel",
+            "Воронка",
+            "Процес",
+            "Послідовні етапи та залишок на кожному з них.",
+            "funnel",
+            1,
+            vec![
+                dimension("stage", "Етап"),
+                metric("value", "Значення"),
+                field("stage_order", "Порядок", "integer", "order", "none", true),
+            ],
+        ),
+        template(
+            "map",
+            "Карта подій",
+            "Географія",
+            "Точки на карті з числовим значенням і станом.",
+            "map",
+            2,
+            vec![
+                field("label", "Назва", "text", "label", "none", true),
+                field("latitude", "Широта", "real", "latitude", "none", true),
+                field("longitude", "Довгота", "real", "longitude", "none", true),
+                metric("value", "Значення"),
+                field("status", "Стан", "text", "status", "none", false),
+            ],
+        ),
+        template(
+            "cohort",
+            "Когортна матриця",
+            "Структура",
+            "Матриця значень за когортою та періодом.",
+            "cohort",
+            2,
+            vec![
+                dimension("cohort", "Когорта"),
+                field("period", "Період", "text", "dimension", "none", true),
+                metric("value", "Значення"),
+            ],
+        ),
+        template(
+            "activity",
+            "Стрічка активності",
+            "Оперативність",
+            "Останні події зі станом і числовим показником.",
+            "activity",
+            1,
+            vec![
+                field(
+                    "occurred_at",
+                    "Час події",
+                    "datetime",
+                    "dimension",
+                    "none",
+                    true,
+                ),
+                field("label", "Подія", "text", "label", "none", true),
+                field("status", "Стан", "text", "status", "none", false),
+                field("value", "Значення", "real", "metric", "sum", false),
+            ],
+        ),
+        template(
+            "waveform",
+            "Двобічна гістограма",
+            "Динаміка",
+            "Позитивні й негативні значення відносно спільної осі.",
+            "waveform",
+            2,
+            vec![
+                field("occurred_at", "Час", "datetime", "dimension", "none", true),
+                metric("positive_value", "Верхнє значення"),
+                metric("negative_value", "Нижнє значення"),
+                field("series", "Ряд", "text", "series", "none", false),
+            ],
+        ),
+    ]
+}
+
+fn valid_branch(branch: &str) -> bool {
+    matches!(branch, "air" | "rocket" | "pvk" | "dshv")
+}
+
+fn valid_identifier(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 64
+        && value.bytes().enumerate().all(|(index, byte)| {
+            byte == b'_' || byte.is_ascii_lowercase() || (index > 0 && byte.is_ascii_digit())
+        })
+}
+
+fn valid_storage_table(value: &str) -> bool {
+    value.strip_prefix("dashboard_data_").is_some_and(|suffix| {
+        suffix.len() == 24 && suffix.bytes().all(|byte| byte.is_ascii_hexdigit())
+    })
+}
+
+fn quoted_identifier(value: &str) -> Result<String, DashboardModuleError> {
+    if !valid_identifier(value) {
+        return Err(DashboardModuleError::InvalidStoredSchema);
+    }
+    Ok(format!("\"{value}\""))
+}
+
+fn sql_type(data_type: &str) -> Result<&'static str, DashboardModuleError> {
+    match data_type {
+        "text" | "date" | "datetime" => Ok("TEXT"),
+        "integer" | "boolean" => Ok("INTEGER"),
+        "real" => Ok("REAL"),
+        _ => Err(DashboardModuleError::InvalidStoredSchema),
+    }
+}
+
+fn normalized_title(value: Option<&str>, fallback: &str) -> Result<String, DashboardModuleError> {
+    let title = value.unwrap_or(fallback).trim();
+    if title.is_empty() || title.chars().count() > 80 {
+        return Err(DashboardModuleError::InvalidTitle);
+    }
+    Ok(title.to_owned())
+}
+
+fn generated_identity(
+    profile_id: &str,
+    branch: &str,
+    template_id: &str,
+    title: &str,
+    created_at: &str,
+) -> (String, String) {
+    let digest = format!(
+        "{:x}",
+        Sha256::digest(
+            format!("easywar-dashboard-module-v1\0{profile_id}\0{branch}\0{template_id}\0{title}\0{created_at}").as_bytes()
+        )
+    );
+    let short = &digest[..24];
+    (
+        format!("dashboard-{short}"),
+        format!("dashboard_data_{short}"),
+    )
+}
+
+type StoredModuleRow = (
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+);
+
+impl DashboardModuleStore {
+    pub fn new(pool: SqlitePool) -> Self {
+        Self { pool }
+    }
+
+    pub async fn list(
+        &self,
+        profile_id: &str,
+        branch: &str,
+    ) -> Result<Vec<DashboardModule>, DashboardModuleError> {
+        if !valid_branch(branch) {
+            return Err(DashboardModuleError::InvalidBranch);
+        }
+        let rows = sqlx::query_as::<_, StoredModuleRow>(
+            "SELECT id, branch, template_id, visual_kind, title, storage_table, created_at, updated_at
+             FROM dashboard_modules
+             WHERE profile_id = ? AND branch = ?
+             ORDER BY created_at, id",
+        )
+        .bind(profile_id)
+        .bind(branch)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut modules = Vec::with_capacity(rows.len());
+        for row in rows {
+            modules.push(self.materialize(row).await?);
+        }
+        Ok(modules)
+    }
+
+    pub async fn create(
+        &self,
+        profile_id: &str,
+        branch: &str,
+        template_id: &str,
+        requested_title: Option<&str>,
+        created_at: &str,
+    ) -> Result<DashboardModule, DashboardModuleError> {
+        if !valid_branch(branch) {
+            return Err(DashboardModuleError::InvalidBranch);
+        }
+        let selected = catalog()
+            .into_iter()
+            .find(|item| item.id == template_id)
+            .ok_or(DashboardModuleError::UnknownTemplate)?;
+        let title = normalized_title(requested_title, selected.title)?;
+
+        let count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM dashboard_modules WHERE profile_id = ? AND branch = ?",
+        )
+        .bind(profile_id)
+        .bind(branch)
+        .fetch_one(&self.pool)
+        .await?;
+        if count >= MAX_MODULES_PER_BRANCH {
+            return Err(DashboardModuleError::ModuleLimit);
+        }
+
+        let (id, storage_table) =
+            generated_identity(profile_id, branch, selected.id, &title, created_at);
+        let mut transaction = self.pool.begin().await?;
+        sqlx::query(
+            "INSERT INTO dashboard_modules
+             (id, profile_id, branch, template_id, visual_kind, title, storage_table, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&id)
+        .bind(profile_id)
+        .bind(branch)
+        .bind(selected.id)
+        .bind(selected.visual_kind)
+        .bind(&title)
+        .bind(&storage_table)
+        .bind(created_at)
+        .bind(created_at)
+        .execute(&mut *transaction)
+        .await?;
+
+        for (position, item) in selected.fields.iter().enumerate() {
+            if !valid_identifier(item.key) {
+                return Err(DashboardModuleError::InvalidStoredSchema);
+            }
+            sqlx::query(
+                "INSERT INTO dashboard_module_fields
+                 (module_id, field_key, label, data_type, field_role, aggregation, required, position)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind(&id)
+            .bind(item.key)
+            .bind(item.label)
+            .bind(item.data_type)
+            .bind(item.role)
+            .bind(item.aggregation)
+            .bind(item.required)
+            .bind(position as i64)
+            .execute(&mut *transaction)
+            .await?;
+        }
+
+        create_data_table(&mut transaction, &storage_table, &selected.fields).await?;
+        transaction.commit().await?;
+        self.get_for_profile(profile_id, &id).await
+    }
+
+    pub async fn get_data(
+        &self,
+        profile_id: &str,
+        module_id: &str,
+    ) -> Result<DashboardModuleData, DashboardModuleError> {
+        let module = self.get_for_profile(profile_id, module_id).await?;
+        let table = quoted_identifier(&module.storage_table)?;
+        let mut columns = vec!["row_id".to_owned(), "created_at".to_owned()];
+        columns.extend(module.fields.iter().map(|item| item.key.clone()));
+        let select = columns
+            .iter()
+            .map(|column| quoted_identifier(column))
+            .collect::<Result<Vec<_>, _>>()?
+            .join(", ");
+        let sql = format!(
+            "SELECT {select} FROM {table} ORDER BY row_id LIMIT {}",
+            MAX_ROWS_PER_READ + 1
+        );
+        let stored = sqlx::query(&sql).fetch_all(&self.pool).await?;
+        let truncated = stored.len() as i64 > MAX_ROWS_PER_READ;
+        let mut rows = Vec::with_capacity(stored.len().min(MAX_ROWS_PER_READ as usize));
+        for row in stored.into_iter().take(MAX_ROWS_PER_READ as usize) {
+            let mut item = BTreeMap::new();
+            item.insert(
+                "rowId".to_owned(),
+                Value::Number(row.try_get::<i64, _>("row_id")?.into()),
+            );
+            item.insert(
+                "createdAt".to_owned(),
+                Value::String(row.try_get::<String, _>("created_at")?),
+            );
+            for field in &module.fields {
+                let value = match field.data_type.as_str() {
+                    "text" | "date" | "datetime" => row
+                        .try_get::<Option<String>, _>(field.key.as_str())?
+                        .map(Value::String)
+                        .unwrap_or(Value::Null),
+                    "integer" => row
+                        .try_get::<Option<i64>, _>(field.key.as_str())?
+                        .map(|value| Value::Number(value.into()))
+                        .unwrap_or(Value::Null),
+                    "real" => row
+                        .try_get::<Option<f64>, _>(field.key.as_str())?
+                        .and_then(Number::from_f64)
+                        .map(Value::Number)
+                        .unwrap_or(Value::Null),
+                    "boolean" => row
+                        .try_get::<Option<i64>, _>(field.key.as_str())?
+                        .map(|value| Value::Bool(value != 0))
+                        .unwrap_or(Value::Null),
+                    _ => return Err(DashboardModuleError::InvalidStoredSchema),
+                };
+                item.insert(field.key.clone(), value);
+            }
+            rows.push(item);
+        }
+        Ok(DashboardModuleData {
+            module,
+            rows,
+            truncated,
+        })
+    }
+
+    pub async fn replace_rows(
+        &self,
+        profile_id: &str,
+        module_id: &str,
+        rows: Vec<Map<String, Value>>,
+        updated_at: &str,
+    ) -> Result<DashboardModuleData, DashboardModuleError> {
+        if rows.len() > MAX_ROWS_PER_WRITE {
+            return Err(DashboardModuleError::TooManyRows);
+        }
+        let module = self.get_for_profile(profile_id, module_id).await?;
+        let allowed = module
+            .fields
+            .iter()
+            .map(|field| field.key.as_str())
+            .collect::<BTreeSet<_>>();
+        for row in &rows {
+            if let Some(key) = row.keys().find(|key| !allowed.contains(key.as_str())) {
+                return Err(DashboardModuleError::UnknownField(key.clone()));
+            }
+            for field in &module.fields {
+                validate_value(field, row.get(&field.key))?;
+            }
+        }
+
+        let table = quoted_identifier(&module.storage_table)?;
+        let field_columns = module
+            .fields
+            .iter()
+            .map(|field| quoted_identifier(&field.key))
+            .collect::<Result<Vec<_>, _>>()?;
+        let columns = std::iter::once("\"created_at\"".to_owned())
+            .chain(field_columns)
+            .collect::<Vec<_>>();
+        let placeholders = vec!["?"; columns.len()].join(", ");
+        let insert = format!(
+            "INSERT INTO {table} ({}) VALUES ({placeholders})",
+            columns.join(", ")
+        );
+
+        let mut transaction = self.pool.begin().await?;
+        sqlx::query(&format!("DELETE FROM {table}"))
+            .execute(&mut *transaction)
+            .await?;
+        for row in rows {
+            let mut query = sqlx::query(&insert).bind(updated_at);
+            for field in &module.fields {
+                let value = row.get(&field.key).filter(|value| !value.is_null());
+                query = match field.data_type.as_str() {
+                    "text" | "date" | "datetime" => {
+                        query.bind(value.and_then(Value::as_str).map(ToOwned::to_owned))
+                    }
+                    "integer" => query.bind(value.and_then(Value::as_i64)),
+                    "real" => query.bind(value.and_then(Value::as_f64)),
+                    "boolean" => query.bind(value.and_then(Value::as_bool).map(|value| {
+                        if value {
+                            1_i64
+                        } else {
+                            0_i64
+                        }
+                    })),
+                    _ => return Err(DashboardModuleError::InvalidStoredSchema),
+                };
+            }
+            query.execute(&mut *transaction).await?;
+        }
+        sqlx::query("UPDATE dashboard_modules SET updated_at = ? WHERE id = ?")
+            .bind(updated_at)
+            .bind(module_id)
+            .execute(&mut *transaction)
+            .await?;
+        transaction.commit().await?;
+        self.get_data(profile_id, module_id).await
+    }
+
+    async fn get_for_profile(
+        &self,
+        profile_id: &str,
+        module_id: &str,
+    ) -> Result<DashboardModule, DashboardModuleError> {
+        let row = sqlx::query_as::<_, StoredModuleRow>(
+            "SELECT id, branch, template_id, visual_kind, title, storage_table, created_at, updated_at
+             FROM dashboard_modules WHERE profile_id = ? AND id = ?",
+        )
+        .bind(profile_id)
+        .bind(module_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(DashboardModuleError::ModuleNotFound)?;
+        self.materialize(row).await
+    }
+
+    async fn materialize(
+        &self,
+        row: StoredModuleRow,
+    ) -> Result<DashboardModule, DashboardModuleError> {
+        self.synchronize_template_schema(&row).await?;
+        let (id, branch, template_id, visual_kind, title, storage_table, created_at, updated_at) =
+            row;
+        if !valid_branch(&branch) || !valid_storage_table(&storage_table) {
+            return Err(DashboardModuleError::InvalidStoredSchema);
+        }
+        let fields = sqlx::query_as::<_, (String, String, String, String, String, i64, i64)>(
+            "SELECT field_key, label, data_type, field_role, aggregation, required, position
+             FROM dashboard_module_fields WHERE module_id = ? ORDER BY position",
+        )
+        .bind(&id)
+        .fetch_all(&self.pool)
+        .await?
+        .into_iter()
+        .map(|field| DashboardModuleField {
+            key: field.0,
+            label: field.1,
+            data_type: field.2,
+            role: field.3,
+            aggregation: field.4,
+            required: field.5 != 0,
+            position: field.6,
+        })
+        .collect::<Vec<_>>();
+        if fields.is_empty() || fields.iter().any(|field| !valid_identifier(&field.key)) {
+            return Err(DashboardModuleError::InvalidStoredSchema);
+        }
+        let table = quoted_identifier(&storage_table)?;
+        let row_count = sqlx::query_scalar::<_, i64>(&format!("SELECT count(*) FROM {table}"))
+            .fetch_one(&self.pool)
+            .await?;
+        let default_span = catalog()
+            .into_iter()
+            .find(|item| item.id == template_id)
+            .map(|item| item.default_span)
+            .unwrap_or(1);
+        Ok(DashboardModule {
+            id,
+            branch,
+            template_id,
+            visual_kind,
+            default_span,
+            title,
+            storage_table,
+            fields,
+            row_count,
+            created_at,
+            updated_at,
+        })
+    }
+
+    /// Каталог може отримувати нові адитивні поля після того, як користувач уже
+    /// створив модуль. Фізичну таблицю та опис полів розширюємо на місці,
+    /// зберігаючи всі наявні рядки. Довільні назви в DDL не потрапляють.
+    async fn synchronize_template_schema(
+        &self,
+        row: &StoredModuleRow,
+    ) -> Result<(), DashboardModuleError> {
+        let (module_id, _, template_id, _, _, storage_table, _, _) = row;
+        let Some(template) = catalog().into_iter().find(|item| item.id == template_id) else {
+            return Ok(());
+        };
+        let table = quoted_identifier(storage_table)?;
+        let physical = sqlx::query(&format!("PRAGMA table_info({table})"))
+            .fetch_all(&self.pool)
+            .await?
+            .into_iter()
+            .map(|column| {
+                Ok((
+                    column.try_get::<String, _>("name")?,
+                    column.try_get::<String, _>("type")?.to_ascii_uppercase(),
+                ))
+            })
+            .collect::<Result<BTreeMap<_, _>, sqlx::Error>>()?;
+        if physical.is_empty() {
+            return Err(DashboardModuleError::InvalidStoredSchema);
+        }
+        for field in &template.fields {
+            if let Some(stored_type) = physical.get(field.key) {
+                if stored_type != sql_type(field.data_type)? {
+                    return Err(DashboardModuleError::InvalidStoredSchema);
+                }
+            }
+        }
+
+        let stored_fields =
+            sqlx::query_as::<_, (String, String, String, String, String, i64, i64)>(
+                "SELECT field_key, label, data_type, field_role, aggregation, required, position
+             FROM dashboard_module_fields WHERE module_id = ? ORDER BY position",
+            )
+            .bind(module_id)
+            .fetch_all(&self.pool)
+            .await?;
+        let metadata_matches = stored_fields.len() == template.fields.len()
+            && stored_fields.iter().zip(&template.fields).enumerate().all(
+                |(position, (stored, expected))| {
+                    stored.0 == expected.key
+                        && stored.1 == expected.label
+                        && stored.2 == expected.data_type
+                        && stored.3 == expected.role
+                        && stored.4 == expected.aggregation
+                        && (stored.5 != 0) == expected.required
+                        && stored.6 == position as i64
+                },
+            );
+        let columns_match = template
+            .fields
+            .iter()
+            .all(|field| physical.contains_key(field.key));
+        if metadata_matches && columns_match {
+            return Ok(());
+        }
+
+        let mut transaction = self.pool.begin().await?;
+        for field in &template.fields {
+            if !physical.contains_key(field.key) {
+                let column = quoted_identifier(field.key)?;
+                sqlx::query(&format!(
+                    "ALTER TABLE {table} ADD COLUMN {column} {}",
+                    sql_type(field.data_type)?
+                ))
+                .execute(&mut *transaction)
+                .await?;
+            }
+        }
+        sqlx::query("DELETE FROM dashboard_module_fields WHERE module_id = ?")
+            .bind(module_id)
+            .execute(&mut *transaction)
+            .await?;
+        for (position, field) in template.fields.iter().enumerate() {
+            sqlx::query(
+                "INSERT INTO dashboard_module_fields
+                 (module_id, field_key, label, data_type, field_role, aggregation, required, position)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind(module_id)
+            .bind(field.key)
+            .bind(field.label)
+            .bind(field.data_type)
+            .bind(field.role)
+            .bind(field.aggregation)
+            .bind(field.required)
+            .bind(position as i64)
+            .execute(&mut *transaction)
+            .await?;
+        }
+        transaction.commit().await?;
+        Ok(())
+    }
+}
+
+async fn create_data_table(
+    transaction: &mut Transaction<'_, Sqlite>,
+    storage_table: &str,
+    fields: &[DashboardModuleFieldTemplate],
+) -> Result<(), DashboardModuleError> {
+    if !valid_storage_table(storage_table) {
+        return Err(DashboardModuleError::InvalidStoredSchema);
+    }
+    let mut columns = vec![
+        "\"row_id\" INTEGER PRIMARY KEY AUTOINCREMENT".to_owned(),
+        "\"created_at\" TEXT NOT NULL".to_owned(),
+    ];
+    for field in fields {
+        columns.push(format!(
+            "{} {}{}",
+            quoted_identifier(field.key)?,
+            sql_type(field.data_type)?,
+            if field.required { " NOT NULL" } else { "" }
+        ));
+    }
+    let table = quoted_identifier(storage_table)?;
+    sqlx::query(&format!("CREATE TABLE {table} ({})", columns.join(", ")))
+        .execute(&mut **transaction)
+        .await?;
+    Ok(())
+}
+
+fn validate_value(
+    field: &DashboardModuleField,
+    value: Option<&Value>,
+) -> Result<(), DashboardModuleError> {
+    let absent = value.map_or(true, Value::is_null);
+    if absent {
+        return if field.required {
+            Err(DashboardModuleError::RequiredField(field.label.clone()))
+        } else {
+            Ok(())
+        };
+    }
+    let value = value.expect("checked above");
+    let valid = match field.data_type.as_str() {
+        "text" | "date" | "datetime" => value.as_str().is_some(),
+        "integer" => value.as_i64().is_some(),
+        "real" => value.as_f64().is_some_and(f64::is_finite),
+        "boolean" => value.as_bool().is_some(),
+        _ => return Err(DashboardModuleError::InvalidStoredSchema),
+    };
+    if !valid {
+        return Err(DashboardModuleError::InvalidValue(
+            field.label.clone(),
+            field.data_type.clone(),
+        ));
+    }
+    if let Some(text) = value.as_str() {
+        if field.required && text.trim().is_empty() {
+            return Err(DashboardModuleError::RequiredField(field.label.clone()));
+        }
+        if text.chars().count() > MAX_TEXT_LENGTH {
+            return Err(DashboardModuleError::TextTooLong(field.label.clone()));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::database::{
+        COMMAND_TABLES_SQL, DASHBOARD_MODULES_SQL, INITIAL_SCHEMA_SQL, LOCAL_PROFILES_SQL,
+        OWN_LOSSES_TABLES_SQL, PROFILE_BRANCH_TABLES_SQL, PROFILE_DETAILS_SQL, PROFILE_MODULES_SQL,
+        WORKSPACE_TEMPLATES_SQL, XLSX_DUPLICATE_LINKS_SQL,
+    };
+    use serde_json::json;
+    use sqlx::sqlite::SqlitePoolOptions;
+    use std::collections::BTreeSet;
+
+    const FLIGHT_FIELD_KEYS: [&str; 24] = [
+        "list_number",
+        "aircraft_type",
+        "day_night",
+        "flight_shift_number",
+        "training_program_fuel",
+        "combat_training_exercise_number",
+        "complex_exercise_number_1",
+        "complex_exercise_number_2",
+        "flight_count",
+        "takeoff_time",
+        "landing_time",
+        "airborne_hours",
+        "total_hours",
+        "flight_altitude",
+        "combat_application_grade",
+        "flight_grade",
+        "cloud_base_upper",
+        "cloud_base_lower",
+        "cloud_cover",
+        "visibility",
+        "instrument_meteorological_conditions",
+        "time_in_clouds",
+        "hood_time",
+        "fuel_consumption",
+    ];
+
+    async fn store() -> DashboardModuleStore {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        for migration in [
+            INITIAL_SCHEMA_SQL,
+            XLSX_DUPLICATE_LINKS_SQL,
+            LOCAL_PROFILES_SQL,
+            WORKSPACE_TEMPLATES_SQL,
+            PROFILE_DETAILS_SQL,
+            PROFILE_BRANCH_TABLES_SQL,
+            COMMAND_TABLES_SQL,
+            OWN_LOSSES_TABLES_SQL,
+            PROFILE_MODULES_SQL,
+            DASHBOARD_MODULES_SQL,
+        ] {
+            sqlx::raw_sql(migration).execute(&pool).await.unwrap();
+        }
+        sqlx::query(
+            "INSERT INTO local_profiles (id, display_name, name_key, created_at, updated_at)
+             VALUES ('profile-111111111111111111111111', 'Синтетичний', 'синтетичний', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        DashboardModuleStore::new(pool)
+    }
+
+    #[test]
+    fn catalog_covers_reference_visualizations_and_flight_hours() {
+        let items = catalog();
+        assert_eq!(items.len(), 20);
+        for kind in [
+            "kpi",
+            "line",
+            "area",
+            "columns",
+            "horizontal-bar",
+            "grouped-columns",
+            "donut",
+            "radial-progress",
+            "multi-ring",
+            "radar",
+            "gauge",
+            "progress-bars",
+            "calendar",
+            "table",
+            "funnel",
+            "map",
+            "cohort",
+            "activity",
+            "waveform",
+        ] {
+            assert!(
+                items.iter().any(|item| item.visual_kind == kind),
+                "missing {kind}"
+            );
+        }
+        let flight = items.iter().find(|item| item.id == "flight-hours").unwrap();
+        assert_eq!(flight.visual_kind, "horizontal-bar");
+        assert_eq!(
+            flight
+                .fields
+                .iter()
+                .map(|field| field.key)
+                .collect::<Vec<_>>(),
+            FLIGHT_FIELD_KEYS
+        );
+    }
+
+    #[tokio::test]
+    async fn create_builds_a_physical_table_with_template_columns() {
+        let store = store().await;
+        let module = store
+            .create(
+                "profile-111111111111111111111111",
+                "air",
+                "flight-hours",
+                None,
+                "2026-01-01T00:00:01Z",
+            )
+            .await
+            .unwrap();
+        assert_eq!(module.title, "Загальний наліт за типом ПС");
+        assert_eq!(module.row_count, 0);
+        assert!(valid_storage_table(&module.storage_table));
+
+        let columns = sqlx::query(&format!("PRAGMA table_info({})", module.storage_table))
+            .fetch_all(&store.pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|row| row.try_get::<String, _>("name").unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(&columns[..2], ["row_id", "created_at"]);
+        assert_eq!(&columns[2..], FLIGHT_FIELD_KEYS);
+    }
+
+    #[tokio::test]
+    async fn replace_rows_validates_schema_and_returns_local_data() {
+        let store = store().await;
+        let module = store
+            .create(
+                "profile-111111111111111111111111",
+                "air",
+                "flight-hours",
+                Some("Наліт ПС"),
+                "2026-01-01T00:00:01Z",
+            )
+            .await
+            .unwrap();
+        let rows = vec![json!({
+            "list_number": 1,
+            "aircraft_type": "F-16",
+            "day_night": "День",
+            "flight_count": 2,
+            "takeoff_time": "08:10",
+            "landing_time": "09:25",
+            "airborne_hours": 18.5,
+            "total_hours": 24.0,
+            "cloud_base_upper": 1500.0,
+            "cloud_base_lower": 800.0,
+            "cloud_cover": 5,
+            "visibility": 10.0,
+            "instrument_meteorological_conditions": true,
+            "fuel_consumption": 420.5
+        })
+        .as_object()
+        .unwrap()
+        .clone()];
+        let data = store
+            .replace_rows(
+                "profile-111111111111111111111111",
+                &module.id,
+                rows,
+                "2026-01-02T00:00:00Z",
+            )
+            .await
+            .unwrap();
+        assert_eq!(data.module.row_count, 1);
+        assert_eq!(data.rows[0]["aircraft_type"], "F-16");
+        assert_eq!(data.rows[0]["airborne_hours"], 18.5);
+        assert_eq!(data.rows[0]["cloud_cover"], 5);
+        assert_eq!(data.rows[0]["instrument_meteorological_conditions"], true);
+
+        let invalid = vec![json!({
+            "aircraft_type": "F-16",
+            "airborne_hours": "не число",
+            "total_hours": 24
+        })
+        .as_object()
+        .unwrap()
+        .clone()];
+        assert!(matches!(
+            store
+                .replace_rows(
+                    "profile-111111111111111111111111",
+                    &module.id,
+                    invalid,
+                    "2026-01-03T00:00:00Z"
+                )
+                .await,
+            Err(DashboardModuleError::InvalidValue(_, _))
+        ));
+        assert_eq!(
+            store
+                .get_data("profile-111111111111111111111111", &module.id)
+                .await
+                .unwrap()
+                .rows
+                .len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn legacy_flight_module_is_extended_without_losing_rows() {
+        let store = store().await;
+        let module_id = "dashboard-legacy-flight";
+        let table = "dashboard_data_aaaaaaaaaaaaaaaaaaaaaaaa";
+        sqlx::query(
+            "INSERT INTO dashboard_modules
+             (id, profile_id, branch, template_id, visual_kind, title, storage_table, created_at, updated_at)
+             VALUES (?, 'profile-111111111111111111111111', 'air', 'flight-hours', 'horizontal-bar',
+                     'Старий наліт', ?, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .bind(module_id)
+        .bind(table)
+        .execute(&store.pool)
+        .await
+        .unwrap();
+        for (position, (key, label, data_type, role, aggregation)) in [
+            ("aircraft_type", "Тип ПС", "text", "dimension", "none"),
+            ("airborne_hours", "Наліт (повітря)", "real", "metric", "sum"),
+            ("total_hours", "Наліт (загальний)", "real", "metric", "sum"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            sqlx::query(
+                "INSERT INTO dashboard_module_fields
+                 (module_id, field_key, label, data_type, field_role, aggregation, required, position)
+                 VALUES (?, ?, ?, ?, ?, ?, 1, ?)",
+            )
+            .bind(module_id)
+            .bind(key)
+            .bind(label)
+            .bind(data_type)
+            .bind(role)
+            .bind(aggregation)
+            .bind(position as i64)
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        }
+        sqlx::query(&format!(
+            "CREATE TABLE {table} (
+                row_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL,
+                aircraft_type TEXT NOT NULL,
+                airborne_hours REAL NOT NULL,
+                total_hours REAL NOT NULL
+             )"
+        ))
+        .execute(&store.pool)
+        .await
+        .unwrap();
+        sqlx::query(&format!(
+            "INSERT INTO {table} (created_at, aircraft_type, airborne_hours, total_hours)
+             VALUES ('2026-01-01T00:00:00Z', 'МіГ-29', 1.5, 2.0)"
+        ))
+        .execute(&store.pool)
+        .await
+        .unwrap();
+
+        let data = store
+            .get_data("profile-111111111111111111111111", module_id)
+            .await
+            .unwrap();
+
+        assert_eq!(data.module.fields.len(), FLIGHT_FIELD_KEYS.len());
+        assert_eq!(
+            data.module
+                .fields
+                .iter()
+                .map(|field| field.key.as_str())
+                .collect::<Vec<_>>(),
+            FLIGHT_FIELD_KEYS
+        );
+        assert_eq!(data.rows.len(), 1);
+        assert_eq!(data.rows[0]["aircraft_type"], "МіГ-29");
+        assert_eq!(data.rows[0]["airborne_hours"], 1.5);
+        assert_eq!(data.rows[0]["cloud_cover"], Value::Null);
+        let columns = sqlx::query(&format!("PRAGMA table_info({table})"))
+            .fetch_all(&store.pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|row| row.try_get::<String, _>("name").unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(&columns[..2], ["row_id", "created_at"]);
+        assert_eq!(
+            columns[2..]
+                .iter()
+                .map(String::as_str)
+                .collect::<BTreeSet<_>>(),
+            FLIGHT_FIELD_KEYS.into_iter().collect::<BTreeSet<_>>()
+        );
+    }
+
+    #[tokio::test]
+    async fn modules_are_isolated_by_profile_and_branch() {
+        let store = store().await;
+        let module = store
+            .create(
+                "profile-111111111111111111111111",
+                "air",
+                "kpi",
+                None,
+                "2026-01-01T00:00:01Z",
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .list("profile-111111111111111111111111", "air")
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(store
+            .list("profile-111111111111111111111111", "rocket")
+            .await
+            .unwrap()
+            .is_empty());
+        assert!(matches!(
+            store
+                .get_data("profile-222222222222222222222222", &module.id)
+                .await,
+            Err(DashboardModuleError::ModuleNotFound)
+        ));
+    }
+}

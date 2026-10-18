@@ -2,6 +2,7 @@ pub mod analytics;
 mod app_update;
 pub mod backup;
 pub mod base_tables;
+pub mod dashboard_modules;
 mod database;
 mod desktop_shell;
 pub mod local_model;
@@ -30,6 +31,9 @@ use app_update::{AppUpdateStatus, PendingUpdate};
 use backup::BackupStore;
 use base_tables::BaseTable;
 use chrono::{SecondsFormat, Utc};
+use dashboard_modules::{
+    DashboardModule, DashboardModuleData, DashboardModuleStore, DashboardModuleTemplate,
+};
 use database::{DatabaseStatus, DatabaseStatusStore};
 use local_model::{
     GenerationRequest, LocalModelRuntime, LocalModelSettings, LocalModelStatus, LocalModelStore,
@@ -119,6 +123,76 @@ async fn get_dashboard_model(
     to: Option<String>,
 ) -> Result<analytics::DashboardModel, String> {
     analytics::load_dashboard_model(&repository, from.as_deref(), to.as_deref())
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn get_dashboard_module_catalog() -> Vec<DashboardModuleTemplate> {
+    dashboard_modules::catalog()
+}
+
+fn active_profile_id(session: &ProfileSession) -> Result<String, String> {
+    session
+        .get()
+        .ok_or_else(|| dashboard_modules::DashboardModuleError::ProfileRequired.to_string())
+}
+
+#[tauri::command]
+async fn list_dashboard_modules(
+    modules: tauri::State<'_, DashboardModuleStore>,
+    session: tauri::State<'_, ProfileSession>,
+    branch: String,
+) -> Result<Vec<DashboardModule>, String> {
+    modules
+        .list(&active_profile_id(&session)?, &branch)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn create_dashboard_module(
+    modules: tauri::State<'_, DashboardModuleStore>,
+    session: tauri::State<'_, ProfileSession>,
+    branch: String,
+    template_id: String,
+    title: Option<String>,
+) -> Result<DashboardModule, String> {
+    let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
+    modules
+        .create(
+            &active_profile_id(&session)?,
+            &branch,
+            &template_id,
+            title.as_deref(),
+            &now,
+        )
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn get_dashboard_module_data(
+    modules: tauri::State<'_, DashboardModuleStore>,
+    session: tauri::State<'_, ProfileSession>,
+    module_id: String,
+) -> Result<DashboardModuleData, String> {
+    modules
+        .get_data(&active_profile_id(&session)?, &module_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn replace_dashboard_module_rows(
+    modules: tauri::State<'_, DashboardModuleStore>,
+    session: tauri::State<'_, ProfileSession>,
+    module_id: String,
+    rows: Vec<serde_json::Map<String, Value>>,
+) -> Result<DashboardModuleData, String> {
+    let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
+    modules
+        .replace_rows(&active_profile_id(&session)?, &module_id, rows, &now)
         .await
         .map_err(|error| error.to_string())
 }
@@ -1589,6 +1663,7 @@ pub fn run() {
             app.manage(WorkspaceTemplateStore::new(pool.clone()));
             app.manage(SignalReceiveController::default());
             app.manage(DatabaseStatusStore::new(pool.clone()));
+            app.manage(DashboardModuleStore::new(pool.clone()));
             app.manage(BackupStore::new(pool));
             app.manage(LiveDatabasePath(setup_database_file));
             app.manage(instance_lock);
@@ -1600,6 +1675,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_database_status,
             get_dashboard_model,
+            get_dashboard_module_catalog,
+            list_dashboard_modules,
+            create_dashboard_module,
+            get_dashboard_module_data,
+            replace_dashboard_module_rows,
             get_local_profiles,
             register_local_profile,
             set_local_profile_modules,

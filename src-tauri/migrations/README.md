@@ -45,3 +45,9 @@ at registration (`air`, `rocket`, `artillery`, `pvk`, `dshv`), one row per
 `(profile_id, module)`. It only decides which cards the start screen shows for
 that profile; data access is still decided by the password and the bound tables.
 Profiles that exist before this migration keep all five modules.
+
+`0010_dashboard_modules.sql` adds the profile- and branch-scoped registry for
+custom dashboard modules and their verified field definitions. Creating a
+module then creates its own `dashboard_data_<id>` table transactionally through
+the Rust store. Physical column names come only from the built-in catalog; a
+user-supplied title is stored as data and is never interpolated into SQL.
