@@ -40,8 +40,12 @@ import {
   rowRuleProblem,
   rowsAfterDelete,
   rowsAfterSave,
+  normalizeDensity,
+  rowMatchesQuery,
   schemaSummary,
+  tableColumnGroups,
   tableEditState,
+  visibleColumnKeys,
 } from '../src/dashboard-module-catalog-core.js';
 
 const field = (key, label, dataType = 'text', role = 'note', aggregation = 'none', required = false) => (
@@ -804,7 +808,8 @@ test('a record is one table row edited in place, with its form above the table',
   assert.match(source, /control\.setAttribute\('form', ROW_FORM_ID\)/);
   assert.match(source, /form: ROW_FORM_ID/, 'the save button sits in the row but submits the form above the table');
   assert.match(source, /el\('colgroup'/);
-  assert.match(source, /module\.fields\.map\(fieldColumnWidth\)/);
+  // Ширини колонок — з `fieldColumnWidth`; colgroup перебудовується, коли змінюється група колонок.
+  assert.match(source, /el\('col', \{ style: \{ width: `\$\{fieldColumnWidth\(field\)\}px` \} \}\)/);
   assert.match(source, /const inherited = isEdit \? null : inheritedValues\(module\.fields, rows\)/);
   assert.match(source, /controls\.get\(error\?\.fieldKey\)/, 'the cursor goes to the cell with the error');
   assert.match(source, /tr\.scrollIntoView\(\{ block: 'nearest' \}\)/);
@@ -1011,4 +1016,64 @@ test('the weather carry is a visible switch, on by default, and the created rows
   assert.ok(source.includes('text: notes.carryLabel') && source.includes('text: notes.carry '), 'the switch says what it does and where to look');
   assert.ok(source.includes('add(notes.carryUnresolved, true)'), 'records left without weather are reported, not hidden');
   assert.match(css, /\.ewmc-source-carry\{display:grid;/);
+});
+
+test('the journal columns fall into display groups and every field is in exactly one of them', () => {
+  const groups = tableColumnGroups(flightFields);
+  assert.deepEqual(groups.map(group => group.title), ['Усі', 'Основне', 'Політ і наліт', 'Метеоумови', 'Екіпаж', 'Паливо й вантаж', 'Оцінки']);
+  const named = groups.slice(1).flatMap(group => group.keys);
+  assert.equal(named.length, flightFields.length, 'no field is lost or counted twice');
+  assert.deepEqual(new Set(named), new Set(flightFields.map(item => item.key)));
+  const keysOf = id => groups.find(group => group.id === id).keys;
+  assert.deepEqual(keysOf('meteo'), ['cloud_base_upper', 'cloud_base_lower', 'cloud_cover', 'visibility']);
+  assert.ok(keysOf('flight').includes('instrument_meteorological_conditions'), 'СМУ is a property of the flight, not of the weather');
+  assert.ok(keysOf('crew').includes('crew_ke_callsign'));
+  // Модуль без журнальних полів: одна група — фільтр не потрібен.
+  assert.deepEqual(tableColumnGroups([field('label', 'Підпис'), field('value', 'Значення', 'real', 'metric', 'sum')]), []);
+  assert.deepEqual(tableColumnGroups([]), []);
+});
+
+test('a column group keeps the aircraft type and number in view; «all» and unknown groups show everything', () => {
+  const meteo = visibleColumnKeys(flightFields, 'meteo');
+  assert.deepEqual([...meteo], ['aircraft_type', 'aircraft_number', 'cloud_base_upper', 'cloud_base_lower', 'cloud_cover', 'visibility']);
+  assert.equal(visibleColumnKeys(flightFields, 'all').size, flightFields.length);
+  assert.equal(visibleColumnKeys(flightFields, 'no-such-group').size, flightFields.length);
+  const plain = [field('label', 'Підпис'), field('value', 'Значення', 'real', 'metric', 'sum')];
+  assert.equal(visibleColumnKeys(plain, 'meteo').size, 2);
+});
+
+test('search finds records by any shown value, all words must match and case does not matter', () => {
+  const fieldOf = key => flightFields.find(item => item.key === key);
+  const fields = ['aircraft_type', 'aircraft_number', 'crew_ke', 'cargo_kg', 'airborne_hours', 'instrument_meteorological_conditions'].map(fieldOf);
+  const row = { aircraft_type: 'Мі-8', aircraft_number: '21', crew_ke: 'Тестенко', cargo_kg: 1500, airborne_hours: 32 / 60, instrument_meteorological_conditions: true };
+  assert.equal(rowMatchesQuery(fields, row, ''), true);
+  assert.equal(rowMatchesQuery(fields, row, '   '), true);
+  assert.equal(rowMatchesQuery(fields, row, 'мі-8'), true);
+  assert.equal(rowMatchesQuery(fields, row, 'тестенко 21'), true);
+  assert.equal(rowMatchesQuery(fields, row, 'тестенко 22'), false, 'every word has to be found');
+  assert.equal(rowMatchesQuery(fields, row, '0:32'), true, 'durations are found as they are shown');
+  assert.equal(rowMatchesQuery(fields, row, '1500'), true, 'numbers are found without the thousands space');
+  assert.equal(rowMatchesQuery(fields, row, 'так'), true);
+  assert.equal(rowMatchesQuery(fields, { aircraft_type: 'Мі-24' }, '—'), false, 'empty cells are not searched');
+});
+
+test('table density is comfortable unless compact was chosen', () => {
+  assert.equal(normalizeDensity('compact'), 'compact');
+  for (const value of ['comfortable', null, undefined, '', 'tiny']) assert.equal(normalizeDensity(value), 'comfortable');
+});
+
+test('the module page has search, column groups and density, and editing still shows the whole record in one row', async () => {
+  const source = await readFile(new URL('../src/dashboard-module-catalog.js', import.meta.url), 'utf8');
+  const css = await readFile(new URL('../src/dashboard-module-catalog.css', import.meta.url), 'utf8');
+  const page = source.slice(source.indexOf('function showModulePage('), source.indexOf('function createFieldControl('));
+  for (const text of ['Пошук у записах', 'Групи колонок', 'Щільність таблиці', 'Звичайно', 'Компактно', 'Нічого не знайдено за запитом']) {
+    assert.ok(page.includes(text), text);
+  }
+  assert.match(page, /if \(tableView\.group !== 'all'\) \{\s*tableView\.group = 'all';\s*applyView\(\);/, 'editing shows every column');
+  assert.match(page, /search\.disabled = active;/, 'search and groups are locked while a row is edited');
+  assert.doesNotMatch(page, /drawer|ewmc-side-panel/, 'no side panel: the record stays one table row');
+  assert.match(source, /const DENSITY_KEY = 'easywar\.moduleTable\.density';/);
+  assert.match(source, /try \{ return localStorage\.getItem\(DENSITY_KEY\); \} catch/);
+  assert.match(css, /\.ewmc-data-scroll\.is-compact /);
+  assert.match(css, /\.ewmc-table-toolbar\{display:flex;/);
 });

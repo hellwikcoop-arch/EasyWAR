@@ -31,6 +31,17 @@ html[data-theme=light] .ewmc-visual{background:linear-gradient(150deg,#edf7ff,#f
 .ewmc-data-table .ewmc-col-number{width:52px}.ewmc-data-table .ewmc-col-action{width:176px}
 .ewmc-row-number{font-variant-numeric:tabular-nums}.ewmc-row-actions{white-space:nowrap}.ewmc-row-actions .btn{min-height:30px;padding:4px 8px;font-size:10px}.ewmc-editing-actions .btn+.btn{margin-left:6px}
 .ewmc-dialog .ewmc-table-empty{margin:10px 0 0;padding:18px;border:1px dashed var(--line-strong,#334155);border-radius:12px;color:var(--muted,#9fb0c4);text-align:center}
+/* Над таблицею: пошук у записах, групи колонок (лише показ) і щільність рядків. */
+.ewmc-table-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px}
+.ewmc-search-field{display:flex;flex:0 1 300px;align-items:center;gap:7px;min-width:200px;min-height:38px;padding:0 10px;border:1px solid var(--line-strong,#334155);border-radius:10px;background:var(--surface,#101a2a)}.ewmc-search-field span{color:var(--muted,#9fb0c4);font-size:17px}.ewmc-search-field:focus-within{border-color:var(--accent,#28b8ff);outline:2px solid color-mix(in srgb,var(--accent,#28b8ff) 24%,transparent)}
+/* Загальні стилі полів застосунку тут не потрібні: рамку малює сама обгортка з лупою. */
+.ewmc-dialog .ewmc-search-field input.ewmc-search{flex:1;width:100%;min-width:0;height:34px;min-height:0;margin:0;padding:0;border:0;border-radius:0;outline:0;box-shadow:none;background:transparent;color:var(--ink,#eef6ff);font:inherit;font-size:12px}
+.ewmc-group-filter{display:flex;flex-wrap:wrap;gap:6px}.ewmc-chip{min-height:32px;padding:4px 11px;border:1px solid var(--line,#26364a);border-radius:999px;background:transparent;color:var(--muted,#9fb0c4);font:inherit;font-size:11px;font-weight:700;white-space:nowrap;cursor:pointer}.ewmc-chip[aria-pressed=true]{border-color:color-mix(in srgb,var(--accent,#28b8ff) 55%,var(--line,#26364a));background:color-mix(in srgb,var(--accent,#28b8ff) 14%,transparent);color:var(--ink,#eef6ff)}
+.ewmc-chip:disabled,.ewmc-search:disabled{opacity:.5;cursor:not-allowed}
+.ewmc-density{display:flex;margin-left:auto;padding:3px;border:1px solid var(--line,#26364a);border-radius:10px;background:var(--surface,#101a2a)}.ewmc-density button{min-height:30px;padding:4px 10px;border:0;border-radius:7px;background:transparent;color:var(--muted,#9fb0c4);font:inherit;font-size:11px;cursor:pointer}.ewmc-density button[aria-pressed=true]{background:var(--surface-2,#142238);color:var(--ink,#eef6ff);box-shadow:inset 0 0 0 1px var(--line-strong,#334155)}
+.ewmc-search-count{flex-basis:100%;color:var(--muted,#9fb0c4);font-size:11px}.ewmc-search-count:empty{display:none}
+.ewmc-data-scroll.is-compact .ewmc-data-table th{padding:6px 8px}.ewmc-data-scroll.is-compact .ewmc-data-table tr:not(.ewmc-editing)>td{padding:4px 8px}.ewmc-data-scroll.is-compact .ewmc-row-actions .btn{min-height:24px;padding:2px 7px}
+@media(max-width:640px){.ewmc-search-field{flex:1 1 100%}.ewmc-density{margin-left:0}}
 /* Рядок, що редагується: клітинки з полями, підсвічена лінія, у кожній клітинці під полем — підказка. */
 .ewmc-data-table tr.ewmc-editing>td{overflow:visible;vertical-align:top;background:var(--ewmc-edit);box-shadow:inset 0 2px 0 var(--accent,#28b8ff),inset 0 -2px 0 var(--accent,#28b8ff)}.ewmc-data-table tr.ewmc-editing>td:first-child{padding-top:19px}.ewmc-data-table tr.ewmc-editing>.ewmc-editing-actions{padding-top:14px}
 .ewmc-data-table td.ewmc-cell-edit{padding:8px 6px;white-space:normal}.ewmc-cell-edit .ewmc-hint{margin-top:4px}

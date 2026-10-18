@@ -17,15 +17,19 @@ import {
   isConflictError,
   matchesCatalogItem,
   normalizeCatalog,
+  normalizeDensity,
   normalizeModules,
   previewModel,
   replaceRowsRequest,
   rowCountLabel,
   rowForWrite,
+  rowMatchesQuery,
   rowsAfterDelete,
   rowsAfterSave,
   schemaSummary,
+  tableColumnGroups,
   tableEditState,
+  visibleColumnKeys,
 } from './dashboard-module-catalog-core.js';
 import { describePlan, importRows, planImport, rankSheets, sheetOptionLabel } from './dashboard-module-source-core.js';
 
@@ -38,6 +42,10 @@ if (typeof invoke === 'function') initialize();
 const ROW_FORM_ID = 'ewmc-row-form';
 const NUMBER_COLUMN_WIDTH = 52;
 const ACTION_COLUMN_WIDTH = 176;
+// Щільність таблиці — зручність одного користувача на цьому пристрої, не дані: її можна загубити без шкоди.
+const DENSITY_KEY = 'easywar.moduleTable.density';
+const readDensity = () => { try { return localStorage.getItem(DENSITY_KEY); } catch (error) { return null; } };
+const saveDensity = value => { try { localStorage.setItem(DENSITY_KEY, value); } catch (error) { /* діє до перезавантаження */ } };
 
 function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
@@ -59,7 +67,8 @@ function initialize() {
   if (!toolbar || !dashboard) return;
 
   // `cancelEdit` — скасування рядка, що редагується: Escape скасовує правку, а не закриває вікно разом із набраним рядком.
-  const state = { branch, catalog: [], modules: [], data: new Map(), busy: false, profileMissing: false, cancelEdit: null };
+  // `tableViews` — пошук і група колонок сторінки кожного модуля: після збереження рядка сторінка перебудовується, а вибір лишається.
+  const state = { branch, catalog: [], modules: [], data: new Map(), busy: false, profileMissing: false, cancelEdit: null, tableViews: new Map() };
   const openButton = el('button', {
     type: 'button',
     class: 'btn quiet ewmc-open',
@@ -483,6 +492,11 @@ function initialize() {
       'data-action': 'add-row',
       onclick: () => startEdit(null),
     });
+    // Пошук, група колонок і щільність лише змінюють показ: записи ті самі, а на час правки видно всі колонки.
+    const tableView = state.tableViews.get(module.id) || { query: '', group: 'all' };
+    state.tableViews.set(module.id, tableView);
+    const groups = tableColumnGroups(module.fields);
+    if (!groups.some(group => group.id === tableView.group)) tableView.group = 'all';
     const rowNodes = rows.map((row, index) => el('tr', {}, rowCells(row, index)));
     const body = el('tbody', {}, rowNodes);
     const emptyNote = el('p', {
@@ -490,19 +504,86 @@ function initialize() {
       text: unreadable ? 'Дані не прочитано.' : 'Записів ще немає. Натисніть «+ Додати рядок».',
       hidden: rows.length > 0,
     });
-    const widths = module.fields.map(fieldColumnWidth);
-    const tableWidth = NUMBER_COLUMN_WIDTH + widths.reduce((sum, width) => sum + width, 0) + ACTION_COLUMN_WIDTH;
-    const table = el('table', { class: 'ewmc-data-table', style: { minWidth: `${tableWidth}px` } },
-      el('colgroup', {},
-        el('col', { class: 'ewmc-col-number' }),
-        widths.map(width => el('col', { style: { width: `${width}px` } })),
-        el('col', { class: 'ewmc-col-action' })),
+    const noMatch = el('p', { class: 'ewmc-table-empty ewmc-no-match', hidden: true });
+    const colgroup = el('colgroup');
+    const table = el('table', { class: 'ewmc-data-table' },
+      colgroup,
       el('thead', {}, el('tr', {},
         el('th', { scope: 'col', class: 'ewmc-row-number', text: '№', title: 'Номер рядка' }),
-        module.fields.map(field => el('th', { scope: 'col', class: field.required ? 'ewmc-required' : '', title: field.label, text: field.label })),
+        module.fields.map(field => el('th', { scope: 'col', class: field.required ? 'ewmc-required' : '', title: field.label, text: field.label, 'data-key': field.key })),
         el('th', { scope: 'col', text: 'Дія' }))),
       body);
     const scroll = el('div', { class: 'ewmc-data-scroll' }, table);
+
+    const search = el('input', {
+      type: 'search',
+      class: 'ewmc-search',
+      value: tableView.query,
+      maxlength: '120',
+      placeholder: 'Пошук у записах',
+      'aria-label': 'Пошук у записах таблиці',
+    });
+    search.addEventListener('input', () => { tableView.query = search.value; applyView(); });
+    // Escape у пошуку спершу очищає запит, а не повертає на дашборд.
+    search.addEventListener('keydown', event => {
+      if (event.key !== 'Escape' || !search.value) return;
+      event.preventDefault();
+      event.stopPropagation();
+      search.value = '';
+      tableView.query = '';
+      applyView();
+    });
+    const searchCount = el('span', { class: 'ewmc-search-count', 'aria-live': 'polite' });
+    const chips = groups.map(group => el('button', {
+      type: 'button',
+      class: 'ewmc-chip',
+      text: group.title,
+      'data-group': group.id,
+      onclick: () => { tableView.group = group.id; applyView(); },
+    }));
+    const densityButtons = [['comfortable', 'Звичайно'], ['compact', 'Компактно']].map(([value, label]) => el('button', {
+      type: 'button',
+      text: label,
+      'data-density': value,
+      onclick: () => { paintDensity(value); saveDensity(value); },
+    }));
+    const toolbar = rows.length
+      ? el('div', { class: 'ewmc-table-toolbar' },
+        el('label', { class: 'ewmc-search-field' }, el('span', { 'aria-hidden': 'true', text: '⌕' }), search),
+        chips.length ? el('div', { class: 'ewmc-group-filter', role: 'group', 'aria-label': 'Групи колонок' }, chips) : null,
+        el('div', { class: 'ewmc-density', role: 'group', 'aria-label': 'Щільність таблиці' }, densityButtons),
+        searchCount)
+      : null;
+
+    function paintDensity(value) {
+      const density = normalizeDensity(value);
+      scroll.classList.toggle('is-compact', density === 'compact');
+      for (const button of densityButtons) button.setAttribute('aria-pressed', String(button.dataset.density === density));
+    }
+
+    // Видимі колонки (група) і рядки (пошук). Номер рядка в «№» лишається номером запису в таблиці.
+    function applyView() {
+      const shown = visibleColumnKeys(module.fields, tableView.group);
+      const visibleFields = module.fields.filter(field => shown.has(field.key));
+      colgroup.replaceChildren(
+        el('col', { class: 'ewmc-col-number' }),
+        visibleFields.map(field => el('col', { style: { width: `${fieldColumnWidth(field)}px` } })),
+        el('col', { class: 'ewmc-col-action' }));
+      const width = visibleFields.reduce((sum, field) => sum + fieldColumnWidth(field), 0);
+      table.style.minWidth = `${NUMBER_COLUMN_WIDTH + width + ACTION_COLUMN_WIDTH}px`;
+      for (const cell of table.querySelectorAll('[data-key]')) cell.hidden = !shown.has(cell.dataset.key);
+      let found = 0;
+      rowNodes.forEach((tr, index) => {
+        const match = rowMatchesQuery(module.fields, rows[index], tableView.query);
+        tr.hidden = !match;
+        if (match) found += 1;
+      });
+      const query = tableView.query.trim();
+      searchCount.textContent = query ? `Знайдено: ${found} з ${rows.length}` : '';
+      noMatch.hidden = !(query && rows.length && !found);
+      noMatch.textContent = query ? `Нічого не знайдено за запитом «${query}».` : '';
+      for (const chip of chips) chip.setAttribute('aria-pressed', String(chip.dataset.group === tableView.group));
+    }
     // Панель над таблицею: підказки, лічильник екіпажу, помилки й видалення рядка, що редагується.
     const editHost = el('div', { class: 'ewmc-edit-host' });
 
@@ -511,7 +592,7 @@ function initialize() {
         el('td', { class: 'ewmc-row-number', text: String(index + 1) }),
         module.fields.map(field => {
           const shown = formatFieldValue(field, row?.[field.key]);
-          return el('td', { text: shown, title: shown.length > 14 ? shown : false });
+          return el('td', { text: shown, title: shown.length > 14 ? shown : false, 'data-key': field.key });
         }),
         el('td', { class: 'ewmc-row-actions' },
           el('button', {
@@ -530,11 +611,19 @@ function initialize() {
       editing = active;
       addButton.disabled = readOnly || active;
       for (const button of body.querySelectorAll('[data-action="edit-row"]')) button.disabled = readOnly || active;
+      // Пошук і групи на час правки не змінюються: рядок, що редагується, не має зникнути з очей.
+      search.disabled = active;
+      for (const chip of chips) chip.disabled = active;
       scroll.classList.toggle('is-editing', active);
     }
 
     function startEdit(rowIndex) {
       if (editing || readOnly) return;
+      // Запис — це всі поля в одному рядку, тож на час правки видно всі колонки, а не лише групу.
+      if (tableView.group !== 'all') {
+        tableView.group = 'all';
+        applyView();
+      }
       const isEdit = Number.isInteger(rowIndex) && rows[rowIndex] != null;
       const existing = isEdit ? rows[rowIndex] : {};
       // Погоду записують раз на 5–10 записів льотної зміни: новий запис бере її з попереднього.
@@ -554,7 +643,7 @@ function initialize() {
         paintHint();
         control.addEventListener('input', paintHint);
         control.setAttribute('aria-describedby', hint.id);
-        return el('td', { class: 'ewmc-cell-edit' }, control, hint);
+        return el('td', { class: 'ewmc-cell-edit', 'data-key': field.key }, control, hint);
       });
 
       // Підставлена погода позначена окремо й очищається одним натисканням: стару погоду легко не помітити.
@@ -765,10 +854,14 @@ function initialize() {
           payload.failed === true
             ? el('button', { type: 'button', class: 'btn quiet', text: 'Прочитати знову', onclick: () => reopenFresh(module.id) })
             : null)] : []),
+        toolbar,
         editHost,
         scroll,
-        emptyNote),
+        emptyNote,
+        noMatch),
     );
+    paintDensity(readDensity());
+    applyView();
     dialog.dataset.view = 'table';
     dialog.dataset.module = module.id;
     if (!dialog.open) dialog.showModal();

@@ -447,6 +447,80 @@ export function inheritedValues(fields, rows) {
   return null;
 }
 
+/**
+ * Групи колонок для фільтра над таблицею сторінки модуля. Це лише показ: запис і далі
+ * редагується в одному рядку з усіма полями, а на час правки видно всі колонки. «Політ у СМУ»,
+ * час у хмарах і під шторкою — ознаки польоту, тому вони в «Політ і наліт», а не в метеоумовах.
+ * Поля, яких немає в жодній групі, ідуть в «Основне».
+ */
+const TABLE_GROUPS = [
+  { id: 'main', title: 'Основне', keys: null },
+  {
+    id: 'flight',
+    title: 'Політ і наліт',
+    keys: [
+      'flight_count', 'engine_test_time', 'takeoff_time', 'landing_time', 'airborne_hours', 'total_hours', 'flight_altitude',
+      'instrument_meteorological_conditions', 'time_in_clouds', 'hood_time', 'rsp_approaches', 'rsp_landings',
+    ],
+  },
+  { id: 'meteo', title: 'Метеоумови', keys: FIELD_GROUPS.find(group => group.id === 'meteo').keys },
+  { id: 'crew', title: 'Екіпаж', keys: ['crew_ke_callsign', ...FIELD_GROUPS.find(group => group.id === 'crew').keys] },
+  { id: 'cargo', title: 'Паливо й вантаж', keys: ['training_program_fuel', 'fuel_consumption', 'passengers', 'cargo_kg'] },
+  { id: 'grades', title: 'Оцінки', keys: ['combat_application_grade', 'flight_grade'] },
+];
+/** Колонки, видимі в кожній групі: з ними зрозуміло, чий це рядок. */
+const ANCHOR_KEYS = ['aircraft_type', 'aircraft_number'];
+
+/**
+ * Групи колонок модуля для фільтра: «Усі» й групи, у яких є поля цього модуля. Порожній
+ * список — фільтр не потрібен (менше двох груп, як у модулів без журналу польотів).
+ */
+export function tableColumnGroups(fields) {
+  const list = Array.isArray(fields) ? fields : [];
+  const present = new Set(list.map(field => field.key));
+  const grouped = new Set(TABLE_GROUPS.flatMap(group => group.keys || []));
+  const groups = TABLE_GROUPS
+    .map(group => ({
+      id: group.id,
+      title: group.title,
+      keys: group.keys ? group.keys.filter(key => present.has(key)) : list.map(field => field.key).filter(key => !grouped.has(key)),
+    }))
+    .filter(group => group.keys.length);
+  if (groups.length < 2) return [];
+  return [{ id: 'all', title: 'Усі', keys: list.map(field => field.key) }, ...groups];
+}
+
+/** Ключі видимих колонок для групи `groupId`; невідома група або «Усі» — усі поля. */
+export function visibleColumnKeys(fields, groupId) {
+  const list = Array.isArray(fields) ? fields : [];
+  const all = new Set(list.map(field => field.key));
+  const group = tableColumnGroups(list).find(item => item.id === groupId);
+  if (!group || group.id === 'all') return all;
+  const anchors = ANCHOR_KEYS.filter(key => all.has(key));
+  return new Set([...(anchors.length ? anchors : list.slice(0, 1).map(field => field.key)), ...group.keys]);
+}
+
+/**
+ * Чи підходить запис під пошук: кожне слово запиту має трапитися в показаному значенні якогось
+ * поля або в самому значенні (так «1500» знаходить «1 500»). Регістр не важить.
+ */
+export function rowMatchesQuery(fields, row, query) {
+  const terms = String(query ?? '').toLocaleLowerCase('uk').split(/\s+/u).filter(Boolean);
+  if (!terms.length) return true;
+  const list = Array.isArray(fields) ? fields : [];
+  const text = list
+    .filter(field => row?.[field.key] != null && row[field.key] !== '')
+    .map(field => `${formatFieldValue(field, row[field.key])} ${String(row[field.key])}`)
+    .join(' ')
+    .toLocaleLowerCase('uk');
+  return terms.every(term => text.includes(term));
+}
+
+/** Щільність таблиці: «Звичайно» (типова) або «Компактно». */
+export function normalizeDensity(value) {
+  return value === 'compact' ? 'compact' : 'comfortable';
+}
+
 /** Найбільший склад екіпажу з інструкторами: КЕ, ЛШ, БТ і до 5 інших. */
 export const MAX_CREW = 8;
 /** Поля з прізвищами. Позивний командира (`crew_ke_callsign`) — не особа, тому тут його немає. */
@@ -663,6 +737,10 @@ export const dashboardModuleCore = {
   fieldColumnWidth,
   fieldSections,
   inheritedValues,
+  tableColumnGroups,
+  visibleColumnKeys,
+  rowMatchesQuery,
+  normalizeDensity,
   crewCount,
   crewSummary,
   FieldValueError,
