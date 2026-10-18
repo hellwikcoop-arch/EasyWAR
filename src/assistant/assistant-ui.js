@@ -7,6 +7,7 @@ import { answerApplicationState } from './assistant-state-core.js';
 import { DIALOGUE_ACTIONS, runDialogueTurn } from './assistant-dialogue-core.js';
 import { createLocalModelClient } from './assistant-llm.js';
 import { createAssistantMotion } from './assistant-motion.js';
+import { createSongPlayer, songButtonText } from './assistant-song.js';
 import { languageReply, answerLead, reviewLead, welcomeRemark, reviewRemark, explainLead, WELCOME_TEXT } from './assistant-persona-core.js';
 import { explainElement } from './assistant-explain-core.js';
 import { createExplainController } from './assistant-explain.js';
@@ -24,6 +25,7 @@ async function loadKnowledge() {
 }
 
 const defaultPortraitURL = new URL('./assets/colonel-kombat-stable.png', import.meta.url).href;
+const favoriteSongURL = new URL('./assets/favorite-song.mp3', import.meta.url).href;
 const outfitPortraits = {
   default: defaultPortraitURL,
   pilot: new URL('./assets/colonel-outfit-pilot.webp', import.meta.url).href,
@@ -99,6 +101,25 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
   const panel = element('aside', { id: 'ew-assistant-panel', class: 'ew-assistant-panel', hidden: true, 'aria-label': 'КОМБАТ — локальний помічник' });
   const characterImage = element('img', { src: portraitURL, alt: '', draggable: 'false', decoding: 'async' });
   const motion = createAssistantMotion({ image: characterImage, staticURL: portraitURL, clips: gestureClips });
+  // Пасхалка: відповідь на питання про улюблену пісню вмикає локальний звук без відео (assistant-song.js).
+  const song = createSongPlayer({ url: favoriteSongURL });
+  function syncSongButtons() {
+    const state = song.state();
+    for (const button of panel.querySelectorAll('.ew-assistant-song')) {
+      button.dataset.state = state; button.textContent = songButtonText(state);
+      button.setAttribute('aria-pressed', String(state === 'playing')); button.disabled = state === 'failed';
+    }
+    announcer.textContent = state === 'playing' ? 'Пісня грає.' : state === 'failed' ? 'Пісню не вдалося відтворити.' : '';
+  }
+  song.subscribe(syncSongButtons);
+  function songButton() {
+    const state = song.state();
+    return element('button', {
+      type: 'button', class: 'ew-assistant-turn-action ew-assistant-song', 'data-state': state, 'aria-pressed': String(state === 'playing'),
+      disabled: state === 'failed', text: songButtonText(state),
+      onclick: event => { event.stopPropagation(); if (song.isPlaying()) song.stop(); else void song.play(); },
+    });
+  }
   // Одяг відповідає відкритому модулю; жести (вітання, вказівка) намальовані лише для базового образу.
   let outfit = 'default';
   function applyOutfit() {
@@ -248,7 +269,7 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
   });
 
   function resetProposal() { if (proposal.previewUrl) URL.revokeObjectURL(proposal.previewUrl); proposal = { kind: 'fix', text: '', withContext: true, image: null, previewUrl: '', note: '' }; }
-  function clear() { draft = freshDraft(); explain.stop(); explainResult = null; explainBranch = ''; explainNote = ''; resetProposal(); motion.stop(); request++; history = []; pendingInput = ''; review = null; status = ''; navigationStatus = ''; busy = false; thinking = false; if (usedModel) { usedModel = false; void llm.stop(); } if (install.phase === 'running') void llm.cancelInstall(); installRun++; install = { info: null, phase: 'idle', progress: null, message: '', confirming: false }; installBar = installText = null; checkbox.checked = false; modelBox.hidden = true; modelBox.replaceChildren(); panel.hidden = true; launcher.hidden = true; launcher.setAttribute('aria-expanded', 'false'); panel.replaceChildren(); announcer.textContent = ''; }
+  function clear() { song.stop(); draft = freshDraft(); explain.stop(); explainResult = null; explainBranch = ''; explainNote = ''; resetProposal(); motion.stop(); request++; history = []; pendingInput = ''; review = null; status = ''; navigationStatus = ''; busy = false; thinking = false; if (usedModel) { usedModel = false; void llm.stop(); } if (install.phase === 'running') void llm.cancelInstall(); installRun++; install = { info: null, phase: 'idle', progress: null, message: '', confirming: false }; installBar = installText = null; checkbox.checked = false; modelBox.hidden = true; modelBox.replaceChildren(); panel.hidden = true; launcher.hidden = true; launcher.setAttribute('aria-expanded', 'false'); panel.replaceChildren(); announcer.textContent = ''; }
   function updateSession(id) {
     const previous = session.state();
     const next = session.setProfile(id);
@@ -263,7 +284,7 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
     launcher.querySelector('small').textContent = appUpdateState.getSnapshot().status === 'available' ? 'Є оновлення' : 'Запитати помічника';
   }
   function gesture(id, fallback) { if (!panel.hidden && session.state().enabled && !motion.play(id) && fallback) motion.play(fallback); }
-  function close() { explain.stop(); motion.stop(); panel.hidden = true; launcher.setAttribute('aria-expanded', 'false'); if (!launcher.hidden) launcher.focus(); }
+  function close() { song.stop(); explain.stop(); motion.stop(); panel.hidden = true; launcher.setAttribute('aria-expanded', 'false'); if (!launcher.hidden) launcher.focus(); }
   // Натискання на планку «Зв'язок з розробником»: КОМБАТ показує на скроню. Посилання діє як завжди.
   document.addEventListener('click', event => { if (event.target instanceof Element && event.target.closest('.dev-banner')) gesture('attention'); });
   function open() { if (!session.state().enabled) return; panel.hidden = false; launcher.setAttribute('aria-expanded', 'true'); render(); panel.querySelector('.ew-assistant-input input')?.focus(); gesture('wave'); }
@@ -322,6 +343,7 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
         type: 'button', class: 'ew-assistant-turn-action', 'data-action': action.id, disabled: busy, text: DIALOGUE_ACTIONS[action.id].label,
         onclick: event => { event.stopPropagation(); void navigate(DIALOGUE_ACTIONS[action.id].area); },
       }))));
+      if (turn.media === 'favorite-song') answer.append(element('div', { class: 'ew-assistant-turn-actions' }, songButton()));
       if (at === history.length - 1 && turn.suggestions?.length) answer.append(element('div', { class: 'ew-assistant-suggestions', role: 'group', 'aria-label': 'Можливі запитання' }, ...turn.suggestions.map(text => element('button', {
         type: 'button', class: 'ew-assistant-suggestion', disabled: busy, text, onclick: () => ask(text),
       }))));
@@ -599,7 +621,8 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
       : unavailableTurn(query);
     if (!turn || !(await allowed(token)) || current !== request) return;
     history.push(turn); history = history.slice(-20); busy = false; thinking = false; mode = 'help'; render();
-    gesture(...(turn.mode === 'local-model' || turn.voice ? ['nod', 'explain'] : ['shake', 'explain']));
+    gesture(...(turn.media || turn.mode === 'local-model' || turn.voice ? ['nod', 'explain'] : ['shake', 'explain']));
+    if (turn.media === 'favorite-song') void song.play();
     announcer.textContent = [turn.voice, turn.answer].filter(Boolean).join('\n'); panel.querySelector('.ew-assistant-input input')?.focus();
   }
   async function checkData() {
@@ -637,7 +660,7 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
   applyOutfit();
   // Вкладка довідника змінюється всередині модуля, тож стан перевіряємо раз на секунду (дешевий запит до DOM).
   const outfitTimer = setInterval(applyOutfit, 1000);
-  window.addEventListener('pagehide', () => { clearInterval(outfitTimer); explain.stop(); session.reset(); clear(); motion.dispose(); unsubscribeUpdate(); });
+  window.addEventListener('pagehide', () => { clearInterval(outfitTimer); song.dispose(); explain.stop(); session.reset(); clear(); motion.dispose(); unsubscribeUpdate(); });
   panel.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); if (explain.isActive()) explain.stop('escape'); else close(); } });
   return { settings, updateSession, disable: () => { session.reset(); clear(); checkbox.disabled = true; } };
 }

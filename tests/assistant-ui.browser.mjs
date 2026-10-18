@@ -522,6 +522,51 @@ try {
   assert.match(saved, /Таблиці й записи в нього не входять/u);
   assert.match(await proposal.innerText(), /Пакет збережено/u);
 
+  // Пасхалка: питання про улюблену пісню вмикає лише звук. Відео немає, модель не викликається, мережі немає.
+  const songRequests = [];
+  page.on('request', request => { if (/favorite-song\.mp3(?:[?#]|$)/u.test(request.url())) songRequests.push(request.url()); });
+  await page.evaluate(() => {
+    window.__songs = [];
+    const Native = window.Audio;
+    window.Audio = function Audio(source) { const element = new Native(source); window.__songs.push(element); return element; };
+    window.Audio.prototype = Native.prototype;
+  });
+  assert.equal(songRequests.length, 0, 'пісня не вантажиться, поки про неї не спитали');
+  const modelCallsBeforeSong = await page.evaluate(() => window.modelRequests.length);
+  await input.fill('Яка твоя улюблена пісня?');
+  await input.press('Enter');
+  const songButton = panel.locator('.ew-assistant-song');
+  await songButton.waitFor();
+  assert.match(await panel.locator('.ew-assistant-message').last().innerText(), /Є одна/u);
+  await page.waitForFunction(() => window.__songs[0] && !window.__songs[0].paused && window.__songs[0].currentTime > 0.2, null, { timeout: 8000 });
+  assert.equal(await songButton.innerText(), 'Зупинити пісню');
+  assert.equal(await songButton.getAttribute('aria-pressed'), 'true');
+  assert.equal(await page.locator('video').count(), 0, 'відео не показується');
+  assert.equal(await page.evaluate(() => window.__songs.length), 1);
+  assert.equal(await page.evaluate(() => window.modelRequests.length), modelCallsBeforeSong, 'мовна модель питання про пісню не отримує');
+  assert.equal(songRequests.length >= 1 && songRequests.every(url => /^http:\/\/(127\.0\.0\.1|localhost):/u.test(url)), true, 'файл береться з самого застосунку');
+  await page.screenshot({ path: '/tmp/easywar-shots/assistant-song-playing.png', fullPage: true });
+  await songButton.click();
+  assert.equal(await songButton.innerText(), 'Увімкнути пісню');
+  assert.equal(await page.evaluate(() => window.__songs[0].paused && window.__songs[0].currentTime === 0), true, 'кнопка зупиняє й перемотує до початку');
+  await songButton.click();
+  await page.waitForFunction(() => !window.__songs[0].paused && window.__songs[0].currentTime > 0.1, null, { timeout: 8000 });
+  assert.equal(await page.evaluate(() => window.__songs.length), 1, 'повторний запуск використовує той самий елемент');
+  await panel.locator('.ew-assistant-close').click();
+  assert.equal(await page.evaluate(() => window.__songs[0].paused), true, 'згортання панелі глушить пісню');
+  await launcher.click();
+  assert.equal(await panel.locator('.ew-assistant-song').innerText(), 'Увімкнути пісню', 'у збереженій відповіді кнопка знову пропонує запуск');
+  await panel.locator('.ew-assistant-song').click();
+  await page.waitForFunction(() => !window.__songs[0].paused, null, { timeout: 8000 });
+  await page.keyboard.press('Escape');
+  assert.equal(await page.evaluate(() => window.__songs[0].paused), true, 'Escape теж глушить пісню');
+  await launcher.click();
+  await input.fill('Як працюють профілі?');
+  await input.press('Enter');
+  await panel.locator('.ew-assistant-message').last().filter({ hasText: /профіл/iu }).waitFor();
+  assert.equal(await page.evaluate(() => window.__songs.length), 1, 'звичайні питання пісню не вмикають');
+  assert.equal(await page.evaluate(() => window.__songs[0].paused), true);
+
   // Locking clears the panel and pending answers immediately.
   await input.fill('Як працюють профілі?');
   await page.evaluate(() => { window.holdSession = true; window.resumeSession = null; });
@@ -538,6 +583,7 @@ try {
   assert.equal(await panel.isVisible(), false);
   assert.equal(await panel.locator('.ew-assistant-message').count(), 0);
   assert.equal(await launcher.isVisible(), false);
+  assert.equal(await page.evaluate(() => window.__songs.every(song => song.paused)), true, 'блокування профілю глушить пісню');
   const commands = await page.evaluate(() => window.testCommands);
   assert.equal(commands.some(command => /assistant.*(?:save|write)|sql|append|approve/u.test(command)), false);
   assert.deepEqual(remote, []);
