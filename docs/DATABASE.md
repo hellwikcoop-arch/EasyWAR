@@ -21,7 +21,11 @@ separate XLSX table per branch module (`air`, `rocket`) to a profile and moves
 an earlier single binding to the Air Force slot. Migration
 `0009_profile_modules.sql` stores the modules (`air`, `rocket`, `artillery`,
 `pvk`, `dshv`) a profile chose at registration and backfills all five for
-profiles that already exist. Migrations contain no
+profiles that already exist. Migration `0010_dashboard_modules.sql` adds the
+metadata of user-created dashboard modules (`dashboard_modules`,
+`dashboard_module_fields`); the rows of each module live in a separate
+`dashboard_data_<24 hex>` table that Rust creates at runtime from a built-in
+catalog template, not from the migration. Migrations contain no
 operational fixtures and create no external integration.
 
 ## Provenance layers
@@ -43,6 +47,9 @@ operational fixtures and create no external integration.
 | Profile details | `local_profile_details` | Position, small avatar and optional Argon2id sign-in hash; gates sign-in on this device only. |
 | Profile modules | `local_profile_modules` | Modules a profile chose at registration (`air`, `rocket`, `artillery`, `pvk`, `dshv`); only shown on the start screen, not an access boundary. Cascades on profile delete. |
 | Profile tables | `local_profile_tables` | One XLSX path per profile and branch module (`air`, `rocket`); the file itself is never stored or changed by binding. |
+| Dashboard modules | `dashboard_modules` | One user-created dashboard module per row: owning profile, branch (`air`, `rocket`, `pvk`, `dshv`), built-in catalog template, visual kind, title and the name of its data table. Cascades on profile delete. |
+| Dashboard module fields | `dashboard_module_fields` | The checked field list copied from the catalog template: key, Ukrainian label, data type, role, aggregation, required flag and position. Cascades with the module. |
+| Dashboard module data | `dashboard_data_<24 hex>` | Created at runtime, one table per module: `row_id`, `created_at` and one column per catalog field. Table and column names come only from the validated catalog, never from user text. The profile-delete cascade removes the metadata rows but does not drop these tables. |
 
 The `report_current_state` view derives `NEW`, `PARSED`, or the latest review
 decision without overwriting source or parser records.
