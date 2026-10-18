@@ -252,6 +252,17 @@ table (header + Excel column letter next to each field; Rocket Forces also gets
   fails until they are applied again. Keep new fields in sync with `FIELD_ORDER` of
   the page's CORE: the form only shows columns that exist in the open table.
 
+## Каталог стовпців, плиток і блоків (крок 1: формат)
+
+`src/catalog-core.js` — чисте ядро (без DOM, мережі, сховищ, `eval`) для майбутнього
+конструктора таблиць: розбирає й перевіряє JSON-каталог (`parseCatalogText`,
+`validateCatalog`), повертає глибоко заморожену копію або список помилок зі шляхами.
+Формат, обмеження й приклад — у [CATALOG.md](CATALOG.md); `tests/catalog-core.test.mjs`
+бере приклад саме з цього документа, тож приклад і валідатор не розходяться. Жодна
+сторінка ядро ще не підключає: `air.html`, `rocket.html` і їхня поведінка не змінені.
+Наступні кроки (плитки як описи, конструктор порожньої таблиці, динамічні блоки в
+«Розташування блоків») — у розділі «Дорожня карта» того ж документа й у `BACKLOG.md`.
+
 ## Rocket Forces reference styling
 
 `src/public/rocket-refs.js` (built by `script/rocket-refs/build.py` from
