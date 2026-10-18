@@ -9,6 +9,7 @@
 import {
   FieldValueError,
   fieldKind,
+  fieldSections,
   formatFieldValue,
   parseDuration,
   parseFieldInput,
@@ -654,9 +655,52 @@ function readRow(row, context) {
   for (const field of context.fields) {
     if (!field.required || values[field.key] != null) continue;
     const failed = issues.find(issue => issue.key === field.key);
-    return { skip: failed ? `«${field.label}»: не вдалося розібрати` : `немає значення в «${field.label}»` };
+    // Значення пропущеного запису не імпортуються, але його метеоумови стоять у таблиці в часі:
+    // `planImport` враховує їх, щоб наступні записи не взяли давнішу погоду.
+    return { skip: failed ? `«${field.label}»: не вдалося розібрати` : `немає значення в «${field.label}»`, values, issues };
   }
   return { values, issues };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Метеоумови, протягнуті на наступні записи тієї ж льотної зміни
+
+/** Номер льотної зміни: межі зміни визначаються лише за ним. */
+const SHIFT_KEY = 'flight_shift_number';
+
+/** Поля метеоумов шаблону — ті самі, які форма переносить у новий запис (`inheritedValues`). */
+const weatherKeysOf = fields => fieldSections(fields)
+  .filter(section => section.inherit)
+  .flatMap(section => section.fields.map(field => field.key));
+
+const shiftOf = values => (Number.isInteger(values[SHIFT_KEY]) ? values[SHIFT_KEY] : null);
+
+/**
+ * Метеоумови записують не в кожному польоті, а коли вони змінюються. Запис без метеоумов
+ * бере їх із попереднього запису тієї самої льотної зміни, поки в таблиці не з'явиться нове
+ * значення: нове завжди головніше. Погода переходить цілим набором одного запису, без домішок
+ * з інших. Не протягується через кордон зміни й там, де номера зміни немає (межі не відомі);
+ * через клітинку метеоумов, яку не вдалося розібрати (погода невідома); погода, що порушує
+ * правила форми, теж не розмножується. Тут лише вирішується, кому що дістається, — самі записи
+ * не змінюються (див. `importRows`).
+ *
+ * Повертає для кожного запису по порядку: `{ set }` — протягнута погода; `{ left: true }` —
+ * погода в таблиці була, але протягнути її не можна (інша зміна чи немає номера); `null` — нічого.
+ */
+function weatherTracker(keys) {
+  let donor = null;
+  return (values, unreadable) => {
+    const own = keys.filter(key => values[key] != null);
+    if (own.length) {
+      const set = Object.fromEntries(own.map(key => [key, values[key]]));
+      donor = rowRuleProblem(set) ? null : { set, shift: shiftOf(values) };
+      return null;
+    }
+    if (unreadable) donor = null;
+    if (!donor) return null;
+    const shift = shiftOf(values);
+    return shift != null && shift === donor.shift ? { set: donor.set } : { left: true };
+  };
 }
 
 function bump(map, key, entry) {
@@ -719,6 +763,9 @@ export function planImport(fields, sheetRows) {
     // Рядки, які порушують правила форми (НМХ вище за ВМХ, екіпаж більший за 8). Вони не відкидаються:
     // це зауваження. `items` — по одному запису на вид порушення, зі своїм першим рядком таблиці.
     rules: { count: 0, firstNumber: null, message: '', items: [] },
+    // Метеоумови, які можна протягнути на записи без них (`importRows`): `sets[i]` — набір для запису
+    // `rows[i]` або null; `possible` — скільки записів його отримають, `unresolved` — скільком не можна.
+    carry: { keys: [], possible: 0, firstNumber: null, unresolved: 0, unresolvedFirst: null, sets: [] },
     truncated: false,
     blocked: '',
     firstRecord: [],
@@ -743,15 +790,29 @@ export function planImport(fields, sheetRows) {
   const reasons = new Map();
   const problems = new Map();
   const ruleKinds = new Map();
+  const { carry } = plan;
+  carry.keys = weatherKeysOf(list);
+  const track = weatherTracker(carry.keys);
+  const weatherUnreadable = issues => issues.some(issue => issue.key === 'weather' || carry.keys.includes(issue.key));
   for (const row of rows.slice(header.index + 1)) {
     if (plan.rows.length >= MAX_IMPORT_ROWS) { plan.truncated = true; break; }
     const read = readRow(row, context);
     if (read.skip) {
       bump(reasons, read.skip, { reason: read.skip, firstNumber: row.number });
+      if (read.values) track(read.values, weatherUnreadable(read.issues));
       continue;
     }
     plan.rows.push(read.values);
     plan.rowNumbers.push(row.number);
+    const carried = track(read.values, weatherUnreadable(read.issues));
+    carry.sets.push(carried?.set ?? null);
+    if (carried?.set) {
+      carry.possible += 1;
+      carry.firstNumber ??= row.number;
+    } else if (carried?.left) {
+      carry.unresolved += 1;
+      carry.unresolvedFirst ??= row.number;
+    }
     for (const issue of read.issues) bump(problems, issue.key, { ...issue, firstNumber: row.number });
     const rule = rowRuleProblem(read.values);
     if (rule) {
@@ -788,6 +849,19 @@ const rowsWord = count => `${count} ${pluralForm(count, 'рядок', 'рядк�
 // Після «до»: «до 1 рядка», «до 2 рядків», «до 5 рядків», «до 21 рядка».
 const rowsGenitive = count => `${count} ${pluralForm(count, 'рядка', 'рядків', 'рядків')}`;
 const cellsWord = count => `${count} ${pluralForm(count, 'клітинку', 'клітинки', 'клітинок')}`;
+// Де шукати в таблиці: «рядок 7» для одного запису, «перший — рядок 7» для кількох.
+const whereWord = (count, number) => (count > 1 ? `перший — рядок ${number}` : `рядок ${number}`);
+
+/**
+ * Записи для створення модуля. `carryWeather` — протягнути метеоумови на записи тієї ж льотної зміни,
+ * де їх не вказано (`plan.carry`); нове значення з таблиці ніколи не перекривається. Без протягування
+ * записи такі, як у таблиці.
+ */
+export function importRows(plan, { carryWeather = true } = {}) {
+  const { sets, possible } = plan.carry;
+  if (!carryWeather || !possible) return plan.rows;
+  return plan.rows.map((row, index) => (sets[index] ? { ...sets[index], ...row } : row));
+}
 
 /** Підписи плану для вікна створення. Порожній рядок — нічого показувати. */
 export function describePlan(plan) {
@@ -800,6 +874,10 @@ export function describePlan(plan) {
     extra: '',
     skipped: '',
     warnings: [],
+    // Метеоумови: підпис прапорця «протягнути», пояснення під ним і причина, чому не скрізь вдалося.
+    carryLabel: '',
+    carry: '',
+    carryUnresolved: '',
     truncated: '',
   };
   if (plan.missing.length && plan.matched) {
@@ -813,8 +891,16 @@ export function describePlan(plan) {
     `«${item.label}»: не розібрано ${cellsWord(item.count)} (рядок ${item.firstNumber}: «${item.sample}» — ${item.reason}).`
   ));
   for (const item of plan.rules.items) {
-    const where = item.count > 1 ? `перший — рядок ${item.firstNumber}` : `рядок ${item.firstNumber}`;
-    notes.warnings.push(`Зауваження до ${rowsGenitive(item.count)} (${where}): ${item.message}`);
+    notes.warnings.push(`Зауваження до ${rowsGenitive(item.count)} (${whereWord(item.count, item.firstNumber)}): ${item.message}`);
+  }
+  const { carry } = plan;
+  if (carry.possible) {
+    notes.carryLabel = `Протягнути метеоумови на ${rowCountLabel(carry.possible)} тієї ж льотної зміни, де їх не вказано`;
+    notes.carry = `Береться значення з попереднього запису тієї ж льотної зміни, поки в таблиці не з'явиться нове (${whereWord(carry.possible, carry.firstNumber)}).`;
+  }
+  if (carry.unresolved) {
+    notes.carryUnresolved = `Не вдалося протягнути метеоумови на ${rowCountLabel(carry.unresolved)} (${whereWord(carry.unresolved, carry.unresolvedFirst)}): `
+      + 'почалася нова льотна зміна без метеоумов або в таблиці не вказано номер зміни. Метеополя там лишаться порожніми.';
   }
   if (plan.truncated) notes.truncated = `У таблиці більше ${MAX_IMPORT_ROWS} рядків: підтягнуто перші ${MAX_IMPORT_ROWS} записів.`;
   return notes;
@@ -836,6 +922,7 @@ export const dashboardModuleSourceCore = {
   rankSheets,
   convertCell,
   planImport,
+  importRows,
   describePlan,
   sheetOptionLabel,
 };

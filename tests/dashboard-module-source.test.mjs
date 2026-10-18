@@ -7,6 +7,7 @@ import {
   enoughMatches,
   findHeaderRow,
   headerCandidates,
+  importRows,
   matchHeaders,
   normalizeHeader,
   planImport,
@@ -583,14 +584,136 @@ test('every record the plan produces is a value the Rust store accepts', () => {
     ownerCells({ ...baseValues(), [col('Номер ПС')]: 24, [col('Висота')]: '0.3м(300м)', [col('Витрата палива')]: '310 (248)' }),
     ownerCells({ ...baseValues(), [col('Зліт')]: 1015, [col('Пасажири')]: '3', [col('Вантаж')]: '150 кг', [col('ПМУ/СМУ')]: 'СМУ' }),
     ownerCells({ ...baseValues(), [col('Льотна зміна')]: '1', [col('кількість польотів')]: 2.5, [col('Оцінка за політ')]: 4 }),
-    ownerCells({ ...baseValues(), [col('Метеоумови (хмарність нижня межа верхня межа видимість)')]: '3 200 800 6' }),
+    ownerCells({ ...baseValues(), [col('Льотна зміна')]: 1, [col('Метеоумови (хмарність нижня межа верхня межа видимість)')]: '3 200 800 6' }),
+    ownerCells({ ...baseValues(), [col('Льотна зміна')]: 1 }),
   ];
   const plan = planImport(flightFields, journal(...messy));
-  assert.equal(plan.rows.length, 4);
-  for (const row of plan.rows) {
+  assert.equal(plan.rows.length, 5);
+  assert.equal(plan.carry.possible, 1, 'the last record takes the weather of the one before it');
+  for (const row of [...plan.rows, ...importRows(plan)]) {
     for (const key of Object.keys(row)) assert.ok(fieldOf(key), `unknown field ${key}`);
     for (const field of flightFields) assert.ok(accepted(field, row[field.key]), `${field.key}=${JSON.stringify(row[field.key])}`);
   }
+});
+
+// ---------------------------------------------------------------------------------------------
+// Метеоумови, протягнуті на записи тієї ж льотної зміни
+
+const WEATHER = col('Метеоумови (хмарність нижня межа верхня межа видимість)');
+const SHIFT = col('Льотна зміна');
+/** Політ льотної зміни `shift` з метеоумовами однією клітинкою (або без них). */
+const flightOf = (shift, weather, extra = {}) => ownerCells({ ...baseValues(), [SHIFT]: shift, [WEATHER]: weather, ...extra });
+const weatherOf = row => [row.cloud_cover, row.cloud_base_lower, row.cloud_base_upper, row.visibility];
+const NO_WEATHER = [undefined, undefined, undefined, undefined];
+const SHIFT_JOURNAL = () => journal(
+  flightOf(1, '5/300/1000/10'), // рядок 2: погода вказана
+  flightOf(1, null), // рядок 3: та сама зміна — бере погоду з рядка 2
+  flightOf(1, '7/200/800/4'), // рядок 4: нове значення перекриває старе
+  flightOf(1, null), // рядок 5: бере погоду з рядка 4
+  flightOf(2, null), // рядок 6: нова зміна без погоди — протягувати нема звідки
+  flightOf(2, '3 150 600 6'), // рядок 7
+  flightOf(2, null), // рядок 8
+);
+
+test('weather goes on to the next records of the same flight shift until the table gives a new value', () => {
+  const plan = planImport(flightFields, SHIFT_JOURNAL());
+  assert.equal(plan.rows.length, 7);
+  assert.deepEqual([...plan.carry.keys].sort(), ['cloud_base_lower', 'cloud_base_upper', 'cloud_cover', 'visibility']);
+  assert.deepEqual(
+    [plan.carry.possible, plan.carry.firstNumber, plan.carry.unresolved, plan.carry.unresolvedFirst],
+    [3, 3, 1, 6],
+  );
+  assert.equal(plan.carry.sets.length, plan.rows.length, 'one slot per imported record');
+
+  const records = importRows(plan);
+  assert.deepEqual(records.map(weatherOf), [
+    [5, 300, 1000, 10], [5, 300, 1000, 10], [7, 200, 800, 4], [7, 200, 800, 4], NO_WEATHER, [3, 150, 600, 6], [3, 150, 600, 6],
+  ]);
+  assert.equal(records[1].aircraft_type, 'Мі-8', 'the other fields are those of the record itself');
+  assert.equal(records[1].flight_shift_number, 1);
+  assert.equal(records[0], plan.rows[0], 'a record with its own weather is not copied');
+
+  assert.deepEqual([1, 3, 4, 6].map(index => weatherOf(plan.rows[index])), Array(4).fill(NO_WEATHER), 'the plan itself still holds the table as it is');
+  assert.equal(importRows(plan, { carryWeather: false }), plan.rows, 'with the carry off the records are the table as it is');
+});
+
+test('carried weather is the whole set of one record: a partial set is not completed from an older one', () => {
+  const plan = planImport(flightFields, sheetOf([
+    ['Тип ПС', 'Наліт', 'Наліт загальний', 'Льотна зміна', 'Хмарність', 'Видимість'],
+    ['Мі-8', '0:30', '0:40', 1, 4, 10],
+    ['Мі-8', '0:30', '0:40', 1, null, 6],
+    ['Мі-8', '0:30', '0:40', 1, null, null],
+  ]));
+  assert.equal(plan.matched, 6);
+  assert.equal(plan.carry.possible, 1);
+  const records = importRows(plan);
+  assert.deepEqual(weatherOf(records[0]), [4, undefined, undefined, 10]);
+  assert.deepEqual(weatherOf(records[1]), [undefined, undefined, undefined, 6], 'its own visibility and no cloud cover from the record before');
+  assert.deepEqual(weatherOf(records[2]), [undefined, undefined, undefined, 6], 'the set of the newest record only');
+});
+
+test('weather is not carried without a shift number, over a shift change, past an unreadable cell or a wrong weather', () => {
+  const noColumn = planImport(flightFields, sheetOf([
+    ['Тип ПС', 'Наліт', 'Наліт загальний', 'Метеоумови'],
+    ['Мі-8', '0:30', '0:40', '5/300/1000/10'],
+    ['Мі-8', '0:30', '0:40', null],
+  ]));
+  assert.deepEqual([noColumn.carry.possible, noColumn.carry.unresolved, noColumn.carry.unresolvedFirst], [0, 1, 3], 'shift boundaries are unknown');
+  assert.equal(importRows(noColumn), noColumn.rows);
+
+  const blankShift = planImport(flightFields, journal(flightOf(1, '5/300/1000/10'), flightOf(null, null), flightOf(1, null)));
+  assert.deepEqual([blankShift.carry.possible, blankShift.carry.unresolved, blankShift.carry.unresolvedFirst], [1, 1, 3]);
+  assert.deepEqual(importRows(blankShift).map(weatherOf), [[5, 300, 1000, 10], NO_WEATHER, [5, 300, 1000, 10]]);
+
+  const unreadable = planImport(flightFields, journal(flightOf(1, '5/300/1000/10'), flightOf(1, 'ясно'), flightOf(1, null)));
+  assert.deepEqual([unreadable.carry.possible, unreadable.carry.unresolved], [0, 0], 'after a cell that cannot be read the weather is unknown');
+  assert.ok(unreadable.warnings.some(item => item.key === 'weather'));
+
+  const inverted = planImport(flightFields, journal(flightOf(1, '5/1000/300/10'), flightOf(1, null)));
+  assert.equal(inverted.rules.count, 1, 'the wrong weather is still reported once, on its own record');
+  assert.deepEqual([inverted.carry.possible, inverted.carry.unresolved], [0, 0], 'and is not multiplied');
+});
+
+test('a skipped record still moves the weather: the next ones do not take an older value', () => {
+  const plan = planImport(flightFields, journal(
+    flightOf(1, '5/300/1000/10'),
+    flightOf(1, '7/200/800/4', { [col('Тип ПС')]: null }),
+    flightOf(1, null),
+  ));
+  assert.equal(plan.rows.length, 2);
+  assert.equal(plan.skippedCount, 1);
+  assert.equal(plan.carry.sets.length, 2);
+  assert.deepEqual(importRows(plan).map(weatherOf), [[5, 300, 1000, 10], [7, 200, 800, 4]]);
+});
+
+test('a template without weather fields has nothing to carry', () => {
+  const calendar = catalog.find(item => item.id === 'calendar').fields;
+  const plan = planImport(calendar, sheetOf([['Дата', 'Значення'], ['2026-03-01', 4], ['2026-03-02', 5]]));
+  assert.deepEqual(plan.carry.keys, []);
+  assert.equal(plan.carry.possible + plan.carry.unresolved, 0);
+  assert.equal(importRows(plan), plan.rows);
+  assert.equal(describePlan(plan).carryLabel, '');
+});
+
+test('carry notes give the count, the first row and the reason some records stay without weather', () => {
+  const notes = describePlan(planImport(flightFields, SHIFT_JOURNAL()));
+  assert.equal(notes.carryLabel, 'Протягнути метеоумови на 3 записи тієї ж льотної зміни, де їх не вказано');
+  assert.equal(
+    notes.carry,
+    "Береться значення з попереднього запису тієї ж льотної зміни, поки в таблиці не з'явиться нове (перший — рядок 3).",
+  );
+  assert.equal(
+    notes.carryUnresolved,
+    'Не вдалося протягнути метеоумови на 1 запис (рядок 6): почалася нова льотна зміна без метеоумов або в таблиці не вказано номер зміни. Метеополя там лишаться порожніми.',
+  );
+
+  const single = describePlan(planImport(flightFields, journal(flightOf(1, '5/300/1000/10'), flightOf(1, null), flightOf(2, null), flightOf(2, null))));
+  assert.equal(single.carryLabel, 'Протягнути метеоумови на 1 запис тієї ж льотної зміни, де їх не вказано');
+  assert.match(single.carry, /\(рядок 3\)\.$/u);
+  assert.match(single.carryUnresolved, /^Не вдалося протягнути метеоумови на 2 записи \(перший — рядок 4\): /u);
+
+  const plain = describePlan(planImport(flightFields, journal(flightOf(1, '5/300/1000/10'), flightOf(1, '5/300/1000/10'))));
+  assert.deepEqual([plain.carryLabel, plain.carry, plain.carryUnresolved], ['', '', ''], 'nothing to say when every record has its own weather');
 });
 
 // ---------------------------------------------------------------------------------------------

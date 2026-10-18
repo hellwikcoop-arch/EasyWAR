@@ -27,7 +27,7 @@ import {
   schemaSummary,
   tableEditState,
 } from './dashboard-module-catalog-core.js';
-import { describePlan, planImport, rankSheets, sheetOptionLabel } from './dashboard-module-source-core.js';
+import { describePlan, importRows, planImport, rankSheets, sheetOptionLabel } from './dashboard-module-source-core.js';
 
 const invoke = window.__TAURI_INTERNALS__?.invoke || window.parent?.__TAURI_INTERNALS__?.invoke;
 if (typeof invoke === 'function') initialize();
@@ -281,7 +281,7 @@ function initialize() {
   // користувач), зіставляє її стовпці з колонками модуля й пропонує підтягнути записи. Файл лише
   // читається. Колонки модуля, яких у таблиці немає, лишаються порожніми: дані вносять у самому модулі.
   function sourceBlock(item, onChange) {
-    const model = { phase: 'loading', pending: true, message: '', origin: '', workbook: null, ranked: [], sheet: '', plan: null, use: false };
+    const model = { phase: 'loading', pending: true, message: '', origin: '', workbook: null, ranked: [], sheet: '', plan: null, use: false, carry: true };
     let request = 0;
     const body = el('div', { class: 'ewmc-source-body', 'aria-live': 'polite' });
     const node = el('section', { class: 'ewmc-source', 'aria-labelledby': 'ewmc-source-title' },
@@ -343,6 +343,8 @@ function initialize() {
         model.plan = planImport(item.fields, sheet);
         // Таблиця, схожа лише частково, не підтягується сама: користувач вмикає це свідомо.
         model.use = model.ranked.find(entry => entry.name === name)?.confident === true && model.plan.rows.length > 0;
+        // Метеоумови, яких у записі не вказано, за умовчанням беруться з попереднього запису тієї ж льотної зміни.
+        model.carry = true;
         setPhase('ready');
       } catch (error) {
         if (id === request) setPhase('error', String(error));
@@ -406,14 +408,27 @@ function initialize() {
       add(notes.missing);
       add(notes.extra);
       add(notes.skipped, true);
+      add(notes.carryUnresolved, true);
       notes.warnings.forEach(text => add(text, true));
       add(notes.truncated, true);
       if (lines.length) nodes.push(el('ul', { class: 'ewmc-source-notes' }, lines));
       const use = el('input', { type: 'checkbox', disabled: !plan.rows.length });
       use.checked = model.use;
-      use.addEventListener('change', () => { model.use = use.checked; });
+      // Протягнути метеоумови можна, лише якщо є на які записи й записи взагалі підтягуються.
+      const carry = plan.carry.possible ? el('input', { type: 'checkbox', disabled: !model.use }) : null;
+      if (carry) carry.checked = model.carry;
+      use.addEventListener('change', () => {
+        model.use = use.checked;
+        if (carry) carry.disabled = !use.checked;
+      });
+      carry?.addEventListener('change', () => { model.carry = carry.checked; });
       nodes.push(el('label', { class: 'ewmc-source-use' }, use,
         el('span', { text: plan.rows.length ? `Підтягнути ${rowCountLabel(plan.rows.length)} у новий модуль` : 'Підтягувати нічого' })));
+      if (carry) {
+        nodes.push(el('div', { class: 'ewmc-source-carry' },
+          el('label', { class: 'ewmc-source-use' }, carry, el('span', { text: notes.carryLabel })),
+          el('p', { class: 'ewmc-source-hint', text: notes.carry })));
+      }
       if (plan.found.length) {
         nodes.push(el('details', {},
           el('summary', { text: 'Які стовпці таблиці куди потраплять' }),
@@ -432,7 +447,7 @@ function initialize() {
       node,
       start,
       pending: () => model.pending,
-      rows: () => (model.phase === 'ready' && model.use && model.plan?.rows.length ? model.plan.rows : null),
+      rows: () => (model.phase === 'ready' && model.use && model.plan?.rows.length ? importRows(model.plan, { carryWeather: model.carry }) : null),
       // Після закриття вікна пізні відповіді таблиці вже нікуди не потраплять.
       dispose: () => { request += 1; },
     };

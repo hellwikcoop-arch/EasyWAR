@@ -55,6 +55,7 @@ html[data-theme=light] .ewmc-visual{background:linear-gradient(150deg,#edf7ff,#f
 .ewmc-source-notes li{padding:8px 10px;border-radius:9px;background:color-mix(in srgb,var(--accent,#28b8ff) 8%,transparent);color:var(--muted,#9fb0c4);line-height:1.45}
 .ewmc-source-notes li.warn{background:color-mix(in srgb,#ffb84d 13%,transparent);color:#ffd9a0}
 .ewmc-source-use{display:flex;align-items:center;gap:9px;font-size:13px;font-weight:700}.ewmc-source-use input{width:18px;height:18px;accent-color:var(--accent,#28b8ff)}
+.ewmc-source-carry{display:grid;gap:4px;padding-left:27px}.ewmc-source-carry .ewmc-source-use{font-size:12px}
 .ewmc-source select{min-height:40px;max-width:100%;padding:0 10px;border:1px solid var(--line-strong,#334155);border-radius:10px;background:var(--surface,#101a2a);color:var(--ink,#eef6ff);font:inherit}
 .ewmc-source details{padding-top:8px;border-top:1px solid var(--line,#26364a)}.ewmc-source summary{color:var(--accent,#28b8ff);font-weight:700;cursor:pointer}
 .ewmc-source-map{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:4px 14px;margin:8px 0 0;font-size:11px}.ewmc-source-map dt{color:var(--muted,#9fb0c4)}.ewmc-source-map dd{margin:0;overflow-wrap:anywhere}

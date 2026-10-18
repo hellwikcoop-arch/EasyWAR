@@ -1001,3 +1001,14 @@ test('the data-from-table block sits in the left column of the create form, abov
   assert.match(css, /@media\(max-width:900px\)\{[\s\S]*?\.ewmc-create-main,\.ewmc-table-plan\{grid-column:1;grid-row:auto\}/);
   assert.match(css, /\.ewmc-source\{display:grid;/);
 });
+
+test('the weather carry is a visible switch, on by default, and the created rows follow it', async () => {
+  const source = await readFile(new URL('../src/dashboard-module-catalog.js', import.meta.url), 'utf8');
+  const css = await readFile(new URL('../src/dashboard-module-catalog.css', import.meta.url), 'utf8');
+  assert.match(source, /use: false, carry: true \}/, 'on by default, as the owner asked');
+  assert.match(source, /importRows\(model\.plan, \{ carryWeather: model\.carry \}\)/, 'the records sent to Rust are those of the switch');
+  assert.match(source, /plan\.carry\.possible \? el\('input', \{ type: 'checkbox'/, 'the switch exists only when there is something to carry');
+  assert.ok(source.includes('text: notes.carryLabel') && source.includes('text: notes.carry '), 'the switch says what it does and where to look');
+  assert.ok(source.includes('add(notes.carryUnresolved, true)'), 'records left without weather are reported, not hidden');
+  assert.match(css, /\.ewmc-source-carry\{display:grid;/);
+});
