@@ -779,6 +779,30 @@ impl DashboardModuleStore {
         requested_title: Option<&str>,
         created_at: &str,
     ) -> Result<DashboardModule, DashboardModuleError> {
+        self.create_with_rows(
+            profile_id,
+            branch,
+            template_id,
+            requested_title,
+            Vec::new(),
+            created_at,
+        )
+        .await
+    }
+
+    /// Створює модуль і, якщо є `rows` (дані, підтягнуті з таблиці користувача), одразу
+    /// записує їх у його таблицю тією самою транзакцією: модуль з'являється з усіма
+    /// рядками або не з'являється зовсім. Рядки перевіряються так само, як під час
+    /// заміни рядків; службове поле `rowId` у нових рядках не приймається.
+    pub async fn create_with_rows(
+        &self,
+        profile_id: &str,
+        branch: &str,
+        template_id: &str,
+        requested_title: Option<&str>,
+        rows: Vec<Map<String, Value>>,
+        created_at: &str,
+    ) -> Result<DashboardModule, DashboardModuleError> {
         if !valid_branch(branch) {
             return Err(DashboardModuleError::InvalidBranch);
         }
@@ -787,6 +811,21 @@ impl DashboardModuleStore {
             .find(|item| item.id == template_id)
             .ok_or(DashboardModuleError::UnknownTemplate)?;
         let title = normalized_title(requested_title, selected.title)?;
+        let template_fields = selected
+            .fields
+            .iter()
+            .enumerate()
+            .map(|(position, item)| DashboardModuleField {
+                key: item.key.to_owned(),
+                label: item.label.to_owned(),
+                data_type: item.data_type.to_owned(),
+                role: item.role.to_owned(),
+                aggregation: item.aggregation.to_owned(),
+                required: item.required,
+                position: position as i64,
+            })
+            .collect::<Vec<_>>();
+        validate_new_rows(&template_fields, &rows)?;
 
         let count: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM dashboard_modules WHERE profile_id = ? AND branch = ?",
@@ -841,6 +880,14 @@ impl DashboardModuleStore {
         }
 
         create_data_table(&mut transaction, &storage_table, &selected.fields).await?;
+        insert_rows(
+            &mut transaction,
+            &storage_table,
+            &template_fields,
+            &rows,
+            created_at,
+        )
+        .await?;
         transaction.commit().await?;
         self.get_for_profile(profile_id, &id).await
     }
@@ -1040,22 +1087,7 @@ impl DashboardModuleStore {
                 None => sqlx::query(&insert_new).bind(updated_at),
             };
             for field in &module.fields {
-                let value = row.get(&field.key).filter(|value| !value.is_null());
-                query = match field.data_type.as_str() {
-                    "text" | "date" | "datetime" => {
-                        query.bind(value.and_then(Value::as_str).map(ToOwned::to_owned))
-                    }
-                    "integer" => query.bind(value.and_then(Value::as_i64)),
-                    "real" => query.bind(value.and_then(Value::as_f64)),
-                    "boolean" => query.bind(value.and_then(Value::as_bool).map(|value| {
-                        if value {
-                            1_i64
-                        } else {
-                            0_i64
-                        }
-                    })),
-                    _ => return Err(DashboardModuleError::InvalidStoredSchema),
-                };
+                query = bind_field(query, field, row.get(&field.key))?;
             }
             query.execute(&mut *transaction).await?;
         }
@@ -1281,6 +1313,80 @@ async fn create_data_table(
     sqlx::query(&format!("CREATE TABLE {table} ({})", columns.join(", ")))
         .execute(&mut **transaction)
         .await?;
+    Ok(())
+}
+
+type SqliteQuery<'q> = sqlx::query::Query<'q, Sqlite, sqlx::sqlite::SqliteArguments<'q>>;
+
+/// Підставляє значення поля в запит за типом колонки; порожнє значення стає `NULL`.
+fn bind_field<'q>(
+    query: SqliteQuery<'q>,
+    field: &DashboardModuleField,
+    value: Option<&Value>,
+) -> Result<SqliteQuery<'q>, DashboardModuleError> {
+    let value = value.filter(|value| !value.is_null());
+    Ok(match field.data_type.as_str() {
+        "text" | "date" | "datetime" => {
+            query.bind(value.and_then(Value::as_str).map(ToOwned::to_owned))
+        }
+        "integer" => query.bind(value.and_then(Value::as_i64)),
+        "real" => query.bind(value.and_then(Value::as_f64)),
+        "boolean" => query.bind(value.and_then(Value::as_bool).map(i64::from)),
+        _ => return Err(DashboardModuleError::InvalidStoredSchema),
+    })
+}
+
+/// Перевірка нових рядків до початку транзакції: кількість, невідомі поля, типи й
+/// обов'язкові поля. `rowId` у новому рядку не має сенсу, тому це невідоме поле.
+fn validate_new_rows(
+    fields: &[DashboardModuleField],
+    rows: &[Map<String, Value>],
+) -> Result<(), DashboardModuleError> {
+    if rows.len() > MAX_ROWS_PER_WRITE {
+        return Err(DashboardModuleError::TooManyRows);
+    }
+    let allowed = fields
+        .iter()
+        .map(|field| field.key.as_str())
+        .collect::<BTreeSet<_>>();
+    for row in rows {
+        if let Some(key) = row.keys().find(|key| !allowed.contains(key.as_str())) {
+            return Err(DashboardModuleError::UnknownField(key.clone()));
+        }
+        for field in fields {
+            validate_value(field, row.get(&field.key))?;
+        }
+    }
+    Ok(())
+}
+
+/// Дописує рядки в таблицю модуля в порядку надходження (їхні `row_id` зростають).
+async fn insert_rows(
+    transaction: &mut Transaction<'_, Sqlite>,
+    storage_table: &str,
+    fields: &[DashboardModuleField],
+    rows: &[Map<String, Value>],
+    created_at: &str,
+) -> Result<(), DashboardModuleError> {
+    if rows.is_empty() {
+        return Ok(());
+    }
+    let table = quoted_identifier(storage_table)?;
+    let columns = std::iter::once(Ok("\"created_at\"".to_owned()))
+        .chain(fields.iter().map(|field| quoted_identifier(&field.key)))
+        .collect::<Result<Vec<_>, DashboardModuleError>>()?;
+    let sql = format!(
+        "INSERT INTO {table} ({}) VALUES ({})",
+        columns.join(", "),
+        vec!["?"; columns.len()].join(", ")
+    );
+    for row in rows {
+        let mut query = sqlx::query(&sql).bind(created_at);
+        for field in fields {
+            query = bind_field(query, field, row.get(&field.key))?;
+        }
+        query.execute(&mut **transaction).await?;
+    }
     Ok(())
 }
 
@@ -1553,6 +1659,169 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    fn seed(value: serde_json::Value) -> Map<String, Value> {
+        value.as_object().unwrap().clone()
+    }
+
+    async fn module_count(store: &DashboardModuleStore) -> i64 {
+        sqlx::query_scalar("SELECT count(*) FROM dashboard_modules")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap()
+    }
+
+    async fn data_table_count(store: &DashboardModuleStore) -> i64 {
+        sqlx::query_scalar(
+            "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name LIKE 'dashboard_data_%'",
+        )
+        .fetch_one(&store.pool)
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn create_with_rows_seeds_the_new_table_in_source_order() {
+        let store = store().await;
+        let rows = vec![
+            seed(json!({
+                "list_number": 1,
+                "aircraft_type": "Тестовий-1",
+                "airborne_hours": 0.5,
+                "total_hours": 0.75,
+                "crew_ke": "Тестенко"
+            })),
+            seed(json!({
+                "list_number": 2,
+                "aircraft_type": "Тестовий-2",
+                "airborne_hours": 1.0,
+                "total_hours": 1.25,
+                "instrument_meteorological_conditions": false
+            })),
+        ];
+
+        let module = store
+            .create_with_rows(
+                "profile-111111111111111111111111",
+                "air",
+                "flight-hours",
+                None,
+                rows,
+                "2026-01-01T00:00:01Z",
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(module.row_count, 2);
+        assert_eq!(module.created_at, module.updated_at);
+        let data = store
+            .get_data("profile-111111111111111111111111", &module.id)
+            .await
+            .unwrap();
+        assert_eq!(data.rows.len(), 2);
+        assert_eq!(data.rows[0]["aircraft_type"], "Тестовий-1");
+        assert_eq!(data.rows[0]["crew_ke"], "Тестенко");
+        assert_eq!(data.rows[0]["createdAt"], "2026-01-01T00:00:01Z");
+        assert_eq!(data.rows[1]["aircraft_type"], "Тестовий-2");
+        assert_eq!(data.rows[1]["instrument_meteorological_conditions"], false);
+        // Поля, яких немає в таблиці користувача, лишаються порожніми колонками модуля.
+        assert_eq!(data.rows[0]["crew_lsh"], Value::Null);
+        assert!(data.rows[0]["rowId"].as_i64() < data.rows[1]["rowId"].as_i64());
+    }
+
+    #[tokio::test]
+    async fn create_with_rows_without_rows_equals_create() {
+        let store = store().await;
+        let module = store
+            .create_with_rows(
+                "profile-111111111111111111111111",
+                "air",
+                "flight-hours",
+                None,
+                Vec::new(),
+                "2026-01-01T00:00:01Z",
+            )
+            .await
+            .unwrap();
+        assert_eq!(module.row_count, 0);
+        assert_eq!(module_count(&store).await, 1);
+    }
+
+    #[tokio::test]
+    async fn a_bad_seed_row_leaves_no_module_and_no_table_behind() {
+        let store = store().await;
+        let good = seed(json!({
+            "aircraft_type": "Тестовий",
+            "airborne_hours": 0.5,
+            "total_hours": 0.75
+        }));
+        let cases = vec![
+            (
+                "тип значення",
+                seed(
+                    json!({"aircraft_type": "Тестовий", "airborne_hours": "півгодини", "total_hours": 1}),
+                ),
+            ),
+            (
+                "обов'язкове поле",
+                seed(json!({"aircraft_type": "Тестовий", "airborne_hours": 0.5})),
+            ),
+            (
+                "невідоме поле",
+                seed(
+                    json!({"aircraft_type": "Тестовий", "airborne_hours": 0.5, "total_hours": 1, "secret": 1}),
+                ),
+            ),
+            (
+                "службовий rowId",
+                seed(
+                    json!({"rowId": 1, "aircraft_type": "Тестовий", "airborne_hours": 0.5, "total_hours": 1}),
+                ),
+            ),
+        ];
+        for (name, bad) in cases {
+            let result = store
+                .create_with_rows(
+                    "profile-111111111111111111111111",
+                    "air",
+                    "flight-hours",
+                    None,
+                    vec![good.clone(), bad],
+                    "2026-01-01T00:00:01Z",
+                )
+                .await;
+            assert!(result.is_err(), "{name}: рядок мав бути відхилений");
+            assert_eq!(module_count(&store).await, 0, "{name}: модуль створено");
+            assert_eq!(
+                data_table_count(&store).await,
+                0,
+                "{name}: лишилась таблиця"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn seeding_more_than_the_write_limit_is_rejected_before_anything_is_created() {
+        let store = store().await;
+        let row = seed(json!({
+            "aircraft_type": "Тестовий",
+            "airborne_hours": 0.5,
+            "total_hours": 0.75
+        }));
+        let result = store
+            .create_with_rows(
+                "profile-111111111111111111111111",
+                "air",
+                "flight-hours",
+                None,
+                vec![row; MAX_ROWS_PER_WRITE + 1],
+                "2026-01-01T00:00:01Z",
+            )
+            .await;
+        assert!(matches!(result, Err(DashboardModuleError::TooManyRows)));
+        assert_eq!(module_count(&store).await, 0);
+        assert_eq!(data_table_count(&store).await, 0);
     }
 
     #[tokio::test]

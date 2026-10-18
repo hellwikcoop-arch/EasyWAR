@@ -37,6 +37,7 @@ import {
   rowCountLabel,
   rowForStorage,
   rowForWrite,
+  rowRuleProblem,
   rowsAfterDelete,
   rowsAfterSave,
   schemaSummary,
@@ -936,4 +937,67 @@ test('row deletion is confirmed inside the dialog and never uses browser dialogs
   }
   assert.doesNotMatch(source, /\b(?:confirm|alert|prompt)\s*\(/);
   assert.doesNotMatch(source, /innerHTML|outerHTML|insertAdjacentHTML/);
+});
+
+test('the row rules can be asked without throwing, for rows that come from a table', () => {
+  assert.equal(rowRuleProblem({ aircraft_type: 'Мі-8', cloud_base_lower: 300, cloud_base_upper: 800 }), null);
+  assert.equal(rowRuleProblem({ cloud_base_lower: 300 }), null, 'with one cloud base there is nothing to compare');
+  const inverted = rowRuleProblem({ cloud_base_lower: 1200, cloud_base_upper: 300 });
+  assert.ok(inverted instanceof FieldValueError);
+  assert.equal(inverted.fieldKey, 'cloud_base_lower');
+  assert.match(inverted.message, /Нижня межа хмар \(НМХ\) не може бути вищою за верхню \(ВМХ\)/);
+  const crowded = rowRuleProblem({ crew_ke: 'Тестенко', crew_lsh: 'Зразкович', crew_bt: 'Умовний', crew_other: 'А, Б, В, Г, Д, Е' });
+  assert.match(crowded.message, /В екіпажі 9 осіб, а може бути не більше 8/);
+  assert.equal(crowded.fieldKey, 'crew_other', 'the cursor goes to the last filled crew field');
+  // Форма, як і раніше, відхиляє такий запис, а не лише попереджає.
+  const base = { aircraft_type: 'Мі-8', airborne_hours: '0:22', total_hours: '0:32' };
+  assert.throws(() => rowForWrite(flightFields, { ...base, cloud_base_upper: '300', cloud_base_lower: '1200' }), FieldValueError);
+});
+
+test('creating a module can bring rows from the table of the profile, and only reads that table', async () => {
+  const source = await readFile(new URL('../src/dashboard-module-catalog.js', import.meta.url), 'utf8');
+  const lib = await readFile(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf8');
+  const reader = await readFile(new URL('../src-tauri/src/module_source.rs', import.meta.url), 'utf8');
+  assert.match(source, /from '\.\/dashboard-module-source-core\.js'/);
+  for (const command of ['inspect_linked_module_source', 'pick_module_source', 'read_module_source_sheet']) {
+    assert.ok(source.includes(`invoke('${command}'`), `the form calls ${command}`);
+    assert.match(lib, new RegExp(`async fn ${command}\\(`), `${command} exists in Rust`);
+    assert.match(lib, new RegExp(`\\n\\s+${command},`), `${command} is registered as a command`);
+  }
+  // Записи йдуть у створення лише коли користувач залишив галочку: без неї виклик такий самий, як був.
+  assert.match(source, /\.\.\.\(rows \? \{ rows \} : \{\}\)/);
+  assert.match(source, /if \(state\.busy \|\| source\.pending\(\)\) return;/, 'a table that is still being read is never raced');
+  assert.match(lib, /rows: Option<Vec<serde_json::Map<String, Value>>>/);
+  for (const text of [
+    'Дані з вашої таблиці', 'Файл таблиці лише читається й не змінюється.', 'Обрати файл XLSX…', 'Обрати інший файл…',
+    'Які стовпці таблиці куди потраплять', 'Перший запис таким, яким його буде збережено', 'Шукаю таблицю профілю…',
+    'До профілю не підключено таблицю.', 'У таблиці немає аркуша зі стовпцями, схожими на колонки цього модуля.',
+  ]) {
+    assert.ok(source.includes(text), text);
+  }
+  assert.doesNotMatch(source, /\b(?:confirm|alert|prompt)\s*\(/);
+  assert.doesNotMatch(source, /innerHTML|outerHTML|insertAdjacentHTML/);
+  assert.doesNotMatch(source, /\bfetch\s*\(|XMLHttpRequest|WebSocket/);
+  // Читач таблиці нічого не пише: ні файлів, ні в таблицю власника.
+  // (Тести в кінці файла збирають вигадану книгу в пам'яті, тому перевіряється лише робочий код.)
+  const production = reader.slice(0, reader.indexOf('#[cfg(test)]'));
+  assert.ok(production.length > 1000, 'the production part of the reader was found');
+  assert.doesNotMatch(production, /fs::write|File::create|OpenOptions|write_all|remove_file|rename\(|rust_xlsxwriter|xlsxwriter|umya/);
+  assert.match(production, /Xlsx::new|open_workbook_from_rs|calamine/);
+  // Шлях файла, який обрав користувач, береться лише з вікна вибору, а не від інтерфейсу.
+  const commands = lib.slice(lib.indexOf('struct ModuleSourceSelection'), lib.indexOf('async fn get_dashboard_module_data'));
+  assert.doesNotMatch(commands, /\bpath:\s*(?:String|PathBuf)/);
+  assert.match(commands, /blocking_pick_file\(\)/);
+});
+
+test('the data-from-table block sits in the left column of the create form, above the long column list', async () => {
+  const source = await readFile(new URL('../src/dashboard-module-catalog.js', import.meta.url), 'utf8');
+  const css = await readFile(new URL('../src/dashboard-module-catalog.css', import.meta.url), 'utf8');
+  const form = source.slice(source.indexOf('function showCreate(item)'), source.indexOf('function sourceBlock(item, onChange)'));
+  assert.ok(form.indexOf("class: 'ewmc-create-main'") < form.indexOf('source.node'), 'the block is inside the left column');
+  assert.ok(form.indexOf('source.node') < form.indexOf("class: 'ewmc-table-plan'"), 'and comes before the column list');
+  assert.match(css, /\.ewmc-create-main\{[^}]*grid-column:1;grid-row:4/);
+  assert.match(css, /\.ewmc-table-plan\{grid-column:2;grid-row:4;/);
+  assert.match(css, /@media\(max-width:900px\)\{[\s\S]*?\.ewmc-create-main,\.ewmc-table-plan\{grid-column:1;grid-row:auto\}/);
+  assert.match(css, /\.ewmc-source\{display:grid;/);
 });

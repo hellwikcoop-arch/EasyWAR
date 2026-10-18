@@ -27,6 +27,7 @@ import {
   schemaSummary,
   tableEditState,
 } from './dashboard-module-catalog-core.js';
+import { describePlan, planImport, rankSheets, sheetOptionLabel } from './dashboard-module-source-core.js';
 
 const invoke = window.__TAURI_INTERNALS__?.invoke || window.parent?.__TAURI_INTERNALS__?.invoke;
 if (typeof invoke === 'function') initialize();
@@ -222,12 +223,19 @@ function initialize() {
   function showCreate(item) {
     const title = el('input', { type: 'text', maxlength: '80', value: item.title, required: true, 'aria-label': 'Назва модуля' });
     const status = el('p', { class: 'ewmc-form-status', 'aria-live': 'polite' });
+    const submit = el('button', { type: 'submit', class: 'btn primary', text: 'Створити модуль і таблицю' });
+    // Поки таблицю читають, створювати модуль рано: підтягування вже вимкнене за замовчуванням, але не обране.
+    const syncSubmit = () => { submit.disabled = state.busy || source.pending(); };
+    const source = sourceBlock(item, syncSubmit);
     const form = el('form', { class: 'ewmc-create-form' },
       el('button', { type: 'button', class: 'ewmc-back', text: '← До каталогу', onclick: showCatalog }),
       el('p', { class: 'ewmc-eyebrow', text: item.category }),
       el('h2', { id: 'ewmc-dialog-title', text: item.title }),
-      visual(item.visualKind, previewModel({ visualKind: item.visualKind, fields: item.fields }, sampleRows(item)), true),
-      el('label', { class: 'ewmc-field' }, el('span', { text: 'Назва на дашборді' }), title),
+      // Ліва колонка: вигляд, назва й дані з таблиці; праворуч — довгий список колонок нової таблиці.
+      el('div', { class: 'ewmc-create-main' },
+        visual(item.visualKind, previewModel({ visualKind: item.visualKind, fields: item.fields }, sampleRows(item)), true),
+        el('label', { class: 'ewmc-field' }, el('span', { text: 'Назва на дашборді' }), title),
+        source.node),
       el('section', { class: 'ewmc-table-plan' },
         el('h3', { text: 'Колонки нової таблиці' }),
         el('div', {}, item.fields.map(field => el('div', { class: 'ewmc-plan-row' },
@@ -237,32 +245,197 @@ function initialize() {
       status,
       el('div', { class: 'ewmc-form-actions' },
         el('button', { type: 'button', class: 'btn quiet', text: 'Скасувати', onclick: () => dialog.close() }),
-        el('button', { type: 'submit', class: 'btn primary', text: 'Створити модуль і таблицю' })),
+        submit),
     );
     form.addEventListener('submit', async event => {
       event.preventDefault();
-      if (state.busy) return;
+      if (state.busy || source.pending()) return;
       state.busy = true;
-      const submit = form.querySelector('[type="submit"]');
-      submit.disabled = true;
-      status.textContent = 'Створення локальної таблиці…';
+      syncSubmit();
+      const name = title.value.trim();
+      const rows = source.rows();
+      status.classList.remove('error');
+      status.textContent = rows ? `Створення локальної таблиці й запис: ${rowCountLabel(rows.length)}…` : 'Створення локальної таблиці…';
       try {
-        await invoke('create_dashboard_module', { branch: state.branch, templateId: item.id, title: title.value.trim() });
+        await invoke('create_dashboard_module', { branch: state.branch, templateId: item.id, title: name, ...(rows ? { rows } : {}) });
         dialog.close();
         await loadModules();
-        showToast(`Модуль «${title.value.trim()}» створено.`);
+        showToast(rows ? `Модуль «${name}» створено, підтягнуто: ${rowCountLabel(rows.length)}.` : `Модуль «${name}» створено.`);
       } catch (error) {
         status.textContent = String(error || 'Не вдалося створити модуль.');
         status.classList.add('error');
       } finally {
         state.busy = false;
-        submit.disabled = false;
+        syncSubmit();
       }
     });
     dialog.replaceChildren(form);
     dialog.dataset.view = 'create';
+    dialog.addEventListener('close', source.dispose, { once: true });
     title.focus();
     title.select();
+    source.start();
+  }
+
+  // Блок «Дані з вашої таблиці» у вікні створення: знаходить таблицю профілю (або файл, який обрав
+  // користувач), зіставляє її стовпці з колонками модуля й пропонує підтягнути записи. Файл лише
+  // читається. Колонки модуля, яких у таблиці немає, лишаються порожніми: дані вносять у самому модулі.
+  function sourceBlock(item, onChange) {
+    const model = { phase: 'loading', pending: true, message: '', origin: '', workbook: null, ranked: [], sheet: '', plan: null, use: false };
+    let request = 0;
+    const body = el('div', { class: 'ewmc-source-body', 'aria-live': 'polite' });
+    const node = el('section', { class: 'ewmc-source', 'aria-labelledby': 'ewmc-source-title' },
+      el('h3', { id: 'ewmc-source-title', text: 'Дані з вашої таблиці' }),
+      el('p', { class: 'ewmc-source-hint', text: 'Записи беруться з вашої таблиці, а стовпці, яких у ній немає, стають новими колонками модуля — їх заповнюють у самому модулі. Файл таблиці лише читається й не змінюється.' }),
+      body);
+
+    function setPhase(phase, message = '') {
+      model.phase = phase;
+      model.message = message;
+      model.pending = phase === 'loading' || phase === 'reading';
+      render();
+      onChange();
+    }
+
+    async function start() {
+      const id = ++request;
+      setPhase('loading');
+      try {
+        const workbook = await invoke('inspect_linked_module_source', { branch: state.branch });
+        if (id !== request) return;
+        if (!workbook) setPhase('none');
+        else await useWorkbook(workbook, id);
+      } catch (error) {
+        if (id === request) setPhase('error', String(error));
+      }
+    }
+
+    async function pickFile() {
+      const id = ++request;
+      model.pending = true;
+      render();
+      onChange();
+      try {
+        const workbook = await invoke('pick_module_source');
+        if (id !== request) return;
+        if (workbook) await useWorkbook(workbook, id);
+        else setPhase(model.phase, model.message);
+      } catch (error) {
+        if (id === request) setPhase('error', String(error));
+      }
+    }
+
+    async function useWorkbook(workbook, id) {
+      model.workbook = workbook;
+      model.origin = workbook.origin;
+      model.ranked = rankSheets(item.fields, workbook);
+      const best = model.ranked[0];
+      if (!best || best.matched === 0) setPhase('empty');
+      else await openSheet(best.name, id);
+    }
+
+    async function openSheet(name, id = ++request) {
+      model.sheet = name;
+      setPhase('reading', name);
+      try {
+        const sheet = await invoke('read_module_source_sheet', { origin: model.origin, branch: state.branch, sheet: name });
+        if (id !== request) return;
+        model.plan = planImport(item.fields, sheet);
+        // Таблиця, схожа лише частково, не підтягується сама: користувач вмикає це свідомо.
+        model.use = model.ranked.find(entry => entry.name === name)?.confident === true && model.plan.rows.length > 0;
+        setPhase('ready');
+      } catch (error) {
+        if (id === request) setPhase('error', String(error));
+      }
+    }
+
+    function fileLine() {
+      const where = model.origin === 'linked' ? 'підключена до профілю' : 'обрана вручну';
+      return el('p', { class: 'ewmc-source-file' }, `Таблиця «${model.workbook.fileName}» · ${where}`);
+    }
+
+    // Коли таблиці ще немає, вибір файла — головна дія блоку; далі це лише запасний шлях.
+    function pickButton(label, main = false) {
+      return el('button', { type: 'button', class: main ? 'btn' : 'btn quiet', text: label, disabled: model.pending, onclick: pickFile });
+    }
+
+    function render() {
+      const nodes = [];
+      switch (model.phase) {
+        case 'loading':
+          nodes.push(el('p', { text: 'Шукаю таблицю профілю…' }));
+          break;
+        case 'reading':
+          nodes.push(fileLine(), el('p', { text: `Читаю аркуш «${model.message}»…` }));
+          break;
+        case 'none':
+          nodes.push(el('p', { text: 'До профілю не підключено таблицю. Щоб підтягнути записи, оберіть файл XLSX.' }),
+            el('div', { class: 'ewmc-source-actions' }, pickButton('Обрати файл XLSX…', true)));
+          break;
+        case 'error':
+          nodes.push(el('p', { class: 'error', text: `Не вдалося прочитати таблицю: ${model.message}` }),
+            el('div', { class: 'ewmc-source-actions' }, pickButton('Обрати файл XLSX…', true)));
+          break;
+        case 'empty':
+          nodes.push(fileLine(),
+            el('p', { text: 'У таблиці немає аркуша зі стовпцями, схожими на колонки цього модуля. Модуль буде створено з порожньою таблицею.' }),
+            el('div', { class: 'ewmc-source-actions' }, pickButton('Обрати інший файл…')));
+          break;
+        default:
+          nodes.push(...readyNodes());
+      }
+      body.replaceChildren(...nodes);
+    }
+
+    function readyNodes() {
+      const { plan } = model;
+      const notes = describePlan(plan);
+      const candidate = model.ranked.find(entry => entry.name === model.sheet);
+      const nodes = [fileLine()];
+      if (model.ranked.length > 1) {
+        const select = el('select', { 'aria-label': 'Аркуш таблиці' },
+          model.ranked.map(entry => el('option', { value: entry.name, selected: entry.name === model.sheet, text: sheetOptionLabel(entry) })));
+        select.addEventListener('change', () => openSheet(select.value));
+        nodes.push(select);
+      }
+      nodes.push(el('p', { class: 'ewmc-source-summary' }, el('strong', { text: notes.summary }), ` ${notes.columns}`));
+      const lines = [];
+      const add = (text, warn = false) => { if (text) lines.push(el('li', { class: warn ? 'warn' : '', text })); };
+      add(notes.blocked, true);
+      if (candidate && !candidate.confident && plan.rows.length) add('Таблиця схожа на модуль лише частково, тому підтягування вимкнено — увімкніть його, якщо записи розібрано правильно.', true);
+      add(notes.missing);
+      add(notes.extra);
+      add(notes.skipped, true);
+      notes.warnings.forEach(text => add(text, true));
+      add(notes.truncated, true);
+      if (lines.length) nodes.push(el('ul', { class: 'ewmc-source-notes' }, lines));
+      const use = el('input', { type: 'checkbox', disabled: !plan.rows.length });
+      use.checked = model.use;
+      use.addEventListener('change', () => { model.use = use.checked; });
+      nodes.push(el('label', { class: 'ewmc-source-use' }, use,
+        el('span', { text: plan.rows.length ? `Підтягнути ${rowCountLabel(plan.rows.length)} у новий модуль` : 'Підтягувати нічого' })));
+      if (plan.found.length) {
+        nodes.push(el('details', {},
+          el('summary', { text: 'Які стовпці таблиці куди потраплять' }),
+          el('dl', { class: 'ewmc-source-map' }, plan.found.flatMap(entry => [el('dt', { text: entry.label }), el('dd', { text: entry.from })]))));
+      }
+      if (plan.firstRecord.length) {
+        nodes.push(el('details', {},
+          el('summary', { text: 'Перший запис таким, яким його буде збережено' }),
+          el('dl', { class: 'ewmc-source-map' }, plan.firstRecord.flatMap(entry => [el('dt', { text: entry.label }), el('dd', { text: entry.text })]))));
+      }
+      nodes.push(el('div', { class: 'ewmc-source-actions' }, pickButton('Обрати інший файл…')));
+      return nodes;
+    }
+
+    return {
+      node,
+      start,
+      pending: () => model.pending,
+      rows: () => (model.phase === 'ready' && model.use && model.plan?.rows.length ? model.plan.rows : null),
+      // Після закриття вікна пізні відповіді таблиці вже нікуди не потраплять.
+      dispose: () => { request += 1; },
+    };
   }
 
   async function reopenFresh(moduleId, message = '', view = null) {

@@ -469,17 +469,26 @@ export function crewSummary(values) {
     : `Екіпаж: ${count} з ${MAX_CREW} осіб`;
 }
 
-/** Правила, що зв'язують кілька полів одного запису. */
-function checkRowRules(row) {
+/**
+ * Правила, що зв'язують кілька полів одного запису. Повертає помилку або `null`.
+ * Форма відхиляє запис із такою помилкою, а підтягування даних з таблиці лише попереджає.
+ */
+export function rowRuleProblem(row) {
   if (finite(row.cloud_base_lower) && finite(row.cloud_base_upper) && row.cloud_base_lower > row.cloud_base_upper) {
-    throw new FieldValueError('Нижня межа хмар (НМХ) не може бути вищою за верхню (ВМХ).', 'cloud_base_lower');
+    return new FieldValueError('Нижня межа хмар (НМХ) не може бути вищою за верхню (ВМХ).', 'cloud_base_lower');
   }
   const crew = crewCount(row);
   if (crew > MAX_CREW) {
     // Курсор — в останнє заповнене поле екіпажу: звідти найлегше прибрати зайве прізвище.
     const last = [...CREW_KEYS].reverse().find(key => typeof row[key] === 'string' && row[key].trim());
-    throw new FieldValueError(`В екіпажі ${crew} осіб, а може бути не більше ${MAX_CREW}.`, last);
+    return new FieldValueError(`В екіпажі ${crew} осіб, а може бути не більше ${MAX_CREW}.`, last);
   }
+  return null;
+}
+
+function checkRowRules(row) {
+  const problem = rowRuleProblem(row);
+  if (problem) throw problem;
 }
 
 /**
@@ -658,6 +667,7 @@ export const dashboardModuleCore = {
   crewSummary,
   FieldValueError,
   parseFieldInput,
+  rowRuleProblem,
   rowForWrite,
   rowForStorage,
   rowsAfterSave,
