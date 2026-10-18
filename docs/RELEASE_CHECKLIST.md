@@ -112,6 +112,9 @@ cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -
   `Developer ID Application`; сертифікат і credentials не збережені в Git.
 - [ ] Hardened Runtime та потрібні entitlements перевірені й мінімізовані.
 - [ ] `codesign --verify --deep --strict` проходить для `.app`.
+- [ ] Sidecar `Contents/MacOS/easywar-llm-runner` (рушій мовної моделі) підписаний тією
+  самою ідентичністю з Hardened Runtime, входить до нотаризації й запускається з
+  підписаного пакета (`script/runner_smoke.sh`).
 - [ ] Артефакт відправлено до Apple notary service; статус `Accepted` збережено
   як доказ.
 - [ ] Notarization ticket прикріплено (`stapler`) до розповсюджуваного
@@ -128,7 +131,8 @@ cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -
 - [ ] Installer зібрано на підтримуваному Windows toolchain для заявленої
   архітектури.
 - [ ] Executable та installer підписані production code-signing certificate;
-  timestamp і ланцюжок довіри перевірені.
+  timestamp і ланцюжок довіри перевірені. Те саме стосується `easywar-llm-runner.exe`
+  (рушій мовної моделі, лежить поруч із застосунком).
 - [ ] Clean-VM install, перший запуск, SQLite migrations та створення ярликів
   пройдені без developer tools.
 - [ ] Оновлення з попередньої підтримуваної версії зберігає дані та має

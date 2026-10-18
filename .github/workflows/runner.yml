@@ -1,0 +1,39 @@
+name: Language-model runner
+
+# Builds the КОМБАТ runner (runner/, a thin wrapper over llama.cpp) on Linux and checks its
+# JSON-lines protocol on a synthetic model. It runs only when the runner or its build scripts
+# change; the Windows and macOS builds of the same program happen in desktop-build.yml on
+# release tags, where they gate the installers.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "runner/**"
+      - "script/build_runner.sh"
+      - "script/runner_smoke.sh"
+      - ".github/workflows/runner.yml"
+  pull_request:
+    paths:
+      - "runner/**"
+      - "script/build_runner.sh"
+      - "script/runner_smoke.sh"
+      - ".github/workflows/runner.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runner-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build the runner
+        run: script/build_runner.sh x86_64-unknown-linux-gnu
+      - name: Protocol smoke test (synthetic model)
+        run: script/runner_smoke.sh src-tauri/binaries/easywar-llm-runner-x86_64-unknown-linux-gnu

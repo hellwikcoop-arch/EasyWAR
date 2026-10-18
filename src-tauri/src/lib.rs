@@ -371,7 +371,12 @@ fn get_local_model_install_info(
 ) -> Result<InstallInfo, String> {
     let source = model_install::qwen3_4b_q4km();
     let dir = local_model_install_dir(&app, &source)?;
-    Ok(model_install::info(&source, &dir, installer.is_busy()))
+    Ok(model_install::info(
+        &source,
+        &dir,
+        installer.is_busy(),
+        model_install::bundled_runner().is_some(),
+    ))
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -415,8 +420,11 @@ async fn install_local_model(
     }
     let finalize_source = source.clone();
     let finalize_dir = dir.clone();
+    // Windows cannot replace a program that is running: stop the old runner before the copy.
+    runtime.stop();
     let finalized = tauri::async_runtime::spawn_blocking(move || {
-        model_install::finalize_package(&finalize_source, &finalize_dir)
+        let bundled = model_install::bundled_runner();
+        model_install::finalize_package(&finalize_source, &finalize_dir, bundled.as_deref())
     })
     .await
     .map_err(|error| error.to_string())?
@@ -438,7 +446,7 @@ async fn install_local_model(
             outcome: "modelOnly",
             status: local_model_status_now(&store, &runtime).await?,
             message: Some(format!(
-                "Модель завантажено й перевірено. Щоб вона запрацювала, покладіть файл рушія runner.exe у папку {} і натисніть «Підключити встановлену модель». Поки його немає, КОМБАТ відповідає за довідкою.",
+                "Модель завантажено й перевірено, але ця збірка застосунку не містить програми-рушія. Встановіть випуск з рушієм або покладіть файл рушія (runner.exe) у папку {} і натисніть «Підключити встановлену модель». Поки його немає, КОМБАТ відповідає за довідкою.",
                 dir.display()
             )),
         }),
