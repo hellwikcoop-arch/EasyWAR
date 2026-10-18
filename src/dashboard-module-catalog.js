@@ -4,6 +4,7 @@ import {
   columnCountLabel,
   crewCount,
   crewSummary,
+  fieldColumnWidth,
   fieldHint,
   fieldInputText,
   fieldInputType,
@@ -30,6 +31,13 @@ import {
 const invoke = window.__TAURI_INTERNALS__?.invoke || window.parent?.__TAURI_INTERNALS__?.invoke;
 if (typeof invoke === 'function') initialize();
 
+// Запис редагується прямо в рядку таблиці, а форма з підказками стоїть над нею; поля з'єднано з формою
+// атрибутом `form`. Колонки «№» і «Дія» закріплено по краях; їх ширину задає CSS (`ewmc-col-number`,
+// `ewmc-col-action`), а тут вона потрібна лише для мінімальної ширини всієї таблиці.
+const ROW_FORM_ID = 'ewmc-row-form';
+const NUMBER_COLUMN_WIDTH = 52;
+const ACTION_COLUMN_WIDTH = 176;
+
 function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
   for (const [key, value] of Object.entries(attrs)) {
@@ -49,7 +57,8 @@ function initialize() {
   const dashboard = branch === 'dshv' ? document.querySelector('#view-udshv') : document.querySelector('#view-dash');
   if (!toolbar || !dashboard) return;
 
-  const state = { branch, catalog: [], modules: [], data: new Map(), busy: false, profileMissing: false };
+  // `cancelEdit` — скасування рядка, що редагується: Escape скасовує правку, а не закриває вікно разом із набраним рядком.
+  const state = { branch, catalog: [], modules: [], data: new Map(), busy: false, profileMissing: false, cancelEdit: null };
   const openButton = el('button', {
     type: 'button',
     class: 'btn quiet ewmc-open',
@@ -66,6 +75,30 @@ function initialize() {
 
   const dialog = el('dialog', { class: 'ewmc-dialog', 'aria-labelledby': 'ewmc-dialog-title' });
   document.body.append(dialog);
+  // Escape на сторінці модуля: спершу скасовує рядок, що редагується, і лише потім повертає на дашборд.
+  // Каталог і форма створення закриваються як звичайне вікно.
+  dialog.addEventListener('cancel', event => {
+    if (dialog.dataset.view !== 'table') return;
+    event.preventDefault();
+    if (state.busy) return;
+    if (state.cancelEdit) state.cancelEdit();
+    else closePage();
+  });
+  dialog.addEventListener('close', () => {
+    state.cancelEdit = null;
+    if (dialog.dataset.view === 'table') focusModuleButton(dialog.dataset.module);
+  });
+
+  // Картки дашборда перемальовуються після кожного збереження, тож фокус іде на нову кнопку цього модуля.
+  function focusModuleButton(moduleId) {
+    [...host.querySelectorAll('[data-action="open-page"]')].find(button => button.dataset.moduleId === moduleId)?.focus();
+  }
+
+  function closePage() {
+    const moduleId = dialog.dataset.module;
+    dialog.close();
+    focusModuleButton(moduleId);
+  }
 
   openButton.addEventListener('click', async () => {
     if (!state.catalog.length) await loadCatalog();
@@ -128,7 +161,16 @@ function initialize() {
         el('span', { class: 'ewmc-live', text: module.rowCount ? 'Дані' : 'Створено' })),
       visual(module.visualKind, model),
       el('div', { class: 'ewmc-module-actions' },
-        el('button', { type: 'button', class: 'btn quiet', text: 'Відкрити таблицю', onclick: () => showDataTable(module) })),
+        el('button', {
+          type: 'button',
+          class: 'btn quiet',
+          text: 'Відкрити сторінку',
+          title: 'Окрема сторінка з усією таблицею модуля',
+          'data-action': 'open-page',
+          'data-module-id': module.id,
+          // Сторінка відкривається з курсором на «+ Додати рядок»: журнал частіше доповнюють, ніж читають.
+          onclick: () => showModulePage(module, 'add'),
+        })),
       el('details', { class: 'ewmc-schema' },
         el('summary', { text: 'Структура таблиці' }),
         el('code', { text: module.storageTable }),
@@ -156,6 +198,7 @@ function initialize() {
       list,
     );
     paint();
+    dialog.dataset.view = 'catalog';
     if (!dialog.open) dialog.showModal();
     search.focus();
   }
@@ -217,85 +260,105 @@ function initialize() {
       }
     });
     dialog.replaceChildren(form);
+    dialog.dataset.view = 'create';
     title.focus();
     title.select();
   }
 
-  async function reopenFresh(moduleId, message = '') {
+  async function reopenFresh(moduleId, message = '', view = null) {
     await loadModules();
     const fresh = state.modules.find(item => item.id === moduleId);
-    if (fresh) showDataTable(fresh);
+    if (fresh) showModulePage(fresh, null, view);
     else if (dialog.open) dialog.close();
     if (message) showToast(message, true);
   }
 
-  function showDataTable(module) {
+  // Таблиця модуля відкривається окремою сторінкою на весь екран, а не вікном поверх дашборда.
+  // `view` — де стоїть таблиця: після додавання рядка вона гортається до кінця, після правки лишається на місці.
+  function showModulePage(module, focusTarget = null, view = null) {
+    state.cancelEdit = null;
     const payload = state.data.get(module.id) || { rows: [], truncated: false, failed: true };
     const rows = Array.isArray(payload.rows) ? payload.rows : [];
     const access = tableEditState(payload);
     const readOnly = !access.editable;
     const unreadable = payload.failed === true;
-    const body = el('tbody');
-    if (!rows.length) {
-      body.append(el('tr', {}, el('td', { colspan: String(module.fields.length + 1), class: 'ewmc-table-empty', text: unreadable ? 'Дані не прочитано.' : 'Записів ще немає.' })));
-    } else {
-      rows.forEach((row, index) => body.append(el('tr', {},
-        module.fields.map(field => el('td', { text: formatFieldValue(field, row?.[field.key]) })),
+    // Запис — один рядок таблиці, як рядок бази даних: поля редагуються прямо в ньому, а не в окремій формі.
+    let editing = false;
+    // Повернення на дашборд: кнопка в шапці сторінки закриває її, а Escape спершу скасовує рядок, що редагується.
+    const backButton = el('button', { type: 'button', class: 'btn quiet ewmc-page-back', text: '← До дашборда', 'data-action': 'back', onclick: closePage });
+
+    const addButton = el('button', {
+      type: 'button',
+      class: 'btn primary',
+      text: '+ Додати рядок',
+      disabled: readOnly,
+      'data-action': 'add-row',
+      onclick: () => startEdit(null),
+    });
+    const rowNodes = rows.map((row, index) => el('tr', {}, rowCells(row, index)));
+    const body = el('tbody', {}, rowNodes);
+    const emptyNote = el('p', {
+      class: 'ewmc-table-empty',
+      text: unreadable ? 'Дані не прочитано.' : 'Записів ще немає. Натисніть «+ Додати рядок».',
+      hidden: rows.length > 0,
+    });
+    const widths = module.fields.map(fieldColumnWidth);
+    const tableWidth = NUMBER_COLUMN_WIDTH + widths.reduce((sum, width) => sum + width, 0) + ACTION_COLUMN_WIDTH;
+    const table = el('table', { class: 'ewmc-data-table', style: { minWidth: `${tableWidth}px` } },
+      el('colgroup', {},
+        el('col', { class: 'ewmc-col-number' }),
+        widths.map(width => el('col', { style: { width: `${width}px` } })),
+        el('col', { class: 'ewmc-col-action' })),
+      el('thead', {}, el('tr', {},
+        el('th', { scope: 'col', class: 'ewmc-row-number', text: '№', title: 'Номер рядка' }),
+        module.fields.map(field => el('th', { scope: 'col', class: field.required ? 'ewmc-required' : '', title: field.label, text: field.label })),
+        el('th', { scope: 'col', text: 'Дія' }))),
+      body);
+    const scroll = el('div', { class: 'ewmc-data-scroll' }, table);
+    // Панель над таблицею: підказки, лічильник екіпажу, помилки й видалення рядка, що редагується.
+    const editHost = el('div', { class: 'ewmc-edit-host' });
+
+    function rowCells(row, index) {
+      return [
+        el('td', { class: 'ewmc-row-number', text: String(index + 1) }),
+        module.fields.map(field => {
+          const shown = formatFieldValue(field, row?.[field.key]);
+          return el('td', { text: shown, title: shown.length > 14 ? shown : false });
+        }),
         el('td', { class: 'ewmc-row-actions' },
           el('button', {
             type: 'button',
             class: 'btn quiet',
             text: 'Редагувати',
-            disabled: readOnly,
-            onclick: () => showRowForm(module, index),
-          })))));
+            disabled: readOnly || editing,
+            'data-action': 'edit-row',
+            onclick: () => startEdit(index),
+          })),
+      ];
     }
-    const table = el('table', { class: 'ewmc-data-table' },
-      el('thead', {}, el('tr', {},
-        module.fields.map(field => el('th', { scope: 'col', text: field.label })),
-        el('th', { scope: 'col', text: 'Дія' }))),
-      body);
-    dialog.replaceChildren(
-      el('form', { method: 'dialog', class: 'ewmc-dialog-head' },
-        el('div', {},
-          el('p', { class: 'ewmc-eyebrow', text: 'Локальна SQLite-таблиця' }),
-          el('h2', { id: 'ewmc-dialog-title', text: module.title }),
-          el('p', { text: `${unreadable ? 'Дані недоступні' : rowCountLabel(rows.length)} · ${columnCountLabel(module.fields.length)}` })),
-        el('button', { value: 'cancel', class: 'ewmc-close', 'aria-label': 'Закрити', text: '×' })),
-      el('div', { class: 'ewmc-data-toolbar' },
-        el('code', { text: module.storageTable }),
-        el('button', {
-          type: 'button',
-          class: 'btn primary',
-          text: '+ Додати рядок',
-          disabled: readOnly,
-          onclick: () => showRowForm(module, null),
-        })),
-      ...(readOnly ? [el('div', { class: 'ewmc-readonly' },
-        el('p', { class: 'ewmc-form-status error', text: access.reason }),
-        payload.failed === true
-          ? el('button', { type: 'button', class: 'btn quiet', text: 'Прочитати знову', onclick: () => reopenFresh(module.id) })
-          : null)] : []),
-      el('div', { class: 'ewmc-data-scroll' }, table),
-    );
-    if (!dialog.open) dialog.showModal();
-  }
 
-  function showRowForm(module, rowIndex) {
-    const payload = state.data.get(module.id) || { rows: [], failed: true };
-    // Запис замінює весь набір рядків: без повністю прочитаної таблиці форма не відкривається.
-    if (!tableEditState(payload).editable) { showDataTable(module); return; }
-    const rows = Array.isArray(payload.rows) ? payload.rows : [];
-    const isEdit = Number.isInteger(rowIndex) && rows[rowIndex] != null;
-    const existing = isEdit ? rows[rowIndex] : {};
-    // Погоду записують раз на 5–10 записів льотної зміни: новий запис бере її з попереднього.
-    const inherited = isEdit ? null : inheritedValues(module.fields, rows);
-    const controls = new Map();
-    const currentValues = () => Object.fromEntries([...controls].map(([key, control]) => [key, control.value]));
-    const sections = fieldSections(module.fields).map(section => {
-      const grid = el('div', { class: 'ewmc-row-form-grid' });
-      for (const field of section.fields) {
+    // Поки рядок редагується, інші дії вимкнено: запис замінює весь набір рядків.
+    function setEditing(active) {
+      editing = active;
+      addButton.disabled = readOnly || active;
+      for (const button of body.querySelectorAll('[data-action="edit-row"]')) button.disabled = readOnly || active;
+      scroll.classList.toggle('is-editing', active);
+    }
+
+    function startEdit(rowIndex) {
+      if (editing || readOnly) return;
+      const isEdit = Number.isInteger(rowIndex) && rows[rowIndex] != null;
+      const existing = isEdit ? rows[rowIndex] : {};
+      // Погоду записують раз на 5–10 записів льотної зміни: новий запис бере її з попереднього.
+      const inherited = isEdit ? null : inheritedValues(module.fields, rows);
+      const sections = fieldSections(module.fields);
+      const controls = new Map();
+      const currentValues = () => Object.fromEntries([...controls].map(([key, control]) => [key, control.value]));
+      const cells = module.fields.map(field => {
         const control = createFieldControl(field, existing[field.key] ?? inherited?.values[field.key]);
+        // Поля стоять у клітинках таблиці, а форма — над нею: атрибут `form` з'єднує їх (Enter зберігає рядок).
+        control.setAttribute('form', ROW_FORM_ID);
+        if (inherited?.values[field.key] != null) control.dataset.inherited = 'true';
         controls.set(field.key, control);
         // Підказка (кілограми для літрів, метри для «0,3 км») оновлюється під час введення; порожня — прихована.
         const hint = el('small', { class: 'ewmc-hint', id: `ewmc-hint-${field.key}` });
@@ -303,148 +366,237 @@ function initialize() {
         paintHint();
         control.addEventListener('input', paintHint);
         control.setAttribute('aria-describedby', hint.id);
-        // Список прізвищ довший за одну колонку, тому поле «інші» займає весь рядок групи.
-        grid.append(el('label', { class: field.key === 'crew_other' ? 'ewmc-field ewmc-wide' : 'ewmc-field' },
-          el('span', { text: `${field.label}${field.required ? ' *' : ''}` }),
-          control,
-          hint));
-      }
-      if (!section.title) return grid;
-      const parts = [el('legend', { text: section.title })];
-      if (section.note) parts.push(el('p', { class: 'ewmc-group-note', text: section.note }));
-      if (section.inherit && inherited) parts.push(inheritedNote(section));
-      parts.push(grid);
-      if (section.id === 'crew') parts.push(crewSummaryNote(grid));
-      return el('fieldset', { class: 'ewmc-group', 'data-group': section.id }, parts);
-    });
-
-    // Підставлена погода позначена окремо й очищається одним натисканням: стару погоду легко не помітити.
-    function inheritedNote(section) {
-      const clear = el('button', { type: 'button', class: 'btn quiet', text: 'Очистити' });
-      const note = el('p', { class: 'ewmc-inherit' },
-        el('span', { text: 'Підставлено з останнього запису, де вказано погоду. Змініть значення, якщо погода інша.' }),
-        clear);
-      clear.addEventListener('click', () => {
-        for (const field of section.fields) {
-          const control = controls.get(field.key);
-          control.value = '';
-          control.dispatchEvent(new Event('input', { bubbles: true }));
-        }
-        note.hidden = true;
-        controls.get(section.fields[0].key)?.focus();
+        return el('td', { class: 'ewmc-cell-edit' }, control, hint);
       });
-      return note;
-    }
 
-    // Лічильник складу екіпажу, щоб ліміт був видно до збереження, а не лише в помилці.
-    function crewSummaryNote(grid) {
-      const note = el('small', { class: 'ewmc-hint ewmc-crew-total' });
-      const paint = () => {
-        const values = currentValues();
-        note.textContent = crewSummary(values);
-        note.classList.toggle('over', crewCount(values) > MAX_CREW);
+      // Підставлена погода позначена окремо й очищається одним натисканням: стару погоду легко не помітити.
+      function inheritedNote(section) {
+        const clear = el('button', { type: 'button', class: 'btn quiet', text: 'Очистити' });
+        const note = el('p', { class: 'ewmc-inherit' },
+          el('span', {}, el('b', { text: `${section.title}. ` }), 'Підставлено з останнього запису, де вказано погоду. Змініть значення, якщо погода інша.'),
+          clear);
+        clear.addEventListener('click', () => {
+          for (const field of section.fields) {
+            const control = controls.get(field.key);
+            control.value = '';
+            control.removeAttribute('data-inherited');
+            control.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+          note.hidden = true;
+          controls.get(section.fields[0].key)?.focus();
+        });
+        return note;
+      }
+
+      // Порада про склад і лічильник екіпажу, щоб ліміт був видно до збереження, а не лише в помилці.
+      function crewSummaryNote(section) {
+        const total = el('small', { class: 'ewmc-hint ewmc-crew-total' });
+        const paint = () => {
+          const values = currentValues();
+          total.textContent = crewSummary(values);
+          total.classList.toggle('over', crewCount(values) > MAX_CREW);
+        };
+        for (const field of section.fields) controls.get(field.key)?.addEventListener('input', paint);
+        paint();
+        return el('div', { class: 'ewmc-crew-note' }, el('p', { class: 'ewmc-group-note', text: section.note }), total);
+      }
+
+      const meteo = sections.find(section => section.inherit);
+      const crew = sections.find(section => section.id === 'crew');
+      const status = el('p', { class: 'ewmc-form-status', 'aria-live': 'polite' });
+      const saveButton = el('button', {
+        type: 'submit',
+        form: ROW_FORM_ID,
+        class: 'btn primary',
+        text: isEdit ? 'Зберегти' : 'Додати',
+        title: isEdit ? 'Зберегти зміни' : 'Додати рядок',
+      });
+      const cancelButton = el('button', { type: 'button', class: 'btn quiet', text: 'Скасувати', onclick: () => cancel() });
+      // Видалення — лише для наявного запису й лише після підтвердження в самому вікні (без системних діалогів).
+      const removeButton = isEdit ? el('button', { type: 'button', class: 'btn ewmc-danger', text: 'Видалити запис' }) : null;
+      const keepButton = isEdit ? el('button', { type: 'button', class: 'btn quiet', text: 'Ні, залишити' }) : null;
+      const confirmButton = isEdit ? el('button', { type: 'button', class: 'btn ewmc-danger solid', text: 'Так, видалити' }) : null;
+      const confirmBox = isEdit
+        ? el('div', { class: 'ewmc-confirm', role: 'group', 'aria-labelledby': 'ewmc-confirm-text', hidden: true },
+          el('p', { id: 'ewmc-confirm-text', text: 'Видалити цей запис із локальної таблиці? Дію не можна скасувати.' }),
+          el('div', { class: 'ewmc-confirm-actions' }, keepButton, confirmButton))
+        : null;
+      const lockable = [saveButton, cancelButton, removeButton, keepButton, confirmButton, backButton].filter(Boolean);
+      const setLocked = locked => lockable.forEach(button => { button.disabled = locked; });
+      const showConfirm = asking => {
+        if (!isEdit) return;
+        confirmBox.hidden = !asking;
+        removeButton.hidden = asking;
       };
-      grid.addEventListener('input', paint);
-      paint();
-      return note;
-    }
-    const status = el('p', { class: 'ewmc-form-status', 'aria-live': 'polite' });
-    const saveButton = el('button', { type: 'submit', class: 'btn primary', text: isEdit ? 'Зберегти зміни' : 'Додати рядок' });
-    const cancelButton = el('button', { type: 'button', class: 'btn quiet', text: 'Скасувати', onclick: () => showDataTable(module) });
-    // Видалення — лише для наявного запису й лише після підтвердження в самому вікні (без системних діалогів).
-    const removeButton = isEdit ? el('button', { type: 'button', class: 'btn ewmc-danger', text: 'Видалити запис' }) : null;
-    const keepButton = isEdit ? el('button', { type: 'button', class: 'btn quiet', text: 'Ні, залишити' }) : null;
-    const confirmButton = isEdit ? el('button', { type: 'button', class: 'btn ewmc-danger solid', text: 'Так, видалити' }) : null;
-    const confirmBox = isEdit
-      ? el('div', { class: 'ewmc-confirm', role: 'group', 'aria-labelledby': 'ewmc-confirm-text', hidden: true },
-        el('p', { id: 'ewmc-confirm-text', text: 'Видалити цей запис із локальної таблиці? Дію не можна скасувати.' }),
-        el('div', { class: 'ewmc-confirm-actions' }, keepButton, confirmButton))
-      : null;
-    const lockable = [saveButton, cancelButton, removeButton, keepButton, confirmButton].filter(Boolean);
-    const setLocked = locked => lockable.forEach(button => { button.disabled = locked; });
-    const showConfirm = asking => {
-      if (!isEdit) return;
-      confirmBox.hidden = !asking;
-      removeButton.hidden = asking;
-    };
-    const askToRemove = asking => {
-      showConfirm(asking);
-      // Фокус — на безпечній відповіді, щоб випадковий Enter не видалив запис.
-      if (isEdit) (asking ? keepButton : removeButton).focus();
-    };
-    const form = el('form', { class: 'ewmc-row-form' },
-      el('button', { type: 'button', class: 'ewmc-back', text: '← До таблиці', onclick: () => showDataTable(module) }),
-      el('p', { class: 'ewmc-eyebrow', text: isEdit ? 'Редагування запису' : 'Новий запис' }),
-      el('h2', { id: 'ewmc-dialog-title', text: module.title }),
-      sections,
-      status,
-      confirmBox,
-      el('div', { class: 'ewmc-form-actions' }, removeButton, cancelButton, saveButton),
-    );
+      const askToRemove = asking => {
+        showConfirm(asking);
+        // Фокус — на безпечній відповіді, щоб випадковий Enter не видалив запис.
+        if (isEdit) (asking ? keepButton : removeButton).focus();
+      };
+      // Рядок довгий, тому до груп, які записують найчастіше (погода, екіпаж), можна перейти однією кнопкою.
+      const groups = sections.filter(section => section.title);
+      const jumps = groups.length
+        ? el('span', { class: 'ewmc-jumps' }, 'Перейти до:', groups.map(section => el('button', {
+          type: 'button',
+          class: 'btn quiet',
+          text: section.title,
+          onclick: () => controls.get(section.fields[0].key)?.focus(),
+        })))
+        : null;
+      const form = el('form', { class: 'ewmc-edit-bar', id: ROW_FORM_ID },
+        el('div', { class: 'ewmc-edit-head' },
+          el('strong', { text: isEdit ? `Редагування рядка ${rowIndex + 1}` : 'Новий запис' }),
+          el('span', { text: 'Усі поля запису — в одному рядку таблиці. Enter — зберегти.' }),
+          jumps,
+          removeButton),
+        inherited && meteo ? inheritedNote(meteo) : null,
+        crew ? crewSummaryNote(crew) : null,
+        status,
+        confirmBox);
 
-    // Запис замінює весь набір рядків; `expectedUpdatedAt` не дає перезаписати зміни з іншого вікна.
-    async function persist(nextRows, doneMessage) {
-      if (state.busy) return;
-      state.busy = true;
-      setLocked(true);
-      status.classList.remove('error');
-      status.textContent = 'Збереження в локальній SQLite…';
-      try {
-        const result = await invoke('replace_dashboard_module_rows', replaceRowsRequest(module, nextRows));
-        const updated = normalizeModules([result?.module])[0] || module;
-        state.modules = state.modules.map(item => item.id === module.id ? updated : item);
-        state.data.set(module.id, { module: updated, rows: Array.isArray(result?.rows) ? result.rows : [], truncated: result?.truncated === true });
-        renderHost();
-        showDataTable(updated);
-        showToast(doneMessage);
-      } catch (error) {
-        if (isConflictError(error)) {
-          await reopenFresh(module.id, 'Таблицю змінено в іншому вікні. Показано актуальні дані — повторіть дію.');
+      const tr = isEdit ? rowNodes[rowIndex] : el('tr');
+      const original = isEdit ? [...tr.children] : [];
+      tr.classList.add('ewmc-editing');
+      tr.replaceChildren(
+        el('td', { class: 'ewmc-row-number', text: String(isEdit ? rowIndex + 1 : rows.length + 1) }),
+        ...cells,
+        el('td', { class: 'ewmc-row-actions ewmc-editing-actions' }, saveButton, cancelButton));
+      if (!isEdit) {
+        body.append(tr);
+        emptyNote.hidden = true;
+      }
+      editHost.replaceChildren(form);
+      setEditing(true);
+      state.cancelEdit = cancel;
+
+      function finish() {
+        state.cancelEdit = null;
+        editHost.replaceChildren();
+        tr.classList.remove('ewmc-editing');
+        if (isEdit) {
+          tr.replaceChildren(...original);
+        } else {
+          tr.remove();
+          emptyNote.hidden = rows.length > 0;
+        }
+        setEditing(false);
+      }
+
+      function cancel() {
+        if (state.busy) return;
+        finish();
+        (isEdit ? tr.querySelector('[data-action="edit-row"]') : addButton)?.focus();
+      }
+
+      // Помилку показано над таблицею, а курсор іде в клітинку, яку треба виправити: серед десятків колонок її не видно.
+      function showError(error) {
+        status.textContent = String(error?.message || error || 'Не вдалося зберегти запис.');
+        status.classList.add('error');
+        const control = controls.get(error?.fieldKey);
+        if (control) {
+          control.setAttribute('aria-invalid', 'true');
+          control.focus();
+        }
+      }
+
+      // Запис замінює весь набір рядків; `expectedUpdatedAt` не дає перезаписати зміни з іншого вікна.
+      async function persist(nextRows, doneMessage, focusAfter, isDelete = false) {
+        if (state.busy) return;
+        state.busy = true;
+        setLocked(true);
+        status.classList.remove('error');
+        status.textContent = 'Збереження в локальній SQLite…';
+        try {
+          const result = await invoke('replace_dashboard_module_rows', replaceRowsRequest(module, nextRows));
+          const updated = normalizeModules([result?.module])[0] || module;
+          state.modules = state.modules.map(item => item.id === module.id ? updated : item);
+          state.data.set(module.id, { module: updated, rows: Array.isArray(result?.rows) ? result.rows : [], truncated: result?.truncated === true });
+          renderHost();
+          // Новий рядок стоїть у кінці: таблиця гортається до нього; після правки чи видалення вона лишається на місці.
+          showModulePage(updated, focusAfter, focusAfter === 'add' && !isDelete ? { top: 'end', left: 0 } : { top: scroll.scrollTop, left: scroll.scrollLeft });
+          showToast(doneMessage);
+        } catch (error) {
+          if (isConflictError(error)) {
+            await reopenFresh(module.id, 'Таблицю змінено в іншому вікні. Показано актуальні дані — повторіть дію.', { top: scroll.scrollTop, left: scroll.scrollLeft });
+            return;
+          }
+          showConfirm(false);
+          status.textContent = String(error?.message || error || 'Не вдалося зберегти запис.');
+          status.classList.add('error');
+        } finally {
+          state.busy = false;
+          setLocked(false);
+        }
+      }
+
+      form.addEventListener('submit', event => {
+        event.preventDefault();
+        if (state.busy) return;
+        showConfirm(false);
+        let edited;
+        try {
+          edited = rowForWrite(module.fields, currentValues(), existing);
+        } catch (error) {
+          showError(error);
           return;
         }
-        showConfirm(false);
-        status.textContent = String(error?.message || error || 'Не вдалося зберегти запис.');
-        status.classList.add('error');
-      } finally {
-        state.busy = false;
-        setLocked(false);
+        persist(rowsAfterSave(module.fields, rows, isEdit ? rowIndex : null, edited), isEdit ? 'Запис оновлено.' : 'Рядок додано.', isEdit ? rowIndex : 'add');
+      });
+      // Повідомлення про помилку зникає, щойно користувач береться виправляти поле, і не висить поруч із уже виправленим.
+      const onInput = event => {
+        event.currentTarget.removeAttribute('data-inherited');
+        for (const control of controls.values()) control.removeAttribute('aria-invalid');
+        if (state.busy || !status.classList.contains('error')) return;
+        status.textContent = '';
+        status.classList.remove('error');
+      };
+      for (const control of controls.values()) control.addEventListener('input', onInput);
+      if (isEdit) {
+        removeButton.addEventListener('click', () => askToRemove(true));
+        keepButton.addEventListener('click', () => askToRemove(false));
+        confirmButton.addEventListener('click', () => persist(rowsAfterDelete(module.fields, rows, rowIndex), 'Запис видалено.', 'add', true));
       }
+      tr.scrollIntoView({ block: 'nearest' });
+      controls.values().next().value?.focus();
     }
 
-    form.addEventListener('submit', event => {
-      event.preventDefault();
-      if (state.busy) return;
-      let edited;
-      try {
-        edited = rowForWrite(module.fields, currentValues(), existing);
-      } catch (error) {
-        status.textContent = String(error?.message || error || 'Не вдалося зберегти запис.');
-        status.classList.add('error');
-        return;
-      }
-      persist(rowsAfterSave(module.fields, rows, isEdit ? rowIndex : null, edited), isEdit ? 'Запис оновлено.' : 'Рядок додано.');
-    });
-    // Повідомлення про помилку зникає, щойно користувач береться виправляти поле, і не висить поруч із уже виправленим.
-    form.addEventListener('input', () => {
-      if (state.busy || !status.classList.contains('error')) return;
-      status.textContent = '';
-      status.classList.remove('error');
-    });
-    if (isEdit) {
-      removeButton.addEventListener('click', () => askToRemove(true));
-      keepButton.addEventListener('click', () => askToRemove(false));
-      confirmButton.addEventListener('click', () => persist(rowsAfterDelete(module.fields, rows, rowIndex), 'Запис видалено.'));
-    }
-    dialog.replaceChildren(form);
+    // Шапка сторінки: назад, назва й лічильники, головна дія. Нижче — панель запису й таблиця на всю висоту.
+    dialog.replaceChildren(
+      el('header', { class: 'ewmc-page-head' },
+        el('form', { method: 'dialog', class: 'ewmc-page-nav' }, backButton),
+        el('div', { class: 'ewmc-page-title' },
+          el('p', { class: 'ewmc-eyebrow', text: 'Локальна SQLite-таблиця' }),
+          el('h2', { id: 'ewmc-dialog-title', text: module.title }),
+          el('p', { class: 'ewmc-sub' },
+            `${unreadable ? 'Дані недоступні' : rowCountLabel(rows.length)} · ${columnCountLabel(module.fields.length)} · `,
+            el('code', { text: module.storageTable }))),
+        addButton),
+      el('div', { class: 'ewmc-page-body' },
+        ...(readOnly ? [el('div', { class: 'ewmc-readonly' },
+          el('p', { class: 'ewmc-form-status error', text: access.reason }),
+          payload.failed === true
+            ? el('button', { type: 'button', class: 'btn quiet', text: 'Прочитати знову', onclick: () => reopenFresh(module.id) })
+            : null)] : []),
+        editHost,
+        scroll,
+        emptyNote),
+    );
+    dialog.dataset.view = 'table';
+    dialog.dataset.module = module.id;
     if (!dialog.open) dialog.showModal();
-    controls.values().next().value?.focus();
+    if (view) {
+      scroll.scrollTop = view.top === 'end' ? scroll.scrollHeight : view.top;
+      scroll.scrollLeft = view.left;
+    }
+    if (focusTarget === 'add') addButton.focus();
+    else if (Number.isInteger(focusTarget)) rowNodes[focusTarget]?.querySelector('[data-action="edit-row"]')?.focus();
   }
 
   function createFieldControl(field, value) {
     const type = fieldInputType(field);
     if (field.key === 'day_night') {
       const select = el('select', { 'aria-label': field.label },
-        el('option', { value: '', text: '— Не вказано' }),
+        el('option', { value: '', text: '—' }),
         el('option', { value: 'День', text: 'День' }),
         el('option', { value: 'Ніч', text: 'Ніч' }));
       select.value = value == null ? '' : String(value);
@@ -452,7 +604,7 @@ function initialize() {
     }
     if (type === 'select') {
       const select = el('select', { 'aria-label': field.label },
-        el('option', { value: '', text: '— Не вказано' }),
+        el('option', { value: '', text: '—' }),
         el('option', { value: 'true', text: 'Так' }),
         el('option', { value: 'false', text: 'Ні' }));
       select.value = value === true ? 'true' : value === false ? 'false' : '';
@@ -475,7 +627,8 @@ function initialize() {
 
   function showToast(message, error = false) {
     const toast = el('div', { class: `ewmc-toast${error ? ' error' : ''}`, role: 'status', text: message });
-    document.body.append(toast);
+    // Сторінка відкрита як модальна: усе поза нею, зокрема сповіщення на <body>, закрите шаром поверх.
+    (dialog.open ? dialog : document.body).append(toast);
     setTimeout(() => toast.remove(), 4200);
   }
 

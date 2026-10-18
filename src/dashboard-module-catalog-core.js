@@ -44,6 +44,20 @@ export function normalizeCatalog(source) {
   });
 }
 
+/**
+ * Типову назву шаблону «flight-hours» замінено на «Журнал хронометражу польотів». Модуль, створений
+ * зі старою типовою назвою, показує нову; збережена назва в базі не переписується, змінюється лише підпис.
+ * Назву, яку користувач змінив сам, не чіпаємо.
+ */
+const RENAMED_DEFAULT_TITLES = new Map([
+  ['flight-hours', { from: 'Загальний наліт за типом ПС', to: 'Журнал хронометражу польотів' }],
+]);
+
+export function moduleTitle(templateId, title) {
+  const renamed = RENAMED_DEFAULT_TITLES.get(templateId);
+  return renamed && renamed.from === title ? renamed.to : title;
+}
+
 export function normalizeModules(source) {
   if (!Array.isArray(source)) return [];
   const seen = new Set();
@@ -51,7 +65,7 @@ export function normalizeModules(source) {
     const id = text(item?.id, 64);
     const branch = BRANCHES.has(item?.branch) ? item.branch : '';
     const visualKind = VISUAL_KINDS.has(item?.visualKind) ? item.visualKind : '';
-    const title = text(item?.title, 80);
+    const title = moduleTitle(item?.templateId, text(item?.title, 80));
     const table = /^dashboard_data_[0-9a-f]{24}$/.test(item?.storageTable || '') ? item.storageTable : '';
     const fields = Array.isArray(item?.fields) ? item.fields.map(normalizeField).filter(Boolean) : [];
     if (!id || seen.has(id) || !branch || !visualKind || !title || !table || !fields.length) return [];
@@ -273,14 +287,61 @@ export function fieldInputType(field) {
   return 'text';
 }
 
-function parseMeasured(kind, label, raw) {
+/**
+ * Помилка значення поля. `fieldKey` — поле, яке треба виправити: запис — це один
+ * довгий рядок таблиці, тож редактор переносить курсор у цю клітинку, а не лишає
+ * користувача шукати її серед десятків колонок за назвою в повідомленні.
+ */
+export class FieldValueError extends Error {
+  constructor(message, fieldKey = '') {
+    super(message);
+    this.name = 'FieldValueError';
+    this.fieldKey = typeof fieldKey === 'string' ? fieldKey : '';
+  }
+}
+
+/**
+ * Ширини колонок таблиці, px. Запис — один рядок із десятків полів, тому кожне поле має
+ * власну ширину за змістом: час і числа вузькі, прізвища екіпажу й текст широкі.
+ */
+const COLUMN_WIDTHS = new Map([
+  ['aircraft_number', 112],
+  ['crew_ke_callsign', 128],
+  ['day_night', 96],
+  ['cloud_cover', 108],
+  ['crew_ke', 148],
+  ['crew_lsh', 148],
+  ['crew_bt', 148],
+  ['crew_other', 232],
+]);
+
+export function fieldColumnWidth(field) {
+  const known = COLUMN_WIDTHS.get(field?.key);
+  if (known) return known;
+  switch (fieldKind(field)) {
+    case 'duration': return 92;
+    case 'height': return 132;
+    case 'fuel': return 116;
+    default: break;
+  }
+  switch (fieldInputType(field)) {
+    case 'select': return 96;
+    case 'number': return 92;
+    case 'time': return 108;
+    case 'date': return 156;
+    case 'datetime-local': return 216;
+    default: return 148;
+  }
+}
+
+function parseMeasured(field, kind, label, raw) {
   const value = typeof raw === 'number'
     ? (finite(raw) && raw >= 0 ? raw : null)
     : kind === 'duration' ? parseDuration(raw) : parseHeight(raw);
   if (value != null) return value;
-  throw new Error(kind === 'duration'
+  throw new FieldValueError(kind === 'duration'
     ? `Поле «${label}» має містити час у форматі год:хв, наприклад 0:32.`
-    : `Поле «${label}» має містити метри (300) або кілометри з позначкою (0,3 км).`);
+    : `Поле «${label}» має містити метри (300) або кілометри з позначкою (0,3 км).`, field?.key);
 }
 
 function limitsMessage(label, { min, max }) {
@@ -292,45 +353,48 @@ function limitsMessage(label, { min, max }) {
 }
 
 function withinLimits(field, label, value) {
-  if (outsideLimits(field, value)) throw new Error(limitsMessage(label, fieldLimits(field)));
+  if (outsideLimits(field, value)) throw new FieldValueError(limitsMessage(label, fieldLimits(field)), field?.key);
   return value;
 }
 
 export function parseFieldInput(field, rawValue) {
   const label = text(field?.label, 80) || 'Поле';
+  const fail = message => new FieldValueError(message, field?.key);
   const raw = typeof rawValue === 'string' ? rawValue.trim() : rawValue;
   if (raw === '' || raw == null) {
-    if (field?.required) throw new Error(`Поле «${label}» є обов'язковим.`);
+    if (field?.required) throw fail(`Поле «${label}» є обов'язковим.`);
     return null;
   }
   if (field?.dataType === 'boolean') {
     if (raw === true || raw === 'true') return true;
     if (raw === false || raw === 'false') return false;
-    throw new Error(`Поле «${label}» має містити «Так» або «Ні».`);
+    throw fail(`Поле «${label}» має містити «Так» або «Ні».`);
   }
   if (field?.dataType === 'integer') {
     const value = typeof raw === 'number' ? raw : Number(raw);
-    if (!Number.isSafeInteger(value)) throw new Error(`Поле «${label}» має містити ціле число.`);
+    if (!Number.isSafeInteger(value)) throw fail(`Поле «${label}» має містити ціле число.`);
     return withinLimits(field, label, value);
   }
   if (field?.dataType === 'real') {
     const kind = fieldKind(field);
-    if (kind === 'duration' || kind === 'height') return parseMeasured(kind, label, raw);
+    if (kind === 'duration' || kind === 'height') return parseMeasured(field, kind, label, raw);
     const value = typeof raw === 'number' ? raw : Number(String(raw).replace(',', '.'));
-    if (!Number.isFinite(value)) throw new Error(`Поле «${label}» має містити число.`);
+    if (!Number.isFinite(value)) throw fail(`Поле «${label}» має містити число.`);
     return withinLimits(field, label, value);
   }
   const value = String(raw);
-  if (value.length > 4096) throw new Error(`Поле «${label}» перевищує 4096 символів.`);
+  if (value.length > 4096) throw fail(`Поле «${label}» перевищує 4096 символів.`);
   return value;
 }
 
 /**
- * Групи полів у формі запису. Метеоумови записують не щоразу, а раз на 5–10 записів
- * однієї льотної зміни, тому нові записи беруть їх із попереднього (`inherit`). Екіпаж —
- * окремий блок: КЕ, ЛШ і БТ окремими полями, решта через кому. «Політ у СМУ» — ознака
- * самого польоту, а не погоди, тому лишається серед основних полів. Позивний командира
- * (`crew_ke_callsign`) теж основне поле: у формі він стоїть одразу після номера ПС.
+ * Групи полів запису. Усі поля стоять в одному рядку таблиці, а групи лише дають редактору
+ * підказки. Метеоумови записують не щоразу, а раз на 5–10 записів однієї льотної зміни,
+ * тому нові записи беруть їх із попереднього (`inherit`). Екіпаж: КЕ, ЛШ і БТ окремими
+ * полями, решта через кому; пораду про склад (`note`) і лічильник «n з 8» показано над
+ * рядком. «Політ у СМУ» — ознака самого польоту, а не погоди, тому до групи не входить.
+ * Позивний командира (`crew_ke_callsign`) теж поза групами: у шаблоні він стоїть одразу
+ * після номера ПС.
  */
 const FIELD_GROUPS = [
   {
@@ -350,8 +414,8 @@ const FIELD_GROUPS = [
 ];
 
 /**
- * Поля форми за розділами: спершу основні (без заголовка), далі групи з наявних полів.
- * Для модуля без згрупованих полів — один основний розділ, тобто звичайна форма.
+ * Поля запису за розділами: спершу основні (без заголовка), далі групи з наявних полів.
+ * Для модуля без згрупованих полів — один основний розділ.
  */
 export function fieldSections(fields) {
   const list = Array.isArray(fields) ? fields : [];
@@ -408,10 +472,14 @@ export function crewSummary(values) {
 /** Правила, що зв'язують кілька полів одного запису. */
 function checkRowRules(row) {
   if (finite(row.cloud_base_lower) && finite(row.cloud_base_upper) && row.cloud_base_lower > row.cloud_base_upper) {
-    throw new Error('Нижня межа хмар (НМХ) не може бути вищою за верхню (ВМХ).');
+    throw new FieldValueError('Нижня межа хмар (НМХ) не може бути вищою за верхню (ВМХ).', 'cloud_base_lower');
   }
   const crew = crewCount(row);
-  if (crew > MAX_CREW) throw new Error(`В екіпажі ${crew} осіб, а може бути не більше ${MAX_CREW}.`);
+  if (crew > MAX_CREW) {
+    // Курсор — в останнє заповнене поле екіпажу: звідти найлегше прибрати зайве прізвище.
+    const last = [...CREW_KEYS].reverse().find(key => typeof row[key] === 'string' && row[key].trim());
+    throw new FieldValueError(`В екіпажі ${crew} осіб, а може бути не більше ${MAX_CREW}.`, last);
+  }
 }
 
 /**
@@ -563,6 +631,7 @@ export const dashboardModuleCore = {
   branchFromLocation,
   normalizeCatalog,
   normalizeModules,
+  moduleTitle,
   schemaSummary,
   matchesCatalogItem,
   formatValue,
@@ -582,10 +651,12 @@ export const dashboardModuleCore = {
   fieldPlaceholder,
   fieldHint,
   fieldInputType,
+  fieldColumnWidth,
   fieldSections,
   inheritedValues,
   crewCount,
   crewSummary,
+  FieldValueError,
   parseFieldInput,
   rowForWrite,
   rowForStorage,

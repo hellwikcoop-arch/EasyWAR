@@ -162,9 +162,9 @@ pub fn catalog() -> Vec<DashboardModuleTemplate> {
     vec![
         template(
             "flight-hours",
-            "Загальний наліт за типом ПС",
+            "Журнал хронометражу польотів",
             "Авіація",
-            "Порівнює наліт у повітрі із загальним нальотом для кожного типу ПС.",
+            "Журнал польотів: кожен політ — один рядок таблиці (екіпаж, погода, наліт, паливо). На дашборді — наліт у повітрі та загальний наліт за типом ПС.",
             "horizontal-bar",
             2,
             vec![
@@ -1456,7 +1456,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(module.title, "Загальний наліт за типом ПС");
+        assert_eq!(module.title, "Журнал хронометражу польотів");
         assert_eq!(module.row_count, 0);
         assert!(valid_storage_table(&module.storage_table));
 

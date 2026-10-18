@@ -3,11 +3,13 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {
   FUEL_DENSITY_KG_PER_L,
+  FieldValueError,
   MAX_CREW,
   branchFromLocation,
   columnCountLabel,
   crewCount,
   crewSummary,
+  fieldColumnWidth,
   fieldHint,
   fieldInputText,
   fieldInputType,
@@ -22,6 +24,7 @@ import {
   inheritedValues,
   isConflictError,
   matchesCatalogItem,
+  moduleTitle,
   normalizeCatalog,
   normalizeModules,
   outsideLimits,
@@ -517,7 +520,7 @@ test('the lower cloud base cannot be above the upper one', () => {
   assert.equal(rowForWrite(flightFields, { ...base, cloud_base_upper: '300' }).cloud_base_upper, 300);
 });
 
-test('the form groups the meteo and crew fields and keeps the rest in catalog order', () => {
+test('the meteo and crew fields form groups and the rest keeps catalog order', () => {
   const sections = fieldSections(flightFields);
   assert.deepEqual(sections.map(section => section.id), ['main', 'meteo', 'crew']);
   assert.deepEqual(sections.map(section => section.title), ['', 'Метеоумови', 'Екіпаж']);
@@ -537,7 +540,7 @@ test('the form groups the meteo and crew fields and keeps the rest in catalog or
   assert.deepEqual(
     sections.flatMap(section => section.fields.map(item => item.key)).sort(),
     [...flightFieldKeys].sort(),
-    'every catalog field appears in the form exactly once',
+    'every catalog field appears in the sections exactly once',
   );
   assert.equal(sections[1].inherit, true);
   assert.equal(sections[2].inherit, false);
@@ -666,9 +669,28 @@ test('both operational dashboards load the shared module catalog', async () => {
 test('the table editor writes only through the dedicated local dashboard command', async () => {
   const source = await readFile(new URL('../src/dashboard-module-catalog.js', import.meta.url), 'utf8');
   assert.match(source, /replace_dashboard_module_rows/);
-  assert.match(source, /Відкрити таблицю/);
+  assert.match(source, /Відкрити сторінку/);
   assert.match(source, /Зберегти зміни/);
   assert.doesNotMatch(source, /\bfetch\s*\(|XMLHttpRequest|WebSocket/);
+});
+
+test('a module made under the old default title shows the journal name', () => {
+  const base = {
+    id: 'dashboard-1', branch: 'air', templateId: 'flight-hours', visualKind: 'horizontal-bar',
+    storageTable: 'dashboard_data_1234567890abcdef12345678', fields: flightFields,
+  };
+  const titleOf = (title, templateId = 'flight-hours') => normalizeModules([{ ...base, templateId, title }])[0].title;
+  assert.equal(titleOf('Загальний наліт за типом ПС'), 'Журнал хронометражу польотів');
+  assert.equal(titleOf('Журнал хронометражу польотів'), 'Журнал хронометражу польотів');
+  assert.equal(titleOf('Журнал 2-ї ескадрильї'), 'Журнал 2-ї ескадрильї', 'a name the user chose is kept');
+  assert.equal(titleOf('Загальний наліт за типом ПС', 'other'), 'Загальний наліт за типом ПС', 'only the flight template was renamed');
+  assert.equal(moduleTitle(undefined, 'Назва'), 'Назва');
+});
+
+test('the Rust catalog names the flight template as the flight journal', async () => {
+  const store = await readFile(new URL('../src-tauri/src/dashboard_modules.rs', import.meta.url), 'utf8');
+  assert.match(store, /"flight-hours",\s*"Журнал хронометражу польотів",/);
+  assert.doesNotMatch(store, /"Загальний наліт за типом ПС"/);
 });
 
 const savedRows = () => [
@@ -773,13 +795,119 @@ test('the conflict wording and the version argument match the Rust side', async 
   assert.match(lib, /expected_updated_at: Option<String>/);
 });
 
-test('the row form shows sections and carries the weather into new records only', async () => {
+test('a record is one table row edited in place, with its form above the table', async () => {
   const source = await readFile(new URL('../src/dashboard-module-catalog.js', import.meta.url), 'utf8');
-  assert.match(source, /fieldSections\(module\.fields\)/);
+  // Окремої багатосекційної форми немає: рядок таблиці стає полями, а форма над таблицею з'єднана з ними атрибутом `form`.
+  assert.doesNotMatch(source, /showRowForm|ewmc-row-form-grid|ewmc-group'|ewmc-identity/);
+  assert.match(source, /function startEdit\(rowIndex\)/);
+  assert.match(source, /control\.setAttribute\('form', ROW_FORM_ID\)/);
+  assert.match(source, /form: ROW_FORM_ID/, 'the save button sits in the row but submits the form above the table');
+  assert.match(source, /el\('colgroup'/);
+  assert.match(source, /module\.fields\.map\(fieldColumnWidth\)/);
   assert.match(source, /const inherited = isEdit \? null : inheritedValues\(module\.fields, rows\)/);
-  for (const text of ['Підставлено з останнього запису, де вказано погоду', 'Очистити', 'ewmc-crew-total']) {
+  assert.match(source, /controls\.get\(error\?\.fieldKey\)/, 'the cursor goes to the cell with the error');
+  assert.match(source, /tr\.scrollIntoView\(\{ block: 'nearest' \}\)/);
+  for (const text of [
+    'Підставлено з останнього запису, де вказано погоду', 'Очистити', 'ewmc-crew-total', 'Новий запис',
+    'Усі поля запису — в одному рядку таблиці', 'Редагування рядка', 'Записів ще немає. Натисніть «+ Додати рядок».',
+    'Перейти до:',
+  ]) {
     assert.ok(source.includes(text), text);
   }
+});
+
+test('a module table opens as a full page, not as a window', async () => {
+  const source = await readFile(new URL('../src/dashboard-module-catalog.js', import.meta.url), 'utf8');
+  const css = await readFile(new URL('../src/dashboard-module-catalog.css', import.meta.url), 'utf8');
+  assert.match(source, /function showModulePage\(module, focusTarget = null, view = null\)/);
+  assert.doesNotMatch(source, /showDataTable/, 'no leftover of the dialog entry point');
+  for (const text of ['Відкрити сторінку', '← До дашборда', 'ewmc-page-head', 'ewmc-page-body']) assert.ok(source.includes(text), text);
+  assert.match(source, /dialog\.dataset\.view = 'table'/);
+  assert.match(source, /onclick: \(\) => showModulePage\(module, 'add'\)/, 'the page opens with the cursor on «+ Додати рядок»');
+  // Escape спершу скасовує рядок, що редагується; закриває сторінку лише за відсутності правки.
+  assert.match(source, /dialog\.addEventListener\('cancel'/);
+  assert.match(source, /state\.cancelEdit = cancel/);
+  // Сповіщення живе всередині відкритої сторінки: шар поверх закриває решту документа.
+  assert.match(source, /\(dialog\.open \? dialog : document\.body\)\.append\(toast\)/);
+  // Після додавання таблиця гортається до нового рядка, після правки лишається на місці.
+  assert.match(source, /\{ top: 'end', left: 0 \}/);
+  assert.match(source, /scroll\.scrollTop = view\.top === 'end' \? scroll\.scrollHeight : view\.top/);
+  assert.match(css, /\.ewmc-dialog\[data-view=table\]\{inset:0;width:100%;height:100%;max-width:none;max-height:none;margin:0;padding:0;border:0;border-radius:0/);
+  assert.match(css, /\.ewmc-dialog\[data-view=table\]\[open\]\{display:flex;flex-direction:column\}/);
+  assert.match(css, /\.ewmc-page-body\{[^}]*flex:1;[^}]*overflow:auto/);
+  assert.doesNotMatch(css, /\.ewmc-data-scroll(?:\.is-editing)?\{[^}]*max-height/, 'the table takes the height of the page');
+  assert.doesNotMatch(css, /ewmc-data-toolbar/);
+});
+
+test('the record row stays on one line and the edge columns are pinned', async () => {
+  const css = await readFile(new URL('../src/dashboard-module-catalog.css', import.meta.url), 'utf8');
+  assert.match(css, /\.ewmc-data-table\{[^}]*table-layout:fixed/);
+  assert.match(css, /td:first-child\{position:sticky;left:0/, 'the row number stays while the row is scrolled');
+  assert.match(css, /td:last-child\{position:sticky;right:0/, 'the save and cancel buttons stay in view');
+  assert.match(css, /tr\.ewmc-editing>td\{[^}]*overflow:visible/);
+  assert.match(css, /\.ewmc-cell-edit input,\.ewmc-cell-edit select\{[^}]*width:100%/);
+  assert.match(css, /\.ewmc-cell-edit \[data-inherited=true\]/, 'carried-over weather is marked until it is changed');
+  assert.match(css, /\.ewmc-cell-edit \[aria-invalid=true\]/);
+  assert.doesNotMatch(css, /ewmc-row-form|ewmc-group\{|ewmc-identity/);
+});
+
+test('a value error names the field to fix, so the editor can put the cursor there', () => {
+  const caught = fn => { try { fn(); } catch (error) { return error; } return null; };
+  const key = (fieldName, text) => caught(() => parseFieldInput(flightField(fieldName), text))?.fieldKey;
+  const cover = caught(() => parseFieldInput(flightField('cloud_cover'), '11'));
+  assert.ok(cover instanceof FieldValueError);
+  assert.ok(cover instanceof Error, 'code that knows nothing about the key still sees an ordinary error');
+  assert.equal(cover.fieldKey, 'cloud_cover');
+  assert.match(cover.message, /від 0 до 10/);
+  assert.equal(key('aircraft_type', ''), 'aircraft_type', 'a missing required value');
+  assert.equal(key('airborne_hours', 'abc'), 'airborne_hours');
+  assert.equal(key('flight_altitude', '0,3'), 'flight_altitude');
+  assert.equal(key('visibility', 'ясно'), 'visibility');
+  assert.equal(key('passengers', '1,5'), 'passengers');
+  assert.equal(key('fuel_consumption', '-1'), 'fuel_consumption');
+  assert.equal(key('instrument_meteorological_conditions', 'можливо'), 'instrument_meteorological_conditions');
+  assert.equal(key('aircraft_number', 'x'.repeat(4097)), 'aircraft_number');
+  assert.equal(new FieldValueError('x').fieldKey, '');
+  assert.equal(new FieldValueError('x', 5).fieldKey, '');
+
+  // Правила між полями вказують на клітинку, де виправлення найпростіше.
+  const base = { aircraft_type: 'Ан-26', airborne_hours: '0:22', total_hours: '0:32' };
+  const lower = caught(() => rowForWrite(flightFields, { ...base, cloud_base_upper: '300', cloud_base_lower: '1200' }));
+  assert.equal(lower.fieldKey, 'cloud_base_lower');
+  const names = 'Тестенко, Зразкович, Умовний, Пробенко, Прикладний, Вигаданий, Макетенко, Фіктивний, Шаблонний';
+  const tooMany = caught(() => rowForWrite(flightFields, { ...base, crew_ke: 'Тестенко', crew_other: names }));
+  assert.equal(tooMany.fieldKey, 'crew_other', 'the last filled crew field');
+  const inKe = caught(() => rowForWrite(flightFields, { ...base, crew_ke: names }));
+  assert.equal(inKe.fieldKey, 'crew_ke');
+  // Помилка першого неправильного поля вказує саме на нього, а не на останнє.
+  const first = caught(() => rowForWrite(flightFields, { ...base, cloud_cover: '11', visibility: '-2' }));
+  assert.equal(first.fieldKey, 'cloud_cover');
+});
+
+test('every column of the record row has a width that suits its content', () => {
+  const width = fieldName => fieldColumnWidth(flightField(fieldName));
+  for (const item of flightFields) {
+    assert.ok(Number.isInteger(fieldColumnWidth(item)) && fieldColumnWidth(item) >= 84, item.key);
+  }
+  assert.ok(width('crew_other') > width('crew_ke'), 'the list of other surnames is the widest');
+  assert.equal(width('crew_ke'), width('crew_bt'));
+  assert.ok(width('crew_ke') > width('cloud_cover'), 'a surname needs more room than a digit');
+  assert.ok(width('cloud_cover') > width('flight_count'), 'the header «Хмарність, 0–10» keeps its range on one line');
+  assert.equal(width('airborne_hours'), width('total_hours'), 'durations are equal');
+  assert.ok(width('airborne_hours') <= 100, 'a duration like 12:34 is narrow');
+  assert.equal(width('flight_altitude'), width('cloud_base_upper'));
+  assert.ok(width('flight_altitude') > width('airborne_hours'), 'a height takes the hint «300 або 0,3 км»');
+  assert.ok(width('fuel_consumption') > width('visibility'), 'litres show the kilograms under the field');
+  assert.equal(width('day_night'), width('instrument_meteorological_conditions'), 'both are short dropdowns');
+  assert.ok(width('aircraft_number') < width('aircraft_type'));
+  assert.equal(fieldColumnWidth({ key: 'taken', dataType: 'date' }), 156);
+  assert.equal(fieldColumnWidth({ key: 'taken', dataType: 'datetime' }), 216);
+  assert.equal(fieldColumnWidth({ key: 'note', dataType: 'text' }), 148);
+  assert.equal(fieldColumnWidth(null), 148);
+  assert.equal(fieldColumnWidth({ key: 'constructor', dataType: 'text' }), 148, 'a key is never looked up on the prototype');
+  // Увесь рядок журналу — приблизно чотири екрани, а не більше.
+  const total = flightFields.reduce((sum, item) => sum + fieldColumnWidth(item), 0);
+  assert.ok(total > 3000 && total < 4200, String(total));
 });
 
 test('row and column counts are declined in Ukrainian', () => {
