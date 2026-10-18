@@ -34,6 +34,7 @@ use base_tables::BaseTable;
 use chrono::{SecondsFormat, Utc};
 use dashboard_modules::{
     DashboardModule, DashboardModuleData, DashboardModuleStore, DashboardModuleTemplate,
+    NewImportCorrection,
 };
 use database::{DatabaseStatus, DatabaseStatusStore};
 use local_model::{
@@ -161,15 +162,17 @@ async fn create_dashboard_module(
     template_id: String,
     title: Option<String>,
     rows: Option<Vec<serde_json::Map<String, Value>>>,
+    corrections: Option<Vec<NewImportCorrection>>,
 ) -> Result<DashboardModule, String> {
     let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
     modules
-        .create_with_rows(
+        .create_with_import(
             &active_profile_id(&session)?,
             &branch,
             &template_id,
             title.as_deref(),
             rows.unwrap_or_default(),
+            corrections.unwrap_or_default(),
             &now,
         )
         .await

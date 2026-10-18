@@ -19,6 +19,7 @@ import {
   normalizeCatalog,
   normalizeDensity,
   normalizeModules,
+  pluralForm,
   previewModel,
   replaceRowsRequest,
   rowCountLabel,
@@ -31,7 +32,17 @@ import {
   tableEditState,
   visibleColumnKeys,
 } from './dashboard-module-catalog-core.js';
-import { describePlan, importRows, planImport, rankSheets, sheetOptionLabel } from './dashboard-module-source-core.js';
+import {
+  buildImport,
+  correctionOutcome,
+  correctionRecords,
+  describePlan,
+  importRows,
+  planImport,
+  rankSheets,
+  reviewState,
+  sheetOptionLabel,
+} from './dashboard-module-source-core.js';
 
 const invoke = window.__TAURI_INTERNALS__?.invoke || window.parent?.__TAURI_INTERNALS__?.invoke;
 if (typeof invoke === 'function') initialize();
@@ -46,6 +57,10 @@ const ACTION_COLUMN_WIDTH = 176;
 const DENSITY_KEY = 'easywar.moduleTable.density';
 const readDensity = () => { try { return localStorage.getItem(DENSITY_KEY); } catch (error) { return null; } };
 const saveDensity = value => { try { localStorage.setItem(DENSITY_KEY, value); } catch (error) { /* діє до перезавантаження */ } };
+/** Скільки зауважень показує екран «Перевірка» за раз: решта — у самій таблиці. */
+const REVIEW_LIMIT = 200;
+const ISSUE_KINDS = { unreadable: 'не розібрано', skipped: 'запис пропущено', rule: 'правило форми' };
+const WEATHER_HINT_TEXT = 'Чотири числа: хмарність, НМХ, ВМХ, видимість — наприклад 5/300/1000/10.';
 
 function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
@@ -68,7 +83,7 @@ function initialize() {
 
   // `cancelEdit` — скасування рядка, що редагується: Escape скасовує правку, а не закриває вікно разом із набраним рядком.
   // `tableViews` — пошук і група колонок сторінки кожного модуля: після збереження рядка сторінка перебудовується, а вибір лишається.
-  const state = { branch, catalog: [], modules: [], data: new Map(), busy: false, profileMissing: false, cancelEdit: null, tableViews: new Map() };
+  const state = { branch, catalog: [], modules: [], data: new Map(), busy: false, profileMissing: false, cancelEdit: null, tableViews: new Map(), leaveReview: null };
   const openButton = el('button', {
     type: 'button',
     class: 'btn quiet ewmc-open',
@@ -88,6 +103,12 @@ function initialize() {
   // Escape на сторінці модуля: спершу скасовує рядок, що редагується, і лише потім повертає на дашборд.
   // Каталог і форма створення закриваються як звичайне вікно.
   dialog.addEventListener('cancel', event => {
+    // Escape на екрані «Перевірка» повертає до форми створення, не гублячи ні її, ні виправлень.
+    if (dialog.dataset.view === 'review') {
+      event.preventDefault();
+      state.leaveReview?.();
+      return;
+    }
     if (dialog.dataset.view !== 'table') return;
     event.preventDefault();
     if (state.busy) return;
@@ -235,7 +256,7 @@ function initialize() {
     const submit = el('button', { type: 'submit', class: 'btn primary', text: 'Створити модуль і таблицю' });
     // Поки таблицю читають, створювати модуль рано: підтягування вже вимкнене за замовчуванням, але не обране.
     const syncSubmit = () => { submit.disabled = state.busy || source.pending(); };
-    const source = sourceBlock(item, syncSubmit);
+    const source = sourceBlock(item, syncSubmit, () => showReview(source, form));
     const form = el('form', { class: 'ewmc-create-form' },
       el('button', { type: 'button', class: 'ewmc-back', text: '← До каталогу', onclick: showCatalog }),
       el('p', { class: 'ewmc-eyebrow', text: item.category }),
@@ -263,13 +284,22 @@ function initialize() {
       syncSubmit();
       const name = title.value.trim();
       const rows = source.rows();
+      // Виправлення з екрана «Перевірка» йдуть окремо від записів: Rust зберігає їх у своїй таблиці.
+      const corrections = rows ? source.corrections() : [];
       status.classList.remove('error');
       status.textContent = rows ? `Створення локальної таблиці й запис: ${rowCountLabel(rows.length)}…` : 'Створення локальної таблиці…';
       try {
-        await invoke('create_dashboard_module', { branch: state.branch, templateId: item.id, title: name, ...(rows ? { rows } : {}) });
+        await invoke('create_dashboard_module', {
+          branch: state.branch,
+          templateId: item.id,
+          title: name,
+          ...(rows ? { rows } : {}),
+          ...(corrections.length ? { corrections } : {}),
+        });
         dialog.close();
         await loadModules();
-        showToast(rows ? `Модуль «${name}» створено, підтягнуто: ${rowCountLabel(rows.length)}.` : `Модуль «${name}» створено.`);
+        const fixed = corrections.length ? `, виправлених значень: ${corrections.length}` : '';
+        showToast(rows ? `Модуль «${name}» створено, підтягнуто: ${rowCountLabel(rows.length)}${fixed}.` : `Модуль «${name}» створено.`);
       } catch (error) {
         status.textContent = String(error || 'Не вдалося створити модуль.');
         status.classList.add('error');
@@ -289,8 +319,12 @@ function initialize() {
   // Блок «Дані з вашої таблиці» у вікні створення: знаходить таблицю профілю (або файл, який обрав
   // користувач), зіставляє її стовпці з колонками модуля й пропонує підтягнути записи. Файл лише
   // читається. Колонки модуля, яких у таблиці немає, лишаються порожніми: дані вносять у самому модулі.
-  function sourceBlock(item, onChange) {
-    const model = { phase: 'loading', pending: true, message: '', origin: '', workbook: null, ranked: [], sheet: '', plan: null, use: false, carry: true };
+  function sourceBlock(item, onChange, openReview) {
+    // `corrections` — виправлення з екрана «Перевірка» (ідентифікатор → введений текст); `build` — записи з ними.
+    const model = {
+      phase: 'loading', pending: true, message: '', origin: '', workbook: null, ranked: [], sheet: '', plan: null,
+      use: false, carry: true, corrections: new Map(), build: null,
+    };
     let request = 0;
     const body = el('div', { class: 'ewmc-source-body', 'aria-live': 'polite' });
     const node = el('section', { class: 'ewmc-source', 'aria-labelledby': 'ewmc-source-title' },
@@ -350,6 +384,9 @@ function initialize() {
         const sheet = await invoke('read_module_source_sheet', { origin: model.origin, branch: state.branch, sheet: name });
         if (id !== request) return;
         model.plan = planImport(item.fields, sheet);
+        // Виправлення належать рядкам конкретного аркуша: інший аркуш починає перевірку з чистого.
+        model.corrections = new Map();
+        model.build = null;
         // Таблиця, схожа лише частково, не підтягується сама: користувач вмикає це свідомо.
         model.use = model.ranked.find(entry => entry.name === name)?.confident === true && model.plan.rows.length > 0;
         // Метеоумови, яких у записі не вказано, за умовчанням беруться з попереднього запису тієї ж льотної зміни.
@@ -400,7 +437,8 @@ function initialize() {
 
     function readyNodes() {
       const { plan } = model;
-      const notes = describePlan(plan);
+      const notes = describePlan(plan, model.build);
+      const importable = (model.build ?? plan).rows.length;
       const candidate = model.ranked.find(entry => entry.name === model.sheet);
       const nodes = [fileLine()];
       if (model.ranked.length > 1) {
@@ -420,11 +458,21 @@ function initialize() {
       add(notes.carryUnresolved, true);
       notes.warnings.forEach(text => add(text, true));
       add(notes.truncated, true);
+      add(notes.corrected);
       if (lines.length) nodes.push(el('ul', { class: 'ewmc-source-notes' }, lines));
-      const use = el('input', { type: 'checkbox', disabled: !plan.rows.length });
+      // Зауваження можна виправити до створення модуля; сире значення таблиці при цьому лишається як є.
+      if (plan.issues.length) {
+        const review = reviewState(plan, model.build ?? buildImport(item.fields, plan));
+        nodes.push(el('div', { class: 'ewmc-source-review' },
+          el('p', {},
+            el('b', { text: `Зауважень до значень: ${review.total}` }),
+            review.fixed ? ` · виправлено ${review.fixed}, залишилось ${review.open}` : ' · їх можна виправити до створення модуля'),
+          el('button', { type: 'button', class: 'btn', text: 'Перевірити й виправити…', 'data-action': 'review', onclick: openReview })));
+      }
+      const use = el('input', { type: 'checkbox', disabled: !importable });
       use.checked = model.use;
       // Протягнути метеоумови можна, лише якщо є на які записи й записи взагалі підтягуються.
-      const carry = plan.carry.possible ? el('input', { type: 'checkbox', disabled: !model.use }) : null;
+      const carry = (model.build ?? plan).carry.possible ? el('input', { type: 'checkbox', disabled: !model.use }) : null;
       if (carry) carry.checked = model.carry;
       use.addEventListener('change', () => {
         model.use = use.checked;
@@ -432,7 +480,7 @@ function initialize() {
       });
       carry?.addEventListener('change', () => { model.carry = carry.checked; });
       nodes.push(el('label', { class: 'ewmc-source-use' }, use,
-        el('span', { text: plan.rows.length ? `Підтягнути ${rowCountLabel(plan.rows.length)} у новий модуль` : 'Підтягувати нічого' })));
+        el('span', { text: importable ? `Підтягнути ${rowCountLabel(importable)} у новий модуль` : 'Підтягувати нічого' })));
       if (carry) {
         nodes.push(el('div', { class: 'ewmc-source-carry' },
           el('label', { class: 'ewmc-source-use' }, carry, el('span', { text: notes.carryLabel })),
@@ -456,10 +504,156 @@ function initialize() {
       node,
       start,
       pending: () => model.pending,
-      rows: () => (model.phase === 'ready' && model.use && model.plan?.rows.length ? importRows(model.plan, { carryWeather: model.carry }) : null),
+      rows: () => {
+        if (model.phase !== 'ready' || !model.use || !model.plan) return null;
+        const rows = importRows(model.plan, { carryWeather: model.carry, build: model.build });
+        return rows.length ? rows : null;
+      },
+      corrections: () => (model.build ? correctionRecords(model.plan, model.build, model.workbook?.fileName) : []),
+      refresh: render,
+      // Екран «Перевірка» працює з тим самим планом: виправлення лишаються в моделі блоку до створення модуля.
+      review: () => ({
+        plan: model.plan,
+        fileName: model.workbook?.fileName ?? '',
+        sheet: model.sheet,
+        fields: item.fields,
+        state: () => reviewState(model.plan, model.build ?? buildImport(item.fields, model.plan)),
+        rowsCount: () => (model.build ?? model.plan).rows.length,
+        outcome: (key, text) => correctionOutcome(item.fields, model.plan, key, text),
+        set: (id, text) => {
+          model.corrections.set(id, text);
+          model.build = buildImport(item.fields, model.plan, model.corrections);
+        },
+        clear: id => {
+          model.corrections.delete(id);
+          model.build = model.corrections.size ? buildImport(item.fields, model.plan, model.corrections) : null;
+        },
+      }),
       // Після закриття вікна пізні відповіді таблиці вже нікуди не потраплять.
       dispose: () => { request += 1; },
     };
+  }
+
+  // Екран «Перевірка»: кожне зауваження до значень таблиці з сирим текстом клітинки й полем для
+  // виправлення. Виправлення лишаються в блоці «Дані з вашої таблиці» до створення модуля; сира
+  // клітинка не змінюється, а разом зі створенням Rust зберігає виправлення окремо від записів.
+  function showReview(source, form) {
+    const review = source.review();
+    const fieldByKey = new Map(review.fields.map(field => [field.key, field]));
+    const drafts = new Map();
+    const view = el('div', { class: 'ewmc-review' });
+
+    function back() {
+      state.leaveReview = null;
+      dialog.replaceChildren(form);
+      dialog.dataset.view = 'create';
+      source.refresh();
+      form.querySelector('[data-action="review"]')?.focus();
+    }
+
+    const metric = (value, label) => el('div', {}, el('strong', { text: String(value) }), el('span', { text: label }));
+
+    function card(issue) {
+      const field = fieldByKey.get(issue.key);
+      const input = el('input', {
+        type: 'text',
+        maxlength: '4096',
+        // Сирий текст клітинки — основа для виправлення, якщо це клітинка саме цього поля.
+        value: drafts.get(issue.id) ?? (issue.corrected || (issue.prefill ? issue.raw : '')),
+        placeholder: issue.key === 'weather' ? '5/300/1000/10' : (field ? fieldPlaceholder(field) : '') || false,
+        'aria-label': `Виправлене значення: ${issue.label}, рядок ${issue.number}`,
+        'data-id': issue.id,
+      });
+      const error = el('p', { class: 'ewmc-issue-error', 'aria-live': 'polite' });
+      const apply = (text = input.value) => {
+        drafts.set(issue.id, text);
+        const outcome = review.outcome(issue.key, text);
+        if (outcome.problem) {
+          error.textContent = `Не годиться: ${outcome.problem}.`;
+          input.setAttribute('aria-invalid', 'true');
+          input.focus();
+          return;
+        }
+        drafts.delete(issue.id);
+        review.set(issue.id, text);
+        render(issue.id);
+      };
+      input.addEventListener('keydown', event => {
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+        apply();
+      });
+      input.addEventListener('input', () => {
+        input.removeAttribute('aria-invalid');
+        error.textContent = '';
+      });
+      // «0,3» без одиниці: метри чи кілометри вирішує людина, а не програма.
+      const ambiguous = fieldKind(field) === 'height' && /^\s*0[.,]\d+\s*$/u.test(issue.raw)
+        ? el('div', { class: 'ewmc-issue-choices', role: 'group', 'aria-label': 'Одиниця висоти' },
+          el('span', { text: 'Одиниця одним натисканням:' }),
+          [`${issue.raw.trim()} км`, `${issue.raw.trim()} м`].map(text => el('button', { type: 'button', class: 'btn', text, onclick: () => apply(text) })))
+        : null;
+      const fixedNote = {
+        fixed: issue.kind === 'skipped' ? 'Виправлено: запис підтягнеться.' : 'Виправлено.',
+        still: 'Виправлення застосовано, але правило досі порушене.',
+        invalid: issue.problem ? `Не годиться: ${issue.problem}.` : '',
+        open: issue.kind === 'skipped' ? 'Запис не підтягнеться, доки значення не виправлено.' : issue.kind === 'rule' ? 'Запис підтягнеться й так, але з цим зауваженням.' : 'Без виправлення поле лишиться порожнім.',
+      }[issue.status];
+      return el('li', { class: 'ewmc-issue', 'data-state': issue.status, 'data-id': issue.id },
+        el('div', { class: 'ewmc-issue-head' },
+          el('b', { text: `Рядок ${issue.number} · ${issue.label}` }),
+          el('span', { class: 'ewmc-issue-kind', text: ISSUE_KINDS[issue.kind] })),
+        el('p', { class: 'ewmc-issue-reason', text: issue.reason }),
+        el('p', { class: 'ewmc-issue-raw' },
+          'У таблиці', issue.column ? ` («${issue.column}»)` : '', ': ',
+          el('b', { text: `«${issue.raw || 'порожньо'}»` }),
+          issue.corrected && issue.status !== 'open' ? el('span', {}, ' → ', el('b', { text: `«${issue.corrected}»` })) : null),
+        issue.key === 'weather' ? el('p', { class: 'ewmc-issue-hint', text: WEATHER_HINT_TEXT }) : null,
+        el('div', { class: 'ewmc-issue-fix' },
+          input,
+          el('button', { type: 'button', class: 'btn', text: issue.corrected ? 'Змінити' : 'Застосувати', 'data-action': 'apply', onclick: () => apply() }),
+          issue.corrected ? el('button', {
+            type: 'button',
+            class: 'btn quiet',
+            text: 'Скасувати виправлення',
+            onclick: () => { drafts.delete(issue.id); review.clear(issue.id); render(issue.id); },
+          }) : null),
+        ambiguous,
+        el('p', { class: 'ewmc-issue-status', text: fixedNote }),
+        error);
+    }
+
+    function render(focusId = null) {
+      const status = review.state();
+      const shown = status.items.slice(0, REVIEW_LIMIT);
+      view.replaceChildren(...[
+        el('button', { type: 'button', class: 'ewmc-back', text: '← До створення', onclick: back }),
+        el('p', { class: 'ewmc-eyebrow', text: 'Перевірка перед підтягуванням' }),
+        el('h2', { id: 'ewmc-dialog-title', text: 'Перевірка значень з таблиці' }),
+        el('p', {
+          class: 'ewmc-review-lead',
+          text: `Таблиця «${review.fileName}», аркуш «${review.sheet}» лише читається. Виправлене значення потрапить у запис модуля, а сире значення клітинки збережеться окремо — його буде видно на сторінці модуля.`,
+        }),
+        el('div', { class: 'ewmc-review-metrics' },
+          metric(review.rowsCount(), 'записів підтягнеться'),
+          metric(status.total, 'зауважень'),
+          metric(status.fixed, 'виправлено'),
+          metric(status.open, 'залишилось')),
+        el('ol', { class: 'ewmc-review-list' }, shown.map(card)),
+        status.items.length > shown.length
+          ? el('p', { class: 'ewmc-review-more', text: `Показано перші ${REVIEW_LIMIT} зауважень з ${status.items.length}; решту виправте в модулі після створення.` })
+          : null,
+        el('div', { class: 'ewmc-form-actions' },
+          el('button', { type: 'button', class: 'btn primary', text: 'Готово — до створення модуля', onclick: back })),
+      ].filter(Boolean));
+      const target = focusId ? view.querySelector(`li[data-id="${CSS.escape(focusId)}"] [data-action="apply"]`) : null;
+      (target ?? view.querySelector('.ewmc-issue input'))?.focus();
+    }
+
+    state.leaveReview = back;
+    dialog.replaceChildren(view);
+    dialog.dataset.view = 'review';
+    render();
   }
 
   async function reopenFresh(moduleId, message = '', view = null) {
@@ -476,6 +670,9 @@ function initialize() {
     state.cancelEdit = null;
     const payload = state.data.get(module.id) || { rows: [], truncated: false, failed: true };
     const rows = Array.isArray(payload.rows) ? payload.rows : [];
+    // Значення, виправлені під час підтягування з таблиці: сира клітинка збережена окремо від запису.
+    const corrections = Array.isArray(payload.corrections) ? payload.corrections : [];
+    const correctionAt = new Map(corrections.map(item => [`${item.rowId}:${item.fieldKey}`, item]));
     const access = tableEditState(payload);
     const readOnly = !access.editable;
     const unreadable = payload.failed === true;
@@ -561,6 +758,19 @@ function initialize() {
       for (const button of densityButtons) button.setAttribute('aria-pressed', String(button.dataset.density === density));
     }
 
+    // Перелік виправлень підтягування: сире значення клітинки, введене значення, причина й місце в таблиці.
+    function correctionsList() {
+      const position = new Map(rows.map((row, index) => [row.rowId, index + 1]));
+      const labelOf = new Map(module.fields.map(field => [field.key, field.label]));
+      return el('details', { class: 'ewmc-corrections' },
+        el('summary', { text: `Виправлено під час підтягування з таблиці: ${corrections.length} ${pluralForm(corrections.length, 'значення', 'значення', 'значень')}` }),
+        el('p', { class: 'ewmc-corrections-note', text: 'Файл таблиці не змінювався: сире значення клітинки збережено окремо від запису. У таблиці нижче такі клітинки позначено ✎.' }),
+        el('ul', {}, corrections.map(item => el('li', {},
+          el('b', { text: `Запис ${position.get(item.rowId) ?? '—'} · ${labelOf.get(item.fieldKey) ?? item.fieldKey}: ` }),
+          'у таблиці ', el('b', { text: `«${item.rawText || 'порожньо'}»` }), ' → ', el('b', { text: `«${item.correctedText}»` }),
+          el('small', { text: ` — рядок ${item.sourceRow}${item.sourceColumn ? `, «${item.sourceColumn}»` : ''}, аркуш «${item.sourceSheet}», ${item.sourceFile}. ${item.reason}` })))));
+    }
+
     // Видимі колонки (група) і рядки (пошук). Номер рядка в «№» лишається номером запису в таблиці.
     function applyView() {
       const shown = visibleColumnKeys(module.fields, tableView.group);
@@ -592,6 +802,13 @@ function initialize() {
         el('td', { class: 'ewmc-row-number', text: String(index + 1) }),
         module.fields.map(field => {
           const shown = formatFieldValue(field, row?.[field.key]);
+          const fix = correctionAt.get(`${row?.rowId}:${field.key}`);
+          if (fix) {
+            return el('td', { class: 'ewmc-corrected', title: correctionText(fix), 'data-key': field.key },
+              el('span', { class: 'ewmc-corrected-mark', 'aria-hidden': 'true', text: '✎' }),
+              shown,
+              el('span', { class: 'ewmc-sr', text: ` (виправлено під час підтягування; у таблиці було «${fix.rawText || 'порожньо'}»)` }));
+          }
           return el('td', { text: shown, title: shown.length > 14 ? shown : false, 'data-key': field.key });
         }),
         el('td', { class: 'ewmc-row-actions' },
@@ -787,7 +1004,12 @@ function initialize() {
           const result = await invoke('replace_dashboard_module_rows', replaceRowsRequest(module, nextRows));
           const updated = normalizeModules([result?.module])[0] || module;
           state.modules = state.modules.map(item => item.id === module.id ? updated : item);
-          state.data.set(module.id, { module: updated, rows: Array.isArray(result?.rows) ? result.rows : [], truncated: result?.truncated === true });
+          state.data.set(module.id, {
+            module: updated,
+            rows: Array.isArray(result?.rows) ? result.rows : [],
+            truncated: result?.truncated === true,
+            corrections: Array.isArray(result?.corrections) ? result.corrections : [],
+          });
           renderHost();
           // Новий рядок стоїть у кінці: таблиця гортається до нього; після правки чи видалення вона лишається на місці.
           showModulePage(updated, focusAfter, focusAfter === 'add' && !isDelete ? { top: 'end', left: 0 } : { top: scroll.scrollTop, left: scroll.scrollLeft });
@@ -849,6 +1071,7 @@ function initialize() {
             el('code', { text: module.storageTable }))),
         addButton),
       el('div', { class: 'ewmc-page-body' },
+        corrections.length ? correctionsList() : null,
         ...(readOnly ? [el('div', { class: 'ewmc-readonly' },
           el('p', { class: 'ewmc-form-status error', text: access.reason }),
           payload.failed === true
@@ -915,6 +1138,13 @@ function initialize() {
 
   loadCatalog();
   loadModules();
+}
+
+/** Підказка клітинки, виправленої під час підтягування: що було в таблиці, що введено й звідки. */
+function correctionText(item) {
+  const where = [`рядок ${item.sourceRow}`, item.sourceColumn && `«${item.sourceColumn}»`, item.sourceSheet && `аркуш «${item.sourceSheet}»`, item.sourceFile]
+    .filter(Boolean).join(', ');
+  return `Виправлено під час підтягування з таблиці: «${item.rawText || 'порожньо'}» → «${item.correctedText}» (${where}). ${item.reason}`;
 }
 
 function sampleRows(item) {

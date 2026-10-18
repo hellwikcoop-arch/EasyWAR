@@ -625,13 +625,26 @@ const sampleOf = cell => {
   return text.length > 24 ? `${text.slice(0, 23)}…` : text;
 };
 
+/** Сирий текст клітинки так, як він стоїть у таблиці (для екрана «Перевірка» й збереженого виправлення). */
+const rawOf = cell => (cell == null ? '' : String(cell)).slice(0, MAX_TEXT);
+
+/** Сирий текст поля запису в рядку: одна клітинка, кілька колонок через кому або клітинка метеоумов. */
+function cellTextOf(matched, cells, key) {
+  const columns = matched.mapped.get(key);
+  if (columns) return columns.map(index => rawOf(cells[index]).trim()).filter(Boolean).join(', ').slice(0, MAX_TEXT);
+  if (matched.weather?.keys.includes(key) || key === 'weather') return matched.weather ? rawOf(cells[matched.weather.index]) : '';
+  return '';
+}
+
 function readRow(row, context) {
   const cells = Array.isArray(row?.cells) ? row.cells : [];
   if (isTotalsRow(cells)) return { skip: 'підсумковий рядок' };
   const { fieldByKey, orderedKeys, matched, multi } = context;
   const values = {};
   const issues = [];
-  const note = (key, label, cell, reason) => issues.push({ key, label, sample: sampleOf(cell), reason });
+  const note = (key, label, cell, reason) => issues.push({
+    key, label, sample: sampleOf(cell), reason, raw: rawOf(cell), column: sourceLabel(matched, key),
+  });
   for (const key of orderedKeys) {
     const field = fieldByKey.get(key);
     const columns = matched.mapped.get(key);
@@ -712,7 +725,7 @@ function bump(map, key, entry) {
 /** Звідки береться поле: заголовок колонки; повторювані колонки — «Вправа (2-й стовпець)», «Інший екіпаж ×6». */
 function sourceLabel(matched, key) {
   const own = matched.columns.filter(column => column.key === key);
-  if (!own.length) return matched.weather.header;
+  if (!own.length) return matched.weather?.header ?? '';
   const labels = [];
   for (const column of own) {
     const repeated = matched.columns.filter(item => item.header === column.header).length;
@@ -734,6 +747,176 @@ function describeColumns(fields, matched) {
       .map(field => ({ key: field.key, label: field.label, required: field.required === true })),
     extra: matched.extras.map(item => (item.reason ? `${item.header} (${item.reason})` : item.header)),
   };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Перевірка: виправлення значень до підтягування
+
+/**
+ * Що дає виправлений текст для поля `key` (або `weather` — чотири числа метеоумов однією
+ * клітинкою): ті самі правила, що й для клітинки таблиці, нічого не вгадується.
+ * `{ values }` — значення полів; `{ problem }` — чому текст не годиться.
+ */
+export function correctionOutcome(fields, plan, key, text) {
+  const list = Array.isArray(fields) ? fields : [];
+  const fieldByKey = new Map(list.map(field => [field.key, field]));
+  const trimmed = String(text ?? '').trim();
+  if (!trimmed) return { problem: 'введіть значення' };
+  if (trimmed.length > MAX_TEXT) return { problem: `не більше ${MAX_TEXT} символів` };
+  if (key === 'weather') {
+    const result = weatherValues(trimmed, plan.weatherKeys ?? [], fieldByKey);
+    if (result.problems.length) return { problem: result.problems[0].reason };
+    return Object.keys(result.values).length ? { values: result.values } : { problem: WEATHER_HINT };
+  }
+  const field = fieldByKey.get(key);
+  if (!field) return { problem: 'невідоме поле' };
+  const outcome = convertCell(field, trimmed);
+  if (outcome.problem) return { problem: outcome.problem };
+  if (outcome.value == null) return { problem: 'введіть значення' };
+  return { values: { [key]: outcome.value } };
+}
+
+/** Ідентифікатор виправлення: рядок таблиці й поле (`weather` — клітинка метеоумов). */
+export const correctionId = (number, key) => `${number}:${key}`;
+
+/**
+ * Записи для створення модуля з урахуванням виправлень (`corrections`: ідентифікатор → текст).
+ * Сирі значення плану не змінюються: виправлення накладаються на копію запису. Запис,
+ * пропущений через обов'язкове поле, підтягується, щойно це поле виправлено. Метеоумови
+ * протягуються заново, бо виправлена клітинка погоди теж стає «новим значенням».
+ * Повертає записи, їхні рядки таблиці, протягування, зауваження правил форми, застосовані
+ * виправлення (`applied`) і ті, що не годяться (`problems`).
+ */
+export function buildImport(fields, plan, corrections = new Map()) {
+  const list = Array.isArray(fields) ? fields : [];
+  const required = list.filter(field => field.required);
+  const keys = plan.carry?.keys ?? [];
+  const weatherRelated = key => key === 'weather' || keys.includes(key);
+  const byNumber = new Map();
+  for (const [id, text] of corrections) {
+    const cut = id.indexOf(':');
+    const number = Number(id.slice(0, cut));
+    if (!byNumber.has(number)) byNumber.set(number, []);
+    byNumber.get(number).push([id.slice(cut + 1), text]);
+  }
+  const track = weatherTracker(keys);
+  const out = {
+    rows: [],
+    rowNumbers: [],
+    carry: { keys, possible: 0, firstNumber: null, unresolved: 0, unresolvedFirst: null, sets: [] },
+    rules: [],
+    applied: [],
+    problems: [],
+  };
+  for (const entry of plan.timeline ?? []) {
+    const values = { ...entry.values };
+    const fixed = new Set();
+    for (const [key, text] of byNumber.get(entry.number) ?? []) {
+      const outcome = correctionOutcome(list, plan, key, text);
+      if (outcome.problem) {
+        out.problems.push({ id: correctionId(entry.number, key), number: entry.number, key, text, problem: outcome.problem });
+        continue;
+      }
+      if (key === 'weather') for (const weatherKey of plan.weatherKeys ?? []) delete values[weatherKey];
+      Object.assign(values, outcome.values);
+      fixed.add(key);
+      out.applied.push({ id: correctionId(entry.number, key), number: entry.number, key, text: String(text).trim(), values: outcome.values });
+    }
+    const unreadable = entry.issues.some(issue => weatherRelated(issue.key) && !fixed.has(issue.key));
+    const importable = required.every(field => values[field.key] != null) && out.rows.length < MAX_IMPORT_ROWS;
+    const carried = track(values, unreadable);
+    if (!importable) continue;
+    out.rows.push(values);
+    out.rowNumbers.push(entry.number);
+    out.carry.sets.push(carried?.set ?? null);
+    if (carried?.set) {
+      out.carry.possible += 1;
+      out.carry.firstNumber ??= entry.number;
+    } else if (carried?.left) {
+      out.carry.unresolved += 1;
+      out.carry.unresolvedFirst ??= entry.number;
+    }
+    const rule = rowRuleProblem(values);
+    if (rule) out.rules.push({ id: correctionId(entry.number, rule.fieldKey), number: entry.number, fieldKey: rule.fieldKey, message: rule.message });
+  }
+  return out;
+}
+
+const KIND_ORDER = { skipped: 0, unreadable: 1, rule: 2 };
+
+/**
+ * Зауваження, які можна виправити на екрані «Перевірка»: клітинки, яких не вдалося розібрати;
+ * пропущені записи без обов'язкового значення; порушення правил форми (НМХ вища за ВМХ,
+ * екіпаж понад 8) — поле, яке підсвічує форма. У кожного — рядок таблиці, колонка й сирий текст.
+ */
+function reviewIssues(fields, plan, built, matched) {
+  const fieldByKey = new Map(fields.map(field => [field.key, field]));
+  const order = new Map(fields.map((field, index) => [field.key, index]));
+  // Сирий текст можна взяти за основу виправлення, коли це клітинка саме цього поля
+  // (а не, скажімо, вся клітинка метеоумов для одного НМХ).
+  const ownCell = key => key === 'weather' || matched.mapped.has(key);
+  const issues = [];
+  for (const entry of plan.timeline) {
+    const kind = entry.skipped ? 'skipped' : 'unreadable';
+    for (const issue of entry.issues) {
+      issues.push({
+        id: correctionId(entry.number, issue.key), number: entry.number, key: issue.key, label: issue.label,
+        column: issue.column, raw: issue.raw, reason: issue.reason, kind, prefill: ownCell(issue.key),
+      });
+    }
+    if (!entry.skipped) continue;
+    for (const field of fields) {
+      if (!field.required || entry.values[field.key] != null || entry.issues.some(issue => issue.key === field.key)) continue;
+      issues.push({
+        id: correctionId(entry.number, field.key), number: entry.number, key: field.key, label: field.label,
+        column: sourceLabel(matched, field.key), raw: '', reason: 'немає значення, без нього запис не підтягується', kind: 'skipped',
+        prefill: false,
+      });
+    }
+  }
+  const cellsOf = new Map(plan.timeline.map(entry => [entry.number, entry.cells]));
+  for (const rule of built.rules) {
+    issues.push({
+      id: rule.id, number: rule.number, key: rule.fieldKey, label: fieldByKey.get(rule.fieldKey)?.label ?? rule.fieldKey,
+      column: sourceLabel(matched, rule.fieldKey), raw: cellTextOf(matched, cellsOf.get(rule.number) ?? [], rule.fieldKey),
+      reason: rule.message, kind: 'rule', prefill: ownCell(rule.fieldKey),
+    });
+  }
+  const rank = key => (key === 'weather' ? -1 : order.get(key) ?? 1e6);
+  return issues.sort((left, right) => left.number - right.number
+    || KIND_ORDER[left.kind] - KIND_ORDER[right.kind]
+    || rank(left.key) - rank(right.key));
+}
+
+/**
+ * Виправлення для `create_dashboard_module` (`corrections`): кожне — до свого запису за його
+ * номером серед `rows`, з сирим текстом клітинки, введеним текстом, причиною й місцем у
+ * таблиці (лише назва файла, аркуш, рядок і колонка). Виправлення клітинки метеоумов дає
+ * запис на кожне поле погоди. Виправлення запису, який так і не підтягується, відкидається.
+ */
+export function correctionRecords(plan, built, fileName = '') {
+  const positions = new Map(built.rowNumbers.map((number, index) => [number, index]));
+  const issueById = new Map((plan.issues ?? []).map(issue => [issue.id, issue]));
+  const records = new Map();
+  for (const item of built.applied) {
+    const rowIndex = positions.get(item.number);
+    if (rowIndex == null) continue;
+    const issue = issueById.get(item.id);
+    for (const fieldKey of Object.keys(item.values)) {
+      records.set(`${rowIndex}:${fieldKey}`, {
+        rowIndex,
+        fieldKey,
+        sourceFile: String(fileName ?? '').slice(0, 255),
+        sourceSheet: String(plan.sheet ?? '').slice(0, 255),
+        sourceRow: item.number,
+        sourceColumn: String(issue?.column ?? '').slice(0, 255),
+        rawText: String(issue?.raw ?? '').slice(0, MAX_TEXT),
+        correctedText: item.text.slice(0, MAX_TEXT),
+        reason: String(issue?.reason ?? '').slice(0, 500),
+      });
+    }
+  }
+  return [...records.values()];
 }
 
 const NO_HEADER = 'У аркуші не знайдено рядка заголовків, схожого на колонки модуля.';
@@ -766,6 +949,11 @@ export function planImport(fields, sheetRows) {
     // Метеоумови, які можна протягнути на записи без них (`importRows`): `sets[i]` — набір для запису
     // `rows[i]` або null; `possible` — скільки записів його отримають, `unresolved` — скільком не можна.
     carry: { keys: [], possible: 0, firstNumber: null, unresolved: 0, unresolvedFirst: null, sets: [] },
+    // Для екрана «Перевірка»: рядки з даними по порядку (`timeline`), зауваження, які можна виправити
+    // (`issues`), і поля, що їх дає клітинка метеоумов (`weatherKeys`).
+    timeline: [],
+    issues: [],
+    weatherKeys: [],
     truncated: false,
     blocked: '',
     firstRecord: [],
@@ -789,39 +977,35 @@ export function planImport(fields, sheetRows) {
   };
   const reasons = new Map();
   const problems = new Map();
-  const ruleKinds = new Map();
-  const { carry } = plan;
-  carry.keys = weatherKeysOf(list);
-  const track = weatherTracker(carry.keys);
-  const weatherUnreadable = issues => issues.some(issue => issue.key === 'weather' || carry.keys.includes(issue.key));
+  // Кожен рядок із даними по порядку: і той, що підтягнеться, і пропущений через обов'язкове поле.
+  // Екран «Перевірка» може виправити клітинку будь-якого з них; `buildImport` збирає записи заново.
+  const timeline = [];
+  let imported = 0;
   for (const row of rows.slice(header.index + 1)) {
-    if (plan.rows.length >= MAX_IMPORT_ROWS) { plan.truncated = true; break; }
+    if (imported >= MAX_IMPORT_ROWS) { plan.truncated = true; break; }
     const read = readRow(row, context);
     if (read.skip) {
       bump(reasons, read.skip, { reason: read.skip, firstNumber: row.number });
-      if (read.values) track(read.values, weatherUnreadable(read.issues));
+      if (read.values) timeline.push({ number: row.number, cells: row.cells, values: read.values, issues: read.issues, skipped: read.skip });
       continue;
     }
-    plan.rows.push(read.values);
-    plan.rowNumbers.push(row.number);
-    const carried = track(read.values, weatherUnreadable(read.issues));
-    carry.sets.push(carried?.set ?? null);
-    if (carried?.set) {
-      carry.possible += 1;
-      carry.firstNumber ??= row.number;
-    } else if (carried?.left) {
-      carry.unresolved += 1;
-      carry.unresolvedFirst ??= row.number;
-    }
+    imported += 1;
+    timeline.push({ number: row.number, cells: row.cells, values: read.values, issues: read.issues, skipped: '' });
     for (const issue of read.issues) bump(problems, issue.key, { ...issue, firstNumber: row.number });
-    const rule = rowRuleProblem(read.values);
-    if (rule) {
-      plan.rules.count += 1;
-      if (plan.rules.firstNumber == null) Object.assign(plan.rules, { firstNumber: row.number, message: rule.message });
-      bump(ruleKinds, rule.fieldKey || rule.message, { message: rule.message, firstNumber: row.number });
-    }
+  }
+  plan.timeline = timeline;
+  plan.weatherKeys = matched.weather?.keys ?? [];
+  plan.carry.keys = weatherKeysOf(list);
+  const built = buildImport(list, plan);
+  Object.assign(plan, { rows: built.rows, rowNumbers: built.rowNumbers, carry: built.carry });
+  const ruleKinds = new Map();
+  for (const rule of built.rules) {
+    plan.rules.count += 1;
+    if (plan.rules.firstNumber == null) Object.assign(plan.rules, { firstNumber: rule.number, message: rule.message });
+    bump(ruleKinds, rule.fieldKey || rule.message, { message: rule.message, firstNumber: rule.number });
   }
   plan.rules.items = [...ruleKinds.values()];
+  plan.issues = reviewIssues(list, plan, built, matched);
   plan.truncated ||= sheetRows?.truncated === true;
   plan.skipped = [...reasons.values()].sort((left, right) => right.count - left.count);
   plan.skippedCount = plan.skipped.reduce((sum, item) => sum + item.count, 0);
@@ -855,17 +1039,46 @@ const whereWord = (count, number) => (count > 1 ? `перший — рядок $
 /**
  * Записи для створення модуля. `carryWeather` — протягнути метеоумови на записи тієї ж льотної зміни,
  * де їх не вказано (`plan.carry`); нове значення з таблиці ніколи не перекривається. Без протягування
- * записи такі, як у таблиці.
+ * записи такі, як у таблиці. `build` — результат `buildImport` з виправленнями екрана «Перевірка».
  */
-export function importRows(plan, { carryWeather = true } = {}) {
-  const { sets, possible } = plan.carry;
-  if (!carryWeather || !possible) return plan.rows;
-  return plan.rows.map((row, index) => (sets[index] ? { ...sets[index], ...row } : row));
+export function importRows(plan, { carryWeather = true, build = null } = {}) {
+  const { rows, carry } = build ?? plan;
+  if (!carryWeather || !carry.possible) return rows;
+  return rows.map((row, index) => (carry.sets[index] ? { ...carry.sets[index], ...row } : row));
 }
 
-/** Підписи плану для вікна створення. Порожній рядок — нічого показувати. */
-export function describePlan(plan) {
-  const importable = plan.rows.length;
+/**
+ * Стан зауважень для екрана «Перевірка»: кожне зауваження плану з його станом після
+ * виправлень `build` — `open` (не виправлено), `fixed` (виправлено; для правила — порушення
+ * немає), `still` (виправлення застосовано, але правило й далі порушене), `invalid`
+ * (введений текст не годиться, причина в `problem`). `imported` — чи підтягнеться запис.
+ */
+export function reviewState(plan, build) {
+  const applied = new Map(build.applied.map(item => [item.id, item]));
+  const invalid = new Map(build.problems.map(item => [item.id, item.problem]));
+  const ruleOpen = new Set(build.rules.map(rule => rule.id));
+  const imported = new Set(build.rowNumbers);
+  const items = (plan.issues ?? []).map(issue => {
+    const fixed = applied.has(issue.id);
+    let status;
+    if (invalid.has(issue.id)) status = 'invalid';
+    else if (issue.kind === 'rule') status = ruleOpen.has(issue.id) ? (fixed ? 'still' : 'open') : 'fixed';
+    else status = fixed ? 'fixed' : 'open';
+    return { ...issue, status, problem: invalid.get(issue.id) ?? '', corrected: applied.get(issue.id)?.text ?? '', imported: imported.has(issue.number) };
+  });
+  const count = status => items.filter(item => item.status === status).length;
+  return { items, total: items.length, fixed: count('fixed'), open: items.length - count('fixed'), applied: applied.size };
+}
+
+const valuesWord = count => `${count} ${pluralForm(count, 'значення', 'значення', 'значень')}`;
+
+/**
+ * Підписи плану для вікна створення. Порожній рядок — нічого показувати. `build` — записи з
+ * виправленнями екрана «Перевірка» (`buildImport`); без нього — таблиця як є.
+ */
+export function describePlan(plan, build = null) {
+  const current = build ?? plan;
+  const importable = current.rows.length;
   const notes = {
     summary: importable ? `Буде підтягнуто ${rowCountLabel(importable)}.` : 'Записів для підтягування немає.',
     columns: `Знайдено стовпців: ${plan.matched} з ${plan.total}.`,
@@ -878,6 +1091,8 @@ export function describePlan(plan) {
     carryLabel: '',
     carry: '',
     carryUnresolved: '',
+    // Виправлення з екрана «Перевірка»: скільки значень виправлено вручну.
+    corrected: '',
     truncated: '',
   };
   if (plan.missing.length && plan.matched) {
@@ -893,7 +1108,7 @@ export function describePlan(plan) {
   for (const item of plan.rules.items) {
     notes.warnings.push(`Зауваження до ${rowsGenitive(item.count)} (${whereWord(item.count, item.firstNumber)}): ${item.message}`);
   }
-  const { carry } = plan;
+  const { carry } = current;
   if (carry.possible) {
     notes.carryLabel = `Протягнути метеоумови на ${rowCountLabel(carry.possible)} тієї ж льотної зміни, де їх не вказано`;
     notes.carry = `Береться значення з попереднього запису тієї ж льотної зміни, поки в таблиці не з'явиться нове (${whereWord(carry.possible, carry.firstNumber)}).`;
@@ -903,6 +1118,9 @@ export function describePlan(plan) {
       + 'почалася нова льотна зміна без метеоумов або в таблиці не вказано номер зміни. Метеополя там лишаться порожніми.';
   }
   if (plan.truncated) notes.truncated = `У таблиці більше ${MAX_IMPORT_ROWS} рядків: підтягнуто перші ${MAX_IMPORT_ROWS} записів.`;
+  if (build?.applied.length) {
+    notes.corrected = `Виправлено вручну: ${valuesWord(build.applied.length)}. Сирі значення таблиці збережуться окремо й будуть видні в модулі.`;
+  }
   return notes;
 }
 
@@ -922,6 +1140,11 @@ export const dashboardModuleSourceCore = {
   rankSheets,
   convertCell,
   planImport,
+  buildImport,
+  reviewState,
+  correctionOutcome,
+  correctionId,
+  correctionRecords,
   importRows,
   describePlan,
   sheetOptionLabel,

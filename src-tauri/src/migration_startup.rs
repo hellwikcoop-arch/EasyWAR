@@ -578,7 +578,7 @@ mod tests {
 
         assert_eq!(
             restore::inspect_backup(&live).await.unwrap(),
-            BackupInspection { schema_version: 10 }
+            BackupInspection { schema_version: 11 }
         );
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
@@ -606,7 +606,7 @@ mod tests {
         insert_complete_provenance_chain(&pool).await;
         pool.close().await;
         let original = fs::read(&live).unwrap();
-        let backup = pre_migration_backup_path(&live, 3, 10).unwrap();
+        let backup = pre_migration_backup_path(&live, 3, 11).unwrap();
 
         prepare_database(&live).await.unwrap();
 
@@ -617,7 +617,7 @@ mod tests {
         );
         assert_eq!(
             restore::inspect_backup(&live).await.unwrap(),
-            BackupInspection { schema_version: 10 }
+            BackupInspection { schema_version: 11 }
         );
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
@@ -668,7 +668,7 @@ mod tests {
             .await
             .unwrap();
         pool.close().await;
-        assert_eq!(migration_count, 10);
+        assert_eq!(migration_count, 11);
 
         let migrated_once = fs::read(&live).unwrap();
         let backup_once = fs::read(&backup).unwrap();
@@ -706,7 +706,7 @@ mod tests {
             .await
             .is_err());
         assert_eq!(fs::read(&live).unwrap(), original);
-        let backup = pre_migration_backup_path(&live, 3, 10).unwrap();
+        let backup = pre_migration_backup_path(&live, 3, 11).unwrap();
         assert_eq!(fs::read(&backup).unwrap(), original);
         assert_eq!(
             restore::inspect_backup(&backup).await.unwrap(),
@@ -724,7 +724,7 @@ mod tests {
         first_pool.close().await;
         let first_original = fs::read(&live).unwrap();
         prepare_database(&live).await.unwrap();
-        let first_backup = pre_migration_backup_path(&live, 3, 10).unwrap();
+        let first_backup = pre_migration_backup_path(&live, 3, 11).unwrap();
         assert_eq!(fs::read(&first_backup).unwrap(), first_original);
 
         let restored = directory.path().join("restored-v3.sqlite3");
@@ -744,12 +744,12 @@ mod tests {
 
         prepare_database(&live).await.unwrap();
 
-        let second_backup = numbered_pre_migration_backup_path(&live, 3, 10, 1).unwrap();
+        let second_backup = numbered_pre_migration_backup_path(&live, 3, 11, 1).unwrap();
         assert_eq!(fs::read(&first_backup).unwrap(), first_original);
         assert_eq!(fs::read(&second_backup).unwrap(), restored_original);
         assert_eq!(
             restore::inspect_backup(&live).await.unwrap(),
-            BackupInspection { schema_version: 10 }
+            BackupInspection { schema_version: 11 }
         );
     }
 
@@ -767,11 +767,11 @@ mod tests {
 
         assert_eq!(
             restore::inspect_backup(&live).await.unwrap(),
-            BackupInspection { schema_version: 10 }
+            BackupInspection { schema_version: 11 }
         );
         assert!(!previous.exists());
         assert_eq!(
-            restore::inspect_backup(&pre_migration_backup_path(&live, 3, 10).unwrap())
+            restore::inspect_backup(&pre_migration_backup_path(&live, 3, 11).unwrap())
                 .await
                 .unwrap(),
             BackupInspection { schema_version: 3 }

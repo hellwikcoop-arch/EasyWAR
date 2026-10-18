@@ -6,12 +6,17 @@ import {
   describePlan,
   enoughMatches,
   findHeaderRow,
+  buildImport,
+  correctionId,
+  correctionOutcome,
+  correctionRecords,
   headerCandidates,
   importRows,
   matchHeaders,
   normalizeHeader,
   planImport,
   rankSheets,
+  reviewState,
   sheetOptionLabel,
   sourceProfile,
 } from '../src/dashboard-module-source-core.js';
@@ -714,6 +719,145 @@ test('carry notes give the count, the first row and the reason some records stay
 
   const plain = describePlan(planImport(flightFields, journal(flightOf(1, '5/300/1000/10'), flightOf(1, '5/300/1000/10'))));
   assert.deepEqual([plain.carryLabel, plain.carry, plain.carryUnresolved], ['', '', ''], 'nothing to say when every record has its own weather');
+});
+
+// ---------------------------------------------------------------------------------------------
+// Перевірка: виправлення значень до підтягування (сире значення таблиці лишається як є)
+
+const REVIEW_JOURNAL = () => journal(
+  flightOf(1, '5/300/1000/10', { [col('Зліт')]: '25:00' }), // рядок 2: час зльоту не розібрано
+  flightOf(1, null, { [col('Висота')]: '0,3' }), // рядок 3: висота неоднозначна; погода протягується
+  flightOf(1, null, { [col('Тип ПС')]: null }), // рядок 4: без типу ПС — пропущено
+  flightOf(1, 'ясно'), // рядок 5: клітинку метеоумов не розібрано
+  flightOf(1, null), // рядок 6: після нерозібраної погоди — без погоди
+  flightOf(2, '5/1000/300/10'), // рядок 7: НМХ вища за ВМХ
+);
+
+test('the review lists what can be corrected: unreadable cells, skipped records and broken form rules', () => {
+  const plan = planImport(flightFields, REVIEW_JOURNAL());
+  assert.equal(plan.rows.length, 5);
+  assert.deepEqual(plan.issues.map(issue => [issue.id, issue.kind]), [
+    ['2:takeoff_time', 'unreadable'],
+    ['3:flight_altitude', 'unreadable'],
+    ['4:aircraft_type', 'skipped'],
+    ['5:weather', 'unreadable'],
+    ['7:cloud_base_lower', 'rule'],
+  ]);
+  const byId = Object.fromEntries(plan.issues.map(issue => [issue.id, issue]));
+  assert.deepEqual(
+    [byId['2:takeoff_time'].raw, byId['2:takeoff_time'].column, byId['2:takeoff_time'].label],
+    ['25:00', 'Зліт', 'Час зльоту'],
+  );
+  assert.equal(byId['3:flight_altitude'].raw, '0,3');
+  assert.equal(byId['4:aircraft_type'].raw, '');
+  assert.match(byId['4:aircraft_type'].reason, /без нього запис не підтягується/u);
+  assert.equal(byId['5:weather'].column, 'Метеоумови (хмарність нижня межа верхня межа видимість)');
+  assert.equal(byId['7:cloud_base_lower'].raw, '5/1000/300/10', 'the raw text is the weather cell the value came from');
+  assert.deepEqual(plan.issues.map(issue => issue.prefill), [true, true, false, true, false],
+    'the raw text is a starting point only when it is the cell of that very field');
+  assert.match(byId['7:cloud_base_lower'].reason, /НМХ/u);
+});
+
+test('a corrected text is read by the same rules as a table cell and nothing is guessed', () => {
+  const plan = planImport(flightFields, REVIEW_JOURNAL());
+  assert.deepEqual(correctionOutcome(flightFields, plan, 'takeoff_time', ' 14:25 '), { values: { takeoff_time: '14:25' } });
+  assert.match(correctionOutcome(flightFields, plan, 'takeoff_time', '25:00').problem, /час доби/u);
+  assert.deepEqual(correctionOutcome(flightFields, plan, 'flight_altitude', '0,3 км'), { values: { flight_altitude: 300 } });
+  assert.match(correctionOutcome(flightFields, plan, 'flight_altitude', '0,3').problem, /0,3 км/u);
+  assert.deepEqual(correctionOutcome(flightFields, plan, 'weather', '3/200/800/6'), {
+    values: { cloud_cover: 3, cloud_base_lower: 200, cloud_base_upper: 800, visibility: 6 },
+  });
+  assert.match(correctionOutcome(flightFields, plan, 'weather', '3/200').problem, /чотири числа/u);
+  assert.deepEqual(correctionOutcome(flightFields, plan, 'aircraft_type', 'Мі-8'), { values: { aircraft_type: 'Мі-8' } });
+  assert.equal(correctionOutcome(flightFields, plan, 'aircraft_type', '   ').problem, 'введіть значення');
+  assert.equal(correctionOutcome(flightFields, plan, 'secret', '1').problem, 'невідоме поле');
+});
+
+test('corrections go into copies of the records: the plan keeps the table as it is', () => {
+  const plan = planImport(flightFields, REVIEW_JOURNAL());
+  const before = JSON.stringify(plan.rows);
+  const corrections = new Map([
+    [correctionId(2, 'takeoff_time'), '14:25'],
+    [correctionId(3, 'flight_altitude'), '0,3 км'],
+    [correctionId(4, 'aircraft_type'), 'Мі-24'],
+    [correctionId(5, 'weather'), '3/200/800/6'],
+    [correctionId(7, 'cloud_base_lower'), '200'],
+  ]);
+  const built = buildImport(flightFields, plan, corrections);
+  assert.equal(JSON.stringify(plan.rows), before, 'the plan rows are untouched');
+  assert.deepEqual(built.rowNumbers, [2, 3, 4, 5, 6, 7], 'the skipped record comes back in its place');
+  assert.equal(built.rows[0].takeoff_time, '14:25');
+  assert.equal(built.rows[1].flight_altitude, 300);
+  assert.equal(built.rows[2].aircraft_type, 'Мі-24');
+  assert.deepEqual(weatherOf(built.rows[3]), [3, 200, 800, 6]);
+  assert.deepEqual(built.rules, [], 'the corrected НМХ no longer breaks the rule');
+  assert.equal(built.applied.length, 5);
+  assert.deepEqual(built.problems, []);
+  // Виправлена погода — нове значення: запис після неї бере саме її.
+  const records = importRows(plan, { build: built });
+  assert.deepEqual(weatherOf(records[4]), [3, 200, 800, 6]);
+  assert.deepEqual(weatherOf(records[1]), [5, 300, 1000, 10], 'the record after the first one still takes the first weather');
+  assert.deepEqual(weatherOf(importRows(plan).at(-2)), NO_WEATHER, 'without the correction the weather after an unreadable cell is unknown');
+
+  const wrong = buildImport(flightFields, plan, new Map([[correctionId(2, 'takeoff_time'), '24:61']]));
+  assert.equal(wrong.problems.length, 1);
+  assert.equal(wrong.problems[0].id, '2:takeoff_time');
+  assert.equal('takeoff_time' in wrong.rows[0], false, 'a bad correction leaves the field empty, as without it');
+});
+
+test('saved corrections point to the created records and keep the raw cell, the typed text and where it was', () => {
+  const plan = planImport(flightFields, REVIEW_JOURNAL());
+  const built = buildImport(flightFields, plan, new Map([
+    [correctionId(2, 'takeoff_time'), ' 14:25 '],
+    [correctionId(4, 'aircraft_type'), 'Мі-24'],
+    [correctionId(5, 'weather'), '3/200/800/6'],
+  ]));
+  const records = correctionRecords(plan, built, 'Журнал_синтетичний.xlsx');
+  assert.deepEqual(records[0], {
+    rowIndex: 0, fieldKey: 'takeoff_time', sourceFile: 'Журнал_синтетичний.xlsx', sourceSheet: 'Журнал', sourceRow: 2,
+    sourceColumn: 'Зліт', rawText: '25:00', correctedText: '14:25', reason: 'очікується час доби, наприклад 14:25',
+  });
+  assert.deepEqual(records.map(record => [record.rowIndex, record.fieldKey]), [
+    [0, 'takeoff_time'], [2, 'aircraft_type'],
+    [3, 'cloud_cover'], [3, 'cloud_base_lower'], [3, 'cloud_base_upper'], [3, 'visibility'],
+  ]);
+  assert.ok(records.every(record => record.rawText !== record.correctedText));
+  // Кожне виправлене поле в записі має значення — так перевіряє і Rust.
+  const rows = importRows(plan, { build: built });
+  for (const record of records) assert.notEqual(rows[record.rowIndex][record.fieldKey], undefined, record.fieldKey);
+  // Запис, який так і не підтягується, своїх виправлень не зберігає.
+  const lost = buildImport(flightFields, plan, new Map([[correctionId(4, 'flight_altitude'), '300']]));
+  assert.deepEqual(correctionRecords(plan, lost, 'x.xlsx'), []);
+});
+
+test('the review state tells what is fixed, still open or wrong, and the notes count the corrections', () => {
+  const plan = planImport(flightFields, REVIEW_JOURNAL());
+  const untouched = reviewState(plan, buildImport(flightFields, plan));
+  assert.deepEqual([untouched.total, untouched.fixed, untouched.open], [5, 0, 5]);
+  const built = buildImport(flightFields, plan, new Map([
+    [correctionId(2, 'takeoff_time'), '14:25'],
+    [correctionId(3, 'flight_altitude'), '0,3'],
+    [correctionId(7, 'cloud_base_lower'), '900'],
+  ]));
+  const state = reviewState(plan, built);
+  const status = Object.fromEntries(state.items.map(item => [item.id, item.status]));
+  assert.deepEqual(status, {
+    '2:takeoff_time': 'fixed',
+    '3:flight_altitude': 'invalid',
+    '4:aircraft_type': 'open',
+    '5:weather': 'open',
+    '7:cloud_base_lower': 'still',
+  });
+  assert.match(state.items.find(item => item.id === '3:flight_altitude').problem, /0,3 км/u);
+  assert.equal(state.items.find(item => item.id === '4:aircraft_type').imported, false);
+  assert.deepEqual([state.fixed, state.open, state.applied], [1, 4, 2]);
+
+  const notes = describePlan(plan, built);
+  assert.equal(notes.summary, 'Буде підтягнуто 5 записів.');
+  assert.equal(notes.corrected, 'Виправлено вручну: 2 значення. Сирі значення таблиці збережуться окремо й будуть видні в модулі.');
+  const recovered = buildImport(flightFields, plan, new Map([[correctionId(4, 'aircraft_type'), 'Мі-8']]));
+  assert.equal(describePlan(plan, recovered).summary, 'Буде підтягнуто 6 записів.');
+  assert.equal(describePlan(plan).corrected, '');
 });
 
 // ---------------------------------------------------------------------------------------------

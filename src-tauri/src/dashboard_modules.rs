@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Number, Value};
 use sha2::{Digest, Sha256};
 use sqlx::{Row, Sqlite, SqlitePool, Transaction};
@@ -11,6 +11,11 @@ const MAX_TEXT_LENGTH: usize = 4096;
 /// Службове поле рядка: ідентифікатор запису, який клієнт отримав від `get_data`.
 /// Це не колонка каталогу, тому в DDL воно не потрапляє.
 const ROW_ID_KEY: &str = "rowId";
+/// Скільки виправлень можна передати разом зі створенням модуля.
+const MAX_CORRECTIONS_PER_WRITE: usize = 20_000;
+/// Назва файла, аркуша й заголовок колонки джерела виправлення.
+const MAX_SOURCE_TEXT_LENGTH: usize = 255;
+const MAX_REASON_LENGTH: usize = 500;
 
 #[derive(Clone, Debug)]
 pub struct DashboardModuleStore {
@@ -74,6 +79,42 @@ pub struct DashboardModuleData {
     pub module: DashboardModule,
     pub rows: Vec<BTreeMap<String, Value>>,
     pub truncated: bool,
+    /// Значення, виправлені на екрані «Перевірка» під час підтягування з таблиці
+    /// користувача: сирий текст клітинки й введений текст окремо від запису.
+    pub corrections: Vec<DashboardModuleCorrection>,
+}
+
+/// Виправлення, яке надходить разом зі створенням модуля: `row_index` — номер запису
+/// в `rows` (з нуля). Сам запис уже містить виправлене значення; тут — звідки воно
+/// взялося. Шляху до файла немає: лише назва, аркуш, рядок і заголовок колонки.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NewImportCorrection {
+    pub row_index: usize,
+    pub field_key: String,
+    pub source_file: String,
+    pub source_sheet: String,
+    pub source_row: i64,
+    pub source_column: String,
+    pub raw_text: String,
+    pub corrected_text: String,
+    pub reason: String,
+}
+
+/// Збережене виправлення значення запису модуля (таблиця `dashboard_module_corrections`).
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct DashboardModuleCorrection {
+    pub row_id: i64,
+    pub field_key: String,
+    pub source_file: String,
+    pub source_sheet: String,
+    pub source_row: i64,
+    pub source_column: String,
+    pub raw_text: String,
+    pub corrected_text: String,
+    pub reason: String,
+    pub created_at: String,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -108,6 +149,8 @@ pub enum DashboardModuleError {
     Conflict,
     #[error("некоректний або повторений ідентифікатор запису")]
     InvalidRowId,
+    #[error("виправлення значення не відповідає підтягнутим записам")]
+    InvalidCorrection,
 }
 
 fn field(
@@ -803,6 +846,34 @@ impl DashboardModuleStore {
         rows: Vec<Map<String, Value>>,
         created_at: &str,
     ) -> Result<DashboardModule, DashboardModuleError> {
+        self.create_with_import(
+            profile_id,
+            branch,
+            template_id,
+            requested_title,
+            rows,
+            Vec::new(),
+            created_at,
+        )
+        .await
+    }
+
+    /// Як `create_with_rows`, але ще й з виправленнями з екрана «Перевірка»: вони
+    /// записуються в `dashboard_module_corrections` тією самою транзакцією, кожне —
+    /// до свого запису за його новим `row_id`. Виправлення, яке не відповідає
+    /// записам (немає такого запису чи поля, значення порожнє, повтор), скасовує
+    /// створення так само, як некоректний рядок.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_with_import(
+        &self,
+        profile_id: &str,
+        branch: &str,
+        template_id: &str,
+        requested_title: Option<&str>,
+        rows: Vec<Map<String, Value>>,
+        corrections: Vec<NewImportCorrection>,
+        created_at: &str,
+    ) -> Result<DashboardModule, DashboardModuleError> {
         if !valid_branch(branch) {
             return Err(DashboardModuleError::InvalidBranch);
         }
@@ -826,6 +897,7 @@ impl DashboardModuleStore {
             })
             .collect::<Vec<_>>();
         validate_new_rows(&template_fields, &rows)?;
+        validate_corrections(&template_fields, &rows, &corrections)?;
 
         let count: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM dashboard_modules WHERE profile_id = ? AND branch = ?",
@@ -880,7 +952,7 @@ impl DashboardModuleStore {
         }
 
         create_data_table(&mut transaction, &storage_table, &selected.fields).await?;
-        insert_rows(
+        let row_ids = insert_rows(
             &mut transaction,
             &storage_table,
             &template_fields,
@@ -888,6 +960,27 @@ impl DashboardModuleStore {
             created_at,
         )
         .await?;
+        for correction in &corrections {
+            sqlx::query(
+                "INSERT INTO dashboard_module_corrections
+                 (module_id, row_id, field_key, source_file, source_sheet, source_row, source_column,
+                  raw_text, corrected_text, reason, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind(&id)
+            .bind(row_ids[correction.row_index])
+            .bind(&correction.field_key)
+            .bind(&correction.source_file)
+            .bind(&correction.source_sheet)
+            .bind(correction.source_row)
+            .bind(&correction.source_column)
+            .bind(&correction.raw_text)
+            .bind(correction.corrected_text.trim())
+            .bind(&correction.reason)
+            .bind(created_at)
+            .execute(&mut *transaction)
+            .await?;
+        }
         transaction.commit().await?;
         self.get_for_profile(profile_id, &id).await
     }
@@ -948,10 +1041,21 @@ impl DashboardModuleStore {
             }
             rows.push(item);
         }
+        let corrections = sqlx::query_as::<_, DashboardModuleCorrection>(
+            "SELECT row_id, field_key, source_file, source_sheet, source_row, source_column,
+                    raw_text, corrected_text, reason, created_at
+             FROM dashboard_module_corrections
+             WHERE module_id = ?
+             ORDER BY row_id, id",
+        )
+        .bind(&module.id)
+        .fetch_all(&self.pool)
+        .await?;
         Ok(DashboardModuleData {
             module,
             rows,
             truncated,
+            corrections,
         })
     }
 
@@ -1091,6 +1195,14 @@ impl DashboardModuleStore {
             }
             query.execute(&mut *transaction).await?;
         }
+        // Видалений запис забирає свої виправлення: їм більше нема до чого належати.
+        sqlx::query(&format!(
+            "DELETE FROM dashboard_module_corrections
+             WHERE module_id = ? AND row_id NOT IN (SELECT \"row_id\" FROM {table})"
+        ))
+        .bind(module_id)
+        .execute(&mut *transaction)
+        .await?;
         transaction.commit().await?;
         self.get_data(profile_id, module_id).await
     }
@@ -1360,16 +1472,17 @@ fn validate_new_rows(
     Ok(())
 }
 
-/// Дописує рядки в таблицю модуля в порядку надходження (їхні `row_id` зростають).
+/// Дописує рядки в таблицю модуля в порядку надходження (їхні `row_id` зростають)
+/// і повертає `row_id` кожного рядка в тому самому порядку.
 async fn insert_rows(
     transaction: &mut Transaction<'_, Sqlite>,
     storage_table: &str,
     fields: &[DashboardModuleField],
     rows: &[Map<String, Value>],
     created_at: &str,
-) -> Result<(), DashboardModuleError> {
+) -> Result<Vec<i64>, DashboardModuleError> {
     if rows.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
     let table = quoted_identifier(storage_table)?;
     let columns = std::iter::once(Ok("\"created_at\"".to_owned()))
@@ -1380,12 +1493,53 @@ async fn insert_rows(
         columns.join(", "),
         vec!["?"; columns.len()].join(", ")
     );
+    let mut row_ids = Vec::with_capacity(rows.len());
     for row in rows {
         let mut query = sqlx::query(&sql).bind(created_at);
         for field in fields {
             query = bind_field(query, field, row.get(&field.key))?;
         }
-        query.execute(&mut **transaction).await?;
+        row_ids.push(query.execute(&mut **transaction).await?.last_insert_rowid());
+    }
+    Ok(row_ids)
+}
+
+/// Виправлення мають відповідати записам, які створюються: є такий запис і таке
+/// поле, у записі є значення (саме його й виправлено), одне виправлення на поле
+/// запису, тексти в межах. Сирий текст може бути порожнім (клітинка без значення).
+fn validate_corrections(
+    fields: &[DashboardModuleField],
+    rows: &[Map<String, Value>],
+    corrections: &[NewImportCorrection],
+) -> Result<(), DashboardModuleError> {
+    if corrections.len() > MAX_CORRECTIONS_PER_WRITE {
+        return Err(DashboardModuleError::InvalidCorrection);
+    }
+    let known = fields
+        .iter()
+        .map(|field| field.key.as_str())
+        .collect::<BTreeSet<_>>();
+    let within = |text: &str, limit: usize| text.chars().count() <= limit;
+    let mut seen = BTreeSet::new();
+    for correction in corrections {
+        let corrected = correction.corrected_text.trim();
+        let valid = known.contains(correction.field_key.as_str())
+            && rows
+                .get(correction.row_index)
+                .and_then(|row| row.get(&correction.field_key))
+                .is_some_and(|value| !value.is_null())
+            && correction.source_row >= 1
+            && within(&correction.source_file, MAX_SOURCE_TEXT_LENGTH)
+            && within(&correction.source_sheet, MAX_SOURCE_TEXT_LENGTH)
+            && within(&correction.source_column, MAX_SOURCE_TEXT_LENGTH)
+            && within(&correction.raw_text, MAX_TEXT_LENGTH)
+            && !corrected.is_empty()
+            && within(corrected, MAX_TEXT_LENGTH)
+            && within(&correction.reason, MAX_REASON_LENGTH)
+            && seen.insert((correction.row_index, correction.field_key.as_str()));
+        if !valid {
+            return Err(DashboardModuleError::InvalidCorrection);
+        }
     }
     Ok(())
 }
@@ -1431,9 +1585,10 @@ fn validate_value(
 mod tests {
     use super::*;
     use crate::database::{
-        COMMAND_TABLES_SQL, DASHBOARD_MODULES_SQL, INITIAL_SCHEMA_SQL, LOCAL_PROFILES_SQL,
-        OWN_LOSSES_TABLES_SQL, PROFILE_BRANCH_TABLES_SQL, PROFILE_DETAILS_SQL, PROFILE_MODULES_SQL,
-        WORKSPACE_TEMPLATES_SQL, XLSX_DUPLICATE_LINKS_SQL,
+        COMMAND_TABLES_SQL, DASHBOARD_MODULES_SQL, DASHBOARD_MODULE_CORRECTIONS_SQL,
+        INITIAL_SCHEMA_SQL, LOCAL_PROFILES_SQL, OWN_LOSSES_TABLES_SQL, PROFILE_BRANCH_TABLES_SQL,
+        PROFILE_DETAILS_SQL, PROFILE_MODULES_SQL, WORKSPACE_TEMPLATES_SQL,
+        XLSX_DUPLICATE_LINKS_SQL,
     };
     use serde_json::json;
     use sqlx::sqlite::SqlitePoolOptions;
@@ -1494,6 +1649,7 @@ mod tests {
             OWN_LOSSES_TABLES_SQL,
             PROFILE_MODULES_SQL,
             DASHBOARD_MODULES_SQL,
+            DASHBOARD_MODULE_CORRECTIONS_SQL,
         ] {
             sqlx::raw_sql(migration).execute(&pool).await.unwrap();
         }
@@ -2323,5 +2479,235 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(left, 1);
+    }
+
+    /// Виправлення з екрана «Перевірка»: синтетичні клітинки «25:00» → «14:25».
+    fn correction(
+        row_index: usize,
+        field_key: &str,
+        raw: &str,
+        corrected: &str,
+    ) -> NewImportCorrection {
+        NewImportCorrection {
+            row_index,
+            field_key: field_key.to_owned(),
+            source_file: "Журнал_синтетичний.xlsx".to_owned(),
+            source_sheet: "Журнал".to_owned(),
+            source_row: 8 + row_index as i64,
+            source_column: "Зліт".to_owned(),
+            raw_text: raw.to_owned(),
+            corrected_text: corrected.to_owned(),
+            reason: "очікується час доби, наприклад 14:25".to_owned(),
+        }
+    }
+
+    fn imported_rows() -> Vec<Map<String, Value>> {
+        vec![
+            row(
+                json!({"aircraft_type": "Тестовий-1", "airborne_hours": 0.5, "total_hours": 0.75, "takeoff_time": "14:25"}),
+            ),
+            row(
+                json!({"aircraft_type": "Тестовий-2", "airborne_hours": 1.0, "total_hours": 1.25, "flight_altitude": 300.0}),
+            ),
+        ]
+    }
+
+    #[tokio::test]
+    async fn corrections_are_stored_apart_from_the_records_and_point_to_their_rows() {
+        let store = store().await;
+        let module = store
+            .create_with_import(
+                PROFILE,
+                "air",
+                "flight-hours",
+                None,
+                imported_rows(),
+                vec![
+                    correction(0, "takeoff_time", "25:00", "14:25"),
+                    correction(1, "flight_altitude", "0,3", "  300 м  "),
+                ],
+                "2026-01-01T00:00:01Z",
+            )
+            .await
+            .unwrap();
+        let data = store.get_data(PROFILE, &module.id).await.unwrap();
+        // Запис містить виправлене значення, а сире й введене — лише в таблиці виправлень.
+        assert_eq!(data.rows[0]["takeoff_time"], "14:25");
+        assert_eq!(data.rows[1]["flight_altitude"], 300.0);
+        assert_eq!(data.corrections.len(), 2);
+        let first = &data.corrections[0];
+        assert_eq!(first.row_id, data.rows[0]["rowId"].as_i64().unwrap());
+        assert_eq!(
+            (
+                first.field_key.as_str(),
+                first.raw_text.as_str(),
+                first.corrected_text.as_str()
+            ),
+            ("takeoff_time", "25:00", "14:25")
+        );
+        assert_eq!(
+            (
+                first.source_file.as_str(),
+                first.source_sheet.as_str(),
+                first.source_row,
+                first.source_column.as_str()
+            ),
+            ("Журнал_синтетичний.xlsx", "Журнал", 8, "Зліт")
+        );
+        assert_eq!(first.created_at, "2026-01-01T00:00:01Z");
+        assert_eq!(
+            data.corrections[1].row_id,
+            data.rows[1]["rowId"].as_i64().unwrap()
+        );
+        assert_eq!(
+            data.corrections[1].corrected_text, "300 м",
+            "введений текст зберігається без крайніх пробілів"
+        );
+        // У таблиці даних модуля немає жодної службової колонки для виправлень.
+        let columns = sqlx::query(&format!(
+            "SELECT name FROM pragma_table_info('{}')",
+            module.storage_table
+        ))
+        .fetch_all(&store.pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row| row.get::<String, _>("name"))
+        .collect::<Vec<_>>();
+        assert_eq!(columns.len(), 2 + FLIGHT_FIELD_KEYS.len());
+        assert!(columns
+            .iter()
+            .all(|name| !name.contains("correct") && !name.contains("raw")));
+
+        let other = store
+            .create(PROFILE, "air", "kpi", None, "2026-01-01T00:00:02Z")
+            .await
+            .unwrap();
+        assert!(store
+            .get_data(PROFILE, &other.id)
+            .await
+            .unwrap()
+            .corrections
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_correction_that_does_not_match_the_records_cancels_the_whole_creation() {
+        let store = store().await;
+        let cases = vec![
+            (
+                "немає запису",
+                correction(5, "takeoff_time", "25:00", "14:25"),
+            ),
+            ("невідоме поле", correction(0, "secret", "25:00", "14:25")),
+            (
+                "поле запису порожнє",
+                correction(0, "landing_time", "25:00", "14:25"),
+            ),
+            (
+                "порожній виправлений текст",
+                correction(0, "takeoff_time", "25:00", "   "),
+            ),
+            (
+                "рядок джерела",
+                NewImportCorrection {
+                    source_row: 0,
+                    ..correction(0, "takeoff_time", "25:00", "14:25")
+                },
+            ),
+            (
+                "довга назва файла",
+                NewImportCorrection {
+                    source_file: "ф".repeat(256),
+                    ..correction(0, "takeoff_time", "25:00", "14:25")
+                },
+            ),
+        ];
+        for (name, bad) in cases {
+            let result = store
+                .create_with_import(
+                    PROFILE,
+                    "air",
+                    "flight-hours",
+                    None,
+                    imported_rows(),
+                    vec![bad],
+                    "2026-01-01T00:00:01Z",
+                )
+                .await;
+            assert!(
+                matches!(result, Err(DashboardModuleError::InvalidCorrection)),
+                "{name}"
+            );
+            assert_eq!(module_count(&store).await, 0, "{name}: модуль створено");
+            assert_eq!(
+                data_table_count(&store).await,
+                0,
+                "{name}: лишилась таблиця"
+            );
+        }
+        let twice = store
+            .create_with_import(
+                PROFILE,
+                "air",
+                "flight-hours",
+                None,
+                imported_rows(),
+                vec![
+                    correction(0, "takeoff_time", "25:00", "14:25"),
+                    correction(0, "takeoff_time", "25:00", "14:30"),
+                ],
+                "2026-01-01T00:00:01Z",
+            )
+            .await;
+        assert!(
+            matches!(twice, Err(DashboardModuleError::InvalidCorrection)),
+            "одне поле запису — одне виправлення"
+        );
+        let stored: i64 = sqlx::query_scalar("SELECT count(*) FROM dashboard_module_corrections")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        assert_eq!(stored, 0);
+    }
+
+    #[tokio::test]
+    async fn a_removed_record_takes_its_corrections_and_an_edited_one_keeps_them() {
+        let store = store().await;
+        let module = store
+            .create_with_import(
+                PROFILE,
+                "air",
+                "flight-hours",
+                None,
+                imported_rows(),
+                vec![
+                    correction(0, "takeoff_time", "25:00", "14:25"),
+                    correction(1, "flight_altitude", "0,3", "300 м"),
+                ],
+                "2026-01-01T00:00:01Z",
+            )
+            .await
+            .unwrap();
+        let data = store.get_data(PROFILE, &module.id).await.unwrap();
+        let first = data.rows[0]["rowId"].clone();
+        // Перший запис змінено (інший тип ПС), другий видалено.
+        let saved = store
+            .replace_rows(
+                PROFILE,
+                &module.id,
+                vec![row(with_row_id(
+                    json!({"aircraft_type": "Тестовий-3", "airborne_hours": 0.5, "total_hours": 0.75, "takeoff_time": "14:25"}),
+                    first.clone(),
+                ))],
+                Some(&data.module.updated_at),
+                "2026-01-01T00:00:03Z",
+            )
+            .await
+            .unwrap();
+        assert_eq!(saved.rows.len(), 1);
+        assert_eq!(saved.corrections.len(), 1);
+        assert_eq!(saved.corrections[0].row_id, first.as_i64().unwrap());
+        assert_eq!(saved.corrections[0].raw_text, "25:00");
     }
 }

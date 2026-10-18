@@ -1010,9 +1010,9 @@ test('the data-from-table block sits in the left column of the create form, abov
 test('the weather carry is a visible switch, on by default, and the created rows follow it', async () => {
   const source = await readFile(new URL('../src/dashboard-module-catalog.js', import.meta.url), 'utf8');
   const css = await readFile(new URL('../src/dashboard-module-catalog.css', import.meta.url), 'utf8');
-  assert.match(source, /use: false, carry: true \}/, 'on by default, as the owner asked');
-  assert.match(source, /importRows\(model\.plan, \{ carryWeather: model\.carry \}\)/, 'the records sent to Rust are those of the switch');
-  assert.match(source, /plan\.carry\.possible \? el\('input', \{ type: 'checkbox'/, 'the switch exists only when there is something to carry');
+  assert.match(source, /use: false, carry: true,/, 'on by default, as the owner asked');
+  assert.match(source, /importRows\(model\.plan, \{ carryWeather: model\.carry, build: model\.build \}\)/, 'the records sent to Rust are those of the switch (and of the review)');
+  assert.match(source, /\(model\.build \?\? plan\)\.carry\.possible \? el\('input', \{ type: 'checkbox'/, 'the switch exists only when there is something to carry');
   assert.ok(source.includes('text: notes.carryLabel') && source.includes('text: notes.carry '), 'the switch says what it does and where to look');
   assert.ok(source.includes('add(notes.carryUnresolved, true)'), 'records left without weather are reported, not hidden');
   assert.match(css, /\.ewmc-source-carry\{display:grid;/);
@@ -1076,4 +1076,24 @@ test('the module page has search, column groups and density, and editing still s
   assert.match(source, /try \{ return localStorage\.getItem\(DENSITY_KEY\); \} catch/);
   assert.match(css, /\.ewmc-data-scroll\.is-compact /);
   assert.match(css, /\.ewmc-table-toolbar\{display:flex;/);
+});
+
+test('the review screen corrects values before the import and never rewrites the raw table', async () => {
+  const source = await readFile(new URL('../src/dashboard-module-catalog.js', import.meta.url), 'utf8');
+  const css = await readFile(new URL('../src/dashboard-module-catalog.css', import.meta.url), 'utf8');
+  const lib = await readFile(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf8');
+  const review = source.slice(source.indexOf('function showReview('), source.indexOf('async function reopenFresh('));
+  for (const text of ['Перевірка значень з таблиці', '← До створення', 'Застосувати', 'Скасувати виправлення', 'Готово — до створення модуля', 'лише читається']) {
+    assert.ok(review.includes(text), text);
+  }
+  // Виправлення йдуть у Rust окремим параметром, а не як змінені записи чи нові колонки.
+  assert.match(source, /\.\.\.\(corrections\.length \? \{ corrections \} : \{\}\)/);
+  assert.match(lib, /corrections: Option<Vec<NewImportCorrection>>/);
+  assert.match(source, /if \(dialog\.dataset\.view === 'review'\) \{\s*event\.preventDefault\(\);\s*state\.leaveReview\?\.\(\);/, 'Escape returns to the create form');
+  // Сторінка модуля показує виправлені клітинки й перелік виправлень із сирим значенням.
+  assert.match(source, /class: 'ewmc-corrected'/);
+  assert.ok(source.includes('Виправлено під час підтягування з таблиці'));
+  assert.doesNotMatch(review, /innerHTML|confirm\(|alert\(/);
+  assert.match(css, /\.ewmc-issue\{display:grid;/);
+  assert.match(css, /\.ewmc-data-table td\.ewmc-corrected\{/);
 });
