@@ -5,6 +5,7 @@ pub mod base_tables;
 pub mod dashboard_modules;
 mod database;
 mod desktop_shell;
+pub mod easygreen;
 pub mod local_model;
 pub mod local_profiles;
 mod migration_startup;
@@ -913,6 +914,66 @@ async fn save_presentation(
         &[extension],
         extension,
     );
+    let path = target.path.clone();
+    tauri::async_runtime::spawn_blocking(move || phone_export::save_file(&target, &bytes))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())?;
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+/// EasyGreen: зберігає файл, який передала вбудована таблиця (книга .xlsx або експорт у
+/// PDF, CSV чи HTML), у місце, яке обирає користувач. Дані не залишають пристрій. Таблиці,
+/// прив'язані до профілів, і їхні ротовані копії не перезаписуються (сире джерело
+/// змінюється лише штатним записом таблиці профілю).
+#[tauri::command]
+async fn save_easygreen_file(
+    app: tauri::AppHandle,
+    profiles: tauri::State<'_, LocalProfileStore>,
+    file_name: String,
+    bytes: Vec<u8>,
+) -> Result<Option<String>, String> {
+    let kind = easygreen::save_kind(&file_name).map_err(|error| error.to_string())?;
+    easygreen::check_bytes(&bytes).map_err(|error| error.to_string())?;
+    let suggested = easygreen::suggested_file_name(&file_name, kind);
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title("EasyGreen — зберегти")
+            .set_file_name(suggested)
+            .add_filter(kind.filter, &[kind.extension])
+            .blocking_save_file()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let accepted: &[&str] = if kind.extension == "html" {
+        &["html", "htm"]
+    } else {
+        &[kind.extension]
+    };
+    let target = phone_export::save_target(
+        selected.into_path().map_err(|error| error.to_string())?,
+        accepted,
+        kind.extension,
+    );
+    let bound: Vec<std::path::PathBuf> = profiles
+        .all_table_paths()
+        .await
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .map(std::path::PathBuf::from)
+        .collect();
+    if easygreen::is_protected_table(&target.path, &bound) {
+        let name = target
+            .path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        return Err(easygreen::EasyGreenError::ProtectedTable(name).to_string());
+    }
     let path = target.path.clone();
     tauri::async_runtime::spawn_blocking(move || phone_export::save_file(&target, &bytes))
         .await
@@ -1889,6 +1950,7 @@ pub fn run() {
             create_profile_base_table,
             export_phone_file,
             save_presentation,
+            save_easygreen_file,
             clear_profile_database,
             read_profile_database,
             write_profile_database,

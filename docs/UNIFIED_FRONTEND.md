@@ -186,6 +186,14 @@ ends, and the launcher stays `inert` until sign-in.
 - CSP у `tauri.conf.json` не змінювали (вона `null`). Якщо її колись посилять, довідникам, імовірно, знадобляться `'wasm-unsafe-eval'` (декодер meshopt — WASM), `blob:` для текстур із GLB і `font-src 'self'`; з посиленою CSP довідники не перевіряли.
 - Довідники налаштовано під three r160, а проєкт на r186. Різницю гасять `room-env.js` і заплатка `LEGACY_REFLECTIONS` у `guide-kit.js`; тест «вигляд, затверджений на three r160» падає, коли відповідний шматок шейдера three змінюється, — це сигнал переглянути `guide-kit.js`.
 
+## EasyGreen (робоче середовище, прототип)
+
+Електронні таблиці для майбутнього модуля «Робоче середовище» живуть окремо в `src/workspace/easygreen/`
+(панель `mountEasyGreen`, сторінка Vite `workspace-easygreen`), а зібрана веб-версія GridCraft — у
+`src/public/workspace/easygreen/app/`. Кнопки на головному екрані й картки в каталозі модулів немає:
+EasyGreen підключає оболонка модуля. Каталог `workspace/` не входить в офлайн-кеш телефона
+(`vite.config.js`). Подробиці — [EASYGREEN.md](EASYGREEN.md).
+
 ## Desktop behaviour
 
 - **Tauri IPC in the iframe.** Tauri injects its bridge only into the top-level
