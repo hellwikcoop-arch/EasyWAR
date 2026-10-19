@@ -1,46 +1,26 @@
 // EasyGreen — електронні таблиці модуля «Робоче середовище» (розділ «Офіс»), прототип.
 // Таблиця — веб-збірка GridCraft у src/public/workspace/easygreen/app/, працює без мережі в iframe того
-// самого походження. Файли з диска таблиця сама не читає: користувач обирає файл кнопкою «Відкрити файл…»
-// (або «Файл → Відкрити» в самій таблиці), а все, що таблиця зберігає, іде в команду save_easygreen_file:
-// вона питає місце збереження й не перезаписує таблиці профілів (сире джерело не змінюється).
+// самого походження. Файли відкриває й зберігає оболонка (host.openFile / saveFile / saveFileAs, docs/WORKSPACE.md):
+// шляхи лишаються в Rust, а таблиці профілів і їхні копії *.easywar-prev.xlsx не перезаписуються (сире джерело
+// не змінюється). Закриття й питання про незбережені зміни — теж на оболонці.
 //
-// Підключення в оболонку: mountEasyGreen(container, { appUrl }) → { destroy(), isDirty() }.
-// appUrl — шлях до src/public/workspace/easygreen/app/index.html відносно сторінки, що монтує панель.
+// Підключення: src/workspace/easygreen/app.js → mountEasyGreen(container, { host, appUrl }) → { destroy(), isDirty() }.
 import './easygreen.css';
 import {
-  EASYGREEN_APP_QUERY, EASYGREEN_TITLE, OPEN_ACCEPT, closeNeedsConfirm, openMessage, openProblem, parseFrameMessage, saveStatus,
+  EASYGREEN_APP_QUERY, EASYGREEN_TITLE, OPEN_EXTENSIONS, keepsWorkbook, openMessage, openProblem, parseFrameMessage,
+  saveAction, saveStatus,
 } from './easygreen-core.js';
 
 export const DEFAULT_APP_URL = 'workspace/easygreen/app/index.html';
 
-function tauriInvoke() {
-  for (const scope of [window, window.parent, window.top]) {
-    try {
-      const invoke = scope?.__TAURI_INTERNALS__?.invoke;
-      if (typeof invoke === 'function') return invoke;
-    } catch { /* інше походження — пропускаємо */ }
-  }
-  return null;
-}
-
-function downloadInBrowser(name, bytes) {
-  const url = URL.createObjectURL(new Blob([bytes]));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = name;
-  document.body.append(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 10_000);
-  return name;
-}
-
 /**
- * Монтує EasyGreen у `container`. Повертає { destroy, isDirty }: destroy() вивантажує таблицю
- * (WebGL-контекст не лишається в пам'яті); isDirty() — чи є незбережені зміни.
- * options.onClose — якщо задано, показує кнопку «Закрити» і викликає її після підтвердження.
+ * Монтує EasyGreen у `container`. options.host — об'єкт host оболонки; options.appUrl — адреса сторінки
+ * таблиці. Повертає { destroy, isDirty }: destroy() вивантажує таблицю (WebGL-контекст не лишається
+ * в пам'яті); isDirty() — чи є незбережені зміни.
  */
 export function mountEasyGreen(container, options = {}) {
+  const { host } = options;
+  if (!host) throw new Error('EasyGreen відкривається лише з «Робочого середовища».');
   const appUrl = `${options.appUrl || DEFAULT_APP_URL}${EASYGREEN_APP_QUERY}`;
   const root = document.createElement('section');
   root.className = 'ew-easygreen';
@@ -51,24 +31,61 @@ export function mountEasyGreen(container, options = {}) {
       <span class="ew-easygreen-badge">прототип</span>
       <button type="button" class="ew-easygreen-btn" data-act="open" disabled>Відкрити файл…</button>
       <span class="ew-easygreen-status" role="status" aria-live="polite">Завантаження таблиці…</span>
-      <button type="button" class="ew-easygreen-btn" data-act="close" hidden>Закрити</button>
     </div>
-    <iframe class="ew-easygreen-frame" title="${EASYGREEN_TITLE}"></iframe>
-    <input type="file" class="ew-easygreen-file" accept="${OPEN_ACCEPT}" hidden>`;
+    <iframe class="ew-easygreen-frame" title="${EASYGREEN_TITLE}"></iframe>`;
   container.append(root);
 
   const frame = root.querySelector('iframe');
-  const fileInput = root.querySelector('.ew-easygreen-file');
   const openFileButton = root.querySelector('[data-act="open"]');
-  const closeButton = root.querySelector('[data-act="close"]');
   const status = root.querySelector('.ew-easygreen-status');
   const setStatus = (text) => { status.textContent = text; };
 
   let ready = false;
   let dirty = false;
   let destroyed = false;
+  // Файл, відкритий або збережений через EasyWAR: { handle, name }; «Зберегти» книги йде в нього.
+  let current = null;
 
-  const onMessage = async (event) => {
+  const setCurrent = (next) => {
+    const previous = current;
+    current = next;
+    if (previous?.handle && previous.handle !== next?.handle) host.closeFile(previous.handle).catch(() => {});
+    host.setTitle(next?.name || '');
+  };
+
+  const saveAs = async (action, bytes) => {
+    const saved = await host.saveFileAs({ bytes, suggestedName: action.suggestedName, extensions: action.extensions });
+    if (saved && keepsWorkbook(saved.name)) setCurrent(saved);
+    return saved;
+  };
+
+  const save = async (message) => {
+    const action = saveAction(message.name, current);
+    if (!action) {
+      setStatus('Не збережено: EasyGreen зберігає лише .xlsx, .pdf, .csv і .html.');
+      return;
+    }
+    const bytes = new Uint8Array(message.bytes);
+    try {
+      let saved;
+      if (action.kind === 'save') {
+        try {
+          saved = await host.saveFile({ handle: action.handle, bytes });
+        } catch (error) {
+          // Наприклад, це таблиця профілю: її не перезаписуємо, пропонуємо зберегти під іншою назвою.
+          setStatus(saveStatus(null, error));
+          saved = await saveAs({ extensions: ['xlsx'], suggestedName: message.name }, bytes);
+        }
+      } else {
+        saved = await saveAs(action, bytes);
+      }
+      setStatus(saveStatus(saved?.name ?? null, null));
+    } catch (error) {
+      setStatus(saveStatus(null, error));
+    }
+  };
+
+  const onMessage = (event) => {
     if (destroyed || event.source !== frame.contentWindow || event.origin !== window.location.origin) return;
     const message = parseFrameMessage(event.data);
     if (!message) return;
@@ -78,36 +95,32 @@ export function mountEasyGreen(container, options = {}) {
       setStatus('Готово. Відкрийте файл або створіть нову книгу.');
     } else if (message.type === 'dirty') {
       dirty = message.dirty;
+      host.setDirty(dirty);
     } else if (message.type === 'failed') {
       setStatus(`Таблиця не запустилася: ${message.error || 'потрібна підтримка WebGPU або WebGL2'}`);
     } else if (message.type === 'save') {
-      const bytes = new Uint8Array(message.bytes);
-      const invoke = tauriInvoke();
-      try {
-        const result = invoke
-          ? await invoke('save_easygreen_file', { fileName: message.name, bytes: Array.from(bytes) })
-          : downloadInBrowser(message.name, bytes);
-        setStatus(saveStatus(result, null));
-      } catch (error) {
-        setStatus(saveStatus(null, error));
-      }
+      save(message);
     }
   };
   window.addEventListener('message', onMessage);
 
-  openFileButton.addEventListener('click', () => fileInput.click());
-  fileInput.addEventListener('change', async () => {
-    const file = fileInput.files?.[0];
-    fileInput.value = '';
-    if (!file || !ready) return;
-    const problem = openProblem(file.name, file.size);
-    if (problem) { setStatus(problem); return; }
+  openFileButton.addEventListener('click', async () => {
+    if (!ready) return;
     try {
-      const bytes = await file.arrayBuffer();
-      frame.contentWindow?.postMessage(openMessage(file.name, bytes), window.location.origin, [bytes]);
-      setStatus(`Відкрито: ${file.name}`);
+      const opened = await host.openFile({ extensions: OPEN_EXTENSIONS, title: 'EasyGreen — відкрити таблицю' });
+      if (!opened || destroyed) return;
+      const problem = openProblem(opened.name, opened.bytes.byteLength);
+      if (problem) {
+        host.closeFile(opened.handle).catch(() => {});
+        setStatus(problem);
+        return;
+      }
+      const bytes = opened.bytes.slice().buffer;
+      frame.contentWindow?.postMessage(openMessage(opened.name, bytes), window.location.origin, [bytes]);
+      setCurrent({ handle: opened.handle, name: opened.name });
+      setStatus(`Відкрито: ${opened.name}`);
     } catch (error) {
-      setStatus(`Не вдалося прочитати файл: ${error?.message ?? error}`);
+      setStatus(`Не вдалося відкрити файл: ${error?.message ?? error}`);
     }
   });
 
@@ -115,18 +128,10 @@ export function mountEasyGreen(container, options = {}) {
     if (destroyed) return;
     destroyed = true;
     window.removeEventListener('message', onMessage);
+    if (current?.handle) host.closeFile(current.handle).catch(() => {});
     frame.src = 'about:blank';
     root.remove();
   };
-
-  if (typeof options.onClose === 'function') {
-    closeButton.hidden = false;
-    closeButton.addEventListener('click', () => {
-      if (closeNeedsConfirm(dirty) && !window.confirm('У таблиці є незбережені зміни. Закрити EasyGreen без збереження?')) return;
-      destroy();
-      options.onClose();
-    });
-  }
 
   frame.src = appUrl;
   return { destroy, isDirty: () => dirty };

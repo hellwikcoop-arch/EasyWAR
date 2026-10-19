@@ -1,8 +1,8 @@
 # EasyGreen — електронні таблиці (прототип)
 
 EasyGreen — редактор електронних таблиць для модуля «Робоче середовище» (розділ «Офіс»), поруч із
-EasyDoc і EasySlide. Це прототип: його підключає оболонка модуля, власної кнопки на головному екрані
-й картки в каталозі модулів у нього немає.
+EasyDoc і EasySlide. Це прототип: він відкривається карткою **EasyGreen** в оболонці модуля
+([WORKSPACE.md](WORKSPACE.md)), власної кнопки на головному екрані й картки в каталозі модулів у нього немає.
 
 ## Що це
 
@@ -19,34 +19,33 @@ EasyDoc і EasySlide. Це прототип: його підключає обо�
 |---|---|
 | `src/public/workspace/easygreen/app/` | Зібрана таблиця: `index.html`, обв'язка `.js`, `_bg.wasm` (≈19 МБ), ліцензії |
 | `src/workspace/easygreen/easygreen-core.js` | Чиста логіка: протокол повідомлень, перевірка файлів, тексти стану |
-| `src/workspace/easygreen/easygreen-panel.js` | `mountEasyGreen(container, { appUrl, onClose })` → `{ destroy(), isDirty() }` |
+| `src/workspace/easygreen/app.js` | Точка входу за контрактом оболонки: `contract = 1`, `mount(container, host)` |
+| `src/workspace/easygreen/easygreen-panel.js` | `mountEasyGreen(container, { host, appUrl })` → `{ destroy(), isDirty() }` |
 | `src/workspace/easygreen/easygreen.css` | Смуга дій і рамка таблиці |
-| `src/workspace/easygreen/index.html` | EasyGreen окремою сторінкою (сторінка Vite `workspace-easygreen`) |
-| `src-tauri/src/easygreen.rs` | Перевірки збереження: дозволені типи, розмір, назва, захист таблиць профілів |
 | `script/easygreen/build.sh`, `gridcraft-easygreen.patch` | Відтворювана збірка з архіву GridCraft і наші зміни до нього |
 
-## Як підключити в оболонку
+## Як підключено до оболонки
 
-Варіант 1 — iframe на сторінку `workspace/easygreen/index.html` (відносно `index.html`).
-Варіант 2 — змонтувати панель напряму:
-
-```js
-import { mountEasyGreen } from './workspace/easygreen/easygreen-panel.js';
-const panel = mountEasyGreen(container, { appUrl: 'workspace/easygreen/app/index.html' });
-// перед закриттям вкладки: panel.isDirty() → спитати; потім panel.destroy()
-```
-
-Таблиця має бути того самого походження, що й сторінка, яка її монтує (протокол `?host=parent`).
+Оболонка знаходить `src/workspace/easygreen/app.js` і викликає `mount(container, host)` на сторінці
+`workspace/app.html?app=easygreen`. Панель вкладає ще один `<iframe>` зі сторінкою таблиці
+(`host.resolve('workspace/easygreen/app/index.html')` + `?host=parent&lang=uk`), того самого походження.
+Закриття («← Офіс», «Закрити», `Esc`) і питання про незбережені зміни робить оболонка: панель
+передає їй `host.setDirty()` і назву файла `host.setTitle()`.
 
 ## Як працюють файли
 
-- **Відкриття.** Кнопка «Відкрити файл…» на смузі або «Файл → Відкрити» в самій таблиці. Файл
-  читається в пам'ять: таблиця працює з копією і ніколи не пише у файл, з якого його відкрито.
-- **Збереження.** «Зберегти», «Зберегти як» і експорт (PDF, CSV, HTML) передаються в Rust-команду
-  `save_easygreen_file`. Вона відкриває системне вікно збереження й пише через тимчасовий файл.
-  Таблиці, прив'язані до профілів, і їхні копії `<назва>.easywar-prev.xlsx` команда **не
-  перезаписує**: сире джерело змінюється лише штатним записом таблиці профілю.
-- Capabilities Tauri і CSP не змінювалися: діалог викликається з Rust, як для презентацій.
+- **Відкриття.** Кнопка «Відкрити файл…» на смузі → `host.openFile()`; шлях лишається в Rust під
+  номером (`handle`), таблиця отримує копію байтів і ніколи не пише у файл сама. «Файл → Відкрити» в
+  самій таблиці теж працює, але такий файл зберігається лише через «Зберегти як…».
+- **Збереження.** Таблиця передає книгу `.xlsx` (Зберегти, Зберегти як) чи експорт (PDF, CSV, HTML)
+  повідомленням `gridcraft:save`. Правило — `saveAction` у `easygreen-core.js`:
+  - книга з тією самою назвою, що й відкритий через EasyWAR `.xlsx` → `host.saveFile()` у той самий файл;
+  - усе інше (нова книга, інша назва, відкрито CSV чи `.xls`, експорт) → `host.saveFileAs()`;
+  - якщо «Зберегти» відмовило (наприклад, це таблиця профілю), одразу пропонується «Зберегти як…».
+- Таблиці, прив'язані до профілів, і їхні копії `<назва>.easywar-prev.xlsx` команди `office_*`
+  **не перезаписують** (`src-tauri/src/office_files.rs`): сире джерело змінюється лише штатним записом
+  таблиці профілю. Ліміт — 256 МБ.
+- Capabilities Tauri і CSP не змінювалися.
 
 ## Наші зміни до GridCraft
 
@@ -71,6 +70,7 @@ script/easygreen/build.sh /шлях/до/gridcraft-main.zip
 
 - Перевірено в Chromium (Playwright, WebGL2 через SwiftShader): запуск, український інтерфейс,
   відкриття синтетичної таблиці ПС (4 аркуші, 240 рядків), збереження. Значення у збереженому файлі
-  збігаються з оригіналом на всіх аркушах.
+  збігаються з оригіналом на всіх аркушах. Після підключення до оболонки — запуск з картки «Офісу»,
+  відкриття й збереження через запасний шлях браузера `host` (без Tauri).
 - **Не перевірено:** вікна Tauri на macOS (WKWebView) і Windows (WebView2), зокрема WebGL/WebGPU,
   введення кирилиці, буфер обміну й друк; нативне вікно збереження; автозбереження в режимі iframe.

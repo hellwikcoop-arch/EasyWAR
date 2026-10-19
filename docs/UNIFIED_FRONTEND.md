@@ -186,13 +186,14 @@ ends, and the launcher stays `inert` until sign-in.
 - CSP у `tauri.conf.json` не змінювали (вона `null`). Якщо її колись посилять, довідникам, імовірно, знадобляться `'wasm-unsafe-eval'` (декодер meshopt — WASM), `blob:` для текстур із GLB і `font-src 'self'`; з посиленою CSP довідники не перевіряли.
 - Довідники налаштовано під three r160, а проєкт на r186. Різницю гасять `room-env.js` і заплатка `LEGACY_REFLECTIONS` у `guide-kit.js`; тест «вигляд, затверджений на three r160» падає, коли відповідний шматок шейдера three змінюється, — це сигнал переглянути `guide-kit.js`.
 
-## EasyGreen (робоче середовище, прототип)
+## Робоче середовище (розділ «Офіс»)
 
-Електронні таблиці для майбутнього модуля «Робоче середовище» живуть окремо в `src/workspace/easygreen/`
-(панель `mountEasyGreen`, сторінка Vite `workspace-easygreen`), а зібрана веб-версія GridCraft — у
-`src/public/workspace/easygreen/app/`. Кнопки на головному екрані й картки в каталозі модулів немає:
-EasyGreen підключає оболонка модуля. Каталог `workspace/` не входить в офлайн-кеш телефона
-(`vite.config.js`). Подробиці — [EASYGREEN.md](EASYGREEN.md).
+Кнопка «Робоче середовище» на головному екрані відкриває модуль `workspace` у накладці поверх лаунчера, так само як 3D-довідники; legacy HTML не змінювався. Модуль — окремі сторінки збірки `workspace/index.html` (оболонка з розділом «Офіс» і картками EasyGreen, EasyDoc, EasySlide) і `workspace/app.html?app=<id>` (сторінка одного застосунку в `<iframe>` оболонки). Контракт підключення застосунку, команди відкриття й збереження файлів і перелік файлів — у [WORKSPACE.md](WORKSPACE.md).
+
+- `src/workspace-launcher.js` імпортується в `launcher-tools.js` після `guides-launcher.js`, тож кнопка стоїть крайньою ліворуч; перед закриттям накладки питає `EW_WORKSPACE.requestClose()` (незбережені зміни).
+- Код застосунку — `src/workspace/<id>/app.js` з `mount(container, host)`; оболонка знаходить його через `import.meta.glob`, без змін у самій оболонці. Поки файлу немає, картка відкриває заглушку «у розробці».
+- Підключено EasyGreen: `src/workspace/easygreen/app.js` → `mountEasyGreen` (`easygreen-panel.js`), веб-збірка GridCraft — у `src/public/workspace/easygreen/app/`. Подробиці — [EASYGREEN.md](EASYGREEN.md).
+- `vite.config.js`: входи `workspace` і `workspace-app`; чанки `src/workspace/<id>/app.js` отримують назву `assets/workspace-*` (`chunkFileNames`), а кеш переглядача для телефона не бере `workspace/`, `assets/workspace-*` і `.wasm`.
 
 ## Desktop behaviour
 

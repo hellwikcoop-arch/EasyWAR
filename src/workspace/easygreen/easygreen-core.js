@@ -1,14 +1,18 @@
 // EasyGreen — чиста логіка обміну з вбудованою таблицею (веб-збірка GridCraft у src/public/workspace/easygreen/app/).
 // Таблиця працює в iframe того самого походження; файли передаються лише повідомленнями postMessage
 // (протокол `?host=parent` GridCraft): gridcraft:ready / gridcraft:open / gridcraft:save /
-// gridcraft:dirty / gridcraft:failed. Без DOM і сховищ — тестується окремо (tests/easygreen-core.test.mjs).
+// gridcraft:dirty / gridcraft:failed. Файли відкриває й зберігає оболонка «Робочого середовища» (host.openFile,
+// host.saveFile, host.saveFileAs — docs/WORKSPACE.md). Без DOM і сховищ — тестується окремо (tests/easygreen-core.test.mjs).
 
 export const EASYGREEN_TITLE = 'EasyGreen';
 // Параметри сторінки таблиці: режим iframe з батьківською сторінкою й український інтерфейс.
 export const EASYGREEN_APP_QUERY = '?host=parent&lang=uk';
 export const MAX_OPEN_BYTES = 256 * 1024 * 1024;
 export const OPEN_EXTENSIONS = ['xlsx', 'xlsm', 'xls', 'xlsb', 'ods', 'csv', 'tsv', 'txt'];
-export const OPEN_ACCEPT = OPEN_EXTENSIONS.map(ext => `.${ext}`).join(',');
+// Що таблиця передає на збереження: книга (Зберегти, Зберегти як) і експорт.
+export const SAVE_EXTENSIONS = ['xlsx', 'pdf', 'csv', 'html'];
+// Лише книгу .xlsx можна записати назад у відкритий файл; експорт завжди йде через «Зберегти як…».
+const WORKBOOK_EXTENSION = 'xlsx';
 
 const MAX_NAME_CHARS = 180;
 
@@ -61,14 +65,29 @@ export function openMessage(name, bytes) {
   return { type: 'gridcraft:open', name: cleanFileName(name), bytes };
 }
 
-/** Текст стану після збереження: шлях (збережено), null (скасовано) або помилка. */
-export function saveStatus(result, error) {
-  if (error) return `Не збережено: ${String(error?.message ?? error)}`;
-  if (result == null) return 'Збереження скасовано.';
-  return `Збережено: ${result}`;
+/**
+ * Куди зберегти файл, який передала таблиця. `current` — { handle, name } файлу, відкритого чи
+ * збереженого через EasyWAR, або null. Повертає { kind: 'save', handle } — записати в той самий файл
+ * (лише книга .xlsx з тією самою назвою), { kind: 'saveAs', extensions, suggestedName } — вікно
+ * «Зберегти як…», або null — такий тип EasyGreen не зберігає.
+ */
+export function saveAction(name, current) {
+  const extension = fileExtension(name) === 'htm' ? 'html' : fileExtension(name);
+  if (!SAVE_EXTENSIONS.includes(extension)) return null;
+  if (extension === WORKBOOK_EXTENSION && current?.handle && cleanFileName(current.name) === cleanFileName(name)) {
+    return { kind: 'save', handle: current.handle };
+  }
+  return { kind: 'saveAs', extensions: [extension], suggestedName: cleanFileName(name) };
 }
 
-/** Чи треба питати перед закриттям: є незбережені зміни. */
-export function closeNeedsConfirm(dirty) {
-  return dirty === true;
+/** Чи стає збережений файл поточним (наступне «Зберегти» піде в нього): лише книга .xlsx. */
+export function keepsWorkbook(name) {
+  return fileExtension(name) === WORKBOOK_EXTENSION;
+}
+
+/** Текст стану після збереження: назва файлу (збережено), null (скасовано) або помилка. */
+export function saveStatus(name, error) {
+  if (error) return `Не збережено: ${String(error?.message ?? error)}`;
+  if (name == null) return 'Збереження скасовано.';
+  return `Збережено: ${name}`;
 }
