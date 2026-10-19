@@ -65,6 +65,20 @@ export function appPageUrl(id) {
   return `app.html?app=${encodeURIComponent(id)}`;
 }
 
+/**
+ * Де працює оболонка. `editorApp` — window.__EW_EDITOR_APP (його ставить Rust лише у вікні
+ * редактора), `hasInvoke` — чи є Tauri. 'editor': окреме вікно редактора, застосунок
+ * відкривається одразу, закриття закриває вікно; 'desktop': головне вікно, картка відкриває
+ * вікно редактора (F-01: код редактора не працює в головному вікні); 'browser': без Tauri
+ * (vite preview), застосунок відкривається в iframe, як раніше.
+ */
+export function shellMode(editorApp, hasInvoke) {
+  if (editorApp !== undefined) {
+    return { mode: 'editor', app: typeof editorApp === 'string' ? appById(editorApp) : null };
+  }
+  return { mode: hasInvoke ? 'desktop' : 'browser', app: null };
+}
+
 /** Застосунок з рядка адреси `?app=<id>` або null. */
 export function appFromSearch(search) {
   const id = new URLSearchParams(String(search || '')).get('app');

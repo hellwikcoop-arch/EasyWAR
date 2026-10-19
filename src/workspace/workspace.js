@@ -2,7 +2,10 @@
 // застосунку в iframe (app.html?app=<id>). Незбережені зміни застосунок повідомляє через
 // postMessage; перед закриттям оболонка просить підтвердження у власній смузі, без системних
 // діалогів. Лаунчер (workspace-launcher.js) питає дозволу закритися через EW_WORKSPACE.requestClose().
-import { OFFICE_APPS, WORKSPACE_SECTIONS, appById, appPageUrl, frameTitle, parseFrameMessage } from './workspace-core.js';
+// У настільному застосунку застосунок працює не в головному вікні, а в окремому вікні
+// редактора з дозволом лише на команди office_* (shellMode, docs/WORKSPACE.md, «Ізоляція»).
+import { OFFICE_APPS, WORKSPACE_SECTIONS, appById, appPageUrl, frameTitle, parseFrameMessage, shellMode } from './workspace-core.js';
+import { findInvoke } from './workspace-host.js';
 import { isConnected } from './workspace-registry.js';
 
 const home = document.getElementById('ws-home');
@@ -12,6 +15,9 @@ const frame = document.getElementById('ws-frame');
 const titleNode = document.getElementById('ws-app-title');
 const back = document.getElementById('ws-back');
 const confirmBar = document.getElementById('ws-confirm');
+
+const invoke = findInvoke(window);
+const shell = shellMode(window.__EW_EDITOR_APP, Boolean(invoke));
 
 let current = null; // { app, dirty, card }
 let pendingConfirm = null; // resolve смуги підтвердження
@@ -42,12 +48,23 @@ function renderSections() {
         element('p', 'ws-hint', app.hint),
         element('span', 'ws-status', isConnected(app.id) ? 'Відкрити' : 'У розробці'),
       );
-      card.addEventListener('click', () => openApp(app.id, card));
+      card.addEventListener('click', () => {
+        if (shell.mode === 'desktop' && isConnected(app.id)) openEditorWindow(app.id, card);
+        else openApp(app.id, card);
+      });
       cards.append(card);
     }
     block.append(heading, cards);
     sections.append(block);
   }
+}
+
+function openEditorWindow(id, card) {
+  const status = card.querySelector('.ws-status');
+  invoke('workspace_open_editor', { appId: id }).catch(error => {
+    console.error(error);
+    status.textContent = 'Не вдалося відкрити';
+  });
 }
 
 function openApp(id, card) {
@@ -63,6 +80,11 @@ function openApp(id, card) {
 
 function closeApp() {
   hideConfirm(false);
+  if (shell.mode === 'editor') {
+    // Вікно редактора закриває Rust; стан сторінки зникає разом із вікном.
+    invoke('office_editor_close').catch(error => console.error(error));
+    return;
+  }
   frame.src = 'about:blank';
   view.hidden = true;
   home.hidden = false;
@@ -126,4 +148,10 @@ window.addEventListener('message', event => {
 });
 
 window.EW_WORKSPACE = Object.freeze({ requestClose: requestCloseApp, apps: OFFICE_APPS.map(app => app.id) });
-renderSections();
+if (shell.mode === 'editor') {
+  home.hidden = true;
+  if (shell.app) openApp(shell.app.id, null);
+  else invoke('office_editor_close').catch(error => console.error(error));
+} else {
+  renderSections();
+}
