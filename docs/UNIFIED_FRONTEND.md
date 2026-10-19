@@ -195,6 +195,21 @@ ends, and the launcher stays `inert` until sign-in.
 - Підключено EasyGreen: `src/workspace/easygreen/app.js` → `mountEasyGreen` (`easygreen-panel.js`), веб-збірка GridCraft — у `src/public/workspace/easygreen/app/`. Подробиці — [EASYGREEN.md](EASYGREEN.md).
 - `vite.config.js`: входи `workspace` і `workspace-app`; чанки `src/workspace/<id>/app.js` отримують назву `assets/workspace-*` (`chunkFileNames`), а кеш переглядача для телефона не бере `workspace/`, `assets/workspace-*` і `.wasm`.
 
+### EasyDoc (прототип)
+
+Редактор документів на основі WordCraft (MIT OR Apache-2.0, github.com/storytold/wordcraft), зібраний у WASM. Прототип у гілці `claude/easydoc-prototype`, у `main` не зливається.
+
+| Файл | Роль |
+| --- | --- |
+| `src/workspace/easydoc/app.js` | `mount(container, host)` за контрактом [WORKSPACE.md](WORKSPACE.md): вкладає `<iframe>` на `host.resolve('workspace/easydoc/index.html')` і ставить `window.__easydocHost` — місток для сторінки редактора |
+| `src/workspace/easydoc/easydoc-bridge-core.js` | чиста логіка містка: `openDocument` → `host.openFile`, `saveDocument(ім'я, байти)` → `host.saveFile` (та сама назва) або `host.saveFileAs` (нова назва, експорт у PDF), `setDirty` → `host.setDirty`; номери файлів лишаються тут |
+| `src/public/workspace/easydoc/index.html`, `easydoc-host.js` | сторінка редактора: `canvas#wordcraft_canvas`, `wordcraft-web.js` і `wordcraft-web_bg.wasm` (≈ 52 МБ) без бандлера Vite; `easydoc-host.js` бере місток із батьківського вікна, а без оболонки редактор працює з браузерним вибором і завантаженням файлів |
+| `src/public/workspace/easydoc/licenses/` | ліцензії WordCraft і шрифтів (MIT, Apache-2.0, NOTICE, SIL OFL) |
+| `script/build_easydoc.sh`, `script/easydoc/wordcraft-web.patch` | збірка з розпакованого `wordcraft-main`: копія в тимчасову теку, наша правка веб-оболонки, `cargo build --target wasm32-unknown-unknown`, `wasm-bindgen --target web` |
+
+- Наша правка WordCraft лише в `apps/wordcraft-web`: модуль `easywar_host.rs`; `open_async` (документи) і `download` ідуть через місток, `on_dirty` передає позначку змін, власне браузерне «Залишити сторінку?» вимкнене, коли є місток; мова інтерфейсу завжди `uk`.
+- Мережі під час роботи немає (`tests/easydoc.test.mjs`). У самому WordCraft лишаються посилання «Discord», «Поділитися» та вкладка Zotero (лише локальний 127.0.0.1); без натискання вони нічого не роблять.
+
 ## Desktop behaviour
 
 - **Tauri IPC in the iframe.** Tauri injects its bridge only into the top-level
@@ -454,3 +469,21 @@ by hand with narrow anchored patches (see `AGENTS.md`), then run
 | `src/dashboard-module-source-core.js` | чиста логіка підтягування даних з таблиці без DOM і Tauri: нормалізація заголовків (`normalizeHeader`: регістр, пунктуація, `№`, латинські двійники в кириличних словах), зіставлення заголовків із полями шаблону за назвою поля, словником назв журналу польотів і загальним словником (`sourceProfile`, `matchHeaders`; повторені колонки «Вправа» — за порядком, кілька колонок «Інший екіпаж» — одне поле, метеоумови однією клітинкою — чотири поля), пошук рядка заголовків у перших 25 рядках (`findHeaderRow`), оцінка аркушів (`rankSheets`, `enoughMatches`: достатньо всіх обов'язкових і 5 колонок або 60 % шаблону), перетворення клітинок на значення полів (`convertCell`: тривалості лише `год:хв`, висота, паливо з кілограмами, час доби, СМУ, дати), план підтягування (`planImport`: записи, пропущені рядки з причинами, попередження, зауваження правил форми через `rowRuleProblem`, ліміт 10 000, `plan.carry` — метеоумови, які можна протягнути на записи без них: набір одного запису переходить на наступні записи тієї ж льотної зміни за `flight_shift_number`, поки таблиця не дасть нове значення; не переходить через зміну зміни, без номера зміни, після нерозібраної клітинки метеоумов і з погоди, що порушує правило НМХ/ВМХ; пропущений рядок теж зсуває погоду; поля метеоумов беруться з груп форми `fieldSections`), `importRows` (записи для створення модуля з протягнутою погодою або без неї), шар виправлень екрана «Перевірка» (`plan.timeline` — рядки з даними по порядку, `plan.issues` — зауваження з рядком, колонкою й сирим текстом; `correctionOutcome`, `buildImport` — записи з виправленнями на копіях, повернення пропущених записів і нове протягування погоди; `reviewState`, `correctionRecords`) і підписи для вікна (`describePlan`, `sheetOptionLabel`). Те, що неоднозначне, не вгадується. |
 
 `air.html` і `rocket.html` підключають CSS у `<head>`, а модуль — останнім `<script type="module">` (правка в обох файлах). Модуль викликає вісім Tauri-команд: `get_dashboard_module_catalog`, `list_dashboard_modules`, `create_dashboard_module` (необов'язковий `rows` — записи, підтягнуті з таблиці користувача: модуль і записи створюються однією транзакцією, а некоректний запис скасовує створення), `get_dashboard_module_data`, `replace_dashboard_module_rows` і три команди читання таблиці — `inspect_linked_module_source` (аркуші таблиці профілю й перші 25 рядків кожного; `null`, якщо таблицю не прив'язано), `pick_module_source` (вікно вибору .xlsx; шлях лишається лише в пам'яті Rust, інтерфейс шляхів не передає) і `read_module_source_sheet` (усі непорожні рядки одного аркуша); усі, крім каталогу, потребують активного локального профілю. Читач (`src-tauri/src/module_source.rs`, `calamine`) лише читає: XLSX не змінюється й нічого в нього не дописується; capabilities Tauri для цього не змінювалися. Збереження транзакційно переписує весь набір рядків модуля: рядок із `rowId` зберігає свій номер і `created_at`, рядок, якого немає у списку, видаляється (кнопка «Видалити запис» із підтвердженням у самому діалозі, без системних діалогів браузера). Клієнт завжди передає `expectedUpdatedAt` — `updatedAt` модуля, з яким відкрито таблицю; застаріла версія дає відповідь «таблицю змінено в іншому вікні», після чого інтерфейс перечитує дані (`reopenFresh`) і нічого не перезаписує. Таблиця, яку не вдалося прочитати (`failed`), і таблиця понад 10 000 рядків відкриваються лише для читання (`tableEditState`): запис замінив би рядки, яких користувач не бачить.
+
+## EasySlide (прототип, гілка `claude/easyslide-prototype`)
+
+Редактор презентацій у модулі «Робоче середовище» → «Офіс», підключений за контрактом із
+[WORKSPACE.md](WORKSPACE.md). Це веб-збірка DeckCraft (Rust → WASM, egui, MIT OR Apache-2.0)
+з вузькими правками (`script/easyslide/easyslide-web.patch`). У `main` не зливається.
+
+| Файл | Призначення |
+|---|---|
+| `src/workspace/easyslide/app.js` | `mount(container, host)`: полотно `#deckcraft_canvas`, `window.easyslideHost`, запуск WASM за адресою `host.resolve('workspace/easyslide/…')`; `unmount`, `isDirty` |
+| `src/workspace/easyslide/host-core.js` | міст без DOM: `createEasySlideHost(host, notify)` → `open(purpose)` через `host.openFile`, `save(name, bytes)` через `host.saveFileAs` (true лише для `.pptx`/`.deckcraft`, експорт PDF/PNG/JPG/GIF/TXT позначку змін не знімає), `setState(dirty, title)` → `host.setDirty`/`host.setTitle`. Тести — `tests/easyslide-host.test.mjs` |
+| `src/workspace/easyslide/easyslide.css` | полотно на весь контейнер; прихованому `<input>` eframe повертає `box-sizing: content-box` (з `border-box` оболонки Chromium псує введення кирилиці) |
+| `src/public/workspace/easyslide/` | зібраний редактор (`deckcraft-web_bg.wasm`, ≈48 МБ; мережа не потрібна), ліцензії DeckCraft і шрифтів (Inter, BIZ UDPGothic — OFL), `README.md` з хешами |
+| `script/easyslide/uk.tsv`, `script/easyslide/l10n.mjs` | український інтерфейс редактора: словник «англійський рядок → переклад» (з шаблонами `{}`) і генератор таблиць Rust; тести — `tests/easyslide-l10n.test.mjs` |
+| `script/easyslide/build.sh`, `*.patch` | перезбірка WASM в окремій теці поза репозиторієм; правки DeckCraft і гачок перекладу egui |
+
+Файли відкриваються й зберігаються командами оболонки `office_*` (`src-tauri/src/office_files.rs`);
+власних команд EasySlide не має. CSP і capabilities Tauri не змінювалися.
