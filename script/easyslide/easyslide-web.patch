@@ -1,6 +1,84 @@
 --- apps/deckcraft-web/src/web.rs
 +++ apps/deckcraft-web/src/web.rs
-@@ -111,12 +111,31 @@
+@@ -39,7 +39,8 @@
+                     let inbox: Inbox = Inbox::default();
+                     let mut app = SlideApp::new(Session::new(), services(inbox.clone(), cc.egui_ctx.clone()));
+                     let q = query();
+-                    if !q.contains("blank") {
++                    // EasySlide: inside EasyWAR start with an empty presentation, not the English sample deck.
++                    if !q.contains("blank") && easyslide_host().is_none() {
+                         if let Err(e) = deckcraft_engine::sample::open_sample(&mut app.session) {
+                             log::error!("sample deck: {e}");
+                         }
+@@ -49,7 +50,7 @@
+                     if q.contains("show") {
+                         app.start_show(0, false);
+                     }
+-                    Ok(Box::new(WebShell { app, inbox }))
++                    Ok(Box::new(WebShell { app, inbox, reported: None, saving: None }))
+                 }),
+             )
+             .await;
+@@ -71,6 +72,16 @@
+ struct WebShell {
+     app: SlideApp,
+     inbox: Inbox,
++    /// EasySlide: last dirty flag and title reported to the host, and the document being saved.
++    reported: Option<(bool, String)>,
++    saving: Option<(u64, std::sync::Arc<deckcraft_engine::model::Presentation>)>,
++}
++
++thread_local! {
++    /// EasySlide: set by `save_or_download` when a save to a presentation file starts, and to
++    /// `Some(true)` by the host's promise when that save succeeded (`Some(false)`: cancelled).
++    static SAVE_STARTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
++    static SAVE_RESULT: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+ }
+ 
+ impl eframe::App for WebShell {
+@@ -98,6 +109,7 @@
+             });
+         }
+         self.app.logic(ctx);
++        self.sync_host();
+     }
+ 
+     fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
+@@ -106,17 +118,65 @@
+ 
+     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+         self.app.ui(ui);
++        self.sync_host();
++    }
++}
++
++impl WebShell {
++    /// EasySlide: tell the host about unsaved changes and the title, and mark the document saved
++    /// once the host confirms a save.
++    fn sync_host(&mut self) {
++        let Some(host) = easyslide_host() else { return };
++        if SAVE_STARTED.with(|c| c.replace(false))
++            && let Some(d) = self.app.session.active()
++        {
++            self.saving = Some((d.uid, d.doc.clone()));
++        }
++        if let Some(ok) = SAVE_RESULT.with(|c| c.take())
++            && let Some((uid, doc)) = self.saving.take()
++            && ok
++            && let Some(d) = self.app.session.active_mut()
++            && d.uid == uid
++        {
++            d.saved_doc = doc;
++        }
++        let state = self.app.session.active().map(|d| (d.is_dirty(), d.title())).unwrap_or((false, String::new()));
++        if self.reported.as_ref() != Some(&state) {
++            if let Ok(f) = host_method(&host, "setState") {
++                let _ = f.call2(&host, &state.0.into(), &state.1.as_str().into());
++            }
++            self.reported = Some(state);
++        }
+     }
+ }
  
  /// Web services: no file paths, so `pick_open`/`pick_save`/`read` stay `None` and the UI falls
  /// back to `open_async` (browser picker → inbox) and `download`.
@@ -32,7 +110,7 @@
              let dialog = match purpose {
                  "picture" => rfd::AsyncFileDialog::new().add_filter("Pictures", PICTURE_EXTS),
                  "audio" => rfd::AsyncFileDialog::new().add_filter("Audio", AUDIO_EXTS),
-@@ -134,9 +153,9 @@
+@@ -134,9 +194,9 @@
                  ctx.request_repaint();
              });
          })),
@@ -44,7 +122,7 @@
                  log::error!("download of {name} failed: {e}");
              }
          })),
-@@ -145,6 +164,42 @@
+@@ -145,6 +205,51 @@
      }
  }
  
@@ -80,7 +158,16 @@
 +    let Some(host) = easyslide_host() else { return download(path, bytes) };
 +    let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "presentation".into());
 +    let save = host_method(&host, "save")?;
-+    save.call2(&host, &name.into(), &js_sys::Uint8Array::from(bytes)).map_err(|e| format!("{e:?}"))?;
++    let presentation = name.ends_with(".pptx") || name.ends_with(".deckcraft");
++    let promise = save.call2(&host, &name.into(), &js_sys::Uint8Array::from(bytes)).map_err(|e| format!("{e:?}"))?;
++    if presentation {
++        SAVE_STARTED.with(|c| c.set(true));
++        wasm_bindgen_futures::spawn_local(async move {
++            let saved = wasm_bindgen_futures::JsFuture::from(js_sys::Promise::resolve(&promise)).await;
++            let ok = saved.is_ok_and(|v| v.is_truthy());
++            SAVE_RESULT.with(|c| c.set(Some(ok)));
++        });
++    }
 +    Ok(())
 +}
 +
@@ -89,15 +176,16 @@
  }
 --- crates/engine/src/recovery.rs
 +++ crates/engine/src/recovery.rs
-@@ -44,6 +44,8 @@
+@@ -44,7 +44,8 @@
      *ID.get_or_init(|| {
          use std::hash::{BuildHasher, Hasher};
          let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+-        h.write_u32(std::process::id());
 +        // EasySlide: std::process::id() panics on wasm32-unknown-unknown ("no pids on this platform").
-+        #[cfg(not(target_arch = "wasm32"))]
-         h.write_u32(std::process::id());
++        h.write_u32(if cfg!(target_arch = "wasm32") { 0 } else { std::process::id() });
          #[cfg(not(target_arch = "wasm32"))]
          if let Ok(d) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+             h.write_u128(d.as_nanos());
 --- crates/ui-egui/src/lib.rs
 +++ crates/ui-egui/src/lib.rs
 @@ -6,6 +6,9 @@

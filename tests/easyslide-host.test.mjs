@@ -1,59 +1,70 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createEasySlideHost, findInvoke, toOpenedFile } from '../src/workspace/easyslide/host-core.js';
+import { createEasySlideHost, extensionOf, openOptions, saveOptions } from '../src/workspace/easyslide/host-core.js';
 
-test('findInvoke: власний Tauri, батьківський кадр або нічого', () => {
-  const own = () => {};
-  assert.equal(findInvoke({ __TAURI_INTERNALS__: { invoke: own } }), own);
-  const parentInvoke = () => {};
-  const child = { parent: { __TAURI_INTERNALS__: { invoke: parentInvoke } } };
-  assert.equal(findInvoke(child), parentInvoke);
-  const lonely = {}; lonely.parent = lonely;
-  assert.equal(findInvoke(lonely), null);
-  const foreign = { get parent() { return { get __TAURI_INTERNALS__() { throw new Error('cross-origin'); } }; } };
-  assert.equal(findInvoke(foreign), null);
+test('extensionOf і параметри вікон', () => {
+  assert.equal(extensionOf('Звіт.PPTX'), 'pptx');
+  assert.equal(extensionOf('без розширення'), '');
+  assert.deepEqual(openOptions('presentation').extensions, ['pptx', 'ppsx', 'potx', 'deckcraft']);
+  assert.equal(openOptions('picture').filterName, 'Зображення');
+  assert.deepEqual(saveOptions('Звіт.pptx'), { suggestedName: 'Звіт.pptx', extensions: ['pptx'], filterName: 'Презентація PowerPoint', title: 'Зберегти з EasySlide' });
+  assert.deepEqual(saveOptions('слайд.jpeg').extensions, ['jpg']);
+  assert.equal(saveOptions('run.exe'), null);
 });
 
-test('toOpenedFile перетворює відповідь команди на байти', () => {
-  assert.equal(toOpenedFile(null), null);
-  assert.equal(toOpenedFile({ name: 'x.pptx' }), null);
-  const file = toOpenedFile({ name: 'Тест.pptx', bytes: [80, 75, 3, 4] });
-  assert.equal(file.name, 'Тест.pptx');
-  assert.ok(file.bytes instanceof Uint8Array);
-  assert.deepEqual([...file.bytes], [80, 75, 3, 4]);
-});
-
-test('без Tauri міст не створюється', () => {
-  assert.equal(createEasySlideHost(undefined), null);
-});
-
-test('open і save викликають команди EasyWAR', async () => {
+function fakeHost() {
   const calls = [];
-  const messages = [];
-  const invoke = async (cmd, args) => {
-    calls.push([cmd, args]);
-    if (cmd === 'open_easyslide_file') return { name: 'синтетика.pptx', bytes: [1, 2, 3] };
-    if (cmd === 'save_easyslide_file') return '/tmp/синтетика.pptx';
-    throw new Error('невідома команда');
+  let next = 1;
+  return {
+    calls,
+    async openFile(options) { calls.push(['openFile', options.extensions[0]]); return { handle: `h${next++}`, name: 'синтетика.pptx', bytes: new Uint8Array([80, 75]) }; },
+    async saveFileAs({ bytes, suggestedName, extensions }) { calls.push(['saveFileAs', suggestedName, extensions[0], bytes.length]); return { handle: `h${next++}`, name: suggestedName }; },
+    async closeFile(handle) { calls.push(['closeFile', handle]); },
+    setDirty(flag) { calls.push(['setDirty', flag]); },
+    setTitle(text) { calls.push(['setTitle', text]); },
   };
-  const host = createEasySlideHost(invoke, (text) => messages.push(text));
-  const opened = await host.open('presentation');
+}
+
+test('відкриття презентації й зображення через host оболонки', async () => {
+  const host = fakeHost();
+  const bridge = createEasySlideHost(host);
+  const opened = await bridge.open('presentation');
   assert.equal(opened.name, 'синтетика.pptx');
-  assert.deepEqual([...opened.bytes], [1, 2, 3]);
-  const saved = await host.save('звіт.pptx', new Uint8Array([9, 8]));
-  assert.equal(saved, '/tmp/синтетика.pptx');
-  assert.deepEqual(calls[0], ['open_easyslide_file', { purpose: 'presentation' }]);
-  assert.deepEqual(calls[1], ['save_easyslide_file', { fileName: 'звіт.pptx', bytes: [9, 8] }]);
-  assert.match(messages.at(-1), /Збережено/);
+  assert.deepEqual([...opened.bytes], [80, 75]);
+  await bridge.open('picture');
+  await bridge.open('presentation');
+  assert.deepEqual(host.calls, [['openFile', 'pptx'], ['openFile', 'png'], ['openFile', 'pptx'], ['closeFile', 'h1']]);
 });
 
-test('помилки й скасування не ламають редактор', async () => {
+test('збереження: презентація знімає позначку змін, експорт — ні', async () => {
+  const host = fakeHost();
   const messages = [];
-  const failing = createEasySlideHost(async () => { throw 'немає доступу'; }, (text) => messages.push(text));
-  assert.equal(await failing.open('picture'), null);
-  assert.equal(await failing.save('a.pptx', new Uint8Array([1])), null);
-  assert.equal(messages.length, 2);
-  const cancelled = createEasySlideHost(async () => null);
-  assert.equal(await cancelled.open(), null);
-  assert.equal(await cancelled.save('a.pptx', new Uint8Array([1])), null);
+  const bridge = createEasySlideHost(host, (text) => messages.push(text));
+  assert.equal(await bridge.save('звіт.pptx', new Uint8Array([1, 2, 3])), true);
+  assert.equal(await bridge.save('звіт.pdf', new Uint8Array([4])), false);
+  assert.equal(await bridge.save('звіт.exe', new Uint8Array([4])), false);
+  assert.deepEqual(host.calls, [['saveFileAs', 'звіт.pptx', 'pptx', 3], ['saveFileAs', 'звіт.pdf', 'pdf', 1], ['closeFile', 'h2']]);
+  assert.match(messages[0], /Збережено: звіт.pptx/);
+  assert.match(messages.at(-1), /не зберігає/);
+});
+
+test('скасування й помилки не ламають редактор', async () => {
+  const messages = [];
+  const cancelled = createEasySlideHost({ openFile: async () => null, saveFileAs: async () => null });
+  assert.equal(await cancelled.open('presentation'), null);
+  assert.equal(await cancelled.save('a.pptx', new Uint8Array([1])), false);
+  const failing = createEasySlideHost({ openFile: async () => { throw new Error('немає профілю'); }, saveFileAs: async () => { throw new Error('таблиця профілю'); } }, (text) => messages.push(text));
+  assert.equal(await failing.open('presentation'), null);
+  assert.equal(await failing.save('a.pptx', new Uint8Array([1])), false);
+  assert.deepEqual(messages, ['Не вдалося відкрити файл: немає профілю', 'Не вдалося зберегти: таблиця профілю']);
+});
+
+test('setState передає оболонці позначку змін і назву', () => {
+  const host = fakeHost();
+  const bridge = createEasySlideHost(host);
+  bridge.setState(true, 'синтетика');
+  assert.equal(bridge.isDirty(), true);
+  bridge.setState(false, '');
+  assert.equal(bridge.isDirty(), false);
+  assert.deepEqual(host.calls, [['setDirty', true], ['setTitle', 'синтетика'], ['setDirty', false]]);
 });

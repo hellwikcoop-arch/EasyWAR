@@ -186,6 +186,14 @@ ends, and the launcher stays `inert` until sign-in.
 - CSP у `tauri.conf.json` не змінювали (вона `null`). Якщо її колись посилять, довідникам, імовірно, знадобляться `'wasm-unsafe-eval'` (декодер meshopt — WASM), `blob:` для текстур із GLB і `font-src 'self'`; з посиленою CSP довідники не перевіряли.
 - Довідники налаштовано під three r160, а проєкт на r186. Різницю гасять `room-env.js` і заплатка `LEGACY_REFLECTIONS` у `guide-kit.js`; тест «вигляд, затверджений на three r160» падає, коли відповідний шматок шейдера three змінюється, — це сигнал переглянути `guide-kit.js`.
 
+## Робоче середовище (розділ «Офіс»)
+
+Кнопка «Робоче середовище» на головному екрані відкриває модуль `workspace` у накладці поверх лаунчера, так само як 3D-довідники; legacy HTML не змінювався. Модуль — окремі сторінки збірки `workspace/index.html` (оболонка з розділом «Офіс» і картками EasyGreen, EasyDoc, EasySlide) і `workspace/app.html?app=<id>` (сторінка одного застосунку в `<iframe>` оболонки). Контракт підключення застосунку, команди відкриття й збереження файлів і перелік файлів — у [WORKSPACE.md](WORKSPACE.md).
+
+- `src/workspace-launcher.js` імпортується в `launcher-tools.js` після `guides-launcher.js`, тож кнопка стоїть крайньою ліворуч; перед закриттям накладки питає `EW_WORKSPACE.requestClose()` (незбережені зміни).
+- Код застосунку — `src/workspace/<id>/app.js` з `mount(container, host)`; оболонка знаходить його через `import.meta.glob`, без змін у самій оболонці. Поки файлу немає, картка відкриває заглушку «у розробці».
+- `vite.config.js`: входи `workspace` і `workspace-app`; чанки `src/workspace/<id>/app.js` отримують назву `assets/workspace-*` (`chunkFileNames`), а кеш переглядача для телефона не бере `workspace/`, `assets/workspace-*` і `.wasm`.
+
 ## Desktop behaviour
 
 - **Tauri IPC in the iframe.** Tauri injects its bridge only into the top-level
@@ -448,21 +456,17 @@ by hand with narrow anchored patches (see `AGENTS.md`), then run
 
 ## EasySlide (прототип, гілка `claude/easyslide-prototype`)
 
-Редактор презентацій для майбутнього модуля «Робоче середовище» → «Офіс». Це веб-збірка DeckCraft
-(Rust → WASM, egui, MIT OR Apache-2.0) з трьома вузькими правками (`script/easyslide/easyslide-web.patch`).
-У `main` не зливається; власної картки в каталозі модулів і кнопки на головному екрані немає,
-оболонку модуля робить окрема гілка.
+Редактор презентацій у модулі «Робоче середовище» → «Офіс», підключений за контрактом із
+[WORKSPACE.md](WORKSPACE.md). Це веб-збірка DeckCraft (Rust → WASM, egui, MIT OR Apache-2.0)
+з вузькими правками (`script/easyslide/easyslide-web.patch`). У `main` не зливається.
 
 | Файл | Призначення |
 |---|---|
-| `src/workspace/easyslide/index.html` | сторінка редактора (окремий вхід Vite `easyslide`); оболонка відкриває її в кадрі як `workspace/easyslide/index.html?blank` (без `?blank` — англомовний зразок DeckCraft) |
-| `src/workspace/easyslide/host.js` | ставить `window.easyslideHost` і запускає WASM (`vendor/deckcraft-web_bg.wasm`, ≈48 МБ, лежить у збірці; мережа не потрібна) |
-| `src/workspace/easyslide/host-core.js` | міст без DOM: `findInvoke` (Tauri з вікна або батьківського кадру), `createEasySlideHost` → `open(purpose)` / `save(name, bytes)` через команди `open_easyslide_file` і `save_easyslide_file`; без Tauri мосту немає, і редактор працює з вибором файлу й завантаженням браузера. Тести — `tests/easyslide-host.test.mjs` |
-| `src/workspace/easyslide/vendor/` | зібраний редактор, ліцензії DeckCraft і шрифтів (Inter, BIZ UDPGothic — OFL), `README.md` з хешами |
-| `src-tauri/src/easyslide.rs` | які файли відкриваються (презентації `.pptx/.ppsx/.potx/.deckcraft`, зображення) і зберігаються (`.pptx`, `.pdf`, `.png`, `.jpg`, `.gif`, `.txt`, `.deckcraft`), межа 200 МБ на відкриття |
+| `src/workspace/easyslide/app.js` | `mount(container, host)`: полотно `#deckcraft_canvas`, `window.easyslideHost`, запуск WASM за адресою `host.resolve('workspace/easyslide/…')`; `unmount`, `isDirty` |
+| `src/workspace/easyslide/host-core.js` | міст без DOM: `createEasySlideHost(host, notify)` → `open(purpose)` через `host.openFile`, `save(name, bytes)` через `host.saveFileAs` (true лише для `.pptx`/`.deckcraft`, експорт PDF/PNG/JPG/GIF/TXT позначку змін не знімає), `setState(dirty, title)` → `host.setDirty`/`host.setTitle`. Тести — `tests/easyslide-host.test.mjs` |
+| `src/workspace/easyslide/easyslide.css` | полотно на весь контейнер; прихованому `<input>` eframe повертає `box-sizing: content-box` (з `border-box` оболонки Chromium псує введення кирилиці) |
+| `src/public/workspace/easyslide/` | зібраний редактор (`deckcraft-web_bg.wasm`, ≈48 МБ; мережа не потрібна), ліцензії DeckCraft і шрифтів (Inter, BIZ UDPGothic — OFL), `README.md` з хешами |
 | `script/easyslide/build.sh` | перезбірка WASM в окремій теці поза репозиторієм |
 
-CSP і capabilities Tauri не змінювалися: CSP у `tauri.conf.json` вимкнено (`null`), сторінка
-відкривається з того самого джерела в кадрі, а дві нові команди — звичайні команди застосунку.
-Збереження за умовчанням — `.pptx` (правка DeckCraft), атомарний запис, як у `save_presentation`.
-Сторінка й WASM не входять в офлайн-кеш `viewer.html`.
+Файли відкриваються й зберігаються командами оболонки `office_*` (`src-tauri/src/office_files.rs`);
+власних команд EasySlide не має. CSP і capabilities Tauri не змінювалися.

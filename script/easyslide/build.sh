@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Збирає редактор EasySlide (веб-збірка DeckCraft) у src/workspace/easyslide/vendor/.
+# Збирає редактор EasySlide (веб-збірка DeckCraft) у src/public/workspace/easyslide/.
 # Прототип. Чужий код збирається лише в окремій теці поза репозиторієм; під час роботи
 # застосунку нічого не завантажується з мережі.
 #
@@ -12,7 +12,7 @@ set -euo pipefail
 src="$(cd "$1" && pwd)"
 fonts="$(cd "$2" && pwd)"
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
-out="$repo/src/workspace/easyslide/vendor"
+out="$repo/src/public/workspace/easyslide"
 
 patch -d "$src" -p0 --forward --batch < "$repo/script/easyslide/easyslide-web.patch" || true
 grep -q easyslideHost "$src/apps/deckcraft-web/src/web.rs" || { echo "патч EasySlide не застосовано" >&2; exit 1; }

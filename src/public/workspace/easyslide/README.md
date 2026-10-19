@@ -12,13 +12,17 @@
 
 ## Що змінено в коді DeckCraft
 
-Патч `script/easyslide/easyslide-web.patch` (три файли): `apps/deckcraft-web/src/web.rs` — якщо сторінка
-визначає `window.easyslideHost`, редактор відкриває файли через `easyslideHost.open(purpose)` і
-зберігає через `easyslideHost.save(name, bytes)`, тобто системними вікнами EasyWAR (команди
-`open_easyslide_file` і `save_easyslide_file`), а не вибором файлу й завантаженням браузера.
-`crates/engine/src/recovery.rs` — без `std::process::id()` у WASM (інакше редактор падає на старті);
-`crates/ui-egui/src/lib.rs` — у веб-збірці «Зберегти» пропонує `.pptx`, а не `.deckcraft`.
-Міст — `src/workspace/easyslide/host-core.js`, сторінка — `src/workspace/easyslide/index.html` (з `?blank` починає з порожньої презентації, без `?blank` відкриває англомовний зразок DeckCraft).
+Патч `script/easyslide/easyslide-web.patch`:
+
+- `apps/deckcraft-web/src/web.rs` — якщо сторінка визначає `window.easyslideHost`, редактор
+  починає з порожньої презентації, відкриває файли через `easyslideHost.open(purpose)`, зберігає
+  через `easyslideHost.save(name, bytes)` (системні вікна EasyWAR замість вибору файлу й
+  завантаження браузера) і повідомляє `easyslideHost.setState(dirty, title)`; після підтвердженого
+  збереження `.pptx` знімає позначку змін.
+- `crates/engine/src/recovery.rs` — без `std::process::id()` у WASM (інакше редактор падає).
+- `crates/ui-egui/src/lib.rs` — у веб-збірці «Зберегти» пропонує `.pptx`, а не `.deckcraft`.
+
+Міст і запуск — `src/workspace/easyslide/` (`app.js`, `host-core.js`), див. `docs/UNIFIED_FRONTEND.md`.
 
 ## Перезбірка
 
@@ -28,6 +32,6 @@
 SHA-256 цієї збірки:
 
 ```
-7186b90f4ee77cc2fb7512a26137685e8c311120a37de224b29d0baf068f0cf4  deckcraft-web.js
-7fcb48edf85759466d3f2a03e8ff0c2dd54b0fc8315e3547da2212c998381a50  deckcraft-web_bg.wasm
+e79723326d5a0b8ca98cedf0102913914c49c5cd241a112049f2cee3dcec34cb  deckcraft-web.js
+28da0cf6d471223e66d9d4d96ab77916b6c67b731c01bb340d16822ae0c4a0c2  deckcraft-web_bg.wasm
 ```
