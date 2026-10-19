@@ -10,6 +10,8 @@ import {fetchBuffer, makeClock} from '../guide-kit.js';
 import {creditHtml} from '../credits.js';
 import {MODEL_URLS, LAND_URL} from './models.js';
 import {RIG, FLY as FLYD} from './rig.js';
+import {createReveal} from './reveal.js';
+import {drawRoundel, MARK_SPOTS} from './reveal-core.js';
 
 /* ---------- data ---------- */
 // p: [fx tail→nose 0..1, fy bottom→top 0..1] snapped by a ray from the side; or [fx, 0, fz 0..1 across] snapped by a ray from above
@@ -113,6 +115,20 @@ const T=[
  dual:'Ан-26 використовують і ЗСУ — визначайте приналежність лише за додатковими ознаками.',
  glass:/29fe82ee|glass/i},
 
+{id:'mi8ua',model:'mi8tv',mark:'ua',reveal:true,cat:'other',yaw:90,cls:'Транспортно-бойовий гелікоптер · Україна',name:'Мі-8 (ЗСУ)',nato:'Hip',
+ st:'Основний гелікоптер армійської авіації ЗСУ: Мі-8МТ, Мі-8МТВ, Мі-17 і модернізовані Мі-8МСБ-В. Перевезення, десант, евакуація, пошук і рятування, удари НАР і полювання на дрони. Та сама модель, що й у довіднику противника, з українськими розпізнавальними знаками; кнопка «Презентація» показує її в ангарі під чохлом із запуском і зльотом.',
+ specs:[['Екіпаж','3'],['Довжина фюзеляжу','18,4 м (з гвинтами 25,3)'],['Несучий гвинт','21,3 м'],['Висота','≈5,65 м'],['Макс. злітна маса','13 000 кг'],['Вантаж','до 4 000 кг (на зовнішній підвісці до 4 000)'],['Макс. швидкість','250 км/год'],['Крейсерська','220–230 км/год'],['Дальність','≈600 км (перегін ≈1 100 з додатковими баками)'],['Стеля','6 000 м (статична ≈3 980)'],['Двигуни','2 × ТВ3-117МТ/ВМ по 2 000–2 200 к.с.; на Мі-8МСБ-В — ТВ3-117ВМА-СБМ1В (Мотор Січ)']],
+ arm:['Блоки НАР Б-8В20А (С-8) на бортових фермах','Кулемети ПКТ / ДШК у дверях і вікнах','Бомби до 500 кг — залежно від завдання','Засоби захисту: теплові пастки, станції РЕБ (за комплектацією)'],
+ rec:['Довгий «огірок» фюзеляжу з круглими вікнами, п\'ятилопатевий несучий гвинт','Українські розпізнавальні знаки: коло з тризубом на фюзеляжі','Транспортні МТ/МТВ без носового кулемета (на моделі показано озброєний Мі-8ТВ)','Задні стулки-двері вантажної кабіни'],
+ weakTitle:'Чутливі вузли',
+ weak:[
+  {t:'Головний редуктор і втулка гвинта',d:'Один редуктор передає потужність обох двигунів. Його пошкодження означає вимушену посадку, тож стоянки й маршрути підльоту бережуть від ПЗРК і дронів.',p:[.55,.95]},
+  {t:'Двигуни й вихлоп',d:'Двигуни над кабіною дають тепловий слід, видимий з верхньої півсфери; екранно-вихлопні пристрої його зменшують, але не прибирають.',p:[.68,.82]},
+  {t:'Зовнішні паливні баки',d:'Великі баки по бортах без бронювання: при влученні ризик пожежі. Дозаправлення й стоянка — поза зоною спостереження противника.',p:[.6,.38]},
+  {t:'Хвостова балка і рульовий гвинт',d:'Довга незахищена балка; ураження рульового гвинта змушує до аварійної посадки.',p:[.06,.62]}],
+ note:'Модель — Мі-8ТВ: носовий кулемет і ферми озброєння є не на всіх українських машинах. Розпізнавальні знаки на моделі замінено програмно (коло з тризубом поверх текстури), сам файл моделі не змінювався.',
+ glass:/glass|alpha/i},
+
 {id:'an225',cat:'other',yaw:-90,cls:'Надважкий транспортний літак · Україна',name:'Ан-225 «Мрія»',nato:'Cossack',
  st:'Єдиний збудований екземпляр знищено в ангарі аеропорту Гостомель під час боїв наприкінці лютого 2022 року. Найважчий літак, що будь-коли літав.',
  specs:[['Екіпаж','6'],['Довжина','84,0 м'],['Розмах крила','88,4 м'],['Висота','18,1 м'],['Макс. злітна маса','640 000 кг'],['Вантаж','до 250 000 кг'],['Крейсерська','≈800 км/год'],['Дальність','≈4 000 км з 200 т'],['Двигуни','6 × Д-18Т «Мотор Січ»']],
@@ -182,7 +198,7 @@ const SKY=0xa7b6c1;
 const scene=new THREE.Scene();
 scene.environment=new THREE.PMREMGenerator(R).fromScene(new RoomEnvironment(),0.04).texture;
 const key=new THREE.DirectionalLight(0xfff4e0,1.4);key.position.set(6,10,7);scene.add(key);
-scene.add(new THREE.HemisphereLight(0xd8e0d0,0x1a1c18,.6));
+const hemi=new THREE.HemisphereLight(0xd8e0d0,0x1a1c18,.6);scene.add(hemi);
 const cam=new THREE.PerspectiveCamera(32,1,.05,500);
 const ctl=new OrbitControls(cam,cv);ctl.enableDamping=true;ctl.dampingFactor=.08;ctl.autoRotate=true;ctl.autoRotateSpeed=.7;ctl.minDistance=3;ctl.maxDistance=40;ctl.enablePan=false;
 // floor ring
@@ -195,7 +211,7 @@ const loader=new GLTFLoader();loader.setMeshoptDecoder(MeshoptDecoder);
 const cache={};let cur=null,curId=null,meshes=[],markers=[],selW=-1,frameN=0;
 const SIZE=8; // longest dimension in scene units (plate)
 
-const fetchModel=id=>fetchBuffer(MODEL_URLS[id]);
+const fetchModel=t=>fetchBuffer(MODEL_URLS[t.model||t.id]); // t.model: стаття показує файл іншої статті
 
 /* ---------- baking and splitting meshes into parts (triangle runs) ---------- */
 const V3=(a,b,c)=>Array.isArray(a)?new THREE.Vector3(a[0],a[1],a[2]):new THREE.Vector3(a,b,c);
@@ -328,11 +344,24 @@ function stepAnim(dt){
 }
 
 /* ---------- model loading ---------- */
+// Українські розпізнавальні знаки поверх текстури фюзеляжу: малюються на копії зображення, файл моделі не змінюється.
+function markUA(root){
+  const done=new Set();
+  root.traverse(o=>{if(!o.isMesh)return;(Array.isArray(o.material)?o.material:[o.material]).forEach(m=>{
+    const src=m.map,im=src&&src.image;if(!im||done.has(src)||!(im.width===2048&&im.height===2048))return;done.add(src);
+    const c=document.createElement('canvas');c.width=im.width;c.height=im.height;const x=c.getContext('2d');if(!x)return;
+    try{x.drawImage(im,0,0);}catch(e){return;}
+    MARK_SPOTS.forEach(([cx,cy,r])=>drawRoundel(x,cx,cy,r));
+    const tex=new THREE.CanvasTexture(c);tex.colorSpace=src.colorSpace;tex.flipY=src.flipY;tex.wrapS=src.wrapS;tex.wrapT=src.wrapT;tex.anisotropy=src.anisotropy;tex.needsUpdate=true;
+    m.map=tex;m.needsUpdate=true;});});
+}
+
 async function getModel(t){
   if(cache[t.id])return cache[t.id];
-  const data=await fetchModel(t.id);
+  const data=await fetchModel(t);
   const g=await new Promise((res,rej)=>loader.parse(data,'',res,rej));
   const root=new THREE.Group(),inner=g.scene;
+  if(t.mark==='ua')markUA(inner);
   inner.rotation.y=t.yaw*D2R;root.add(inner);
   inner.traverse(o=>{if(!o.isMesh)return;
     const ms=Array.isArray(o.material)?o.material:[o.material];
@@ -351,7 +380,7 @@ async function getModel(t){
   const s=new THREE.Group();s.add(root);s.scale.setScalar(k);
   s.updateMatrixWorld(true);
   const M={t,obj:s,box:new THREE.Box3().setFromObject(s),meshes:[],inner,k,rig:null};
-  const rd=RIG[t.id];
+  const rd=RIG[t.model||t.id];
   if(rd){
     try{M.rig=buildRig(M,rd);M.obj=M.rig.root;}
     catch(e){console.warn('rig '+t.id,e);window.__rigErr=(window.__rigErr||'')+t.id+': '+(e&&e.message||e)+'\n';M.rig=null;M.obj=s;}
@@ -408,7 +437,7 @@ function updateMarks(){
 /* ---------- views ---------- */
 const VIEWS={iso:[1,.55,1.25],side:[0,.18,1],top:[0,1,.0001],front:[1,.15,0]};
 function setView(v,instant){
-  if(FL.on)return;
+  if(FL.on||reveal.on)return;
   view=v;document.querySelectorAll('[data-view]').forEach(b=>b.setAttribute('aria-pressed',b.dataset.view===v));
   const d=VIEWS[v],dist=SIZE*(cur&&cur.rig&&cur.rig.spins&&cur.rig.spins.length?1.68:1.55)/Math.min(1,cam.aspect*.95),tgt=new THREE.Vector3(0,cur?cur.box.max.y*.42:1.2,0);
   const to=new THREE.Vector3(...d).normalize().multiplyScalar(dist).add(tgt);
@@ -438,13 +467,13 @@ function renderSheet(t){
   sh.innerHTML=`
    <div class="hd"><span class="cls">${esc(t.cls)}</span><h2>${esc(t.name)}</h2>${t.nato!=='—'?`<span class="nato">Кодове ім'я НАТО: ${esc(t.nato)}</span>`:''}<p class="st">${esc(t.st)}</p></div>
    ${t.dual?`<div class="flag"><i>УВАГА</i><span>${esc(t.dual)}</span></div>`:''}
-   ${t.weak.length?`<section><h3>Уразливі місця</h3><div class="weak">${t.weak.map((w,i)=>`<button class="wk" id="wk-${i}" data-i="${i}"><b>${i+1}</b><strong>${esc(w.t)}</strong><span>${esc(w.d)}</span></button>`).join('')}</div></section>`:''}
+   ${t.weak.length?`<section><h3>${esc(t.weakTitle||'Уразливі місця')}</h3><div class="weak">${t.weak.map((w,i)=>`<button class="wk" id="wk-${i}" data-i="${i}"><b>${i+1}</b><strong>${esc(w.t)}</strong><span>${esc(w.d)}</span></button>`).join('')}</div></section>`:''}
    ${t.note?`<p class="note">${esc(t.note)}</p>`:''}
    <section><h3>Ознаки розпізнавання</h3><ul class="l">${li(t.rec)}</ul></section>
    <section><h3>Характеристики</h3><table>${rows}</table></section>
    <section><h3>Озброєння</h3><ul class="l">${li(t.arm)}</ul></section>`;
   sh.querySelectorAll('.wk').forEach(b=>b.onclick=()=>pickWeak(+b.dataset.i,true));
-  $('#credit').innerHTML=creditHtml('aviation/'+t.id);
+  $('#credit').innerHTML=creditHtml('aviation/'+(t.model||t.id));
   $('#ovT').textContent=t.nato!=='—'?t.nato:t.cls.split(' · ')[0];
 }
 function pickWeak(i,fromList){
@@ -463,19 +492,21 @@ function pickWeak(i,fromList){
 /* extra controls: gear, sweep, flight camera */
 function syncX(){
   const M=cur,r=M&&M.rig,t=M&&M.t;
-  const hasG=!!(r&&r.gears.length),hasS=!!(r&&r.sweep),canFly=!!(t&&FLYD[t.id]);
+  const hasG=!!(r&&r.gears.length),hasS=!!(r&&r.sweep),canFly=!!(t&&FLYD[t.model||t.id]);
   $('#t-gear').hidden=!hasG;$('#sw-wrap').hidden=!hasS;$('#t-fly').hidden=!canFly;$('#t-cam').hidden=!FL.on;
+  $('#t-reveal').hidden=!(t&&t.reveal);$('#t-reveal').setAttribute('aria-pressed',reveal.on);
   $('#xctl').hidden=!(hasG||hasS||FL.on);
   $('#t-gear').textContent=AN.gearUp?'Шасі: прибрано':'Шасі: випущено';$('#t-gear').setAttribute('aria-pressed',AN.gearUp);
   if(hasS){const s=r.sweep,inp=$('#sw');inp.min=s.min;inp.max=s.max;inp.value=AN.swT;$('#sw-o').textContent=Math.round(AN.swT)+'°';}
   $('#t-fly').setAttribute('aria-pressed',FL.on);
   $('#t-cam').textContent=FL.cam==='follow'?'Камера: слідкує':'Камера: спостерігач';
-  const an=(t&&RIG[t.id]&&RIG[t.id].anim)||null;
-  $('#anote').textContent=an&&r?'Рухається: '+an.join(', ')+'.':(t&&FLYD[t.id]?'':'Статична модель без рухомих частин.');
+  const an=(t&&RIG[t.model||t.id]&&RIG[t.model||t.id].anim)||null;
+  $('#anote').textContent=an&&r?'Рухається: '+an.join(', ')+'.':(t&&FLYD[t.model||t.id]?'':'Статична модель без рухомих частин.');
 }
 let token=0;
 async function select(id){
   const t=T.find(x=>x.id===id);if(!t)return;curId=id;
+  if(reveal.on)reveal.stop();
   renderIdx();renderSheet(t);
   const my=++token;$('#load').hidden=false;$('#load').textContent='Завантаження моделі…';$('#marks').innerHTML='';markers=[];
   try{
@@ -487,7 +518,7 @@ async function select(id){
     AN.gear=0;AN.gearUp=false;
     if(M.rig&&M.rig.sweep){AN.sw=AN.swT=M.rig.sweep.def;}
     buildMarkers(t,M);
-    if(FL.on){if(FLYD[t.id])prepFlight();else endFlight();}
+    if(FL.on){if(FLYD[t.model||t.id])prepFlight();else endFlight();}
     if(!FL.on)setView(view==='iso'?'iso':view,true);
     syncX();
     $('#load').hidden=true;
@@ -500,14 +531,31 @@ document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>setCat(b.dataset.cat)
 document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>setView(b.dataset.view));
 function setSpin(on){ctl.autoRotate=on&&!FL.on;$('#t-spin').setAttribute('aria-pressed',on);}
 $('#t-spin').onclick=()=>setSpin(!ctl.autoRotate);
-$('#t-marks').onclick=()=>{marksOn=!marksOn;$('#t-marks').setAttribute('aria-pressed',marksOn);$('#marks').hidden=!marksOn||FL.on;};
-$('#t-anim').onclick=()=>{AN.on=!AN.on;$('#t-anim').setAttribute('aria-pressed',AN.on);};
+$('#t-marks').onclick=()=>{marksOn=!marksOn;$('#t-marks').setAttribute('aria-pressed',marksOn);$('#marks').hidden=!marksOn||FL.on||reveal.on;};
+$('#t-anim').onclick=()=>{if(reveal.on)return;AN.on=!AN.on;$('#t-anim').setAttribute('aria-pressed',AN.on);};
 $('#t-gear').onclick=()=>{AN.gearUp=!AN.gearUp;syncX();};
 $('#sw').oninput=e=>{AN.swT=+e.target.value;$('#sw-o').textContent=Math.round(AN.swT)+'°';};
 $('#t-fly').onclick=()=>setFly(!FL.on);
 $('#t-cam').onclick=()=>setCamMode(FL.cam==='follow'?'obs':'follow');
 cv.addEventListener('pointerdown',()=>{anim=null;});
-addEventListener('keydown',e=>{if(e.target.tagName==='INPUT')return;if(e.key==='Escape'&&selW>=0)pickWeak(selW,true);if(FL.on&&(e.key==='c'||e.key==='C'||e.key==='с'||e.key==='С'))setCamMode(FL.cam==='follow'?'obs':'follow');});
+addEventListener('keydown',e=>{if(e.target.tagName==='INPUT')return;if(e.key==='Escape'&&reveal.on){setReveal(false);return;}if(e.key==='Escape'&&selW>=0)pickWeak(selW,true);if(FL.on&&(e.key==='c'||e.key==='C'||e.key==='с'||e.key==='С'))setCamMode(FL.cam==='follow'?'obs':'follow');});
+
+/* ---------- презентація: ангар, чохол, запуск і зліт (reveal.js) ---------- */
+const reveal=createReveal({scene,cam,ctl,holder,stage,cv,lights:[key,hemi],floor,AN,onEnd:()=>{
+  stage.classList.remove('reveal');$('#ovS').hidden=true;$('#marks').hidden=!marksOn;
+  $('#t-reveal').setAttribute('aria-pressed',false);if(cur)setView(view,true);syncX();
+}});
+function setReveal(on){
+  if(on===reveal.on)return;
+  if(!on){reveal.stop();return;}
+  const t=cur&&cur.t;if(!t||!t.reveal||FL.busy)return;
+  if(FL.on)endFlight();
+  anim=null;if(selW>=0)pickWeak(selW,true);
+  stage.classList.add('reveal');$('#marks').hidden=true;$('#ovS').hidden=false;
+  reveal.start(cur);
+  $('#t-reveal').setAttribute('aria-pressed',true);syncX();
+}
+$('#t-reveal').onclick=()=>setReveal(!reveal.on);
 
 /* ---------- landscape: mirrored photogrammetry tiles, recentred around the aircraft ---------- */
 const canvasTex=(w,h,fn)=>{const c=document.createElement('canvas');c.width=w;c.height=h;fn(c.getContext('2d'),w,h);const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;return t;};
@@ -561,7 +609,7 @@ function hAt(x,z){if(!LAND.ready)return 0;const bb=LAND.bb,L=LAND.L,W=LAND.W;
 /* ---------- flight: coordinated right-hand circle at a fixed altitude ---------- */
 const obsPos=new THREE.Vector3(),_w=new THREE.Vector3(),UP=new THREE.Vector3(0,1,0);
 function flightScale(M,t){
-  const f=FLYD[t.id],b=M.box,ext={x:b.max.x-b.min.x,y:b.max.y-b.min.y,z:b.max.z-b.min.z};
+  const f=FLYD[t.model||t.id],b=M.box,ext={x:b.max.x-b.min.x,y:b.max.y-b.min.y,z:b.max.z-b.min.z};
   let u=ext[f.ref]||ext.x;
   if(f.ref==='rotor'&&M.rig&&M.rig.spins.length)u=2*Math.max(...M.rig.spins.map(s=>s.R));
   return f.real/u;
@@ -572,7 +620,7 @@ function aircraftPose(){
   holder.position.set(f.x,f.y,f.z);holder.rotation.set(f.ph,f.psi,f.th);
 }
 function prepFlight(){
-  const M=cur,t=M&&M.t,f=t&&FLYD[t.id];if(!f){endFlight();return;}
+  const M=cur,t=M&&M.t,f=t&&FLYD[t.model||t.id];if(!f){endFlight();return;}
   FL.sc=flightScale(M,t);FL.D=SIZE*FL.sc;
   FL.v=f.v;FL.alt=f.alt;FL.pitch=(f.pitch||0)*D2R;FL.bank=Math.min(62*D2R,f.bank?f.bank*D2R:Math.atan(f.v*f.v/(G*(f.R||400))));
   FL.R=f.R||f.v*f.v/(G*Math.tan(FL.bank));
@@ -611,7 +659,8 @@ function endFlight(){
 async function setFly(on){
   if(on===FL.on||FL.busy)return;
   if(!on){endFlight();syncX();return;}
-  const t=cur&&cur.t;if(!t||!FLYD[t.id])return;
+  const t=cur&&cur.t;if(!t||!FLYD[t.model||t.id])return;
+  if(reveal.on)reveal.stop();
   FL.busy=true;
   try{
     if(!LAND.ready&&!LAND.failed){$('#load').hidden=false;$('#load').textContent='Завантаження ландшафту…';await loadLand();$('#load').hidden=true;}
@@ -665,8 +714,9 @@ new ResizeObserver(resize).observe(stage);resize();
 const clock=makeClock();
 function frame(dt,nr){
   frameN++;
-  if(anim&&!FL.on){anim.t=Math.min(1,anim.t+.045);const e=1-Math.pow(1-anim.t,3);cam.position.lerpVectors(anim.from,anim.to,e);ctl.target.lerpVectors(anim.ft,anim.tt,e);if(anim.t>=1)anim=null;}
+  if(anim&&!FL.on&&!reveal.on){anim.t=Math.min(1,anim.t+.045);const e=1-Math.pow(1-anim.t,3);cam.position.lerpVectors(anim.from,anim.to,e);ctl.target.lerpVectors(anim.ft,anim.tt,e);if(anim.t>=1)anim=null;}
   if(cur)stepAnim(dt);
+  if(reveal.on)reveal.step(dt);
   if(FL.on&&cur){flightStep(dt);camFlight(dt);}else ctl.update();
   if(!nr){R.render(scene,cam);updateMarks();}
 }
@@ -679,7 +729,7 @@ loop();
 window.__T=T;window.__select=select;window.__setView=setView;window.__ready=()=>!!cur&&$('#load').hidden&&!FL.busy;
 window.__tick=(n,dt)=>{for(let i=0;i<n;i++)frame(dt||1/30,i<n-1);};
 window.__snap=()=>{frame(0);return cv.toDataURL('image/png');};
-window.__AN=AN;window.__FL=FL;window.__LAND=LAND;window.__cur=()=>cur;window.__setFly=setFly;window.__setCam=setCamMode;window.__hAt=hAt;window.__markers=()=>markers;
+window.__AN=AN;window.__FL=FL;window.__reveal=reveal;window.__setReveal=setReveal;window.__LAND=LAND;window.__cur=()=>cur;window.__setFly=setFly;window.__setCam=setCamMode;window.__hAt=hAt;window.__markers=()=>markers;
 window.__camSet=(p,t,fov)=>{ctl.minDistance=.05;cam.position.set(p[0],p[1],p[2]);ctl.target.set(t[0],t[1],t[2]);if(fov){cam.fov=fov;cam.updateProjectionMatrix();}ctl.autoRotate=false;ctl.update();}; // для перевірок: камера з коду
 window.__snapM=function(){
   frame(0);const W=cv.width,H=cv.height,c=document.createElement('canvas');c.width=W;c.height=H;const x=c.getContext('2d');x.drawImage(cv,0,0);

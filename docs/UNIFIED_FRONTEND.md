@@ -156,7 +156,7 @@ ends, and the launcher stays `inert` until sign-in.
 | --- | --- |
 | `src/guides-launcher.js`, `src/guides-launcher.css` | кнопка (`prepend` у `.appbar-right`; імпорт останній у `launcher-tools.js`, тож кнопка стоїть крайньою ліворуч) і накладка з `<iframe>` на `guides/index.html`; «Закрити» та `Esc` ставлять `about:blank`, щоб WebGL-сцена не лишалась у пам'яті |
 | `src/guides/index.html`, `hub.js`, `hub.css` | хаб: шість карток (кількість і назви моделей беруться з `credits.js`) і легенда походження моделей; посилання «До EasyWAR» видиме лише тоді, коли хаб відкрито не в накладці |
-| `src/guides/<id>/` | довідник (`rvia`, `ppo`, `ground-forces`, `uav`, `aviation`, `enemy-ground`): `index.html` без вбудованих скриптів, `main.js`, `style.css`, `models.js`, `models/*.glb`, поділ моделей на частини (`specs.js`, `meta.js`, `rig.js`, `spec.js`) |
+| `src/guides/<id>/` | довідник (`rvia`, `ppo`, `ground-forces`, `uav`, `aviation`, `enemy-ground`): `index.html` без вбудованих скриптів, `main.js`, `style.css`, `models.js`, `models/*.glb`, поділ моделей на частини (`specs.js`, `meta.js`, `rig.js`, `spec.js`); в `aviation` ще `reveal-core.js` (чиста логіка презентації Мі-8: карта висот, тканина-чохол, зліт, знак) і `reveal.js` (сцена ангару) |
 | `src/guides/credits.js` | авторство всіх моделей і ландшафту; від нього залежать підписи, хаб і `src/models/CREDITS.md` |
 | `src/guides/guide-kit.js`, `room-env.js`, `base.css`, `fonts/` | спільне: читання GLB, годинник, заплатка відбиттів three, копія `RoomEnvironment` із three r160 (MIT), базові стилі, локальні шрифти woff2 (SIL OFL, тексти ліцензій у `fonts/licenses`) |
 

@@ -63,6 +63,13 @@ header p{margin:2px 0 0;color:var(--dim);font-size:13px;max-width:62ch}
 .rg output{font:500 12px/1 var(--mono);color:var(--fg);min-width:3.6ch}
 .rg[hidden],.vb[hidden]{display:none}
 .stage.fly{background:#a7b6c1}
+/* presentation: dark hangar; the handle hint follows the cover's handle, the fade plate closes the show */
+.stage.reveal{background:#050607}
+.stage.reveal canvas{cursor:default}
+.rv-hint{position:absolute;left:0;top:0;font:500 11px/1.3 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:#f1f3ee;background:rgba(5,6,7,.72);border:1px solid rgba(241,243,238,.35);border-radius:3px;padding:5px 8px;pointer-events:none;white-space:nowrap;will-change:transform}
+.rv-hint[hidden]{display:none}
+.rv-fade{position:absolute;inset:0;background:#050607;opacity:0;transition:opacity .65s ease;pointer-events:none}
+.rv-fade.is-in{opacity:1}
 .credit{font-size:12px;color:var(--faint);margin:0}
 .credit a{color:var(--dim)}
 
