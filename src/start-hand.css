@@ -1,0 +1,13 @@
+/* Полотно сцени «рука тягнеться до курсора» на стартовому екрані (start-hand.js). Лежить під усім
+   вмістом #view-start (у нього власний контекст накладання), над його CSS-фоном, який лише трохи
+   притемнює своїм напівпрозорим шаром. Кліки не ловить. */
+#view-start > canvas.ew-hand {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+  background: rgba(3, 7, 12, .34);
+}

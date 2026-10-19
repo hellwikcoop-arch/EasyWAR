@@ -124,6 +124,30 @@ module script before `</body>`. `script/import_unified_html.mjs` rewrites
   Every committed version stays in git history and ships in each update package
   (backlog P2-6), so do not commit iterations.
 
+## Сцена «рука тягнеться до курсора» на стартовому екрані
+
+Живий фон лаунчера: з верхнього лівого кута до курсора тягнеться каркасна рука кольору
+ракетного акценту (`#ff5a48`), з нижнього правого — темна суцільна (`#1a2230`, плоске
+затінення, тепле контрове світло), кінчики вказівних пальців сходяться біля курсора;
+позаду — кілька сотень зір із повільним мерехтінням.
+
+| Файл | Роль |
+| --- | --- |
+| `src/start-hand-core.js` | чиста логіка: детермінований генератор і розкладка зір, поза рук за нормалізованим курсором (кінчик, зап'ястя, кут, витягування, згинання пальців), «дихання», згладжування, правило `handSceneMode` (тести — `tests/start-hand.test.mjs`) |
+| `src/start-hand.js` | DOM + three.js: `<canvas class="ew-hand">` першим елементом `#view-start`, процедурні руки (долоня — заокруглений брусок, пальці — ланцюги капсул), зорі як `Points`, `pointermove` на `window`, один рендер на кадр; завантажується модулем після `launcher-tools.js` і перед `startup-splash.js` |
+| `src/start-hand.css` | полотно `position: fixed; inset: 0; z-index: -1` усередині контексту накладання `#view-start`, `pointer-events: none`, власний напівпрозорий темний шар над CSS-фоном |
+
+- Руки й зорі будуються в коді: моделей, завантажень і мережі немає; сховища не
+  використовуються. Усього ≈7 тис. трикутників, без тіней і постобробки,
+  `devicePixelRatio` не більше 2.
+- Сцена спить, коли вкладку не видно (`document.hidden`), коли лаунчер сховано за
+  модулем (`#view-start` має `display: none` — див. `openBranch`/`showBranches` у
+  вбудованому скрипті `index.html`) і під екраном входу (`html.ew-locked`).
+- `prefers-reduced-motion: reduce` — один нерухомий кадр без стеження за курсором і
+  мерехтіння; без WebGL сцена не створюється, стартовий екран лишається як був.
+- `src/index.html` отримав один рядок — `<script type="module" src="./start-hand.js">`
+  між `launcher-tools.js` і `startup-splash.js`; після `script/import_unified_html.mjs`
+  його треба повернути, `tests/start-hand.test.mjs` це перевіряє.
 
 ## Registration and sign-in gate
 
