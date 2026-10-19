@@ -23,7 +23,7 @@ The verifier requires:
 Expected artifacts:
 
 - `src-tauri/target/debug/bundle/macos/EasyWAR.app`
-- `src-tauri/target/debug/bundle/dmg/EasyWAR_0.5.0_aarch64.dmg`
+- `src-tauri/target/debug/bundle/dmg/EasyWAR_<версія з package.json>_aarch64.dmg`
 
 Ad-hoc signing proves bundle integrity for local development. It does **not**
 establish publisher identity, satisfy Gatekeeper for general distribution, or

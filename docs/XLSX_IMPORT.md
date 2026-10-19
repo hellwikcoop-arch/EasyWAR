@@ -2,13 +2,14 @@
 
 ## Scope
 
-Desktop 0.5 includes a local, in-memory reader for the existing EasyWAR
+The desktop application includes a local, in-memory reader for the existing EasyWAR
 workbook contract. It accepts workbook bytes, reads the `Зведена` sheet and
 returns a typed import batch. It does not upload, copy, modify or export the
 source workbook.
 
-The adapter uses Calamine `0.26.1`, pinned because it supports the repository's
-Rust `1.77.2` baseline. The current Calamine release requires a newer compiler.
+The adapter uses Calamine `0.26.1`. It was pinned while the repository's Rust
+baseline was `1.77.2`; `rust-version` is now `1.90`, so that constraint no longer
+applies and an upgrade is a separate decision (audit 2026-10-19, M8).
 
 ## Required sheet contract
 

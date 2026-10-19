@@ -29,6 +29,7 @@ Each module isolates its `localStorage` keys and IndexedDB names by prefix
 | `src/app-update-state-core.js` | Тимчасовий знімок стану штатного оновлювача без запуску перевірки; `backup.js` публікує результати вже наявних дій |
 | `src/assistant/assistant-knowledge-core.js` | Чисті компіляція й пошук уривків фіксованої локальної довідки з джерелом «файл → розділ» |
 | `src/assistant/assistant-explain-core.js` | Чисте ядро режиму пояснень для ПС/РВ: дескриптор елемента → що це й на чому засновано (лише з `DATA_REFERENCE.md`) |
+| `src/assistant/assistant-explain-refs-core.js` | Статичні ідентифікатори й назви елементів, на яких заснована відповідь режиму пояснень: з них (без тексту з таблиць) будується пакет пропозиції розробнику |
 | `src/assistant/assistant-explain-udshv-core.js` | Те саме для УДШВ і вкладки «Наші втрати» (гілка `dshv`) |
 | `src/assistant/assistant-explain.js` | DOM-контролер режиму пояснень: перехоплення кліків у capture, підсвітка, Esc, зняття при закритті; без змін файлів модулів |
 | `src/assistant/assistant-rules-core.js` | Каталог постійних ID, пояснень і пропозицій; адаптер наявного `reviewData` без застосування виправлень |

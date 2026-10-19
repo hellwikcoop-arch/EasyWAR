@@ -3,15 +3,25 @@
 //! Модулі записують таблицю цілком, тож помилка серіалізації (порожня чи обрізана
 //! книга) знищила б єдину робочу копію журналу. Перед заміною файлу:
 //! 1. байти відкриваються як книга XLSX, а для відомих родів військ на місці має бути
-//!    аркуш із заголовками (`Зведена` для ПС/РВ, `Таблиця 1` для ПВК);
+//!    аркуш із заголовками (`Зведена` для ПС/РВ, `Таблиця 1` для ПВК); перед цим
+//!    книга проходить межі розпакування ([`crate::xlsx_import::ZipLimits`]), щоб
+//!    «ZIP-бомба» з webview не вичерпала пам'ять у calamine;
 //! 2. поточний файл, якщо він сам є коректною книгою, копіюється поруч як
 //!    `<назва>.easywar-prev.xlsx` — одна попередня копія, яка оновлюється не частіше
 //!    за [`PREVIOUS_COPY_MIN_AGE`], щоб серія збережень поспіль не витіснила
-//!    останній добрий стан;
+//!    останній добрий стан. Копію також не затирають, якщо поточний файл виглядає
+//!    як різке зменшення кількості рядків відносно неї ([`rows_collapsed`]): книга
+//!    «лише заголовки» проходить перевірку на коректність, і без цього наступне
+//!    збереження перенесло б її в копію й витіснило останній добрий стан;
 //! 3. нові байти записуються у тимчасовий файл у тій самій папці й замінюють таблицю
-//!    одним перейменуванням.
+//!    одним перейменуванням, після чого (на unix) синхронізується тека.
 //!
-//! Якщо копію зробити не вдалося, таблиця не змінюється.
+//! Якщо копію зробити не вдалося, таблиця не змінюється. Сам запис таблиці
+//! різке зменшення рядків не блокує: користувач має право очистити журнал.
+//!
+//! Таблиця-symlink: копію для неї не роблять (`symlink_metadata` не бачить
+//! звичайного файлу), а `persist` замінює саме посилання звичайним файлом, тож ціль
+//! посилання не змінюється. Цю поведінку лишено як є.
 
 use std::{
     fs,
@@ -20,14 +30,26 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use calamine::{Reader, Xlsx};
+use calamine::{Data, Range, Reader, Xlsx};
 
-use crate::local_profiles::Branch;
+use crate::{
+    local_profiles::Branch,
+    xlsx_import::{ensure_zip_within_limits_with, ZipLimits},
+};
 
 /// Суфікс файлу попередньої копії: `EasyWAR_РВ.xlsx` → `EasyWAR_РВ.easywar-prev.xlsx`.
 pub const PREVIOUS_COPY_SUFFIX: &str = ".easywar-prev.xlsx";
 /// Не оновлювати попередню копію частіше, ніж раз на цей час.
 pub const PREVIOUS_COPY_MIN_AGE: Duration = Duration::from_secs(5 * 60);
+/// Різке зменшення рядків рахується, лише якщо до нього було не менше стількох
+/// рядків даних; у менших таблицях значущим вважається тільки повне очищення.
+pub const COLLAPSE_MIN_ROWS: usize = 10;
+/// Скільки діє захист копії від різкого зменшення рядків: між записом самої копії й
+/// останнім записом таблиці. Таблиця, що працювала довше, вважається новим станом: інакше
+/// після навмисного скорочення журналу копія застрягла б на старому стані назавжди. Час
+/// міряється за самою таблицею, а не за годинником: застосунок, не запущений понад добу
+/// після збою, не повинен «дочекатися» кінця захисту й затерти останню добру копію.
+pub const COLLAPSE_GUARD_WINDOW: Duration = Duration::from_secs(24 * 60 * 60);
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProfileTableError {
@@ -51,7 +73,8 @@ pub enum ProfileTableError {
 }
 
 /// Аркуш, без якого книга для цього роду військ не вважається таблицею EasyWAR.
-/// Для інших гілок (ДШВ, «Наші втрати») точна структура не зафіксована, тож
+/// Для інших гілок (ДШВ, «Наші втрати») назви аркушів не зафіксовані ні в Rust, ні в
+/// JS: їх обирає користувач (див. `rankSheets` у `dashboard-module-catalog.js`), тож
 /// перевіряється лише, що книга відкривається й має аркуші.
 pub fn required_sheet(branch: Branch) -> Option<&'static str> {
     match branch {
@@ -69,10 +92,35 @@ fn normalize_label(value: &str) -> String {
         .to_lowercase()
 }
 
+fn find_sheet(sheet_names: &[String], required: &str) -> Option<String> {
+    sheet_names
+        .iter()
+        .find(|name| normalize_label(name) == normalize_label(required))
+        .cloned()
+}
+
+/// Відкриває книгу, попередньо перевіривши межі розпакування.
+fn open_workbook(
+    bytes: &[u8],
+    limits: ZipLimits,
+) -> Result<Xlsx<Cursor<&[u8]>>, ProfileTableError> {
+    ensure_zip_within_limits_with(bytes, limits)
+        .map_err(|error| ProfileTableError::InvalidWorkbook(error.to_string()))?;
+    Xlsx::new(Cursor::new(bytes))
+        .map_err(|error| ProfileTableError::InvalidWorkbook(error.to_string()))
+}
+
 /// Перевіряє байти до запису. Нічого не змінює.
 pub fn validate_workbook(branch: Branch, bytes: &[u8]) -> Result<(), ProfileTableError> {
-    let mut workbook = Xlsx::new(Cursor::new(bytes))
-        .map_err(|error| ProfileTableError::InvalidWorkbook(error.to_string()))?;
+    validate_workbook_with_limits(branch, bytes, ZipLimits::DEFAULT)
+}
+
+fn validate_workbook_with_limits(
+    branch: Branch,
+    bytes: &[u8],
+    limits: ZipLimits,
+) -> Result<(), ProfileTableError> {
+    let mut workbook = open_workbook(bytes, limits)?;
     let sheet_names = workbook.sheet_names();
     if sheet_names.is_empty() {
         return Err(ProfileTableError::NoSheets);
@@ -80,11 +128,8 @@ pub fn validate_workbook(branch: Branch, bytes: &[u8]) -> Result<(), ProfileTabl
     let Some(required) = required_sheet(branch) else {
         return Ok(());
     };
-    let sheet = sheet_names
-        .iter()
-        .find(|name| normalize_label(name) == normalize_label(required))
-        .cloned()
-        .ok_or_else(|| ProfileTableError::MissingSheet {
+    let sheet =
+        find_sheet(&sheet_names, required).ok_or_else(|| ProfileTableError::MissingSheet {
             required,
             found: sheet_names
                 .iter()
@@ -106,6 +151,52 @@ pub fn validate_workbook(branch: Branch, bytes: &[u8]) -> Result<(), ProfileTabl
     Ok(())
 }
 
+fn cell_has_content(cell: &Data) -> bool {
+    match cell {
+        Data::Empty => false,
+        Data::String(text) => !text.trim().is_empty(),
+        _ => true,
+    }
+}
+
+/// Рядки даних на аркуші: непорожні рядки без першого (рядка заголовків).
+fn sheet_data_rows(range: &Range<Data>) -> usize {
+    range
+        .rows()
+        .filter(|cells| cells.iter().any(cell_has_content))
+        .count()
+        .saturating_sub(1)
+}
+
+/// Кількість рядків даних у книзі. Для ПС, РВ і ПВК — на обов'язковому аркуші; для
+/// гілок без фіксованої структури — сума по всіх аркушах (на кожному аркуші перший
+/// непорожній рядок вважається заголовком). `None`, якщо книгу не вдалося прочитати.
+pub fn count_data_rows(branch: Branch, bytes: &[u8]) -> Option<usize> {
+    let mut workbook = open_workbook(bytes, ZipLimits::DEFAULT).ok()?;
+    let sheet_names = workbook.sheet_names();
+    let sheets = match required_sheet(branch) {
+        Some(required) => vec![find_sheet(&sheet_names, required)?],
+        None => sheet_names,
+    };
+    let mut rows = 0usize;
+    for sheet in sheets {
+        let range = workbook.worksheet_range(&sheet).ok()?;
+        rows = rows.saturating_add(sheet_data_rows(&range));
+    }
+    Some(rows)
+}
+
+/// Чи виглядає перехід від `before` до `after` рядків даних як різке зменшення:
+/// 1. рядки були, а тепер жодного (повне очищення), або
+/// 2. було не менше [`COLLAPSE_MIN_ROWS`] рядків, а стало менш ніж половина
+///    (рівно половина ще не різке зменшення).
+pub fn rows_collapsed(before: usize, after: usize) -> bool {
+    if before == 0 {
+        return false;
+    }
+    after == 0 || (before >= COLLAPSE_MIN_ROWS && after.saturating_mul(2) < before)
+}
+
 /// Шлях попередньої копії поруч із таблицею.
 pub fn previous_copy_path(table: &Path) -> Result<PathBuf, ProfileTableError> {
     let stem = table
@@ -119,8 +210,22 @@ pub fn previous_copy_path(table: &Path) -> Result<PathBuf, ProfileTableError> {
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum SaveOutcome {
-    /// Таблицю записано; чи оновлено попередню копію.
-    Saved { previous_copy_updated: bool },
+    /// Таблицю записано. `previous_copy_updated` — копію оновлено станом до цього
+    /// запису; `previous_copy_protected` — копію свідомо не чіпали, бо поточна
+    /// таблиця виглядає як різке зменшення рядків відносно неї ([`rows_collapsed`]).
+    /// Команда `write_profile_database` цей результат не віддає в JS.
+    Saved {
+        previous_copy_updated: bool,
+        previous_copy_protected: bool,
+    },
+}
+
+/// Що сталося з попередньою копією під час запису.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Rotation {
+    Updated,
+    NotNeeded,
+    Protected,
 }
 
 /// Перевіряє, за потреби ротує попередню копію й атомарно замінює таблицю.
@@ -147,7 +252,7 @@ fn save_with_policy(
         .filter(|parent| !parent.as_os_str().is_empty())
         .ok_or(ProfileTableError::InvalidPath)?;
     let previous = previous_copy_path(table)?;
-    let previous_copy_updated = rotate_previous_copy(table, &previous, branch, min_age, now)?;
+    let rotation = rotate_previous_copy(table, &previous, branch, min_age, now)?;
 
     let mut temporary =
         tempfile::NamedTempFile::new_in(directory).map_err(ProfileTableError::Write)?;
@@ -158,9 +263,22 @@ fn save_with_policy(
     temporary
         .persist(table)
         .map_err(|error| ProfileTableError::Write(error.error))?;
+    sync_directory(directory);
     Ok(SaveOutcome::Saved {
-        previous_copy_updated,
+        previous_copy_updated: rotation == Rotation::Updated,
+        previous_copy_protected: rotation == Rotation::Protected,
     })
+}
+
+/// Синхронізує теку після перейменування, щоб заміна файлів пережила збій живлення.
+/// Таблицю вже замінено, тож помилку тут не повертаємо (як у `startup_recovery`):
+/// інакше інтерфейс повідомив би про невдачу запису, який відбувся. На Windows
+/// теку відкрити як файл неможливо, там нічого не робимо.
+fn sync_directory(directory: &Path) {
+    #[cfg(unix)]
+    let _ = fs::File::open(directory).and_then(|handle| handle.sync_all());
+    #[cfg(not(unix))]
+    let _ = directory;
 }
 
 fn rotate_previous_copy(
@@ -169,22 +287,27 @@ fn rotate_previous_copy(
     branch: Branch,
     min_age: Duration,
     now: SystemTime,
-) -> Result<bool, ProfileTableError> {
+) -> Result<Rotation, ProfileTableError> {
     let current = match fs::symlink_metadata(table) {
         Ok(metadata) if metadata.file_type().is_file() => metadata,
         // Таблиці ще немає (або це не звичайний файл): копіювати нічого.
-        Ok(_) | Err(_) => return Ok(false),
+        Ok(_) | Err(_) => return Ok(Rotation::NotNeeded),
     };
     if current.len() == 0 {
-        return Ok(false);
+        return Ok(Rotation::NotNeeded);
     }
     if previous_copy_is_fresh(previous, min_age, now) {
-        return Ok(false);
+        return Ok(Rotation::NotNeeded);
     }
     // Пошкоджений поточний файл не повинен витіснити останню добру копію.
     let current_bytes = fs::read(table).map_err(ProfileTableError::PreviousCopy)?;
     if validate_workbook(branch, &current_bytes).is_err() {
-        return Ok(false);
+        return Ok(Rotation::NotNeeded);
+    }
+    // Коректна, але майже порожня таблиця («лише заголовки») теж не повинна.
+    let table_written = current.modified().unwrap_or(now);
+    if would_collapse_previous_copy(previous, branch, &current_bytes, table_written) {
+        return Ok(Rotation::Protected);
     }
     let directory = previous.parent().ok_or(ProfileTableError::InvalidPath)?;
     let mut temporary =
@@ -196,7 +319,44 @@ fn rotate_previous_copy(
     temporary
         .persist(previous)
         .map_err(|error| ProfileTableError::PreviousCopy(error.error))?;
-    Ok(true)
+    Ok(Rotation::Updated)
+}
+
+/// Чи затре копія поточним станом різке зменшення рядків. Лише для наявної, читабельної
+/// копії, записаної не раніше ніж [`COLLAPSE_GUARD_WINDOW`] до `table_written` (останнього
+/// запису таблиці); в усіх сумнівних випадках (немає копії, не читається, невідомо)
+/// відповідь «ні» — діє звичайна ротація.
+fn would_collapse_previous_copy(
+    previous: &Path,
+    branch: Branch,
+    current_bytes: &[u8],
+    table_written: SystemTime,
+) -> bool {
+    let Ok(metadata) = fs::symlink_metadata(previous) else {
+        return false;
+    };
+    if !metadata.file_type().is_file() || metadata.len() == 0 {
+        return false;
+    }
+    // Невідомий вік (або годинник пішов назад) — вважаємо копію свіжою й захищаємо.
+    let within_window = metadata
+        .modified()
+        .ok()
+        .and_then(|modified| table_written.duration_since(modified).ok())
+        .is_none_or(|age| age < COLLAPSE_GUARD_WINDOW);
+    if !within_window {
+        return false;
+    }
+    let Ok(previous_bytes) = fs::read(previous) else {
+        return false;
+    };
+    match (
+        count_data_rows(branch, &previous_bytes),
+        count_data_rows(branch, current_bytes),
+    ) {
+        (Some(before), Some(after)) => rows_collapsed(before, after),
+        _ => false,
+    }
 }
 
 fn previous_copy_is_fresh(previous: &Path, min_age: Duration, now: SystemTime) -> bool {
@@ -222,7 +382,8 @@ mod tests {
         table.bytes().to_vec()
     }
 
-    fn zip_with_sheet(sheet_name: &str, with_header: bool) -> Vec<u8> {
+    /// Книга з одним аркушем і готовим XML рядків (`<row>…</row>`).
+    fn zip_with_sheet_rows(sheet_name: &str, rows: &str) -> Vec<u8> {
         use zip::write::SimpleFileOptions;
         let mut buffer = Cursor::new(Vec::new());
         {
@@ -260,11 +421,6 @@ mod tests {
             archive
                 .start_file("xl/worksheets/sheet1.xml", options)
                 .unwrap();
-            let rows = if with_header {
-                r#"<row r="1"><c r="A1" t="inlineStr"><is><t>Дата</t></is></c></row>"#
-            } else {
-                ""
-            };
             archive
                 .write_all(
                     format!(
@@ -276,6 +432,33 @@ mod tests {
             archive.finish().unwrap();
         }
         buffer.into_inner()
+    }
+
+    fn zip_with_sheet(sheet_name: &str, with_header: bool) -> Vec<u8> {
+        if with_header {
+            zip_with_rows(sheet_name, 0)
+        } else {
+            zip_with_sheet_rows(sheet_name, "")
+        }
+    }
+
+    /// Книга з рядком заголовків і `data_rows` синтетичними рядками даних.
+    fn zip_with_rows(sheet_name: &str, data_rows: usize) -> Vec<u8> {
+        zip_with_marked_rows(sheet_name, data_rows, "")
+    }
+
+    /// Те саме, але `marker` у тексті рядків робить книги з однаковою кількістю
+    /// рядків різними за байтами.
+    fn zip_with_marked_rows(sheet_name: &str, data_rows: usize, marker: &str) -> Vec<u8> {
+        let mut rows =
+            String::from(r#"<row r="1"><c r="A1" t="inlineStr"><is><t>Дата</t></is></c></row>"#);
+        for index in 0..data_rows {
+            let row = index + 2;
+            rows.push_str(&format!(
+                r#"<row r="{row}"><c r="A{row}" t="inlineStr"><is><t>Запис {index}{marker}</t></is></c></row>"#
+            ));
+        }
+        zip_with_sheet_rows(sheet_name, &rows)
     }
 
     #[test]
@@ -379,7 +562,8 @@ mod tests {
         assert_eq!(
             outcome,
             SaveOutcome::Saved {
-                previous_copy_updated: true
+                previous_copy_updated: true,
+                previous_copy_protected: false,
             }
         );
         assert_eq!(fs::read(&table).unwrap(), replacement);
@@ -404,7 +588,8 @@ mod tests {
         assert_eq!(
             outcome,
             SaveOutcome::Saved {
-                previous_copy_updated: false
+                previous_copy_updated: false,
+                previous_copy_protected: false,
             }
         );
         assert_eq!(fs::read(&table).unwrap(), base(BaseTable::Air));
@@ -427,7 +612,8 @@ mod tests {
         assert_eq!(
             outcome,
             SaveOutcome::Saved {
-                previous_copy_updated: false
+                previous_copy_updated: false,
+                previous_copy_protected: false,
             }
         );
         assert_eq!(fs::read(&table).unwrap(), third);
@@ -459,7 +645,8 @@ mod tests {
         assert_eq!(
             outcome,
             SaveOutcome::Saved {
-                previous_copy_updated: true
+                previous_copy_updated: true,
+                previous_copy_protected: false,
             }
         );
         assert_eq!(fs::read(&previous).unwrap(), current);
@@ -481,7 +668,8 @@ mod tests {
         assert_eq!(
             outcome,
             SaveOutcome::Saved {
-                previous_copy_updated: false
+                previous_copy_updated: false,
+                previous_copy_protected: false,
             }
         );
         assert_eq!(fs::read(&previous).unwrap(), good);
@@ -508,5 +696,372 @@ mod tests {
             "{result:?}"
         );
         assert_eq!(fs::read(&table).unwrap(), original);
+    }
+
+    const HEADER_ROW: &str = r#"<row r="1"><c r="A1" t="inlineStr"><is><t>Дата</t></is></c></row>"#;
+
+    /// Момент, коли копія вже не «свіжа» (минуло більше за [`PREVIOUS_COPY_MIN_AGE`]).
+    fn after_min_age() -> SystemTime {
+        SystemTime::now() + PREVIOUS_COPY_MIN_AGE + Duration::from_secs(1)
+    }
+
+    fn saved(updated: bool, protected: bool) -> SaveOutcome {
+        SaveOutcome::Saved {
+            previous_copy_updated: updated,
+            previous_copy_protected: protected,
+        }
+    }
+
+    #[test]
+    fn data_rows_are_counted_without_the_header_and_blank_rows() {
+        assert_eq!(
+            count_data_rows(Branch::Rocket, &zip_with_rows("Зведена", 12)),
+            Some(12)
+        );
+        assert_eq!(
+            count_data_rows(Branch::Rocket, &zip_with_rows("Зведена", 0)),
+            Some(0)
+        );
+        assert_eq!(
+            count_data_rows(Branch::Rocket, &zip_with_sheet("Зведена", false)),
+            Some(0)
+        );
+        // Рядок із самих пробілів і рядок без значень — не дані.
+        let rows = format!(
+            "{HEADER_ROW}\
+             <row r=\"2\"><c r=\"A2\" t=\"inlineStr\"><is><t>Запис</t></is></c></row>\
+             <row r=\"3\"><c r=\"A3\" t=\"inlineStr\"><is><t>   </t></is></c></row>\
+             <row r=\"4\"><c r=\"A4\"/></row>"
+        );
+        assert_eq!(
+            count_data_rows(Branch::Air, &zip_with_sheet_rows("Зведена", &rows)),
+            Some(1)
+        );
+        // Без обов'язкового аркуша порахувати нічого, як і для не-книги.
+        assert_eq!(
+            count_data_rows(Branch::Rocket, &zip_with_rows("Інший", 12)),
+            None
+        );
+        assert_eq!(count_data_rows(Branch::Rocket, b"PK not a workbook"), None);
+        // Гілка без фіксованої структури рахує по всіх аркушах.
+        assert_eq!(
+            count_data_rows(Branch::Dshv, &zip_with_rows("Втрати", 5)),
+            Some(5)
+        );
+        assert!(count_data_rows(Branch::Rocket, &base(BaseTable::Rvia)).is_some());
+    }
+
+    #[test]
+    fn the_collapse_rule_means_emptying_or_losing_more_than_half_of_ten_or_more_rows() {
+        for (before, after, expected) in [
+            (0, 0, false),
+            (0, 50, false),
+            (1, 0, true),
+            (9, 0, true),
+            (9, 1, false),
+            (9, 4, false),
+            (10, 5, false),
+            (10, 4, true),
+            (11, 5, true),
+            (100, 50, false),
+            (100, 49, true),
+            (100, 100, false),
+            (100, 400, false),
+            (usize::MAX, usize::MAX / 2 + 1, false),
+            (usize::MAX, usize::MAX / 2, true),
+        ] {
+            assert_eq!(
+                rows_collapsed(before, after),
+                expected,
+                "{before} -> {after}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_collapsed_write_followed_by_a_later_save_does_not_evict_the_last_good_copy() {
+        let directory = tempfile::tempdir().unwrap();
+        let table = directory.path().join("EasyWAR_РВ.xlsx");
+        let previous = directory.path().join("EasyWAR_РВ.easywar-prev.xlsx");
+        let good = zip_with_rows("Зведена", 30);
+        let headers_only = zip_with_rows("Зведена", 0);
+        fs::write(&table, &good).unwrap();
+
+        // Момент T: збій записує книгу «лише заголовки». Вона коректна, тож таблицю
+        // замінено (очищення не блокується), а добрий стан іде в копію.
+        let outcome = save(&table, Branch::Rocket, &headers_only).unwrap();
+        assert_eq!(outcome, saved(true, false));
+        assert_eq!(fs::read(&table).unwrap(), headers_only);
+        assert_eq!(fs::read(&previous).unwrap(), good);
+
+        // Момент T+6 хв: наступне збереження не повинно перенести «лише заголовки»
+        // в копію (це і був сценарій витіснення).
+        let recovered = zip_with_marked_rows("Зведена", 31, " нове");
+        let outcome = save_with_policy(
+            &table,
+            Branch::Rocket,
+            &recovered,
+            PREVIOUS_COPY_MIN_AGE,
+            after_min_age(),
+        )
+        .unwrap();
+        assert_eq!(outcome, saved(false, true));
+        assert_eq!(
+            fs::read(&previous).unwrap(),
+            good,
+            "the last good copy survives"
+        );
+        assert_eq!(fs::read(&table).unwrap(), recovered);
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn a_collapsing_save_is_always_written_and_still_keeps_the_state_before_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let table = directory.path().join("EasyWAR_ПС.xlsx");
+        let previous = directory.path().join("EasyWAR_ПС.easywar-prev.xlsx");
+        let older = zip_with_marked_rows("Зведена", 28, " раніше");
+        let good = zip_with_rows("Зведена", 30);
+        let cleared = zip_with_rows("Зведена", 0);
+        fs::write(&previous, &older).unwrap();
+        fs::write(&table, &good).unwrap();
+
+        let outcome = save_with_policy(
+            &table,
+            Branch::Air,
+            &cleared,
+            PREVIOUS_COPY_MIN_AGE,
+            after_min_age(),
+        )
+        .unwrap();
+
+        // Поточний стан (30 рядків) не є різким зменшенням відносно копії (28), тож
+        // він іде в копію; сама таблиця очищена, як просив користувач.
+        assert_eq!(outcome, saved(true, false));
+        assert_eq!(fs::read(&table).unwrap(), cleared);
+        assert_eq!(fs::read(&previous).unwrap(), good);
+    }
+
+    #[test]
+    fn gradual_shrinking_keeps_rotating_the_copy() {
+        let directory = tempfile::tempdir().unwrap();
+        let table = directory.path().join("EasyWAR_РВ.xlsx");
+        let previous = directory.path().join("EasyWAR_РВ.easywar-prev.xlsx");
+        let before = zip_with_rows("Зведена", 40);
+        let half = zip_with_marked_rows("Зведена", 20, " половина");
+        fs::write(&previous, &before).unwrap();
+        fs::write(&table, &half).unwrap();
+
+        let outcome = save_with_policy(
+            &table,
+            Branch::Rocket,
+            &zip_with_rows("Зведена", 19),
+            PREVIOUS_COPY_MIN_AGE,
+            after_min_age(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            outcome,
+            saved(true, false),
+            "exactly half is not a collapse"
+        );
+        assert_eq!(fs::read(&previous).unwrap(), half);
+    }
+
+    fn set_modified(path: &Path, time: SystemTime) {
+        fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(time)
+            .unwrap();
+    }
+
+    #[test]
+    fn the_guard_lapses_after_the_window_so_a_deliberate_reduction_becomes_the_new_copy() {
+        let directory = tempfile::tempdir().unwrap();
+        let table = directory.path().join("EasyWAR_РВ.xlsx");
+        let previous = directory.path().join("EasyWAR_РВ.easywar-prev.xlsx");
+        let good = zip_with_rows("Зведена", 30);
+        let reduced = zip_with_rows("Зведена", 3);
+        let next = zip_with_marked_rows("Зведена", 4, " далі");
+        fs::write(&previous, &good).unwrap();
+        fs::write(&table, &reduced).unwrap();
+        // Копію записано давно, а зменшену таблицю востаннє змінено ще в межах доби після цього.
+        let copied = SystemTime::now() - 5 * COLLAPSE_GUARD_WINDOW;
+        set_modified(&previous, copied);
+        set_modified(
+            &table,
+            copied + COLLAPSE_GUARD_WINDOW - Duration::from_secs(120),
+        );
+        let outcome = save_with_policy(
+            &table,
+            Branch::Rocket,
+            &next,
+            PREVIOUS_COPY_MIN_AGE,
+            SystemTime::now(),
+        )
+        .unwrap();
+        assert_eq!(outcome, saved(false, true));
+        assert_eq!(fs::read(&previous).unwrap(), good);
+
+        // Таблиця пропрацювала понад добу після запису копії: це новий стан.
+        set_modified(
+            &table,
+            copied + COLLAPSE_GUARD_WINDOW + Duration::from_secs(120),
+        );
+        let outcome = save_with_policy(
+            &table,
+            Branch::Rocket,
+            &next,
+            PREVIOUS_COPY_MIN_AGE,
+            SystemTime::now(),
+        )
+        .unwrap();
+        assert_eq!(outcome, saved(true, false));
+        assert_eq!(
+            fs::read(&previous).unwrap(),
+            next,
+            "table was replaced by `next` in the first call"
+        );
+    }
+
+    #[test]
+    fn an_application_left_closed_after_a_collapse_does_not_outwait_the_guard() {
+        let directory = tempfile::tempdir().unwrap();
+        let table = directory.path().join("EasyWAR_РВ.xlsx");
+        let previous = directory.path().join("EasyWAR_РВ.easywar-prev.xlsx");
+        let good = zip_with_rows("Зведена", 30);
+        let headers_only = zip_with_rows("Зведена", 0);
+        let next = zip_with_marked_rows("Зведена", 1, " після вихідних");
+        fs::write(&previous, &good).unwrap();
+        fs::write(&table, &headers_only).unwrap();
+        // Збій записав «лише заголовки» за хвилини після копії, а застосунок не запускали тиждень.
+        let copied = SystemTime::now() - 7 * COLLAPSE_GUARD_WINDOW;
+        set_modified(&previous, copied);
+        set_modified(&table, copied + Duration::from_secs(600));
+
+        let outcome = save_with_policy(
+            &table,
+            Branch::Rocket,
+            &next,
+            PREVIOUS_COPY_MIN_AGE,
+            SystemTime::now(),
+        )
+        .unwrap();
+
+        assert_eq!(outcome, saved(false, true));
+        assert_eq!(
+            fs::read(&previous).unwrap(),
+            good,
+            "the last good copy stays"
+        );
+    }
+
+    #[test]
+    fn small_tables_are_protected_only_against_being_emptied() {
+        for (copy_rows, current_rows, protected) in [(8, 3, false), (8, 0, true), (9, 4, false)] {
+            let directory = tempfile::tempdir().unwrap();
+            let table = directory.path().join("EasyWAR_ПС.xlsx");
+            let previous = directory.path().join("EasyWAR_ПС.easywar-prev.xlsx");
+            fs::write(&previous, zip_with_rows("Зведена", copy_rows)).unwrap();
+            fs::write(
+                &table,
+                zip_with_marked_rows("Зведена", current_rows, " зараз"),
+            )
+            .unwrap();
+
+            let outcome = save_with_policy(
+                &table,
+                Branch::Air,
+                &zip_with_rows("Зведена", 5),
+                PREVIOUS_COPY_MIN_AGE,
+                after_min_age(),
+            )
+            .unwrap();
+
+            assert_eq!(
+                outcome,
+                saved(!protected, protected),
+                "{copy_rows} -> {current_rows}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unreadable_copy_cannot_block_rotation() {
+        let directory = tempfile::tempdir().unwrap();
+        let table = directory.path().join("EasyWAR_РВ.xlsx");
+        let previous = directory.path().join("EasyWAR_РВ.easywar-prev.xlsx");
+        let headers_only = zip_with_rows("Зведена", 0);
+        fs::write(&previous, b"PK synthetic damaged copy").unwrap();
+        fs::write(&table, &headers_only).unwrap();
+
+        let outcome = save_with_policy(
+            &table,
+            Branch::Rocket,
+            &zip_with_rows("Зведена", 2),
+            PREVIOUS_COPY_MIN_AGE,
+            after_min_age(),
+        )
+        .unwrap();
+
+        assert_eq!(outcome, saved(true, false));
+        assert_eq!(fs::read(&previous).unwrap(), headers_only);
+    }
+
+    #[test]
+    fn branches_without_a_required_sheet_compare_rows_over_all_sheets() {
+        let directory = tempfile::tempdir().unwrap();
+        let table = directory.path().join("EasyWAR_ДШВ.xlsx");
+        let previous = directory.path().join("EasyWAR_ДШВ.easywar-prev.xlsx");
+        let good = zip_with_rows("Втрати", 30);
+        fs::write(&previous, &good).unwrap();
+        fs::write(&table, zip_with_rows("Втрати", 2)).unwrap();
+
+        let outcome = save_with_policy(
+            &table,
+            Branch::Dshv,
+            &zip_with_rows("Втрати", 3),
+            PREVIOUS_COPY_MIN_AGE,
+            after_min_age(),
+        )
+        .unwrap();
+
+        assert_eq!(outcome, saved(false, true));
+        assert_eq!(fs::read(&previous).unwrap(), good);
+    }
+
+    #[test]
+    fn a_workbook_that_inflates_past_the_limits_is_rejected_before_calamine_reads_it() {
+        // Лист із 4 МБ пробілів між тегами: ZIP стискає його до кількох кілобайт.
+        let bomb = zip_with_sheet_rows(
+            "Зведена",
+            &format!("{HEADER_ROW}{}", " ".repeat(4 * 1024 * 1024)),
+        );
+        assert!(bomb.len() < 64 * 1024, "{}", bomb.len());
+        let tiny = ZipLimits {
+            per_entry: 256 * 1024,
+            total: 512 * 1024,
+        };
+
+        let error = validate_workbook_with_limits(Branch::Rocket, &bomb, tiny)
+            .expect_err("a part over the limit must be rejected");
+
+        assert!(
+            matches!(&error, ProfileTableError::InvalidWorkbook(message)
+                if message.contains("після розпакування") && message.contains("xl/worksheets/sheet1.xml")),
+            "{error:?}"
+        );
+        // Той самий файл у межах за замовчуванням — звичайна книга.
+        assert!(validate_workbook(Branch::Rocket, &bomb).is_ok());
+    }
+
+    #[test]
+    fn syncing_a_missing_directory_is_silently_ignored() {
+        let directory = tempfile::tempdir().unwrap();
+        sync_directory(directory.path());
+        sync_directory(&directory.path().join("missing"));
     }
 }

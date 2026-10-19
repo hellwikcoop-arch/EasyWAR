@@ -16,6 +16,8 @@ use calamine::{Data, ExcelDateTime, Range, Reader, SheetType, SheetVisible, Xlsx
 use serde::Serialize;
 use serde_json::{Number, Value};
 
+use crate::xlsx_import::{ensure_zip_within_limits_with, ZipLimits};
+
 /// Рядків даних, які можна підтягнути за раз; збігається з межею запису модуля.
 pub const MAX_DATA_ROWS: usize = 10_000;
 /// Запас на заголовок і службові рядки над ним.
@@ -75,6 +77,17 @@ pub struct SourceSheetRows {
 }
 
 fn open(bytes: &[u8]) -> Result<Xlsx<Cursor<Vec<u8>>>, ModuleSourceError> {
+    open_within(bytes, ZipLimits::DEFAULT)
+}
+
+/// Відкриває книгу, попередньо перевіривши межі розпакування: calamine читає частини
+/// цілком, тож «ZIP-бомба» невеликого розміру вичерпала б пам'ять.
+fn open_within(
+    bytes: &[u8],
+    limits: ZipLimits,
+) -> Result<Xlsx<Cursor<Vec<u8>>>, ModuleSourceError> {
+    ensure_zip_within_limits_with(bytes, limits)
+        .map_err(|error| ModuleSourceError::InvalidWorkbook(error.to_string()))?;
     Xlsx::new(Cursor::new(bytes.to_vec()))
         .map_err(|error| ModuleSourceError::InvalidWorkbook(error.to_string()))
 }
@@ -560,6 +573,30 @@ mod tests {
         assert_eq!(
             inspected.sheets[0].row_count,
             MAX_DATA_ROWS + HEADER_ALLOWANCE + 6
+        );
+    }
+
+    #[test]
+    fn a_part_inflating_past_the_limit_is_refused_before_it_is_read() {
+        let mut archive = ZipWriter::new(Cursor::new(Vec::new()));
+        let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+        archive.start_file("xl/sharedStrings.xml", options).unwrap();
+        let chunk = vec![0u8; 64 * 1024];
+        for _ in 0..48 {
+            archive.write_all(&chunk).unwrap();
+        }
+        let bomb = archive.finish().unwrap().into_inner();
+        assert!(bomb.len() < 64 * 1024, "{}", bomb.len());
+        let tiny = ZipLimits {
+            per_entry: 1024 * 1024,
+            total: 2 * 1024 * 1024,
+        };
+
+        let error = open_within(&bomb, tiny).err().expect("over the limit");
+
+        assert!(
+            matches!(&error, ModuleSourceError::InvalidWorkbook(text) if text.contains("sharedStrings.xml")),
+            "{error}"
         );
     }
 

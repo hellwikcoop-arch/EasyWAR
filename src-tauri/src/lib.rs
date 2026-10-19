@@ -403,7 +403,11 @@ async fn rename_local_profile(
         .map_err(|error| error.to_string())
 }
 
-/// Вхід у профіль: для захищеного профілю потрібен пароль.
+/// Вхід у профіль: для захищеного профілю потрібен пароль. Після п'яти неправильних
+/// паролів поспіль вхід у цей профіль зупиняється на 30 с, далі пауза подвоюється (до
+/// 10 хв); перший правильний пароль скидає лічильник. Лічильник лише в пам'яті процесу
+/// і спільний із підтвердженням чинного пароля в `set_local_profile_password`.
+/// Профіль без пароля, як і раніше, приймає будь-який пароль.
 #[tauri::command]
 async fn activate_local_profile(
     profiles: tauri::State<'_, LocalProfileStore>,
@@ -474,7 +478,8 @@ async fn get_local_model_status(
 }
 
 /// Користувач сам обирає папку пакета моделі; перевіряються маніфест і SHA-256 файлів.
-/// Модель після цього лишається вимкненою, поки її не ввімкнуть окремо.
+/// Після успішної перевірки модель одразу вмикається (`enabled: true`); вимкнути її можна
+/// окремо командою `set_local_model_enabled`.
 #[tauri::command]
 async fn choose_local_model_package(
     app: tauri::AppHandle,
@@ -601,6 +606,9 @@ struct InstallResult {
 
 /// Явне встановлення моделі: завантаження, перевірка SHA-256, а за наявності
 /// рушія поруч — запис маніфесту й повна перевірка пакета. Починається лише з цієї команди.
+/// Підтвердження в інтерфейсі сторінки не є захистом (його може оминути будь-який скрипт
+/// вікна), тому перед першим мережевим запитом, зокрема й при поновленні завантаження,
+/// Rust сам показує нативне вікно «Так/Ні». Відмова повертає `outcome: "cancelled"`.
 #[tauri::command]
 async fn install_local_model(
     app: tauri::AppHandle,
@@ -617,13 +625,18 @@ async fn install_local_model(
     let emit: model_install::Emit = std::sync::Arc::new(move |event| {
         let _ = on_event.send(event);
     });
-    match model_install::install_model(&source, &dir, &guard, emit).await {
+    match model_install::install_model(&source, &dir, &guard, emit, model_install::native_consent())
+        .await
+    {
         Ok(_) => {}
-        Err(model_install::InstallError::Cancelled) => {
+        Err(
+            error
+            @ (model_install::InstallError::Cancelled | model_install::InstallError::Declined),
+        ) => {
             return Ok(InstallResult {
                 outcome: "cancelled",
                 status: local_model_status_now(&store, &runtime).await?,
-                message: Some(model_install::InstallError::Cancelled.to_string()),
+                message: Some(error.to_string()),
             });
         }
         Err(error) => return Err(error.to_string()),
@@ -762,6 +775,10 @@ async fn update_local_profile_details(
         .map_err(|error| error.to_string())
 }
 
+/// Встановлює або змінює пароль профілю. Профіль із паролем: лише з сесії цього профілю
+/// і з чинним паролем. Профіль без пароля (з версій до обов'язкового пароля): з власної
+/// сесії або поки ніхто не ввійшов, бо саме так екран входу просить встановити пароль
+/// перед першим входом (`local_profiles::authorize_password_change`).
 #[tauri::command]
 async fn set_local_profile_password(
     profiles: tauri::State<'_, LocalProfileStore>,
@@ -774,6 +791,12 @@ async fn set_local_profile_password(
     if new_password.is_none() {
         return Err(local_profiles::LocalProfileError::PasswordRequired.to_string());
     }
+    let has_password = profiles
+        .has_password(&profile_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    local_profiles::authorize_password_change(has_password, session.get().as_deref(), &profile_id)
+        .map_err(|error| error.to_string())?;
     let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
     let state = profiles
         .set_password(
@@ -847,7 +870,11 @@ struct CreatedBaseTable {
     path: String,
 }
 
-/// Зберігає готову презентацію (.pptx) у файл, який обирає користувач. Дані не залишають пристрій.
+/// Зберігає готову презентацію (.pptx або .pdf) у файл, який обирає користувач. Дані не
+/// залишають пристрій. Запис іде через тимчасовий файл; якщо розширення дописали ми
+/// («report» → «report.pptx») і такий файл уже є, він не затирається, а команда повертає
+/// помилку: вікно збереження про заміну саме не питало. Заміну, підтверджену самим вікном
+/// (обрано вже наявний «report.pptx»), виконано.
 #[tauri::command]
 async fn save_presentation(
     app: tauri::AppHandle,
@@ -881,15 +908,13 @@ async fn save_presentation(
     let Some(selected) = selected else {
         return Ok(None);
     };
-    let mut path = selected.into_path().map_err(|error| error.to_string())?;
-    if !path
-        .extension()
-        .is_some_and(|current| current.eq_ignore_ascii_case(extension))
-    {
-        path.as_mut_os_string().push(format!(".{extension}"));
-    }
-    let target = path.clone();
-    tauri::async_runtime::spawn_blocking(move || std::fs::write(&target, bytes))
+    let target = phone_export::save_target(
+        selected.into_path().map_err(|error| error.to_string())?,
+        &[extension],
+        extension,
+    );
+    let path = target.path.clone();
+    tauri::async_runtime::spawn_blocking(move || phone_export::save_file(&target, &bytes))
         .await
         .map_err(|error| error.to_string())?
         .map_err(|error| error.to_string())?;
@@ -956,7 +981,8 @@ struct PhoneExportResult {
 /// вбудованих ресурсів у місце, яке обрав користувач. З `with_table` у файл кладеться
 /// копія таблиці, прив'язаної до плитки активного профілю (профіль із паролем має бути
 /// розблокований); без нього даних у файлі немає. Повертає `None`, якщо вікно вибору
-/// закрито.
+/// закрито. Наявний файл не затирається, якщо розширення `.html` дописали ми
+/// (див. `save_presentation`).
 #[tauri::command]
 async fn export_phone_file(
     app: tauri::AppHandle,
@@ -1017,10 +1043,10 @@ async fn export_phone_file(
     let Some(selected) = selected else {
         return Ok(None);
     };
-    let path =
-        phone_export::with_html_extension(selected.into_path().map_err(|error| error.to_string())?);
-    let target = path.clone();
-    tauri::async_runtime::spawn_blocking(move || phone_export::write_file(&target, &bytes))
+    let target =
+        phone_export::html_save_target(selected.into_path().map_err(|error| error.to_string())?);
+    let path = target.path.clone();
+    tauri::async_runtime::spawn_blocking(move || phone_export::save_file(&target, &bytes))
         .await
         .map_err(|error| error.to_string())?
         .map_err(|error| format!("Не вдалося зберегти файл: {error}"))?;
@@ -1773,21 +1799,35 @@ pub fn run() {
                 .build(),
         )
         .setup(move |app| {
-            let resolved_database_file = app.path().app_config_dir()?.join(database_name);
+            // `setup` виконується вже в циклі подій, і Tauri відповідає на його помилку панікою,
+            // якої без консолі (Windows) не видно: тут помилку показує нативне вікно, далі вихід
+            // (на Linux лише stderr, бо вікно в заблокованому `setup` не з'явилося б).
+            let dialogs = startup_recovery::SetupDialogs;
+            let resolved_database_file = startup_recovery::or_exit(
+                &dialogs,
+                app.path().app_config_dir(),
+                "Не вдалося визначити директорію конфігурації EasyWAR",
+            )
+            .join(database_name);
             if resolved_database_file != setup_database_file {
-                return Err(
-                    "шлях локальної бази не збігається з перевіреним startup-шляхом".into(),
+                startup_recovery::exit_with(
+                    &dialogs,
+                    "шлях локальної бази не збігається з перевіреним startup-шляхом.",
                 );
             }
             let options = SqliteConnectOptions::new()
                 .filename(&setup_database_file)
                 .foreign_keys(true)
                 .busy_timeout(Duration::from_secs(5));
-            let pool = tauri::async_runtime::block_on(
-                SqlitePoolOptions::new()
-                    .max_connections(1)
-                    .connect_with(options),
-            )?;
+            let pool = startup_recovery::or_exit(
+                &dialogs,
+                tauri::async_runtime::block_on(
+                    SqlitePoolOptions::new()
+                        .max_connections(1)
+                        .connect_with(options),
+                ),
+                "Не вдалося підключитися до локальної бази",
+            );
             app.manage(SignalSettingsStore::new(SettingsStore::new(pool.clone())));
             app.manage(AutoUpdateStore::new(SettingsStore::new(pool.clone())));
             app.manage(Repository::new(pool.clone()));
@@ -1806,7 +1846,11 @@ pub fn run() {
             app.manage(instance_lock);
             app.manage(restore_startup_report);
             app.manage(PendingUpdate::default());
-            desktop_shell::create_main_window(app)?;
+            startup_recovery::or_exit(
+                &dialogs,
+                desktop_shell::create_main_window(app),
+                "Не вдалося створити головне вікно",
+            );
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1884,7 +1928,9 @@ pub fn run() {
             export_approved_xlsx_from_reference
         ])
         .build(context)
-        .expect("помилка запуску EasyWAR")
+        .unwrap_or_else(|error| {
+            startup_recovery::exit_with(&dialogs, &format!("помилка запуску EasyWAR: {error}."))
+        })
         .run(|app, event| {
             // Рушій локальної моделі — дочірній процес: при виході із застосунку його зупиняють явно.
             if matches!(event, tauri::RunEvent::Exit) {

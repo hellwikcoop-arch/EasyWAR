@@ -27,6 +27,10 @@ pub struct SignalSessionStatus {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct SignalSessionSummary {
     pub captured: usize,
+    /// Notifications that were neither stored nor answered and did not end the session:
+    /// sources outside the allowlist, envelopes without a text message (receipts,
+    /// typing, sync, reactions, attachments without a caption) and envelopes that are
+    /// already stored.
     pub ignored: usize,
     pub commands: usize,
     pub end: SignalReceiveEnd,
@@ -57,9 +61,13 @@ async fn process_notification(
     notification: &signal_daemon::SignalReceiveNotification,
     account: &str,
 ) -> Result<NotificationOutcome, SignalSessionError> {
+    // Neither a denied source nor an envelope without text ends the session. Nothing about
+    // the envelope body is logged or returned here.
     let inspected = match inspect_allowed_notification(config, notification, account) {
         Ok(message) => message,
-        Err(SignalIngestError::SourceDenied) => return Ok(NotificationOutcome::Ignored),
+        Err(SignalIngestError::SourceDenied | SignalIngestError::NotTextMessage) => {
+            return Ok(NotificationOutcome::Ignored)
+        }
         Err(error) => return Err(error.into()),
     };
 
@@ -81,8 +89,14 @@ async fn process_notification(
     }
 
     let captured_at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
-    persist_allowed_notification(repository, config, notification, account, &captured_at).await?;
-    Ok(NotificationOutcome::Captured)
+    match persist_allowed_notification(repository, config, notification, account, &captured_at)
+        .await
+    {
+        Ok(_) => Ok(NotificationOutcome::Captured),
+        // Already stored (earlier in this session or in a previous one): nothing to add.
+        Err(SignalIngestError::Duplicate) => Ok(NotificationOutcome::Ignored),
+        Err(error) => Err(error.into()),
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -545,5 +559,358 @@ mod tests {
         ));
         assert!(!controller.status().active);
         assert!(repository.list_signal_inbox(100).await.unwrap().is_empty());
+    }
+
+    const TEXT: &str = "Синтетична доповідь без реальних даних";
+    const BASE_TIMESTAMP: u64 = 1_767_225_600_000;
+
+    fn text_envelope(sender: &str, timestamp: u64, message: &str) -> Value {
+        json!({
+            "sourceUuid": sender,
+            "timestamp": timestamp,
+            "dataMessage": {"message": message}
+        })
+    }
+
+    /// Envelopes signal-cli emits that carry no text message, as one source would send them.
+    fn non_text_envelopes(sender: &str) -> Vec<Value> {
+        let timestamp = BASE_TIMESTAMP;
+        vec![
+            json!({
+                "sourceUuid": sender,
+                "timestamp": timestamp,
+                "receiptMessage": {"when": timestamp, "isDelivery": true, "timestamps": [timestamp]}
+            }),
+            json!({
+                "sourceUuid": sender,
+                "timestamp": timestamp,
+                "typingMessage": {"action": "STARTED", "timestamp": timestamp}
+            }),
+            json!({
+                "sourceUuid": sender,
+                "timestamp": timestamp,
+                "syncMessage": {"readMessages": [{"sender": sender, "timestamp": timestamp}]}
+            }),
+            json!({
+                "sourceUuid": sender,
+                "timestamp": timestamp,
+                "dataMessage": {
+                    "timestamp": timestamp,
+                    "reaction": {"emoji": "+", "targetAuthorUuid": sender, "targetSentTimestamp": timestamp}
+                }
+            }),
+            json!({
+                "sourceUuid": sender,
+                "timestamp": timestamp,
+                "dataMessage": {
+                    "timestamp": timestamp,
+                    "attachments": [{"contentType": "image/jpeg", "size": 1}]
+                }
+            }),
+            json!({
+                "sourceUuid": sender,
+                "timestamp": timestamp,
+                "dataMessage": {"message": "  "}
+            }),
+        ]
+    }
+
+    /// A daemon that streams `envelopes` as receive events and then only expects the
+    /// session's `unsubscribeReceive` (no command reply is ever sent).
+    fn synthetic_envelope_daemon(envelopes: Vec<Value>) -> (SignalDaemonEndpoint, JoinHandle<()>) {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("synthetic listener");
+        let address = listener.local_addr().expect("synthetic address");
+        let handle = std::thread::spawn(move || {
+            let (mut events, _) = listener.accept().expect("synthetic SSE connection");
+            let (request, _) = read_request(&mut events);
+            assert_eq!(request, "GET /api/v1/events HTTP/1.1");
+            events
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: keep-alive\r\n\r\n")
+                .expect("synthetic SSE headers");
+            events.flush().expect("synthetic SSE flush");
+
+            let (mut subscribe, _) = listener.accept().expect("synthetic subscribe");
+            let (_, request) = read_request(&mut subscribe);
+            let request = request.expect("synthetic subscribe JSON");
+            assert_eq!(request["method"], "subscribeReceive");
+            write_rpc(&mut subscribe, &request, json!(42));
+
+            // One write for the whole stream: the client cannot close the connection
+            // before it has received anything, so the write cannot race a failing session.
+            let mut stream = String::new();
+            for envelope in envelopes {
+                let event = json!({
+                    "jsonrpc": "2.0",
+                    "method": "receive",
+                    "params": {
+                        "subscription": 42,
+                        "result": {"account": "synthetic-account", "envelope": envelope}
+                    }
+                });
+                stream.push_str(&format!("data: {event}\n\n"));
+            }
+            events
+                .write_all(stream.as_bytes())
+                .expect("synthetic SSE events");
+            events.flush().expect("synthetic event flush");
+
+            // Whether the session ends by the notification limit or stops after a failure,
+            // it must unsubscribe exactly once and send nothing else.
+            let seen = serve_cleanup(&listener, 1, |method, _| match method {
+                "unsubscribeReceive" => Value::Null,
+                method => panic!("unexpected synthetic method: {method:?}"),
+            });
+            assert_eq!(seen, ["unsubscribeReceive"]);
+        });
+        (SignalDaemonEndpoint::Http { address }, handle)
+    }
+
+    fn allowing_config(endpoint: SignalDaemonEndpoint) -> ValidatedSignalAdapterConfig {
+        SignalAdapterConfig {
+            endpoint,
+            intake_enabled: true,
+            allowlist: SignalAllowlist::new(
+                ["synthetic-sender".to_owned()],
+                ["synthetic-group".to_owned()],
+            )
+            .unwrap(),
+            ..SignalAdapterConfig::default()
+        }
+        .validate()
+        .unwrap()
+    }
+
+    async fn run_bounded_session(
+        controller: &SignalReceiveController,
+        repository: &Repository,
+        config: &ValidatedSignalAdapterConfig,
+        limit: usize,
+    ) -> Result<SignalSessionSummary, SignalSessionError> {
+        controller
+            .run(
+                repository,
+                config,
+                "synthetic-account",
+                limit,
+                Duration::from_secs(5),
+            )
+            .await
+    }
+
+    fn stored_timestamps(inbox: &[crate::repository::SignalInboxItem]) -> Vec<String> {
+        let mut timestamps: Vec<String> = inbox
+            .iter()
+            .map(|item| item.source_timestamp.clone().unwrap_or_default())
+            .collect();
+        timestamps.sort();
+        timestamps
+    }
+
+    #[tokio::test]
+    async fn non_text_envelopes_from_any_source_do_not_end_the_session() {
+        let repository = repository().await;
+        let mut envelopes = Vec::new();
+        for (allowed, denied) in non_text_envelopes("synthetic-sender")
+            .into_iter()
+            .zip(non_text_envelopes("synthetic-denied"))
+        {
+            envelopes.push(allowed);
+            envelopes.push(denied);
+        }
+        // A denied source cannot end the session with a malformed body either.
+        envelopes.push(json!({
+            "sourceUuid": "synthetic-denied",
+            "dataMessage": {"message": TEXT, "groupInfo": "synthetic"}
+        }));
+        envelopes.push(json!({"sourceUuid": "synthetic-denied"}));
+        let ignored_before_text = envelopes.len();
+        envelopes.push(text_envelope("synthetic-sender", BASE_TIMESTAMP + 1, TEXT));
+        let (endpoint, server) = synthetic_envelope_daemon(envelopes);
+        let config = allowing_config(endpoint);
+        let controller = SignalReceiveController::default();
+
+        let summary =
+            run_bounded_session(&controller, &repository, &config, ignored_before_text + 1)
+                .await
+                .expect("non-text envelopes must not fail the session");
+        server.join().expect("synthetic daemon must stop");
+
+        assert_eq!(
+            summary,
+            SignalSessionSummary {
+                captured: 1,
+                ignored: ignored_before_text,
+                commands: 0,
+                end: SignalReceiveEnd::LimitReached,
+            }
+        );
+        assert!(!controller.status().active);
+        let inbox = repository.list_signal_inbox(100).await.unwrap();
+        assert_eq!(inbox.len(), 1);
+        assert_eq!(inbox[0].current_status, "NEW");
+        assert_eq!(
+            stored_timestamps(&inbox),
+            [(BASE_TIMESTAMP + 1).to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn stored_duplicates_are_ignored_and_later_messages_are_still_captured() {
+        let repository = repository().await;
+        let config = allowing_config(SignalDaemonEndpoint::Http {
+            address: (Ipv4Addr::LOCALHOST, 9).into(),
+        });
+        // Stored by an earlier session.
+        let earlier = signal_daemon::SignalReceiveNotification {
+            subscription: 42,
+            account: "synthetic-account".to_owned(),
+            envelope: text_envelope("synthetic-sender", BASE_TIMESTAMP, TEXT),
+        };
+        persist_allowed_notification(
+            &repository,
+            &config,
+            &earlier,
+            "synthetic-account",
+            "2026-01-01T00:00:00.000Z",
+        )
+        .await
+        .expect("synthetic earlier capture");
+
+        let (endpoint, server) = synthetic_envelope_daemon(vec![
+            // Duplicate of the earlier session.
+            text_envelope("synthetic-sender", BASE_TIMESTAMP, TEXT),
+            text_envelope("synthetic-sender", BASE_TIMESTAMP + 1, TEXT),
+            // Duplicate inside this session.
+            text_envelope("synthetic-sender", BASE_TIMESTAMP + 1, TEXT),
+            text_envelope("synthetic-sender", BASE_TIMESTAMP + 2, TEXT),
+        ]);
+        let config = allowing_config(endpoint);
+        let controller = SignalReceiveController::default();
+
+        let summary = run_bounded_session(&controller, &repository, &config, 4)
+            .await
+            .expect("duplicates must not fail the session");
+        server.join().expect("synthetic daemon must stop");
+
+        assert_eq!(
+            summary,
+            SignalSessionSummary {
+                captured: 2,
+                ignored: 2,
+                commands: 0,
+                end: SignalReceiveEnd::LimitReached,
+            }
+        );
+        let inbox = repository.list_signal_inbox(100).await.unwrap();
+        assert_eq!(
+            stored_timestamps(&inbox),
+            [
+                BASE_TIMESTAMP.to_string(),
+                (BASE_TIMESTAMP + 1).to_string(),
+                (BASE_TIMESTAMP + 2).to_string(),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn database_failure_after_ignored_envelopes_still_fails_the_session() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("synthetic database");
+        sqlx::raw_sql(INITIAL_SCHEMA_SQL)
+            .execute(&pool)
+            .await
+            .expect("synthetic migration");
+        let repository = Repository::new(pool.clone());
+        // Ignored envelopes never touch the database, so only the text message can fail.
+        pool.close().await;
+
+        let mut envelopes = non_text_envelopes("synthetic-sender");
+        envelopes.extend(non_text_envelopes("synthetic-denied"));
+        envelopes.push(text_envelope("synthetic-sender", BASE_TIMESTAMP + 1, TEXT));
+        let total = envelopes.len();
+        let (endpoint, server) = synthetic_envelope_daemon(envelopes);
+        let config = allowing_config(endpoint);
+        let controller = SignalReceiveController::default();
+
+        let result = run_bounded_session(&controller, &repository, &config, total).await;
+        server
+            .join()
+            .expect("synthetic daemon must still unsubscribe");
+
+        assert!(matches!(
+            result,
+            Err(SignalSessionError::Ingest(SignalIngestError::Repository(
+                RepositoryError::Database(_)
+            )))
+        ));
+        assert!(!controller.status().active);
+    }
+
+    #[tokio::test]
+    async fn non_text_envelope_outcomes_are_decided_without_the_database() {
+        // Пул закрито: будь-яке звернення до бази дало б помилку, а не очікуваний результат.
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("synthetic database");
+        let repository = Repository::new(pool.clone());
+        pool.close().await;
+        let config = allowing_config(SignalDaemonEndpoint::Http {
+            address: (Ipv4Addr::LOCALHOST, 9).into(),
+        });
+        let notification = |envelope: Value| signal_daemon::SignalReceiveNotification {
+            subscription: 42,
+            account: "synthetic-account".to_owned(),
+            envelope,
+        };
+        for sender in ["synthetic-sender", "synthetic-denied"] {
+            for envelope in non_text_envelopes(sender) {
+                let outcome = process_notification(
+                    &repository,
+                    &config,
+                    &notification(envelope),
+                    "synthetic-account",
+                )
+                .await
+                .expect("a non-text envelope is never an error");
+                assert_eq!(outcome, NotificationOutcome::Ignored);
+            }
+        }
+
+        // A malformed text message from an allowed sender stays a protocol error.
+        let malformed = process_notification(
+            &repository,
+            &config,
+            &notification(json!({
+                "sourceUuid": "synthetic-sender",
+                "dataMessage": {"message": TEXT}
+            })),
+            "synthetic-account",
+        )
+        .await;
+        assert!(matches!(
+            malformed,
+            Err(SignalSessionError::Ingest(
+                SignalIngestError::InvalidEnvelope
+            ))
+        ));
+        // A notification for another local account is a protocol error as well.
+        let other_account = signal_daemon::SignalReceiveNotification {
+            subscription: 42,
+            account: "synthetic-other-account".to_owned(),
+            envelope: text_envelope("synthetic-sender", BASE_TIMESTAMP, TEXT),
+        };
+        let mismatch =
+            process_notification(&repository, &config, &other_account, "synthetic-account").await;
+        assert!(matches!(
+            mismatch,
+            Err(SignalSessionError::Ingest(
+                SignalIngestError::AccountMismatch
+            ))
+        ));
     }
 }

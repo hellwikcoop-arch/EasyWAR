@@ -4,6 +4,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha384};
 use sqlx::{sqlite::SqliteConnectOptions, sqlite::SqlitePoolOptions};
 use std::{
+    collections::BTreeSet,
     ffi::OsString,
     fs::{self, File, OpenOptions},
     io::{self, Write},
@@ -81,8 +82,8 @@ pub enum RestoreInspectionError {
     UnsupportedSchema,
     #[error("контрольна сума міграції не відповідає EasyWAR")]
     MigrationMismatch,
-    #[error("у копії бракує обов'язкових таблиць або подань EasyWAR")]
-    MissingSchemaObjects,
+    #[error("у копії бракує обов'язкових об'єктів схеми EasyWAR (таблиць, подань або тригерів захисту історії): {0}")]
+    MissingSchemaObjects(String),
     #[error("не вдалося прочитати файл копії: {0}")]
     Io(#[from] io::Error),
     #[error("не вдалося перевірити SQLite-копію: {0}")]
@@ -618,68 +619,88 @@ async fn inspect_pool(pool: &sqlx::SqlitePool) -> Result<BackupInspection, Resto
         }
     }
 
-    for (kind, name) in [
-        ("table", "raw_sources"),
-        ("table", "reports"),
-        ("table", "parsed_report_versions"),
-        ("table", "manual_corrections"),
-        ("table", "review_decisions"),
-        ("table", "revision_history"),
-        ("table", "audit_log"),
-        ("table", "settings"),
-        ("view", "report_current_state"),
-    ] {
-        let found: i64 =
-            sqlx::query_scalar("SELECT count(*) FROM sqlite_master WHERE type = $1 AND name = $2")
-                .bind(kind)
-                .bind(name)
-                .fetch_one(pool)
-                .await?;
-        if found != 1 {
-            return Err(RestoreInspectionError::MissingSchemaObjects);
-        }
-    }
-
-    if applied.last().unwrap().0 >= 2 {
-        let found: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM sqlite_master
-             WHERE type = 'table' AND name = 'xlsx_row_fingerprints'",
-        )
-        .fetch_one(pool)
-        .await?;
-        if found != 1 {
-            return Err(RestoreInspectionError::MissingSchemaObjects);
-        }
-    }
-    if applied.last().unwrap().0 >= 3 {
-        for table in ["local_profiles", "local_profile_state"] {
-            let found: i64 = sqlx::query_scalar(
-                "SELECT count(*) FROM sqlite_master
-                 WHERE type = 'table' AND name = ?",
-            )
-            .bind(table)
-            .fetch_one(pool)
-            .await?;
-            if found != 1 {
-                return Err(RestoreInspectionError::MissingSchemaObjects);
-            }
-        }
-    }
-    if applied.last().unwrap().0 >= 4 {
-        let found: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM sqlite_master
-             WHERE type = 'table' AND name = 'local_profile_workspace_templates'",
-        )
-        .fetch_one(pool)
-        .await?;
-        if found != 1 {
-            return Err(RestoreInspectionError::MissingSchemaObjects);
-        }
+    // Версії міграцій збігаються з префіксом вбудованого списку (перевірено вище), тож
+    // обов'язкові об'єкти — це те, що створюють рівно `applied.len()` перших міграцій.
+    let required_sql: Vec<&'static str> = expected
+        .iter()
+        .take(applied.len())
+        .map(|migration| migration.sql)
+        .collect();
+    let required = expected_schema_objects(required_sql).await?;
+    let present = schema_objects(pool).await?;
+    let missing: Vec<&SchemaObject> = required.difference(&present).collect();
+    if !missing.is_empty() {
+        return Err(RestoreInspectionError::MissingSchemaObjects(
+            describe_missing(&missing),
+        ));
     }
 
     Ok(BackupInspection {
         schema_version: applied.last().unwrap().0,
     })
+}
+
+/// Об'єкт схеми SQLite: `(тип, ім'я)` з `sqlite_master`; тип — `table`, `view` або `trigger`.
+type SchemaObject = (String, String);
+
+/// Скільки відсутніх об'єктів називає повідомлення про помилку.
+const MISSING_OBJECTS_SHOWN: usize = 6;
+
+/// Таблиці, подання й тригери, які створюють саме ці міграції: у тому числі тригери незмінності
+/// провенансу (`*_no_update`/`*_no_delete` з 0001 і 0002). Міграції по черзі застосовуються до
+/// порожньої бази в пам'яті (на диск нічого не пишеться), тож перелік завжди збігається з реальними
+/// файлами `src-tauri/migrations` для версії схеми копії, а нова міграція не потребує ручного
+/// оновлення. Порівнюються імена; індекси, стовпці й тіла тригерів не перевіряються.
+async fn expected_schema_objects(
+    migrations_sql: Vec<&'static str>,
+) -> Result<BTreeSet<SchemaObject>, RestoreInspectionError> {
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await?;
+    let objects = reference_schema_objects(&pool, migrations_sql).await;
+    pool.close().await;
+    Ok(objects?)
+}
+
+async fn reference_schema_objects(
+    pool: &sqlx::SqlitePool,
+    migrations_sql: Vec<&'static str>,
+) -> Result<BTreeSet<SchemaObject>, sqlx::Error> {
+    for sql in migrations_sql {
+        sqlx::raw_sql(sql).execute(pool).await?;
+    }
+    schema_objects(pool).await
+}
+
+/// Таблиці, подання й тригери бази без службових (`sqlite_*`).
+async fn schema_objects(pool: &sqlx::SqlitePool) -> Result<BTreeSet<SchemaObject>, sqlx::Error> {
+    let rows: Vec<SchemaObject> = sqlx::query_as(
+        "SELECT type, name FROM sqlite_master
+         WHERE type IN ('table', 'view', 'trigger') AND substr(name, 1, 7) != 'sqlite_'",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().collect())
+}
+
+fn describe_missing(missing: &[&SchemaObject]) -> String {
+    let mut parts: Vec<String> = missing
+        .iter()
+        .take(MISSING_OBJECTS_SHOWN)
+        .map(|(kind, name)| {
+            let label = match kind.as_str() {
+                "table" => "таблиця",
+                "view" => "подання",
+                _ => "тригер",
+            };
+            format!("{label} {name}")
+        })
+        .collect();
+    if missing.len() > MISSING_OBJECTS_SHOWN {
+        parts.push(format!("та ще {}", missing.len() - MISSING_OBJECTS_SHOWN));
+    }
+    parts.join(", ")
 }
 
 #[cfg(test)]
@@ -689,6 +710,11 @@ mod tests {
     use sqlx::SqlitePool;
 
     async fn synthetic_database(path: &Path) -> SqlitePool {
+        synthetic_database_at(path, database::migrations().len()).await
+    }
+
+    /// База, до якої застосовано лише перші `migration_count` міграцій (схема тієї версії).
+    async fn synthetic_database_at(path: &Path, migration_count: usize) -> SqlitePool {
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
             .connect_with(
@@ -708,7 +734,7 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
-        for migration in database::migrations() {
+        for migration in database::migrations().into_iter().take(migration_count) {
             sqlx::raw_sql(migration.sql).execute(&pool).await.unwrap();
             sqlx::query(
                 "INSERT INTO _sqlx_migrations
@@ -835,7 +861,7 @@ mod tests {
         pool.close().await;
         assert!(matches!(
             inspect_backup(&second).await,
-            Err(RestoreInspectionError::MissingSchemaObjects)
+            Err(RestoreInspectionError::MissingSchemaObjects(_))
         ));
 
         let third = dir.path().join("missing-v2-table.sqlite3");
@@ -847,7 +873,7 @@ mod tests {
         pool.close().await;
         assert!(matches!(
             inspect_backup(&third).await,
-            Err(RestoreInspectionError::MissingSchemaObjects)
+            Err(RestoreInspectionError::MissingSchemaObjects(_))
         ));
 
         let fourth = dir.path().join("missing-v3-table.sqlite3");
@@ -859,7 +885,7 @@ mod tests {
         pool.close().await;
         assert!(matches!(
             inspect_backup(&fourth).await,
-            Err(RestoreInspectionError::MissingSchemaObjects)
+            Err(RestoreInspectionError::MissingSchemaObjects(_))
         ));
 
         let fifth = dir.path().join("missing-v4-table.sqlite3");
@@ -871,8 +897,274 @@ mod tests {
         pool.close().await;
         assert!(matches!(
             inspect_backup(&fifth).await,
-            Err(RestoreInspectionError::MissingSchemaObjects)
+            Err(RestoreInspectionError::MissingSchemaObjects(_))
         ));
+    }
+
+    /// Створює базу схеми `migration_count`, застосовує до неї `damage` і повертає результат перевірки.
+    async fn inspect_damaged(
+        directory: &Path,
+        name: &str,
+        migration_count: usize,
+        damage: &[impl AsRef<str>],
+    ) -> Result<BackupInspection, RestoreInspectionError> {
+        let path = directory.join(format!("{name}.sqlite3"));
+        let pool = synthetic_database_at(&path, migration_count).await;
+        // Без перевірки зовнішніх ключів `DROP` не залежить від порядку таблиць.
+        sqlx::query("PRAGMA foreign_keys = OFF")
+            .execute(&pool)
+            .await
+            .unwrap();
+        for statement in damage {
+            sqlx::query(statement.as_ref())
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        pool.close().await;
+        inspect_backup(&path).await
+    }
+
+    fn missing_message(result: Result<BackupInspection, RestoreInspectionError>) -> String {
+        match result {
+            Err(error @ RestoreInspectionError::MissingSchemaObjects(_)) => error.to_string(),
+            other => panic!("очікувалась відсутність об'єктів схеми, отримано {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn accepts_a_complete_database_of_every_schema_version() {
+        let dir = tempfile::tempdir().unwrap();
+        for (index, migration) in database::migrations().iter().enumerate() {
+            let path = dir.path().join(format!("v{}.sqlite3", migration.version));
+            synthetic_database_at(&path, index + 1).await.close().await;
+            assert_eq!(
+                inspect_backup(&path).await.unwrap(),
+                BackupInspection {
+                    schema_version: migration.version
+                },
+                "схема v{}",
+                migration.version
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn rejects_a_current_database_that_lacks_a_table_added_after_schema_v4() {
+        let dir = tempfile::tempdir().unwrap();
+        let current = database::migrations().len();
+        for table in [
+            "local_profile_details",
+            "local_profile_tables",
+            "local_profile_modules",
+            "dashboard_modules",
+            "dashboard_module_fields",
+            "dashboard_module_corrections",
+        ] {
+            let message = missing_message(
+                inspect_damaged(
+                    dir.path(),
+                    table,
+                    current,
+                    &[&format!("DROP TABLE {table}")],
+                )
+                .await,
+            );
+            assert!(
+                message.contains(&format!("таблиця {table}")),
+                "{table}: {message}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn rejects_a_database_that_lacks_a_table_of_its_own_older_version() {
+        let dir = tempfile::tempdir().unwrap();
+        for (table, migration_count) in [
+            ("xlsx_row_fingerprints", 2),
+            ("local_profile_state", 3),
+            ("local_profile_workspace_templates", 4),
+            ("local_profile_details", 5),
+            ("local_profile_tables", 8),
+            ("local_profile_modules", 9),
+            ("dashboard_modules", 10),
+        ] {
+            let message = missing_message(
+                inspect_damaged(
+                    dir.path(),
+                    &format!("{table}-v{migration_count}"),
+                    migration_count,
+                    &[&format!("DROP TABLE {table}")],
+                )
+                .await,
+            );
+            assert!(message.contains(table), "{table}: {message}");
+        }
+    }
+
+    #[tokio::test]
+    async fn rejects_a_database_without_a_provenance_protecting_trigger() {
+        let dir = tempfile::tempdir().unwrap();
+        let current = database::migrations().len();
+        for trigger in [
+            "raw_sources_no_update",
+            "reports_no_delete",
+            "parsed_versions_no_update",
+            "corrections_no_delete",
+            "review_decisions_no_update",
+            "revision_history_no_delete",
+            "audit_log_no_update",
+            "xlsx_row_fingerprints_no_update",
+            "xlsx_row_fingerprints_no_delete",
+        ] {
+            let message = missing_message(
+                inspect_damaged(
+                    dir.path(),
+                    trigger,
+                    current,
+                    &[&format!("DROP TRIGGER {trigger}")],
+                )
+                .await,
+            );
+            assert!(
+                message.contains(&format!("тригер {trigger}")),
+                "{trigger}: {message}"
+            );
+        }
+        // Тригери 0001 обов'язкові й для найстарішої схеми, тригери 0002 — від v2.
+        assert!(matches!(
+            inspect_damaged(
+                dir.path(),
+                "v1-trigger",
+                1,
+                &["DROP TRIGGER audit_log_no_delete"]
+            )
+            .await,
+            Err(RestoreInspectionError::MissingSchemaObjects(_))
+        ));
+        assert!(matches!(
+            inspect_damaged(
+                dir.path(),
+                "v2-trigger",
+                2,
+                &["DROP TRIGGER xlsx_row_fingerprints_no_delete"]
+            )
+            .await,
+            Err(RestoreInspectionError::MissingSchemaObjects(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn names_the_first_missing_objects_and_counts_the_rest() {
+        let dir = tempfile::tempdir().unwrap();
+        // Три таблиці разом зі своїми шістьма тригерами: 9 відсутніх об'єктів, названо 6.
+        let message = missing_message(
+            inspect_damaged(
+                dir.path(),
+                "many-missing",
+                database::migrations().len(),
+                &[
+                    "DROP TABLE raw_sources",
+                    "DROP TABLE reports",
+                    "DROP TABLE parsed_report_versions",
+                ],
+            )
+            .await,
+        );
+        assert!(message.contains("таблиця raw_sources"), "{message}");
+        assert!(message.contains("таблиця reports"), "{message}");
+        assert!(
+            message.contains("таблиця parsed_report_versions"),
+            "{message}"
+        );
+        assert!(message.ends_with("та ще 3"), "{message}");
+    }
+
+    #[tokio::test]
+    async fn a_newer_backup_is_still_rejected_and_extra_tables_are_still_accepted() {
+        let dir = tempfile::tempdir().unwrap();
+        let newer = database::migrations().len() as i64 + 1;
+        let result = inspect_damaged(
+            dir.path(),
+            "newer",
+            database::migrations().len(),
+            &[&format!(
+                "INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time)
+                 VALUES ({newer}, 'synthetic future', 1, x'00', 0)"
+            )],
+        )
+        .await;
+        assert!(matches!(
+            result,
+            Err(RestoreInspectionError::UnsupportedSchema)
+        ));
+
+        // Таблиці, які застосунок створює під час роботи поза міграціями, не заважають.
+        let result = inspect_damaged(
+            dir.path(),
+            "extra-table",
+            database::migrations().len(),
+            &["CREATE TABLE dashboard_data_deadbeef (id INTEGER PRIMARY KEY)"],
+        )
+        .await;
+        assert_eq!(
+            result.unwrap(),
+            BackupInspection {
+                schema_version: database::migrations().len() as i64
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn required_objects_follow_the_real_migrations() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = database::create_migrated_database(&dir.path().join("fresh.sqlite3"))
+            .await
+            .unwrap();
+        let mut created = schema_objects(&pool).await.unwrap();
+        pool.close().await;
+        assert!(created.remove(&("table".to_string(), "_sqlx_migrations".to_string())));
+
+        let required = expected_schema_objects(
+            database::migrations()
+                .iter()
+                .map(|migration| migration.sql)
+                .collect(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            required, created,
+            "перелік обов'язкових об'єктів має збігатися з тим, що створює справжня міграція"
+        );
+        for trigger in [
+            "raw_sources",
+            "reports",
+            "parsed_versions",
+            "corrections",
+            "review_decisions",
+            "revision_history",
+            "audit_log",
+        ]
+        .into_iter()
+        .flat_map(|prefix| [format!("{prefix}_no_update"), format!("{prefix}_no_delete")])
+        .chain([
+            "xlsx_row_fingerprints_no_update".to_string(),
+            "xlsx_row_fingerprints_no_delete".to_string(),
+        ]) {
+            assert!(
+                required.contains(&("trigger".to_string(), trigger.clone())),
+                "{trigger}"
+            );
+        }
+        for table in [
+            "local_profile_details",
+            "local_profile_modules",
+            "dashboard_modules",
+        ] {
+            assert!(required.contains(&("table".to_string(), table.to_string())));
+        }
     }
 
     #[tokio::test]
