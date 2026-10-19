@@ -2,8 +2,10 @@
 //! нативним повідомленням, а пошкоджену базу можна відкласти й стартувати порожнім.
 //!
 //! Правила:
-//! * нічого не видаляється й не переписується: пошкоджена база лише перейменовується
-//!   (разом з WAL/SHM/journal) на `<файл>.damaged-<UTC-час>`;
+//! * нічого не видаляється й не переписується: пошкоджена база лише перейменовується на
+//!   `<файл>.damaged-<UTC-час>`, а її WAL/SHM/journal — на те саме ім'я із тим самим
+//!   закінченням (`<файл>.damaged-<UTC-час>-wal` тощо): SQLite шукає супровідні файли за
+//!   іменем бази, тож лише так відкладена копія лишається цілою парою «база + WAL»;
 //! * відкладання лише після явної згоди користувача у вікні «Так/Ні»;
 //! * база з новішої версії EasyWAR, помилки файлової системи, невдала міграція й
 //!   неоднозначні стани перемикання — не пошкодження: файл не чіпається, показується причина;
@@ -293,8 +295,32 @@ fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
     PathBuf::from(name)
 }
 
-/// Перейменовує базу та її WAL/SHM/journal на `<файл>.damaged-<мітка>` (або `-<n>`, якщо зайнято).
-/// Спершу переносяться супровідні файли, потім сама база. Повертає шлях відкладеної бази.
+/// Найбільше число в суфіксі `-<n>`, яке пробуємо, коли ім'я `.damaged-<мітка>` зайняте.
+const MAX_SET_ASIDE_SLOT: usize = 1024;
+
+/// Перейменовує базу та її WAL/SHM/journal у набір `<файл>.damaged-<мітка>` (або `-<n>`, якщо зайнято).
+///
+/// Імена: база → `<файл>.damaged-<мітка>`, супровідні файли → те саме ім'я + `-wal`/`-shm`/`-journal`.
+/// SQLite шукає WAL і journal саме за іменем бази, тож відкладена копія лишається цілою парою
+/// «база + WAL», а `restore::inspect_backup` бачить її супровідні файли й не видає її за
+/// самодостатню резервну копію.
+///
+/// Порядок перейменувань: спершу сама база, потім супровідні файли. Перейменування набору файлів не
+/// атомарне, тож перерваний процес лишає частину файлів на старих іменах; порядок обрано так, щоб
+/// проміжний стан завжди був безпечним і нічого не втрачалося:
+/// * база першою: якщо процес зупинився між кроками, у живому місці лишаються тільки «осиротілі»
+///   `-wal`/`-shm`/`-journal` без бази. Наступний старт відмовляє закрито
+///   (`restore::recover_live_sidecars` → `LiveSidecarsPresent`): нічого не застосовує й не видаляє,
+///   а SQLite не створює порожню базу поруч зі старим WAL. Усі байти цілі: база під новим іменем,
+///   решта на старих місцях, і їх можна перейменувати за схемою вище вручну;
+/// * якби першими йшли супровідні файли, перерваний процес лишив би живу базу без її WAL: наступний
+///   старт відкрив би застарілі дані без зафіксованих транзакцій і міг би цього не помітити;
+/// * при помилці перейменування (не при аварії процесу) вже виконані кроки повертаються у зворотному
+///   порядку, тобто база повертається останньою, і відкат має ту саму властивість;
+/// * після кожного кроку синхронізується тека (Unix), щоб кроки не помінялися місцями після збою
+///   живлення.
+///
+/// Повертає шлях відкладеної бази.
 pub(crate) fn set_aside_damaged_database(live_database: &Path, stamp: &str) -> io::Result<PathBuf> {
     if !live_database.is_absolute() {
         return Err(io::Error::new(
@@ -308,44 +334,96 @@ pub(crate) fn set_aside_damaged_database(live_database: &Path, stamp: &str) -> i
             "база не є звичайним файлом",
         ));
     }
-    let mut members: Vec<PathBuf> = SIDECAR_SUFFIXES
-        .iter()
-        .map(|suffix| with_suffix(live_database, suffix))
-        .filter(|path| fs::symlink_metadata(path).is_ok())
-        .collect();
-    members.push(live_database.to_path_buf());
+    let steps = plan_set_aside(live_database, stamp)?;
+    let moved = steps
+        .first()
+        .map(|(_, target)| target.clone())
+        .ok_or_else(|| io::Error::other("порожній план відкладання"))?;
+    rename_in_order(&steps, |from, to| {
+        fs::rename(from, to)?;
+        sync_parent_directory(to);
+        Ok(())
+    })?;
+    Ok(moved)
+}
 
-    let mut slot = 0usize;
-    let suffix_for = |slot: usize| {
-        if slot == 0 {
+/// Кроки `(звідки, куди)` у порядку виконання: база, потім наявні супровідні файли.
+/// Ім'я вважається зайнятим, якщо існує будь-який із чотирьох цільових шляхів (навіть коли
+/// відповідного супровідного файлу зараз немає): інакше чужий `-wal` потрапив би до відкладеної бази.
+fn plan_set_aside(live_database: &Path, stamp: &str) -> io::Result<Vec<(PathBuf, PathBuf)>> {
+    for slot in 0..=MAX_SET_ASIDE_SLOT {
+        let suffix = if slot == 0 {
             format!(".damaged-{stamp}")
         } else {
             format!(".damaged-{stamp}-{slot}")
+        };
+        let target = with_suffix(live_database, &suffix);
+        let mut taken = path_taken(&target)?;
+        for sidecar in SIDECAR_SUFFIXES {
+            taken = taken || path_taken(&with_suffix(&target, sidecar))?;
         }
-    };
-    loop {
-        let taken = members
-            .iter()
-            .any(|path| fs::symlink_metadata(with_suffix(path, &suffix_for(slot))).is_ok());
-        if !taken {
-            break;
+        if taken {
+            continue;
         }
-        slot += 1;
-        if slot > 1024 {
-            return Err(io::Error::other(
-                "немає вільного імені для відкладеної бази",
-            ));
+        let mut steps = vec![(live_database.to_path_buf(), target.clone())];
+        for sidecar in SIDECAR_SUFFIXES {
+            let source = with_suffix(live_database, sidecar);
+            if path_taken(&source)? {
+                steps.push((source, with_suffix(&target, sidecar)));
+            }
         }
+        return Ok(steps);
     }
-    let suffix = suffix_for(slot);
-    for path in &members {
-        fs::rename(path, with_suffix(path, &suffix))?;
+    Err(io::Error::other(
+        "немає вільного імені для відкладеної бази",
+    ))
+}
+
+/// Виконує перейменування по черзі; при помилці повертає виконані кроки у зворотному порядку.
+/// Якщо повернути не вдалося, помилка називає файли, що лишились на нових іменах.
+fn rename_in_order(
+    steps: &[(PathBuf, PathBuf)],
+    mut rename: impl FnMut(&Path, &Path) -> io::Result<()>,
+) -> io::Result<()> {
+    for (index, (from, to)) in steps.iter().enumerate() {
+        let Err(error) = rename(from, to) else {
+            continue;
+        };
+        let mut stuck = Vec::new();
+        for (done_from, done_to) in steps[..index].iter().rev() {
+            if let Err(rollback_error) = rename(done_to, done_from) {
+                stuck.push(format!("{}: {rollback_error}", done_to.display()));
+            }
+        }
+        let reason = format!("{}: {error}", from.display());
+        return Err(if stuck.is_empty() {
+            io::Error::new(error.kind(), reason)
+        } else {
+            io::Error::other(format!(
+                "{reason}; повернути вже перейменовані файли не вдалося ({})",
+                stuck.join("; ")
+            ))
+        });
     }
+    Ok(())
+}
+
+fn path_taken(path: &Path) -> io::Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
+/// Найкращою спробою синхронізує теку з файлом (лише Unix); помилка тут не скасовує відкладання.
+fn sync_parent_directory(path: &Path) {
     #[cfg(unix)]
-    if let Some(parent) = live_database.parent() {
+    if let Some(parent) = path.parent() {
         let _ = fs::File::open(parent).and_then(|directory| directory.sync_all());
     }
-    Ok(with_suffix(live_database, &suffix))
+    #[cfg(not(unix))]
+    let _ = path;
 }
 
 #[cfg(test)]
@@ -483,6 +561,7 @@ mod tests {
         fs::write(&live, b"synthetic main").expect("main");
         fs::write(with_suffix(&live, "-wal"), b"synthetic wal").expect("wal");
         fs::write(with_suffix(&live, "-shm"), b"synthetic shm").expect("shm");
+        fs::write(with_suffix(&live, "-journal"), b"synthetic journal").expect("journal");
         fs::write(directory.path().join("easywar.db.instance-lock"), b"x").expect("lock");
 
         let moved = set_aside_damaged_database(&live, "20261017-120000").expect("set aside");
@@ -492,30 +571,54 @@ mod tests {
             directory.path().join("easywar.db.damaged-20261017-120000")
         );
         assert_eq!(fs::read(&moved).expect("moved"), b"synthetic main");
-        assert_eq!(
-            fs::read(
-                directory
+        // SQLite шукає супровідні файли за іменем бази: <відкладена база>-wal тощо.
+        for (suffix, bytes) in [
+            ("-wal", &b"synthetic wal"[..]),
+            ("-shm", &b"synthetic shm"[..]),
+            ("-journal", &b"synthetic journal"[..]),
+        ] {
+            assert_eq!(
+                fs::read(
+                    directory
+                        .path()
+                        .join(format!("easywar.db.damaged-20261017-120000{suffix}"))
+                )
+                .expect(suffix),
+                bytes,
+                "{suffix}"
+            );
+            assert!(
+                !directory
                     .path()
-                    .join("easywar.db-wal.damaged-20261017-120000")
-            )
-            .expect("wal"),
-            b"synthetic wal"
-        );
-        assert_eq!(
-            fs::read(
-                directory
-                    .path()
-                    .join("easywar.db-shm.damaged-20261017-120000")
-            )
-            .expect("shm"),
-            b"synthetic shm"
-        );
-        assert!(!live.exists());
-        assert!(!with_suffix(&live, "-wal").exists());
+                    .join(format!("easywar.db{suffix}.damaged-20261017-120000"))
+                    .exists(),
+                "the old name «<db>{suffix}.damaged-<час>» must not be used: {suffix}"
+            );
+        }
+        assert_live_paths_are_free(&live);
         assert!(
             directory.path().join("easywar.db.instance-lock").exists(),
             "other files stay"
         );
+        let names: Vec<String> = fs::read_dir(directory.path())
+            .expect("dir")
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names.len(), 5, "main + 3 sidecars + lock only: {names:?}");
+    }
+
+    /// Жодного з чотирьох живих імен (база, `-wal`, `-shm`, `-journal`) не лишилось.
+    fn assert_live_paths_are_free(live: &Path) {
+        assert!(!live.exists(), "{}", live.display());
+        for suffix in SIDECAR_SUFFIXES {
+            let sidecar = with_suffix(live, suffix);
+            assert!(
+                fs::symlink_metadata(&sidecar).is_err(),
+                "{}",
+                sidecar.display()
+            );
+        }
     }
 
     #[test]
@@ -544,6 +647,252 @@ mod tests {
         assert!(set_aside_damaged_database(&directory.path().join("missing.db"), "s").is_err());
         assert!(set_aside_damaged_database(Path::new("easywar.db"), "s").is_err());
         assert!(set_aside_damaged_database(directory.path(), "s").is_err());
+    }
+
+    #[test]
+    fn set_aside_treats_a_foreign_sidecar_at_the_target_name_as_taken() {
+        // Чужий `-wal` під цільовим іменем потрапив би до відкладеної бази й зіпсував би її.
+        let directory = tempfile::tempdir().expect("synthetic directory");
+        let live = directory.path().join("easywar.db");
+        let foreign_wal = directory
+            .path()
+            .join("easywar.db.damaged-20261017-120000-wal");
+        fs::write(&foreign_wal, b"foreign wal").expect("foreign wal");
+        fs::write(&live, b"synthetic main").expect("live");
+
+        let moved = set_aside_damaged_database(&live, "20261017-120000").expect("set aside");
+
+        assert_eq!(
+            moved,
+            directory
+                .path()
+                .join("easywar.db.damaged-20261017-120000-1")
+        );
+        assert_eq!(fs::read(&foreign_wal).expect("foreign"), b"foreign wal");
+        assert!(!with_suffix(&moved, "-wal").exists());
+        assert_live_paths_are_free(&live);
+    }
+
+    #[test]
+    fn numbered_slot_keeps_the_sidecar_naming_scheme() {
+        let directory = tempfile::tempdir().expect("synthetic directory");
+        let live = directory.path().join("easywar.db");
+        fs::write(
+            directory.path().join("easywar.db.damaged-20261017-120000"),
+            b"old",
+        )
+        .expect("earlier");
+        fs::write(&live, b"second main").expect("live");
+        fs::write(with_suffix(&live, "-wal"), b"second wal").expect("wal");
+
+        let moved = set_aside_damaged_database(&live, "20261017-120000").expect("set aside");
+
+        assert_eq!(
+            moved,
+            directory
+                .path()
+                .join("easywar.db.damaged-20261017-120000-1")
+        );
+        assert_eq!(
+            fs::read(
+                directory
+                    .path()
+                    .join("easywar.db.damaged-20261017-120000-1-wal")
+            )
+            .expect("wal"),
+            b"second wal"
+        );
+        assert_live_paths_are_free(&live);
+    }
+
+    #[test]
+    fn set_aside_moves_the_database_before_its_sidecars() {
+        let directory = tempfile::tempdir().expect("synthetic directory");
+        let live = directory.path().join("easywar.db");
+        fs::write(&live, b"main").expect("live");
+        fs::write(with_suffix(&live, "-wal"), b"wal").expect("wal");
+        fs::write(with_suffix(&live, "-journal"), b"journal").expect("journal");
+
+        let steps = plan_set_aside(&live, "20261017-120000").expect("plan");
+
+        let target = directory.path().join("easywar.db.damaged-20261017-120000");
+        let expected: Vec<(PathBuf, PathBuf)> = ["", "-wal", "-journal"]
+            .into_iter()
+            .map(|suffix| (with_suffix(&live, suffix), with_suffix(&target, suffix)))
+            .collect();
+        assert_eq!(
+            steps, expected,
+            "the database goes first; absent sidecars (-shm) are not planned"
+        );
+    }
+
+    #[test]
+    fn an_interruption_after_the_database_moved_leaves_only_orphans_that_startup_refuses() {
+        // Імітація аварії між першим і другим кроком: база вже під новим іменем, WAL ще на місці.
+        let runtime = runtime();
+        let directory = tempfile::tempdir().expect("synthetic directory");
+        let live = directory.path().join("easywar.db");
+        fs::write(&live, b"synthetic main").expect("live");
+        fs::write(with_suffix(&live, "-wal"), b"synthetic wal").expect("wal");
+        let steps = plan_set_aside(&live, "20261017-120000").expect("plan");
+        let (database_from, database_to) = &steps[0];
+        fs::rename(database_from, database_to).expect("first step only");
+
+        let lock = crate::restore::acquire_application_instance_lock(&live).expect("lock");
+        let startup = runtime.block_on(crate::restore::recover_live_sidecars(&live, &lock));
+
+        assert!(matches!(
+            startup,
+            Err(RestoreInspectionError::LiveSidecarsPresent)
+        ));
+        assert_eq!(fs::read(database_to).expect("moved"), b"synthetic main");
+        assert_eq!(
+            fs::read(with_suffix(&live, "-wal")).expect("orphan wal is untouched"),
+            b"synthetic wal"
+        );
+        assert!(
+            !live.exists(),
+            "no empty database appears next to the orphan WAL"
+        );
+    }
+
+    #[test]
+    fn set_aside_keeps_committed_wal_frames_attached_to_the_moved_database() {
+        use sqlx::sqlite::SqliteJournalMode;
+
+        let runtime = runtime();
+        let directory = tempfile::tempdir().expect("synthetic directory");
+        let running = directory.path().join("running.db");
+        let live = directory.path().join("easywar.db");
+        runtime.block_on(async {
+            let pool = SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect_with(
+                    SqliteConnectOptions::new()
+                        .filename(&running)
+                        .create_if_missing(true)
+                        .journal_mode(SqliteJournalMode::Wal),
+                )
+                .await
+                .expect("open");
+            for statement in [
+                "PRAGMA wal_autocheckpoint = 0",
+                "CREATE TABLE synthetic_rows (id INTEGER PRIMARY KEY, payload TEXT NOT NULL)",
+                "INSERT INTO synthetic_rows (id, payload) VALUES (1, 'a'), (2, 'b'), (3, 'c')",
+            ] {
+                sqlx::query(statement)
+                    .execute(&pool)
+                    .await
+                    .expect(statement);
+            }
+            // Знімок файлів, як після аварії: зафіксовані рядки лежать лише у WAL.
+            for suffix in ["", "-wal", "-shm"] {
+                fs::copy(with_suffix(&running, suffix), with_suffix(&live, suffix)).expect(suffix);
+            }
+            pool.close().await;
+        });
+        assert!(fs::metadata(with_suffix(&live, "-wal")).expect("wal").len() > 0);
+
+        let moved = set_aside_damaged_database(&live, "20261017-120000").expect("set aside");
+
+        assert_live_paths_are_free(&live);
+        assert!(
+            matches!(
+                runtime.block_on(crate::restore::inspect_backup(&moved)),
+                Err(RestoreInspectionError::SidecarsPresent)
+            ),
+            "the deferred copy is not passed off as a self-contained backup while its WAL is attached"
+        );
+        let rows: i64 = runtime.block_on(async {
+            let pool = SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect_with(SqliteConnectOptions::new().filename(&moved))
+                .await
+                .expect("open the deferred database");
+            let rows = sqlx::query_scalar("SELECT count(*) FROM synthetic_rows")
+                .fetch_one(&pool)
+                .await
+                .expect("rows from the attached WAL");
+            pool.close().await;
+            rows
+        });
+        assert_eq!(rows, 3, "transactions committed only to the WAL survive");
+    }
+
+    #[test]
+    fn a_failed_step_rolls_back_the_finished_steps_in_reverse_order() {
+        let directory = tempfile::tempdir().expect("synthetic directory");
+        let live = directory.path().join("easywar.db");
+        for (suffix, bytes) in [("", "main"), ("-wal", "wal"), ("-shm", "shm")] {
+            fs::write(with_suffix(&live, suffix), bytes).expect(suffix);
+        }
+        let steps = plan_set_aside(&live, "20261017-120000").expect("plan");
+        let calls = RefCell::new(Vec::new());
+
+        let result = rename_in_order(&steps, |from, to| {
+            calls
+                .borrow_mut()
+                .push((from.to_path_buf(), to.to_path_buf()));
+            if to.to_string_lossy().ends_with("-shm") {
+                return Err(io::Error::other("synthetic rename failure"));
+            }
+            fs::rename(from, to)
+        });
+
+        let error = result.expect_err("the third rename fails");
+        assert!(error.to_string().contains("synthetic rename failure"));
+        assert!(error.to_string().contains("easywar.db-shm"));
+        // Вперед: база, wal, shm (збій); назад: wal, потім база (база повертається останньою).
+        let calls = calls.into_inner();
+        assert_eq!(calls.len(), 5);
+        assert_eq!(calls[0].0, live);
+        assert_eq!(calls[3].0, steps[1].1);
+        assert_eq!(calls[4].0, steps[0].1);
+        for (suffix, bytes) in [("", "main"), ("-wal", "wal"), ("-shm", "shm")] {
+            assert_eq!(
+                fs::read(with_suffix(&live, suffix)).expect(suffix),
+                bytes.as_bytes(),
+                "{suffix} is back"
+            );
+            assert!(
+                !with_suffix(&steps[0].1, suffix).exists(),
+                "nothing is left under the new name: {suffix}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_failed_rollback_names_the_files_left_under_the_new_names() {
+        let directory = tempfile::tempdir().expect("synthetic directory");
+        let live = directory.path().join("easywar.db");
+        fs::write(&live, b"main").expect("live");
+        fs::write(with_suffix(&live, "-wal"), b"wal").expect("wal");
+        let steps = plan_set_aside(&live, "20261017-120000").expect("plan");
+        let calls = Cell::new(0);
+
+        let result = rename_in_order(&steps, |from, to| {
+            calls.set(calls.get() + 1);
+            match calls.get() {
+                1 => fs::rename(from, to),
+                _ => Err(io::Error::other("synthetic failure")),
+            }
+        });
+
+        let error = result.expect_err("both the step and the rollback fail");
+        let text = error.to_string();
+        assert!(
+            text.contains("повернути вже перейменовані файли не вдалося"),
+            "{text}"
+        );
+        assert!(
+            text.contains("easywar.db.damaged-20261017-120000"),
+            "{text}"
+        );
+        assert_eq!(
+            fs::read(&steps[0].1).expect("the database is still intact under its new name"),
+            b"main"
+        );
+        assert_eq!(fs::read(with_suffix(&live, "-wal")).expect("wal"), b"wal");
     }
 
     #[test]
