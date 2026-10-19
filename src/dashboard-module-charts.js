@@ -6,6 +6,7 @@
 
 import { UKRAINE_BOUNDS, UKRAINE_OUTLINE } from './dashboard-module-geo.js';
 import { chartSummary } from './dashboard-module-charts-core.js';
+import { pluralForm } from './dashboard-module-catalog-core.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const FONT = 11;
@@ -609,6 +610,130 @@ function leaderboard(model, width, height, { compact }) {
     item.deltaText && !compact ? el('span', { class: `ewmc-delta ${item.delta > 0 ? 'good' : item.delta < 0 ? 'bad' : 'neutral'}`, text: item.deltaText }) : null))), { compact });
 }
 
+// «Метеоумови»: темна карта з ізолініями хмарності, виноски на пунктах, шкала часу з
+// небезпечними моментами й рядок показників (стиль погодних дашбордів). Кадр перемикається
+// кнопками шкали без повторного читання бази: усі кадри вже є в моделі.
+const ISOLINE_CLASS = { 3: 'low', 6: 'mid', 8: 'high' };
+let weatherClipSeed = 0;
+
+function weatherMap(frame, width, height, { compact }) {
+  const bounds = { ...frame.grid.bounds };
+  for (const station of frame.stations) {
+    bounds.west = Math.min(bounds.west, station.longitude - 0.4);
+    bounds.east = Math.max(bounds.east, station.longitude + 0.4);
+    bounds.south = Math.min(bounds.south, station.latitude - 0.3);
+    bounds.north = Math.max(bounds.north, station.latitude + 0.3);
+  }
+  const midLat = (bounds.north + bounds.south) / 2 * Math.PI / 180;
+  const spanX = (bounds.east - bounds.west) * Math.cos(midLat);
+  const spanY = bounds.north - bounds.south;
+  const pad = 6;
+  const scale = Math.min((width - pad * 2) / spanX, (height - pad * 2) / spanY);
+  const offsetX = (width - spanX * scale) / 2;
+  const offsetY = (height - spanY * scale) / 2;
+  const project = (lon, lat) => ({ x: offsetX + (lon - bounds.west) * Math.cos(midLat) * scale, y: offsetY + (bounds.north - lat) * scale });
+  const { grid } = frame;
+  const gridPoint = (col, row) => project(
+    grid.bounds.west + col / (grid.cols - 1) * (grid.bounds.east - grid.bounds.west),
+    grid.bounds.north - row / (grid.rows - 1) * (grid.bounds.north - grid.bounds.south));
+  const outlinePath = UKRAINE_OUTLINE.map(ring => `M${ring.map(([lon, lat]) => { const point = project(lon, lat); return `${fixed(point.x)} ${fixed(point.y)}`; }).join(' L')} Z`).join('');
+  const outline = svg('path', { d: outlinePath, class: 'ewmc-wx-land' });
+  // Ізолінії обрізаються контуром: за кордоном пунктів немає, і хмарність там не вгадується.
+  const clipId = `ewmc-wx-clip-${++weatherClipSeed}`;
+  const clip = svg('defs', {}, svg('clipPath', { id: clipId }, svg('path', { d: outlinePath })));
+  const isolines = frame.isolines.filter(line => line.segments.length).map(line => {
+    const d = line.segments.map(([x1, y1, x2, y2]) => {
+      const a = gridPoint(x1, y1); const b = gridPoint(x2, y2);
+      return `M${fixed(a.x)} ${fixed(a.y)}L${fixed(b.x)} ${fixed(b.y)}`;
+    }).join('');
+    const kind = ISOLINE_CLASS[line.level] || 'mid';
+    return svg('g', { class: `ewmc-wx-iso ${kind}` },
+      svg('path', { d, class: 'ewmc-wx-iso-glow' }),
+      svg('path', { d, class: 'ewmc-wx-iso-line' }, svgTitle(`Хмарність ${line.level}/10`)));
+  });
+  const placed = [];
+  const overlaps = box => placed.some(other => box.x < other.x + other.w + 3 && other.x < box.x + box.w + 3 && box.y < other.y + other.h + 3 && other.y < box.y + box.h + 3);
+  const labelled = compact ? [] : frame.stations
+    .map((station, index) => ({ station, index, rank: station.tone === 'bad' ? 0 : station.tone === 'warn' ? 1 : 2 }))
+    .sort((left, right) => left.rank - right.rank || left.index - right.index)
+    .slice(0, 6)
+    .map(item => item.station);
+  const callouts = [];
+  const dots = frame.stations.map(station => {
+    const position = project(station.longitude, station.latitude);
+    const tone = station.tone || 'calm';
+    const title = `${station.label}: ${station.callout}${station.reasons.length ? ` · ${station.reasons.join(', ')}` : ''}`;
+    if (labelled.includes(station)) {
+      const name = truncate(station.label, 96, 10);
+      const detail = truncate(station.callout, 132, 10);
+      const boxW = Math.max(textWidth(name, 10), textWidth(detail, 10)) + 14;
+      const boxH = 30;
+      // Перше вільне місце: праворуч чи ліворуч від пункту, вище чи нижче, далі — зсув по вертикалі.
+      const candidates = [];
+      for (const shift of [0, 1, -1, 2, -2, 3, -3]) {
+        for (const side of [1, -1]) {
+          const x = side > 0 ? position.x + 10 : position.x - 10 - boxW;
+          const y = position.y - boxH - 6 + shift * (boxH + 4);
+          candidates.push({ x, y, w: boxW, h: boxH, right: side > 0 });
+        }
+      }
+      const inside = box => box.x >= 2 && box.x + box.w <= width - 2 && box.y >= 2 && box.y + box.h <= height - 2;
+      const spot = candidates.find(box => inside(box) && !overlaps(box)) || null;
+      if (!spot) return svg('g', { class: `ewmc-wx-station ${tone}` },
+        station.tone ? svg('circle', { cx: fixed(position.x), cy: fixed(position.y), r: 10, class: 'ewmc-wx-halo' }) : null,
+        svg('circle', { cx: fixed(position.x), cy: fixed(position.y), r: 4, class: 'ewmc-wx-dot' }, svgTitle(title)));
+      placed.push(spot);
+      const { x, y, right } = spot;
+      callouts.push(svg('g', { class: `ewmc-wx-callout ${tone}` },
+        svg('line', { x1: fixed(position.x), y1: fixed(position.y), x2: fixed(right ? x : x + boxW), y2: fixed(y + boxH / 2), class: 'ewmc-wx-leader' }),
+        svg('rect', { x: fixed(x), y: fixed(y), width: fixed(boxW), height: boxH, rx: 3, class: 'ewmc-wx-plaque' }),
+        svg('text', { x: fixed(x + 7), y: fixed(y + 12), class: 'ewmc-wx-plaque-name', text: name }),
+        svg('text', { x: fixed(x + 7), y: fixed(y + 24), class: 'ewmc-wx-plaque-text', text: detail })));
+    }
+    return svg('g', { class: `ewmc-wx-station ${tone}` },
+      station.tone ? svg('circle', { cx: fixed(position.x), cy: fixed(position.y), r: compact ? 7 : 10, class: 'ewmc-wx-halo' }) : null,
+      svg('circle', { cx: fixed(position.x), cy: fixed(position.y), r: compact ? 3 : 4, class: 'ewmc-wx-dot' }, svgTitle(title)));
+  });
+  return svg('svg', { viewBox: `0 0 ${width} ${height}`, width, height, class: 'ewmc-svg ewmc-wx-map', role: 'img', 'aria-label': `Карта хмарності на ${frame.label}` },
+    clip, outline, svg('g', { 'clip-path': `url(#${clipId})` }, isolines), dots, callouts);
+}
+
+function weatherChart(model, width, height, { compact }) {
+  const root = el('figure', { class: `ewmc-chart ewmc-chart-weather${compact ? ' compact' : ''}`, 'aria-label': chartSummary(model) });
+  if (!model.frames.length) {
+    root.append(el('p', { class: 'ewmc-chart-foot', text: model.empty ? 'Спостережень ще немає.' : 'Немає спостережень із часом і координатами.' }));
+    return root;
+  }
+  const paint = () => {
+    const frame = model.frames[model.current] ?? model.frames.at(-1);
+    const stripH = compact ? 34 : 40;
+    const timeH = compact || model.frames.length < 2 ? 0 : 34;
+    const mapH = Math.max(80, height - stripH - timeH - (compact ? 6 : 14));
+    const head = compact ? null : el('div', { class: 'ewmc-wx-head' },
+      el('b', { text: frame.label }),
+      el('span', { text: `${frame.stations.length} ${pluralForm(frame.stations.length, 'пункт', 'пункти', 'пунктів')}` }),
+      frame.hazardText ? el('span', { class: `ewmc-wx-alert ${frame.tone}`, text: frame.hazardText, title: frame.hazardText }) : el('span', { class: 'ewmc-wx-alert calm', text: 'Небезпечних явищ немає' }));
+    const legendNode = compact ? null : el('ul', { class: 'ewmc-wx-legend', 'aria-label': 'Ізолінії хмарності' },
+      [3, 6, 8].map(level => el('li', {}, el('i', { class: `ewmc-wx-key ${ISOLINE_CLASS[level]}` }), el('span', { text: `${level}/10` }))));
+    const timeline = timeH ? el('div', { class: 'ewmc-wx-time', role: 'group', 'aria-label': 'Шкала часу спостережень' },
+      model.frames.map((item, index) => el('button', {
+        type: 'button',
+        class: `ewmc-wx-tick${item.tone ? ` ${item.tone}` : ''}${index === model.current ? ' active' : ''}`,
+        'aria-pressed': index === model.current ? 'true' : 'false',
+        'aria-label': `${item.label}${item.hazardText ? `, ${item.hazardText}` : ''}`,
+        title: `${item.label}${item.hazardText ? ` · ${item.hazardText}` : ''}`,
+        onclick: () => { model.current = index; paint(); root.querySelector('.ewmc-wx-tick.active')?.focus(); },
+      }, el('i'), el('small', { text: item.short })))) : null;
+    const strip = el('dl', { class: 'ewmc-wx-strip' }, frame.summary.map(cell => el('div', { class: `ewmc-wx-cell${cell.tone ? ` ${cell.tone}` : ''}`, title: `${cell.label} (${cell.note})` },
+      el('dt', { text: cell.label }),
+      el('dd', { text: cell.valueText }))));
+    const foot = !compact && model.skipped ? el('p', { class: 'ewmc-chart-foot', text: `Без часу чи координат: ${model.skipped}` }) : null;
+    root.replaceChildren(...[head, el('div', { class: 'ewmc-wx-stage' }, weatherMap(frame, width, mapH, { compact }), legendNode), timeline, strip, foot].filter(Boolean));
+  };
+  paint();
+  return root;
+}
+
 const RENDERERS = {
   kpi,
   line: seriesLines,
@@ -633,6 +758,7 @@ const RENDERERS = {
   activity,
   waveform,
   leaderboard,
+  weather: weatherChart,
 };
 
 /** Малює модель у задану ширину й висоту (пікселі). Невідомий вид — таблиця. */

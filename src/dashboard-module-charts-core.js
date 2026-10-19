@@ -5,6 +5,7 @@
 // слотів палітри (1–8): ряд отримує слот у порядку першої появи й не змінює його.
 
 import { fieldKind, formatDuration, formatValue, pluralForm } from './dashboard-module-catalog-core.js';
+import { weatherModel } from './dashboard-module-weather-core.js';
 
 /** Понад стільки рядів решта складається в «Інші»: дев'ятого кольору в палітрі немає. */
 export const SERIES_LIMIT = 8;
@@ -753,6 +754,7 @@ const BUILDERS = {
   activity,
   waveform,
   leaderboard,
+  weather: weatherModel,
 };
 
 export const CHART_KINDS = Object.freeze(Object.keys(BUILDERS));
@@ -784,7 +786,7 @@ export function chartSummary(model) {
     'horizontal-bar': 'Горизонтальні смуги', 'grouped-columns': 'Згруповані стовпчики', 'diverging-bars': 'Приріст і втрати', combo: 'Стовпчики з лінією',
     donut: 'Кільцева діаграма', 'radial-progress': 'Радіальний прогрес', 'multi-ring': 'Кілька радіальних шкал', radar: 'Радар', gauge: 'Шкала',
     'progress-bars': 'Смуги виконання', calendar: 'Календар', table: 'Таблиця', funnel: 'Воронка', map: 'Карта', cohort: 'Когорти',
-    activity: 'Стрічка подій', waveform: 'Двобічна гістограма', leaderboard: 'Рейтинг',
+    activity: 'Стрічка подій', waveform: 'Двобічна гістограма', leaderboard: 'Рейтинг', weather: 'Метеоумови',
   };
   const name = names[model?.kind] ?? 'Діаграма';
   if (!model || model.empty) return `${name}: даних ще немає`;
@@ -792,6 +794,11 @@ export function chartSummary(model) {
   if (model.series?.length > 1) parts.push(`${model.series.length} ${pluralForm(model.series.length, 'ряд', 'ряди', 'рядів')}`);
   if (model.kind === 'kpi' && model.valueText) parts.push(`${model.label}: ${model.valueText}${model.unit ? ` ${model.unit}` : ''}`);
   if (model.kind === 'gauge') parts.push(`${model.label}: ${model.valueText} з ${model.maxText}`);
+  if (model.kind === 'weather') {
+    const frame = model.frames?.[model.current];
+    if (frame) parts.push(`${frame.label}, ${frame.stations.length} ${pluralForm(frame.stations.length, 'пункт', 'пункти', 'пунктів')}`);
+    if (frame?.hazardText) parts.push(`небезпека — ${frame.hazardText}`);
+  }
   return `${name}: ${parts.join(', ')}`;
 }
 
