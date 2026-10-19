@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="uk" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>EasyWAR · Прототип журналу польотів</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23122840'/%3E%3Ctext x='32' y='40' text-anchor='middle' font-size='24' font-family='sans-serif' font-weight='700' fill='%234ba6ff'%3EEW%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="./styles.css?v=1">
+</head>
+<body>
+  <a class="skip-link" href="#main">До основного вмісту</a>
+
+  <header class="prototype-bar">
+    <div class="brand-lockup">
+      <span class="brand-mark" aria-hidden="true">EW</span>
+      <span><b>EasyWAR</b><small>UX-прототип · синтетичні дані</small></span>
+    </div>
+    <nav class="view-switcher" aria-label="Екрани прототипу">
+      <button class="view-button is-active" data-view="create" aria-pressed="true">Створення</button>
+      <button class="view-button" data-view="review" aria-pressed="false">Перевірка</button>
+      <button class="view-button" data-view="table" aria-pressed="false">Таблиця</button>
+    </nav>
+    <button class="icon-button" id="theme-toggle" type="button" aria-label="Увімкнути світлу тему" title="Змінити тему">
+      <span aria-hidden="true">◐</span>
+    </button>
+  </header>
+
+  <main id="main">
+    <section class="screen is-active" data-screen="create" aria-labelledby="create-title">
+      <div class="page-shell">
+        <header class="page-header">
+          <button class="back-button" type="button">← До каталогу</button>
+          <div class="eyebrow">Авіація · новий модуль</div>
+          <div class="title-row">
+            <div>
+              <h1 id="create-title">Журнал хронометражу польотів</h1>
+              <p>Підключіть таблицю, перевірте зіставлення та створіть локальний модуль.</p>
+            </div>
+            <span class="save-state"><i aria-hidden="true"></i> Чернетку збережено локально</span>
+          </div>
+        </header>
+
+        <ol class="stepper" aria-label="Етапи створення модуля">
+          <li class="is-done"><span>1</span><div><b>Файл</b><small>Журнал.xlsx</small></div></li>
+          <li class="is-active" aria-current="step"><span>2</span><div><b>Зіставлення</b><small>34 із 35</small></div></li>
+          <li><span>3</span><div><b>Перевірка</b><small>8 записів</small></div></li>
+          <li><span>4</span><div><b>Створення</b><small>Локальна SQLite</small></div></li>
+        </ol>
+
+        <div class="workspace-grid">
+          <div class="workspace-main">
+            <section class="panel name-panel" aria-labelledby="module-name-label">
+              <label id="module-name-label" for="module-name">Назва на дашборді</label>
+              <input id="module-name" value="Журнал хронометражу польотів" maxlength="80">
+              <span class="field-hint">Цю назву буде видно на картці модуля.</span>
+            </section>
+
+            <section class="panel source-panel" aria-labelledby="source-title">
+              <div class="panel-heading">
+                <div>
+                  <span class="section-kicker">Джерело даних</span>
+                  <h2 id="source-title">Дані з вашої таблиці</h2>
+                </div>
+                <span class="status-badge status-success">Файл підключено</span>
+              </div>
+
+              <div class="file-card">
+                <div class="file-icon" aria-hidden="true">X</div>
+                <div class="file-copy">
+                  <b>Журнал_синтетичний.xlsx</b>
+                  <span>Аркуш «Журнал» · 10 рядків · файл лише читається</span>
+                </div>
+                <button class="secondary-button" type="button">Замінити</button>
+              </div>
+
+              <div class="metric-strip" aria-label="Підсумок імпорту">
+                <div><strong>8</strong><span>готові записи</span></div>
+                <div><strong>34/35</strong><span>колонки знайдено</span></div>
+                <div><strong class="warning-text">2</strong><span>пропущені рядки</span></div>
+                <div><strong>1</strong><span>поле вручну</span></div>
+              </div>
+
+              <div class="info-note">
+                <span aria-hidden="true">i</span>
+                <p><b>Одна колонка відсутня у файлі.</b> Позивний командира екіпажу можна буде заповнити в модулі після створення.</p>
+              </div>
+
+              <div class="compact-issues">
+                <button class="issue-summary" type="button" aria-expanded="false" aria-controls="create-issues">
+                  <span class="issue-icon warning" aria-hidden="true">!</span>
+                  <span><b>Є 4 зауваження до даних</b><small>2 значення не розібрано · 2 логічні перевірки</small></span>
+                  <span class="chevron" aria-hidden="true">⌄</span>
+                </button>
+                <div class="issue-details" id="create-issues" hidden>
+                  <article><b>Рядок 8 · Час зльоту</b><p>«25:00» не є коректним часом. Очікується формат на кшталт 14:25.</p></article>
+                  <article><b>Рядок 8 · Висота польоту</b><p>«0,3» потребує уточнення одиниці: 300 м або 0,3 км.</p></article>
+                  <article><b>Рядок 7 · Екіпаж</b><p>Указано 9 осіб, тоді як для шаблону очікується не більше 8.</p></article>
+                  <article><b>Рядок 13 · Межі хмар</b><p>Нижня межа не може бути вищою за верхню.</p></article>
+                </div>
+              </div>
+
+              <label class="import-toggle">
+                <input type="checkbox" checked>
+                <span class="toggle-track" aria-hidden="true"></span>
+                <span><b>Імпортувати 8 перевірених записів</b><small>Два підсумкові або неповні рядки буде пропущено.</small></span>
+              </label>
+            </section>
+
+            <section class="preview-panel" aria-labelledby="preview-title">
+              <div class="panel-heading compact">
+                <div>
+                  <span class="section-kicker">Попередній вигляд</span>
+                  <h2 id="preview-title">Наліт за типом ПС</h2>
+                </div>
+                <span class="legend"><i class="airborne"></i> Повітря <i class="total"></i> Загалом</span>
+              </div>
+              <div class="bar-preview" aria-label="Синтетичний приклад графіка">
+                <div><span>Мі-8</span><i class="airborne" style="--size:68%"></i><b>42</b><i class="total" style="--size:91%"></i><b>56</b></div>
+                <div><span>Мі-24</span><i class="airborne" style="--size:78%"></i><b>48</b><i class="total" style="--size:100%"></i><b>62</b></div>
+                <div><span>Ан-26</span><i class="airborne" style="--size:44%"></i><b>27</b><i class="total" style="--size:61%"></i><b>38</b></div>
+              </div>
+            </section>
+          </div>
+
+          <aside class="schema-card" aria-labelledby="schema-title">
+            <div class="schema-heading">
+              <div><span class="section-kicker">Схема модуля</span><h2 id="schema-title">35 колонок</h2></div>
+              <button class="text-button" id="technical-toggle" type="button" aria-expanded="false">Технічні деталі</button>
+            </div>
+            <div class="schema-progress"><span style="--progress:97%"></span></div>
+            <p class="schema-summary">34 колонки знайдено у файлі. Одну нову колонку користувач заповнюватиме вручну.</p>
+
+            <div class="schema-stats">
+              <div><b>34</b><span>зіставлено</span></div>
+              <div><b>1</b><span>нова</span></div>
+              <div><b>3</b><span>обов'язкові</span></div>
+            </div>
+
+            <div class="schema-groups">
+              <details open><summary><span>Основне</span><small>10/10</small></summary><p>Номер, тип і борт ПС, зміна, програма та вправи.</p></details>
+              <details><summary><span>Час і наліт</span><small>9/9</small></summary><p>Зліт, посадка, наліт, проба двигуна й кількість польотів.</p></details>
+              <details><summary><span>Метеоумови</span><small>7/7</small></summary><p>Хмарність, видимість, СМУ та час у хмарах.</p></details>
+              <details><summary><span>Екіпаж і вантаж</span><small>8/9</small></summary><p>Одна нова колонка: позивний командира екіпажу.</p></details>
+            </div>
+
+            <div class="technical-panel" id="technical-panel" hidden>
+              <div><span>Тип ПС</span><code>aircraft_type</code><small>text</small></div>
+              <div><span>Наліт (повітря)</span><code>airborne_hours</code><small>real</small></div>
+              <div><span>Наліт (загальний)</span><code>total_hours</code><small>real</small></div>
+              <div><span>Позивний командира</span><code>crew_ke_callsign</code><small>text</small></div>
+            </div>
+          </aside>
+        </div>
+
+        <footer class="action-bar">
+          <span><b>Крок 2 з 4</b><small>Перевірте зіставлення перед продовженням.</small></span>
+          <div><button class="secondary-button" type="button">Назад</button><button class="primary-button next-view" data-next="review" type="button">Перевірити дані →</button></div>
+        </footer>
+      </div>
+    </section>
+
+    <section class="screen" data-screen="review" aria-labelledby="review-title" hidden>
+      <div class="page-shell review-shell">
+        <header class="page-header">
+          <button class="back-button previous-view" data-previous="create" type="button">← До зіставлення</button>
+          <div class="eyebrow">Авіація · перевірка XLSX</div>
+          <div class="title-row">
+            <div><h1 id="review-title">Перевірка перед імпортом</h1><p>Виправте критичні значення або імпортуйте лише перевірені записи.</p></div>
+            <span class="status-badge status-warning">4 зауваження</span>
+          </div>
+        </header>
+
+        <ol class="stepper" aria-label="Етапи створення модуля">
+          <li class="is-done"><span>✓</span><div><b>Файл</b><small>Журнал.xlsx</small></div></li>
+          <li class="is-done"><span>✓</span><div><b>Зіставлення</b><small>34 із 35</small></div></li>
+          <li class="is-active" aria-current="step"><span>3</span><div><b>Перевірка</b><small>8 записів</small></div></li>
+          <li><span>4</span><div><b>Створення</b><small>Локальна SQLite</small></div></li>
+        </ol>
+
+        <div class="review-layout">
+          <div class="review-main">
+            <section class="review-hero">
+              <div class="review-score"><span>8</span><small>із 10 рядків<br>готові до імпорту</small></div>
+              <div class="review-copy"><span class="section-kicker">Підсумок перевірки</span><h2>Модуль можна створити без небезпечних рядків</h2><p>Файл не змінюється. У локальну таблицю потраплять лише вісім записів, які пройшли базову перевірку.</p></div>
+            </section>
+
+            <section class="issue-list" aria-label="Зауваження до даних">
+              <article class="issue-card issue-error" data-severity="error">
+                <span class="issue-marker" aria-hidden="true">×</span>
+                <div><span class="issue-meta">Рядок 8 · Час зльоту</span><h3>Час «25:00» неможливо розібрати</h3><p>Введіть час доби у форматі `14:25` або залиште поле порожнім.</p><div class="issue-value"><del>25:00</del><span>→</span><input aria-label="Виправлений час зльоту" value="14:25" pattern="[0-2][0-9]:[0-5][0-9]"></div></div>
+                <button class="secondary-button apply-fix" type="button">Застосувати</button>
+              </article>
+              <article class="issue-card issue-error" data-severity="error">
+                <span class="issue-marker" aria-hidden="true">×</span>
+                <div><span class="issue-meta">Рядок 8 · Висота польоту</span><h3>Значення «0,3» має неоднозначну одиницю</h3><p>Для цього журналу висота зберігається у метрах.</p><div class="choice-row"><button class="choice is-active" type="button" aria-pressed="true">300 м</button><button class="choice" type="button" aria-pressed="false">0,3 м</button><button class="choice" type="button" aria-pressed="false">Не імпортувати</button></div></div>
+              </article>
+              <article class="issue-card issue-warning" data-severity="warning">
+                <span class="issue-marker" aria-hidden="true">!</span>
+                <div><span class="issue-meta">Рядок 7 · Екіпаж</span><h3>Указано 9 осіб</h3><p>Шаблон очікує не більше 8. Запис можна імпортувати, але варто звірити джерело.</p></div>
+                <label class="keep-row"><input type="checkbox" checked> Залишити</label>
+              </article>
+              <article class="issue-card issue-warning" data-severity="warning">
+                <span class="issue-marker" aria-hidden="true">!</span>
+                <div><span class="issue-meta">Рядок 13 · Межі хмар</span><h3>Нижня межа вища за верхню</h3><p>Перевірте, чи не переплутано значення ВМХ і НМХ.</p></div>
+                <button class="secondary-button" type="button">Показати рядок</button>
+              </article>
+            </section>
+          </div>
+
+          <aside class="review-aside">
+            <section class="panel sticky-summary">
+              <span class="section-kicker">Що буде створено</span>
+              <h2>Локальний модуль</h2>
+              <dl><div><dt>Назва</dt><dd>Журнал хронометражу польотів</dd></div><div><dt>Записи</dt><dd id="ready-count">8</dd></div><div><dt>Колонки</dt><dd>35</dd></div><div><dt>Сховище</dt><dd>SQLite · локально</dd></div></dl>
+              <label class="confirm-box"><input type="checkbox" checked><span><b>Імпортувати лише перевірені записи</b><small>Проблемні рядки залишаться у вихідному XLSX.</small></span></label>
+              <button class="primary-button wide next-view" data-next="table" type="button">Створити модуль</button>
+              <button class="text-button wide" type="button">Зберегти звіт перевірки</button>
+            </section>
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <section class="screen table-screen" data-screen="table" aria-labelledby="table-title" hidden>
+      <div class="table-page">
+        <header class="table-header">
+          <div>
+            <button class="back-button previous-view" data-previous="review" type="button">← До дашборда</button>
+            <span class="section-kicker">Локальна SQLite-таблиця</span>
+            <h1 id="table-title">Журнал хронометражу польотів</h1>
+            <p>8 записів · 35 колонок <button class="inline-code" id="storage-toggle" type="button" aria-expanded="false">Показати технічну назву</button></p>
+          </div>
+          <button class="primary-button" id="add-row" type="button">＋ Додати рядок</button>
+        </header>
+
+        <div class="table-toolbar">
+          <label class="search-field"><span aria-hidden="true">⌕</span><input id="table-search" type="search" placeholder="Пошук за типом або номером ПС"></label>
+          <div class="group-filter" aria-label="Групи колонок"></div>
+          <div class="density-control" role="group" aria-label="Щільність таблиці"><button class="is-active" data-density="compact" type="button">Компактно</button><button data-density="comfortable" type="button">Звичайно</button></div>
+          <button class="secondary-button columns-button" type="button">Колонки <span id="visible-columns">35</span></button>
+        </div>
+
+        <div class="table-status" role="status"><span><i aria-hidden="true"></i> Усі зміни зберігаються локально</span><span>Закріплено: №, тип ПС, номер ПС та дія</span></div>
+
+        <div class="data-frame density-compact" tabindex="0" aria-label="Таблиця журналу. Використовуйте горизонтальну прокрутку для перегляду всіх колонок.">
+          <table id="flight-table">
+            <thead></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="scroll-hint"><span>← Закріплені колонки</span><span>Прокручуйте горизонтально для перегляду 35 колонок →</span><span>Закріплена дія →</span></div>
+      </div>
+
+      <div class="drawer-backdrop" id="drawer-backdrop" hidden></div>
+      <aside class="edit-drawer" id="edit-drawer" aria-labelledby="drawer-title" aria-hidden="true">
+        <header><div><span class="section-kicker">Локальний запис</span><h2 id="drawer-title">Новий рядок</h2></div><button class="icon-button" id="close-drawer" type="button" aria-label="Закрити">×</button></header>
+        <div class="drawer-content">
+          <section><h3>Основне</h3><div class="form-grid"><label>Тип ПС<input value="Мі-8"></label><label>Номер ПС<input value="21"></label><label>День / ніч<select><option>День</option><option>Ніч</option></select></label><label>Льотна зміна<input type="number" value="2"></label></div></section>
+          <section><h3>Час і наліт</h3><div class="form-grid"><label>Час зльоту<input type="time" value="14:25"></label><label>Час посадки<input type="time" value="15:10"></label><label>Наліт (повітря), год<input type="number" step="0.1" value="0.8"></label><label>Наліт (загальний), год<input type="number" step="0.1" value="1.0"></label></div></section>
+          <section><h3>Метеоумови</h3><div class="form-grid"><label>Хмарність, 0–10<input type="number" min="0" max="10" value="4"></label><label>Видимість, км<input type="number" step="0.1" value="10"></label></div></section>
+        </div>
+        <footer><button class="secondary-button" id="cancel-drawer" type="button">Скасувати</button><button class="primary-button" id="save-row" type="button">Зберегти рядок</button></footer>
+      </aside>
+
+      <div class="toast" id="toast" role="status" aria-live="polite" hidden>Рядок збережено локально</div>
+    </section>
+  </main>
+
+  <script src="./app.js?v=1"></script>
+</body>
+</html>
