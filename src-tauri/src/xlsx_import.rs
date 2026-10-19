@@ -1,7 +1,11 @@
 use calamine::{Data, DataType, Reader, Xlsx};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use std::{collections::BTreeMap, io::Cursor};
+use std::{
+    collections::BTreeMap,
+    fmt,
+    io::{self, Cursor, Read},
+};
 
 pub const EASYWAR_SHEET_NAME: &str = "Зведена";
 
@@ -174,6 +178,15 @@ pub enum XlsxImportError {
 }
 
 pub fn import_easywar_xlsx(bytes: &[u8]) -> Result<XlsxImportBatch, XlsxImportError> {
+    import_easywar_xlsx_with_limits(bytes, ZipLimits::DEFAULT)
+}
+
+fn import_easywar_xlsx_with_limits(
+    bytes: &[u8],
+    limits: ZipLimits,
+) -> Result<XlsxImportBatch, XlsxImportError> {
+    ensure_zip_within_limits_with(bytes, limits)
+        .map_err(|error| XlsxImportError::InvalidWorkbook(error.to_string()))?;
     let mut workbook = Xlsx::new(Cursor::new(bytes.to_vec()))
         .map_err(|error| XlsxImportError::InvalidWorkbook(error.to_string()))?;
     let sheet_names = workbook.sheet_names();
@@ -251,6 +264,169 @@ pub fn inspect_easywar_xlsx(bytes: &[u8]) -> Result<XlsxInspection, XlsxImportEr
         sheet_name: batch.sheet_name,
         row_count: batch.rows.len(),
     })
+}
+
+/// Межі розпакування ZIP-частин книги XLSX.
+///
+/// calamine читає частини без власного ліміту, а `xlsx_export` розпаковує еталон у
+/// пам'ять, тож невеликий файл (до 64 МБ) може розгорнутися на гігабайти
+/// («ZIP-бомба»). Межі значно перевищують будь-який реальний журнал EasyWAR
+/// (аркуш на тисячі рядків — це мегабайти XML), але не дають вичерпати пам'ять.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ZipLimits {
+    /// Найбільший розпакований розмір однієї частини, байт.
+    pub per_entry: u64,
+    /// Найбільший сумарний розпакований розмір усіх частин, байт.
+    pub total: u64,
+}
+
+impl ZipLimits {
+    /// Межі для робочих файлів: 128 МБ на частину, 256 МБ разом.
+    pub const DEFAULT: ZipLimits = ZipLimits {
+        per_entry: 128 * 1024 * 1024,
+        total: 256 * 1024 * 1024,
+    };
+}
+
+/// Яку межу розпакування перевищено.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ZipLimitExceeded {
+    Entry { name: String, limit: u64 },
+    Total { limit: u64 },
+}
+
+impl fmt::Display for ZipLimitExceeded {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ZipLimitExceeded::Entry { name, limit } => write!(
+                formatter,
+                "частина «{name}» після розпакування більша за {} — файл пошкоджено або спотворено",
+                format_limit(*limit)
+            ),
+            ZipLimitExceeded::Total { limit } => write!(
+                formatter,
+                "усі частини разом після розпакування більші за {} — файл пошкоджено або спотворено",
+                format_limit(*limit)
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ZipLimitExceeded {}
+
+fn format_limit(bytes: u64) -> String {
+    const MIB: u64 = 1024 * 1024;
+    if bytes >= MIB {
+        format!("{} МБ", bytes.div_ceil(MIB))
+    } else {
+        format!("{} КБ", bytes.div_ceil(1024).max(1))
+    }
+}
+
+/// Помилка читання частини: перевищено межу або збій вводу-виводу.
+#[derive(Debug)]
+pub enum ZipPartError {
+    Limit(ZipLimitExceeded),
+    Io(io::Error),
+}
+
+/// Облік розпакованих байтів архіву за [`ZipLimits`].
+#[derive(Debug)]
+pub struct ZipBudget {
+    limits: ZipLimits,
+    used: u64,
+}
+
+impl ZipBudget {
+    pub fn new(limits: ZipLimits) -> Self {
+        Self { limits, used: 0 }
+    }
+
+    /// Читає частину не далі за межу (на один байт більше дозволеного, щоб помітити
+    /// перевищення) і додає прочитане до обліку. Якщо передано `keep`, прочитані
+    /// байти складаються туди. Розмір із заголовка ZIP не береться до уваги:
+    /// він може бути підроблений, тому міряються реально розпаковані байти.
+    pub fn read_part<R: Read>(
+        &mut self,
+        name: &str,
+        reader: R,
+        mut keep: Option<&mut Vec<u8>>,
+    ) -> Result<u64, ZipPartError> {
+        let remaining = self.limits.total - self.used;
+        let cap = self.limits.per_entry.min(remaining).saturating_add(1);
+        let mut reader = reader.take(cap);
+        let mut buffer = [0u8; 64 * 1024];
+        let mut read: u64 = 0;
+        let mut failure = None;
+        loop {
+            let count = match reader.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(count) => count,
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                Err(error) => {
+                    failure = Some(error);
+                    break;
+                }
+            };
+            read += count as u64;
+            if let Some(target) = keep.as_deref_mut() {
+                target.extend_from_slice(&buffer[..count]);
+            }
+        }
+        // Байти, прочитані до збою, теж рахуються: інакше архів із безліччю частин,
+        // які «ламаються» посередині, обійшов би сумарну межу.
+        if read > self.limits.per_entry {
+            return Err(ZipPartError::Limit(ZipLimitExceeded::Entry {
+                name: name.to_owned(),
+                limit: self.limits.per_entry,
+            }));
+        }
+        if read > remaining {
+            return Err(ZipPartError::Limit(ZipLimitExceeded::Total {
+                limit: self.limits.total,
+            }));
+        }
+        self.used += read;
+        match failure {
+            Some(error) => Err(ZipPartError::Io(error)),
+            None => Ok(read),
+        }
+    }
+}
+
+/// Перевіряє, що книга не розпакується понад [`ZipLimits::DEFAULT`]. Нічого не
+/// зберігає. Див. [`ensure_zip_within_limits_with`].
+pub fn ensure_zip_within_limits(bytes: &[u8]) -> Result<(), ZipLimitExceeded> {
+    ensure_zip_within_limits_with(bytes, ZipLimits::DEFAULT)
+}
+
+/// Послідовно розпаковує кожну частину в нікуди й міряє реальний розмір.
+/// Лише перевищення межі є помилкою: байти, що не є ZIP, і пошкоджені частини
+/// тут мовчки пропускаються, бо про них скаже calamine своїм звичайним
+/// повідомленням (книга з пошкодженою зайвою частиною, яку calamine не читає,
+/// досі відкривається).
+pub fn ensure_zip_within_limits_with(
+    bytes: &[u8],
+    limits: ZipLimits,
+) -> Result<(), ZipLimitExceeded> {
+    let Ok(mut archive) = zip::ZipArchive::new(Cursor::new(bytes)) else {
+        return Ok(());
+    };
+    let mut budget = ZipBudget::new(limits);
+    for index in 0..archive.len() {
+        let Ok(mut file) = archive.by_index(index) else {
+            continue;
+        };
+        if file.is_dir() {
+            continue;
+        }
+        let name = file.name().to_owned();
+        match budget.read_part(&name, &mut file, None) {
+            Err(ZipPartError::Limit(exceeded)) => return Err(exceeded),
+            Ok(_) | Err(ZipPartError::Io(_)) => {}
+        }
+    }
+    Ok(())
 }
 
 fn resolve_columns(header_row: &[Data]) -> Result<Vec<usize>, XlsxImportError> {
@@ -560,6 +736,201 @@ mod tests {
             assert_eq!(row.raw_values.get("Дата"), Some(&case.raw));
             assert_eq!(row.parsed.date, case.expected, "raw date: {}", case.raw);
         }
+    }
+
+    const TINY_LIMITS: ZipLimits = ZipLimits {
+        per_entry: 128 * 1024,
+        total: 256 * 1024,
+    };
+
+    /// ZIP із частин, заповнених нулями: розпаковуються у мегабайти, важать кілобайти.
+    fn zip_of_zero_parts(parts: &[(&str, usize)]) -> Vec<u8> {
+        let mut archive = ZipWriter::new(Cursor::new(Vec::new()));
+        let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+        let chunk = vec![0u8; 64 * 1024];
+        for (name, size) in parts {
+            archive.start_file(*name, options).unwrap();
+            let mut left = *size;
+            while left > 0 {
+                let part = left.min(chunk.len());
+                archive.write_all(&chunk[..part]).unwrap();
+                left -= part;
+            }
+        }
+        archive.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn a_part_inflating_past_the_limit_is_reported_with_its_name() {
+        let bomb = zip_of_zero_parts(&[("xl/worksheets/sheet1.xml", 3 * 1024 * 1024)]);
+        assert!(bomb.len() < 64 * 1024, "{}", bomb.len());
+
+        let error = ensure_zip_within_limits_with(&bomb, TINY_LIMITS).expect_err("over the limit");
+
+        assert_eq!(
+            error,
+            ZipLimitExceeded::Entry {
+                name: "xl/worksheets/sheet1.xml".to_owned(),
+                limit: TINY_LIMITS.per_entry,
+            }
+        );
+        let message = error.to_string();
+        assert!(message.contains("xl/worksheets/sheet1.xml"), "{message}");
+        assert!(message.contains("128 КБ"), "{message}");
+        assert!(message.contains("після розпакування"), "{message}");
+    }
+
+    #[test]
+    fn parts_that_fit_alone_but_not_together_hit_the_total_limit() {
+        let bomb = zip_of_zero_parts(&[
+            ("a.xml", 100 * 1024),
+            ("b.xml", 100 * 1024),
+            ("c.xml", 100 * 1024),
+        ]);
+
+        let error = ensure_zip_within_limits_with(&bomb, TINY_LIMITS).expect_err("over the sum");
+
+        assert_eq!(
+            error,
+            ZipLimitExceeded::Total {
+                limit: TINY_LIMITS.total
+            }
+        );
+        assert!(error.to_string().contains("256 КБ"));
+    }
+
+    #[test]
+    fn parts_at_exactly_the_limits_are_accepted() {
+        let archive = zip_of_zero_parts(&[
+            ("a.xml", TINY_LIMITS.per_entry as usize),
+            (
+                "b.xml",
+                (TINY_LIMITS.total - TINY_LIMITS.per_entry) as usize,
+            ),
+        ]);
+
+        assert_eq!(ensure_zip_within_limits_with(&archive, TINY_LIMITS), Ok(()));
+    }
+
+    #[test]
+    fn non_zip_bytes_are_left_to_the_workbook_reader() {
+        for bytes in [&b""[..], &b"PK"[..], &b"plain text, not a workbook"[..]] {
+            assert_eq!(ensure_zip_within_limits_with(bytes, TINY_LIMITS), Ok(()));
+            assert!(matches!(
+                import_easywar_xlsx(bytes),
+                Err(XlsxImportError::InvalidWorkbook(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn the_importer_applies_the_limits_before_reading_the_workbook() {
+        // Справна книга, лише з 3 МБ пробілів після кореневого тегу листа.
+        let rows = vec![headers().iter().map(|value| value.to_string()).collect()];
+        let padded = format!(
+            "{}{}",
+            worksheet_xml(&rows, &[]),
+            " ".repeat(3 * 1024 * 1024)
+        );
+        let workbook = build_synthetic_workbook(EASYWAR_SHEET_NAME, &padded);
+        assert!(workbook.len() < 64 * 1024, "{}", workbook.len());
+
+        let error = import_easywar_xlsx_with_limits(&workbook, TINY_LIMITS)
+            .expect_err("a workbook over the limits must not be imported");
+
+        assert!(
+            matches!(&error, XlsxImportError::InvalidWorkbook(message)
+                if message.contains("після розпакування") && message.contains("xl/worksheets/sheet1.xml")),
+            "{error:?}"
+        );
+        // Межі за замовчуванням набагато більші: та сама книга імпортується.
+        assert_eq!(
+            import_easywar_xlsx(&workbook)
+                .expect("default limits")
+                .rows
+                .len(),
+            0
+        );
+        let ordinary = synthetic_workbook(EASYWAR_SHEET_NAME, &headers(), true);
+        assert_eq!(ensure_zip_within_limits(&ordinary), Ok(()));
+    }
+
+    #[test]
+    fn a_damaged_unused_part_does_not_make_the_check_fail() {
+        // Межі перевіряє лише розмір; пошкодження решти — справа calamine.
+        let mut archive = zip_of_zero_parts(&[("docProps/thumbnail.bin", 100 * 1024)]);
+        // Псуємо потік стиснення в середині файлу (після локального заголовка).
+        let middle = archive.len() / 2;
+        for byte in &mut archive[middle..middle + 4] {
+            *byte ^= 0xFF;
+        }
+        let mut reader = zip::ZipArchive::new(Cursor::new(&archive[..])).unwrap();
+        let mut sink = Vec::new();
+        assert!(
+            reader.by_index(0).unwrap().read_to_end(&mut sink).is_err(),
+            "the damage must be real"
+        );
+
+        assert_eq!(ensure_zip_within_limits_with(&archive, TINY_LIMITS), Ok(()));
+    }
+
+    /// Читач, що віддає нулі, а потім ламається (як частина з пошкодженим потоком).
+    struct ZerosThenFailure {
+        remaining: usize,
+    }
+
+    impl Read for ZerosThenFailure {
+        fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+            if self.remaining == 0 {
+                return Err(io::Error::other("synthetic corrupt stream"));
+            }
+            let count = buffer.len().min(self.remaining);
+            buffer[..count].fill(0);
+            self.remaining -= count;
+            Ok(count)
+        }
+    }
+
+    #[test]
+    fn bytes_read_before_a_failure_still_count_toward_the_total() {
+        let mut budget = ZipBudget::new(TINY_LIMITS);
+        for name in ["a.xml", "b.xml"] {
+            let result = budget.read_part(
+                name,
+                ZerosThenFailure {
+                    remaining: 100 * 1024,
+                },
+                None,
+            );
+            assert!(matches!(result, Err(ZipPartError::Io(_))), "{result:?}");
+        }
+
+        // Із 256 КБ уже витрачено 200 КБ: ще одна «зламана» частина на 100 КБ не вміщається.
+        let result = budget.read_part(
+            "c.xml",
+            ZerosThenFailure {
+                remaining: 100 * 1024,
+            },
+            None,
+        );
+
+        assert!(
+            matches!(
+                result,
+                Err(ZipPartError::Limit(ZipLimitExceeded::Total { .. }))
+            ),
+            "{result:?}"
+        );
+    }
+
+    #[test]
+    fn limit_labels_use_kilobytes_below_one_megabyte() {
+        assert_eq!(format_limit(1), "1 КБ");
+        assert_eq!(format_limit(1024), "1 КБ");
+        assert_eq!(format_limit(1025), "2 КБ");
+        assert_eq!(format_limit(1024 * 1024), "1 МБ");
+        assert_eq!(format_limit(ZipLimits::DEFAULT.per_entry), "128 МБ");
+        assert_eq!(format_limit(ZipLimits::DEFAULT.total), "256 МБ");
     }
 
     fn headers() -> Vec<&'static str> {
