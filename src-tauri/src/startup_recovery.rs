@@ -89,7 +89,7 @@ impl Failure {
             | RestoreInspectionError::ForeignKeyViolation
             | RestoreInspectionError::MissingMigrationHistory
             | RestoreInspectionError::MigrationMismatch
-            | RestoreInspectionError::MissingSchemaObjects => Self::Damaged(error.to_string()),
+            | RestoreInspectionError::MissingSchemaObjects(_) => Self::Damaged(error.to_string()),
             RestoreInspectionError::UnsupportedSchema => Self::UnsupportedSchema,
             RestoreInspectionError::Database(SqlxError::Database(database_error))
                 if is_corruption_code(database_error.code().as_deref()) =>
@@ -498,7 +498,7 @@ mod tests {
             RestoreInspectionError::ForeignKeyViolation,
             RestoreInspectionError::MissingMigrationHistory,
             RestoreInspectionError::MigrationMismatch,
-            RestoreInspectionError::MissingSchemaObjects,
+            RestoreInspectionError::MissingSchemaObjects("таблиця synthetic".to_string()),
         ];
         for error in &damaged {
             assert!(
