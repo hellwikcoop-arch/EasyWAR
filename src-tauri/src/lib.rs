@@ -5,6 +5,7 @@ pub mod base_tables;
 pub mod dashboard_modules;
 mod database;
 mod desktop_shell;
+pub mod easyslide;
 pub mod local_model;
 pub mod local_profiles;
 mod migration_startup;
@@ -902,6 +903,84 @@ async fn save_presentation(
                 .add_filter("Презентація PPTX", &["pptx"])
                 .blocking_save_file()
         }
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let target = phone_export::save_target(
+        selected.into_path().map_err(|error| error.to_string())?,
+        &[extension],
+        extension,
+    );
+    let path = target.path.clone();
+    tauri::async_runtime::spawn_blocking(move || phone_export::save_file(&target, &bytes))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())?;
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+#[derive(serde::Serialize)]
+struct EasySlideFile {
+    name: String,
+    bytes: Vec<u8>,
+}
+
+/// EasySlide (прототип): системне вікно відкриття файлу для редактора презентацій. Повертає ім'я
+/// й вміст або `None`, якщо користувач скасував. Файл лише читається; нічого не надсилається.
+#[tauri::command]
+async fn open_easyslide_file(
+    app: tauri::AppHandle,
+    purpose: String,
+) -> Result<Option<EasySlideFile>, String> {
+    let (label, extensions) = easyslide::open_filter(&purpose);
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title("Відкрити в EasySlide")
+            .add_filter(label, extensions)
+            .blocking_pick_file()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let path = selected.into_path().map_err(|error| error.to_string())?;
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "презентація".to_owned());
+    let bytes = tauri::async_runtime::spawn_blocking(move || {
+        easyslide::read_limited(&path, easyslide::MAX_OPEN_BYTES)
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    Ok(Some(EasySlideFile { name, bytes }))
+}
+
+/// EasySlide (прототип): зберігає файл редактора (PPTX, PDF, зображення) у місце, яке обирає
+/// користувач, так само атомарно, як `save_presentation`. Невідомі формати не записуються.
+#[tauri::command]
+async fn save_easyslide_file(
+    app: tauri::AppHandle,
+    file_name: String,
+    bytes: Vec<u8>,
+) -> Result<Option<String>, String> {
+    if bytes.is_empty() {
+        return Err("файл порожній".to_owned());
+    }
+    let (label, extension) = easyslide::save_format(&file_name)
+        .ok_or_else(|| format!("EasySlide не зберігає файли такого типу: {file_name}"))?;
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title("Зберегти з EasySlide")
+            .set_file_name(file_name)
+            .add_filter(label, &[extension])
+            .blocking_save_file()
     })
     .await
     .map_err(|error| error.to_string())?;
@@ -1889,6 +1968,8 @@ pub fn run() {
             create_profile_base_table,
             export_phone_file,
             save_presentation,
+            open_easyslide_file,
+            save_easyslide_file,
             clear_profile_database,
             read_profile_database,
             write_profile_database,

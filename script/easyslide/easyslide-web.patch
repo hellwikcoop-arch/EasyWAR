@@ -1,0 +1,130 @@
+--- apps/deckcraft-web/src/web.rs
++++ apps/deckcraft-web/src/web.rs
+@@ -111,12 +111,31 @@
+ 
+ /// Web services: no file paths, so `pick_open`/`pick_save`/`read` stay `None` and the UI falls
+ /// back to `open_async` (browser picker → inbox) and `download`.
++///
++/// EasyWAR (EasySlide): when the page defines `window.easyslideHost`, files are opened and saved
++/// through the host (EasyWAR's own Tauri dialogs) instead of the browser picker and downloads.
+ fn services(inbox: Inbox, ctx: egui::Context) -> Services {
+     let open_inbox = inbox.clone();
+     Services {
+         open_async: Some(Box::new(move |purpose: &str, request: u64| {
+             let inbox = open_inbox.clone();
+             let ctx = ctx.clone();
++            if let Some(host) = easyslide_host() {
++                let purpose = purpose.to_owned();
++                wasm_bindgen_futures::spawn_local(async move {
++                    let event = match host_open(&host, &purpose).await {
++                        Ok(Some((name, bytes))) => InboxEvent::File(InboxFile { id: request, name, bytes }),
++                        Ok(None) => InboxEvent::Cancelled { id: request },
++                        Err(e) => {
++                            log::error!("EasySlide open failed: {e}");
++                            InboxEvent::Cancelled { id: request }
++                        }
++                    };
++                    push_inbox(&inbox, event);
++                    ctx.request_repaint();
++                });
++                return;
++            }
+             let dialog = match purpose {
+                 "picture" => rfd::AsyncFileDialog::new().add_filter("Pictures", PICTURE_EXTS),
+                 "audio" => rfd::AsyncFileDialog::new().add_filter("Audio", AUDIO_EXTS),
+@@ -134,9 +153,9 @@
+                 ctx.request_repaint();
+             });
+         })),
+-        write: Some(Box::new(|name: &str, bytes: &[u8]| download(name, bytes))),
++        write: Some(Box::new(|name: &str, bytes: &[u8]| save_or_download(name, bytes))),
+         download: Some(Box::new(|name: &str, bytes: &[u8]| {
+-            if let Err(e) = download(name, bytes) {
++            if let Err(e) = save_or_download(name, bytes) {
+                 log::error!("download of {name} failed: {e}");
+             }
+         })),
+@@ -145,6 +164,42 @@
+     }
+ }
+ 
++/// `window.easyslideHost` when the embedding page (EasyWAR) provides one.
++fn easyslide_host() -> Option<wasm_bindgen::JsValue> {
++    let window = web_sys::window()?;
++    let host = js_sys::Reflect::get(&window, &"easyslideHost".into()).ok()?;
++    (host.is_object()).then_some(host)
++}
++
++fn host_method(host: &wasm_bindgen::JsValue, name: &str) -> Result<js_sys::Function, String> {
++    js_sys::Reflect::get(host, &name.into())
++        .ok()
++        .and_then(|f| f.dyn_into::<js_sys::Function>().ok())
++        .ok_or_else(|| format!("easyslideHost.{name} is missing"))
++}
++
++/// `easyslideHost.open(purpose)` → `{ name, bytes: Uint8Array }` or `null` when cancelled.
++async fn host_open(host: &wasm_bindgen::JsValue, purpose: &str) -> Result<Option<(String, Vec<u8>)>, String> {
++    let js = |e: wasm_bindgen::JsValue| format!("{e:?}");
++    let promise = host_method(host, "open")?.call1(host, &purpose.into()).map_err(js)?;
++    let value = wasm_bindgen_futures::JsFuture::from(js_sys::Promise::resolve(&promise)).await.map_err(js)?;
++    if value.is_null() || value.is_undefined() {
++        return Ok(None);
++    }
++    let name = js_sys::Reflect::get(&value, &"name".into()).ok().and_then(|v| v.as_string()).unwrap_or_else(|| "presentation".into());
++    let bytes = js_sys::Reflect::get(&value, &"bytes".into()).map_err(js)?;
++    Ok(Some((name, js_sys::Uint8Array::new(&bytes).to_vec())))
++}
++
++/// Saves through `easyslideHost.save(name, bytes)` when hosted by EasyWAR, else a browser download.
++fn save_or_download(path: &str, bytes: &[u8]) -> Result<(), String> {
++    let Some(host) = easyslide_host() else { return download(path, bytes) };
++    let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "presentation".into());
++    let save = host_method(&host, "save")?;
++    save.call2(&host, &name.into(), &js_sys::Uint8Array::from(bytes)).map_err(|e| format!("{e:?}"))?;
++    Ok(())
++}
++
+ fn push_inbox(inbox: &Inbox, event: InboxEvent) {
+     inbox.lock().unwrap_or_else(|e| e.into_inner()).push(event);
+ }
+--- crates/engine/src/recovery.rs
++++ crates/engine/src/recovery.rs
+@@ -44,6 +44,8 @@
+     *ID.get_or_init(|| {
+         use std::hash::{BuildHasher, Hasher};
+         let mut h = std::collections::hash_map::RandomState::new().build_hasher();
++        // EasySlide: std::process::id() panics on wasm32-unknown-unknown ("no pids on this platform").
++        #[cfg(not(target_arch = "wasm32"))]
+         h.write_u32(std::process::id());
+         #[cfg(not(target_arch = "wasm32"))]
+         if let Ok(d) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+--- crates/ui-egui/src/lib.rs
++++ crates/ui-egui/src/lib.rs
+@@ -6,6 +6,9 @@
+ #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
+ #![forbid(unsafe_code)]
+ 
++/// EasySlide: the web build (embedded in EasyWAR) saves PowerPoint files by default.
++const DEFAULT_SAVE_FORMAT: &str = if cfg!(target_arch = "wasm32") { "pptx" } else { "deckcraft" };
++
+ pub mod animtimeline;
+ pub mod backstage;
+ pub mod canvas;
+@@ -1324,7 +1327,7 @@
+                 Err(e) => self.set_status(e.to_string()),
+             }
+         } else {
+-            self.save_as_dialog("deckcraft");
++            self.save_as_dialog(DEFAULT_SAVE_FORMAT);
+         }
+     }
+ 
+@@ -1342,7 +1345,7 @@
+                 UiRequest::Message { text } => self.set_status(text),
+                 UiRequest::PickFile { purpose } => {
+                     if purpose == "saveAs" {
+-                        self.save_as_dialog("deckcraft");
++                        self.save_as_dialog(DEFAULT_SAVE_FORMAT);
+                     }
+                 }
+                 UiRequest::Media { action, shape, ms } => {

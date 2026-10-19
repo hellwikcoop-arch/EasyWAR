@@ -9,7 +9,7 @@ const host = process.env.TAURI_DEV_HOST;
 // зі списком усіх файлів. Версія кешу береться з package.json, тож нова збірка
 // замінює старий кеш. 3D-моделі (.glb), переглядач літаків (aircraft-viewer.html, aircraft-3d/),
 // відео заставки (.mp4), ресурси 3D-карти (map-assets, >100 МБ) і 3D-довідники (сторінки й
-// скрипти guides*, їхні шрифти .woff2) у кеш не входять: у вікнах командування вони не потрібні,
+// скрипти guides*, їхні шрифти .woff2), а також прототип EasySlide (workspace/easyslide/, deckcraft-web*) у кеш не входять: у вікнах командування вони не потрібні,
 // моделі важать десятки мегабайтів, а заставка є лише в застосунку.
 // Сервіс-воркер реєструє лише viewer.html; у застосунку Tauri його немає.
 function viewerServiceWorker() {
@@ -25,7 +25,7 @@ function viewerServiceWorker() {
           if (statSync(full).isDirectory()) walk(full);
           else {
             const rel = relative(out, full).split("\\").join("/");
-            if (name !== "sw.js" && !name.endsWith(".map") && !name.endsWith(".glb") && !name.endsWith(".mp4") && !name.endsWith(".woff2") && name !== "aircraft-viewer.html" && !full.includes(`${sep}aircraft-3d${sep}`) && !/(^|\/)guides[-/]/.test(rel) && !rel.startsWith("map-assets/")) files.push("./" + rel);
+            if (name !== "sw.js" && !name.endsWith(".map") && !name.endsWith(".glb") && !name.endsWith(".mp4") && !name.endsWith(".woff2") && name !== "aircraft-viewer.html" && !full.includes(`${sep}aircraft-3d${sep}`) && !/(^|\/)guides[-/]/.test(rel) && !rel.startsWith("map-assets/") && !rel.startsWith("workspace/easyslide/") && !/deckcraft-web|easyslide/.test(rel)) files.push("./" + rel);
           }
         }
       };
@@ -94,6 +94,8 @@ export default defineConfig({
         viewer: fileURLToPath(new URL("./src/viewer.html", import.meta.url)),
         // Літаки у вкладці «Довідник» (ПС): окрема сторінка зі своєю сценою, відкривається в кадрі.
         aircraftViewer: fileURLToPath(new URL("./src/aircraft-viewer.html", import.meta.url)),
+        // EasySlide (прототип): редактор презентацій на веб-збірці DeckCraft для модуля «Робоче середовище» → «Офіс».
+        easyslide: fileURLToPath(new URL("./src/workspace/easyslide/index.html", import.meta.url)),
         // 3D-довідники: хаб і шість довідників; лаунчер відкриває хаб в iframe-накладці (src/guides-launcher.js).
         guides: fileURLToPath(new URL("./src/guides/index.html", import.meta.url)),
         "guides-rvia": fileURLToPath(new URL("./src/guides/rvia/index.html", import.meta.url)),
