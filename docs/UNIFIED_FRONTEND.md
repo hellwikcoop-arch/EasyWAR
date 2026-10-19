@@ -369,6 +369,17 @@ by hand with narrow anchored patches (see `AGENTS.md`), then run
 карток не вилучаються. Дашборди ПВК і УДШВ мають власний акцент (синій і малиновий) через
 локальні `--ew-accent`; тло шапки ПВК — абстрактний рельєф `src/pvk-art/relief-banner.webp`.
 
+Стиль «Пункт керування» (за довідником Heightwell) живе окремо в `src/public/heightwell-theme.css`
+і `src/public/fonts/heightwell/` (Space Grotesk для латиниці й цифр, Onest для кирилиці в одній гарнітурі
+«HW Grotesk», IBM Plex Mono для міток; усі SIL OFL 1.1, ліцензії поруч). Сторінки його не підключають:
+`ui-kit.js` додає `<link id="ew-skin-css">` лише після вмикання, ставить `html[data-skin="heightwell"]` і
+зберігає вибір у `localStorage` (`aviahub.skin`); кнопка `#skinBtn` (клас `.ew-skin-btn`) стає одразу після
+`#themeBtn`. Усі правила стилю — під `html[data-skin="heightwell"]:not([data-theme="light"])` і лише
+перевизначають токени модулів (`--bg`, `--surface`, `--ink`, `--accent`, `--sans`, `--mono` тощо); світло
+розділу — `--hw-chapter` за `data-ew-module`. Файли командування для телефона (`build_standalone.mjs`,
+без `public/`) стиль не несуть: якщо файлу немає, `ui-kit.js` знімає атрибут і ховає кнопку.
+Тести — `tests/heightwell-theme.test.mjs`.
+
 `artillery.html` теж підключає `ui-kit.css`/`ui-kit.js` (`data-ew-module="artillery"`), але має власні токени в
 `artillery.css`: блок «Спільний вигляд дашбордів» у кінці файлу перетворює вкладки на бічне меню
 (CSS через `body:has(#tabs:not([hidden]))`, від 900 px; нижче — рядок вкладок із прокруткою), перемальовує
