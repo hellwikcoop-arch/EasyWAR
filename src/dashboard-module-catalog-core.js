@@ -3,7 +3,7 @@ const VISUAL_KINDS = new Set([
   'kpi', 'line', 'area', 'columns', 'horizontal-bar', 'grouped-columns', 'donut',
   'radial-progress', 'multi-ring', 'radar', 'gauge', 'progress-bars', 'calendar',
   'table', 'funnel', 'map', 'cohort', 'activity', 'waveform',
-  'combo', 'stacked-columns', 'diverging-bars', 'leaderboard',
+  'combo', 'stacked-columns', 'diverging-bars', 'leaderboard', 'weather',
 ]);
 const FIELD_TYPES = new Set(['text', 'integer', 'real', 'date', 'datetime', 'boolean']);
 const FIELD_ROLES = new Set(['dimension', 'metric', 'label', 'series', 'status', 'latitude', 'longitude', 'order', 'note']);
