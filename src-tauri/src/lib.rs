@@ -403,7 +403,11 @@ async fn rename_local_profile(
         .map_err(|error| error.to_string())
 }
 
-/// Вхід у профіль: для захищеного профілю потрібен пароль.
+/// Вхід у профіль: для захищеного профілю потрібен пароль. Після п'яти неправильних
+/// паролів поспіль вхід у цей профіль зупиняється на 30 с, далі пауза подвоюється (до
+/// 10 хв); перший правильний пароль скидає лічильник. Лічильник лише в пам'яті процесу
+/// і спільний із підтвердженням чинного пароля в `set_local_profile_password`.
+/// Профіль без пароля, як і раніше, приймає будь-який пароль.
 #[tauri::command]
 async fn activate_local_profile(
     profiles: tauri::State<'_, LocalProfileStore>,
@@ -762,6 +766,10 @@ async fn update_local_profile_details(
         .map_err(|error| error.to_string())
 }
 
+/// Встановлює або змінює пароль профілю. Профіль із паролем: лише з сесії цього профілю
+/// і з чинним паролем. Профіль без пароля (з версій до обов'язкового пароля): з власної
+/// сесії або поки ніхто не ввійшов, бо саме так екран входу просить встановити пароль
+/// перед першим входом (`local_profiles::authorize_password_change`).
 #[tauri::command]
 async fn set_local_profile_password(
     profiles: tauri::State<'_, LocalProfileStore>,
@@ -774,6 +782,12 @@ async fn set_local_profile_password(
     if new_password.is_none() {
         return Err(local_profiles::LocalProfileError::PasswordRequired.to_string());
     }
+    let has_password = profiles
+        .has_password(&profile_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    local_profiles::authorize_password_change(has_password, session.get().as_deref(), &profile_id)
+        .map_err(|error| error.to_string())?;
     let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
     let state = profiles
         .set_password(
@@ -847,7 +861,11 @@ struct CreatedBaseTable {
     path: String,
 }
 
-/// Зберігає готову презентацію (.pptx) у файл, який обирає користувач. Дані не залишають пристрій.
+/// Зберігає готову презентацію (.pptx або .pdf) у файл, який обирає користувач. Дані не
+/// залишають пристрій. Запис іде через тимчасовий файл; якщо розширення дописали ми
+/// («report» → «report.pptx») і такий файл уже є, він не затирається, а команда повертає
+/// помилку: вікно збереження про заміну саме не питало. Заміну, підтверджену самим вікном
+/// (обрано вже наявний «report.pptx»), виконано.
 #[tauri::command]
 async fn save_presentation(
     app: tauri::AppHandle,
@@ -881,15 +899,13 @@ async fn save_presentation(
     let Some(selected) = selected else {
         return Ok(None);
     };
-    let mut path = selected.into_path().map_err(|error| error.to_string())?;
-    if !path
-        .extension()
-        .is_some_and(|current| current.eq_ignore_ascii_case(extension))
-    {
-        path.as_mut_os_string().push(format!(".{extension}"));
-    }
-    let target = path.clone();
-    tauri::async_runtime::spawn_blocking(move || std::fs::write(&target, bytes))
+    let target = phone_export::save_target(
+        selected.into_path().map_err(|error| error.to_string())?,
+        &[extension],
+        extension,
+    );
+    let path = target.path.clone();
+    tauri::async_runtime::spawn_blocking(move || phone_export::save_file(&target, &bytes))
         .await
         .map_err(|error| error.to_string())?
         .map_err(|error| error.to_string())?;
@@ -956,7 +972,8 @@ struct PhoneExportResult {
 /// вбудованих ресурсів у місце, яке обрав користувач. З `with_table` у файл кладеться
 /// копія таблиці, прив'язаної до плитки активного профілю (профіль із паролем має бути
 /// розблокований); без нього даних у файлі немає. Повертає `None`, якщо вікно вибору
-/// закрито.
+/// закрито. Наявний файл не затирається, якщо розширення `.html` дописали ми
+/// (див. `save_presentation`).
 #[tauri::command]
 async fn export_phone_file(
     app: tauri::AppHandle,
@@ -1017,10 +1034,10 @@ async fn export_phone_file(
     let Some(selected) = selected else {
         return Ok(None);
     };
-    let path =
-        phone_export::with_html_extension(selected.into_path().map_err(|error| error.to_string())?);
-    let target = path.clone();
-    tauri::async_runtime::spawn_blocking(move || phone_export::write_file(&target, &bytes))
+    let target =
+        phone_export::html_save_target(selected.into_path().map_err(|error| error.to_string())?);
+    let path = target.path.clone();
+    tauri::async_runtime::spawn_blocking(move || phone_export::save_file(&target, &bytes))
         .await
         .map_err(|error| error.to_string())?
         .map_err(|error| format!("Не вдалося зберегти файл: {error}"))?;
