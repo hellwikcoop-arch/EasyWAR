@@ -238,7 +238,7 @@ jobs:
         run: script/build_runner.sh x86_64-pc-windows-msvc
       - name: Runner protocol smoke test
         shell: bash
-        run: script/runner_smoke.sh src-tauri/binaries/easywar-llm-runner-x86_64-pc-windows-msvc.exe
+        run: script/ci_diag.sh smoke bash -x script/runner_smoke.sh src-tauri/binaries/easywar-llm-runner-x86_64-pc-windows-msvc.exe
       - name: Build MSI and NSIS installers (unsigned)
         shell: bash
         env:
