@@ -194,6 +194,21 @@ ends, and the launcher stays `inert` until sign-in.
 - Код застосунку — `src/workspace/<id>/app.js` з `mount(container, host)`; оболонка знаходить його через `import.meta.glob`, без змін у самій оболонці. Поки файлу немає, картка відкриває заглушку «у розробці».
 - `vite.config.js`: входи `workspace` і `workspace-app`; чанки `src/workspace/<id>/app.js` отримують назву `assets/workspace-*` (`chunkFileNames`), а кеш переглядача для телефона не бере `workspace/`, `assets/workspace-*` і `.wasm`.
 
+### EasyDoc (прототип)
+
+Редактор документів на основі WordCraft (MIT OR Apache-2.0, github.com/storytold/wordcraft), зібраний у WASM. Прототип у гілці `claude/easydoc-prototype`, у `main` не зливається.
+
+| Файл | Роль |
+| --- | --- |
+| `src/workspace/easydoc/app.js` | `mount(container, host)` за контрактом [WORKSPACE.md](WORKSPACE.md): вкладає `<iframe>` на `host.resolve('workspace/easydoc/index.html')` і ставить `window.__easydocHost` — місток для сторінки редактора |
+| `src/workspace/easydoc/easydoc-bridge-core.js` | чиста логіка містка: `openDocument` → `host.openFile`, `saveDocument(ім'я, байти)` → `host.saveFile` (та сама назва) або `host.saveFileAs` (нова назва, експорт у PDF), `setDirty` → `host.setDirty`; номери файлів лишаються тут |
+| `src/public/workspace/easydoc/index.html`, `easydoc-host.js` | сторінка редактора: `canvas#wordcraft_canvas`, `wordcraft-web.js` і `wordcraft-web_bg.wasm` (≈ 52 МБ) без бандлера Vite; `easydoc-host.js` бере місток із батьківського вікна, а без оболонки редактор працює з браузерним вибором і завантаженням файлів |
+| `src/public/workspace/easydoc/licenses/` | ліцензії WordCraft і шрифтів (MIT, Apache-2.0, NOTICE, SIL OFL) |
+| `script/build_easydoc.sh`, `script/easydoc/wordcraft-web.patch` | збірка з розпакованого `wordcraft-main`: копія в тимчасову теку, наша правка веб-оболонки, `cargo build --target wasm32-unknown-unknown`, `wasm-bindgen --target web` |
+
+- Наша правка WordCraft лише в `apps/wordcraft-web`: модуль `easywar_host.rs`; `open_async` (документи) і `download` ідуть через місток, `on_dirty` передає позначку змін, власне браузерне «Залишити сторінку?» вимкнене, коли є місток; мова інтерфейсу завжди `uk`.
+- Мережі під час роботи немає (`tests/easydoc.test.mjs`). У самому WordCraft лишаються посилання «Discord», «Поділитися» та вкладка Zotero (лише локальний 127.0.0.1); без натискання вони нічого не роблять.
+
 ## Desktop behaviour
 
 - **Tauri IPC in the iframe.** Tauri injects its bridge only into the top-level
