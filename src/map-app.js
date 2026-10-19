@@ -315,6 +315,7 @@ const frag = /* glsl */`
   #include <logdepthbuf_pars_fragment>
   uniform sampler2D uData; uniform sampler2D uSat; uniform float uExag;
   uniform vec3 uSun; uniform int uMode; uniform vec3 uBg; uniform vec3 uGrid; uniform vec3 uRamp[7];
+  uniform vec3 uInk; uniform vec3 uPaper; uniform vec2 uGridDiv;   // режими-креслення: туш, папір і крок сітки каркаса (клітинок на всю плиту)
   uniform vec4 uHoles[48]; uniform int uHoleN; uniform int uCityN; uniform int uFineN; uniform int uHoleMode; uniform sampler2D uBorders; uniform float uBorderOn; uniform float uFrontOn;
   uniform sampler2D uMask; uniform vec2 uMaskTexel;   // precise national outline (OSM), 4096 px
   varying vec2 vUvImg; varying vec2 vUvD; varying float vH;
@@ -324,6 +325,17 @@ const frag = /* glsl */`
     for(int i=0;i<6;i++){ float t = smoothstep(s[i], s[i+1], h); c = mix(c, uRamp[i+1], t); }
     return c;
   }
+  // термоградієнт режиму «Неон»: глибока синь → бірюза → зелень → жовтий → помаранч → малиновий → білий
+  vec3 neon(float h){
+    vec3 r[7]; r[0]=vec3(0.04,0.10,0.30); r[1]=vec3(0.05,0.62,0.78); r[2]=vec3(0.17,0.83,0.42); r[3]=vec3(0.95,0.85,0.30); r[4]=vec3(1.0,0.42,0.24); r[5]=vec3(1.0,0.18,0.48); r[6]=vec3(1.0);
+    float s[7]; s[0]=0.0; s[1]=120.0; s[2]=250.0; s[3]=450.0; s[4]=800.0; s[5]=1300.0; s[6]=2061.0;
+    vec3 c = r[0];
+    for(int i=0;i<6;i++){ float t = smoothstep(s[i], s[i+1], h); c = mix(c, r[i+1], t); }
+    return c;
+  }
+  // горизонталі: лінія кожні step метрів, завширшки близько пікселя завдяки fwidth
+  // Коли на піксель припадає понад чверть кроку (далекий план, крутий схил), лінії зливалися б у шум — там вони згасають.
+  float contour(float h, float step){ float c = h/step; float g = fract(c); float d = min(g, 1.0-g); float w = fwidth(c); return (1.0 - smoothstep(0.0, 1.6*w, d)) * (1.0 - smoothstep(0.25, 0.6, w)); }
   void main(){
     #include <logdepthbuf_fragment>
     if (texture2D(uMask, vUvD).r < 0.5) discard;   // clip the surface to the precise outline
@@ -342,14 +354,35 @@ const frag = /* glsl */`
     } else if (uMode == 1) {
       vec3 base = ramp(vH);
       col = base * (0.38*hemi + 0.80*diff) * (1.0 - 0.3*slope);
+    } else if (uMode == 2) {
+      // Креслення: горизонталі тушшю на папері, легка відмивка схилів, як на топографічному аркуші
+      float minor = contour(vH, 50.0), major = contour(vH, 250.0);
+      vec3 paper = uPaper * (0.84 + 0.18*diff + 0.06*hemi);
+      col = mix(paper, uInk, clamp(minor*0.42 + major*0.9, 0.0, 1.0));
+      col = mix(col, uInk, slope*0.28);
+    } else if (uMode == 3) {
+      // Макет: матовий білий архітектурний макет — м'яке світло, затемнені улоговини
+      col = uPaper * (0.52*hemi + 0.50*diff) * (1.0 - 0.45*slope);
+    } else if (uMode == 4) {
+      // Каркас: темна поверхня, світла сітка з кроком uGridDiv і тонкі горизонталі
+      vec2 gc = vUvD * uGridDiv; vec2 a = abs(fract(gc - 0.5) - 0.5) / max(fwidth(gc), vec2(1e-5));
+      float fine = 1.0 - min(min(a.x, a.y), 1.0);
+      vec2 gc4 = gc / 4.0; vec2 a4 = abs(fract(gc4 - 0.5) - 0.5) / max(fwidth(gc4), vec2(1e-5));
+      float coarse = 1.0 - min(min(a4.x, a4.y), 1.0);
+      float minor = contour(vH, 100.0);
+      col = uBg * 0.9 + uInk * (0.012 + 0.035*diff);
+      col = mix(col, uInk, clamp(fine*0.22 + coarse*0.45 + minor*0.28, 0.0, 0.85));
+    } else if (uMode == 5) {
+      // Відмивка: сіра тінь рельєфу без кольору, як на аналітичній відмивці
+      col = uPaper * (0.26 + 0.74*diff) * (1.0 - 0.6*slope);
+    } else if (uMode == 6) {
+      // Точки: поверхня майже чорна й лише затуляє дальні точки; самі точки малює dotsMat
+      col = uBg * 0.6 + uInk * 0.025*diff;
     } else {
-      float c = vH/100.0; float gg = fract(c); float dd = min(gg, 1.0-gg); float w = fwidth(c);
-      float minor = 1.0 - smoothstep(0.0, 1.6*w, dd);
-      float c5 = vH/500.0; float g5 = fract(c5); float d5 = min(g5, 1.0-g5); float w5 = fwidth(c5);
-      float major = 1.0 - smoothstep(0.0, 1.6*w5, d5);
-      vec3 paper = mix(uBg, uGrid, 0.06) * (0.75 + 0.35*diff + 0.1*hemi);
-      col = mix(paper, uGrid, clamp(minor*0.45 + major*0.9, 0.0, 1.0));
-      col = mix(col, uGrid, slope*0.35);
+      // Неон: термоградієнт за висотою з підсвіченими горизонталями
+      float minor = contour(vH, 100.0), major = contour(vH, 500.0);
+      col = neon(vH) * (0.32 + 0.80*diff) * (1.0 - 0.25*slope);
+      col += vec3(0.55, 0.95, 1.0) * (minor*0.22 + major*0.5);
     }
     // black line along the top edge of the plinth: land mask drops within ~0.7 texel of the border/coast
     float mE = min(min(texture2D(uMask, vUvD + vec2(uMaskTexel.x*3.0, 0.0)).r, texture2D(uMask, vUvD - vec2(uMaskTexel.x*3.0, 0.0)).r),
@@ -361,8 +394,10 @@ const frag = /* glsl */`
     vec3 bd = texture2D(uBorders, vUvD).rgb;   // r = oblast lines, g = raion lines, b = line of contact (1.0) / occupied (0.47) / unknown status (0.24)
     float fl = step(0.8, bd.b); float ft = bd.b*(1.0-fl)/0.47;
     col = mix(col, vec3(0.85, 0.12, 0.12), ft*uFrontOn*0.22);                   // occupied territory: light red wash
-    col = mix(col, uMode == 2 ? uGrid : vec3(1.0), bd.g*uBorderOn*0.75);   // raions: thin white
-    vec3 bc = uMode == 0 ? vec3(1.0, 0.92, 0.55) : uMode == 1 ? vec3(0.10, 0.13, 0.22) : uGrid;
+    // raions: thin white on imagery and ramps, ink on drawings and the model; oblasts: gold on imagery, ink elsewhere, cyan in neon
+    bool photo = uMode == 0 || uMode == 1;
+    col = mix(col, photo ? vec3(1.0) : uMode == 7 ? vec3(0.6, 1.0, 1.0) : uInk, bd.g*uBorderOn*(photo ? 0.75 : 0.45));
+    vec3 bc = uMode == 0 ? vec3(1.0, 0.92, 0.55) : uMode == 1 ? vec3(0.10, 0.13, 0.22) : uMode == 7 ? vec3(0.6, 1.0, 1.0) : uInk;
     col = mix(col, bc, bd.r*uBorderOn*0.9);
     col = mix(col, vec3(1.0, 0.16, 0.12), fl*uFrontOn);                         // line of contact: red
     gl_FragColor = vec4(col, 1.0);
@@ -376,6 +411,7 @@ const uniforms = {
   uData:{value:null}, uSat:{value:null}, uExag:{value:skipIntro?1:0.001}, uScale:{value:SCALE}, uPlinth:{value:PLINTH},
   uSun:{value:new THREE.Vector3(1,1,1)}, uSkirt:{value:220*SCALE}, uRect:{value:new THREE.Vector4(0, 0, 1, 1)},
   uMode:{value:0}, uWall:{value:cssColor('--wall')}, uBg:{value:cssColor('--bg')}, uGrid:{value:cssColor('--grid')},
+  uInk:{value:new THREE.Color('#2b2b2b')}, uPaper:{value:new THREE.Color('#f3efe4')}, uGridDiv:{value:new THREE.Vector2((META.lon1-META.lon0)/0.25, (META.lat1-META.lat0)/0.25)},   // сітка каркаса: клітинка 0,25°
   uRamp:{value:rampHex.map(h=>new THREE.Color(h))},
   uHoles:{value:Array.from({length:48}, () => new THREE.Vector4(0,0,0,0))}, uHoleN:{value:0}, uCityN:{value:0}, uFineN:{value:0}, uHoleMode:{value:0}, uLift:{value:0}, uBExag:{value:1},   // real-world scale: no vertical exaggeration for terrain or buildings
   uBorders:{value:blackTex}, uBorderOn:{value:0}, uFrontOn:{value:1}, uMask:{value:null}, uMaskTexel:{value:new THREE.Vector2(1/4096, 1/2796)}
@@ -388,6 +424,36 @@ const wireMat = new THREE.ShaderMaterial({
   uniform vec3 uGrid; uniform sampler2D uMask; varying vec2 vUvD; void main(){ #include <logdepthbuf_fragment>
   if(texture2D(uMask, vUvD).r<0.5) discard; gl_FragColor=vec4(uGrid,0.28); #include <colorspace_fragment> }`
 });
+// Режим «Точки»: та сама сітка рельєфу, намальована точками; розмір точки спадає з відстанню, спідниця й море відкидаються
+const dotsMat = new THREE.ShaderMaterial({
+  uniforms:{uData:uniforms.uData, uExag:uniforms.uExag, uScale:uniforms.uScale, uLift:{value:0.004}, uMask:uniforms.uMask, uInk:uniforms.uInk, uDot:{value:Math.min(devicePixelRatio || 1, 2)*2.4}},
+  transparent:true, depthWrite:false,
+  vertexShader:`#include <common>
+  #include <logdepthbuf_pars_vertex>
+  attribute vec2 aUv; uniform sampler2D uData; uniform float uExag; uniform float uScale; uniform float uLift; uniform float uDot;
+  varying vec2 vUvD; varying float vH; varying float vSkirt;
+  void main(){
+    vUvD = aUv; vSkirt = position.y;
+    float h = max(texture2D(uData, aUv).r, 0.0); vH = h;
+    vec4 mv = modelViewMatrix * vec4(position.x, (h + uLift)*uScale*uExag, position.z, 1.0);
+    gl_PointSize = uDot * clamp(7.0 / max(-mv.z, 0.001), 0.4, 2.6);
+    gl_Position = projectionMatrix * mv;
+    #include <logdepthbuf_vertex>
+  }`,
+  fragmentShader:`precision highp float;
+  #include <common>
+  #include <logdepthbuf_pars_fragment>
+  uniform sampler2D uMask; uniform vec3 uInk; varying vec2 vUvD; varying float vH; varying float vSkirt;
+  void main(){
+    #include <logdepthbuf_fragment>
+    if (vSkirt < -0.5 || texture2D(uMask, vUvD).r < 0.5) discard;
+    float r = length(gl_PointCoord - 0.5); if (r > 0.5) discard;
+    float a = smoothstep(0.5, 0.28, r) * mix(0.55, 1.0, clamp(vH/1500.0, 0.0, 1.0));
+    gl_FragColor = vec4(uInk, a);
+    #include <colorspace_fragment>
+  }`
+});
+let dotsOn = false;
 // a patch (regional or city imagery) shares every uniform with the base terrain except its own texture, hole mode, lift and uv rectangle
 function patchMaterial(tex, mode, lift, b){
   const u0 = (b[0]-META.lon0)/(META.lon1-META.lon0), v0 = (META.lat1-b[3])/(META.lat1-META.lat0);
@@ -406,7 +472,7 @@ const SEG = isMobile ? 552 : 1104, SEGY = isMobile ? 376 : 752;   // finest grid
 const CHX = 6, CHY = 4, LOD_STEP = [1, 2, 4], LOD_NEAR = [5, 11];  // a chunk closer than 5 units uses the full grid, closer than 11 half of it, otherwise a quarter
 const LOD_TOP = LOD_STEP.length - 1;
 const CELL = MAPW/SEG;   // one finest-grid cell in plate units
-const chunks = []; let wireOn = false, chunksDrawn = 0, chunkJobs = 0, farMesh = null, farWire = null, farView = false;
+const chunks = []; let wireOn = false, chunksDrawn = 0, chunkJobs = 0, farMesh = null, farWire = null, farDots = null, farView = false;
 const chunkSpec = (ch, lod) => ({b:ch.b, nx:Math.ceil(SEG/CHX/LOD_STEP[lod]), ny:Math.ceil(SEGY/CHY/LOD_STEP[lod]), skirt:true});
 function initChunks(){
   if (chunks.length) return;
@@ -417,14 +483,21 @@ function initChunks(){
     ch.geos[LOD_TOP] = geo; ch.radius = g.radius;
     ch.mesh = new THREE.Mesh(geo, mat); ch.mesh.position.set(g.origin[0], 0, g.origin[1]); ch.mesh.onBeforeRender = () => { chunksDrawn++; };
     ch.wire = new THREE.Mesh(geo, wireMat); ch.wire.position.set(g.origin[0], 0.004, g.origin[1]); ch.wire.visible = wireOn;
-    ch.centre = ch.mesh.position.clone(); scene.add(ch.mesh, ch.wire); chunks.push(ch);
+    ch.dots = new THREE.Points(geo, dotsMat); ch.dots.position.copy(ch.mesh.position); ch.dots.visible = dotsOn;
+    ch.centre = ch.mesh.position.clone(); scene.add(ch.mesh, ch.wire, ch.dots); chunks.push(ch);
   }
   // far view: when every chunk would be at its coarsest level anyway, the whole country is drawn as one merged grid, i.e. one draw call instead of 24
   const g = core.buildGrid([META.lon0, META.lon1, META.lat0, META.lat1], Math.ceil(SEG/LOD_STEP[LOD_TOP]), Math.ceil(SEGY/LOD_STEP[LOD_TOP]), false), geo = gridGeometry(g);
   farMesh = new THREE.Mesh(geo, mat); farMesh.position.set(g.origin[0], 0, g.origin[1]); farMesh.visible = false;
-  farWire = new THREE.Mesh(geo, wireMat); farWire.position.set(g.origin[0], 0.004, g.origin[1]); farWire.visible = false; scene.add(farMesh, farWire);
+  farWire = new THREE.Mesh(geo, wireMat); farWire.position.set(g.origin[0], 0.004, g.origin[1]); farWire.visible = false;
+  farDots = new THREE.Points(geo, dotsMat); farDots.position.copy(farMesh.position); farDots.visible = false; scene.add(farMesh, farWire, farDots);
 }
-function setChunkLod(ch, lod){ ch.lod = lod; ch.mesh.geometry = ch.wire.geometry = ch.geos[lod]; }
+function setChunkLod(ch, lod){ ch.lod = lod; ch.mesh.geometry = ch.wire.geometry = ch.dots.geometry = ch.geos[lod]; }
+// Видимість сітки й точок: за перемикачем «Сітка», режимом «Точки» та тим, чи малюється країна однією спільною сіткою
+function syncOverlays(){
+  if (farWire){ farWire.visible = farView && wireOn; farDots.visible = farView && dotsOn; }
+  for (const ch of chunks){ ch.wire.visible = !farView && wireOn; ch.dots.visible = !farView && dotsOn; }
+}
 function updateChunks(){
   let far = chunks.length > 0;
   for (const ch of chunks){
@@ -442,9 +515,10 @@ function updateChunks(){
     }
     if (!ch.busy) for (let k = 0; k < ch.lod; k++) if (ch.geos[k] && want >= ch.lod){ ch.geos[k].dispose(); ch.geos[k] = null; }   // finer levels are released as soon as the chunk has moved away
   }
-  if (far !== farView || (farMesh && farWire.visible !== (far && wireOn))){
-    farView = far; farMesh.visible = far; farWire.visible = far && wireOn;
-    for (const ch of chunks){ ch.mesh.visible = !far; ch.wire.visible = !far && wireOn; }
+  if (far !== farView){
+    farView = far; farMesh.visible = far;
+    for (const ch of chunks) ch.mesh.visible = !far;
+    syncOverlays();
   }
 }
 
@@ -489,7 +563,6 @@ const wallMat = new THREE.ShaderMaterial({
     vec3 n = normalize(cross(dFdx(vWorld), dFdy(vWorld))); float d = max(dot(n, normalize(uSun)), 0.0);
     float rim = 0.55 + 0.45*clamp((vWorld.y + uPlinth)/0.6, 0.0, 1.0);
     vec3 col = uWall * (0.55 + 0.55*d) * rim;
-    if (uMode == 2) col = mix(uBg, uGrid, 0.18) * (0.7 + 0.5*d);
     if (vTop > 0.955) col = vec3(0.0);   // black band along the top edge (~1 km)
     gl_FragColor = vec4(col, 1.0);
     #include <tonemapping_fragment>
@@ -552,8 +625,9 @@ const Labels = (() => {
   }
   // styles follow the page tokens; rebuilt when the theme changes
   const ST = {}, PRI = {capital:0, obl:1, t1:2, peak:3, t2:4, t3:5, t4:6};
-  function restyle(){
-    const fg = cssColor('--fg'), bg = cssColor('--bg'), muted = cssColor('--muted'), gold = cssColor('--gold'), accent = cssColor('--accent'), white = new THREE.Color(1, 1, 1), black = new THREE.Color(0, 0, 0);
+  // `over` — кольори сцени режиму, коли вони не збігаються з темою сторінки (білий макет у темній темі, чорний каркас у світлій)
+  function restyle(over = null){
+    const fg = over?.fg ?? cssColor('--fg'), bg = over?.bg ?? cssColor('--bg'), muted = over?.muted ?? cssColor('--muted'), gold = cssColor('--gold'), accent = cssColor('--accent'), white = new THREE.Color(1, 1, 1), black = new THREE.Color(0, 0, 0);
     Object.assign(ST, {
       capital:{size:12.5, edge:0.70, fill:white, fa:1, halo:black, ha:1, hw:1.5, dot:9, dfill:white, dring:accent},   // oblast centres: white name with a dark outline, white dot with a blue ring
       t1:{size:11.5, edge:0.71, fill:fg, fa:1, halo:bg, ha:0.95, hw:1.6, dot:7, dfill:gold, dring:bg},
@@ -691,6 +765,12 @@ const ROOF_COLORS = ['#8a6b50', '#6f6a62', '#8d8f90', '#7d7267', '#6e665c'];
 const roofMats = ROOF_COLORS.map(h => patchBld(new THREE.MeshLambertMaterial({color:h, flatShading:true})));   // flat roof colour per category (vertex colours tint walls only)
 const wallMats = BLD_COLORS.map(() => patchBld(new THREE.MeshLambertMaterial({vertexColors:true, flatShading:true})));
 const bldMats = [...roofMats, ...wallMats];
+// Режими-креслення малюють забудову без фасадів: білий макет, сіра відмивка, світлий каркас або неоновий каркас
+const monoMats = (color, wire = false) => Array.from({length:10}, () => patchBld(wire
+  ? new THREE.MeshBasicMaterial({color, wireframe:true, transparent:true, opacity:0.45, depthWrite:false})
+  : new THREE.MeshLambertMaterial({color, flatShading:true})));
+const clayMats = monoMats('#f4f4f2'), paperMats = monoMats('#e9e4d6'), shadeMats = monoMats('#cfcfcf'), wireBld = monoMats('#e6f0ff', true), neonBld = monoMats('#8df3ff', true);
+const bldSetFor = m => m === 3 ? clayMats : m === 2 ? paperMats : m === 5 ? shadeMats : m === 4 || m === 6 ? wireBld : m === 7 ? neonBld : bldMats;
 async function loadFacades(){
   try {
     const spec = await fetchJson('facades.json');
@@ -736,7 +816,7 @@ function cityMesh(r){
   geo.setAttribute('position', new THREE.BufferAttribute(r.pos, 3)); geo.setAttribute('aGround', new THREE.BufferAttribute(r.grd, 1));
   geo.setAttribute('uv', new THREE.BufferAttribute(r.uv, 2)); geo.setAttribute('color', new THREE.BufferAttribute(r.col, 3, true)); geo.setIndex(new THREE.BufferAttribute(r.idx, 1));
   geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), r.radius + 0.05);
-  const m = new THREE.Mesh(geo, bldMats); m.position.set(r.origin[0], 0, r.origin[1]); m.visible = false; return m;   // vertices are relative to the pack centre
+  const m = new THREE.Mesh(geo, bldSetFor(uniforms.uMode.value)); m.position.set(r.origin[0], 0, r.origin[1]); m.visible = false; return m;   // vertices are relative to the pack centre
 }
 async function loadCity(c){
   c.state = 'loading';
@@ -976,11 +1056,32 @@ async function init(){
   loadLayer('buildings').then(() => { if (Layers.buildings.state === 'error') $('r-b').textContent = 'не завантажилась'; });
 }
 
-// ---------- theme ----------
+// ---------- theme and view modes ----------
+// Вигляд: 0 супутник, 1 рельєф (гіпсометрія), 2 креслення (горизонталі на папері), 3 макет (білий архітектурний макет),
+// 4 каркас (світла сітка на чорному), 5 відмивка (сіра тінь рельєфу), 6 точки (хмара точок), 7 неон (термоградієнт).
+// Перші два беруть кольори з теми сторінки; решта мають власні папір, туш, тло й стіну плінта, однакові в обох темах там,
+// де сам вигляд це диктує (чорне тло каркаса), і підлаштовані під тему там, де ні (сіре тло макета).
+const MODE = {sat:0, hyp:1, con:2, model:3, wire:4, shade:5, dots:6, neon:7};
+const SCENE_STYLES = {
+  [MODE.con]:  {light:{bg:'#e9e4d7', paper:'#f4f0e5', ink:'#2b2b2b', wall:'#cfc8b8', fg:'#1a1a1a', muted:'#5a5a5a'}, dark:{bg:'#0b0e15', paper:'#141926', ink:'#c9d2e3', wall:'#1b2130', fg:'#e8edf6', muted:'#8e9ab0'}},
+  [MODE.model]:{light:{bg:'#d8dce2', paper:'#f3f3f1', ink:'#7f838a', wall:'#e2e2e0', fg:'#1a1f2b', muted:'#4f5663'}, dark:{bg:'#171b24', paper:'#eeeeec', ink:'#7f838a', wall:'#d6d6d3', fg:'#e8edf6', muted:'#9aa3b5'}},
+  [MODE.wire]: {light:{bg:'#04060a', paper:'#0b0e14', ink:'#e6f0ff', wall:'#0c1017', fg:'#eef3ff', muted:'#9fb0c4'}, dark:null},
+  [MODE.shade]:{light:{bg:'#cdd0d5', paper:'#d9d9d9', ink:'#3a3a3a', wall:'#9c9c9c', fg:'#1a1a1a', muted:'#555555'}, dark:{bg:'#14161a', paper:'#d2d2d2', ink:'#3a3a3a', wall:'#8c8c8c', fg:'#e8e8e8', muted:'#9a9a9a'}},
+  [MODE.dots]: {light:{bg:'#03050a', paper:'#0b0e14', ink:'#ffffff', wall:'#070a10', fg:'#eef3ff', muted:'#9fb0c4'}, dark:null},
+  [MODE.neon]: {light:{bg:'#05070d', paper:'#0b0e14', ink:'#8df3ff', wall:'#0a1020', fg:'#eef3ff', muted:'#9fb0c4'}, dark:null},
+};
+function sceneStyle(m = uniforms.uMode.value){
+  const dark = document.documentElement.dataset.theme !== 'light';
+  const s = SCENE_STYLES[m]; if (!s) return null;
+  return s[dark ? 'dark' : 'light'] || s.light;   // чорні вигляди однакові в обох темах
+}
 function applyTheme(){
-  uniforms.uWall.value = cssColor('--wall'); uniforms.uBg.value = cssColor('--bg'); uniforms.uGrid.value = cssColor('--grid');
-  renderer.setClearColor(cssColor('--bg'), 1); shadowMat.color = new THREE.Color(css('--shadow').replace(/rgba\(([^,]+,[^,]+,[^,]+),[^)]*\)/, 'rgb($1)')); shadowMat.opacity = parseFloat(css('--shadow').split(',')[3]) || 0.5;
-  Labels.restyle();
+  const s = sceneStyle();
+  uniforms.uWall.value = new THREE.Color(s ? s.wall : css('--wall')); uniforms.uBg.value = new THREE.Color(s ? s.bg : css('--bg')); uniforms.uGrid.value = cssColor('--grid');
+  uniforms.uInk.value = new THREE.Color(s ? s.ink : css('--grid')); uniforms.uPaper.value = new THREE.Color(s ? s.paper : css('--bg'));
+  renderer.setClearColor(uniforms.uBg.value, 1); shadowMat.color = new THREE.Color(css('--shadow').replace(/rgba\(([^,]+,[^,]+,[^,]+),[^)]*\)/, 'rgb($1)')); shadowMat.opacity = parseFloat(css('--shadow').split(',')[3]) || 0.5;
+  shadowPlane.visible = !(s && parseInt(s.bg.slice(1, 3), 16) < 0x10);   // на чорному тлі тінь невидима — не малюємо
+  Labels.restyle(s ? {fg:new THREE.Color(s.fg), bg:new THREE.Color(s.bg), muted:new THREE.Color(s.muted)} : null);
 }
 applyTheme();
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
@@ -988,8 +1089,16 @@ new MutationObserver(applyTheme).observe(document.documentElement, {attributes:t
 
 // ---------- UI ----------
 const setPressed = (b, v) => b.setAttribute('aria-pressed', String(v));
-const modeBtns = {0:$('m-sat'), 1:$('m-hyp'), 2:$('m-con')};
-function setMode(m){ uniforms.uMode.value = m; for (const k in modeBtns) setPressed(modeBtns[k], +k === m); $('legend').style.display = m === 1 ? 'flex' : 'none'; try{localStorage.setItem('ukr3d.mode', m)}catch(e){} }
+const modeBtns = {[MODE.sat]:$('m-sat'), [MODE.hyp]:$('m-hyp'), [MODE.shade]:$('m-shade'), [MODE.con]:$('m-con'), [MODE.model]:$('m-model'), [MODE.wire]:$('m-wire'), [MODE.dots]:$('m-dots'), [MODE.neon]:$('m-neon')};
+function setMode(m){
+  if (!(m in modeBtns)) m = MODE.sat;
+  uniforms.uMode.value = m; for (const k in modeBtns) setPressed(modeBtns[k], +k === m);
+  const legend = $('legend'); legend.style.display = m === MODE.hyp || m === MODE.neon ? 'flex' : 'none'; legend.classList.toggle('neon', m === MODE.neon);
+  dotsOn = m === MODE.dots; syncOverlays();
+  const set = bldSetFor(m); for (const c of CITY3D) if (c.bldMesh) c.bldMesh.material = set;
+  applyTheme();
+  try{localStorage.setItem('ukr3d.mode', m)}catch(e){}
+}
 Object.entries(modeBtns).forEach(([m,b]) => b.addEventListener('click', () => setMode(+m)));
 const targetExag = 1;   // true vertical scale
 function setSun(){ const az = +$('sun').value; $('sun-v').textContent = az+'°'; const a = THREE.MathUtils.degToRad(az), el = THREE.MathUtils.degToRad(38);
@@ -1003,7 +1112,7 @@ function togglePop2(open){ pop2.hidden = !open; btnC3d.setAttribute('aria-expand
 btnC3d.addEventListener('click', () => togglePop2(pop2.hidden));
 document.addEventListener('pointerdown', e => { if (!pop2.hidden && !pop2.contains(e.target) && e.target !== btnC3d) togglePop2(false); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && !pop2.hidden) togglePop2(false); });
-$('t-wire').addEventListener('click', e => { wireOn = !wireOn; for (const ch of chunks) ch.wire.visible = wireOn && !farView; setPressed(e.currentTarget, wireOn); });
+$('t-wire').addEventListener('click', e => { wireOn = !wireOn; syncOverlays(); setPressed(e.currentTarget, wireOn); });
 let bordersOn = true, frontOn = true, labelsOn = true;
 $('t-front').addEventListener('click', e => { frontOn = !frontOn; uniforms.uFrontOn.value = frontOn ? 1 : 0; setPressed(e.currentTarget, frontOn); });
 $('t-brd').addEventListener('click', e => { bordersOn = !bordersOn; uniforms.uBorderOn.value = bordersOn && uniforms.uBorders.value !== blackTex ? 1 : 0; setPressed(e.currentTarget, bordersOn); });
