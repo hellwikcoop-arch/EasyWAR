@@ -98,9 +98,9 @@ impl AutoUpdateStore {
     pub async fn claim_due_check(&self, now: DateTime<Utc>) -> Result<bool, RepositoryError> {
         let settings = self.load().await?;
         let due = settings.enabled
-            && settings.last_check_at.map_or(true, |last| {
-                now - last >= auto_check_interval() || last > now
-            });
+            && settings
+                .last_check_at
+                .is_none_or(|last| now - last >= auto_check_interval() || last > now);
         if due {
             self.save(
                 AutoUpdateSettings {

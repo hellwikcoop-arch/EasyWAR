@@ -1612,7 +1612,7 @@ fn validate_value(
     field: &DashboardModuleField,
     value: Option<&Value>,
 ) -> Result<(), DashboardModuleError> {
-    let absent = value.map_or(true, Value::is_null);
+    let absent = value.is_none_or(Value::is_null);
     if absent {
         return if field.required {
             Err(DashboardModuleError::RequiredField(field.label.clone()))
