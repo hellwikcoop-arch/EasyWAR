@@ -10,6 +10,7 @@ pub mod local_profiles;
 mod migration_startup;
 pub mod model_install;
 pub mod module_source;
+pub mod office_documents;
 pub mod phone_export;
 pub mod position_templates;
 pub mod profile_table;
@@ -902,6 +903,68 @@ async fn save_presentation(
                 .add_filter("Презентація PPTX", &["pptx"])
                 .blocking_save_file()
         }
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let target = phone_export::save_target(
+        selected.into_path().map_err(|error| error.to_string())?,
+        &[extension],
+        extension,
+    );
+    let path = target.path.clone();
+    tauri::async_runtime::spawn_blocking(move || phone_export::save_file(&target, &bytes))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())?;
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+/// EasyDoc (прототип): користувач обирає документ у системному вікні, команда повертає його
+/// ім'я й байти. `None`, якщо вікно закрили без вибору.
+#[tauri::command]
+async fn open_office_document(
+    app: tauri::AppHandle,
+) -> Result<Option<office_documents::PickedDocument>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let selected = app
+            .dialog()
+            .file()
+            .set_title("Відкрити документ")
+            .add_filter("Документи", office_documents::OPEN_EXTENSIONS)
+            .blocking_pick_file();
+        let Some(selected) = selected else {
+            return Ok(None);
+        };
+        let path = selected.into_path().map_err(|error| error.to_string())?;
+        office_documents::read_document(&path).map(Some)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// EasyDoc (прототип): зберігає документ або експорт у файл, який обирає користувач, так само
+/// як `save_presentation`. Повертає шлях або `None`, якщо збереження скасовано.
+#[tauri::command]
+async fn save_office_document(
+    app: tauri::AppHandle,
+    file_name: String,
+    bytes: Vec<u8>,
+) -> Result<Option<String>, String> {
+    if bytes.is_empty() {
+        return Err("документ порожній".to_owned());
+    }
+    let (extension, label) = office_documents::save_format(&file_name);
+    let suggested = office_documents::suggested_name(&file_name);
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title("Зберегти документ")
+            .set_file_name(suggested)
+            .add_filter(label, &[extension])
+            .blocking_save_file()
     })
     .await
     .map_err(|error| error.to_string())?;
@@ -1889,6 +1952,8 @@ pub fn run() {
             create_profile_base_table,
             export_phone_file,
             save_presentation,
+            open_office_document,
+            save_office_document,
             clear_profile_database,
             read_profile_database,
             write_profile_database,

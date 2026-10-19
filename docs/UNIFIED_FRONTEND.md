@@ -186,6 +186,24 @@ ends, and the launcher stays `inert` until sign-in.
 - CSP у `tauri.conf.json` не змінювали (вона `null`). Якщо її колись посилять, довідникам, імовірно, знадобляться `'wasm-unsafe-eval'` (декодер meshopt — WASM), `blob:` для текстур із GLB і `font-src 'self'`; з посиленою CSP довідники не перевіряли.
 - Довідники налаштовано під three r160, а проєкт на r186. Різницю гасять `room-env.js` і заплатка `LEGACY_REFLECTIONS` у `guide-kit.js`; тест «вигляд, затверджений на three r160» падає, коли відповідний шматок шейдера three змінюється, — це сигнал переглянути `guide-kit.js`.
 
+## EasyDoc (прототип, «Робоче середовище» → «Офіс»)
+
+Редактор документів на основі WordCraft (MIT OR Apache-2.0, github.com/storytold/wordcraft), зібраний у WASM і вбудований як статичні файли. Прототип у гілці `claude/easydoc-prototype`, у `main` не зливається. Оболонку модуля «Робоче середовище» робить окрема гілка; до неї редактор відкривається тимчасовою кнопкою «EasyDoc» на головному екрані.
+
+| Файл | Роль |
+| --- | --- |
+| `src/workspace/easydoc/easydoc-launcher.js`, `.css` | `mountEasydoc(контейнер)` вставляє `<iframe>` на `workspace/easydoc/index.html` і повертає функцію вивантаження (`about:blank`); тимчасова кнопка й накладка до появи оболонки |
+| `src/public/workspace/easydoc/index.html` | сторінка редактора: `canvas#wordcraft_canvas`, завантаження `wordcraft-web.js` і `wordcraft-web_bg.wasm` (≈ 52 МБ) без бандлера Vite |
+| `src/public/workspace/easydoc/easydoc-host.js` | місток `window.__easydocHost`: `openDocument()` і `saveDocument(ім'я, байти)` викликають Tauri-команди `open_office_document` і `save_office_document` батьківського вікна; без Tauri місток не ставиться, і редактор працює з браузерним вибором і завантаженням файлів |
+| `src/public/workspace/easydoc/licenses/` | ліцензії WordCraft і шрифтів (MIT, Apache-2.0, NOTICE, SIL OFL) |
+| `script/build_easydoc.sh`, `script/easydoc/wordcraft-web.patch` | збірка з розпакованого `wordcraft-main`: копія в тимчасову теку, наша правка веб-оболонки (місток, українська мова), `cargo build --target wasm32-unknown-unknown`, `wasm-bindgen --target web` |
+| `src-tauri/src/office_documents.rs` | перелік форматів, обмеження 256 МБ, читання обраного файлу, ім'я для вікна збереження |
+
+- Наша правка WordCraft лише у `apps/wordcraft-web`: модуль `easywar_host.rs`, переадресація `open_async` (для документів) і `download` на місток, мова інтерфейсу `uk` завжди.
+- Мережі під час роботи немає: сторінка й скрипти лежать у збірці, зовнішніх адрес на сторінці немає (`tests/easydoc.test.mjs`). У самому WordCraft лишаються посилання «Discord», «Поділитися» та вкладка Zotero (Zotero — лише локальний 127.0.0.1); вони не діють без натискання.
+- CSP (`null`) і capabilities (`core:default`) не змінювали. Якщо CSP колись посилять, редактору потрібні `'wasm-unsafe-eval'` у `script-src`.
+- Кеш переглядача для телефона (`viewerServiceWorker`) не бере `workspace/`.
+
 ## Desktop behaviour
 
 - **Tauri IPC in the iframe.** Tauri injects its bridge only into the top-level

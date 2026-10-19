@@ -9,7 +9,8 @@ const host = process.env.TAURI_DEV_HOST;
 // зі списком усіх файлів. Версія кешу береться з package.json, тож нова збірка
 // замінює старий кеш. 3D-моделі (.glb), переглядач літаків (aircraft-viewer.html, aircraft-3d/),
 // відео заставки (.mp4), ресурси 3D-карти (map-assets, >100 МБ) і 3D-довідники (сторінки й
-// скрипти guides*, їхні шрифти .woff2) у кеш не входять: у вікнах командування вони не потрібні,
+// скрипти guides*, їхні шрифти .woff2) і офісні редактори «Робочого середовища» (workspace/, WASM ≈ 50 МБ)
+// у кеш не входять: у вікнах командування вони не потрібні,
 // моделі важать десятки мегабайтів, а заставка є лише в застосунку.
 // Сервіс-воркер реєструє лише viewer.html; у застосунку Tauri його немає.
 function viewerServiceWorker() {
@@ -25,7 +26,7 @@ function viewerServiceWorker() {
           if (statSync(full).isDirectory()) walk(full);
           else {
             const rel = relative(out, full).split("\\").join("/");
-            if (name !== "sw.js" && !name.endsWith(".map") && !name.endsWith(".glb") && !name.endsWith(".mp4") && !name.endsWith(".woff2") && name !== "aircraft-viewer.html" && !full.includes(`${sep}aircraft-3d${sep}`) && !/(^|\/)guides[-/]/.test(rel) && !rel.startsWith("map-assets/")) files.push("./" + rel);
+            if (name !== "sw.js" && !name.endsWith(".map") && !name.endsWith(".glb") && !name.endsWith(".mp4") && !name.endsWith(".woff2") && name !== "aircraft-viewer.html" && !full.includes(`${sep}aircraft-3d${sep}`) && !/(^|\/)guides[-/]/.test(rel) && !rel.startsWith("map-assets/") && !rel.startsWith("workspace/")) files.push("./" + rel);
           }
         }
       };
