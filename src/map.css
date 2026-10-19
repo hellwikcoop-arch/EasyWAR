@@ -64,6 +64,7 @@ h1 small{display:block;font:500 11px/1.4 var(--body);color:var(--muted);letter-s
 #readout b{color:var(--fg);font-weight:500}
 #legend{margin-top:12px;display:none;align-items:center;gap:8px;font:400 11px/1 var(--mono);color:var(--muted)}
 #legend i{display:block;width:120px;height:8px;border-radius:2px;background:linear-gradient(90deg,#2f8f5b,#8dc063 20%,#d9d27a 35%,#c99a5b 50%,#a66a4a 65%,#e8d9cc 85%,#ffffff)}
+#legend.neon i{background:linear-gradient(90deg,#0a1a4d,#0d9ec7 15%,#2bd36b 28%,#f2d94e 42%,#ff6a3d 58%,#ff2d7a 78%,#ffffff)}
 .bar{position:fixed;left:0;right:0;bottom:0;padding:10px 16px calc(10px + env(safe-area-inset-bottom,0px));display:flex;justify-content:center;pointer-events:none}
 .strip{pointer-events:auto;display:flex;align-items:center;gap:14px;max-width:100%;overflow-x:auto;padding:8px 10px;border:1px solid var(--line);border-radius:14px;background:var(--panel);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);box-shadow:0 10px 30px rgba(0,0,0,.12);scrollbar-width:none}
 .strip::-webkit-scrollbar{display:none}
