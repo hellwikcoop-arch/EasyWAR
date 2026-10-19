@@ -416,8 +416,9 @@ function progressBars(model, width, height, { compact }) {
   const items = model.items.length ? model.items : [];
   return figure('progress-bars', model, el('ul', { class: 'ewmc-progress' }, items.map(item => el('li', {},
     el('span', { class: 'ewmc-progress-label', text: item.label, title: item.label }),
-    el('span', { class: 'ewmc-meter', style: { '--ewmc-c': slotColor(item.slot) }, title: `${item.label}: ${item.currentText}${item.targetText ? ` з ${item.targetText}` : ''}` },
-      el('i', { style: { width: `${item.percent}%` } })),
+    // Смуга з «пігулок»: заповнено стільки сегментів, скільки відсотків виконано (до найближчого).
+    el('span', { class: 'ewmc-pills', style: { '--ewmc-c': slotColor(item.slot) }, title: `${item.label}: ${item.currentText}${item.targetText ? ` з ${item.targetText}` : ''}` },
+      Array.from({ length: model.segments || 8 }, (_, index) => el('i', { class: index < item.filled ? 'on' : '' }))),
     compact ? null : el('b', { text: item.targetText ? `${item.currentText} / ${item.targetText}` : item.currentText }),
     el('small', { text: `${Math.round(item.percent)} %` })))), { compact });
 }

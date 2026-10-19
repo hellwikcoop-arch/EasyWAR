@@ -360,8 +360,13 @@ function multiRing(module, rows, info) {
   return { kind: 'multi-ring', empty: !rows.length, items: progressItems(module, rows, info, 5) };
 }
 
+/** Скільки сегментів-«пігулок» у смузі виконання: крок 12,5 % ще читається на око. */
+const PROGRESS_SEGMENTS = 8;
+
 function progressBars(module, rows, info) {
-  return { kind: 'progress-bars', empty: !rows.length, items: progressItems(module, rows, info, 8) };
+  const items = progressItems(module, rows, info, 8)
+    .map(item => ({ ...item, filled: Math.round(item.percent / 100 * PROGRESS_SEGMENTS) }));
+  return { kind: 'progress-bars', empty: !rows.length, segments: PROGRESS_SEGMENTS, items };
 }
 
 function gauge(module, rows, info) {

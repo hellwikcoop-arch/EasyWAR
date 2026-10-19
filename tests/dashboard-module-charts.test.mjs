@@ -469,3 +469,23 @@ test('dashboard: ticker under the grid and HUD corners only in the dark theme, m
   assert.match(css, /html:not\(\[data-theme=light\]\) \.ewmc-module\{--ewmc-hud:/u);
   assert.doesNotMatch(css, /html\[data-theme=light\] \.ewmc-module\{[^}]*--ewmc-hud/u);
 });
+
+test('progress bars: segmented «pills», filled share rounds to the nearest segment and never overflows', () => {
+  const rows = [
+    { label: 'Тест-1', current_value: 62, target_value: 100, ring_order: 1 },
+    { label: 'Тест-2', current_value: 0, target_value: 100, ring_order: 2 },
+    { label: 'Тест-3', current_value: 140, target_value: 100, ring_order: 3 },
+    { label: 'Тест-4', current_value: 5, ring_order: 4 },
+  ];
+  const model = modelOf('progress-bars', rows);
+  assert.equal(model.segments, 8);
+  assert.deepEqual(model.items.map(item => item.filled), [5, 0, 8, 0]);
+});
+
+test('progress bars render pills and glow only in the dark theme', async () => {
+  const renderers = await read('../src/dashboard-module-charts.js');
+  const css = await read('../src/dashboard-module-catalog.css');
+  assert.match(renderers, /class: 'ewmc-pills'/u);
+  assert.match(css, /\.ewmc-pills\{/u);
+  assert.match(css, /html:not\(\[data-theme=light\]\) \.ewmc-pills i\.on\{[^}]*drop-shadow/u);
+});
