@@ -1,56 +1,93 @@
-// EasyDoc (прототип): місток між вбудованим редактором документів і командами EasyWAR,
-// а також текстові контракти сторінки й кнопки лаунчера (офлайн, без зовнішніх адрес).
+// EasyDoc (прототип): місток між редактором WordCraft і host «Робочого середовища», сторінка
+// редактора (офлайн, без зовнішніх адрес) і підключення за контрактом docs/WORKSPACE.md.
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
+import { DOCUMENT_EXTENSIONS, OPEN_EXTENSIONS, createEasydocBridge, extensionOf } from '../src/workspace/easydoc/easydoc-bridge-core.js';
 
 const root = new URL('../', import.meta.url);
 const read = (path) => readFile(new URL(path, root), 'utf8');
-// Скрипт лежить у public/ і підключається звичайним <script>, тож читаємо його як класичний скрипт.
-const hostModule = { exports: {} };
-vm.runInNewContext(await read('src/public/workspace/easydoc/easydoc-host.js'), { module: hostModule, Uint8Array, Array, String });
-const { createEasydocHost, findInvoke } = hostModule.exports;
 
-test('відкриття повертає ім\'я й байти документа з команди open_office_document', async () => {
+function fakeHost({ open = null, save = null, saveAs = null } = {}) {
   const calls = [];
-  const host = createEasydocHost(async (cmd, args) => {
-    calls.push([cmd, args]);
-    return { name: 'Синтетичний.docx', bytes: [80, 75, 3, 4] };
-  });
-  const picked = await host.openDocument();
-  assert.deepEqual(calls, [['open_office_document', undefined]]);
-  assert.equal(picked.name, 'Синтетичний.docx');
-  assert.ok(picked.bytes instanceof Uint8Array);
-  assert.deepEqual([...picked.bytes], [80, 75, 3, 4]);
+  const host = {
+    calls,
+    async openFile(options) { calls.push(['openFile', options]); return open; },
+    async saveFile(args) { calls.push(['saveFile', args.handle]); return save; },
+    async saveFileAs(args) { calls.push(['saveFileAs', args.suggestedName, args.extensions]); return saveAs; },
+    async closeFile(handle) { calls.push(['closeFile', handle]); },
+    setTitle(title) { calls.push(['setTitle', title]); },
+    setDirty(dirty) { calls.push(['setDirty', dirty]); },
+  };
+  return host;
+}
+
+test('розширення визначається з імені файлу', () => {
+  assert.equal(extensionOf('Звіт.DOCX'), 'docx');
+  assert.equal(extensionOf('Звіт'), '');
+  assert.equal(extensionOf('архів.tar.gz'), 'gz');
+  assert.ok(OPEN_EXTENSIONS.length <= 8, 'оболонка приймає не більше 8 розширень');
+  assert.ok(DOCUMENT_EXTENSIONS.includes('docx') && !DOCUMENT_EXTENSIONS.includes('pdf'));
 });
 
-test('скасоване вікно відкриття дає null', async () => {
-  const host = createEasydocHost(async () => null);
-  assert.equal(await host.openDocument(), null);
+test('відкриття бере файл через host і показує його назву', async () => {
+  const bytes = new Uint8Array([80, 75, 3, 4]);
+  const host = fakeHost({ open: { handle: 'h1', name: 'Синтетичний.docx', bytes } });
+  const bridge = createEasydocBridge(host);
+  const picked = await bridge.openDocument();
+  assert.deepEqual(picked, { name: 'Синтетичний.docx', bytes });
+  assert.deepEqual(host.calls[0], ['openFile', { extensions: [...OPEN_EXTENSIONS] }]);
+  assert.deepEqual(host.calls.at(-1), ['setTitle', 'Синтетичний.docx']);
 });
 
-test('збереження передає ім\'я й байти в save_office_document і повертає його відповідь', async () => {
-  const calls = [];
-  const host = createEasydocHost(async (cmd, args) => {
-    calls.push([cmd, args]);
-    return '/tmp/Звіт.docx';
-  });
-  assert.equal(await host.saveDocument('Звіт.docx', new Uint8Array([1, 2, 3])), '/tmp/Звіт.docx');
-  // Об'єкт аргументів створено в іншому контексті vm, тож порівнюємо його вміст через JSON.
-  assert.equal(JSON.stringify(calls), JSON.stringify([['save_office_document', { fileName: 'Звіт.docx', bytes: [1, 2, 3] }]]));
+test('скасоване відкриття нічого не змінює', async () => {
+  const host = fakeHost();
+  assert.equal(await createEasydocBridge(host).openDocument(), null);
+  assert.equal(host.calls.length, 1);
 });
 
-test('invoke береться з власного або батьківського вікна, без Tauri — null', () => {
-  const invoke = () => {};
-  assert.equal(findInvoke({ __TAURI_INTERNALS__: { invoke } }), invoke);
-  const child = { parent: { __TAURI_INTERNALS__: { invoke } } };
-  assert.equal(findInvoke(child), invoke);
+test('«Зберегти» з тією самою назвою пише у відкритий файл, нова назва — «Зберегти як…»', async () => {
+  const host = fakeHost({ open: { handle: 'h1', name: 'Звіт.docx', bytes: new Uint8Array() }, save: { handle: 'h1', name: 'Звіт.docx' }, saveAs: { handle: 'h2', name: 'Копія.docx' } });
+  const bridge = createEasydocBridge(host);
+  await bridge.openDocument();
+  assert.equal(await bridge.saveDocument('Звіт.docx', new Uint8Array([1])), 'Звіт.docx');
+  assert.ok(host.calls.some(([kind, handle]) => kind === 'saveFile' && handle === 'h1'));
+  assert.equal(await bridge.saveDocument('Копія.docx', new Uint8Array([1])), 'Копія.docx');
+  assert.ok(host.calls.some(([kind, name, ext]) => kind === 'saveFileAs' && name === 'Копія.docx' && ext[0] === 'docx'));
+  // Документ тепер у новому файлі, старий номер звільнено.
+  assert.ok(host.calls.some(([kind, handle]) => kind === 'closeFile' && handle === 'h1'));
+  assert.deepEqual(host.calls.at(-1), ['setTitle', 'Копія.docx']);
+});
+
+test('експорт у PDF не підміняє відкритий документ і звільняє номер експорту', async () => {
+  const host = fakeHost({ open: { handle: 'h1', name: 'Звіт.docx', bytes: new Uint8Array() }, saveAs: { handle: 'h9', name: 'Звіт.pdf' } });
+  const bridge = createEasydocBridge(host);
+  await bridge.openDocument();
+  assert.equal(await bridge.saveDocument('Звіт.pdf', new Uint8Array([1])), 'Звіт.pdf');
+  assert.deepEqual(host.calls.at(-1), ['closeFile', 'h9']);
+  assert.equal(await bridge.saveDocument('Звіт.docx', new Uint8Array([1])), null, 'host.saveFile повернув null');
+});
+
+test('позначка незбережених змін іде в host і читається через isDirty', async () => {
+  const host = fakeHost();
+  const bridge = createEasydocBridge(host);
+  bridge.setDirty(true);
+  assert.equal(bridge.isDirty(), true);
+  assert.deepEqual(host.calls.at(-1), ['setDirty', true]);
+});
+
+test('сторінка редактора бере місток лише з батьківського вікна', async () => {
+  const shim = { exports: {} };
+  vm.runInNewContext(await read('src/public/workspace/easydoc/easydoc-host.js'), { module: shim });
+  const { findBridge } = shim.exports;
+  const bridge = { openDocument() {}, saveDocument() {} };
+  assert.equal(findBridge({ parent: { __easydocHost: bridge } }), bridge);
   const lone = {};
   lone.parent = lone;
-  assert.equal(findInvoke(lone), null);
-  const blocked = { get parent() { throw new Error('cross-origin'); } };
-  assert.equal(findInvoke(blocked), null);
+  assert.equal(findBridge(lone), null);
+  assert.equal(findBridge({ parent: { __easydocHost: {} } }), null);
+  assert.equal(findBridge({ get parent() { throw new Error('cross-origin'); } }), null);
 });
 
 test('сторінка EasyDoc українською, без зовнішніх адрес, вантажить лише локальні файли', async () => {
@@ -60,15 +97,16 @@ test('сторінка EasyDoc українською, без зовнішніх
   assert.doesNotMatch(html, /https?:\/\//);
   assert.match(html, /src="\.\/easydoc-host\.js"/);
   assert.match(html, /from '\.\/wordcraft-web\.js'/);
-  const host = await read('src/public/workspace/easydoc/easydoc-host.js');
-  assert.doesNotMatch(host, /fetch\(|XMLHttpRequest|WebSocket|https?:\/\//);
+  for (const file of ['src/public/workspace/easydoc/easydoc-host.js', 'src/workspace/easydoc/app.js', 'src/workspace/easydoc/easydoc-bridge-core.js']) {
+    assert.doesNotMatch(await read(file), /fetch\(|XMLHttpRequest|WebSocket|https?:\/\/|localStorage|indexedDB/, file);
+  }
 });
 
-test('EasyDoc монтується з локальної сторінки; тимчасова кнопка підключена в лаунчері', async () => {
-  const launcher = await read('src/workspace/easydoc/easydoc-launcher.js');
-  assert.match(launcher, /EASYDOC_URL = 'workspace\/easydoc\/index\.html'/);
-  assert.match(launcher, /EASYDOC_TITLE = 'EasyDoc'/);
-  assert.match(launcher, /export function mountEasydoc/);
-  assert.match(launcher, /about:blank/);
-  assert.match(await read('src/launcher-tools.js'), /import '\.\/workspace\/easydoc\/easydoc-launcher\.js';/);
+test('app.js дотримується контракту «Робочого середовища»', async () => {
+  const app = await read('src/workspace/easydoc/app.js');
+  assert.match(app, /export const contract = 1;/);
+  assert.match(app, /export async function mount\(container, host\)/);
+  assert.match(app, /host\.resolve\('workspace\/easydoc\/index\.html'\)/);
+  assert.match(app, /unmount\(\)/);
+  assert.match(app, /isDirty:/);
 });

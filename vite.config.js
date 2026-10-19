@@ -9,8 +9,7 @@ const host = process.env.TAURI_DEV_HOST;
 // зі списком усіх файлів. Версія кешу береться з package.json, тож нова збірка
 // замінює старий кеш. 3D-моделі (.glb), переглядач літаків (aircraft-viewer.html, aircraft-3d/),
 // відео заставки (.mp4), ресурси 3D-карти (map-assets, >100 МБ) і 3D-довідники (сторінки й
-// скрипти guides*, їхні шрифти .woff2) і офісні редактори «Робочого середовища» (workspace/, WASM ≈ 50 МБ)
-// у кеш не входять: у вікнах командування вони не потрібні,
+// скрипти guides*, їхні шрифти .woff2) і «Робоче середовище» (workspace*, .wasm) у кеш не входять: у вікнах командування вони не потрібні,
 // моделі важать десятки мегабайтів, а заставка є лише в застосунку.
 // Сервіс-воркер реєструє лише viewer.html; у застосунку Tauri його немає.
 function viewerServiceWorker() {
@@ -26,7 +25,7 @@ function viewerServiceWorker() {
           if (statSync(full).isDirectory()) walk(full);
           else {
             const rel = relative(out, full).split("\\").join("/");
-            if (name !== "sw.js" && !name.endsWith(".map") && !name.endsWith(".glb") && !name.endsWith(".mp4") && !name.endsWith(".woff2") && name !== "aircraft-viewer.html" && !full.includes(`${sep}aircraft-3d${sep}`) && !/(^|\/)guides[-/]/.test(rel) && !rel.startsWith("map-assets/") && !rel.startsWith("workspace/")) files.push("./" + rel);
+            if (name !== "sw.js" && !name.endsWith(".map") && !name.endsWith(".glb") && !name.endsWith(".mp4") && !name.endsWith(".wasm") && !name.endsWith(".woff2") && name !== "aircraft-viewer.html" && !full.includes(`${sep}aircraft-3d${sep}`) && !/(^|\/)guides[-/]/.test(rel) && !/(^|\/)workspace[-/]/.test(rel) && !rel.startsWith("map-assets/")) files.push("./" + rel);
           }
         }
       };
@@ -86,6 +85,14 @@ export default defineConfig({
     sourcemap: Boolean(process.env.TAURI_ENV_DEBUG),
     // Launcher plus the branch modules it opens in same-origin iframes; map.html — 3D-карта, яку вкладки «Карта» ПС і РВ вбудовують в iframe.
     rolldownOptions: {
+      // Код застосунків «Робочого середовища» (src/workspace/<id>/app.js) отримує префікс
+      // workspace-, щоб офлайн-кеш телефона (viewerServiceWorker) його не брав.
+      output: {
+        chunkFileNames: (chunk) =>
+          /\/src\/workspace\/[^/]+\/app\.js$/.test((chunk.facadeModuleId || "").replace(/\\/g, "/"))
+            ? "assets/workspace-[name]-[hash].js"
+            : "assets/[name]-[hash].js",
+      },
       input: {
         index: fileURLToPath(new URL("./src/index.html", import.meta.url)),
         air: fileURLToPath(new URL("./src/air.html", import.meta.url)),
@@ -103,6 +110,9 @@ export default defineConfig({
         "guides-uav": fileURLToPath(new URL("./src/guides/uav/index.html", import.meta.url)),
         "guides-aviation": fileURLToPath(new URL("./src/guides/aviation/index.html", import.meta.url)),
         "guides-enemy-ground": fileURLToPath(new URL("./src/guides/enemy-ground/index.html", import.meta.url)),
+        // Робоче середовище: розділ «Офіс» і сторінка застосунку; лаунчер відкриває його в iframe-накладці (src/workspace-launcher.js).
+        workspace: fileURLToPath(new URL("./src/workspace/index.html", import.meta.url)),
+        "workspace-app": fileURLToPath(new URL("./src/workspace/app.html", import.meta.url)),
       },
     },
   },

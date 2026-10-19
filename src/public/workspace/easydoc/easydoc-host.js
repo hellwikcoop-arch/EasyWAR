@@ -1,38 +1,24 @@
-/* EasyDoc (прототип): місток між вбудованим редактором документів (WordCraft, WASM) і EasyWAR.
-   Сторінка відкривається в накладці лаунчера (iframe того самого походження), тож команди Tauri
-   беремо з батьківського вікна. Відкриття й збереження йдуть лише через системні вікна EasyWAR
-   (команди open_office_document і save_office_document); мережі тут немає. Без Tauri (браузерний
-   перегляд) місток не встановлюється, і редактор працює з власним вибором і завантаженням файлів. */
+/* EasyDoc: сторінка редактора (WordCraft, WASM) бере місток із батьківської сторінки застосунку
+   «Робочого середовища» (src/workspace/easydoc/app.js). Через місток іде відкриття й збереження
+   документів вікнами EasyWAR і позначка незбережених змін. Відкрита окремо (без оболонки), сторінка
+   працює з браузерним вибором і завантаженням файлів. Мережі тут немає. */
 (function (root) {
   'use strict';
 
-  function createEasydocHost(invoke) {
-    return {
-      async openDocument() {
-        const picked = await invoke('open_office_document');
-        if (!picked) return null;
-        return { name: String(picked.name || 'Документ.docx'), bytes: Uint8Array.from(picked.bytes || []) };
-      },
-      saveDocument(name, bytes) {
-        return invoke('save_office_document', { fileName: String(name || 'Документ.docx'), bytes: Array.from(bytes || []) });
-      },
-    };
-  }
-
-  function findInvoke(win) {
+  function findBridge(win) {
     try {
-      const own = win.__TAURI_INTERNALS__ && win.__TAURI_INTERNALS__.invoke;
-      if (typeof own === 'function') return own;
-      const parentInvoke = win.parent && win.parent !== win && win.parent.__TAURI_INTERNALS__ && win.parent.__TAURI_INTERNALS__.invoke;
-      return typeof parentInvoke === 'function' ? parentInvoke : null;
+      const parentWin = win.parent;
+      if (!parentWin || parentWin === win) return null;
+      const bridge = parentWin.__easydocHost;
+      return bridge && typeof bridge.openDocument === 'function' && typeof bridge.saveDocument === 'function' ? bridge : null;
     } catch {
       return null;
     }
   }
 
-  if (typeof module === 'object' && module.exports) module.exports = { createEasydocHost, findInvoke };
+  if (typeof module === 'object' && module.exports) module.exports = { findBridge };
   if (root && typeof root === 'object' && root.document) {
-    const invoke = findInvoke(root);
-    if (invoke) root.__easydocHost = createEasydocHost(invoke);
+    const bridge = findBridge(root);
+    if (bridge) root.__easydocHost = bridge;
   }
 })(typeof window !== 'undefined' ? window : undefined);

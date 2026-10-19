@@ -1,7 +1,7 @@
 diff -ruN a/apps/wordcraft-web/src/easywar_host.rs b/apps/wordcraft-web/src/easywar_host.rs
 --- a/apps/wordcraft-web/src/easywar_host.rs
 +++ b/apps/wordcraft-web/src/easywar_host.rs
-@@ -0,0 +1,83 @@
+@@ -0,0 +1,99 @@
 +//! EasyDoc (EasyWAR) host bridge. When the page that loads this build defines
 +//! `window.__easydocHost` with `openDocument()` and `saveDocument(name, bytes)` (both return
 +//! promises), Open and Save go through the host application instead of the browser picker and
@@ -23,6 +23,22 @@ diff -ruN a/apps/wordcraft-web/src/easywar_host.rs b/apps/wordcraft-web/src/easy
 +
 +fn method(host: &JsValue, name: &str) -> Option<js_sys::Function> {
 +    js_sys::Reflect::get(host, &JsValue::from_str(name)).ok()?.dyn_into::<js_sys::Function>().ok()
++}
++
++/// True when the page provides the EasyWAR host object (then EasyWAR asks about unsaved changes
++/// itself, and the browser's own "leave page?" prompt is not shown).
++pub fn present() -> bool {
++    host().is_some()
++}
++
++/// Tell the host whether the document has unsaved changes.
++pub fn set_dirty(dirty: bool) {
++    let Some(host) = host() else { return };
++    if let Some(set) = method(&host, "setDirty")
++        && let Err(e) = set.call1(&host, &JsValue::from_bool(dirty))
++    {
++        log::warn!("easydoc host: setDirty failed: {e:?}");
++    }
 +}
 +
 +/// Ask the host for a document; its bytes arrive through the inbox. `false` when there is no host
@@ -120,7 +136,29 @@ diff -ruN a/apps/wordcraft-web/src/web.rs b/apps/wordcraft-web/src/web.rs
              let dialog = if purpose == "picture" {
                  rfd::AsyncFileDialog::new().add_filter("Pictures", IMAGE_EXTS)
              } else if purpose == "font" {
-@@ -392,6 +398,10 @@
+@@ -249,7 +255,11 @@
+         download: Some(Box::new(move |path: &str, bytes: &[u8]| download(&saves, &save_ctx, path, bytes))),
+         print: Some(Box::new(print_pdf)),
+         inbox: Some(inbox),
+-        on_dirty: Some(Box::new(move |d| dirty.set(d))),
++        on_dirty: Some(Box::new(move |d| {
++            dirty.set(d);
++            // EasyDoc: the EasyWAR workspace shows its own unsaved-changes bar.
++            crate::easywar_host::set_dirty(d);
++        })),
+         animations_enabled: Some(animations_enabled()),
+         store_font: Some(Box::new(font_store::store)),
+         forget_font: Some(Box::new(font_store::forget)),
+@@ -377,7 +387,7 @@
+     let window = web_sys::window().ok_or("no window")?;
+     let on_unload = wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::BeforeUnloadEvent)>::new(move |e: web_sys::BeforeUnloadEvent| {
+         // A save still in the browser's picker hasn't written anything yet.
+-        if dirty.get() || saves.pending() > 0 {
++        if (dirty.get() || saves.pending() > 0) && !crate::easywar_host::present() {
+             e.prevent_default();
+             // Older browsers ask only when `returnValue` is set.
+             e.set_return_value("unsaved changes");
+@@ -392,6 +402,10 @@
  /// Trigger a browser save dialog or download of `bytes` named after the last component of `path`.
  fn download(saves: &AsyncSaves, ctx: &egui::Context, path: &str, bytes: &[u8]) -> Result<(), String> {
      let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "document".into());

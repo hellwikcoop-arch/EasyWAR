@@ -714,6 +714,15 @@ impl LocalProfileStore {
         self.list().await
     }
 
+    /// Шляхи всіх таблиць, прив'язаних до будь-якого профілю (EasyGreen їх не перезаписує).
+    pub async fn all_table_paths(&self) -> Result<Vec<String>, LocalProfileError> {
+        Ok(
+            sqlx::query_scalar("SELECT path FROM local_profile_tables ORDER BY path")
+                .fetch_all(&self.pool)
+                .await?,
+        )
+    }
+
     pub async fn table_path(
         &self,
         id: &str,
@@ -1557,6 +1566,28 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(orphaned, 0);
+    }
+
+    #[tokio::test]
+    async fn all_table_paths_lists_every_profile_binding() {
+        let store = store().await;
+        assert!(store.all_table_paths().await.unwrap().is_empty());
+        let first = id("Перший");
+        let second = id("Другий");
+        store.create(&first, "Перший", NOW_1).await.unwrap();
+        store.create(&second, "Другий", NOW_1).await.unwrap();
+        store
+            .set_table_path(&first, Branch::Air, Some("/synthetic/b.xlsx"), NOW_2)
+            .await
+            .unwrap();
+        store
+            .set_table_path(&second, Branch::Pvk, Some("/synthetic/a.xlsx"), NOW_2)
+            .await
+            .unwrap();
+        assert_eq!(
+            store.all_table_paths().await.unwrap(),
+            ["/synthetic/a.xlsx", "/synthetic/b.xlsx"]
+        );
     }
 
     #[tokio::test]

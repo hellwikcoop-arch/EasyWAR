@@ -1,5 +1,5 @@
-/* Накладка EasyDoc (прототип) поверх головного екрана; вигляд як у накладки 3D-довідників. */
-.ew-easydoc-overlay {
+/* Накладка модуля «Робоче середовище» поверх головного екрана (як у 3D-довідників). */
+.ew-workspace-overlay {
   position: fixed;
   inset: 0;
   z-index: 1000;
@@ -9,8 +9,8 @@
   color: #d9dbdf;
   padding-top: env(safe-area-inset-top, 0px);
 }
-.ew-easydoc-overlay[hidden] { display: none; }
-.ew-easydoc-bar {
+.ew-workspace-overlay[hidden] { display: none; }
+.ew-workspace-bar {
   flex: none;
   display: flex;
   align-items: center;
@@ -23,7 +23,7 @@
   text-transform: uppercase;
   color: #8a8f98;
 }
-.ew-easydoc-close {
+.ew-workspace-close {
   font: inherit;
   letter-spacing: .04em;
   color: #d9dbdf;
@@ -34,9 +34,9 @@
   min-height: 34px;
   cursor: pointer;
 }
-.ew-easydoc-close:hover,
-.ew-easydoc-close:focus-visible { border-color: #d8c48e; outline: none; }
-.ew-easydoc-frame {
+.ew-workspace-close:hover,
+.ew-workspace-close:focus-visible { border-color: #d8c48e; outline: none; }
+.ew-workspace-frame {
   flex: 1;
   width: 100%;
   min-height: 0;

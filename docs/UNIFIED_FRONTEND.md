@@ -186,23 +186,28 @@ ends, and the launcher stays `inert` until sign-in.
 - CSP у `tauri.conf.json` не змінювали (вона `null`). Якщо її колись посилять, довідникам, імовірно, знадобляться `'wasm-unsafe-eval'` (декодер meshopt — WASM), `blob:` для текстур із GLB і `font-src 'self'`; з посиленою CSP довідники не перевіряли.
 - Довідники налаштовано під three r160, а проєкт на r186. Різницю гасять `room-env.js` і заплатка `LEGACY_REFLECTIONS` у `guide-kit.js`; тест «вигляд, затверджений на three r160» падає, коли відповідний шматок шейдера three змінюється, — це сигнал переглянути `guide-kit.js`.
 
-## EasyDoc (прототип, «Робоче середовище» → «Офіс»)
+## Робоче середовище (розділ «Офіс»)
 
-Редактор документів на основі WordCraft (MIT OR Apache-2.0, github.com/storytold/wordcraft), зібраний у WASM і вбудований як статичні файли. Прототип у гілці `claude/easydoc-prototype`, у `main` не зливається. Оболонку модуля «Робоче середовище» робить окрема гілка; до неї редактор відкривається тимчасовою кнопкою «EasyDoc» на головному екрані.
+Кнопка «Робоче середовище» на головному екрані відкриває модуль `workspace` у накладці поверх лаунчера, так само як 3D-довідники; legacy HTML не змінювався. Модуль — окремі сторінки збірки `workspace/index.html` (оболонка з розділом «Офіс» і картками EasyGreen, EasyDoc, EasySlide) і `workspace/app.html?app=<id>` (сторінка одного застосунку в `<iframe>` оболонки). Контракт підключення застосунку, команди відкриття й збереження файлів і перелік файлів — у [WORKSPACE.md](WORKSPACE.md).
+
+- `src/workspace-launcher.js` імпортується в `launcher-tools.js` після `guides-launcher.js`, тож кнопка стоїть крайньою ліворуч; перед закриттям накладки питає `EW_WORKSPACE.requestClose()` (незбережені зміни).
+- Код застосунку — `src/workspace/<id>/app.js` з `mount(container, host)`; оболонка знаходить його через `import.meta.glob`, без змін у самій оболонці. Поки файлу немає, картка відкриває заглушку «у розробці».
+- `vite.config.js`: входи `workspace` і `workspace-app`; чанки `src/workspace/<id>/app.js` отримують назву `assets/workspace-*` (`chunkFileNames`), а кеш переглядача для телефона не бере `workspace/`, `assets/workspace-*` і `.wasm`.
+
+### EasyDoc (прототип)
+
+Редактор документів на основі WordCraft (MIT OR Apache-2.0, github.com/storytold/wordcraft), зібраний у WASM. Прототип у гілці `claude/easydoc-prototype`, у `main` не зливається.
 
 | Файл | Роль |
 | --- | --- |
-| `src/workspace/easydoc/easydoc-launcher.js`, `.css` | `mountEasydoc(контейнер)` вставляє `<iframe>` на `workspace/easydoc/index.html` і повертає `{ destroy }` (як `mountEasyGreen`), `destroy` ставить `about:blank`; тимчасова кнопка й накладка до появи оболонки |
-| `src/public/workspace/easydoc/index.html` | сторінка редактора: `canvas#wordcraft_canvas`, завантаження `wordcraft-web.js` і `wordcraft-web_bg.wasm` (≈ 52 МБ) без бандлера Vite |
-| `src/public/workspace/easydoc/easydoc-host.js` | місток `window.__easydocHost`: `openDocument()` і `saveDocument(ім'я, байти)` викликають Tauri-команди `open_office_document` і `save_office_document` батьківського вікна; без Tauri місток не ставиться, і редактор працює з браузерним вибором і завантаженням файлів |
+| `src/workspace/easydoc/app.js` | `mount(container, host)` за контрактом [WORKSPACE.md](WORKSPACE.md): вкладає `<iframe>` на `host.resolve('workspace/easydoc/index.html')` і ставить `window.__easydocHost` — місток для сторінки редактора |
+| `src/workspace/easydoc/easydoc-bridge-core.js` | чиста логіка містка: `openDocument` → `host.openFile`, `saveDocument(ім'я, байти)` → `host.saveFile` (та сама назва) або `host.saveFileAs` (нова назва, експорт у PDF), `setDirty` → `host.setDirty`; номери файлів лишаються тут |
+| `src/public/workspace/easydoc/index.html`, `easydoc-host.js` | сторінка редактора: `canvas#wordcraft_canvas`, `wordcraft-web.js` і `wordcraft-web_bg.wasm` (≈ 52 МБ) без бандлера Vite; `easydoc-host.js` бере місток із батьківського вікна, а без оболонки редактор працює з браузерним вибором і завантаженням файлів |
 | `src/public/workspace/easydoc/licenses/` | ліцензії WordCraft і шрифтів (MIT, Apache-2.0, NOTICE, SIL OFL) |
-| `script/build_easydoc.sh`, `script/easydoc/wordcraft-web.patch` | збірка з розпакованого `wordcraft-main`: копія в тимчасову теку, наша правка веб-оболонки (місток, українська мова), `cargo build --target wasm32-unknown-unknown`, `wasm-bindgen --target web` |
-| `src-tauri/src/office_documents.rs` | перелік форматів, обмеження 256 МБ, читання обраного файлу, ім'я для вікна збереження |
+| `script/build_easydoc.sh`, `script/easydoc/wordcraft-web.patch` | збірка з розпакованого `wordcraft-main`: копія в тимчасову теку, наша правка веб-оболонки, `cargo build --target wasm32-unknown-unknown`, `wasm-bindgen --target web` |
 
-- Наша правка WordCraft лише у `apps/wordcraft-web`: модуль `easywar_host.rs`, переадресація `open_async` (для документів) і `download` на місток, мова інтерфейсу `uk` завжди.
-- Мережі під час роботи немає: сторінка й скрипти лежать у збірці, зовнішніх адрес на сторінці немає (`tests/easydoc.test.mjs`). У самому WordCraft лишаються посилання «Discord», «Поділитися» та вкладка Zotero (Zotero — лише локальний 127.0.0.1); вони не діють без натискання.
-- CSP (`null`) і capabilities (`core:default`) не змінювали. Якщо CSP колись посилять, редактору потрібні `'wasm-unsafe-eval'` у `script-src`.
-- Кеш переглядача для телефона (`viewerServiceWorker`) не бере `workspace/`.
+- Наша правка WordCraft лише в `apps/wordcraft-web`: модуль `easywar_host.rs`; `open_async` (документи) і `download` ідуть через місток, `on_dirty` передає позначку змін, власне браузерне «Залишити сторінку?» вимкнене, коли є місток; мова інтерфейсу завжди `uk`.
+- Мережі під час роботи немає (`tests/easydoc.test.mjs`). У самому WordCraft лишаються посилання «Discord», «Поділитися» та вкладка Zotero (лише локальний 127.0.0.1); без натискання вони нічого не роблять.
 
 ## Desktop behaviour
 
