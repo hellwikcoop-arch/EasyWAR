@@ -31,8 +31,8 @@ Vite-фронтендом для внесення, перевірки та ан�
 
 ```bash
 npm run test:unit                                   # ≈900 JS-тестів + XLSX-контракт (cargo run --example)
-cargo test --manifest-path src-tauri/Cargo.toml     # понад 250 Rust-тестів
-cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+cargo test --locked --manifest-path src-tauri/Cargo.toml     # ≈350 Rust-тестів (`--locked`, як у CI)
+cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
 cargo fmt --manifest-path src-tauri/Cargo.toml --check
 npm run build                                       # Vite → dist/ (≈390 МБ, з них ≈200 МБ — .glb, ≈140 МБ — map-assets)
 node script/release_version.mjs                     # узгодженість версій у 5 файлах

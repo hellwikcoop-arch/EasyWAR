@@ -851,7 +851,14 @@ mod tests {
 
     #[tokio::test]
     async fn non_text_envelope_outcomes_are_decided_without_the_database() {
-        let repository = repository().await;
+        // Пул закрито: будь-яке звернення до бази дало б помилку, а не очікуваний результат.
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("synthetic database");
+        let repository = Repository::new(pool.clone());
+        pool.close().await;
         let config = allowing_config(SignalDaemonEndpoint::Http {
             address: (Ipv4Addr::LOCALHOST, 9).into(),
         });
@@ -905,6 +912,5 @@ mod tests {
                 SignalIngestError::AccountMismatch
             ))
         ));
-        assert!(repository.list_signal_inbox(100).await.unwrap().is_empty());
     }
 }

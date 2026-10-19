@@ -492,30 +492,34 @@ async fn open_response(
     Err(InstallError::Status(416))
 }
 
-/// Opens `<name>.part` for writing without ever following a symbolic link: otherwise a link
+/// Opens `<name>.part` for writing without following a symbolic link: otherwise a link
 /// planted in the model folder would let `set_len` truncate, and the download overwrite,
 /// whatever file it points to. A link (or any other non-regular entry) found in the way is
-/// removed itself — never its target — and the download starts over.
+/// removed itself — never its target — and the download starts over. A new file is made with
+/// `create_new` (`O_EXCL`), which refuses a link even when it dangles, so nothing is created
+/// outside the folder; an existing regular file is opened without `create` and then compared
+/// with what is on disk ([`ensure_same_file`]) before anything is truncated or written.
 fn open_part(part: &Path) -> Result<std::fs::File, InstallError> {
-    match std::fs::symlink_metadata(part) {
-        Ok(meta) if meta.is_file() => {}
+    let existing = match std::fs::symlink_metadata(part) {
+        Ok(meta) if meta.is_file() => true,
         Ok(meta) if meta.file_type().is_symlink() => {
             std::fs::remove_file(part).map_err(io_error)?;
+            false
         }
         Ok(_) => {
             return Err(InstallError::Io(
                 "на місці файлу завантаження лежить не файл".to_owned(),
             ));
         }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
         Err(error) => return Err(io_error(error)),
+    };
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true);
+    if !existing {
+        options.create_new(true);
     }
-    let file = std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(part)
-        .map_err(io_error)?;
+    let file = options.open(part).map_err(io_error)?;
     ensure_same_file(&file, part)?;
     Ok(file)
 }
@@ -1488,6 +1492,24 @@ mod tests {
 
         assert!(matches!(error, InstallError::Io(_)), "{error}");
         assert_eq!(std::fs::read(&target).unwrap(), b"synthetic target");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_planted_where_a_new_part_is_made_creates_nothing_outside() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = dir.path().join("outside.bin");
+        let part = dir.path().join(PART_FILE);
+        // The link appears after open_part saw «no file» and before it creates one.
+        std::os::unix::fs::symlink(&outside, &part).unwrap();
+
+        let refused = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&part);
+
+        assert!(refused.is_err(), "O_EXCL refuses a dangling link");
+        assert!(!outside.exists(), "nothing is created through the link");
     }
 
     #[test]

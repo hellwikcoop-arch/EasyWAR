@@ -162,16 +162,17 @@ installed in the current environment.
 
 An allowed sender can issue one of five exact slash commands while the explicit
 bounded session is active: `/help`, `/status`, `/ping`, `/queue`, or `/last`.
-Commands with arguments and unknown slash commands receive a bounded Ukrainian
-help response. The same account, sender, and group allowlist checks run before a
+Commands with arguments and unknown slash commands receive a one-line Ukrainian
+unknown-command reply that points to `/help`. The same account, sender, and group allowlist checks run before a
 command is recognized. A denied source receives no reply.
 
 Known limit: the parser treats any message that, after trimming, starts with `/`
 as a command. If it is longer than 64 characters, contains a control character
-(including a line break) or is not a single word, the reply is the help text
+(including a line break) or is not a single word, the reply is that unknown-command line
 and the message is not stored. So a report that starts with `/` (for example a
-date such as `/12.10 …`) from an allowed sender is answered with the help text
-and lost to the queue; the sender sees the reply, but EasyWAR keeps the raw text
+date such as `/12.10 …`) from an allowed sender is answered with the one-line
+«Невідома команда EasyWAR. Надішліть /help для переліку команд.» and lost to the
+queue; the sender sees the reply, but EasyWAR keeps the raw text
 nowhere. If the reply cannot be sent, the session ends with an error. The
 proposed rule (a command is a single ASCII token `^/[A-Za-z][A-Za-z0-9_]*$` of
 up to 64 characters, everything else is stored as an ordinary report) awaits the

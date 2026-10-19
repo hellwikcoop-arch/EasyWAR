@@ -10,6 +10,7 @@ import {
   POSITION_MAX,
   failureDelayMs,
   loginFailure,
+  registerLoginFailure,
   gateScreen,
   loginCardNote,
   modulesError,
@@ -92,13 +93,23 @@ test('failed attempts slow down after five tries, capped at one minute', () => {
   assert.equal(failureDelayMs(NaN), 0);
 });
 
-test('a pause announced by the core is shown as is and is not counted by the page', () => {
+test('the core\'s wording of a failed login is mapped to the page message', () => {
   assert.deepEqual(loginFailure('неправильний пароль'), { message: 'Неправильний пароль.', throttled: false });
   assert.deepEqual(
     loginFailure('забагато невдалих спроб входу, спробуйте знову через 30 с'),
     { message: 'Забагато невдалих спроб входу, спробуйте знову через 30 с.', throttled: true });
   assert.deepEqual(loginFailure('щось інше'), { message: 'Не вдалося увійти: щось інше', throttled: false });
   assert.equal(loginFailure(undefined).throttled, false);
+});
+
+test('a pause announced by the core is not counted by the page, a wrong password is', () => {
+  const start = { failures: 4, blockedUntil: 0 };
+  const wrong = registerLoginFailure(start, 'неправильний пароль', 1000);
+  assert.deepEqual(wrong, { failures: 5, blockedUntil: 1000 + failureDelayMs(5), message: 'Неправильний пароль.' });
+  const paused = registerLoginFailure(wrong, 'забагато невдалих спроб входу, спробуйте знову через 30 с', 2000);
+  assert.equal(paused.failures, 5, 'the page counter does not grow on the core pause');
+  assert.equal(paused.blockedUntil, wrong.blockedUntil);
+  assert.match(paused.message, /^Забагато невдалих спроб входу/);
 });
 
 test('login card says whether the password must still be set', () => {

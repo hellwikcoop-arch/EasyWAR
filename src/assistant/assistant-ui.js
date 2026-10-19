@@ -92,7 +92,7 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
   // ідентифікатори з коду (модуль, назва пояснення); withLabel окремо додає підпис з екрана, що може бути з таблиці.
   const freshProposal = () => ({ kind: 'fix', text: '', withContext: false, withLabel: false, image: null, previewUrl: '', note: '' });
   let proposal = freshProposal();
-  let proposalVersion = '', proposalVersionLoad = null, refreshProposalPreview = null;
+  let proposalVersion = '', proposalVersionLoad = null, refreshProposalPreview = null, proposalStamp = null;
   // Чернетка доповіді: текст користувача, який КОМБАТ може підставити в поле модуля лише після підтвердження.
   const freshDraft = () => ({ branch: document.body.dataset.activeBranch === 'rocket' ? 'rocket' : 'air', text: '', plan: null, note: '' });
   let draft = freshDraft();
@@ -522,6 +522,7 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
     return { branch: explainBranch, explainId: explainResult.ref.id, screenLabel: proposal.withLabel ? explainResult.title : '' };
   }
   // Один і той самий виклик будує і перегляд, і файл, тож перегляд показує саме те, що буде збережено чи скопійовано.
+  // Час пакета фіксується під час останньої зміни (перегляду) й той самий іде у файл: назва й дата не розходяться з переглядом.
   function proposalPackage(now) {
     const names = proposalFileNames(now, proposal.image);
     return { names, text: buildProposal({ kind: proposal.kind, text: proposal.text, context: proposalContext(), appVersion: proposalVersion, createdAt: now, imageName: names.image }) };
@@ -530,7 +531,7 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
     const verdict = validateProposalText(proposal.text);
     if (!verdict.ok) { proposal.note = verdict.message; render(); return null; }
     await loadProposalVersion();
-    return proposalPackage(new Date());
+    return proposalPackage(proposalStamp || new Date());
   }
   function proposalSection() {
     const ref = explainResult?.ref || null;
@@ -539,7 +540,8 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
     const refresh = () => {
       label.disabled = !(ref && proposal.withContext);
       label.checked = Boolean(ref && proposal.withContext && proposal.withLabel);
-      preview.value = proposalPackage(new Date()).text;
+      proposalStamp = new Date();
+      preview.value = proposalPackage(proposalStamp).text;
     };
     const kinds = element('select', { 'aria-label': 'Тип пропозиції', onchange: event => { proposal.kind = event.target.value; refresh(); } },
       ...PROPOSAL_KINDS.map(item => element('option', { value: item.id, text: item.label, selected: item.id === proposal.kind })));

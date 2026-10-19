@@ -51,6 +51,32 @@ impl StartupDialogs for NativeDialogs {
     }
 }
 
+/// Вікна для збоїв усередині `setup`, коли головний потік уже обслуговує цикл подій Tauri.
+/// На Linux (gtk3) `rfd` показує вікно через той самий головний цикл GLib, а заблокований у
+/// `setup` головний потік його не обслуговує: вікно не з'являється, процес висить разом із
+/// блокуванням екземпляра (перевірено в Xvfb). Тому там лишається текст у stderr і вихід;
+/// на macOS і Windows вікно працює так само, як до запуску циклу подій.
+pub(crate) struct SetupDialogs;
+
+impl StartupDialogs for SetupDialogs {
+    fn notify(&self, title: &str, message: &str) {
+        #[cfg(target_os = "linux")]
+        eprintln!("{title}: {message}");
+        #[cfg(not(target_os = "linux"))]
+        NativeDialogs.notify(title, message);
+    }
+
+    fn confirm(&self, title: &str, message: &str) -> bool {
+        #[cfg(target_os = "linux")]
+        {
+            eprintln!("{title}: {message}");
+            false
+        }
+        #[cfg(not(target_os = "linux"))]
+        NativeDialogs.confirm(title, message)
+    }
+}
+
 /// Без графічного середовища (наприклад, Linux без дисплея) вікно може не створитися:
 /// тоді текст уже виведено в stderr, а запит вважається відхиленим.
 fn show_native(
@@ -380,7 +406,8 @@ fn plan_set_aside(live_database: &Path, stamp: &str) -> io::Result<Vec<(PathBuf,
 }
 
 /// Виконує перейменування по черзі; при помилці повертає виконані кроки у зворотному порядку.
-/// Якщо повернути не вдалося, помилка називає файли, що лишились на нових іменах.
+/// Перша невдача повернення зупиняє відкат, щоб базу не повернуто без журналу; помилка
+/// називає файли, що лишились на нових іменах.
 fn rename_in_order(
     steps: &[(PathBuf, PathBuf)],
     mut rename: impl FnMut(&Path, &Path) -> io::Result<()>,
@@ -390,9 +417,14 @@ fn rename_in_order(
             continue;
         };
         let mut stuck = Vec::new();
-        for (done_from, done_to) in steps[..index].iter().rev() {
+        let mut rollback = steps[..index].iter().rev();
+        while let Some((done_from, done_to)) = rollback.next() {
             if let Err(rollback_error) = rename(done_to, done_from) {
                 stuck.push(format!("{}: {rollback_error}", done_to.display()));
+                // Далі не повертаємо: база, повернута без свого журналу, розійшлася б із ним.
+                // Усе, що лишилося на нових іменах, називає помилка.
+                stuck.extend(rollback.map(|(_, left)| format!("{}: не повертали", left.display())));
+                break;
             }
         }
         let reason = format!("{}: {error}", from.display());
@@ -893,6 +925,49 @@ mod tests {
             b"main"
         );
         assert_eq!(fs::read(with_suffix(&live, "-wal")).expect("wal"), b"wal");
+    }
+
+    #[test]
+    fn a_failed_sidecar_rollback_does_not_move_the_database_back_without_its_journal() {
+        let directory = tempfile::tempdir().expect("synthetic directory");
+        let live = directory.path().join("easywar.db");
+        fs::write(&live, b"main").expect("live");
+        fs::write(with_suffix(&live, "-wal"), b"wal").expect("wal");
+        fs::write(with_suffix(&live, "-shm"), b"shm").expect("shm");
+        let steps = plan_set_aside(&live, "20261017-120000").expect("plan");
+        assert_eq!(steps.len(), 3);
+        let calls = Cell::new(0);
+
+        let result = rename_in_order(&steps, |from, to| {
+            calls.set(calls.get() + 1);
+            match calls.get() {
+                // база й журнал переїхали; третій крок і повернення журналу падають
+                1 | 2 => fs::rename(from, to),
+                _ => Err(io::Error::other("synthetic failure")),
+            }
+        });
+
+        let text = result
+            .expect_err("the step and the rollback fail")
+            .to_string();
+        assert!(
+            text.contains("повернути вже перейменовані файли не вдалося"),
+            "{text}"
+        );
+        assert_eq!(
+            calls.get(),
+            4,
+            "the database is not renamed back after a failed rollback"
+        );
+        assert_eq!(
+            fs::read(&steps[0].1).expect("the database stays under its new name"),
+            b"main"
+        );
+        assert!(!live.exists(), "the live name stays free");
+        assert!(
+            text.contains("easywar.db.damaged-20261017-120000"),
+            "{text}"
+        );
     }
 
     #[test]

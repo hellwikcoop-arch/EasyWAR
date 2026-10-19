@@ -44,9 +44,11 @@ pub const PREVIOUS_COPY_MIN_AGE: Duration = Duration::from_secs(5 * 60);
 /// Різке зменшення рядків рахується, лише якщо до нього було не менше стількох
 /// рядків даних; у менших таблицях значущим вважається тільки повне очищення.
 pub const COLLAPSE_MIN_ROWS: usize = 10;
-/// Скільки діє захист копії від різкого зменшення рядків, рахуючи від часу запису
-/// самої копії. Далі зменшена таблиця вважається новим станом: інакше після
-/// навмисного скорочення журналу копія застрягла б на старому стані назавжди.
+/// Скільки діє захист копії від різкого зменшення рядків: між записом самої копії й
+/// останнім записом таблиці. Таблиця, що працювала довше, вважається новим станом: інакше
+/// після навмисного скорочення журналу копія застрягла б на старому стані назавжди. Час
+/// міряється за самою таблицею, а не за годинником: застосунок, не запущений понад добу
+/// після збою, не повинен «дочекатися» кінця захисту й затерти останню добру копію.
 pub const COLLAPSE_GUARD_WINDOW: Duration = Duration::from_secs(24 * 60 * 60);
 
 #[derive(Debug, thiserror::Error)]
@@ -303,7 +305,8 @@ fn rotate_previous_copy(
         return Ok(Rotation::NotNeeded);
     }
     // Коректна, але майже порожня таблиця («лише заголовки») теж не повинна.
-    if would_collapse_previous_copy(previous, branch, &current_bytes, now) {
+    let table_written = current.modified().unwrap_or(now);
+    if would_collapse_previous_copy(previous, branch, &current_bytes, table_written) {
         return Ok(Rotation::Protected);
     }
     let directory = previous.parent().ok_or(ProfileTableError::InvalidPath)?;
@@ -320,13 +323,14 @@ fn rotate_previous_copy(
 }
 
 /// Чи затре копія поточним станом різке зменшення рядків. Лише для наявної, читабельної
-/// копії, записаної не раніше ніж [`COLLAPSE_GUARD_WINDOW`] тому; в усіх сумнівних
-/// випадках (немає копії, не читається, невідомо) відповідь «ні» — діє звичайна ротація.
+/// копії, записаної не раніше ніж [`COLLAPSE_GUARD_WINDOW`] до `table_written` (останнього
+/// запису таблиці); в усіх сумнівних випадках (немає копії, не читається, невідомо)
+/// відповідь «ні» — діє звичайна ротація.
 fn would_collapse_previous_copy(
     previous: &Path,
     branch: Branch,
     current_bytes: &[u8],
-    now: SystemTime,
+    table_written: SystemTime,
 ) -> bool {
     let Ok(metadata) = fs::symlink_metadata(previous) else {
         return false;
@@ -338,7 +342,7 @@ fn would_collapse_previous_copy(
     let within_window = metadata
         .modified()
         .ok()
-        .and_then(|modified| now.duration_since(modified).ok())
+        .and_then(|modified| table_written.duration_since(modified).ok())
         .is_none_or(|age| age < COLLAPSE_GUARD_WINDOW);
     if !within_window {
         return false;
@@ -865,6 +869,15 @@ mod tests {
         assert_eq!(fs::read(&previous).unwrap(), half);
     }
 
+    fn set_modified(path: &Path, time: SystemTime) {
+        fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(time)
+            .unwrap();
+    }
+
     #[test]
     fn the_guard_lapses_after_the_window_so_a_deliberate_reduction_becomes_the_new_copy() {
         let directory = tempfile::tempdir().unwrap();
@@ -875,20 +888,35 @@ mod tests {
         let next = zip_with_marked_rows("Зведена", 4, " далі");
         fs::write(&previous, &good).unwrap();
         fs::write(&table, &reduced).unwrap();
-
-        let inside = SystemTime::now() + COLLAPSE_GUARD_WINDOW - Duration::from_secs(120);
-        let outcome =
-            save_with_policy(&table, Branch::Rocket, &next, PREVIOUS_COPY_MIN_AGE, inside).unwrap();
-        assert_eq!(outcome, saved(false, true));
-        assert_eq!(fs::read(&previous).unwrap(), good);
-
-        let outside = SystemTime::now() + COLLAPSE_GUARD_WINDOW + Duration::from_secs(120);
+        // Копію записано давно, а зменшену таблицю востаннє змінено ще в межах доби після цього.
+        let copied = SystemTime::now() - 5 * COLLAPSE_GUARD_WINDOW;
+        set_modified(&previous, copied);
+        set_modified(
+            &table,
+            copied + COLLAPSE_GUARD_WINDOW - Duration::from_secs(120),
+        );
         let outcome = save_with_policy(
             &table,
             Branch::Rocket,
             &next,
             PREVIOUS_COPY_MIN_AGE,
-            outside,
+            SystemTime::now(),
+        )
+        .unwrap();
+        assert_eq!(outcome, saved(false, true));
+        assert_eq!(fs::read(&previous).unwrap(), good);
+
+        // Таблиця пропрацювала понад добу після запису копії: це новий стан.
+        set_modified(
+            &table,
+            copied + COLLAPSE_GUARD_WINDOW + Duration::from_secs(120),
+        );
+        let outcome = save_with_policy(
+            &table,
+            Branch::Rocket,
+            &next,
+            PREVIOUS_COPY_MIN_AGE,
+            SystemTime::now(),
         )
         .unwrap();
         assert_eq!(outcome, saved(true, false));
@@ -896,6 +924,38 @@ mod tests {
             fs::read(&previous).unwrap(),
             next,
             "table was replaced by `next` in the first call"
+        );
+    }
+
+    #[test]
+    fn an_application_left_closed_after_a_collapse_does_not_outwait_the_guard() {
+        let directory = tempfile::tempdir().unwrap();
+        let table = directory.path().join("EasyWAR_РВ.xlsx");
+        let previous = directory.path().join("EasyWAR_РВ.easywar-prev.xlsx");
+        let good = zip_with_rows("Зведена", 30);
+        let headers_only = zip_with_rows("Зведена", 0);
+        let next = zip_with_marked_rows("Зведена", 1, " після вихідних");
+        fs::write(&previous, &good).unwrap();
+        fs::write(&table, &headers_only).unwrap();
+        // Збій записав «лише заголовки» за хвилини після копії, а застосунок не запускали тиждень.
+        let copied = SystemTime::now() - 7 * COLLAPSE_GUARD_WINDOW;
+        set_modified(&previous, copied);
+        set_modified(&table, copied + Duration::from_secs(600));
+
+        let outcome = save_with_policy(
+            &table,
+            Branch::Rocket,
+            &next,
+            PREVIOUS_COPY_MIN_AGE,
+            SystemTime::now(),
+        )
+        .unwrap();
+
+        assert_eq!(outcome, saved(false, true));
+        assert_eq!(
+            fs::read(&previous).unwrap(),
+            good,
+            "the last good copy stays"
         );
     }
 

@@ -18,8 +18,7 @@ import {
   PASSWORD_MIN,
   POSITION_MAX,
   NAME_MAX,
-  failureDelayMs,
-  loginFailure,
+  registerLoginFailure,
   gateScreen,
   loginCardNote,
   modulesError,
@@ -199,12 +198,9 @@ export function createProfileGate({ el, avatar, readAvatar }) {
             await signInLocalProfile(selected.id, password.value);
             resolve('signed-in');
           } catch (failure) {
-            const { message, throttled } = loginFailure(String(failure?.message || failure));
-            if (!throttled) {
-              failures += 1;
-              blockedUntil = Date.now() + failureDelayMs(failures);
-            }
-            error.textContent = message;
+            const next = registerLoginFailure({ failures, blockedUntil }, String(failure?.message || failure), Date.now());
+            ({ failures, blockedUntil } = next);
+            error.textContent = next.message;
             password.value = '';
             if (confirm) confirm.value = '';
             password.focus();

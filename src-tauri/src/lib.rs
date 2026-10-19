@@ -1800,8 +1800,9 @@ pub fn run() {
         )
         .setup(move |app| {
             // `setup` виконується вже в циклі подій, і Tauri відповідає на його помилку панікою,
-            // якої без консолі (Windows) не видно: тут помилку показує нативне вікно, далі вихід.
-            let dialogs = startup_recovery::NativeDialogs;
+            // якої без консолі (Windows) не видно: тут помилку показує нативне вікно, далі вихід
+            // (на Linux лише stderr, бо вікно в заблокованому `setup` не з'явилося б).
+            let dialogs = startup_recovery::SetupDialogs;
             let resolved_database_file = startup_recovery::or_exit(
                 &dialogs,
                 app.path().app_config_dir(),

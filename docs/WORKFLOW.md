@@ -94,7 +94,7 @@
 |---|---|
 | `src/*.js`, `src/public/*.js`, `tests/` | `npm run test:unit` |
 | `src/*.html` (legacy) | правила «Legacy HTML editing» в `AGENTS.md`; синтаксис кожного inline-скрипта; `npm run test:unit` (`desktop-frontend`, `module-editor`, `pwa-viewer`) ; `npm run build` |
-| `src-tauri/src/**` | `cargo test`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo fmt --check` (з `--manifest-path src-tauri/Cargo.toml`) |
+| `src-tauri/src/**` | `cargo test --locked`, `cargo clippy --locked --all-targets --all-features -- -D warnings`, `cargo fmt --check` (з `--manifest-path src-tauri/Cargo.toml`; `--locked`, як у CI, не дає мовчки переписати `Cargo.lock`) |
 | `src-tauri/migrations/` | усе з попереднього рядка + тест міграції + `DATABASE.md` + `migrations/README.md` |
 | `vite.config.js`, `script/build_standalone.mjs`, `package.json` | `npm run build`, `npm run test:unit` (`standalone-build`, `pwa-viewer`) |
 | `runner/` (рушій мовної моделі), `script/build_runner.sh`, `tauri.runner.conf.json` | `script/build_runner.sh` для хоста + `script/runner_smoke.sh <runner>` (потрібні cmake, git, g++/MSVC/Xcode, python3); у PR це ж робить `runner.yml`. Якщо змінено протокол — також `local_model.rs` і `docs/ASSISTANT.md` |

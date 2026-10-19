@@ -140,6 +140,17 @@ export function loginFailure(text) {
   return { message: `Не вдалося увійти: ${raw}`, throttled: false };
 }
 
+/**
+ * Стан сторінки входу після відмови ядра: лічильник невдач, час, до якого кнопка
+ * заблокована, і текст помилки. Пауза, оголошена ядром, лічильник сторінки не збільшує.
+ */
+export function registerLoginFailure({ failures, blockedUntil }, text, now) {
+  const { message, throttled } = loginFailure(text);
+  if (throttled) return { failures, blockedUntil, message };
+  const next = failures + 1;
+  return { failures: next, blockedUntil: now + failureDelayMs(next), message };
+}
+
 /** Який екран показати після заставки: реєстрація, якщо профілів ще немає, інакше вхід. */
 export function gateScreen(state) {
   return Array.isArray(state?.profiles) && state.profiles.length > 0 ? 'login' : 'register';
