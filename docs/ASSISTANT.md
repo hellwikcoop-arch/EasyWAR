@@ -480,6 +480,9 @@ stdin/stdout: рушій пише `{"ready":true}`; застосунок над�
   прапорцем `--config` у випускових збірках CI; звичайні `cargo test`/`tauri dev`
   не потребують зібраного рушія). Поруч із виконуваним файлом застосунку він лежить
   як `easywar-llm-runner[.exe]`; macOS підписує його разом із застосунком.
+  Для `universal-apple-darwin` скрипт кладе три файли: `-aarch64-apple-darwin`,
+  `-x86_64-apple-darwin` (Tauri збирає кожну архітектуру окремо й шукає sidecar саме
+  для неї) і зшитий `-universal-apple-darwin` (його бере пакувальник).
   Ліцензії llama.cpp і nlohmann/json (MIT) входять до інсталятора як ресурс
   `licenses/llm-runner.txt`.
 - **Копіювання в папку моделі.** `finalize_package` копіює вбудований рушій у
