@@ -30,7 +30,7 @@ import {
   tableEditState,
   visibleColumnKeys,
 } from './dashboard-module-catalog-core.js';
-import { chartModel } from './dashboard-module-charts-core.js';
+import { chartModel, takeoffHoursModel } from './dashboard-module-charts-core.js';
 import { mountChart } from './dashboard-module-charts.js';
 import {
   buildImport,
@@ -190,6 +190,7 @@ function initialize() {
         el('div', {}, el('h3', { text: module.title }), el('p', { text: `${rowCountLabel(module.rowCount)} · локальна SQLite` })),
         el('span', { class: 'ewmc-live', text: module.rowCount ? 'Дані' : 'Створено' })),
       visual(module, rows),
+      takeoffVisual(module, rows),
       el('div', { class: 'ewmc-module-actions' },
         el('button', {
           type: 'button',
@@ -1196,12 +1197,24 @@ function sampleRows(item) {
     [['Виліт пари', 'Готово', 2], ['Доповідь прийнято', 'Готово', 1], ['Затримка вильоту', 'Увага', 1], ['Повернення на базу', 'Готово', 2]].forEach(([label, status, value], index) => push({ occurred_at: stamp(index), label, status, value }));
   } else if (kind === 'waveform') {
     values.forEach((value, index) => push({ occurred_at: stamp(index), positive_value: value, negative_value: values[(index + 5) % values.length] * 0.6, series: 'Разом' }));
+  } else if (kind === 'ridgeline') {
+    [['Мі-8', [7, 8, 8, 9, 10, 13, 14]], ['Мі-24', [5, 6, 6, 7, 16, 17]], ['Ан-26', [11, 12, 12, 13, 21]]]
+      .forEach(([series, hours]) => hours.forEach((hour, index) => push({ occurred_at: `2026-10-${String(1 + index).padStart(2, '0')}T${String(hour).padStart(2, '0')}:15`, series })));
   } else if (kind === 'leaderboard') {
     units.slice(0, 5).forEach((label, index) => push({ label, group: index < 3 ? 'Ескадрилья' : 'Ланка', value: values[index], delta: [8, -2, 3, 0, 5][index] }));
   } else {
     units.slice(0, 5).forEach((label, index) => push({ label, category: label, value: values[index], status: index % 2 ? 'Виконується' : 'Готово' }));
   }
   return rows;
+}
+
+/** Друга діаграма картки журналу польотів: зльоти за годинами доби по типах ПС («гребені»). */
+function takeoffVisual(module, rows) {
+  if (!module.fields?.some(field => field.key === 'takeoff_time') || !module.fields.some(field => field.key === 'aircraft_type')) return null;
+  const host = el('div', { class: 'ewmc-chart-host' });
+  const box = el('div', { class: 'ewmc-visual ewmc-visual-extra', 'data-visual': 'ridgeline' }, host);
+  mountChart(host, takeoffHoursModel(module, rows), { height: 150 });
+  return box;
 }
 
 /** Картка з діаграмою модуля (або шаблону) з його рядків; перемальовується під ширину картки. */
