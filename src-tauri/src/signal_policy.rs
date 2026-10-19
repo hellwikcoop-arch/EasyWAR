@@ -52,6 +52,11 @@ pub enum SignalReceiveMode {
 pub struct SignalAllowlist {
     allowed_senders: BTreeSet<String>,
     allowed_groups: BTreeSet<String>,
+    /// "Bot in a group" mode: any member of a listed group is an allowed source for
+    /// messages in that group. Direct messages still need a listed sender. Absent in
+    /// settings saved before this field existed, which keeps the stricter behaviour.
+    #[serde(default)]
+    allow_group_members: bool,
 }
 
 impl SignalAllowlist {
@@ -64,16 +69,30 @@ impl SignalAllowlist {
         Ok(Self {
             allowed_senders,
             allowed_groups,
+            allow_group_members: false,
         })
     }
 
+    pub fn with_group_members(mut self, allow: bool) -> Self {
+        self.allow_group_members = allow;
+        self
+    }
+
     fn permits_source(&self, sender: &str, group: Option<&str>) -> bool {
+        if group.is_some_and(|group_id| self.permits_group_members(group_id)) {
+            return true;
+        }
         self.allowed_senders.contains(sender)
             && group.is_none_or(|group_id| self.allowed_groups.contains(group_id))
     }
 
-    fn has_allowed_sender(&self) -> bool {
+    fn permits_group_members(&self, group: &str) -> bool {
+        self.allow_group_members && self.allowed_groups.contains(group)
+    }
+
+    fn has_allowed_source(&self) -> bool {
         !self.allowed_senders.is_empty()
+            || (self.allow_group_members && !self.allowed_groups.is_empty())
     }
 
     fn validate(&self) -> Result<(), SignalPolicyError> {
@@ -143,7 +162,7 @@ impl SignalAdapterConfig {
         if self.auto_approve {
             return Err(SignalPolicyError::AutoApprovalForbidden);
         }
-        if self.intake_enabled && !self.allowlist.has_allowed_sender() {
+        if self.intake_enabled && !self.allowlist.has_allowed_source() {
             return Err(SignalPolicyError::AllowlistRequired);
         }
 
@@ -162,6 +181,11 @@ impl ValidatedSignalAdapterConfig {
 
     pub fn permits_source(&self, sender: &str, group: Option<&str>) -> bool {
         self.0.intake_enabled && self.0.allowlist.permits_source(sender, group)
+    }
+
+    /// True when every member of `group` is an allowed source ("bot in a group" mode).
+    pub fn permits_group_members(&self, group: &str) -> bool {
+        self.0.intake_enabled && self.0.allowlist.permits_group_members(group)
     }
 }
 
@@ -356,6 +380,66 @@ mod tests {
             SignalAllowlist::new(["sender\nalpha".to_owned()], Vec::new()),
             Err(SignalPolicyError::InvalidAllowlistId)
         );
+    }
+
+    #[test]
+    fn group_member_mode_admits_any_sender_only_inside_listed_groups() {
+        let allowlist = SignalAllowlist::new(Vec::new(), ["group-green".to_owned()])
+            .expect("синтетичний ідентифікатор коректний")
+            .with_group_members(true);
+        let validated = SignalAdapterConfig {
+            intake_enabled: true,
+            allowlist,
+            ..SignalAdapterConfig::default()
+        }
+        .validate()
+        .expect("група з режимом «бот у групі» має вмикати приймання");
+
+        assert!(validated.permits_source("sender-any", Some("group-green")));
+        assert!(validated.permits_group_members("group-green"));
+        assert!(!validated.permits_source("sender-any", Some("group-blue")));
+        assert!(!validated.permits_group_members("group-blue"));
+        assert!(!validated.permits_source("sender-any", None));
+    }
+
+    #[test]
+    fn group_member_mode_without_groups_cannot_enable_intake() {
+        assert_eq!(
+            SignalAdapterConfig {
+                intake_enabled: true,
+                allowlist: SignalAllowlist::default().with_group_members(true),
+                ..SignalAdapterConfig::default()
+            }
+            .validate(),
+            Err(SignalPolicyError::AllowlistRequired)
+        );
+    }
+
+    #[test]
+    fn disabled_intake_denies_group_members() {
+        let validated = SignalAdapterConfig {
+            allowlist: SignalAllowlist::new(Vec::new(), ["group-green".to_owned()])
+                .unwrap()
+                .with_group_members(true),
+            ..SignalAdapterConfig::default()
+        }
+        .validate()
+        .unwrap();
+
+        assert!(!validated.permits_group_members("group-green"));
+        assert!(!validated.permits_source("sender-any", Some("group-green")));
+    }
+
+    #[test]
+    fn allowlist_saved_before_group_member_mode_keeps_strict_matching() {
+        let allowlist: SignalAllowlist = serde_json::from_value(serde_json::json!({
+            "allowed_senders": ["sender-alpha"],
+            "allowed_groups": ["group-green"]
+        }))
+        .unwrap();
+
+        assert!(!allowlist.permits_group_members("group-green"));
+        assert!(!allowlist.permits_source("sender-beta", Some("group-green")));
     }
 
     #[test]

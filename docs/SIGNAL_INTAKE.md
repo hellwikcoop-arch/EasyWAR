@@ -27,7 +27,8 @@ References:
 - TCP and HTTP endpoints must resolve to an IP loopback address.
 - A UNIX socket must use an absolute path without parent traversal.
 - `signal-cli` receive mode must be `manual`.
-- Intake cannot be enabled without at least one explicitly listed sender. Group messages require both a listed sender and a listed group. Matches are exact; empty IDs and wildcards are rejected.
+- Intake cannot be enabled without at least one explicitly listed sender, or at least one listed group in the group-member mode below. By default a group message requires both a listed sender and a listed group. Matches are exact; empty IDs and wildcards are rejected.
+- Group-member mode («бот у групі», `allowlist.allow_group_members: true`, off by default): any member of a listed group is an allowed source for messages in that group, the way a bot account added to a group reads it. Direct messages still require a listed sender, and messages from other groups are still denied. Settings saved before this field existed load with the mode off. The mode widens who can put a `NEW` record in the queue, and every listed-group member can also use the session commands below; it never approves anything.
 - Records received through Signal can never be approved automatically.
 - Credentials, account storage, message content, attachments, and real identifiers must never enter Git.
 
@@ -93,8 +94,10 @@ write (`inspect_allowed_notification`):
    (`AccountMismatch`);
 2. the envelope must be a JSON object (`InvalidEnvelope`);
 3. the sender (`sourceUuid`, `sourceNumber` or `source`) must be on the
-   allowlist, by exact match; the group is not examined yet. A sender outside
-   the allowlist is always `SourceDenied`, even when the rest of the envelope
+   allowlist, by exact match; the group is not examined yet. In group-member
+   mode the only other way through is a `dataMessage.groupInfo.groupId` string
+   that names a listed group; this lookup never fails. A source outside the
+   allowlist is always `SourceDenied`, even when the rest of the envelope
    is malformed (no timestamp, `groupInfo` that is not an object and so on);
 4. only for an allowed sender: an envelope without `dataMessage.message` with
    non-blank text is `NotTextMessage` (delivery receipt, typing, sync,

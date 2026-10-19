@@ -56,3 +56,25 @@ export function describePersistedSignalInbox(items) {
       : 'Локальна черга Signal порожня.',
   };
 }
+
+function uniqueAllowlistLines(value) {
+  return [...new Set(String(value || '').split(/\r?\n/).map(line => line.trim()).filter(Boolean))];
+}
+
+// The allowlist object the settings form saves. `allow_group_members` is the
+// "bot in a group" mode: any member of a listed group is accepted in that group.
+export function buildSignalAllowlist(sendersText, groupsText, allowGroupMembers) {
+  return {
+    allowed_senders: uniqueAllowlistLines(sendersText),
+    allowed_groups: uniqueAllowlistLines(groupsText),
+    allow_group_members: allowGroupMembers === true,
+  };
+}
+
+// Adds one identifier as its own line unless it is already listed.
+export function appendAllowlistLine(text, id) {
+  const lines = uniqueAllowlistLines(text);
+  const value = String(id || '').trim();
+  if (!value || lines.includes(value)) return { text: lines.join('\n'), added: false };
+  return { text: [...lines, value].join('\n'), added: true };
+}

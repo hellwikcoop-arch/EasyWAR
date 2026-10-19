@@ -119,7 +119,8 @@ fn is_unique_violation(error: &RepositoryError) -> bool {
 /// Decides whether `notification` is a text message from an allowed source.
 ///
 /// The order is deny-by-default: the sender decision comes first and looks at nothing but
-/// the sender fields, so a source outside the allowlist is `SourceDenied` whatever its
+/// the sender fields (and, in "bot in a group" mode, the group id when it is a valid
+/// string), so a source outside the allowlist is `SourceDenied` whatever its
 /// body contains (a malformed body from it can never end a session). Only then the body
 /// is classified: an envelope without `dataMessage.message` is `NotTextMessage`, and only
 /// a text message from an allowed sender can still be `InvalidEnvelope`.
@@ -138,11 +139,16 @@ pub fn inspect_allowed_notification(
         .ok_or(SignalIngestError::InvalidEnvelope)?;
 
     // `permits_source(_, None)` applies the sender allowlist only; the group is checked
-    // once the text message has been recognised.
+    // once the text message has been recognised. In "bot in a group" mode a sender who is
+    // not listed passes this gate only when the envelope names a group whose members are
+    // all allowed; the lookup never fails, so a malformed body stays `SourceDenied`.
     let senders = sender_candidates(envelope);
-    if !senders
-        .iter()
-        .any(|sender| config.permits_source(sender, None))
+    let open_group =
+        peek_group_id(envelope).is_some_and(|group| config.permits_group_members(group));
+    if !open_group
+        && !senders
+            .iter()
+            .any(|sender| config.permits_source(sender, None))
     {
         return Err(SignalIngestError::SourceDenied);
     }
@@ -184,6 +190,15 @@ fn extract_group(data_message: &Map<String, Value>) -> Result<Option<&str>, Sign
         .filter(|group| valid_identifier(group))
         .ok_or(SignalIngestError::InvalidEnvelope)?;
     Ok(Some(group))
+}
+
+fn peek_group_id(envelope: &Map<String, Value>) -> Option<&str> {
+    envelope
+        .get("dataMessage")?
+        .get("groupInfo")?
+        .get("groupId")?
+        .as_str()
+        .filter(|group| valid_identifier(group))
 }
 
 fn sender_candidates(envelope: &Map<String, Value>) -> Vec<&str> {
@@ -693,5 +708,76 @@ mod tests {
             .await
             .expect("synthetic row count must query");
         assert_eq!(row_count, 0);
+    }
+
+    fn group_member_config() -> ValidatedSignalAdapterConfig {
+        SignalAdapterConfig {
+            intake_enabled: true,
+            allowlist: SignalAllowlist::new(Vec::new(), ["synthetic-group".to_owned()])
+                .expect("synthetic allowlist must validate")
+                .with_group_members(true),
+            ..SignalAdapterConfig::default()
+        }
+        .validate()
+        .expect("synthetic group-member config must validate")
+    }
+
+    #[tokio::test]
+    async fn group_member_mode_persists_any_member_of_an_allowed_group() {
+        let (repository, _pool) = repository().await;
+        let config = group_member_config();
+        let inspected = inspect_allowed_notification(
+            &config,
+            &notification("synthetic-member", Some("synthetic-group")),
+            "synthetic-account",
+        )
+        .expect("a member of an allowed group must pass");
+        assert_eq!(inspected.sender, "synthetic-member");
+        assert_eq!(inspected.group.as_deref(), Some("synthetic-group"));
+
+        persist_allowed_notification(
+            &repository,
+            &config,
+            &notification("synthetic-member", Some("synthetic-group")),
+            "synthetic-account",
+            NOW,
+        )
+        .await
+        .expect("a group-member message must persist");
+        let inbox = repository
+            .list_signal_inbox(100)
+            .await
+            .expect("synthetic Inbox must query");
+        assert_eq!(inbox.len(), 1);
+        assert_eq!(inbox[0].current_status, "NEW");
+    }
+
+    #[test]
+    fn group_member_mode_still_denies_direct_and_other_group_messages() {
+        let config = group_member_config();
+        for group in [None, Some("synthetic-other-group")] {
+            let result = inspect_allowed_notification(
+                &config,
+                &notification("synthetic-member", group),
+                "synthetic-account",
+            );
+            assert!(matches!(result, Err(SignalIngestError::SourceDenied)));
+        }
+    }
+
+    #[test]
+    fn group_member_mode_treats_service_events_as_not_text() {
+        let receipt = SignalReceiveNotification {
+            subscription: 7,
+            account: "synthetic-account".to_owned(),
+            envelope: json!({
+                "sourceUuid": "synthetic-member",
+                "timestamp": 1_767_225_600_000_u64,
+                "dataMessage": { "groupInfo": { "groupId": "synthetic-group" } },
+            }),
+        };
+        let result =
+            inspect_allowed_notification(&group_member_config(), &receipt, "synthetic-account");
+        assert!(matches!(result, Err(SignalIngestError::NotTextMessage)));
     }
 }

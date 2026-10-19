@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  appendAllowlistLine,
+  buildSignalAllowlist,
   describePersistedSignalInbox,
   describeSignalRuntime,
 } from '../src/signal-runtime.js';
@@ -57,4 +59,23 @@ test('persisted Signal Inbox exposes only normalized list fields', () => {
   assert.equal(state.rows[0].statusLabel, 'Потребує перевірки');
   assert.match(state.rows[0].capturedAt, /02\.01\.2026/);
   assert.doesNotMatch(JSON.stringify(state.rows), /SECRET-SYNTHETIC/);
+});
+
+test('the settings form builds a trimmed allowlist with the group-member mode', () => {
+  const allowlist = buildSignalAllowlist(' sender-a \n\nsender-a\r\nsender-b', 'group-x\n', true);
+  assert.deepEqual(allowlist, {
+    allowed_senders: ['sender-a', 'sender-b'],
+    allowed_groups: ['group-x'],
+    allow_group_members: true,
+  });
+  assert.equal(buildSignalAllowlist('', '', 'yes').allow_group_members, false);
+  assert.deepEqual(buildSignalAllowlist(undefined, null, false).allowed_groups, []);
+});
+
+test('a discovered group is appended once as its own line', () => {
+  const first = appendAllowlistLine('group-x', 'group-y');
+  assert.deepEqual(first, { text: 'group-x\ngroup-y', added: true });
+  assert.deepEqual(appendAllowlistLine(first.text, 'group-x'), { text: 'group-x\ngroup-y', added: false });
+  assert.deepEqual(appendAllowlistLine('', 'group-z'), { text: 'group-z', added: true });
+  assert.equal(appendAllowlistLine('group-x', '  ').added, false);
 });

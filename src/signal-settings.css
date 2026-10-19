@@ -127,6 +127,21 @@
   color: var(--muted);
 }
 
+.ew-signal-found-groups li .btn {
+  justify-self: start;
+}
+
+.ew-signal-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.ew-signal-check input {
+  margin-top: 3px;
+}
+
 .ew-signal-receive-actions {
   display: flex;
   flex-wrap: wrap;

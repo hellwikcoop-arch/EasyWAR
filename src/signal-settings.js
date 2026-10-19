@@ -6,13 +6,14 @@ import {
   completeSignalLinkSession,
   createSignalLinkSession,
 } from './signal-link.js';
-import { describePersistedSignalInbox, describeSignalRuntime } from './signal-runtime.js';
+import {
+  appendAllowlistLine,
+  buildSignalAllowlist,
+  describePersistedSignalInbox,
+  describeSignalRuntime,
+} from './signal-runtime.js';
 import { airWindow, airWorkSettled, whenAirDashboard } from './air-bridge.js';
 import './signal-settings.css';
-
-function uniqueLines(value) {
-  return [...new Set(value.split(/\r?\n/).map(line => line.trim()).filter(Boolean))];
-}
 
 function initializeSignalSettings() {
   if (typeof window.__TAURI_INTERNALS__?.invoke !== 'function') return;
@@ -63,7 +64,7 @@ function initializeSignalSettings() {
           <button type="button" class="btn primary" id="ew-signal-receive-start" disabled>Почати сеанс приймання</button>
           <button type="button" class="btn" id="ew-signal-receive-stop" disabled>Зупинити й відписатися</button>
         </div>
-        <p class="ew-signal-note">Явний сеанс працює до 5 хвилин або 64 повідомлень. У базу потрапляють лише джерела зі збереженого allowlist. Автоматичний запуск вимкнений.</p>
+        <p class="ew-signal-note">Явний сеанс працює до 5 хвилин або 64 повідомлень. У базу потрапляють лише джерела зі збереженого списку дозволених (відправники або, в режимі «бот у групі», учасники дозволених груп). Автоматичний запуск вимкнений.</p>
         <p id="ew-signal-receive-status" class="ew-signal-status" role="status" aria-live="polite">Сеанс не запущено.</p>
       </section>
       <label class="ew-signal-field" for="ew-signal-senders">
@@ -73,9 +74,14 @@ function initializeSignalSettings() {
       </label>
       <label class="ew-signal-field" for="ew-signal-groups">
         <span>Дозволені групи</span>
-        <small>Один ідентифікатор на рядок. Для групи потрібен також дозволений відправник.</small>
+        <small>Один ідентифікатор на рядок. Знайдену групу можна додати кнопкою «Дозволити групу» вище.</small>
         <textarea id="ew-signal-groups" rows="4" spellcheck="false" autocomplete="off"></textarea>
       </label>
+      <label class="ew-signal-check" for="ew-signal-group-members">
+        <input id="ew-signal-group-members" type="checkbox">
+        <span>Приймати від усіх учасників дозволених груп (режим «бот у групі»)</span>
+      </label>
+      <p class="ew-signal-note">Без цієї позначки повідомлення з групи приймається лише від відправника зі списку. З нею — від будь-кого в дозволеній групі; особисті повідомлення все одно лише від відправників зі списку. Схвалення записів залишається ручним.</p>
       <p class="ew-signal-note">Автоматичне приймання залишатиметься вимкненим. Явний сеанс запускається окремо, а схвалення записів виконується лише після перевірки.</p>
       <details id="ew-signal-inbox" class="ew-signal-inbox">
         <summary>Локальна черга Signal</summary>
@@ -106,6 +112,7 @@ function initializeSignalSettings() {
   const form = dialog.querySelector('#ew-signal-form');
   const senders = dialog.querySelector('#ew-signal-senders');
   const groups = dialog.querySelector('#ew-signal-groups');
+  const groupMembers = dialog.querySelector('#ew-signal-group-members');
   const status = dialog.querySelector('#ew-signal-status');
   const runtime = dialog.querySelector('#ew-signal-runtime');
   const saveButton = dialog.querySelector('#ew-signal-save');
@@ -518,7 +525,18 @@ function initializeSignalSettings() {
         id.textContent = group.id;
         const membership = document.createElement('span');
         membership.textContent = group.is_blocked ? 'Заблокована' : group.is_member ? 'Учасник' : 'Не учасник';
-        item.append(name, id, membership);
+        const allowGroup = document.createElement('button');
+        allowGroup.type = 'button';
+        allowGroup.className = 'btn quiet';
+        allowGroup.textContent = 'Дозволити групу';
+        allowGroup.addEventListener('click', () => {
+          const result = appendAllowlistLine(groups.value, group.id);
+          groups.value = result.text;
+          discoveryStatus.textContent = result.added
+            ? `Групу «${name.textContent}» додано до списку. Натисніть «Зберегти локально».`
+            : `Група «${name.textContent}» вже є в списку.`;
+        });
+        item.append(name, id, membership, allowGroup);
         foundGroups.append(item);
       }
       discoveryStatus.textContent = `Знайдено груп: ${groups.length}. Дозволений список не змінено.`;
@@ -638,6 +656,7 @@ function initializeSignalSettings() {
       runtime.textContent = describeSignalRuntime(config).message;
       senders.value = (config.allowlist?.allowed_senders || []).join('\n');
       groups.value = (config.allowlist?.allowed_groups || []).join('\n');
+      groupMembers.checked = config.allowlist?.allow_group_members === true;
       status.textContent = config.intake_enabled
         ? 'Збережену політику знайдено. Збереження цієї форми вимкне приймання повідомлень.'
         : 'Налаштування завантажено. Автоматичне приймання повідомлень вимкнено.';
@@ -667,10 +686,7 @@ function initializeSignalSettings() {
       ...currentConfig,
       receive_mode: 'manual',
       intake_enabled: false,
-      allowlist: {
-        allowed_senders: uniqueLines(senders.value),
-        allowed_groups: uniqueLines(groups.value),
-      },
+      allowlist: buildSignalAllowlist(senders.value, groups.value, groupMembers.checked),
       auto_approve: false,
     };
     try {

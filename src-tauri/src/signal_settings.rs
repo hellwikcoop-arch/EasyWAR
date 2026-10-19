@@ -269,4 +269,35 @@ mod tests {
         assert!(!persisted.permits_source("sender-demo", None));
         assert!(settings.get(SIGNAL_SETTINGS_KEY).await.unwrap().is_some());
     }
+
+    #[tokio::test]
+    async fn group_member_mode_round_trips_and_opens_a_session_without_senders() {
+        let (store, settings) = stores().await;
+        store
+            .save_from_desktop(
+                SignalAdapterConfig {
+                    allowlist: SignalAllowlist::new([], ["group-demo".to_owned()])
+                        .unwrap()
+                        .with_group_members(true),
+                    ..SignalAdapterConfig::default()
+                },
+                NOW,
+            )
+            .await
+            .unwrap();
+
+        let stored = settings.get(SIGNAL_SETTINGS_KEY).await.unwrap().unwrap();
+        assert_eq!(
+            stored.value["config"]["allowlist"]["allow_group_members"],
+            json!(true)
+        );
+        let session = store.load_for_explicit_session().await.unwrap();
+        assert!(session.permits_source("member-demo", Some("group-demo")));
+        assert!(!session.permits_source("member-demo", None));
+        assert!(!store
+            .load()
+            .await
+            .unwrap()
+            .permits_group_members("group-demo"));
+    }
 }
