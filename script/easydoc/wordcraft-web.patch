@@ -1,0 +1,171 @@
+diff -ruN a/apps/wordcraft-web/src/easywar_host.rs b/apps/wordcraft-web/src/easywar_host.rs
+--- a/apps/wordcraft-web/src/easywar_host.rs
++++ b/apps/wordcraft-web/src/easywar_host.rs
+@@ -0,0 +1,99 @@
++//! EasyDoc (EasyWAR) host bridge. When the page that loads this build defines
++//! `window.__easydocHost` with `openDocument()` and `saveDocument(name, bytes)` (both return
++//! promises), Open and Save go through the host application instead of the browser picker and
++//! download. Without the host object the browser behaviour is unchanged.
++
++use wasm_bindgen::JsCast as _;
++use wasm_bindgen::JsValue;
++use wordcraft_ui_egui::Inbox;
++use wordcraft_ui_egui::async_saves::{AsyncSaves, SaveOutcome};
++
++/// Largest document accepted from the host (same cap as the browser picker path).
++const MAX_HOST_BYTES: usize = 256 << 20;
++
++fn host() -> Option<JsValue> {
++    let window = web_sys::window()?;
++    let host = js_sys::Reflect::get(&window, &JsValue::from_str("__easydocHost")).ok()?;
++    (host.is_object()).then_some(host)
++}
++
++fn method(host: &JsValue, name: &str) -> Option<js_sys::Function> {
++    js_sys::Reflect::get(host, &JsValue::from_str(name)).ok()?.dyn_into::<js_sys::Function>().ok()
++}
++
++/// True when the page provides the EasyWAR host object (then EasyWAR asks about unsaved changes
++/// itself, and the browser's own "leave page?" prompt is not shown).
++pub fn present() -> bool {
++    host().is_some()
++}
++
++/// Tell the host whether the document has unsaved changes.
++pub fn set_dirty(dirty: bool) {
++    let Some(host) = host() else { return };
++    if let Some(set) = method(&host, "setDirty")
++        && let Err(e) = set.call1(&host, &JsValue::from_bool(dirty))
++    {
++        log::warn!("easydoc host: setDirty failed: {e:?}");
++    }
++}
++
++/// Ask the host for a document; its bytes arrive through the inbox. `false` when there is no host
++/// (the caller falls back to the browser picker).
++pub fn open(inbox: Inbox, ctx: egui::Context) -> bool {
++    let Some(host) = host() else { return false };
++    let Some(open) = method(&host, "openDocument") else { return false };
++    let promise = match open.call0(&host) {
++        Ok(p) => js_sys::Promise::resolve(&p),
++        Err(e) => {
++            log::error!("easydoc host: openDocument failed: {e:?}");
++            return true;
++        }
++    };
++    wasm_bindgen_futures::spawn_local(async move {
++        let picked = match wasm_bindgen_futures::JsFuture::from(promise).await {
++            Ok(v) => v,
++            Err(e) => {
++                log::error!("easydoc host: openDocument rejected: {e:?}");
++                return;
++            }
++        };
++        if picked.is_null() || picked.is_undefined() {
++            return;
++        }
++        let name = js_sys::Reflect::get(&picked, &JsValue::from_str("name")).ok().and_then(|v| v.as_string()).unwrap_or_else(|| "document.docx".into());
++        let Ok(bytes) = js_sys::Reflect::get(&picked, &JsValue::from_str("bytes")) else { return };
++        let bytes = js_sys::Uint8Array::new(&bytes);
++        if bytes.length() as usize > MAX_HOST_BYTES {
++            log::warn!("easydoc host: document larger than 256 MB; not opened");
++            return;
++        }
++        inbox.lock().unwrap_or_else(|e| e.into_inner()).push((name, bytes.to_vec()));
++        ctx.request_repaint();
++    });
++    true
++}
++
++/// Hand a saved or exported file to the host. `None` when there is no host.
++pub fn save(saves: &AsyncSaves, ctx: &egui::Context, name: &str, bytes: &[u8]) -> Option<Result<(), String>> {
++    let host = host()?;
++    let save = method(&host, "saveDocument")?;
++    let array = js_sys::Uint8Array::from(bytes);
++    let promise = match save.call2(&host, &JsValue::from_str(name), &array) {
++        Ok(p) => js_sys::Promise::resolve(&p),
++        Err(e) => return Some(Err(format!("{e:?}"))),
++    };
++    let saves = saves.clone();
++    let ctx = ctx.clone();
++    let ticket = saves.start();
++    wasm_bindgen_futures::spawn_local(async move {
++        let outcome = match wasm_bindgen_futures::JsFuture::from(promise).await {
++            // The host resolves with the saved path, or null when the user cancelled.
++            Ok(v) if v.is_null() || v.is_undefined() => SaveOutcome::Cancelled,
++            Ok(_) => SaveOutcome::Saved,
++            Err(e) => SaveOutcome::Failed(e.as_string().unwrap_or_else(|| format!("{e:?}"))),
++        };
++        saves.finish(ticket, outcome);
++        ctx.request_repaint();
++    });
++    Some(Ok(()))
++}
+diff -ruN a/apps/wordcraft-web/src/main.rs b/apps/wordcraft-web/src/main.rs
+--- a/apps/wordcraft-web/src/main.rs
++++ b/apps/wordcraft-web/src/main.rs
+@@ -16,6 +16,8 @@
+ mod save_fallback;
+ 
+ #[cfg(target_arch = "wasm32")]
++mod easywar_host;
++#[cfg(target_arch = "wasm32")]
+ mod web;
+ 
+ #[cfg(target_arch = "wasm32")]
+diff -ruN a/apps/wordcraft-web/src/web.rs b/apps/wordcraft-web/src/web.rs
+--- a/apps/wordcraft-web/src/web.rs
++++ b/apps/wordcraft-web/src/web.rs
+@@ -68,6 +68,8 @@
+                     // Preferences from an earlier visit (#2132), as the desktop app reads `ui.json`.
+                     let stored = stored_prefs();
+                     crate::prefs::restore(&mut app, stored.as_deref());
++                    // EasyDoc: the EasyWAR interface is Ukrainian only.
++                    app.ui.language = "uk".into();
+                     // A region chosen in File › Options replaces the browser's for the first blank
+                     // document too (#838).
+                     if !sample && app.session.prefs.region.is_some() {
+@@ -215,6 +217,10 @@
+         open_async: Some(Box::new(move |purpose: &str| {
+             let inbox = open_inbox.clone();
+             let ctx = ctx.clone();
++            // EasyDoc: documents are opened through the EasyWAR host when it is present.
++            if !matches!(purpose, "picture" | "font" | "recipients") && crate::easywar_host::open(inbox.clone(), ctx.clone()) {
++                return;
++            }
+             let dialog = if purpose == "picture" {
+                 rfd::AsyncFileDialog::new().add_filter("Pictures", IMAGE_EXTS)
+             } else if purpose == "font" {
+@@ -249,7 +255,11 @@
+         download: Some(Box::new(move |path: &str, bytes: &[u8]| download(&saves, &save_ctx, path, bytes))),
+         print: Some(Box::new(print_pdf)),
+         inbox: Some(inbox),
+-        on_dirty: Some(Box::new(move |d| dirty.set(d))),
++        on_dirty: Some(Box::new(move |d| {
++            dirty.set(d);
++            // EasyDoc: the EasyWAR workspace shows its own unsaved-changes bar.
++            crate::easywar_host::set_dirty(d);
++        })),
+         animations_enabled: Some(animations_enabled()),
+         store_font: Some(Box::new(font_store::store)),
+         forget_font: Some(Box::new(font_store::forget)),
+@@ -377,7 +387,7 @@
+     let window = web_sys::window().ok_or("no window")?;
+     let on_unload = wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::BeforeUnloadEvent)>::new(move |e: web_sys::BeforeUnloadEvent| {
+         // A save still in the browser's picker hasn't written anything yet.
+-        if dirty.get() || saves.pending() > 0 {
++        if (dirty.get() || saves.pending() > 0) && !crate::easywar_host::present() {
+             e.prevent_default();
+             // Older browsers ask only when `returnValue` is set.
+             e.set_return_value("unsaved changes");
+@@ -392,6 +402,10 @@
+ /// Trigger a browser save dialog or download of `bytes` named after the last component of `path`.
+ fn download(saves: &AsyncSaves, ctx: &egui::Context, path: &str, bytes: &[u8]) -> Result<(), String> {
+     let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "document".into());
++    // EasyDoc: saves and exports go to the EasyWAR host's save dialog when it is present.
++    if let Some(result) = crate::easywar_host::save(saves, ctx, &name, bytes) {
++        return result;
++    }
+     let window = web_sys::window().ok_or("no window")?;
+ 
+     // On browsers supporting the File System Access API (Chromium: Chrome, Edge, etc.),

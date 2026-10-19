@@ -1,0 +1,1939 @@
+# Український інтерфейс EasySlide: «англійський рядок<TAB>переклад» (формат — script/easyslide/l10n.mjs).
+easyslideHost.{} is missing	
+no window	
+no document	
+not an anchor	
+no body	
+<p>DeckCraft failed to start: {}</p><p>A browser with WebGPU or WebGL2 is required.</p>	<p>Не вдалося запустити DeckCraft: {}</p><p>Потрібен браузер із підтримкою WebGPU або WebGL2.</p>
+Animation Styles	Стилі анімації
+Animation	Анімація
+no slide	немає слайда
+no such animation	такої анімації немає
+Add Animation	Додати анімацію
+Advanced Animation	Розширена анімація
+Remove Animation	Видалити анімацію
+Reorder Animation	Змінити порядок анімації
+Timing	Час
+no such slide	такого слайда немає
+select an animated shape first	спершу виділіть фігуру з анімацією
+shape {} has no animations to copy	фігура {} не має анімацій для копіювання
+pick animations with the Animation Painter first	спершу візьміть анімації інструментом «Анімація за зразком»
+no target shapes selected	не виділено цільових фігур
+Effect Options	Параметри ефектів
+Remove All Animations	Видалити всі анімації
+Animation Painter	Анімація за зразком
+Apply Animation	Застосувати анімацію
+Animation Gallery	Колекція анімацій
+Animations on Slide	Анімації на слайді
+no such shape	такої фігури немає
+Add Guide	Додати напрямну
+select two or more objects on the slide	виділіть на слайді два або більше об'єктів
+nothing to group	немає чого групувати
+Group {}	Група {}
+Move Guide	Перемістити напрямну
+Delete Guide	Видалити напрямну
+nothing to regroup	немає чого перегруповувати
+Reorder Objects	Змінити порядок об'єктів
+too many guides	забагато напрямних
+no such guide	такої напрямної немає
+Align or Distribute	Вирівняти або розподілити
+Distribute	Розподілити
+Rotate or Flip	Обернути або віддзеркалити
+Nudge	Зсунути
+this picture's format can't be processed	формат цього рисунка не вдається обробити
+unknown effect	невідомий ефект
+the processed picture couldn't be stored	не вдалося зберегти оброблений рисунок
+select a picture	виділіть рисунок
+the picture's data is missing	дані рисунка відсутні
+Pencil Grayscale	Олівець (відтінки сірого)
+Line Drawing	Штриховий малюнок
+Film Grain	Зернистість плівки
+Cutout	Аплікація
+Glow Edges	Світіння країв
+Photocopy	Фотокопія
+Artistic Effects	Художні ефекти
+Adjust	Змінення
+no background found: select a picture whose edges show its background	тло не знайдено: виділіть рисунок, краї якого показують його тло
+select a picture, or pass all: true	виділіть рисунок або передайте all: true
+no handout master	немає зразка роздаткового матеріалу
+Close Master View	Закрити режим зразка
+open View ▸ Notes Master first	спершу відкрийте Подання ▸ Зразок нотаток
+Insert Layout	Вставити макет
+Edit Master	Змінити зразок
+Slide Image Placeholder 3	Заповнювач зображення слайда 3
+Click to edit Master text styles	Клацніть, щоб змінити стилі зразка тексту
+Delete Layout	Видалити макет
+Notes Placeholder 4	Заповнювач нотаток 4
+Insert Placeholder	Вставити заповнювач
+Master Layout	Макет зразка
+no notes master	немає зразка нотаток
+Custom Layout	Настроюваний макет
+Layout Placeholders	Заповнювачі макета
+no such layout	такого макета немає
+slides use this layout	цей макет використовують слайди
+a master needs at least one layout	зразок повинен мати принаймні один макет
+select a layout in Slide Master view	виділіть макет у режимі зразка слайдів
+no such master	такого зразка немає
+open Slide Master view	відкрийте режим зразка слайдів
+give title or footers	укажіть заголовок або нижні колонтитули
+no master	немає зразка
+not a theme or PowerPoint file	це не файл теми чи PowerPoint
+name is empty	ім'я порожнє
+no variant {}; 0..{}	немає варіанта {}; 0..{}
+Theme Gallery	Колекція тем
+Variants	Варіанти
+Variant Gallery	Колекція варіантів
+Customize	Настроїти
+Hide Background Graphics	Приховати графіку тла
+picture options need a picture background	параметри рисунка потребують тла з рисунком
+transparency needs a solid or picture background	прозорість потребує суцільного тла або тла з рисунком
+Header and Footer…	Колонтитули…
+copy applies to slides	копіювання застосовується до слайдів
+Master Views	Режими зразків
+Handout Placeholders	Заповнювачі роздаткового матеріалу
+Placeholders	Заповнювачі
+open View ▸ Handout Master first	спершу відкрийте Подання ▸ Зразок роздаткового матеріалу
+Header Placeholder	Заповнювач верхнього колонтитула
+Date Placeholder	Заповнювач дати
+Footer Placeholder	Заповнювач нижнього колонтитула
+Slide Number Placeholder	Заповнювач номера слайда
+Notes Placeholders	Заповнювачі нотаток
+Clipboard	Буфер обміну
+no text box	немає текстового поля
+Deselect	Скасувати виділення
+Select Objects	Виділити об'єкти
+-lt	
+-ea	
+-cs	
+copy shapes first to paste them as a picture	спершу скопіюйте фігури, щоб вставити їх як рисунок
+nothing to draw	немає чого малювати
+the shapes could not be drawn	не вдалося намалювати фігури
+ copy	 копія
+scope must be \"slides\"	scope має бути «slides»
+the slide list is not shown while editing a master	список слайдів не показується під час редагування зразка
+a template is not a blank presentation	шаблон не є пустою презентацією
+Starter Templates	Початкові шаблони
+use file.openBytes in the browser	у браузері використовуйте file.openBytes
+It was opened as a repaired copy; save it under a new name to keep the original file.	Його відкрито як відновлену копію; збережіть її під новим ім'ям, щоб зберегти вихідний файл.
+Open Data	Відкрити дані
+orientation “{}” isn't portrait or landscape	орієнтація «{}» не є ні книжковою, ні альбомною
+paper “{}” isn't one of {}	розмір паперу «{}» не входить до списку: {}
+“{}” isn't a valid slide range: use numbers and ranges such as 1-3, 5	«{}» — неприпустимий діапазон слайдів: використовуйте номери й діапазони, як-от 1-3, 5
+Save as Template…	Зберегти як шаблон…
+the presentation has {} slides; “{}” is outside them	презентація має слайдів: {}; «{}» виходить за їхні межі
+Save to Data	Зберегти в дані
+.png	
+.jpg	
+.jpeg	
+.pdf	
+.gif	
+Render Slide	Відобразити слайд
+Color At	Колір у точці
+the point is outside the slide	точка поза межами слайда
+a transparent background is for PNG export, not {}	прозоре тло доступне лише для експорту в PNG, а не в {}
+Slide	Слайд
+no recovery folder is set	папку відновлення не задано
+Save AutoRecover Information	Зберегти дані для автовідновлення
+Recovered Presentations	Відновлені презентації
+Open Recovered Presentations	Відкрити відновлені презентації
+Discard Recovered Presentations	Відхилити відновлені презентації
+deckcraft-write-file-{}-{}	
+Next Window	Наступне вікно
+Window	Вікно
+no temporary file may be left behind: {}	
+no matches	збігів не знайдено
+spacing kind must be pts or pct	тип інтервалу має бути pts або pct
+Text Transform	Перетворення тексту
+pick formatting with the Format Painter first	спершу візьміть форматування інструментом «Формат за зразком»
+font file larger than 64 MB	файл шрифту більший за 64 МБ
+not a font DeckCraft can read (or already added)	це не шрифт, який DeckCraft може прочитати (або його вже додано)
+not editing text	текст не редагується
+tab stop {} must be an object	позиція табуляції {} має бути об'єктом
+tab stop {} align must be l, ctr, r or dec	вирівнювання позиції табуляції {} має бути l, ctr, r або dec
+Add Font	Додати шрифт
+Autofit	Автодобір
+Wrap Text in Shape	Переносити текст у фігурі
+Text Box Margins	Поля текстового поля
+Format Painter	Формат за зразком
+Formatting State	Стан форматування
+Font Size	Розмір шрифту
+Text Transparency	Прозорість тексту
+WordArt Styles	Стилі WordArt
+at most 8 adjust values	не більше 8 значень коригування
+adjust values must be finite numbers	значення коригування мають бути скінченними числами
+Arial	
+Text Shadow	Тінь тексту
+Apply Design Idea	Застосувати ідею для оформлення
+Designer	Ідеї для оформлення
+Full-bleed picture, title on a band	Рисунок на весь слайд, заголовок на смузі
+Picture left, text right	Рисунок ліворуч, текст праворуч
+Picture right, text left	Рисунок праворуч, текст ліворуч
+Framed picture beside the title	Рисунок у рамці поруч із заголовком
+Title column beside the text	Стовпець заголовка поруч із текстом
+Centred title over the text	Заголовок по центру над текстом
+Text above, title at the foot	Текст угорі, заголовок унизу
+Change Chart Type	Змінити тип діаграми
+Edit Data	Редагувати дані
+Data	Дані
+the picture was not inserted	рисунок не вставлено
+Chart Elements	Елементи діаграми
+Chart Layouts	Макети діаграм
+Series	Ряд
+Your text here	Ваш текст
+Action Buttons	Кнопки дій
+this format isn't available in that language	цей формат недоступний для цієї мови
+place the insertion point in text first	спершу встановіть курсор у тексті
+3D Model	3D-модель
+not a chart	це не діаграма
+Shape	Фігура
+binSize must be a positive number	binSize має бути додатним числом
+Illustrations	Ілюстрації
+Connector	
+rect needs a positive width and height	rect потребує додатних ширини й висоти
+.ogv	
+.aac	
+.mov	
+Icon Gallery	Колекція значків
+.mka	
+.weba	
+.mkv	
+Shape Gallery	Колекція фігур
+.wmv	
+.asf	
+.svg	
+Images	Зображення
+that photo album is no longer in this presentation	цього фотоальбому вже немає в презентації
+Tables	Таблиці
+Chart…	Діаграма…
+add at least one picture or text box	додайте принаймні один рисунок або текстове поле
+a photo album holds at most 48 pictures or text boxes	фотоальбом може містити не більше 48 рисунків або текстових полів
+each album item must be a picture or a text box	кожен елемент альбому має бути рисунком або текстовим полем
+a text box needs some text	текстове поле має містити текст
+text is longer than 400 characters	текст довший за 400 символів
+the album is larger than 64 MB	альбом більший за 64 МБ
+Date & Time	Дата й час
+#FFFFFF	
+Symbols	Символи
+deckcraft-album:	
+deckcraft-album:{};layout={};frame={};captions={};gray={};theme={}	
+Links	Посилання
+no slide to mark	немає слайда для позначення
+this slide is not part of a photo album	цей слайд не належить до фотоальбому
+the media data is missing	дані медіафайлу відсутні
+only videos have poster frames	кадр-постер є лише у відео
+no frame could be decoded there	у цьому місці не вдалося декодувати кадр
+poster{}.png	
+not an animated GIF	це не анімований GIF
+no animated GIF on this slide	на цьому слайді немає анімованого GIF
+Stop	Зупинити
+Seek	Перейти до позиції
+Media Info	Відомості про медіафайл
+Poster Frame	Кадр-постер
+Video Format	Формат відео
+Play/Pause GIF	Відтворити/призупинити GIF
+not a media shape	це не медіаоб'єкт
+no media	немає медіафайлу
+no audio or video on this slide	на цьому слайді немає аудіо чи відео
+Union	Об'єднати
+Combine	Поєднати
+Fragment	Фрагментувати
+Intersect	Перетнути
+Subtract	Відняти
+select two or more shapes (not lines, groups, tables or charts)	виділіть дві або більше фігур (не лінії, групи, таблиці чи діаграми)
+Freeform {}	Полілінія {}
+Insert Shapes	Вставлення фігур
+no slides	немає слайдів
+nothing selected	нічого не виділено
+select two or more objects	виділіть два або більше об'єктів
+no text insertion point	немає курсора в тексті
+select text or a shape	виділіть текст або фігуру
+nothing to undo	немає чого скасовувати
+nothing to redo	немає чого повторювати
+the presentation has used every object id and can hold no more	презентація використала всі ідентифікатори об'єктів і більше не може їх вмістити
+no shapes selected	фігури не виділено
+the object is locked	об'єкт заблоковано
+base64,	
+Acts on the selected text or shapes.	Діє на виділений текст або фігури.
+Acts on {}, else on the selected shapes.	Діє на {}, інакше — на виділені фігури.
+Acts on the selected shapes.	Діє на виділені фігури.
+Acts on two or more shapes: {}, else the selected ones.	Діє на дві або більше фігур: {}, інакше — на виділені.
+Acts on two or more selected shapes.	Діє на дві або більше виділених фігур.
+Acts on the text being edited; text.edit starts editing a shape's text.	Діє на текст, що редагується; text.edit починає редагування тексту фігури.
+Picture Styles	Стилі рисунків
+Picture Style Gallery	Колекція стилів рисунків
+Simple Frame, White	Проста рамка, біла
+Beveled Matte, White	Скошена матова рамка, біла
+Metal Frame	Металева рамка
+Drop Shadow Rectangle	Прямокутник із тінню
+Rounded Diagonal Corner, White	Округлені протилежні кути, білі
+Snip Diagonal Corner, White	Зрізані протилежні кути, білі
+Moderate Frame, White	Помірна рамка, біла
+Rotated, White	Повернута, біла
+Perspective Shadow, White	Перспективна тінь, біла
+Soft Edge Rectangle	Прямокутник зі згладженими краями
+Double Frame, Black	Подвійна рамка, чорна
+Thick Matte, Black	Товста матова рамка, чорна
+Simple Frame, Black	Проста рамка, чорна
+Beveled Oval, Black	Скошений овал, чорний
+Compound Frame, Black	Складена рамка, чорна
+Center Shadow Rectangle	Прямокутник із центральною тінню
+Soft Edge Oval	Овал зі згладженими краями
+Reflected Rounded Rectangle	Округлений прямокутник із відбиттям
+Reflected Bevel, White	Рельєф із відбиттям, білий
+Metal Rounded Rectangle	Металевий округлений прямокутник
+Moderate Frame, Black	Помірна рамка, чорна
+Bevel Rectangle	Рельєфний прямокутник
+Bevel Perspective	Рельєфна перспектива
+Metal Oval	Металевий овал
+Edit Shape	Змінити фігуру
+Points	Точки
+Move Point	Перемістити точку
+Add Point	Додати точку
+select one shape	виділіть одну фігуру
+a shape in a group can't have its points edited; ungroup it first	точки фігури в групі не можна змінювати; спершу розгрупуйте її
+only a shape with an outline has points to edit	точки для змінення має лише фігура з контуром
+the shape is locked	фігуру заблоковано
+Point Type	Тип точки
+select a shape	виділіть фігуру
+the shape has no position	фігура не має розташування
+not a freeform	це не полілінія
+no such path	такого контуру немає
+no such point	такої точки немає
+Move Handle	Перемістити маркер
+no such segment	такого сегмента немає
+the first point ends no segment	перша точка не завершує жодного сегмента
+no segment ends at that point	у цій точці не закінчується жоден сегмент
+an outline keeps at least two points	контур має містити принаймні дві точки
+that side of the point has no handle	з цього боку точки немає маркера
+Recolor Gallery	Колекція перефарбування
+Text color 2	Колір тексту 2
+Accent color 1	Колір акценту 1
+Accent color 2	Колір акценту 2
+Accent color 3	Колір акценту 3
+Accent color 4	Колір акценту 4
+Accent color 5	Колір акценту 5
+Accent color 6	Колір акценту 6
+No Recolor	Без перефарбування
+Sepia	Сепія
+Washout	Підкладка
+Black and White: 25%	Чорно-білий: 25%
+Black and White: 50%	Чорно-білий: 50%
+Black and White: 75%	Чорно-білий: 75%
+no such comment	такої примітки немає
+Reply	Відповісти
+Delete Comment	Видалити примітку
+Resolve Thread	Позначити обговорення як розв'язане
+no comments	немає приміток
+Next Comment	Наступна примітка
+no more comments	більше немає приміток
+Missing slide title	Відсутній заголовок слайда
+Missing alternative text	Відсутній замінний текст
+Hard-to-read text contrast ({}:1)	Важкочитабельний контраст тексту ({}:1)
+Previous Comment	Попередня примітка
+Check Accessibility	Перевірити доступність
+Accessibility	Спеціальні можливості
+Proofing	Правопис
+Change Spelling	Виправити правопис
+the word isn't there	цього слова там немає
+no shape	немає фігури
+Spelling Dictionary	Словник правопису
+Insert Synonym	Вставити синонім
+Accept Revision	Прийняти зміну
+too long	задовгий
+not comparing	порівняння не виконується
+Start Slide Show	Почати показ слайдів
+Revised	Змінена
+no such revision	такої зміни немає
+Set Up Slide Show…	Налаштування показу слайдів…
+Set Up	Настроювання
+Custom Slide Show	Довільний показ слайдів
+Selection Pane	Область виділення
+Quick Styles	Експрес-стилі
+Drawing	Малювання
+both shapes need connection sites (lines and groups have none)	обидві фігури мають мати точки з'єднання (лінії та групи їх не мають)
+insert failed	не вдалося вставити
+no such line	такої лінії немає
+need at least two points	потрібно щонайменше дві точки
+identical geometry is not an undo step	
+ink gone	рукописний ввід зник
+not ink	це не рукописний ввід
+Straight Connector	Пряма сполучна лінія
+Isosceles Triangle	Рівнобедрений трикутник
+Connect Shapes	З'єднати фігури
+Freeform	Довільна форма
+Ink to Shape	Рукописний ввід у фігуру
+Connection Sites	Точки з'єднання
+Move	Перемістити
+the shape has no size of its own	фігура не має власного розміру
+Position and Size	Розташування й розмір
+Flip	Віддзеркалити
+Adjust Shape	Налаштувати фігуру
+Smooth Corners	Згладжені кути
+no shadow preset	немає готової тіні
+Shape Styles	Стилі фігур
+no layout {}	немає макета {}
+Move Slide	Перемістити слайд
+Go to Slide	Перейти до слайда
+no slide {}	немає слайда {}
+Select Slides	Виділити слайди
+Rename Slide	Перейменувати слайд
+Untitled Section	Розділ без назви
+Default Section	Розділ за замовчуванням
+no section	немає розділу
+no such section	такого розділу немає
+Move Section	Перемістити розділ
+Slides From	Слайди з
+Gradient Range - Accent 3	Градієнтний діапазон – акцент 3
+Gradient Range - Accent 4	Градієнтний діапазон – акцент 4
+Gradient Range - Accent 5	Градієнтний діапазон – акцент 5
+Gradient Range - Accent 6	Градієнтний діапазон – акцент 6
+SmartArt preview	Попередній перегляд SmartArt
+Create Graphic	Створення графіки
+select a SmartArt graphic	виділіть графічний елемент SmartArt
+not a SmartArt graphic	це не графічний елемент SmartArt
+index is required	потрібен індекс
+Edit SmartArt Text	Редагувати текст SmartArt
+SmartArt ({})	SmartArt ({})
+no such node	такого вузла немає
+already at the top level	уже на найвищому рівні
+nothing above to demote under	вище немає елемента, під який можна понизити
+select a text box	виділіть текстове поле
+select a text box on the slide	виділіть текстове поле на слайді
+the shape has no text	фігура не містить тексту
+the graphic isn't at the top of the slide	графічного елемента немає на верхньому рівні слайда
+Remove Shape	Видалити фігуру
+unknown style	невідомий стиль
+unknown colours	невідомі кольори
+unknown layout	невідомий макет
+Change Layout	Змінити макет
+Insert Picture in SmartArt	Вставити рисунок у SmartArt
+Vertical Bullet List	Вертикальний маркований список
+Basic Block List	Простий блоковий список
+Horizontal Bullet List	Горизонтальний маркований список
+Basic Chevron Process	Простий процес із шевронами
+Vertical Process	Вертикальний процес
+Step Up Process	Процес зі сходинками вгору
+Block Cycle	Блоковий цикл
+Basic Radial	Проста радіальна
+Basic Pyramid	Проста піраміда
+Inverted Pyramid	Обернена піраміда
+Basic Matrix	Проста матриця
+Titled Matrix	Матриця із заголовком
+Vertical Picture List	Вертикальний список рисунків
+Grad	
+Picture Caption List	Список рисунків із підписами
+<a:scene3d><a:camera prst=\"{}\"/><a:lightRig rig=\"threePt\" dir=\"t\"/></a:scene3d><a:sp3d prstMaterial=\"matte\"><a:bevelT w=\"{}\" h=\"{}\" prst=\"{}\"/></a:sp3d>	
+Picture Accent Process	Процес з акцентами-рисунками
+Horizontal Picture List	Горизонтальний список рисунків
+Basic Timeline	Проста часова шкала
+Basic Venn	Проста діаграма Венна
+Basic Target	Проста мішень
+Text Cycle	Текстовий цикл
+Continuous Cycle	Неперервний цикл
+Horizontal Hierarchy	Горизонтальна ієрархія
+Grid Matrix	Сітчаста матриця
+Gear	Шестерні
+Funnel	Лійка
+Segmented Cycle	Сегментований цикл
+Multidirectional Cycle	Різнонапрямлений цикл
+SmartArt shape	Фігура SmartArt
+SmartArt arrow	Стрілка SmartArt
+Organization Chart	Організаційна діаграма
+SmartArt connector	Сполучна лінія SmartArt
+Half Circle Organization Chart	Напівкругла організаційна діаграма
+Cycle Matrix	Циклічна матриця
+Segmented Pyramid	Сегментована піраміда
+Basic Pie	Проста кругова
+Name and Title Organization Chart	Організаційна діаграма з іменами й посадами
+Vertical Box List	Вертикальний список прямокутників
+Trapezoid List	Список трапецій
+Table List	Табличний список
+SmartArt picture	Рисунок SmartArt
+Accent Process	Процес з акцентами
+Continuous Block Process	Неперервний блоковий процес
+Basic Bending Process	Простий зигзагоподібний процес
+Linear Venn	Лінійна діаграма Венна
+Stacked Venn	Накладена діаграма Венна
+Nested Target	Вкладена мішень
+Simple Fill	Проста заливка
+Subtle Effect	Легкий ефект
+Intense Effect	Яскравий ефект
+White Outline	Білий контур
+Polished	Полірований
+Inset	Утиснений
+Cartoon	Мультяшний
+Powder	Пудра
+Brick Scene	Цегляна сцена
+Colorful	Кольоровий
+Colorful Range - Accent Colors 2 to 3	Кольоровий діапазон – кольори акцентів 2–3
+Colorful Range - Accent Colors 3 to 4	Кольоровий діапазон – кольори акцентів 3–4
+Colorful Range - Accent Colors 4 to 5	Кольоровий діапазон – кольори акцентів 4–5
+Colorful Range - Accent Colors 5 to 6	Кольоровий діапазон – кольори акцентів 5–6
+Gradient Range - Accent 1	Градієнтний діапазон – акцент 1
+Gradient Range - Accent 2	Градієнтний діапазон – акцент 2
+Select Cells	Виділити клітинки
+Insert Above	Вставити вище
+Table Layout	Макет
+Rows & Columns	Рядки й стовпці
+Insert Below	Вставити нижче
+Insert Left	Вставити ліворуч
+Insert Right	Вставити праворуч
+select a table	виділіть таблицю
+not a table	це не таблиця
+can't delete the last row	не можна видалити останній рядок
+can't delete the last column	не можна видалити останній стовпець
+Merge Cells	Об'єднати клітинки
+Merge	Об'єднання
+can't merge those cells	ці клітинки не можна об'єднати
+that cell isn't merged	ця клітинка не об'єднана
+Split Cells	Розділити клітинки
+unknown dash {}; one of {}	невідомий тип штриха {}; допустимі: {}
+Table Styles	Стилі таблиць
+unknown preset {}; one of normal, none, narrow, wide	невідомий шаблон {}; допустимі: normal, none, narrow, wide
+unknown anchor {}; one of top, middle, bottom	невідома прив'язка {}; допустимі: top, middle, bottom
+Table Style Options	Параметри стилів таблиць
+no table there	там немає таблиці
+the line doesn't divide any cell	лінія не ділить жодної клітинки
+no border to erase there	там немає межі, яку можна стерти
+Draw Borders	Рисування меж
+Align Cell Text	Вирівняти текст у клітинці
+Cell Size	Розмір клітинки
+the text being edited is gone	текст, що редагувався, зник
+Hello مرحبا	
+Hello	
+Comic Neue	
+comic neue	
+Lato	
+Nope Sans	
++mn-lt	
+a\nb	
+Fonts in Presentation	Шрифти в презентації
+Replace Fonts	Замінити шрифти
+Stop Editing Text	Завершити редагування тексту
+AutoCorrect Options	Параметри автовиправлення
+Tools	Знаряддя
+select a shape with text	виділіть фігуру з текстом
+no such cell	такої клітинки немає
+this object doesn't hold text	цей об'єкт не містить тексту
+Type Text	Ввести текст
+Compose Text	Скласти текст
+a lot	
+don't	
+doesn't	
+didn't	
+I've	
+you're	
+Commit Composition	Підтвердити введення
+(tm)	
+Delete Text	Видалити текст
+Move Insertion Point	Перемістити точку вставлення
+Select Text	Виділити текст
+Select All Text	Виділити весь текст
+Select Word	Виділити слово
+Select Paragraph	Виділити абзац
+the list is full	список заповнено
+Set Text	Задати текст
+Get Text	Отримати текст
+<a:scene3d><a:camera prst=\"{}\"	
+><a:rot lat=\"{}\" lon=\"{}\" rev=\"{}\"/></a:camera>	
+<a:lightRig rig=\"{}\" dir=\"{}\"/></a:scene3d><a:sp3d	
+ extrusionH=\"{}\"	
+ contourW=\"{}\"	
+ prstMaterial=\"{}\"	
+<a:{} w=\"{}\" h=\"{}\" prst=\"{}\"/>	
+built-in sound failed	не вдалося завантажити вбудований звук
+Transition	Перехід
+Transition to This Slide	Перехід до цього слайда
+Sound	Звук
+Apply To All	Застосувати до всіх
+Transition Gallery	Колекція переходів
+choose the slides (or sections) to zoom to	виберіть слайди (або розділи) для масштабування
+zoom-{}.png	
+Summary	Підсумок
+there is no {} {} (indices count from 0)	немає {} {} (індекси рахуються від 0)
+a GIF can have at most {} slides	GIF може містити щонайбільше {} слайдів
+no slide {} (the presentation has {})	немає слайда {} (у презентації їх {})
+no slides to export (they are all hidden, or the presentation is empty)	немає слайдів для експорту (усі вони приховані або презентація порожня)
+a GIF can have at most {} slides; choose a range	GIF може містити щонайбільше {} слайдів; виберіть діапазон
+GIF encoding failed: {}	не вдалося закодувати GIF: {}
+GIF export: slide {} has no pixels	Експорт GIF: слайд {} не має пікселів
+Refresh	Оновити
+Check	Позначка
+Marks	Позначки
+Plus	Плюс
+Minus	Мінус
+Star	Зірка
+Heart	Серце
+Flag	Прапор
+Bookmark	Закладка
+Award	Нагорода
+Thumbs up	Великий палець угору
+Check circle	Коло з позначкою
+Warning	Попередження
+User	Користувач
+People	Люди
+Users	Користувачі
+Hand	Рука
+Calendar	Календар
+Time	Час
+Clock	Годинник
+Hourglass	Пісковий годинник
+Timer	Таймер
+Mail	Пошта
+Communication	Спілкування
+Phone	Телефон
+Message	Повідомлення
+Bell	Дзвоник
+Megaphone	Мегафон
+Mention	Згадка
+Column chart	Гістограма
+Charts	Діаграми
+Bar chart	Лінійчата діаграма
+Pie chart	Кругова діаграма
+Trend	Тенденція
+Target	Мішень
+Idea	Ідея
+Files	Файли
+Folder	Папка
+Document	Документ
+Attachment	Вкладення
+Share	Поділитися
+Places	Місця
+Pin	Шпилька
+Globe	Глобус
+Building	Будівля
+Compass	Компас
+Briefcase	Портфель
+Arrow up	Стрілка вгору
+Camera	Камера
+Clapperboard	Кінохлопавка
+Music	Музика
+Objects	Об'єкти
+Search	Пошук
+Alert	Сповіщення
+Arrow down	Стрілка вниз
+Key	Ключ
+Bolt	Блискавка
+Sun	Сонце
+Moon	Місяць
+Cloud	Хмара
+Arrow left	Стрілка ліворуч
+Arrow right	Стрілка праворуч
+Chevron	Шеврон
+Start: {}s, End: {}s	Початок: {} с, кінець: {} с
+Full Page Slides	Слайди на всю сторінку
+Notes Pages	Сторінки нотаток
+Handouts (1 slide per page)	Роздатковий матеріал (1 слайд на сторінці)
+Handouts (2 slides per page)	Роздатковий матеріал (2 слайди на сторінці)
+Handouts (3 slides per page)	Роздатковий матеріал (3 слайди на сторінці)
+Handouts (4 slides per page)	Роздатковий матеріал (4 слайди на сторінці)
+Handouts (6 slides per page)	Роздатковий матеріал (6 слайдів на сторінці)
+Handouts (9 slides per page)	Роздатковий матеріал (9 слайдів на сторінці)
+DeckCraft prints through a PDF: it opens in your PDF viewer, where you choose the printer.	DeckCraft друкує через PDF: файл відкриється в засобі перегляду PDF, де ви виберете принтер.
+DeckCraft prints through a PDF: it downloads, ready to print from your browser or PDF viewer.	DeckCraft друкує через PDF: файл завантажиться, і його можна буде надрукувати з браузера або засобу перегляду PDF.
+Settings	Налаштування
+Print All Slides	Друкувати всі слайди
+Print Current Slide	Друкувати поточний слайд
+Custom Range	Настроюваний діапазон
+Slides:	Слайди:
+Letter	
+Landscape Orientation	Альбомна орієнтація
+Portrait Orientation	Книжкова орієнтація
+Save	Зберегти
+Print Hidden Slides	Друкувати приховані слайди
+Frame Slides	Рамки слайдів
+Edit Header & Footer	Змінити колонтитули
+Close	Закрити
+Nothing to print: every slide in the range is hidden.	Немає що друкувати: усі слайди в діапазоні приховано.
+Previous Page	Попередня сторінка
+Next Page	Наступна сторінка
+Create PDF Document	Створити документ PDF
+Create Handouts	Створити роздатковий матеріал
+Change File Type	Змінити тип файлу
+Create a PDF Document	Створення документа PDF
+Keeps the layout, fonts and pictures	Зберігає макет, шрифти й рисунки
+Opens on any device with a PDF viewer	Відкривається на будь-якому пристрої з переглядачем PDF
+The presentation keeps its own file	Презентація зберігає власний файл
+Include hidden slides	Включити приховані слайди
+Create PDF	Створити PDF
+Several slides on each page of a PDF	Кілька слайдів на кожній сторінці PDF
+Three a page leaves lines for notes	Три на сторінці залишають рядки для нотаток
+Print them for your audience	Роздрукуйте їх для своєї аудиторії
+Transparent background	Прозоре тло
+Leave the slide background out: only what is on the slide is drawn	Не включати тло слайда: малюється лише вміст слайда
+Appearance	Вигляд
+Dark	Темний
+Light	Світлий
+User Information	Відомості про користувача
+DeckCraft has no accounts: there is nothing to sign in to, and your presentations stay on your device.	У DeckCraft немає облікових записів: входити нікуди не потрібно, а ваші презентації залишаються на вашому пристрої.
+Product Information	Відомості про продукт
+Open source under MIT OR Apache-2.0. Not affiliated with Microsoft.	Відкритий код за ліцензією MIT OR Apache-2.0. Не пов'язано з Microsoft.
+About DeckCraft	Про DeckCraft
+The version, the people and models who built it, and where to find us.	Версія, люди й моделі, які його створили, і де нас знайти.
+Join our community on Discord	Приєднуйтеся до нашої спільноти в Discord
+Source on GitHub	Вихідний код на GitHub
+PowerPoint Presentation (*.pptx)	Презентація PowerPoint (*.pptx)
+Opens in PowerPoint and other presentation apps	Відкривається в PowerPoint та інших програмах для презентацій
+DeckCraft Presentation (*.deckcraft)	Презентація DeckCraft (*.deckcraft)
+DeckCraft's own format: everything is kept	Власний формат DeckCraft: зберігається все
+PDF (*.pdf)	PDF (*.pdf)
+A fixed copy that keeps its layout on any device	Незмінна копія, що зберігає макет на будь-якому пристрої
+Outline (*.txt)	Структура (*.txt)
+The slide titles and bullet text as plain text	Заголовки слайдів і текст маркованих списків як звичайний текст
+PNG Picture (*.png)	Рисунок PNG (*.png)
+The current slide as a picture	Поточний слайд як рисунок
+JPEG Picture (*.jpg)	Рисунок JPEG (*.jpg)
+The current slide as a compressed picture	Поточний слайд як стиснутий рисунок
+Title	Назва
+Add a title	Додайте назву
+Subject	Тема
+Specify the subject	Укажіть тему
+Tags	Теги
+Add a tag	Додайте тег
+Categories	Категорії
+Add a category	Додайте категорію
+Company	Компанія
+Specify the company	Укажіть компанію
+Comments	Примітки
+Add comments	Додайте примітки
+Author	Автор
+Add an author	Додайте автора
+Back	Назад
+Back (Esc)	Назад (Esc)
+sample deck northern lights	
+Blank Presentation	Пуста презентація
+Sample deck: Northern Lights	Зразок презентації: Північне сяйво
+Presentations you open show up here. Use Open to browse for one.	Тут з'являтимуться презентації, які ви відкриваєте. Щоб знайти презентацію, скористайтеся командою «Відкрити».
+No recent presentations match “{}”.	Немає останніх презентацій, що відповідають запиту «{}».
+(missing)	(відсутній)
+Remove from Recent	Видалити з останніх
+Home	Основне
+New	Створити
+Open	Відкрити
+More themes	Інші теми
+Info	Відомості
+Templates	Шаблони
+More templates	Інші шаблони
+Save As	Зберегти як
+Recent	Останні
+Search for a file	Пошук файлу
+Print	Друк
+More presentations	Інші презентації
+Export	Експорт
+Join the ArtCraft community on Discord	Приєднуйтеся до спільноти ArtCraft у Discord
+Account	Обліковий запис
+Search for themes and templates	Пошук тем і шаблонів
+No themes or templates match “{}”.	Немає тем або шаблонів, що відповідають запиту «{}».
+Browse	Огляд
+Open a presentation from a folder (Ctrl+O)	Відкрити презентацію з теки (Ctrl+O)
+Recover Unsaved Presentations	Відновити незбережені презентації
+There are no unsaved presentations to recover	Немає незбережених презентацій для відновлення
+Presentations	Презентації
+No presentation is open.	Жодну презентацію не відкрито.
+Not saved yet	Ще не збережено
+Copy path	Копіювати шлях
+Copied the path	Шлях скопійовано
+Open file location	Відкрити розташування файлу
+Check for Issues	Перевірити на наявність проблем
+Inspect Presentation	Перевірити презентацію
+Before you share it, check the presentation for things people with disabilities might find hard to read.	Перш ніж надати спільний доступ, перевірте, чи немає в презентації вмісту, який людям з інвалідністю може бути важко прочитати.
+There are no unsaved changes.	Незбережених змін немає.
+This presentation has unsaved changes. Revert goes back to the saved file.	Ця презентація має незбережені зміни. Команда «Повернутися» відновлює збережений файл.
+This presentation has never been saved.	Цю презентацію ще жодного разу не збережено.
+Revert	Повернутися
+Manage Presentation	Керування презентацією
+Properties	Властивості
+Size	Розмір
+Slides	Слайди
+Hidden slides	Приховані слайди
+Location	Розташування
+Download	Завантажити
+Download the file	Завантажити файл
+Choose where to save	Вибрати, куди зберегти
+Click to add first slide	Клацніть, щоб додати перший слайд
+Smooth Point	Гладка точка
+Straight Point	Пряма точка
+Corner Point	Кутова точка
+Delete Point	Видалити точку
+Exit Edit Points	Вийти з режиму змінення точок
+Delete Repeated Word	Видалити повторене слово
+(no spelling suggestions)	(немає варіантів правопису)
+Ignore All	Пропустити все
+Add to Dictionary	Додати до словника
+Cut	Вирізати
+Copy	Копіювати
+Paste	Вставити
+Paragraph…	Абзац…
+Bullets	Маркери
+Numbering	Нумерація
+Link…	Посилання…
+Format Shape…	Формат фігури…
+Edit Text	Змінити текст
+Edit Points	Змінити точки
+Font…	Шрифт…
+Bring to Front	На передній план
+Bring Forward	Перемістити вперед
+Send to Back	На задній план
+Send Backward	Перемістити назад
+Group	Згрупувати
+Ungroup	Розгрупувати
+Unlock	Розблокувати
+Lock	Заблокувати
+Change Picture…	Змінити рисунок…
+Edit Alt Text…	Змінити замінний текст…
+Set as Default Shape	Зробити фігурою за замовчуванням
+Size and Position…	Розмір і розташування…
+Layout	Макет
+Grid and Guides	Сітка й напрямні
+Guides	Напрямні
+Add Vertical Guide	Додати вертикальну напрямну
+Add Horizontal Guide	Додати горизонтальну напрямну
+Reset Slide	Скинути слайд
+Format Background…	Формат тла…
+New Comment	Створити примітку
+Left Tab	Табуляція за лівим краєм
+Center Tab	Табуляція по центру
+Right Tab	Табуляція за правим краєм
+Decimal Tab	Десяткова табуляція
+ left of centre	 ліворуч від центру
+ right of centre	 праворуч від центру
+ above centre	 вище від центру
+ below centre	 нижче від центру
+ (centre)	 (центр)
+Number of columns:	Кількість стовпців:
+Number of rows:	Кількість рядків:
+Insert	Вставлення
+Slides sized for:	Розмір слайдів:
+Width (in):	Ширина (дюйми):
+Height (in):	Висота (дюйми):
+Orientation:	Орієнтація:
+Portrait	Книжкова
+Landscape	Альбомна
+Maximize content (else ensure fit)	Максимізувати вміст (інакше — забезпечити вміщення)
+Date and time	Дата й час
+  Fixed date (empty = update automatically):	  Фіксована дата (порожньо = оновлювати автоматично):
+Slide number	Номер слайда
+Footer	Нижній колонтитул
+  Footer text:	  Текст нижнього колонтитула:
+Don't show on title slide	Не показувати на титульному слайді
+Apply to All	Застосувати до всіх
+Apply	Застосувати
+Web Page or File	Веб-сторінка або файл
+This Document	Цей документ
+Email Address	Адреса електронної пошти
+Email address:	Адреса електронної пошти:
+Address:	Адреса:
+ScreenTip:	Підказка:
+Show type	Тип показу
+Presented by a speaker (full screen)	Керований доповідачем (повний екран)
+Browsed by an individual (window)	Керований користувачем (вікно)
+Browsed at a kiosk (full screen)	Автоматичний (повний екран)
+Loop continuously until 'Esc'	Безперервний цикл до натискання клавіші Esc
+Show without narration	Показ без дикторського тексту
+Show without animation	Показ без анімації
+Use timings, if present	Використовувати час показу слайдів, якщо є
+All slides	Усі слайди
+Do you want to save the changes you made to {}?	Зберегти зміни, внесені до {}?
+Your changes will be lost if you don't save them.	Якщо не зберегти зміни, їх буде втрачено.
+Don't Save	Не зберігати
+Do you want to save the changes you made to “{}”?	Зберегти зміни, внесені до «{}»?
+Start a conversation	Почніть обговорення
+Post	Опублікувати
+Bulleted	Маркований
+Numbered	Нумерований
+I. II. III.	
+i. ii. iii.	
+Custom character:	Власний символ:
+Start at:	Почати з:
+Size (% of text):	Розмір (% від тексту):
+Automatic	Автоматично
+Text	Текст
+Accent 1	Акцент 1
+Accent 2	Акцент 2
+Accent 3	Акцент 3
+Accent 4	Акцент 4
+Accent 5	Акцент 5
+Accent 6	Акцент 6
+Color:	Колір:
+Remove bullets and numbering	Видалити маркери й нумерацію
+Cancel	Скасувати
+Mouse Click	Клацання мишею
+Mouse Over	Наведення вказівника
+Action on mouse over	Дія під час наведення вказівника
+Action on click	Дія після клацання
+Hyperlink to:	Гіперпосилання на:
+Next Slide	Наступний слайд
+Previous Slide	Попередній слайд
+First Slide	Перший слайд
+Last Slide	Останній слайд
+Last Slide Viewed	Останній переглянутий слайд
+End Show	Завершити показ
+Custom Show…	Довільний показ…
+Slide…	Слайд…
+URL…	URL-адреса…
+This presentation has no custom shows (Slide Show ▸ Custom Slide Show).	У цій презентації немає довільних показів («Показ слайдів» ▸ «Довільний показ слайдів»).
+Run program:	Запустити програму:
+Program:	Програма:
+Play the shape's media	Відтворити мультимедіа фігури
+Highlight click	Виділяти під час клацання
+How would you describe this object and its context to someone who is blind or has low vision?	Як би ви описали цей об'єкт і його контекст людині, яка не бачить або має слабкий зір?
+Mark as decorative	Позначити як декоративний
+Paste or type an outline. Unindented lines become slide titles; tab-indented lines become bullets.	Вставте або введіть структуру. Рядки без відступу стають заголовками слайдів, а рядки з відступом табуляцією — маркованими пунктами.
+Export the presentation as:	Експортувати презентацію як:
+PDF document (.pdf)	Документ PDF (.pdf)
+PNG images (current slide)	Зображення PNG (поточний слайд)
+PNG images (all slides)	Зображення PNG (усі слайди)
+JPEG image (current slide)	Зображення JPEG (поточний слайд)
+PowerPoint Presentation (.pptx)	Презентація PowerPoint (.pptx)
+Outline (.txt)	Структура (.txt)
+Animated GIF (.gif)	Анімований GIF (.gif)
+Print layout:	Макет друку:
+Replace:	Замінити:
+With:	На:
+Font name	Назва шрифту
+Replace	Замінити
+“{}” isn't used explicitly.	«{}» явно не використовується.
+Replaced “{}” with “{}”.	«{}» замінено на «{}».
+Click a symbol to insert it at the insertion point.	Клацніть символ, щоб вставити його в місці курсора.
+Punctuation	Розділові знаки
+Currency	Валюти
+Math	Математичні
+Greek	Грецькі
+Arrows	Стрілки
+Shapes	Фігури
+Type an equation in linear form (e.g. a^2+b^2=c^2, x=(-b±√(b^2-4ac))/2a).	Введіть рівняння в лінійній формі (наприклад, a^2+b^2=c^2, x=(-b±√(b^2-4ac))/2a).
+Liberation Serif	
+Use Destination Theme	Використати кінцеву тему
+Keep Source Formatting	Зберегти вихідне форматування
+Picture (PNG)	Рисунок (PNG)
+Keep Text Only	Зберегти лише текст
+As:	Як:
+Dictionary: {}	Словник: {}
+No {} dictionary is installed, so only common misspellings are found. Put a Hunspell .aff/.dic pair in {}.	Словник для мови {} не встановлено, тому знаходяться лише поширені помилки. Покладіть пару файлів Hunspell .aff/.dic у {}.
+en-US	
+a dictionaries folder	теку словників
+The spelling check is complete. No issues found.	Перевірку правопису завершено. Проблем не виявлено.
+Slide {}: “{}”	Слайд {}: «{}»
+Go to	Перейти
+Repeated word	Повторене слово
+Change to:	Замінити на:
+Click to change this one; Shift-click to change all	Клацніть, щоб замінити це входження; клацніть із Shift, щоб замінити всі
+No accessibility issues found. People with disabilities should not have difficulty reading this document.	Проблем зі спеціальними можливостями не виявлено. Людям з інвалідністю не повинно бути важко читати цей документ.
+Slide {}: {}{}	Слайд {}: {}{}
+Mark selected text as:	Позначити виділений текст як:
+Spelling is checked for languages marked (dictionary).	Правопис перевіряється для мов, позначених «(словник)».
+Do not check spelling or grammar	Не перевіряти правопис і граматику
+Delete	Видалити
+New show name:	Назва нового показу:
+Custom Show 1	Довільний показ 1
+Slides (e.g. 1,3,5):	Слайди (наприклад, 1,3,5):
+Custom Show	Довільний показ
+Select a chart first.	Спочатку виділіть діаграму.
+Edit the data: first row = series names, first column = categories.	Змініть дані: перший рядок — назви рядів, перший стовпець — категорії.
++ Row	+ Рядок
++ Series	+ Ряд
+Start time (s):	Час початку (с):
+End trim (s):	Обтинання в кінці (с):
+Fade in (s):	Поява (с):
+Fade out (s):	Згасання (с):
+Pick a graphic; type one item per line.	Виберіть графічний елемент; вводьте по одному пункту в рядку.
+Basic List	Простий список
+Basic Process	Простий процес
+Basic Cycle	Простий цикл
+Hierarchy	Ієрархія
+Pyramid	Піраміда
+Matrix	Матриця
+Plan\nBuild\nLaunch	
+About	Про програму
+Contributors	Учасники
+Models	Моделі
+Correct TWo INitial CApitals	Виправляти ДВі ПОчаткові ВЕликі літери
+Capitalize first letter of sentences	Починати речення з великої літери
+Capitalize names of days	Писати назви днів з великої літери
+Correct accidental use of cAPS LOCK key	Виправляти випадкове натискання клавіші cAPS LOCK
+Replace fractions (1/2) with fraction characters (½)	Замінювати дроби (1/2) символами дробів (½)
+Ordinals (1st) with superscript	Порядкові числівники (1st) надрядковими знаками
+Replace text as you type	Замінювати текст під час введення
+With	На
+Add	Додати
+Text Box	Текстове поле
+Text: {}	Текст: {}
+General	Загальні
+Dark appearance	Темний вигляд
+Picture	Рисунок
+Interface size	Розмір інтерфейсу
+Editing	Редагування
+Show smart guides	Показувати динамічні напрямні
+Snap objects to grid	Прив'язувати об'єкти до сітки
+Replace straight quotes with smart quotes	Замінювати прямі лапки на парні
+AutoCorrect as you type	Автовиправлення під час введення
+AutoCorrect Options…	Параметри автовиправлення…
+Your name (comments):	Ваше ім'я (примітки):
+Done	Готово
+“{}” is not available yet.	«{}» поки що недоступно.
+seed{}	
+prev{}	
+Pass pictures to insert.photoAlbum	Передайте рисунки в insert.photoAlbum
+Horizontal	По горизонталі
+Vertical	По вертикалі
+Rotation	Обертання
+Width	Ширина
+Scale width	Масштаб за шириною
+Height	Висота
+Scale height	Масштаб за висотою
+Rotation (°):	Обертання (°):
+Scale height (%):	Масштаб за висотою (%):
+Scale width (%):	Масштаб за шириною (%):
+Lock aspect ratio	Зберігати пропорції
+Position	Розташування
+From the top-left corner of the slide	Від верхнього лівого кута слайда
+Horizontal (in):	По горизонталі (дюйми):
+Vertical (in):	По вертикалі (дюйми):
+English (United States)	Англійська (США)
+en-GB	
+English (United Kingdom)	Англійська (Велика Британія)
+fr-FR	
+French (France)	Французька (Франція)
+ja-JP	
+Japanese	Японська
+sv-SE	
+Swedish	Шведська
+The web build inserts album pictures from data passed to insert.photoAlbum	Веб-версія вставляє рисунки альбому з даних, переданих в insert.photoAlbum
+Available formats:	Доступні формати:
+Language:	Мова:
+Month names and AM/PM are listed for English. Other languages list the numeric date and 24-hour time.	Назви місяців і AM/PM наведено для англійської мови. Для інших мов наведено числову дату й 24-годинний час.
+Update automatically	Оновлювати автоматично
+That file is empty	Цей файл порожній
+Snap	Прив'язка
+Snap objects to other objects	Прив'язувати об'єкти до інших об'єктів
+Spacing (pt):	Інтервал (пт):
+Display	Відображення
+Display grid on screen	Відображати сітку на екрані
+Display drawing guides on screen	Відображати напрямні на екрані
+That picture is larger than 32 MB	Цей рисунок більший за 32 МБ
+Presentations and slide shows, rebuilt from scratch in pure Rust.	Презентації та показ слайдів, відтворені з нуля на чистому Rust.
+An open-source, clean-room project. Not affiliated with Microsoft.	Проєкт із відкритим кодом, створений методом «чистої кімнати». Не пов'язаний із Microsoft.
+MIT OR Apache-2.0 · © 2026 ArtCraft Team and the DeckCraft contributors	MIT OR Apache-2.0 · © 2026 ArtCraft Team і учасники проєкту DeckCraft
+Version {}	Версія {}
+CARGO_PKG_VERSION	
+DECKCRAFT_BUILD_SHA	
+DECKCRAFT_BUILD_DATE	
+Harbor	Гавань
+Ember	Жар
+Meadow	Луг
+Nocturne	Ноктюрн
+Paper	Папір
+Coral Reef	Кораловий риф
+Slate	Грифель
+Bold	Жирний
+Italic	Курсив
+Underline	Підкреслення
+Single	Одинарне
+Double	Подвійне
+Heavy	Жирне
+Dotted	Пунктирне
+Dash	Штрихове
+Wavy	Хвилясте
+Color	Колір
+Strikethrough	Закреслення
+Baseline	Базова лінія
+Superscript	Надрядковий
+Subscript	Підрядковий
+Caps	Великі літери
+Small caps	Малі великі літери
+All caps	Усі великі літери
+Spacing	Інтервал
+Very tight	Дуже щільний
+Tight	Щільний
+Normal	Звичайний
+Loose	Розріджений
+Very loose	Дуже розріджений
+Choose a font	Виберіть шрифт
+Font size must be a number	Розмір шрифту має бути числом
+Character spacing must be a number	Інтервал між символами має бути числом
+Exactly	Точно
+1.5 lines	1,5 рядка
+Multiple	Множник
+Alignment	Вирівнювання
+Left	За лівим краєм
+Center	По центру
+Right	За правим краєм
+Justify	За шириною
+Justify low	За шириною знизу
+Distributed	Розподілити
+Indentation	Відступ
+Before text	Перед текстом
+After text	Після тексту
+Special	Спеціальний
+First line	Перший рядок
+Hanging	Виступ
+By	На
+Spacing before	Інтервал перед
+Spacing after	Інтервал після
+Line spacing	Міжрядковий інтервал
+At	Значення
+Tabs…	Табуляція…
+Indent before text must be a number of inches	Відступ перед текстом має бути числом у дюймах
+Indent after text must be a number of inches	Відступ після тексту має бути числом у дюймах
+Special indent must be a number of inches	Спеціальний відступ має бути числом у дюймах
+Spacing before must be a number	Інтервал перед має бути числом
+Spacing after must be a number	Інтервал після має бути числом
+Line spacing must be a number	Міжрядковий інтервал має бути числом
+Decimal	За роздільником
+Default tab stops (in):	Стандартні позиції табуляції (дюйми):
+Tab stops:	Позиції табуляції:
+(none)	(немає)
+Clear	Очистити
+Clear the tab at {}\"	Видалити позицію табуляції на {}″
+Tab stop position (in):	Позиція табуляції (дюйми):
+Alignment:	Вирівнювання:
+Set	Установити
+Clear All	Очистити все
+Find what:	Знайти:
+Replace with:	Замінити на:
+Match case	Враховувати регістр
+Find whole words only	Лише цілі слова
+Find Next	Знайти далі
+Replace All	Замінити все
+Replaced {} occurrence(s).	Замінено входжень: {}.
+DeckCraft can't find “{}”.	DeckCraft не вдається знайти «{}».
+Replace…	Замінити…
+ (notes)	 (нотатки)
+Match {} of {} on slide {}{}.	Збіг {} з {} на слайді {}{}.
+Small (640 px wide)	Малий (ширина 640 пікс.)
+Large (1280 px wide)	Великий (ширина 1280 пікс.)
+Extra Large (1920 px wide)	Дуже великий (ширина 1920 пікс.)
+Custom width	Настроювана ширина
+Medium (960 px wide)	Середній (ширина 960 пікс.)
+Size:	Розмір:
+Width (pixels):	Ширина (пікселі):
+Seconds per slide:	Секунд на слайд:
+From slide:	Зі слайда:
+To slide:	До слайда:
+Loop forever	Безперервне повторення
+Width: enter {} to {} pixels	Ширина: введіть від {} до {} пікселів
+Seconds per slide: enter {} to {}	Секунд на слайд: введіть від {} до {}
+Slides: choose a range from 1 to {}	Слайди: виберіть діапазон від 1 до {}
+Pictures in album	Рисунки в альбомі
+Insert Table	Вставлення таблиці
+No pictures yet	Рисунків ще немає
+Slide Size	Розмір слайда
+Add Pictures…	Додати рисунки…
+Size and Position	Розмір і розташування
+A photo album holds at most 48 pictures or text boxes	Фотоальбом містить щонайбільше 48 рисунків або текстових полів
+The picture list is invalid	Список рисунків недійсний
+New Text Box	Нове текстове поле
+Header and Footer	Колонтитули
+Type the text for the new text box	Введіть текст для нового текстового поля
+Text is longer than 400 characters	Текст довший за 400 символів
+Insert Hyperlink	Вставлення гіперпосилання
+Remove	Видалити
+Set Up Slide Show	Настроювання показу слайдів
+Text box:	Текстове поле:
+Zoom	Масштаб
+Rotate Left	Обернути ліворуч
+Rotate Right	Обернути праворуч
+More Brightness	Збільшити яскравість
+Less Brightness	Зменшити яскравість
+Alt Text	Замінний текст
+More Contrast	Збільшити контрастність
+Less Contrast	Зменшити контрастність
+Picture layout	Макет рисунків
+Slides from Outline	Слайди зі структури
+Fit to slide	За розміром слайда
+1 picture	1 рисунок
+2 pictures	2 рисунки
+Rename Section	Перейменування розділу
+4 pictures	4 рисунки
+1title	
+1 picture with title	1 рисунок із заголовком
+2title	
+2 pictures with title	2 рисунки із заголовком
+4title	
+4 pictures with title	4 рисунки із заголовком
+Frame shape	Форма рамки
+Rename	Перейменувати
+None	Немає
+Rectangle	Прямокутник
+Rounded	Заокруглена
+Simple, white	Проста, біла
+Captions under pictures	Підписи під рисунками
+ALL pictures black and white	УСІ рисунки чорно-білі
+Album theme	Тема альбому
+Rename Layout	Перейменування макета
+Update	Оновити
+Create	Створити
+Paragraph	Абзац
+Add a picture or a text box first	Спочатку додайте рисунок або текстове поле
+Tabs	Табуляція
+Font	Шрифт
+Select a picture to rotate it or change brightness and contrast	Виділіть рисунок, щоб обернути його або змінити яскравість і контрастність
+Text boxes have no picture options	Текстові поля не мають параметрів рисунка
+Rotation {}°, brightness {}, contrast {}	Обертання {}°, яскравість {}, контрастність {}
+Preferences	Параметри
+Custom	Настроювана
+Grid Options	Параметри сітки
+Symbol	Символ
+Enter a scheme name.	Введіть назву схеми.
+Photo Album	Фотоальбом
+Replace Font	Замінити шрифт
+Equation	Рівняння
+Name:	Ім'я:
+Date and Time	Дата й час
+Scheme name	Назва схеми
+Applies to this presentation's theme colours.	Застосовується до кольорів теми цієї презентації.
+Spelling	Правопис
+Paste Special	Спеціальне вставлення
+Inter	
+Find and Replace	Знайти й замінити
+Accessibility Checker	Перевірка доступності
+Language	Мова
+Custom Shows	Довільні покази
+Chart Data	Дані діаграми
+Choose a heading font.	Виберіть шрифт заголовків.
+Choose a body font.	Виберіть шрифт основного тексту.
+Trim Media	Обрізання мультимедіа
+Choose a SmartArt Graphic	Вибір графічного елемента SmartArt
+Heading:	Заголовок:
+Heading font	Шрифт заголовків
+Body:	Основний текст:
+Body font	Шрифт основного тексту
+Bullets and Numbering	Маркери й нумерація
+Heading sample  {}	Зразок заголовка  {}
+Body sample  {}	Зразок основного тексту  {}
+Action Settings	Настроювання дії
+Heading and body fonts for this presentation.	Шрифти заголовків і основного тексту для цієї презентації.
+Create New Theme Colors	Створення нових кольорів теми
+Create New Theme Fonts	Створення нових шрифтів теми
+mailto:	
+mailto:{}	
+Zoom to	Масштаб
+Fit	За розміром
+Percent:	Відсоток:
+Enter a zoom percent	Введіть масштаб у відсотках
+Previous	Попередній
+New Window needs an open presentation	Для нового вікна потрібна відкрита презентація
+New Window needs a slide	Для нового вікна потрібен слайд
+Slide {} of {}	Слайд {} з {}
+Next	Наступний
+The Eyedropper takes colours from a slide	Піпетка бере кольори зі слайда
+Eyedropper: click the slide (Esc cancels)	Піпетка: клацніть слайд (Esc — скасувати)
+From top right	Від верхнього правого кута
+From bottom left	Від нижнього лівого кута
+From bottom right	Від нижнього правого кута
+Preset gradients	Готові градієнти
+Linear	Лінійний
+Rectangular	Прямокутний
+Path	Контурний
+Radial	Радіальний
+Type	Тип
+Direction	Напрямок
+From 	
+Angle	Кут
+Gradient stops	Точки градієнта
+Remove stop	Видалити точку
+Transparency	Прозорість
+From center	Від центру
+From top left	Від верхнього лівого кута
+nothing to print: no presentation is open	нічого друкувати: немає відкритої презентації
+picking a SmartArt picture needs the desktop app	для вибору рисунка SmartArt потрібна настільна програма
+open a presentation first	спочатку відкрийте презентацію
+Browse for Themes needs the desktop app for now	Пошук тем поки що потребує настільної програми
+open the presentation to compare first	спочатку відкрийте презентацію для порівняння
+Compare needs the desktop app for now	Порівняння поки що потребує настільної програми
+no presentation is open	немає відкритої презентації
+animation preview plays the current slide	попередній перегляд анімації відтворює поточний слайд
+no slide to preview	немає слайда для попереднього перегляду
+This slide has no animations	На цьому слайді немає анімацій
+Previewing animations	Попередній перегляд анімацій
+Reuse Slides needs the desktop app	Для повторного використання слайдів потрібна настільна програма
+Inserted {} slides from {}	Вставлено слайдів: {} із {}
+Saved {}	Збережено {}
+Saved	Збережено
+.deckcraft	
+.slidecraft	
+.pptx	
+the slide it was chosen for was deleted	слайд, для якого його вибрано, видалено
+.potx	
+the slide master it was chosen for was deleted	зразок слайдів, для якого його вибрано, видалено
+.ppsx	
+the layout it was chosen for was deleted	макет, для якого його вибрано, видалено
+there was no slide to put it on	не було слайда, на який його можна розмістити
+Couldn't save AutoRecover information: {}	Не вдалося зберегти дані автовідновлення: {}
+dropped file	перетягнутий файл
+.txt	
+.md	
+Pasted image.png	
+no frame was presented (screen locked or window hidden); use ui.render	
+Enter	
+Escape	
+Backspace	
+Tab	
+Up	
+Down	
+End	
+Space	
+Outline View	Режим структури
+Slide Sorter	Сортувальник слайдів
+Notes Page	Сторінка нотаток
+Reading View	Режим читання
+Notes	Нотатки
+Ruler	Лінійка
+Gridlines	Лінії сітки
+Grid Options…	Параметри сітки…
+Zoom In	Збільшити
+Zoom Out	Зменшити
+Set Zoom	Установити масштаб
+Zoom…	Масштаб…
+Fit to Window	За розміром вікна
+Task Pane	Область завдань
+Thesaurus	Тезаурус
+Ribbon Tab	Вкладка стрічки
+Collapse the Ribbon	Згорнути стрічку
+Dark Mode	Темний режим
+Grayscale	Відтінки сірого
+New Window	Нове вікно
+Slide Show	Показ слайдів
+Presenter View	Режим доповідача
+Preview Animations	Попередній перегляд анімації
+File	Файл
+Command Palette	Палітра команд
+Preferences…	Параметри…
+Open…	Відкрити…
+Picture from File…	Рисунок із файлу…
+Insert Picture in SmartArt…	Вставити рисунок у SmartArt…
+Audio from File…	Аудіо з файлу…
+Reuse Slides…	Повторно використати слайди…
+Video from File…	Відео з файлу…
+Save As…	Зберегти як…
+Export…	Експорт…
+Browse for Themes…	Пошук тем…
+Compare…	Порівняти…
+Open Dialog	Відкрити діалогове вікно
+Paste Special…	Спеціальне вставлення…
+Quick Access Toolbar	Панель швидкого доступу
+Find…	Знайти…
+Community Links	Посилання спільноти
+Presentation	Презентація
+DeckCraft can't export “{}”	DeckCraft не може експортувати «{}»
+Exported {}	Експортовано {}
+Saving a copy needs a file picker, which this window doesn't have.	Щоб зберегти копію, потрібне вікно вибору файлу, а в цьому вікні його немає.
+Opened the presentation as a PDF to print	Презентацію відкрито як PDF для друку
+File › {} needs an open presentation	Для «Файл › {}» потрібна відкрита презентація
+media-{}	
+No sound: {}	Немає звуку: {}
+Search commands…	Пошук команд…
+New Presentation	Створити презентацію
+Print…	Друк…
+Edit	Редагування
+Undo	Скасувати
+Redo	Повторити
+Paste and Match Formatting	Вставити з форматуванням призначення
+Select All	Виділити все
+Duplicate	Дублювати
+Delete Slide	Видалити слайд
+View	Подання
+Slide Master	Зразок слайдів
+Handout Master	Зразок роздаткового матеріалу
+Notes Master	Зразок нотаток
+New Slide	Створити слайд
+Duplicate Slide	Дублювати слайд
+Section	Розділ
+Slide Number	Номер слайда
+Table…	Таблиця…
+Chart	Діаграма
+Photo Album…	Фотоальбом…
+Edit Photo Album…	Редагувати фотоальбом…
+Format	Формат
+Align Left	Вирівняти за лівим краєм
+Align Right	Вирівняти за правим краєм
+Right-to-Left Text Direction	Напрямок тексту справа наліво
+Arrange	Упорядкувати
+Regroup	Повторно згрупувати
+Rotate Left 90°	Обернути ліворуч на 90°
+Rotate Right 90°	Обернути праворуч на 90°
+Flip Horizontal	Віддзеркалити по горизонталі
+Flip Vertical	Віддзеркалити по вертикалі
+Play from Start	Відтворити з початку
+Play from Current Slide	Відтворити з поточного слайда
+Hide Slide	Приховати слайд
+Set Up Show…	Налаштувати показ…
+Help	Довідка
+Reading the file: {} s	Читання файлу: {} с
+Still opening {}	Ще відкривається {}
+Stopped opening {}	Відкриття {} зупинено
+Opening {}…	Відкриття {}…
+■ Stop	■ Зупинити
+▶ Play All	▶ Відтворити все
+Select an object on the slide and add an animation from the Animations tab.	Виділіть об'єкт на слайді й додайте анімацію на вкладці «Анімація».
+Shape {}	Фігура {}
+Timing bar {}	Смуга часу {}
+Duration handle {}	Маркер тривалості {}
+Start On Click	Почати після клацання
+Start With Previous	Почати разом із попереднім
+Start After Previous	Почати після попереднього
+Move Up	Перемістити вгору
+Move Down	Перемістити вниз
+Compare this presentation with a revised copy from Review › Compare.	Порівняйте цю презентацію з виправленою копією за допомогою команди «Рецензування › Порівняти».
+Compared with {}	Порівняно з {}
+Not a copy of this presentation: slides are matched by position.	Це не копія цієї презентації: слайди зіставлено за розташуванням.
+No differences left.	Відмінностей не залишилося.
+End Review	Завершити рецензування
+Accept All ({})	Прийняти всі ({})
+Slide inserted after {}	Слайд вставлено після {}
+Slide {} deleted	Слайд {} видалено
+Slide {} changed	Слайд {} змінено
+Accept	Прийняти
++ Add	+ Додати
++ New Comment	+ Створити примітку
+No comments.	Приміток немає.
+Slide {}	Слайд {}
+Reply…	Відповісти…
+Reopen	Відкрити повторно
+Resolve	Позначити як вирішене
+Pick a design for this slide. Ideas are generated on your device.	Виберіть оформлення для цього слайда. Ідеї створюються на вашому пристрої.
+idea-{}	
+layout:{}	
+theme:{}	
+Add a title with a picture or some text to get layout ideas.	Додайте заголовок із рисунком або текстом, щоб отримати ідеї для макета.
+Themes (whole presentation)	Теми (уся презентація)
+Select a shape to format it.	Виділіть фігуру, щоб змінити її формат.
+Fill & Line	Заливка й лінія
+Effects	Ефекти
+Size & Properties	Розмір і властивості
+Text Options	Параметри тексту
+Shadow	Тінь
+Outer	Зовнішня
+Bottom	Знизу
+Inner	Внутрішня
+Perspective	Перспектива
+Format Shape	Формат фігури
+Blur	Розмиття
+ pt	 пт
+Format Background	Формат тла
+Distance	Відстань
+Reflection	Відбиття
+Half	Половина
+Full	Повне
+Animation Pane	Область анімації
+Selection	Виділення
+Glow	Світіння
+Design Ideas	Ідеї для оформлення
+Soft Edges	Згладжені краї
+Text Pane	Область тексту
+size (pt)	розмір (пт)
+Reset Effects	Скинути ефекти
+Revisions	Виправлення
+Pane	Область
+Text Fill	Заливка тексту
+Vertical alignment	Вертикальне вирівнювання
+Top	Угорі
+Middle	Посередині
+Do not Autofit	Без автодобору
+Shrink text on overflow	Стискати текст у разі переповнення
+Resize shape to fit text	Підганяти розмір фігури під текст
+Wrap text in shape	Переносити текст у фігурі
+Margins (pt)	Поля (пт)
+Columns	Стовпці
+Brightness	Яскравість
+Contrast	Контрастність
+Saturation	Насиченість
+Reset Picture	Скинути рисунок
+Fill	Заливка
+No fill	Без заливки
+Solid fill	Суцільна заливка
+Gradient fill	Градієнтна заливка
+Picture or texture fill	Рисунок або текстура
+Pattern fill	Візерунок
+No Fill	Без заливки
+Rotate with shape	Обертати разом із фігурою
+Line	Лінія
+No line	Без лінії
+Solid line	Суцільна лінія
+No Outline	Без контуру
+Compound type	Складений тип
+Thick Thin	Товста й тонка
+Thin Thick	Тонка й товста
+Triple	Потрійна
+Cap type	Тип закінчення
+Flat	Плоский
+Round	Круглий
+Square	Квадратний
+Join type	Тип з'єднання
+Bevel	Скіс
+Miter	Під кутом
+Arrow	Стрілка
+Open Arrow	Відкрита стрілка
+Stealth	Гостра стрілка
+Diamond	Ромб
+Oval	Овал
+Small	Малий
+Medium	Середній
+Large	Великий
+Begin arrow	Тип початкової стрілки
+Begin size	Розмір початкової стрілки
+End arrow	Тип кінцевої стрілки
+End size	Розмір кінцевої стрілки
+Picture source	Джерело рисунка
+Insert…	Вставити…
+Tile picture as texture	Розмістити рисунок як текстуру
+Offset X	Зсув за X
+Offset Y	Зсув за Y
+Scale X	Масштаб за X
+Scale Y	Масштаб за Y
+Top left	Угорі ліворуч
+Top right	Угорі праворуч
+Bottom left	Унизу ліворуч
+Bottom right	Унизу праворуч
+Both	Обидва
+Mirror type	Тип віддзеркалення
+Select a SmartArt graphic to edit its text.	Виділіть графічний об'єкт SmartArt, щоб редагувати його текст.
+Offset left	Зсув ліворуч
+Offset top	Зсув угорі
+Offset right	Зсув праворуч
+Offset bottom	Зсув унизу
+3-D Format	Формат об'ємної фігури
+Top bevel	Верхній рельєф
+Bottom bevel	Нижній рельєф
+   Width	   Ширина
+   Height	   Висота
+Depth	Глибина
+Contour	Контур
+Material	Матеріал
+Lighting	Освітлення
+3-D Rotation	Поворот об'ємної фігури
+Presets	Заготовки
+X Rotation	Обертання за X
+Y Rotation	Обертання за Y
+Z Rotation	Обертання за Z
+Distance from ground	Відстань від основи
+Reset 3-D	Скинути об'ємні параметри
+Type your text here	Введіть текст
+Follow the layout	Відповідно до макета
+Foreground	Передній план
+Background	Тло
+Insert picture from file…	Вставити рисунок із файлу…
+Hide background graphics	Приховати фонові рисунки
+Reset Background	Скинути тло
+Top Right	Угорі праворуч
+Bottom Left	Унизу ліворуч
+Bottom Right	Унизу праворуч
+Top Left	Угорі ліворуч
+Mirror	Віддзеркалення
+Remove from Quick Access Toolbar	Видалити з панелі швидкого доступу
+Customize Quick Access Toolbar	Настроїти панель швидкого доступу
+Right-click any ribbon button to add it.	Клацніть правою кнопкою миші будь-яку кнопку стрічки, щоб додати її.
+Reset to Defaults	Скинути до стандартних
+Add to Quick Access Toolbar	Додати на панель швидкого доступу
+Start from Beginning	Почати з початку
+Find	Знайти
+No Shadow	Без тіні
+Centered	По центру
+No Reflection	Без відбиття
+No Glow	Без світіння
+No Soft Edges	Без згладжених країв
+Light/Dark appearance	Світлий або темний вигляд
+Abc	
+Order Objects	Порядок об'єктів
+Group Objects	Групування об'єктів
+Position Objects	Розташування об'єктів
+Align	Вирівняти
+Rotate	Обернути
+Selection Pane…	Область виділення…
+Align Center	Вирівняти по центру
+Align Top	Вирівняти за верхнім краєм
+Align Middle	Вирівняти посередині
+Align Bottom	Вирівняти за нижнім краєм
+Distribute Horizontally	Розподілити по горизонталі
+Distribute Vertically	Розподілити по вертикалі
+Align to Slide	Вирівняти відносно слайда
+Align Selected Objects	Вирівняти виділені об'єкти
+Replace Fonts…	Замінити шрифти…
+Selection\nPane	Область\nвиділення
+Design\nIdeas	Ідеї для\nоформлення
+Insert Table…	Вставити таблицю…
+Draw Table	Намалювати таблицю
+Pictures	Рисунки
+Screenshot	Знімок екрана
+Screenshot (not available yet)	Знімок екрана (поки недоступно)
+Icons	Значки
+Link	Посилання
+Action	Дія
+Action Button: {}	Кнопка дії: {}
+Action Settings…	Параметри дії…
+Comment	Примітка
+Text\nBox	Текстове\nполе
+Header &\nFooter	Колонтитули
+WordArt style {}	Стиль WordArt {}
+Date &\nTime	Дата й\nчас
+Slide\nNumber	Номер\nслайда
+Video	Відео
+Audio	Аудіо
+Shape Format	Формат фігури
+Search icons	Пошук значків
+Picture Format	Формат рисунка
+No icons match.	Немає відповідних значків.
+Table Design	Конструктор таблиць
+SmartArt Design	Конструктор SmartArt
+Select	Виділити
+Eraser	Гумка
+Black Pen	Чорне перо
+Red Pen	Червоне перо
+Blue Pen	Синє перо
+Pencil	Олівець
+Highlighter	Маркер
+Ink to\nShape	Рукописне\nу фігуру
+Ink to Shape: turn drawn lines, rectangles, ovals and triangles into shapes	Рукописне у фігуру: перетворення намальованих ліній, прямокутників, овалів і трикутників на фігури
+Chart Design	Конструктор діаграм
+Ink to\nText	Рукописне\nу текст
+Ink to Text (coming soon)	Рукописне в текст (незабаром)
+Ink to\nMath	Рукописне\nу формулу
+Ink to Math (coming soon)	Рукописне у формулу (незабаром)
+Playback	Відтворення
+Colors	Кольори
+Draw	Малювання
+Design	Конструктор
+Transitions	Переходи
+Animations	Анімація
+Record	Запис
+Review	Рецензування
+Customize Colors…	Настроїти кольори…
+Fonts	Шрифти
+Customize Fonts…	Настроїти шрифти…
+Background\nStyles	Стилі\nтла
+Style {}	Стиль {}
+Reset Slide Background	Скинути тло слайда
+Slide\nSize	Розмір\nслайда
+Standard (4:3)	Стандартний (4:3)
+Widescreen (16:9)	Широкоекранний (16:9)
+Page Setup…	Параметри сторінки…
+Format\nBackground	Формат\nтла
+Preview	Попередній перегляд
+Subtle	Ледь помітні
+Exciting	Яскраві
+Dynamic Content	Динамічний вміст
+Effect\nOptions	Параметри\nефектів
+Sound:	Звук:
+.wav	
+[Stop Previous Sound]	[Зупинити попередній звук]
+[No Sound]	[Без звуку]
+Other Sound…	Інший звук…
+Choosing a sound file needs the desktop app	Щоб вибрати звуковий файл, потрібна настільна програма
+Loop Until Next Sound	Повторювати до наступного звуку
+Duration:	Тривалість:
+On Mouse Click	Після клацання
+After:	Після:
+Apply\nTo All	Застосувати\nдо всіх
+From Left	Зліва
+From Right	Справа
+From Top	Згори
+From Bottom	Знизу
+In	Усередину
+Out	Назовні
+File (Alt+F)	Файл (Alt+F)
+Play this slide's animations on the canvas	Відтворити анімації цього слайда на полотні
+Entrance	Вхід
+Emphasis	Виділення
+Exit	Вихід
+Motion Paths	Шляхи переміщення
+By Paragraph	За абзацами
+As One Object	Як один об'єкт
+Add\nAnimation	Додати\nанімацію
+Motion	Рух
+Animation\nPane	Область\nанімації
+Trigger	Тригер
+On Click of… (none)	Після клацання… (немає)
+On Click of {}	Після клацання {}
+Animation\nPainter	Анімація\nза зразком
+Animation Painter (double-click to keep it on)	Анімація за зразком (двічі клацніть, щоб не вимикати)
+Start:	Початок:
+On Click	Після клацання
+With Previous	Разом із попереднім
+After Previous	Після попереднього
+Delay:	Затримка:
+Play from\nStart	Відтворити\nз початку
+Play from\nCurrent Slide	Відтворити з\nпоточного слайда
+Presenter\nView	Режим\nдоповідача
+Custom\nShow	Довільний\nпоказ
+Set Up\nSlide Show	Налаштувати\nпоказ слайдів
+Hide\nSlide	Приховати\nслайд
+Rehearse\nTimings	Настроювання\nчасу
+Recording narration needs audio capture (coming soon)	Для запису дикторського тексту потрібне захоплення звуку (незабаром)
+Use Timings	Використовувати час показу
+Play Narrations	Відтворювати дикторський текст
+Show Media Controls	Показувати елементи керування мультимедіа
+Cameo	Камео
+Camera capture is not available yet	Захоплення з камери ще недоступне
+From\nBeginning	З\nпочатку
+From\nCurrent Slide	З поточного\nслайда
+Learn\nMore	Дізнатися\nбільше
+Check\nAccessibility	Перевірити спеціальні\nможливості
+Translate	Перекласти
+Translation needs a language model (not bundled)	Для перекладу потрібна мовна модель (не входить до комплекту)
+Compare	Порівняти
+Accept\nAll	Прийняти\nвсе
+End\nReview	Завершити\nрецензування
+New\nComment	Створити\nпримітку
+Show\nComments	Показати\nпримітки
+Outline\nView	Режим\nструктури
+Slide\nSorter	Сортувальник\nслайдів
+Notes\nPage	Сторінка\nнотаток
+Reading\nView	Режим\nчитання
+Slide\nMaster	Зразок\nслайдів
+Handout\nMaster	Зразок роздаткового\nматеріалу
+Notes\nMaster	Зразок\nнотаток
+Grid\nOptions	Параметри\nсітки
+Fit to\nWindow	За розміром\nвікна
+New\nWindow	Нове\nвікно
+Open another window on this presentation	Відкрити ще одне вікно з цією презентацією
+Dark\nMode	Темний\nрежим
+Transform	Перетворення
+Follow Path	Уздовж шляху
+Warp	Викривлення
+No Transform	Без перетворення
+Edit\nShape	Редагувати\nфігуру
+Change Shape	Змінити фігуру
+Merge\nShapes	Об'єднати\nфігури
+Merge Shapes	Об'єднати фігури
+Shape\nStyles	Стилі\nфігур
+Gradient…	Градієнт…
+Text Outline	Контур тексту
+Text Effects	Текстові ефекти
+Alt\nText	Замінний\nтекст
+Format\nPane	Область\nформатування
+Bring\nForward	Перемістити\nвперед
+Send\nBackward	Перемістити\nназад
+Height:	Висота:
+Width:	Ширина:
+Width: 	Ширина:
+Remove\nBackground	Видалити\nтло
+Remove Background	Видалити тло
+Remove More (looser)	Видалити більше (м'якший допуск)
+Remove Less (tighter)	Видалити менше (суворіший допуск)
+Corrections	Корекція
+Brightness {}%	Яскравість {}%
+Contrast {}%	Контрастність {}%
+Saturation {}%	Насиченість {}%
+Recolor	Перефарбувати
+Set Transparent Color	Установити прозорий колір
+Pixels of this colour become transparent:	Пікселі цього кольору стануть прозорими:
+Artistic\nEffects	Художні\nефекти
+Change Picture	Змінити рисунок
+Compress Pictures	Стиснути рисунки
+Picture Border	Межа рисунка
+Photo\nAlbum	Фото-\nальбом
+Reset Style	Скинути стиль
+Remove the picture style	Видалити стиль рисунка
+Crop	Обрізати
+Crop to Shape	Обрізати за фігурою
+Crop 10% each side	Обрізати по 10% з кожного боку
+Crop 20% each side	Обрізати по 20% з кожного боку
+Reset Crop	Скинути обрізання
+Photo Album options	Параметри фотоальбому
+Header Row	Рядок заголовка
+First Column	Перший стовпець
+Total Row	Рядок підсумків
+Last Column	Останній стовпець
+Banded Rows	Чергування рядків
+Banded Columns	Чергування стовпців
+New Photo Album…	Створити фотоальбом…
+Shading	Заливка
+Borders	Межі
+No Border	Без меж
+All Borders	Усі межі
+Outside Borders	Зовнішні межі
+Inside Borders	Внутрішні межі
+Top Border	Верхня межа
+Bottom Border	Нижня межа
+Left Border	Ліва межа
+Right Border	Права межа
+Inside Horizontal Border	Внутрішня горизонтальна межа
+Inside Vertical Border	Внутрішня вертикальна межа
+Diagonal Down Border	Діагональна межа згори вниз
+Diagonal Up Border	Діагональна межа знизу вгору
+Pen Weight	Товщина пера
+Pen Style	Стиль пера
+Dot	Крапки
+Pen Color	Колір пера
+Table Eraser	Гумка для таблиці
+Delete Columns	Видалити стовпці
+Delete Rows	Видалити рядки
+Delete Table	Видалити таблицю
+Insert\nAbove	Вставити\nзгори
+Insert\nBelow	Вставити\nзнизу
+Insert\nLeft	Вставити\nліворуч
+Insert\nRight	Вставити\nправоруч
+Merge\nCells	Об'єднати\nклітинки
+Split\nCells	Розділити\nклітинки
+Distribute Rows	Вирівняти висоту рядків
+Distribute Columns	Вирівняти ширину стовпців
+Align text to the {} of the cell	Вирівняти текст у клітинці: {}
+Cell Margins	Поля клітинки
+Narrow	Вузькі
+Wide	Широкі
+Change\nChart Type	Змінити\nтип діаграми
+Edit\nData	Редагувати\nдані
+Text\nPane	Область\nтексту
+Type and organise the diagram's text	Введення й упорядкування тексту діаграми
+Add Shape	Додати фігуру
+Add Shape After	Додати фігуру після
+Add Shape Before	Додати фігуру перед
+Add Shape Above	Додати фігуру вище
+Add Shape Below	Додати фігуру нижче
+Add Assistant	Додати помічника
+Promote	Підвищити рівень
+Demote	Понизити рівень
+Insert Picture	Вставити рисунок
+Put a picture in the selected node's picture placeholder	Вставити рисунок у заповнювач рисунка виділеного вузла
+Layouts	Макети
+Convert	Перетворити
+Convert to Text	Перетворити на текст
+Convert to Shapes	Перетворити на фігури
+Change Colors	Змінити кольори
+SmartArt Styles	Стилі SmartArt
+Pause	Пауза
+Play	Відтворити
+Trim	Обрізати
+Start Automatically	Почати автоматично
+Play Across Slides	Відтворювати на всіх слайдах
+Loop until Stopped	Безперервне відтворення
+Hide During Show	Приховати під час показу
+Rewind after Playing	Перемотати назад після відтворення
+Play Full Screen	Відтворювати на весь екран
+Volume	Гучність
+Low	Низька
+High	Висока
+Mute	Вимкнути звук
+Insert\nLayout	Вставити\nмакет
+Preserve	Зберігати
+Footers	Колонтитули
+Insert\nPlaceholder	Вставити\nзаповнювач
+Content	Вміст
+Media	Мультимедіа
+Themes	Теми
+Close\nMaster View	Закрити режим\nзразка
+Header	Верхній колонтитул
+Slide Image	Зображення слайда
+Date	Дата
+Body	Основний текст
+Page Number	Номер сторінки
+Slides Per\nPage: {}	Слайдів на\nсторінці: {}
+Paste (⌘V)	Вставити (⌘V)
+Paste Formatting	Вставити форматування
+Format Painter (double-click to keep it on)	Формат за зразком (двічі клацніть, щоб не вимикати)
+layout-{}	
+New\nSlide	Створити\nслайд
+New Slide (⇧⌘N)	Створити слайд (⇧⌘N)
+Duplicate Selected Slides	Дублювати виділені слайди
+Slides from Outline…	Слайди зі структури…
+Reuse Slides (Keep Source Formatting)…	Повторно використати слайди (зберегти вихідне форматування)…
+Choosing a presentation to reuse needs the desktop app	Щоб вибрати презентацію для повторного використання, потрібна настільна програма
+Reset	Скинути
+Add Section	Додати розділ
+Remove All Sections	Видалити всі розділи
+Rescan Installed Fonts	Повторно знайти встановлені шрифти
+Increase Font Size	Збільшити розмір шрифту
+Decrease Font Size	Зменшити розмір шрифту
+Clear All Formatting	Очистити все форматування
+Character Spacing	Інтервал між символами
+Very Tight	Дуже щільний
+Very Loose	Дуже розріджений
+Change Case	Змінити регістр
+Sentence case.	Як у реченні.
+UPPERCASE	ВСІ ПРОПИСНІ
+Capitalize Each Word	Кожне Слово З Великої
+tOGGLE cASE	зМІНИТИ рЕГІСТР
+Text Highlight Color	Колір виділення тексту
+#FFFF00	
+No Color	Без кольору
+Font Color	Колір шрифту
+List	Список
+Process	Процес
+Cycle	Цикл
+Relationship	Зв'язок
+Bullets and Numbering…	Маркери та нумерація…
+Decrease List Level	Зменшити рівень списку
+Increase List Level	Збільшити рівень списку
+Line Spacing	Міжрядковий інтервал
+Line Spacing Options…	Параметри міжрядкового інтервалу…
+Text Direction	Напрямок тексту
+Rotate all text 90°	Обернути весь текст на 90°
+Rotate all text 270°	Обернути весь текст на 270°
+Stacked	У стовпчик
+Align Text	Вирівняти текст
+ — Edited	 — змінено
+Convert to SmartArt	Перетворити на SmartArt
+Search commands (⇧⌘P)	Пошук команд (⇧⌘P)
+Quick\nStyles	Експрес-\nстилі
+Shape Fill	Заливка фігури
+  Present  	  Показ
+Shape Outline	Контур фігури
+Shape Effects	Ефекти фігури
+Weight	Товщина
+Dashes	Штрихи
+Solid	Суцільна
+Round Dot	Кругла крапка
+Square Dot	Квадратна крапка
+Dash Dot	Штрих-пунктир
+Long Dash	Довгий штрих
+Long Dash Dot	Довгий штрих-пунктир
+Arrow at end	Стрілка в кінці
+Arrow at start	Стрілка на початку
+Arrows at both ends	Стрілки на обох кінцях
+Stealth end	Гостра стрілка в кінці
+Oval ends	Овальні кінці
+Show All	Показати все
+Hide All	Приховати все
+Collapse	Згорнути
+Expand	Розгорнути
+Hide	Приховати
+◉ on	◉ увімк.
+Black	Чорний
+White	Білий
+All	Усі
+Slide {}:{}   Total {}:{}	Слайд {}:{}   Усього {}:{}
+Slide timings recorded.	Час показу слайдів записано.
+Zoom on	Масштаб: увімк.
+First {} slides	Перші слайди ({})
+show-grid-{}	
+Presenter View — DeckCraft	Режим доповідача — DeckCraft
+Next ▶	Далі ▶
+◀ Previous	◀ Назад
+Resume	Продовжити
+Black on	Чорний: увімк.
+White on	Білий: увімк.
+All slides on	Усі слайди: увімк.
+End of slide show	Кінець показу слайдів
+No notes.	Немає нотаток.
+End of slide show, click to exit.	Кінець показу слайдів. Клацніть, щоб вийти.
+Go to slide {}	Перейти до слайда {}
+Click the slide to zoom in. Esc cancels.	Клацніть слайд, щоб збільшити. Esc — скасувати.
+✏ on	✏ увімк.
+Rename Section…	Перейменувати розділ…
+Remove Section	Видалити розділ
+Remove Section & Slides	Видалити розділ і слайди
+Move Section Up	Перемістити розділ вгору
+Move Section Down	Перемістити розділ вниз
+Click to add text	Клацніть, щоб додати текст
+Click to add notes	Клацніть, щоб додати нотатки
+ (not checked)	 (не перевіряється)
+Fit slide to current window	Масштабувати слайд за розміром поточного вікна
+isn't	
+aren't	
+Theme Colors	Кольори теми
+Standard Colors	Стандартні кольори
+More Colors… #	Інші кольори… #
+RRGGBB	
+Eyedropper	Піпетка
+Click the slide to take the colour under the pointer	Клацніть слайд, щоб узяти колір під вказівником
+# Повідомлення про відсутні шрифти (toast.rs збирає речення зі слів).
+{} isn't installed on this computer. Text that uses it is shown in a similar font.	Шрифту {} немає на цьому комп’ютері. Текст із ним показано схожим шрифтом.
+{} aren't installed on this computer. Text that uses them is shown in a similar font.	Шрифтів {} немає на цьому комп’ютері. Текст із ними показано схожими шрифтами.
+# Доповнення: рядки, що трапляються і в пропущених файлах, та оздоблення.
+no presentation open	немає відкритої презентації
+Show	Показати
+Table	Таблиця
+OK	OK
+no shape {}	немає фігури {}
+{}  →	{}  →
+Options	Параметри

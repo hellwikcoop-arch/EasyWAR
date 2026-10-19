@@ -10,6 +10,7 @@ pub mod local_profiles;
 mod migration_startup;
 pub mod model_install;
 pub mod module_source;
+pub mod office_files;
 pub mod phone_export;
 pub mod position_templates;
 pub mod profile_table;
@@ -919,6 +920,188 @@ async fn save_presentation(
         .map_err(|error| error.to_string())?
         .map_err(|error| error.to_string())?;
     Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+/// Файл, який застосунок розділу «Офіс» відкрив через EasyWAR: шлях лишається в Rust.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OfficeOpenedFile {
+    handle: String,
+    name: String,
+    bytes: Vec<u8>,
+}
+
+/// Параметри вікна вибору чи збереження файла (`extensions` — без крапки, перше —
+/// типове для «Зберегти як…»).
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OfficeFileDialog {
+    extensions: Vec<String>,
+    title: Option<String>,
+    filter_name: Option<String>,
+    suggested_name: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OfficeSavedFile {
+    handle: String,
+    name: String,
+}
+
+/// Таблиці, прив'язані до будь-якого профілю: застосунки «Офісу» їх не перезаписують.
+async fn office_bound_tables(profiles: &LocalProfileStore) -> Result<Vec<PathBuf>, String> {
+    Ok(profiles
+        .all_table_paths()
+        .await
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .map(PathBuf::from)
+        .collect())
+}
+
+/// Вікно вибору файла для застосунку «Офісу» (EasyGreen, EasyDoc, EasySlide). Повертає
+/// номер, назву й байти; `None` — користувач закрив вікно. Потрібен активний профіль.
+#[tauri::command]
+async fn office_open_file(
+    app: tauri::AppHandle,
+    session: tauri::State<'_, ProfileSession>,
+    handles: tauri::State<'_, office_files::OfficeFileHandles>,
+    options: OfficeFileDialog,
+) -> Result<Option<OfficeOpenedFile>, String> {
+    let profile_id = active_profile_id(&session)?;
+    let extensions = office_files::normalize_extensions(&options.extensions)
+        .map_err(|error| error.to_string())?;
+    let title = office_files::clean_label(options.title.as_deref(), "Відкрити файл");
+    let filter_name = office_files::clean_label(options.filter_name.as_deref(), "Документи");
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        let filter: Vec<&str> = extensions.iter().map(String::as_str).collect();
+        app.dialog()
+            .file()
+            .set_title(title)
+            .add_filter(filter_name, &filter)
+            .blocking_pick_file()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let path = selected.into_path().map_err(|error| error.to_string())?;
+    let bytes = {
+        let path = path.clone();
+        tauri::async_runtime::spawn_blocking(move || -> Result<Vec<u8>, String> {
+            let size = std::fs::metadata(&path)
+                .map_err(|error| error.to_string())?
+                .len();
+            if size > office_files::MAX_FILE_BYTES as u64 {
+                return Err(office_files::OfficeFileError::TooLarge.to_string());
+            }
+            std::fs::read(&path).map_err(|error| error.to_string())
+        })
+        .await
+        .map_err(|error| error.to_string())??
+    };
+    let name = office_files::file_name(&path);
+    let handle = handles.remember(&profile_id, path);
+    Ok(Some(OfficeOpenedFile {
+        handle,
+        name,
+        bytes,
+    }))
+}
+
+/// «Зберегти»: записує байти у файл, раніше відкритий або збережений за цим номером.
+/// Таблицю, прив'язану до профілю, так не перезаписати: лише «Зберегти як…» в інший файл.
+#[tauri::command]
+async fn office_save_file(
+    profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
+    handles: tauri::State<'_, office_files::OfficeFileHandles>,
+    handle: String,
+    bytes: Vec<u8>,
+) -> Result<OfficeSavedFile, String> {
+    let profile_id = active_profile_id(&session)?;
+    office_files::check_size(&bytes).map_err(|error| error.to_string())?;
+    let path = handles
+        .path(&profile_id, &handle)
+        .map_err(|error| error.to_string())?;
+    office_files::ensure_not_protected(&path, &office_bound_tables(&profiles).await?)
+        .map_err(|error| error.to_string())?;
+    let name = office_files::file_name(&path);
+    let target = phone_export::SaveTarget {
+        path,
+        replace_confirmed: true,
+    };
+    tauri::async_runtime::spawn_blocking(move || phone_export::save_file(&target, &bytes))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())?;
+    Ok(OfficeSavedFile { handle, name })
+}
+
+/// «Зберегти як…»: вікно збереження й запис; повертає новий номер. `None` — вікно закрили.
+/// Перше розширення зі списку дописується, якщо користувач його прибрав.
+#[tauri::command]
+async fn office_save_file_as(
+    app: tauri::AppHandle,
+    profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
+    handles: tauri::State<'_, office_files::OfficeFileHandles>,
+    bytes: Vec<u8>,
+    options: OfficeFileDialog,
+) -> Result<Option<OfficeSavedFile>, String> {
+    let profile_id = active_profile_id(&session)?;
+    office_files::check_size(&bytes).map_err(|error| error.to_string())?;
+    let extensions = office_files::normalize_extensions(&options.extensions)
+        .map_err(|error| error.to_string())?;
+    let title = office_files::clean_label(options.title.as_deref(), "Зберегти файл");
+    let filter_name = office_files::clean_label(options.filter_name.as_deref(), "Документи");
+    let file_name =
+        office_files::suggested_file_name(options.suggested_name.as_deref(), "Документ");
+    let dialog_extensions = extensions.clone();
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        let filter: Vec<&str> = dialog_extensions.iter().map(String::as_str).collect();
+        app.dialog()
+            .file()
+            .set_title(title)
+            .set_file_name(file_name)
+            .add_filter(filter_name, &filter)
+            .blocking_save_file()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let accepted: Vec<&str> = extensions.iter().map(String::as_str).collect();
+    let target = phone_export::save_target(
+        selected.into_path().map_err(|error| error.to_string())?,
+        &accepted,
+        &extensions[0],
+    );
+    office_files::ensure_not_protected(&target.path, &office_bound_tables(&profiles).await?)
+        .map_err(|error| error.to_string())?;
+    let path = target.path.clone();
+    tauri::async_runtime::spawn_blocking(move || phone_export::save_file(&target, &bytes))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())?;
+    let name = office_files::file_name(&path);
+    let handle = handles.remember(&profile_id, path);
+    Ok(Some(OfficeSavedFile { handle, name }))
+}
+
+/// Застосунок закрив файл: номер більше не приймається.
+#[tauri::command]
+fn office_close_file(
+    session: tauri::State<'_, ProfileSession>,
+    handles: tauri::State<'_, office_files::OfficeFileHandles>,
+    handle: String,
+) -> Result<(), String> {
+    let profile_id = active_profile_id(&session)?;
+    handles.forget(&profile_id, &handle);
+    Ok(())
 }
 
 /// Зберігає порожню базову таблицю в новий файл і прив'язує її до профілю
@@ -1841,6 +2024,7 @@ pub fn run() {
             app.manage(DatabaseStatusStore::new(pool.clone()));
             app.manage(DashboardModuleStore::new(pool.clone()));
             app.manage(ModuleSourceSelection::default());
+            app.manage(office_files::OfficeFileHandles::default());
             app.manage(BackupStore::new(pool));
             app.manage(LiveDatabasePath(setup_database_file));
             app.manage(instance_lock);
@@ -1889,6 +2073,10 @@ pub fn run() {
             create_profile_base_table,
             export_phone_file,
             save_presentation,
+            office_open_file,
+            office_save_file,
+            office_save_file_as,
+            office_close_file,
             clear_profile_database,
             read_profile_database,
             write_profile_database,
