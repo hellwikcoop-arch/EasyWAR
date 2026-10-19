@@ -30,7 +30,7 @@ Vite-фронтендом для внесення, перевірки та ан�
 виконує `npm install --no-save` і прогріває cargo; локально — `npm ci`.
 
 ```bash
-npm run test:unit                                   # понад 850 JS-тестів (≈3,5 хв) + XLSX-контракт (cargo run --example)
+npm run test:unit                                   # ≈900 JS-тестів + XLSX-контракт (cargo run --example)
 cargo test --manifest-path src-tauri/Cargo.toml     # понад 250 Rust-тестів
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
 cargo fmt --manifest-path src-tauri/Cargo.toml --check

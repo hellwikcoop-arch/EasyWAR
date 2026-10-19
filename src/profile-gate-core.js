@@ -125,6 +125,21 @@ export function failureDelayMs(failures) {
   return Math.min(60_000, 5_000 * 2 ** (failures - 5));
 }
 
+/**
+ * Розбір відмови входу від ядра. Ядро саме рахує невдалі спроби й призупиняє вхід
+ * («забагато невдалих спроб входу, спробуйте знову через 30 с»): таку відповідь
+ * показуємо як є й не додаємо до лічильника інтерфейсу.
+ */
+export function loginFailure(text) {
+  const raw = String(text ?? '').trim();
+  if (/неправильний пароль/i.test(raw)) return { message: 'Неправильний пароль.', throttled: false };
+  if (/забагато невдалих спроб входу/i.test(raw)) {
+    const message = raw.charAt(0).toUpperCase() + raw.slice(1);
+    return { message: /[.!?]$/.test(message) ? message : `${message}.`, throttled: true };
+  }
+  return { message: `Не вдалося увійти: ${raw}`, throttled: false };
+}
+
 /** Який екран показати після заставки: реєстрація, якщо профілів ще немає, інакше вхід. */
 export function gateScreen(state) {
   return Array.isArray(state?.profiles) && state.profiles.length > 0 ? 'login' : 'register';

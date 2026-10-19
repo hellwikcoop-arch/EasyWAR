@@ -9,6 +9,7 @@ import {
   PASSWORD_MIN,
   POSITION_MAX,
   failureDelayMs,
+  loginFailure,
   gateScreen,
   loginCardNote,
   modulesError,
@@ -89,6 +90,15 @@ test('failed attempts slow down after five tries, capped at one minute', () => {
   assert.equal(failureDelayMs(6), 10000);
   assert.equal(failureDelayMs(40), 60000);
   assert.equal(failureDelayMs(NaN), 0);
+});
+
+test('a pause announced by the core is shown as is and is not counted by the page', () => {
+  assert.deepEqual(loginFailure('неправильний пароль'), { message: 'Неправильний пароль.', throttled: false });
+  assert.deepEqual(
+    loginFailure('забагато невдалих спроб входу, спробуйте знову через 30 с'),
+    { message: 'Забагато невдалих спроб входу, спробуйте знову через 30 с.', throttled: true });
+  assert.deepEqual(loginFailure('щось інше'), { message: 'Не вдалося увійти: щось інше', throttled: false });
+  assert.equal(loginFailure(undefined).throttled, false);
 });
 
 test('login card says whether the password must still be set', () => {
