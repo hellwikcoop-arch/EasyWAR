@@ -40,35 +40,44 @@ The original source must remain auditable and must not be silently overwritten b
 
 ```text
 .
-├── AGENTS.md
+├── AGENTS.md, CLAUDE.md        # інструкції для агентів (Codex, Claude Code)
 ├── .codex/
 │   ├── coordination/project.yaml
 │   └── environments/environment.toml
-├── docs/
-│   ├── ARCHITECTURE.md
-│   ├── ASSISTANT.md
-│   ├── BACKUP_AND_RECOVERY.md
-│   ├── DATABASE.md
-│   ├── MACOS_PACKAGING.md
-│   ├── RELEASE_CHECKLIST.md
-│   ├── ROADMAP.md
-│   ├── USER_GUIDE.md
-│   └── PROJECT_CONTEXT.md
-├── .github/workflows/desktop-build.yml
+├── .claude/                    # налаштування Claude Code, session-start hook, скіл run-easywar
+├── docs/                       # документація; індекс — docs/PROJECT_CONTEXT.md
+│   ├── PROJECT_CONTEXT.md, WORKFLOW.md, BACKLOG.md
+│   ├── AUDIT_2026-10-13.md, AUDIT_2026-10-19.md
+│   ├── ARCHITECTURE.md, DATABASE.md, UNIFIED_FRONTEND.md
+│   ├── ASSISTANT.md, BACKUP_AND_RECOVERY.md, SIGNAL_INTAKE.md, UPDATES.md
+│   ├── MACOS_PACKAGING.md, RELEASE_CHECKLIST.md, ROADMAP.md, USER_GUIDE.md
+│   ├── 3D_MODELS.md            # покажчик 3D-моделей і завантажувачів
+│   └── releases/               # нотатки до випусків і DECISIONS.md
+├── .github/
+│   ├── dependabot.yml
+│   └── workflows/desktop-build.yml
 ├── script/build_and_run.sh
 ├── script/import_unified_html.mjs
 ├── script/assistant_index.mjs  # генерація локального індексу довідки
 ├── script/build_runner.sh      # збірка рушія локальної моделі (runner/) для інсталятора
 ├── runner/                     # рушій КОМБАТА: обгортка над llama.cpp, тести протоколу
+├── tests/                      # node --test, синтетичні фікстури
 ├── src/
-│   ├── index.html   # launcher: вибір роду військ
-│   ├── air.html     # Повітряні Сили + desktop-інтеграції
-│   ├── rocket.html  # Ракетні Війська
-│   ├── assistant/   # локальна довідка й перевірка відкритих даних без моделі
-│   └── aircraft-viewer.html  # інтерактивні літаки у вкладці «Довідник» ПС (кадр, без мережі)
+│   ├── index.html   # launcher: вибір модуля, 3D-довідники, профілі
+│   ├── air.html     # Повітряні Сили + дашборд ПВК (?command=pvk) + desktop-інтеграції
+│   ├── rocket.html  # Ракетні війська + дашборд УДШВ (?command=dshv)
+│   ├── artillery.html  # Артилерія: облік боєприпасів
+│   ├── map.html     # офлайн-3D-карта, вбудовується у вкладки «Карта» ПС і РВ
+│   ├── viewer.html  # перегляд на телефоні (PWA з офлайн-кешем)
+│   ├── aircraft-viewer.html  # інтерактивні літаки у вкладці «Довідник» ПС (кадр, без мережі)
+│   ├── guides/      # 3D-довідники: хаб і шість довідників техніки
+│   ├── models/      # 3D-моделі .glb і CREDITS.md з ліцензіями
+│   ├── public/      # класичні скрипти (редактор модуля, rocket-refs), офлайн-ресурси карти, PWA manifest
+│   └── assistant/   # КОМБАТ: локальна довідка, перевірка відкритих даних, необов'язкова модель
 ├── src-tauri/
 │   ├── capabilities/default.json
 │   ├── migrations/README.md
+│   ├── resources/base-tables/  # порожні шаблони таблиць .xlsx (без даних)
 │   ├── src/
 │   ├── Cargo.toml
 │   └── tauri.conf.json
@@ -77,11 +86,17 @@ The original source must remain auditable and must not be silently overwritten b
 └── README.md
 ```
 
-The frontend is the unified EasyWAR v3.1 application split into three
-same-origin pages: the launcher (`src/index.html`) and the two branch modules
-it opens in iframes (`src/air.html`, `src/rocket.html`). The Rocket Forces
-module is byte-for-byte from the single-file HTML; the Air Force module keeps
-the desktop integrations (Signal, SQLite, XLSX, backup, profiles). See
+The frontend is the unified EasyWAR v3.1 application, shipped as same-origin
+pages. The launcher (`src/index.html`) opens the modules in iframes: Air Force
+(`air.html`), Rocket Forces (`rocket.html`), Artillery (`artillery.html`) and
+the dashboards of the Air Command and Airborne Assault Forces Command, which
+reuse `air.html` and `rocket.html` with `?command=pvk` / `?command=dshv`.
+`map.html`, `aircraft-viewer.html`, `viewer.html` and the pages under
+`src/guides/` are auxiliary pages with their own scenes (all listed as inputs in
+`vite.config.js`). The Rocket Forces module started as the module from the
+single-file v3.1 HTML and has since diverged from it (module-editor hook,
+dashboards, reference sections); the Air Force module keeps the desktop
+integrations (Signal, SQLite, XLSX, backup, profiles). See
 [`docs/UNIFIED_FRONTEND.md`](docs/UNIFIED_FRONTEND.md). SQLite is registered with a versioned provenance schema; see
 [`docs/DATABASE.md`](docs/DATABASE.md). No real data is stored in the repository.
 
@@ -93,7 +108,14 @@ the existing application.
 Локальний помічник «КОМБАТ» (`src/assistant/`) підключений у наявному
 діалозі профілів: явне увімкнення діє лише до завершення поточного входу.
 Він шукає уривки вбудованої довідки й пояснює наявні перевірки відкритої
-таблиці, без мовної моделі, мережі, запису чи постійної історії розмов.
+таблиці; для цього не потрібні ні мовна модель, ні мережа, він нічого не
+записує й не зберігає історію розмов. Додатково можна підключити
+необов'язкову локальну мовну модель (Qwen3-4B, ≈2,5 ГБ): пакет обирають
+вручну або завантажують кнопкою **Наділити КОМБАТА інтелектом** з
+`huggingface.co` після явного підтвердження — це єдина мережева дія помічника;
+файл перевіряється за SHA-256. Рушій (llama.cpp, `runner/`) збирається у
+випускних збірках, входить до інсталятора й працює як локальний дочірній процес; оперативні дані в модель не передаються,
+розмова існує лише в пам'яті вікна.
 Кнопки навігації відкривають штатні панелі профілів, резервних копій і
 оновлень; стан оновлення відображається з уже виконаної перевірки.
 Після зміни документів із дозволеного переліку потрібно запустити
@@ -137,7 +159,8 @@ On Windows, use `npm run tauri dev` from a supported developer shell.
 
 ## Current state
 
-Version 2.0.1. Technical (unsigned / ad-hoc signed) releases are published to the
+Version 2.1.1 (the version lives in `package.json` and in four more files that
+must match; `node script/release_version.mjs` checks them). Technical (unsigned / ad-hoc signed) releases are published to the
 public `easywar-releases` repository and installed copies update themselves
 (see [docs/UPDATES.md](docs/UPDATES.md)). Production distribution remains
 **NO-GO** until every mandatory gate in
@@ -151,6 +174,8 @@ Start here:
   (branches, commits, checks, releases);
 - [docs/BACKLOG.md](docs/BACKLOG.md) — prioritised work queue;
 - [docs/AUDIT_2026-10-13.md](docs/AUDIT_2026-10-13.md) — repository audit;
+- [docs/AUDIT_2026-10-19.md](docs/AUDIT_2026-10-19.md) — repeat audit with the
+  state of every fix;
 - [docs/ROADMAP.md](docs/ROADMAP.md) — milestones.
 
 Agent instructions live in `AGENTS.md` (Codex) and `CLAUDE.md` (Claude Code).

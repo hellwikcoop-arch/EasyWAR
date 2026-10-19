@@ -2,12 +2,21 @@
 
 ## Scope
 
-EasyWAR uses a local SQLite database managed by the official Tauri SQL plugin.
-The database file resolves inside the application-local configuration area and
-must never be committed.
+EasyWAR uses a local SQLite database, `easywar.db`, in the application-local
+configuration directory (`<OS configuration directory>/<bundle identifier>/`).
+It must never be committed. The database is not managed by the Tauri SQL
+plugin. Before Tauri starts, `migration_startup::prepare_database` applies the
+embedded SQLx migrator built from `src-tauri/migrations`; the application then
+opens its own single-connection SQLx pool in `setup`, and the frontend reaches
+the data only through dedicated Rust commands and stores.
 
-The Tauri configuration preloads `sqlite:easywar.db`, so registered migrations
-run during application startup before the frontend requests a connection.
+`tauri-plugin-sql` is still registered in `lib.rs` with the same migration
+list, and `tauri.conf.json` still preloads `sqlite:easywar.db`, but this is a
+leftover: no frontend file imports `@tauri-apps/plugin-sql`, the window's
+capability file grants only `core:default` (no SQL permission), and a test in
+`database.rs` requires the plugin's list to equal the embedded migrator
+version for version and byte for byte. Removing the plugin is a backlog item
+(P3-4).
 
 Migration `0001_provenance_schema.sql` creates the first provenance layer.
 Migration `0002_xlsx_duplicate_links.sql` adds immutable XLSX parsed-payload
@@ -18,7 +27,13 @@ local role-template assignment for each profile. Migration
 `0005_profile_details.sql` adds a profile's position, avatar and optional
 sign-in password hash. Migration `0006_profile_branch_tables.sql` binds a
 separate XLSX table per branch module (`air`, `rocket`) to a profile and moves
-an earlier single binding to the Air Force slot. Migration
+an earlier single binding to the Air Force slot. Migrations
+`0007_command_tables.sql` and `0008_own_losses_tables.sql` widen the `branch`
+check of `local_profile_tables` to `pvk` and `dshv` (the tables of the Air
+Command and Airborne Assault Forces Command dashboards) and then to
+`pvk_losses` and `dshv_losses` (the «НАШІ ВТРАТИ» table of each command tile);
+SQLite cannot change a check in place, so the table is rebuilt and the existing
+bindings are copied unchanged. Migration
 `0009_profile_modules.sql` stores the modules (`air`, `rocket`, `artillery`,
 `pvk`, `dshv`) a profile chose at registration and backfills all five for
 profiles that already exist. Migration `0010_dashboard_modules.sql` adds the
@@ -48,9 +63,9 @@ operational fixtures and create no external integration.
 | Local profiles | `local_profiles` | Mutable local display names with stable opaque IDs; no credentials or roles. |
 | Active local profile | `local_profile_state` | Singleton local selection used by future workspace features. |
 | Workspace template assignments | `local_profile_workspace_templates` | Optional local presentation preset for a profile; no authorization semantics. |
-| Profile details | `local_profile_details` | Position, small avatar and optional Argon2id sign-in hash; gates sign-in on this device only. |
+| Profile details | `local_profile_details` | Position, small avatar and the Argon2id sign-in hash; gates sign-in on this device only. The hash column is nullable: a profile created before registration required a password has no hash and accepts any password until one is set, while every new registration stores a hash (see «Local profiles»). |
 | Profile modules | `local_profile_modules` | Modules a profile chose at registration (`air`, `rocket`, `artillery`, `pvk`, `dshv`); only shown on the start screen, not an access boundary. Cascades on profile delete. |
-| Profile tables | `local_profile_tables` | One XLSX path per profile and branch module (`air`, `rocket`); the file itself is never stored or changed by binding. |
+| Profile tables | `local_profile_tables` | One XLSX path per profile and slot: `air`, `rocket`, `pvk`, `dshv`, and the «НАШІ ВТРАТИ» slots `pvk_losses` and `dshv_losses`; the file itself is never stored or changed by binding. |
 | Dashboard modules | `dashboard_modules` | One user-created dashboard module per row: owning profile, branch (`air`, `rocket`, `pvk`, `dshv`), built-in catalog template, visual kind, title and the name of its data table. Cascades on profile delete. |
 | Dashboard module fields | `dashboard_module_fields` | The checked field list copied from the catalog template: key, Ukrainian label, data type, role, aggregation, required flag and position. Cascades with the module. |
 | Dashboard module data | `dashboard_data_<24 hex>` | Created at runtime, one table per module: `row_id`, `created_at` and one column per catalog field. Table and column names come only from the validated catalog, never from user text. `row_id` is `INTEGER PRIMARY KEY AUTOINCREMENT`, so the number of a deleted row is never reused; a save keeps the `row_id` and `created_at` of every row that comes back with its `rowId`. `dashboard_modules.updated_at` is the version of the whole table: a save that carries `expected_updated_at` is applied only if it still matches (compare-and-swap in the first statement of the transaction), otherwise nothing changes and the caller gets a conflict. Deleting a profile drops its module tables in the same transaction as the metadata cascade, and only names that match the generated `dashboard_data_<24 hex>` pattern are ever dropped. In the built-in `flight-hours` template the unit-bearing `REAL` columns hold plain numbers and the unit is part of the field label: durations (`airborne_hours`, `total_hours`, `engine_test_time`, `time_in_clouds`, `hood_time`) are decimal hours (`0:32` is stored as `32/60` and shown as `год:хв`), `flight_altitude`, `cloud_base_upper` and `cloud_base_lower` are metres, `cloud_cover` is an integer 0–10, `visibility` is kilometres, `fuel_consumption` is litres and `cargo_kg` is kilograms; `passengers`, `rsp_approaches` and `rsp_landings` are counts. Fuel mass is not stored: the UI derives it at 0.8 kg/L. The crew columns (`crew_ke`, `crew_lsh`, `crew_bt`, `crew_other`) are `TEXT` with surnames, `crew_other` comma-separated. `crew_ke_callsign`, the crew commander's call sign placed right after `aircraft_number`, is `TEXT` as well (leading zeros are kept) and is not counted in the crew of at most 8. Value ranges (cloud cover 0–10, non-negative visibility, fuel, cargo, passengers and RSP counts, crew of at most 8, lower cloud base not above the upper one) are checked by the form only; the backend stores what it receives so that an old out-of-range row cannot block saving the table. Template fields appended later are added to existing tables by the runtime schema synchronisation, without a migration. A module can be created together with its first rows (`create_dashboard_module` with `rows`, read from the user's own XLSX by `module_source.rs`): the metadata, the table and the rows are written in one transaction, a row that fails `validate_value` (or more than 10 000 rows) leaves nothing behind, and the XLSX is only read, never changed. Columns the XLSX does not have simply stay empty in the new table. |
@@ -156,6 +171,12 @@ command is removed, so a profile without a password cannot be created;
 empty new password. `set_local_profile_modules` changes the chosen modules
 (requires an unlocked profile; at least one module).
 
+A profile that exists from before the password became mandatory has no hash in
+`local_profile_details`. `LocalProfileStore::verify_password` treats such a
+profile as having no password and accepts any input, so signing in to it
+protects nothing until a password is set. This is a known limit that depends on
+an owner decision about migrating old profiles (backlog P2-14).
+
 Profiles are not accounts in a service, roles or permissions. The sign-in screen
 gates the UI and the unlock checks of data commands on this device only; it does
 not encrypt table files and is not a boundary against someone who can modify the
@@ -184,8 +205,8 @@ are transactional and create no report audit events.
 The profile dialog can explicitly generate a separate empty SQLite database for
 the selected position template. The new file is initialized by the embedded
 SQLx migrator from the same authoritative files in `src-tauri/migrations` that
-the main application registers with the Tauri SQL plugin; there is no separate
-schema dump or copied set of `CREATE TABLE` statements. It receives the complete
+the application applies at startup; there is no separate schema dump or copied
+set of `CREATE TABLE` statements. It receives the complete
 current migration history, one active generic workstation profile and exactly
 one workspace-template assignment. It contains no raw sources, parsed values,
 corrections, decisions, approved revisions, settings or audit events, and it
@@ -207,8 +228,17 @@ the copy, or restore from one. Tests use only temporary synthetic databases.
 
 The read-only restore preflight checks SQLite integrity and foreign keys, then
 matches applied `_sqlx_migrations` versions and SHA-384 checksums to the
-registered EasyWAR migrations. It also requires the core tables and current
-state view. A missing, altered, newer, or unrelated database is rejected.
+registered EasyWAR migrations. It also requires the schema objects: the tables,
+views and triggers (including the sixteen provenance immutability triggers from
+migrations 0001 and 0002) are not taken from a fixed list but derived from the
+first N registered migrations, where N is the number of migrations applied in the
+copy. Those migrations are run against an empty in-memory database and the
+object names are compared with `sqlite_master` of the copy, so a new migration
+needs no manual update of the check. A missing object is reported by name (up to
+six, then «та ще N»). Only names are compared: indexes, columns and trigger
+bodies are not, and extra objects, such as the `dashboard_data_<24 hex>` tables
+created at runtime, are allowed. A missing, altered, newer, or unrelated
+database is rejected.
 Preflight also rejects SQLite files with companion WAL, SHM, or rollback-journal
 files. The in-app restore flow copies a validated file to a temporary file next
 to the live database, validates the copy again, and exposes separate cancel and
@@ -217,7 +247,7 @@ confirm actions. Selection and staging never replace the running database.
 EasyWAR acquires an exclusive cross-process lock before Tauri or any SQLite pool
 starts. After explicit confirmation it writes a small local restore-request
 marker and asks Tauri for a controlled restart. On the next process start, while
-the lock is held and before the SQL plugin opens the database, the app validates
+the lock is held and before the application opens its database pool, the app validates
 the staged copy again, moves the current database to
 `easywar.db.restore-previous`, and atomically renames the staged copy into place.
 The request marker is never inferred from the presence of a staged file, so an
@@ -268,12 +298,22 @@ and migration count. The frontend has no fallback that can label an unknown,
 partial or checksum-mismatched state as current.
 
 The same panel explicitly tells the user to create and verify a local backup
-before installing a newer EasyWAR version. This is local migration UX, not a
-network updater: release discovery, download, signature verification and
-installation are not implemented. Cross-version data-preservation acceptance
-remains part of the separate stable-migration release gate.
+before installing a newer EasyWAR version. The panel itself is local migration
+UX and never goes to the network. Installing a newer version is a separate,
+explicit feature described in [`UPDATES.md`](UPDATES.md): `app_update.rs`
+(`check_for_app_update`, the optional `auto_check_for_app_update`,
+`install_app_update`) fetches `latest.json` from the public release repository
+only after the user's button (or the opt-in daily check, off by default),
+writes a verified database copy `backups/EasyWAR-before-update-<from>-to-<to>-<time>.sqlite3`
+(`VACUUM INTO` plus `integrity_check`) and refuses to start the installation if
+that copy fails, then downloads the package and installs it only if its
+minisign signature matches the public key in `tauri.conf.json`
+(`plugins.updater.pubkey`, verified by `tauri-plugin-updater`). A local or PR
+build has no feed address and reports that updates are not configured.
+Cross-version data-preservation acceptance remains part of the separate
+stable-migration release gate.
 
-Before Tauri, the SQL plugin or any application pool opens `easywar.db`, the
+Before Tauri or any application pool opens `easywar.db`, the
 desktop startup path already holds the exclusive application-instance lock and
 runs the authoritative embedded SQLx migrator from `src-tauri/migrations`.
 There is no manually maintained schema dump:
@@ -296,8 +336,8 @@ There is no manually maintained schema dump:
   separate pre-migration backup exists;
 - a migration error removes only the temporary candidate and leaves the live
   database plus its verified backup intact. A repeated startup against the
-  current schema is a no-op, and the Tauri SQL plugin subsequently sees the
-  same complete migration history;
+  current schema is a no-op, and the application pool (and the leftover SQL
+  plugin) subsequently sees the same complete migration history;
 - a missing, altered, failed, newer or unrelated migration history fails
   closed before application repositories open the database.
 
@@ -305,13 +345,27 @@ Startup failures do not panic. `src-tauri/src/startup_recovery.rs` shows a
 native message (the Windows build has no console) and classifies the failure:
 only an unusable database (not SQLite, failed integrity/foreign-key/migration
 checks, missing required objects) is offered for set-aside, and only after an
-explicit Yes. Set-aside renames the database and its `-wal`/`-shm`/`-journal`
-files to `<db>.damaged-<UTC stamp>` (numbered suffix when taken), never deletes
-or overwrites, then lets the normal migrator create a fresh database. A
-database from a newer schema, file-system errors, failed migrations, ambiguous
-swap states and a second running instance are reported without touching any
-file. Covered by synthetic tests (healthy start, consent, refusal, newer
-schema, name collisions, second-attempt failure).
+explicit Yes. Set-aside renames the database to `<db>.damaged-<UTC stamp>` and
+each companion file to the same name plus its own suffix, so SQLite finds the
+WAL of the set-aside copy: `<db>.damaged-<UTC stamp>-wal`, `-shm` and `-journal`
+(a numbered suffix `-1`, `-2`… is added to the stamp when the name is taken; a
+name counts as taken when any of the four target paths exists). The database is
+renamed first and the companion files after it, with a directory sync after each
+step. If a step fails, the steps already done are rolled back in reverse order,
+the database last; if a process dies in between, only orphaned
+`easywar.db-wal`/`-shm`/`-journal` files remain without a database, and the next
+start refuses them (`LiveSidecarsPresent`) without applying or deleting
+anything. Set-aside never deletes or overwrites a file; afterwards the normal
+migrator creates a fresh database. A set-aside copy that still has its `-wal`/`-shm`/
+`-journal` beside it is not accepted by the backup inspection
+(`SidecarsPresent`). A database from a newer schema, file-system errors, failed
+migrations, ambiguous swap states and a second running instance are reported
+without touching any file. Failures in `setup` (database path mismatch, pool
+connection, main window creation) and in `Builder::build` use the same native
+message and exit with code 1 instead of a silent panic. Covered by synthetic
+tests (healthy start, consent, refusal, newer schema, name collisions,
+second-attempt failure, a WAL pair readable by SQLite after set-aside, rollback
+and an interrupted rename sequence).
 
 The pre-migration backup contains local data and is not encrypted. It remains
 beside the app database for explicit recovery; EasyWAR never uploads it.
@@ -320,6 +374,8 @@ source, parsed values, corrections, approved revision/decision and audit data,
 idempotent repeat startup, candidate failure, non-overwriting backups and an
 interrupted swap gap. Packaged macOS and Windows update acceptance remains a
 separate release gate.
+
+To add a migration:
 
 1. Add a numbered SQL file under `src-tauri/migrations/`.
 2. Register it in `src-tauri/src/database.rs` with the next integer version.

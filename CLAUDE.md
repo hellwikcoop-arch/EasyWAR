@@ -19,7 +19,7 @@ Vite-фронтендом для внесення, перевірки та ан�
 | Що це за проєкт, модулі, словник термінів | `docs/PROJECT_CONTEXT.md` |
 | Як працювати: задачі, гілки, коміти, перевірки, випуск | `docs/WORKFLOW.md` |
 | Що робити далі (пріоритети) | `docs/BACKLOG.md` |
-| Відомі ризики й знахідки аудиту | `docs/AUDIT_2026-10-13.md` |
+| Відомі ризики й знахідки аудиту | `docs/AUDIT_2026-10-13.md`, `docs/AUDIT_2026-10-19.md` (свіжіший, у кінці — стан виправлень) |
 | Архітектура, база, фронтенд | `docs/ARCHITECTURE.md`, `docs/DATABASE.md`, `docs/UNIFIED_FRONTEND.md` |
 | Сценарії користувача | `docs/USER_GUIDE.md` |
 | Запуск і скриншоти застосунку в хмарній сесії | скіл `run-easywar` (`.claude/skills/run-easywar/SKILL.md`) |
@@ -30,11 +30,11 @@ Vite-фронтендом для внесення, перевірки та ан�
 виконує `npm install --no-save` і прогріває cargo; локально — `npm ci`.
 
 ```bash
-npm run test:unit                                   # 326 JS-тестів + XLSX-контракт (cargo run --example)
-cargo test --manifest-path src-tauri/Cargo.toml     # 180 Rust-тестів
+npm run test:unit                                   # понад 850 JS-тестів (≈3,5 хв) + XLSX-контракт (cargo run --example)
+cargo test --manifest-path src-tauri/Cargo.toml     # понад 250 Rust-тестів
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
 cargo fmt --manifest-path src-tauri/Cargo.toml --check
-npm run build                                       # Vite → dist/ (≈139 МБ, з них 119 МБ — .glb)
+npm run build                                       # Vite → dist/ (≈390 МБ, з них ≈200 МБ — .glb, ≈140 МБ — map-assets)
 node script/release_version.mjs                     # узгодженість версій у 5 файлах
 ```
 
@@ -81,8 +81,6 @@ macOS/Windows у ньому лише на тегах. Усе одно запус
   `window.__DASH` (див. `docs/UNIFIED_FRONTEND.md`).
 - `cargo fmt --check` по всьому крейту зелений і є воротами CI: форматуй свої зміни
   (`rustfmt --edition 2021 <файл>`), не залишай розбіжностей.
-- Тест `signal_session::tests::bounded_session_persists_allowed_synthetic_notification`
-  нестабільний (беклог P1-2): падіння не обов'язково твоя помилка, перезапусти.
 - Хмарна сесія — Linux: збірки macOS/Windows, Gatekeeper/SmartScreen, реальний
   `signal-cli` тут не перевіряються; пиши це в «не перевірено».
 - У `tests/` і фікстурах — лише синтетичні дані (`.claude/skills/run-easywar/fixtures.py`
