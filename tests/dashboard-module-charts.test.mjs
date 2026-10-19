@@ -489,3 +489,9 @@ test('progress bars render pills and glow only in the dark theme', async () => {
   assert.match(css, /\.ewmc-pills\{/u);
   assert.match(css, /html:not\(\[data-theme=light\]\) \.ewmc-pills i\.on\{[^}]*drop-shadow/u);
 });
+
+test('every Rust catalog template survives the frontend whitelist, so a new chart kind is never dropped silently', async () => {
+  const { normalizeCatalog } = await import('../src/dashboard-module-catalog-core.js');
+  const kept = normalizeCatalog(catalog).map(item => item.id);
+  assert.deepEqual(kept, catalog.map(item => item.id), 'вид шаблону з Rust має бути у VISUAL_KINDS (dashboard-module-catalog-core.js)');
+});
