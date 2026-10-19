@@ -125,6 +125,25 @@ module script before `</body>`. `script/import_unified_html.mjs` rewrites
   (backlog P2-6), so do not commit iterations.
 
 
+## Технологічний шар стартового екрана
+
+Поверх фону лаунчера і під картками лежить декоративний шар у стилі HUD: мережа вузлів на `<canvas>`,
+радарний промінь навколо кола з тризубом, кутові скоби з годинником, промінь сканування, обвідка й
+легкий нахил картки під курсором, моноширинні заголовки «Командування» / «Роди військ».
+
+| Файл | Роль |
+| --- | --- |
+| `src/start-tech-core.js` | чиста логіка: кількість і рух вузлів, лінії між ними, позиція курсора, коли анімувати, текст годинника (тести — `tests/start-tech.test.mjs`) |
+| `src/start-tech.js` | DOM: додає `canvas.ew-tech-field`, `.ew-hud`, `.ew-radar` (усі `aria-hidden`) і обробник `pointermove` на `.branch-cards` |
+| `src/start-tech.css` | стилі шару; бірюзовий акцент `#60dde8` узято із заставки |
+
+- `src/index.html` має лише два рядки: `<link>` на стилі після `startup-splash.css` і модуль після
+  `launcher-tools.js`. Після `script/import_unified_html.mjs` поверни їх; тест упаде, якщо рядків немає.
+- Canvas не малює нових кадрів, коли ввімкнено «зменшити рух» або перемикач «Анімації» вимкнено
+  (`html[data-motion="off"]`), вкладка прихована або відкрито модуль (`body[data-active-branch]`).
+- Положення радара (центр 50% / 44%, ширина 86% емблеми) підігнано під `start-brand-art`; якщо
+  емблему замінять, перевір його.
+
 ## Registration and sign-in gate
 
 After the splash the launcher is covered by a registration wizard (no profiles
