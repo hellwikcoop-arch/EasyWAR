@@ -10,16 +10,19 @@ import './easydoc-launcher.css';
 export const EASYDOC_URL = 'workspace/easydoc/index.html';
 export const EASYDOC_TITLE = 'EasyDoc';
 
-/** Вставляє редактор у контейнер. Повертає функцію, що вивантажує сторінку редактора. */
+/** Вставляє редактор у контейнер. Повертає { destroy }, як mountEasyGreen: destroy вивантажує
+ *  сторінку редактора. Ознаки незбережених змін оболонці поки не передаємо. */
 export function mountEasydoc(container, { url = EASYDOC_URL } = {}) {
   const frame = document.createElement('iframe');
   frame.className = 'ew-easydoc-frame';
   frame.title = EASYDOC_TITLE;
   frame.src = url;
   container.append(frame);
-  return () => {
-    frame.src = 'about:blank';
-    frame.remove();
+  return {
+    destroy() {
+      frame.src = 'about:blank';
+      frame.remove();
+    },
   };
 }
 
@@ -46,17 +49,17 @@ function initializeTemporaryButton() {
     </div>`;
   document.body.append(overlay);
   const closeButton = overlay.querySelector('.ew-easydoc-close');
-  let unmount = null;
+  let mounted = null;
 
   const close = () => {
     if (!window.confirm('Закрити EasyDoc? Незбережені зміни в документі буде втрачено.')) return;
     overlay.hidden = true;
-    unmount?.();
-    unmount = null;
+    mounted?.destroy();
+    mounted = null;
     openButton.focus();
   };
   openButton.addEventListener('click', () => {
-    unmount ??= mountEasydoc(overlay);
+    mounted ??= mountEasydoc(overlay);
     overlay.hidden = false;
     closeButton.focus();
   });

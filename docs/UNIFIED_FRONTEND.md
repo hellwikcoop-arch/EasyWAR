@@ -192,7 +192,7 @@ ends, and the launcher stays `inert` until sign-in.
 
 | Файл | Роль |
 | --- | --- |
-| `src/workspace/easydoc/easydoc-launcher.js`, `.css` | `mountEasydoc(контейнер)` вставляє `<iframe>` на `workspace/easydoc/index.html` і повертає функцію вивантаження (`about:blank`); тимчасова кнопка й накладка до появи оболонки |
+| `src/workspace/easydoc/easydoc-launcher.js`, `.css` | `mountEasydoc(контейнер)` вставляє `<iframe>` на `workspace/easydoc/index.html` і повертає `{ destroy }` (як `mountEasyGreen`), `destroy` ставить `about:blank`; тимчасова кнопка й накладка до появи оболонки |
 | `src/public/workspace/easydoc/index.html` | сторінка редактора: `canvas#wordcraft_canvas`, завантаження `wordcraft-web.js` і `wordcraft-web_bg.wasm` (≈ 52 МБ) без бандлера Vite |
 | `src/public/workspace/easydoc/easydoc-host.js` | місток `window.__easydocHost`: `openDocument()` і `saveDocument(ім'я, байти)` викликають Tauri-команди `open_office_document` і `save_office_document` батьківського вікна; без Tauri місток не ставиться, і редактор працює з браузерним вибором і завантаженням файлів |
 | `src/public/workspace/easydoc/licenses/` | ліцензії WordCraft і шрифтів (MIT, Apache-2.0, NOTICE, SIL OFL) |
