@@ -466,7 +466,8 @@ by hand with narrow anchored patches (see `AGENTS.md`), then run
 | `src/workspace/easyslide/host-core.js` | міст без DOM: `createEasySlideHost(host, notify)` → `open(purpose)` через `host.openFile`, `save(name, bytes)` через `host.saveFileAs` (true лише для `.pptx`/`.deckcraft`, експорт PDF/PNG/JPG/GIF/TXT позначку змін не знімає), `setState(dirty, title)` → `host.setDirty`/`host.setTitle`. Тести — `tests/easyslide-host.test.mjs` |
 | `src/workspace/easyslide/easyslide.css` | полотно на весь контейнер; прихованому `<input>` eframe повертає `box-sizing: content-box` (з `border-box` оболонки Chromium псує введення кирилиці) |
 | `src/public/workspace/easyslide/` | зібраний редактор (`deckcraft-web_bg.wasm`, ≈48 МБ; мережа не потрібна), ліцензії DeckCraft і шрифтів (Inter, BIZ UDPGothic — OFL), `README.md` з хешами |
-| `script/easyslide/build.sh` | перезбірка WASM в окремій теці поза репозиторієм |
+| `script/easyslide/uk.tsv`, `script/easyslide/l10n.mjs` | український інтерфейс редактора: словник «англійський рядок → переклад» (з шаблонами `{}`) і генератор таблиць Rust; тести — `tests/easyslide-l10n.test.mjs` |
+| `script/easyslide/build.sh`, `*.patch` | перезбірка WASM в окремій теці поза репозиторієм; правки DeckCraft і гачок перекладу egui |
 
 Файли відкриваються й зберігаються командами оболонки `office_*` (`src-tauri/src/office_files.rs`);
 власних команд EasySlide не має. CSP і capabilities Tauri не змінювалися.

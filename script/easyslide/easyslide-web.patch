@@ -1,6 +1,52 @@
+--- Cargo.toml
++++ Cargo.toml
+@@ -1,6 +1,7 @@
+ [workspace]
+ resolver = "3"
+ members = ["crates/*", "apps/*", "xtask"]
++exclude = ["vendor"]
+ default-members = ["crates/*", "apps/deckcraft", "apps/deckcraft-cli"]
+ 
+ [workspace.package]
+@@ -95,4 +96,6 @@
+ debug = 0
+ 
+ [patch.crates-io]
++# EasySlide: egui with the interface translation hook (vendor/egui, egui-l10n.patch in EasyWAR).
++egui = { path = "vendor/egui" }
+ krilla = { git = "https://github.com/storytold/craft-libs", rev = "c3487320b2d1de657b860b3c8abb44e1f2b32bd8", version = "=0.8.2" }
+--- Cargo.lock
++++ Cargo.lock
+@@ -1340,8 +1340,6 @@
+ [[package]]
+ name = "egui"
+ version = "0.36.2"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "dc938cc27cd911415e1e4d151bc56ff9df063d8db081374e87aeb805ea74b2ba"
+ dependencies = [
+  "accesskit",
+  "ahash",
+--- apps/deckcraft-web/src/main.rs
++++ apps/deckcraft-web/src/main.rs
+@@ -18,6 +18,7 @@
+ #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
+ #![forbid(unsafe_code)]
+ 
++mod uk;
+ #[cfg(target_arch = "wasm32")]
+ mod web;
+ 
 --- apps/deckcraft-web/src/web.rs
 +++ apps/deckcraft-web/src/web.rs
-@@ -39,7 +39,8 @@
+@@ -13,6 +13,7 @@
+ 
+ pub fn start() {
+     eframe::WebLogger::init(log::LevelFilter::Info).ok();
++    egui::l10n::set_translator(crate::uk::translate);
+     wasm_bindgen_futures::spawn_local(async {
+         let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+             log::error!("no document");
+@@ -39,7 +40,8 @@
                      let inbox: Inbox = Inbox::default();
                      let mut app = SlideApp::new(Session::new(), services(inbox.clone(), cc.egui_ctx.clone()));
                      let q = query();
@@ -10,7 +56,7 @@
                          if let Err(e) = deckcraft_engine::sample::open_sample(&mut app.session) {
                              log::error!("sample deck: {e}");
                          }
-@@ -49,7 +50,7 @@
+@@ -49,7 +51,7 @@
                      if q.contains("show") {
                          app.start_show(0, false);
                      }
@@ -19,7 +65,7 @@
                  }),
              )
              .await;
-@@ -71,6 +72,16 @@
+@@ -71,6 +73,16 @@
  struct WebShell {
      app: SlideApp,
      inbox: Inbox,
@@ -36,7 +82,7 @@
  }
  
  impl eframe::App for WebShell {
-@@ -98,6 +109,7 @@
+@@ -98,6 +110,7 @@
              });
          }
          self.app.logic(ctx);
@@ -44,7 +90,7 @@
      }
  
      fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
-@@ -106,17 +118,65 @@
+@@ -106,17 +119,65 @@
  
      fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
          self.app.ui(ui);
@@ -110,7 +156,7 @@
              let dialog = match purpose {
                  "picture" => rfd::AsyncFileDialog::new().add_filter("Pictures", PICTURE_EXTS),
                  "audio" => rfd::AsyncFileDialog::new().add_filter("Audio", AUDIO_EXTS),
-@@ -134,9 +194,9 @@
+@@ -134,9 +195,9 @@
                  ctx.request_repaint();
              });
          })),
@@ -122,7 +168,7 @@
                  log::error!("download of {name} failed: {e}");
              }
          })),
-@@ -145,6 +205,51 @@
+@@ -145,6 +206,51 @@
      }
  }
  
@@ -174,6 +220,146 @@
  fn push_inbox(inbox: &Inbox, event: InboxEvent) {
      inbox.lock().unwrap_or_else(|e| e.into_inner()).push(event);
  }
+--- /dev/null
++++ apps/deckcraft-web/src/uk.rs
+@@ -0,0 +1,137 @@
++//! Ukrainian interface for EasySlide: egui passes every interface string through [`translate`]
++//! (hook `egui::l10n`). Whole strings are looked up in `EXACT`; strings built with `format!` match
++//! a `PATTERNS` entry, where `{}` stands for any text that is translated in turn. The tables are
++//! generated from `script/easyslide/uk.tsv` in EasyWAR.
++
++use std::cell::RefCell;
++use std::collections::HashMap;
++
++include!("uk_table.rs");
++
++thread_local! {
++    static INDEX: HashMap<&'static str, &'static str> = EXACT.iter().copied().collect();
++    static CACHE: RefCell<HashMap<String, Option<String>>> = RefCell::new(HashMap::new());
++}
++
++/// Cached results stay below this size: dynamic strings (zoom, counters) would grow it forever.
++const CACHE_LIMIT: usize = 20_000;
++
++pub fn translate(text: &str) -> Option<String> {
++    if let Some(hit) = CACHE.with_borrow(|c| c.get(text).cloned()) {
++        return hit;
++    }
++    let found = lookup(text, 0);
++    CACHE.with_borrow_mut(|c| {
++        if c.len() >= CACHE_LIMIT {
++            c.clear();
++        }
++        c.insert(text.to_owned(), found.clone());
++    });
++    found
++}
++
++fn lookup(text: &str, depth: u8) -> Option<String> {
++    if let Some(uk) = INDEX.with(|i| i.get(text).copied()) {
++        return Some(uk.to_owned());
++    }
++    // Keep the edge spaces and the trailing ellipsis or colon of a known string.
++    let trimmed = text.trim();
++    if trimmed.len() != text.len() && !trimmed.is_empty() {
++        let at = text.find(trimmed).unwrap_or(0);
++        let uk = lookup(trimmed, depth)?;
++        return Some(format!("{}{uk}{}", &text[..at], &text[at + trimmed.len()..]));
++    }
++    if depth > 2 {
++        return None;
++    }
++    PATTERNS.iter().find_map(|(en, uk)| {
++        let parts = capture(en, text)?;
++        let parts: Vec<String> = parts.into_iter().map(|p| lookup(p, depth + 1).unwrap_or_else(|| p.to_owned())).collect();
++        Some(fill(uk, &parts))
++    })
++}
++
++/// The texts standing for each `{}` of `pattern` in `text`, shortest first; `None` if it does not match.
++fn capture<'a>(pattern: &str, text: &'a str) -> Option<Vec<&'a str>> {
++    let pieces: Vec<&str> = pattern.split("{}").collect();
++    let (first, rest) = pieces.split_first()?;
++    let mut tail = text.strip_prefix(first)?;
++    let mut out = Vec::new();
++    for (i, piece) in rest.iter().enumerate() {
++        let last = i + 1 == rest.len();
++        let at = if last {
++            if !tail.ends_with(piece) || tail.len() < piece.len() {
++                return None;
++            }
++            tail.len() - piece.len()
++        } else if piece.is_empty() {
++            return None;
++        } else {
++            tail.find(piece)?
++        };
++        if at == 0 {
++            return None;
++        }
++        out.push(&tail[..at]);
++        tail = &tail[at + piece.len()..];
++    }
++    Some(out)
++}
++
++/// `{}` takes the captures in order; `{1}`, `{2}`… take them by number.
++fn fill(template: &str, parts: &[String]) -> String {
++    let mut out = String::with_capacity(template.len() + 16);
++    let mut next = 0;
++    let mut rest = template;
++    while let Some(open) = rest.find('{') {
++        out.push_str(&rest[..open]);
++        let after = &rest[open + 1..];
++        let Some(close) = after.find('}') else {
++            out.push_str(&rest[open..]);
++            return out;
++        };
++        let inner = &after[..close];
++        let index = if inner.is_empty() {
++            next += 1;
++            Some(next - 1)
++        } else {
++            inner.parse::<usize>().ok().and_then(|n| n.checked_sub(1))
++        };
++        match index.and_then(|i| parts.get(i)) {
++            Some(p) => out.push_str(p),
++            None => out.push_str(&rest[open..open + close + 2]),
++        }
++        rest = &after[close + 1..];
++    }
++    out.push_str(rest);
++    out
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn patterns_and_fill() {
++        assert_eq!(capture("Slide {} of {}", "Slide 3 of 12"), Some(vec!["3", "12"]));
++        assert_eq!(capture("Slide {} of {}", "Slides 3 of 12"), None);
++        assert_eq!(capture("{}…", "Open…"), Some(vec!["Open"]));
++        assert_eq!(fill("{2} — {1}", &["a".into(), "b".into()]), "b — a");
++        assert_eq!(fill("{} з {}", &["3".into(), "12".into()]), "3 з 12");
++    }
++
++    #[test]
++    fn table_is_consistent() {
++        for (en, uk) in EXACT {
++            assert!(!en.contains("{}"), "{en}");
++            assert!(!uk.is_empty(), "{en}");
++        }
++        for (en, uk) in PATTERNS {
++            let holes = en.matches("{}").count();
++            assert!(holes > 0, "{en}");
++            for n in 1..=holes {
++                assert!(uk.contains("{}") || uk.contains(&format!("{{{n}}}")), "{en} → {uk}");
++            }
++        }
++    }
++}
 --- crates/engine/src/recovery.rs
 +++ crates/engine/src/recovery.rs
 @@ -44,7 +44,8 @@
@@ -216,3 +402,76 @@
                      }
                  }
                  UiRequest::Media { action, shape, ms } => {
+--- crates/ui-egui/src/widgets.rs
++++ crates/ui-egui/src/widgets.rs
+@@ -35,8 +35,10 @@
+ pub fn big_button_ex(ui: &mut Ui, icon: Icon, label: &str, enabled: bool, split: bool, selected: bool) -> (Response, Option<Response>) {
+     let t = Tokens::get(ui.ctx());
+     let font = theme::font(11.0);
+-    let lines: Vec<&str> = wrap_label(label);
+-    let text_w = lines.iter().map(|l| ui.fonts_mut(|f| f.layout_no_wrap(l.to_string(), font.clone(), t.text).size().x)).fold(0.0f32, f32::max);
++    // EasySlide: wrap the label as the interface shows it (translated), not the source text.
++    let shown = egui::l10n::tr(label.to_owned());
++    let lines: Vec<&str> = wrap_label(&shown);
++    let text_w = lines.iter().map(|l| ui.fonts_mut(|f| f.layout_no_wrap(egui::l10n::tr(l.to_string()), font.clone(), t.text).size().x)).fold(0.0f32, f32::max);
+     let w = (text_w + 10.0 + if split && lines.len() == 1 { 10.0 } else { 0.0 }).max(40.0);
+     let (rect, resp) = ui.allocate_exact_size(vec2(w, RIBBON_H - 2.0), if enabled { Sense::click() } else { Sense::hover() });
+     // Named for screen readers and UI tests ("Ink to\nShape" reads "Ink to Shape").
+@@ -65,7 +67,7 @@
+     let mut y = rect.min.y + 39.0;
+     for (i, l) in lines.iter().enumerate() {
+         let last = i + 1 == lines.len();
+-        let label_w = ui.fonts_mut(|f| f.layout_no_wrap(l.to_string(), font.clone(), col).size().x);
++        let label_w = ui.fonts_mut(|f| f.layout_no_wrap(egui::l10n::tr(l.to_string()), font.clone(), col).size().x);
+         let extra = if split && last { 9.0 } else { 0.0 };
+         let x = rect.center().x - (label_w + extra) / 2.0;
+         painter.text(pos2(x, y), Align2::LEFT_TOP, l, font.clone(), col);
+@@ -116,7 +118,7 @@
+ pub fn small_button_ex(ui: &mut Ui, icon: Icon, label: &str, enabled: bool, selected: bool, split: bool) -> (Response, Option<Response>) {
+     let t = Tokens::get(ui.ctx());
+     let font = theme::font(12.0);
+-    let tw = if label.is_empty() { 0.0 } else { ui.fonts_mut(|f| f.layout_no_wrap(label.to_string(), font.clone(), t.text).size().x) + 5.0 };
++    let tw = if label.is_empty() { 0.0 } else { ui.fonts_mut(|f| f.layout_no_wrap(egui::l10n::tr(label.to_string()), font.clone(), t.text).size().x) + 5.0 };
+     let arrow_w = if split { 12.0 } else { 0.0 };
+     let w = 24.0 + tw + arrow_w;
+     let (rect, resp) = ui.allocate_exact_size(vec2(w, 22.0), if enabled { Sense::click() } else { Sense::hover() });
+@@ -157,7 +159,7 @@
+ pub fn check_item(ui: &mut Ui, label: &str, enabled: bool, on: bool) -> Response {
+     let t = Tokens::get(ui.ctx());
+     let font = theme::font(12.0);
+-    let tw = ui.fonts_mut(|f| f.layout_no_wrap(label.to_string(), font.clone(), t.text).size().x) + 5.0;
++    let tw = ui.fonts_mut(|f| f.layout_no_wrap(egui::l10n::tr(label.to_string()), font.clone(), t.text).size().x) + 5.0;
+     let (rect, resp) = ui.allocate_exact_size(vec2(24.0 + tw, 22.0), if enabled { Sense::click() } else { Sense::hover() });
+     resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, enabled, on, label));
+     let painter = ui.painter_at(rect);
+--- crates/ui-egui/src/ribbon.rs
++++ crates/ui-egui/src/ribbon.rs
+@@ -168,7 +168,7 @@
+         let mut x = rect.min.x + 12.0;
+         let y = rect.min.y + 2.0;
+         {
+-            let w = ui.fonts_mut(|f| f.layout_no_wrap("File".to_string(), theme::font(13.0), t.text).size().x) + 18.0;
++            let w = ui.fonts_mut(|f| f.layout_no_wrap(egui::l10n::tr("File".to_string()), theme::font(13.0), t.text).size().x) + 18.0;
+             let r = Rect::from_min_size(pos2(x, y), vec2(w, 24.0));
+             let resp = ui.interact(r, ui.id().with("tab_file"), Sense::click());
+             resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "File"));
+@@ -184,7 +184,7 @@
+         let all: Vec<(&str, bool)> = TABS.iter().map(|s| (*s, false)).chain(ctx_tabs.iter().map(|s| (*s, true))).collect();
+         for (name, contextual) in all {
+             let font = theme::font(13.0);
+-            let w = ui.fonts_mut(|f| f.layout_no_wrap(name.to_string(), font.clone(), t.text).size().x) + 18.0;
++            let w = ui.fonts_mut(|f| f.layout_no_wrap(egui::l10n::tr(name.to_string()), font.clone(), t.text).size().x) + 18.0;
+             let r = Rect::from_min_size(pos2(x, y), vec2(w, 24.0));
+             let resp = ui.interact(r, ui.id().with(("tab", name)), Sense::click());
+             let active = app.ui.tab == name;
+--- crates/ui-egui/src/status.rs
++++ crates/ui-egui/src/status.rs
+@@ -100,7 +100,7 @@
+ 
+ fn labeled(ui: &mut Ui, icon: Icon, label: &str, on: bool) -> egui::Response {
+     let t = Tokens::get(ui.ctx());
+-    let w = 22.0 + ui.fonts_mut(|f| f.layout_no_wrap(label.into(), theme::font(12.0), t.text).size().x) + 8.0;
++    let w = 22.0 + ui.fonts_mut(|f| f.layout_no_wrap(egui::l10n::tr(label.into()), theme::font(12.0), t.text).size().x) + 8.0;
+     let (r, resp) = ui.allocate_exact_size(vec2(w, 20.0), Sense::click());
+     if on || resp.hovered() {
+         ui.painter().rect_filled(r, CornerRadius::same(4), if on { t.selected } else { t.hover });
