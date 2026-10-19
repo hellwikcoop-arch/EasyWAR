@@ -1,0 +1,60 @@
+/* Індикатор «Відкриваємо таблицю…» (work-loader.js). Картка зверху посередині, кліків не перехоплює.
+   Рух — лише при prefers-reduced-motion: no-preference; інакше смуга статична, текст і час оновлюються. */
+.ew-uplink {
+  --ul-accent: #4fb3ff;
+  --ul-ink: #eaf2fb;
+  --ul-muted: #9fb2c8;
+  --ul-card: rgb(9 20 33 / 92%);
+  --ul-line: rgb(79 179 255 / 34%);
+  position: fixed;
+  z-index: 2147483000;
+  inset: 18px 16px auto;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+.ew-uplink[hidden] { display: none; }
+.ew-uplink__card {
+  width: min(420px, 100%);
+  box-sizing: border-box;
+  padding: 14px 16px 12px;
+  border: 1px solid var(--ul-line);
+  border-radius: 14px;
+  color: var(--ul-ink);
+  background:
+    repeating-linear-gradient(0deg, rgb(255 255 255 / 2.5%) 0 1px, transparent 1px 4px),
+    var(--ul-card);
+  box-shadow: 0 18px 50px rgb(0 0 0 / 45%), 0 0 0 1px rgb(255 255 255 / 3%) inset;
+  backdrop-filter: blur(10px);
+  font-family: inherit;
+}
+.ew-uplink__head { display: flex; align-items: center; gap: 10px; font-size: 14px; letter-spacing: .02em; }
+.ew-uplink__head b { flex: 1 1 auto; min-width: 0; font-weight: 700; }
+.ew-uplink__dot {
+  flex: none; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--ul-accent); box-shadow: 0 0 10px var(--ul-accent);
+}
+.ew-uplink__time { flex: none; color: var(--ul-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.ew-uplink__bar { display: grid; grid-template-columns: repeat(24, minmax(0, 1fr)); gap: 3px; margin: 12px 0 10px; }
+.ew-uplink__bar i {
+  display: block; height: 8px; border-radius: 2px;
+  background: color-mix(in srgb, var(--ul-accent) 55%, transparent);
+}
+.ew-uplink__detail {
+  margin: 0; overflow: hidden; color: var(--ul-muted); font-size: 12px;
+  white-space: nowrap; text-overflow: ellipsis;
+}
+
+@keyframes ew-uplink-wave {
+  0%, 100% { background: color-mix(in srgb, var(--ul-accent) 14%, transparent); box-shadow: none; }
+  18% { background: var(--ul-accent); box-shadow: 0 0 8px color-mix(in srgb, var(--ul-accent) 70%, transparent); }
+  40% { background: color-mix(in srgb, var(--ul-accent) 30%, transparent); box-shadow: none; }
+}
+@keyframes ew-uplink-in { from { opacity: 0; transform: translateY(-8px); } }
+@keyframes ew-uplink-blink { 50% { opacity: .35; } }
+
+@media (prefers-reduced-motion: no-preference) {
+  .ew-uplink__card { animation: ew-uplink-in .24s cubic-bezier(.22, 1, .36, 1); }
+  .ew-uplink__dot { animation: ew-uplink-blink 1s steps(2, jump-none) infinite; }
+  .ew-uplink__bar i { animation: ew-uplink-wave 1.6s linear calc(var(--i) * 60ms) infinite; }
+}

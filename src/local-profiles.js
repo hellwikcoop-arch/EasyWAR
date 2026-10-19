@@ -29,6 +29,7 @@ import {
   workspaceTemplateLabel,
 } from './local-profiles-core.js';
 import { createProfileGate } from './profile-gate.js';
+import { startWorkLoader } from './work-loader.js';
 import { requestSplashSkip } from './startup-splash-core.js';
 import { GATE_MODULES, modulesError, moduleVisible } from './profile-gate-core.js';
 import { createAssistantUI } from './assistant/assistant-ui.js';
@@ -699,6 +700,7 @@ function initializeLocalProfiles() {
     }
     const name = databaseFileName(path);
     const frame = moduleWindow(branch);
+    const loaderDone = startWorkLoader({ table: branchInfo(branch)?.table, fileName: name });
     try {
       const bytes = await readProfileDatabase(profile.id, branch, undefined, frame);
       // The module reports a table it cannot read itself and keeps the open one.
@@ -719,6 +721,7 @@ function initializeLocalProfiles() {
       status.textContent = message;
       dashboard.showError?.(message);
     } finally {
+      loaderDone();
       loadingDatabaseFor[branch] = null;
     }
   }

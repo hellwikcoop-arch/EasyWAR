@@ -210,19 +210,40 @@ function miniSpark(series) {
     h('svg:circle', { class: 'dot', cx: lastX.toFixed(1), cy: lastY.toFixed(1), r: 3 }));
 }
 
-/** Кільце-відсоток у картці показника (замість міні-графіка, коли показник — частка). */
-function ratioRing(value) {
+/**
+ * Стрілочний прилад у картці показника, коли показник — частка (за мотивом Performance Gauges з AnimatedWebs).
+ * Дуга 0–100 %, поділки через 10 %, стрілка повертається CSS-змінною --p; поява стрілки — у dashboard-motion.css.
+ */
+const GAUGE = { cx: 50, cy: 52, r: 40 };
+function gaugePoint(percent, radius) {
+  const angle = Math.PI * (1 - percent / 100);
+  return [GAUGE.cx + radius * Math.cos(angle), GAUGE.cy - radius * Math.sin(angle)];
+}
+function ratioGauge(value) {
   if (value == null || !Number.isFinite(value)) return null;
   const clamped = Math.max(0, Math.min(100, value));
-  return h('div', { class: 'pvk-kpi-ring', role: 'img', 'aria-label': `${decimal(clamped)}%`, style: { '--p': clamped.toFixed(1) } });
+  const { cx, cy, r } = GAUGE;
+  const arc = `M${cx - r} ${cy} A${r} ${r} 0 0 1 ${cx + r} ${cy}`;
+  const ticks = Array.from({ length: 11 }, (_, index) => {
+    const [x1, y1] = gaugePoint(index * 10, index % 5 ? 30 : 27);
+    const [x2, y2] = gaugePoint(index * 10, 33);
+    return h('svg:line', { class: index % 5 ? 'tick' : 'tick major', x1: x1.toFixed(1), y1: y1.toFixed(1), x2: x2.toFixed(1), y2: y2.toFixed(1) });
+  });
+  return h('svg:svg', { class: 'pvk-kpi-gauge', viewBox: '0 0 100 60', role: 'img', 'aria-label': `${decimal(clamped)}%`, style: { '--p': clamped.toFixed(1) } },
+    h('svg:path', { class: 'track', d: arc, pathLength: 100 }),
+    h('svg:path', { class: 'val', d: arc, pathLength: 100 }),
+    ...ticks,
+    h('svg:g', { class: 'needle' },
+      h('svg:path', { d: `M${cx - 2.6} ${cy} L${cx} ${cy - 31} L${cx + 2.6} ${cy} Z` }),
+      h('svg:circle', { cx, cy, r: 4.5 })));
 }
 
 /**
  * Картка показника. icon — ключ плитки-іконки (маски [data-ic] у dashboard-layout.css),
- * series — ряд по днях для міні-графіка, ring — відсоток для кільця. Без них картка лишається текстовою.
+ * series — ряд по днях для міні-графіка, ring — відсоток для стрілочного приладу. Без них картка лишається текстовою.
  */
 function kpi(label, value, detail, tone = '', { icon = '', series = null, ring = null } = {}) {
-  const visual = ring != null ? ratioRing(ring) : miniSpark(series);
+  const visual = ring != null ? ratioGauge(ring) : miniSpark(series);
   return h('article', { class: `pvk-kpi ${tone}` },
     icon ? h('i', { class: 'pvk-kpi-ic', 'data-ic': icon, 'aria-hidden': 'true' }) : null,
     h('div', { class: 'pvk-kpi-text' }, h('span', { text: label }), h('strong', { text: value }), h('small', { text: detail })),

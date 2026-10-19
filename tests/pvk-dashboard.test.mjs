@@ -278,6 +278,15 @@ test('the dashboard renders every page of a table with data', async () => {
   assert.ok(days.length, 'the activity calendar has days');
   assert.ok(days.every(node => node.style['--level'] !== undefined && node.style['grid-column']), 'each day carries its colour level and column');
   assert.ok(days.some(node => node.style['--level'] === '1'), 'the busiest day is fully coloured');
+  const gauges = root.all().filter(node => /\bpvk-kpi-gauge\b/.test(node.attributes?.class || ''));
+  assert.ok(gauges.length, 'a percentage card shows a needle gauge');
+  for (const gauge of gauges) {
+    const percent = Number(gauge.style['--p']);
+    assert.ok(percent >= 0 && percent <= 100, `gauge value within 0–100: ${gauge.style['--p']}`);
+    assert.equal(gauge.attributes['aria-label'].endsWith('%'), true);
+    assert.ok(gauge.all().some(node => node.attributes?.class === 'needle'), 'the gauge has a needle');
+    assert.equal(gauge.all().filter(node => /\btick\b/.test(node.attributes?.class || '')).length, 11, 'ticks every 10 %');
+  }
 
   const buttons = () => root.all().filter(node => node.tagName === 'button');
   for (const view of ['Таблиця 1', 'АА', 'ПС', 'Об’єкти', 'Зведена таблиця', 'Перевірка даних', 'Зведення ПВК']) {
