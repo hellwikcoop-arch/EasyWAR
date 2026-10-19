@@ -2,12 +2,14 @@ pub mod analytics;
 mod app_update;
 pub mod backup;
 pub mod base_tables;
+pub mod dashboard_modules;
 mod database;
 mod desktop_shell;
 pub mod local_model;
 pub mod local_profiles;
 mod migration_startup;
 pub mod model_install;
+pub mod module_source;
 pub mod phone_export;
 pub mod position_templates;
 pub mod profile_table;
@@ -30,6 +32,10 @@ use app_update::{AppUpdateStatus, PendingUpdate};
 use backup::BackupStore;
 use base_tables::BaseTable;
 use chrono::{SecondsFormat, Utc};
+use dashboard_modules::{
+    DashboardModule, DashboardModuleData, DashboardModuleStore, DashboardModuleTemplate,
+    NewImportCorrection,
+};
 use database::{DatabaseStatus, DatabaseStatusStore};
 use local_model::{
     GenerationRequest, LocalModelRuntime, LocalModelSettings, LocalModelStatus, LocalModelStore,
@@ -119,6 +125,210 @@ async fn get_dashboard_model(
     to: Option<String>,
 ) -> Result<analytics::DashboardModel, String> {
     analytics::load_dashboard_model(&repository, from.as_deref(), to.as_deref())
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn get_dashboard_module_catalog() -> Vec<DashboardModuleTemplate> {
+    dashboard_modules::catalog()
+}
+
+fn active_profile_id(session: &ProfileSession) -> Result<String, String> {
+    session
+        .get()
+        .ok_or_else(|| dashboard_modules::DashboardModuleError::ProfileRequired.to_string())
+}
+
+#[tauri::command]
+async fn list_dashboard_modules(
+    modules: tauri::State<'_, DashboardModuleStore>,
+    session: tauri::State<'_, ProfileSession>,
+    branch: String,
+) -> Result<Vec<DashboardModule>, String> {
+    modules
+        .list(&active_profile_id(&session)?, &branch)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// `rows` — дані, підтягнуті з таблиці користувача: модуль створюється разом із ними
+/// однією транзакцією. Без `rows` таблиця модуля порожня.
+#[tauri::command]
+async fn create_dashboard_module(
+    modules: tauri::State<'_, DashboardModuleStore>,
+    session: tauri::State<'_, ProfileSession>,
+    branch: String,
+    template_id: String,
+    title: Option<String>,
+    rows: Option<Vec<serde_json::Map<String, Value>>>,
+    corrections: Option<Vec<NewImportCorrection>>,
+) -> Result<DashboardModule, String> {
+    let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
+    modules
+        .create_with_import(
+            &active_profile_id(&session)?,
+            &branch,
+            &template_id,
+            title.as_deref(),
+            rows.unwrap_or_default(),
+            corrections.unwrap_or_default(),
+            &now,
+        )
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// Файл, який користувач сам обрав у вікні вибору, щоб підтягнути з нього дані в
+/// модуль. Шлях береться лише з вікна вибору: від інтерфейсу шлях не приймається.
+#[derive(Default)]
+struct ModuleSourceSelection(std::sync::Mutex<Option<PathBuf>>);
+
+impl ModuleSourceSelection {
+    fn get(&self) -> Option<PathBuf> {
+        self.0.lock().map(|guard| guard.clone()).unwrap_or(None)
+    }
+
+    fn set(&self, value: Option<PathBuf>) {
+        if let Ok(mut guard) = self.0.lock() {
+            *guard = value;
+        }
+    }
+}
+
+fn dashboard_branch(branch: &str) -> Result<Branch, String> {
+    match Branch::parse(branch) {
+        Ok(parsed @ (Branch::Air | Branch::Rocket | Branch::Pvk | Branch::Dshv)) => Ok(parsed),
+        _ => Err(dashboard_modules::DashboardModuleError::InvalidBranch.to_string()),
+    }
+}
+
+fn inspect_source_file(path: &Path, origin: &str) -> Result<module_source::SourceWorkbook, String> {
+    let bytes = read_selected_xlsx(path)?;
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    module_source::inspect_bytes(&bytes, &name, origin).map_err(|error| error.to_string())
+}
+
+/// Аркуші таблиці, прив'язаної до активного профілю для цього дашборда. З неї модуль
+/// під час створення підтягує дані. Лише читання; `None`, якщо таблицю не прив'язано.
+#[tauri::command]
+async fn inspect_linked_module_source(
+    profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
+    branch: String,
+) -> Result<Option<module_source::SourceWorkbook>, String> {
+    let branch = dashboard_branch(&branch)?;
+    let profile_id = active_profile_id(&session)?;
+    let Some(path) = profiles
+        .table_path(&profile_id, branch)
+        .await
+        .map_err(|error| error.to_string())?
+        .map(PathBuf::from)
+    else {
+        return Ok(None);
+    };
+    tauri::async_runtime::spawn_blocking(move || inspect_source_file(&path, "linked"))
+        .await
+        .map_err(|error| error.to_string())?
+        .map(Some)
+}
+
+/// Вікно вибору файла .xlsx, з якого модуль підтягне дані. Файл не прив'язується до
+/// профілю й не змінюється; його шлях лишається лише в пам'яті на час створення.
+#[tauri::command]
+async fn pick_module_source(
+    app: tauri::AppHandle,
+    session: tauri::State<'_, ProfileSession>,
+    selection: tauri::State<'_, ModuleSourceSelection>,
+) -> Result<Option<module_source::SourceWorkbook>, String> {
+    active_profile_id(&session)?;
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title("Оберіть таблицю XLSX з даними для модуля")
+            .add_filter("Таблиця XLSX", &["xlsx"])
+            .blocking_pick_file()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let path = selected.into_path().map_err(|error| error.to_string())?;
+    let inspected = {
+        let path = path.clone();
+        tauri::async_runtime::spawn_blocking(move || inspect_source_file(&path, "picked"))
+            .await
+            .map_err(|error| error.to_string())??
+    };
+    selection.set(Some(path));
+    Ok(Some(inspected))
+}
+
+/// Усі непорожні рядки одного аркуша таблиці для підтягування в модуль. `origin` —
+/// `linked` (прив'язана таблиця профілю) або `picked` (файл, обраний у вікні вибору).
+#[tauri::command]
+async fn read_module_source_sheet(
+    profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
+    selection: tauri::State<'_, ModuleSourceSelection>,
+    origin: String,
+    branch: String,
+    sheet: String,
+) -> Result<module_source::SourceSheetRows, String> {
+    let profile_id = active_profile_id(&session)?;
+    let path = match origin.as_str() {
+        "linked" => profiles
+            .table_path(&profile_id, dashboard_branch(&branch)?)
+            .await
+            .map_err(|error| error.to_string())?
+            .map(PathBuf::from)
+            .ok_or_else(|| "До профілю не прив'язано таблицю".to_owned())?,
+        "picked" => selection
+            .get()
+            .ok_or_else(|| "Файл таблиці не обрано".to_owned())?,
+        _ => return Err("Невідоме джерело таблиці".to_owned()),
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        let bytes = read_selected_xlsx(&path)?;
+        module_source::read_sheet_bytes(&bytes, &sheet).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn get_dashboard_module_data(
+    modules: tauri::State<'_, DashboardModuleStore>,
+    session: tauri::State<'_, ProfileSession>,
+    module_id: String,
+) -> Result<DashboardModuleData, String> {
+    modules
+        .get_data(&active_profile_id(&session)?, &module_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn replace_dashboard_module_rows(
+    modules: tauri::State<'_, DashboardModuleStore>,
+    session: tauri::State<'_, ProfileSession>,
+    module_id: String,
+    rows: Vec<serde_json::Map<String, Value>>,
+    expected_updated_at: Option<String>,
+) -> Result<DashboardModuleData, String> {
+    let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
+    modules
+        .replace_rows(
+            &active_profile_id(&session)?,
+            &module_id,
+            rows,
+            expected_updated_at.as_deref(),
+            &now,
+        )
         .await
         .map_err(|error| error.to_string())
 }
@@ -1589,6 +1799,8 @@ pub fn run() {
             app.manage(WorkspaceTemplateStore::new(pool.clone()));
             app.manage(SignalReceiveController::default());
             app.manage(DatabaseStatusStore::new(pool.clone()));
+            app.manage(DashboardModuleStore::new(pool.clone()));
+            app.manage(ModuleSourceSelection::default());
             app.manage(BackupStore::new(pool));
             app.manage(LiveDatabasePath(setup_database_file));
             app.manage(instance_lock);
@@ -1600,6 +1812,14 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_database_status,
             get_dashboard_model,
+            get_dashboard_module_catalog,
+            list_dashboard_modules,
+            create_dashboard_module,
+            inspect_linked_module_source,
+            pick_module_source,
+            read_module_source_sheet,
+            get_dashboard_module_data,
+            replace_dashboard_module_rows,
             get_local_profiles,
             register_local_profile,
             set_local_profile_modules,

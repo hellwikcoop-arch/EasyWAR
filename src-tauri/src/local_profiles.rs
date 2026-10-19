@@ -408,6 +408,8 @@ impl LocalProfileStore {
         )
         .fetch_one(&mut *transaction)
         .await?;
+        // Каскад прибере метадані модулів дашборда, але не їхні фізичні таблиці.
+        crate::dashboard_modules::drop_profile_data_tables(&mut transaction, id).await?;
         sqlx::query("DELETE FROM local_profiles WHERE id = ?")
             .bind(id)
             .execute(&mut *transaction)
@@ -788,8 +790,8 @@ pub(crate) fn validate_profile_id(id: &str) -> Result<(), LocalProfileError> {
 mod tests {
     use super::*;
     use crate::database::{
-        COMMAND_TABLES_SQL, INITIAL_SCHEMA_SQL, LOCAL_PROFILES_SQL, OWN_LOSSES_TABLES_SQL,
-        PROFILE_BRANCH_TABLES_SQL, PROFILE_DETAILS_SQL, PROFILE_MODULES_SQL,
+        COMMAND_TABLES_SQL, DASHBOARD_MODULES_SQL, INITIAL_SCHEMA_SQL, LOCAL_PROFILES_SQL,
+        OWN_LOSSES_TABLES_SQL, PROFILE_BRANCH_TABLES_SQL, PROFILE_DETAILS_SQL, PROFILE_MODULES_SQL,
         XLSX_DUPLICATE_LINKS_SQL,
     };
     use sqlx::sqlite::SqlitePoolOptions;
@@ -832,6 +834,10 @@ mod tests {
             .await
             .unwrap();
         sqlx::raw_sql(PROFILE_MODULES_SQL)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::raw_sql(DASHBOARD_MODULES_SQL)
             .execute(&pool)
             .await
             .unwrap();

@@ -45,3 +45,19 @@ at registration (`air`, `rocket`, `artillery`, `pvk`, `dshv`), one row per
 `(profile_id, module)`. It only decides which cards the start screen shows for
 that profile; data access is still decided by the password and the bound tables.
 Profiles that exist before this migration keep all five modules.
+
+`0010_dashboard_modules.sql` adds the profile- and branch-scoped registry for
+custom dashboard modules and their verified field definitions. Creating a
+module then creates its own `dashboard_data_<id>` table transactionally through
+the Rust store. Physical column names come only from the built-in catalog; a
+user-supplied title is stored as data and is never interpolated into SQL.
+
+`0011_dashboard_module_corrections.sql` adds `dashboard_module_corrections`: the
+values a user corrected on the «Перевірка» screen before rows from their own
+XLSX were brought into a new dashboard module. Each row keeps the raw cell text,
+the text the user typed, the reason the cell could not be used, and where the
+cell was (file name only, sheet, row number, column header); the module record
+itself holds the corrected value. Corrections reference the record by its
+`row_id` in `dashboard_data_<id>` and never become dynamic columns of that table.
+Deleting the module (or its profile) deletes them; a record removed from the
+module table takes its corrections with it. The XLSX is never written.
