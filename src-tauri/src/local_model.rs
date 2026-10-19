@@ -7,7 +7,9 @@
 //! stdin/stdout. Only one request runs at a time, the runner is killed on
 //! cancel, on timeout and after a period of idleness, and every failure leaves
 //! the assistant with its exact answers. The package is checked by SHA-256
-//! before it is trusted. Nothing is downloaded and no question is stored.
+//! before it is trusted. This module itself never touches the network and stores
+//! no question: the optional download of the model file lives in
+//! [`crate::model_install`] and starts only after an explicit user action.
 //!
 //! Runner protocol (one JSON object per line):
 //! * runner → app, once the model is loaded: `{"ready":true}`
