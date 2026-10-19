@@ -339,7 +339,7 @@ fn would_collapse_previous_copy(
         .modified()
         .ok()
         .and_then(|modified| now.duration_since(modified).ok())
-        .map_or(true, |age| age < COLLAPSE_GUARD_WINDOW);
+        .is_none_or(|age| age < COLLAPSE_GUARD_WINDOW);
     if !within_window {
         return false;
     }
