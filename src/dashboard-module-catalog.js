@@ -44,6 +44,11 @@ import {
   sheetOptionLabel,
 } from './dashboard-module-source-core.js';
 
+// Автономний файл (script/build_standalone.mjs) не має висот рельєфу, тож 3D-сцена й three.js у нього не
+// вбудовуються: збірка підставляє true, і гілка з import() відкидається.
+const withoutRelief = typeof __EW_NO_WEATHER_RELIEF__ !== 'undefined' && __EW_NO_WEATHER_RELIEF__;
+const loadRelief = withoutRelief ? null : () => import('./dashboard-module-weather-3d.js');
+
 const invoke = window.__TAURI_INTERNALS__?.invoke || window.parent?.__TAURI_INTERNALS__?.invoke;
 if (typeof invoke === 'function') initialize();
 
@@ -200,7 +205,17 @@ function initialize() {
           'data-module-id': module.id,
           // Сторінка відкривається з курсором на «+ Додати рядок»: журнал частіше доповнюють, ніж читають.
           onclick: () => showModulePage(module, 'add'),
-        })),
+        }),
+        module.visualKind === 'weather' && loadRelief ? el('button', {
+          type: 'button',
+          class: 'btn quiet',
+          text: '3D-рельєф',
+          title: 'Рельєф України з хмарами над пунктами на весь екран',
+          'data-action': 'open-relief',
+          'data-module-id': module.id,
+          disabled: !rows.length,
+          onclick: event => openRelief(module, rows, event.currentTarget),
+        }) : null),
       el('details', { class: 'ewmc-schema' },
         el('summary', { text: 'Структура таблиці' }),
         el('code', { text: module.storageTable }),
@@ -208,6 +223,20 @@ function initialize() {
     );
     if (!rows.length) card.querySelector('.ewmc-visual')?.append(el('p', { class: 'ewmc-no-data', text: 'Таблиця готова · даних ще немає' }));
     return card;
+  }
+
+  // 3D-сцена завантажується лише на вимогу: three.js і висоти рельєфу не потрібні решті дашборда.
+  async function openRelief(module, rows, button) {
+    if (!loadRelief) return;
+    if (button) button.disabled = true;
+    try {
+      const { openWeatherRelief } = await loadRelief();
+      await openWeatherRelief({ model: chartModel(module, rows), title: module.title, returnFocus: button });
+    } catch (error) {
+      showToast(String(error?.message || error || 'Не вдалося відкрити 3D-рельєф.'), true);
+    } finally {
+      if (button) button.disabled = false;
+    }
   }
 
   function showCatalog() {
@@ -1196,6 +1225,18 @@ function sampleRows(item) {
     [['Виліт пари', 'Готово', 2], ['Доповідь прийнято', 'Готово', 1], ['Затримка вильоту', 'Увага', 1], ['Повернення на базу', 'Готово', 2]].forEach(([label, status, value], index) => push({ occurred_at: stamp(index), label, status, value }));
   } else if (kind === 'waveform') {
     values.forEach((value, index) => push({ occurred_at: stamp(index), positive_value: value, negative_value: values[(index + 5) % values.length] * 0.6, series: 'Разом' }));
+  } else if (kind === 'weather') {
+    // Вигадані спостереження: три моменти, у третьому — гроза й низька НМХ на одному пункті.
+    const points = [['Пункт «Північ»', 51.2, 30.9], ['Пункт «Захід»', 49.6, 24.8], ['Пункт «Центр»', 48.9, 32.4], ['Пункт «Південь»', 46.9, 31.2], ['Пункт «Схід»', 49.4, 36.1]];
+    const states = [
+      [[3, 1200, 2200, 10, 4, ''], [5, 900, 1800, 8, 6, ''], [2, 1500, 2500, 10, 3, ''], [1, 1800, 2400, 12, 5, ''], [4, 1100, 2000, 9, 7, '']],
+      [[6, 700, 1900, 7, 7, ''], [7, 600, 2100, 6, 8, 'Дощ'], [4, 1000, 2000, 9, 5, ''], [2, 1600, 2300, 11, 6, ''], [6, 800, 1700, 6, 9, '']],
+      [[8, 300, 2600, 4, 11, 'Злива'], [9, 180, 3200, 1.5, 16, 'Гроза'], [7, 450, 2400, 5, 9, ''], [3, 1400, 2200, 10, 7, ''], [8, 350, 2500, 3, 12, '']],
+    ];
+    states.forEach((state, step) => points.forEach(([label, latitude, longitude], index) => {
+      const [cloud_cover, cloud_base_lower, cloud_base_upper, visibility, wind_speed, phenomenon] = state[index];
+      push({ observed_at: `2026-10-18T${String(6 + step * 3).padStart(2, '0')}:00`, label, latitude, longitude, cloud_cover, cloud_base_lower, cloud_base_upper, visibility, wind_speed, phenomenon });
+    }));
   } else if (kind === 'leaderboard') {
     units.slice(0, 5).forEach((label, index) => push({ label, group: index < 3 ? 'Ескадрилья' : 'Ланка', value: values[index], delta: [8, -2, 3, 0, 5][index] }));
   } else {
@@ -1210,6 +1251,8 @@ function visual(moduleOrTemplate, rows, compact = false) {
   // Діаграма живе у вкладеному вузлі: позначка «даних ще немає» поруч із ним не стирається при перемальовуванні.
   const host = el('div', { class: 'ewmc-chart-host' });
   const box = el('div', { class: `ewmc-visual ${compact ? 'compact' : ''}`, 'data-visual': template.visualKind }, host);
-  mountChart(host, chartModel(template, rows), { height: compact ? 120 : 168, compact });
+  // Погодна картка вища: під картою ще шкала часу й рядок показників.
+  const height = template.visualKind === 'weather' ? (compact ? 150 : 360) : (compact ? 120 : 168);
+  mountChart(host, chartModel(template, rows), { height, compact });
   return box;
 }

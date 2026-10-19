@@ -166,6 +166,10 @@
   (WKWebView) і Windows (WebView2): `color-mix`, `ResizeObserver`, SVG-текст; і на великих
   обсягах (тисячі рядків на картці). (гілка `claude/dashboard-modules`,
   [J3_DASHBOARD_MODULE_CONTEXT.md](J3_DASHBOARD_MODULE_CONTEXT.md))
+- [ ] Картка «Метеоумови» з 3D-рельєфом (25-й шаблон): перевірити 3D у справжньому вікні Tauri на
+  macOS (WKWebView) і Windows (WebView2) — WebGL, ізогіпси в шейдері, швидкість на слабких ПК — і на
+  справжніх даних погоди. (гілка `claude/weather-style`,
+  [J3_DASHBOARD_MODULE_CONTEXT.md](J3_DASHBOARD_MODULE_CONTEXT.md))
 - [ ] 3D-карта: шість нових виглядів поверхні (Відмивка, Креслення, Макет, Каркас, Точки,
   Неон) за референсами власника перевірено лише програмним рендером Chromium (SwiftShader)
   у двох темах і з наближенням до одного міста. Лишається подивитися на справжньому GPU у
