@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Робоче середовище — EasyWAR</title>
+<link rel="stylesheet" href="../guides/fonts/fonts.css">
+<link rel="stylesheet" href="./workspace.css">
+</head>
+<body>
+<main class="ws" id="ws-home">
+  <header class="ws-head">
+    <h1>Робоче середовище</h1>
+    <p>Працює без інтернету · файли лише на цьому пристрої</p>
+  </header>
+  <div id="ws-sections"></div>
+</main>
+<section class="ws-app" id="ws-app" hidden aria-labelledby="ws-app-title">
+  <div class="ws-bar">
+    <button type="button" class="ws-back" id="ws-back">← Офіс</button>
+    <span class="ws-app-title" id="ws-app-title"></span>
+  </div>
+  <div class="ws-confirm" id="ws-confirm" role="alertdialog" aria-labelledby="ws-confirm-text" hidden>
+    <span id="ws-confirm-text">Є незбережені зміни. Закрити застосунок без збереження?</span>
+    <button type="button" class="ws-btn" data-confirm="stay">Залишитися</button>
+    <button type="button" class="ws-btn ws-danger" data-confirm="leave">Закрити без збереження</button>
+  </div>
+  <iframe class="ws-frame" id="ws-frame" title="Застосунок робочого середовища"></iframe>
+</section>
+<script type="module" src="./workspace.js"></script>
+</body>
+</html>
