@@ -1,0 +1,103 @@
+/* Технологічний шар стартового екрана (див. start-tech.js). Акцент — бірюзовий #60dde8 із заставки.
+   Шар лежить над фоном і під картками, не перехоплює кліки й вимикає рух при «зменшити рух». */
+#view-start { --ew-cyan: #60dde8; --ew-mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace; }
+#view-start > .start-box { z-index: 2; }
+
+/* Мережа вузлів. */
+#view-start > .ew-tech-field {
+  position: absolute; inset: 0; z-index: 0; width: 100%; height: 100%;
+  pointer-events: none; mix-blend-mode: screen; opacity: .85;
+  -webkit-mask-image: radial-gradient(120% 90% at 50% 45%, #000 40%, transparent 100%);
+  mask-image: radial-gradient(120% 90% at 50% 45%, #000 40%, transparent 100%);
+}
+
+/* Рамка HUD: кутові скоби, промінь сканування і годинник. */
+#view-start > .ew-hud { position: absolute; inset: 14px; z-index: 1; pointer-events: none; overflow: hidden; }
+#view-start .ew-hud::before {
+  content: ""; position: absolute; left: 0; right: 0; top: -18%; height: 18%;
+  background: linear-gradient(180deg, transparent, rgba(96,221,232,.05) 70%, rgba(96,221,232,.16) 99%, transparent);
+  animation: ewScan 9s linear infinite;
+}
+@keyframes ewScan { to { transform: translateY(660%); } }
+#view-start .ew-hud-corner { position: absolute; width: 26px; height: 26px; border: 0 solid rgba(96,221,232,.55); }
+#view-start .ew-hud-tl { left: 0; top: 0; border-left-width: 2px; border-top-width: 2px; }
+#view-start .ew-hud-tr { right: 0; top: 0; border-right-width: 2px; border-top-width: 2px; }
+#view-start .ew-hud-bl { left: 0; bottom: 0; border-left-width: 2px; border-bottom-width: 2px; }
+#view-start .ew-hud-br { right: 0; bottom: 0; border-right-width: 2px; border-bottom-width: 2px; }
+#view-start .ew-hud-clock {
+  position: absolute; left: 22px; bottom: 16px; display: flex; flex-direction: column; gap: 2px;
+  font: 500 11px/1.2 var(--ew-mono); letter-spacing: .14em; color: rgba(190,236,242,.72);
+  text-shadow: 0 0 10px rgba(96,221,232,.35);
+}
+#view-start .ew-hud-clock b { font-size: 18px; font-weight: 600; letter-spacing: .08em; color: #dff8fb; font-variant-numeric: tabular-nums; }
+#view-start .ew-hud-clock b::before {
+  content: ""; display: inline-block; width: 7px; height: 7px; margin: 0 9px 2px 0; border-radius: 50%;
+  background: var(--ew-cyan); box-shadow: 0 0 10px var(--ew-cyan); animation: ewBlink 2s ease-in-out infinite;
+}
+@keyframes ewBlink { 50% { opacity: .25; } }
+
+/* Радарний промінь навколо кола з тризубом на емблемі (центр кола — 50% / 44% зображення). */
+#view-start .start-brand .ew-radar {
+  position: absolute; left: 50%; top: 44%; width: 86%; aspect-ratio: 1; z-index: 1;
+  transform: translate(-50%, -50%); border-radius: 50%; pointer-events: none; mix-blend-mode: screen;
+  -webkit-mask-image: radial-gradient(circle, transparent 30%, #000 31%, #000 69%, transparent 71%);
+  mask-image: radial-gradient(circle, transparent 30%, #000 31%, #000 69%, transparent 71%);
+}
+#view-start .ew-radar-sweep {
+  position: absolute; inset: 0; border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent 0 290deg, rgba(96,221,232,.05) 300deg, rgba(96,221,232,.42) 359deg, transparent 360deg);
+  animation: ewSweep 6s linear infinite;
+}
+#view-start .ew-radar-ping {
+  position: absolute; inset: 0; border-radius: 50%; border: 1px solid rgba(96,221,232,.5);
+  animation: ewPing 6s cubic-bezier(.16,1,.3,1) infinite;
+}
+@keyframes ewSweep { to { transform: rotate(1turn); } }
+@keyframes ewPing { 0% { transform: scale(.45); opacity: .9; } 70%, 100% { transform: scale(1); opacity: 0; } }
+
+/* Картки: легкий нахил за курсором і обвідка, що «біжить» по контуру при наведенні. */
+@property --ew-angle { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
+#view-start .branch-cards .branch-card::after {
+  content: ""; position: absolute; inset: 0; z-index: 2; pointer-events: none;
+  padding: 1.5px; border-radius: inherit; opacity: 0;
+  background: conic-gradient(from var(--ew-angle), transparent 0 60%, rgba(96,221,232,.9) 76%, #effdff 80%, transparent 86%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  transition: opacity .3s ease;
+  animation: ewTrace 3.2s linear infinite paused;
+}
+#view-start .branch-cards .branch-card:is(:hover, :focus-visible)::after { opacity: 1; animation-play-state: running; }
+#view-start .branch-cards .branch-card[aria-disabled="true"]::after { display: none; }
+@keyframes ewTrace { to { --ew-angle: 1turn; } }
+#view-start .branch-cards .branch-card:is(:hover, :focus-visible) {
+  transform: perspective(900px) translateY(-3px) rotateX(calc(var(--ew-ty, 0) * -3deg)) rotateY(calc(var(--ew-tx, 0) * 4deg)) !important;
+  box-shadow: 0 22px 54px rgba(0,0,0,.5), 0 0 0 1px rgba(96,221,232,.25), 0 0 34px rgba(96,221,232,.14) !important;
+}
+
+/* Заголовки секцій «Командування» / «Роди військ» у широкому розкладі: моноширинний штрих і лінія. */
+@media (min-width: 1000px) and (min-aspect-ratio: 3/2) {
+  #view-start .branch-cards::before, #view-start .branch-cards::after {
+    justify-self: stretch !important; padding: 0 0 7px 14px;
+    font: 600 14px/1.1 var(--ew-mono) !important; letter-spacing: .22em !important; text-transform: uppercase;
+    color: #c9f3f7 !important; text-shadow: 0 0 14px rgba(96,221,232,.35) !important;
+    background:
+      linear-gradient(var(--ew-cyan), var(--ew-cyan)) 0 1px / 3px 14px no-repeat,
+      linear-gradient(90deg, rgba(96,221,232,.55), rgba(96,221,232,.08) 55%, transparent) 0 100% / 100% 1px no-repeat;
+  }
+}
+
+/* Модуль відкрито — шар не потрібен. Малі екрани — без рамки HUD. */
+body[data-active-branch] #view-start > .ew-hud { display: none; }
+@media (max-width: 640px) { #view-start > .ew-hud { display: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  #view-start .ew-hud::before, #view-start .ew-radar-sweep, #view-start .ew-radar-ping,
+  #view-start .ew-hud-clock b::before, #view-start .branch-cards .branch-card::after { animation: none !important; }
+  #view-start .ew-hud::before, #view-start .ew-radar-sweep, #view-start .ew-radar-ping { display: none; }
+  #view-start .branch-cards .branch-card:is(:hover, :focus-visible) { transform: none !important; }
+}
+html[data-motion="off"] #view-start :is(.ew-hud, .ew-radar-sweep, .ew-radar-ping, .ew-hud-clock b, .branch-card)::before,
+html[data-motion="off"] #view-start :is(.ew-radar-sweep, .ew-radar-ping, .branch-card)::after,
+html[data-motion="off"] #view-start :is(.ew-radar-sweep, .ew-radar-ping) { display: none; }
+html[data-motion="off"] #view-start .branch-cards .branch-card:is(:hover, :focus-visible) { transform: none !important; }
