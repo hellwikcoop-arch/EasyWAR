@@ -181,6 +181,12 @@ ends, and the launcher stays `inert` until sign-in.
 
 ## Module editor («Оформлення»)
 
+`src/public/map-hexbin.js` (pure logic, `tests/map-hexbin.test.mjs`) is a classic
+script loaded right after `map-3d-bridge.js` in both `air.html` and `rocket.html`; it
+exposes `globalThis.EWHexbin` for the «Щільність» layer of the 2D map (`drawMap`, under
+the markers, off by default, preference `aviahub.hex`). The standalone build inlines it
+like the other public classic scripts.
+
 `src/public/module-editor-core.js` (pure logic, unit-tested) and
 `src/public/module-editor.js` (UI and runtime) are loaded as classic scripts at
 the end of both modules. The dashboard code of each module lives in a closure,
