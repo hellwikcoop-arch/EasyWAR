@@ -474,7 +474,8 @@ async fn get_local_model_status(
 }
 
 /// Користувач сам обирає папку пакета моделі; перевіряються маніфест і SHA-256 файлів.
-/// Модель після цього лишається вимкненою, поки її не ввімкнуть окремо.
+/// Після успішної перевірки модель одразу вмикається (`enabled: true`); вимкнути її можна
+/// окремо командою `set_local_model_enabled`.
 #[tauri::command]
 async fn choose_local_model_package(
     app: tauri::AppHandle,
@@ -601,6 +602,9 @@ struct InstallResult {
 
 /// Явне встановлення моделі: завантаження, перевірка SHA-256, а за наявності
 /// рушія поруч — запис маніфесту й повна перевірка пакета. Починається лише з цієї команди.
+/// Підтвердження в інтерфейсі сторінки не є захистом (його може оминути будь-який скрипт
+/// вікна), тому перед першим мережевим запитом, зокрема й при поновленні завантаження,
+/// Rust сам показує нативне вікно «Так/Ні». Відмова повертає `outcome: "cancelled"`.
 #[tauri::command]
 async fn install_local_model(
     app: tauri::AppHandle,
@@ -617,13 +621,18 @@ async fn install_local_model(
     let emit: model_install::Emit = std::sync::Arc::new(move |event| {
         let _ = on_event.send(event);
     });
-    match model_install::install_model(&source, &dir, &guard, emit).await {
+    match model_install::install_model(&source, &dir, &guard, emit, model_install::native_consent())
+        .await
+    {
         Ok(_) => {}
-        Err(model_install::InstallError::Cancelled) => {
+        Err(
+            error
+            @ (model_install::InstallError::Cancelled | model_install::InstallError::Declined),
+        ) => {
             return Ok(InstallResult {
                 outcome: "cancelled",
                 status: local_model_status_now(&store, &runtime).await?,
-                message: Some(model_install::InstallError::Cancelled.to_string()),
+                message: Some(error.to_string()),
             });
         }
         Err(error) => return Err(error.to_string()),
@@ -1773,21 +1782,34 @@ pub fn run() {
                 .build(),
         )
         .setup(move |app| {
-            let resolved_database_file = app.path().app_config_dir()?.join(database_name);
+            // `setup` виконується вже в циклі подій, і Tauri відповідає на його помилку панікою,
+            // якої без консолі (Windows) не видно: тут помилку показує нативне вікно, далі вихід.
+            let dialogs = startup_recovery::NativeDialogs;
+            let resolved_database_file = startup_recovery::or_exit(
+                &dialogs,
+                app.path().app_config_dir(),
+                "Не вдалося визначити директорію конфігурації EasyWAR",
+            )
+            .join(database_name);
             if resolved_database_file != setup_database_file {
-                return Err(
-                    "шлях локальної бази не збігається з перевіреним startup-шляхом".into(),
+                startup_recovery::exit_with(
+                    &dialogs,
+                    "шлях локальної бази не збігається з перевіреним startup-шляхом.",
                 );
             }
             let options = SqliteConnectOptions::new()
                 .filename(&setup_database_file)
                 .foreign_keys(true)
                 .busy_timeout(Duration::from_secs(5));
-            let pool = tauri::async_runtime::block_on(
-                SqlitePoolOptions::new()
-                    .max_connections(1)
-                    .connect_with(options),
-            )?;
+            let pool = startup_recovery::or_exit(
+                &dialogs,
+                tauri::async_runtime::block_on(
+                    SqlitePoolOptions::new()
+                        .max_connections(1)
+                        .connect_with(options),
+                ),
+                "Не вдалося підключитися до локальної бази",
+            );
             app.manage(SignalSettingsStore::new(SettingsStore::new(pool.clone())));
             app.manage(AutoUpdateStore::new(SettingsStore::new(pool.clone())));
             app.manage(Repository::new(pool.clone()));
@@ -1806,7 +1828,11 @@ pub fn run() {
             app.manage(instance_lock);
             app.manage(restore_startup_report);
             app.manage(PendingUpdate::default());
-            desktop_shell::create_main_window(app)?;
+            startup_recovery::or_exit(
+                &dialogs,
+                desktop_shell::create_main_window(app),
+                "Не вдалося створити головне вікно",
+            );
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1884,7 +1910,9 @@ pub fn run() {
             export_approved_xlsx_from_reference
         ])
         .build(context)
-        .expect("помилка запуску EasyWAR")
+        .unwrap_or_else(|error| {
+            startup_recovery::exit_with(&dialogs, &format!("помилка запуску EasyWAR: {error}."))
+        })
         .run(|app, event| {
             // Рушій локальної моделі — дочірній процес: при виході із застосунку його зупиняють явно.
             if matches!(event, tauri::RunEvent::Exit) {
