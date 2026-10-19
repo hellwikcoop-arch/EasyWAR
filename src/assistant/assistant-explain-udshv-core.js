@@ -160,11 +160,12 @@ function sectionEntry(d) {
   const own = d.scope === 'own';
   const found = SECTIONS.find(item => (item.own === null || item.own === own) && item.match(title));
   if (!found) return null;
-  return { title: d.panelTitle || d.label, what: found.what, basis: found.basis, sources: sourcesOf(found.sources, [own ? 'own' : 'views']) };
+  return { id: 'panel', title: d.panelTitle || d.label, what: found.what, basis: found.basis, sources: sourcesOf(found.sources, [own ? 'own' : 'views']) };
 }
 
 /**
  * Повертає { id, title, what, basis[], sources[] } або null, якщо елемент невідомий.
+ * `id` обов'язково має назву в assistant-explain-refs-core.js (її бере пакет пропозиції розробнику).
  * d.part — вид елемента, d.scope === 'own' — вкладка «Наші втрати».
  */
 export function explainUdshv(d) {

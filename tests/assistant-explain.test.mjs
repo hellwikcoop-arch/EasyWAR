@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { explainElement, normalizeLabel, EXPLAIN_SOURCES, EXPLAIN_UNKNOWN } from '../src/assistant/assistant-explain-core.js';
 import { explainLead } from '../src/assistant/assistant-persona-core.js';
+import { EXPLAIN_REFS, EXPLAIN_REF_NONE, explainRef, explainRefTitle } from '../src/assistant/assistant-explain-refs-core.js';
 
 const reference = readFileSync(new URL('../docs/DATA_REFERENCE.md', import.meta.url), 'utf8');
 
@@ -184,4 +185,54 @@ test('УДШВ: джерела посилаються на розділи дов
   const headings = new Set([...reference.matchAll(/^#{2,3}\s+(.+?)\s*$/gmu)].map(match => match[1]));
   const result = udshv({ part: 'delta', kind: 'delta', label: '200' });
   for (const source of result.sources) assert.ok(headings.has(source.section), source.section);
+});
+
+// ---- Статичні посилання для пакета пропозиції (assistant-explain-refs-core.js) ----
+const coreSource = name => readFileSync(new URL(`../src/assistant/${name}`, import.meta.url), 'utf8');
+
+test('каталог посилань збігається з ідентифікаторами в ядрах пояснень', () => {
+  const used = new Set();
+  for (const match of coreSource('assistant-explain-core.js').matchAll(/\bid:\s*'([a-z-]+)'/gu)) used.add(match[1]);
+  const udshv = coreSource('assistant-explain-udshv-core.js');
+  for (const match of udshv.matchAll(/\bok\('([a-z-]+)'/gu)) used.add(match[1]);
+  for (const match of udshv.matchAll(/\bid:\s*'([a-z-]+)'/gu)) used.add(match[1]);
+  // Ідентифікатори з шаблонних рядків: `kpi-${d.part}` (kpi, spark) і `column-${d.part}` (sort, cell, total).
+  assert.ok(/ok\(`kpi-\$\{d\.part\}`/u.test(udshv) && /ok\(`column-\$\{d\.part\}`/u.test(udshv));
+  for (const id of ['kpi-kpi', 'kpi-spark', 'column-sort', 'column-cell', 'column-total']) used.add(id);
+  assert.ok(used.size >= 40, `знайдено лише ${used.size} ідентифікаторів`);
+  const catalog = new Set(Object.keys(EXPLAIN_REFS));
+  for (const id of used) assert.ok(catalog.has(id), `в каталозі немає назви для «${id}»`);
+  for (const id of catalog) if (id !== EXPLAIN_REF_NONE) assert.ok(used.has(id), `«${id}» є в каталозі, але ядра його не повертають`);
+});
+
+test('кожен результат має посилання з каталогу, а не з тексту екрана', () => {
+  const sentinel = '99 омбр Синтетична';
+  const descriptors = [
+    { branch: 'air', kind: 'kpi', label: 'Вильоти', value: '128' }, { branch: 'rocket', kind: 'kpi', label: 'ЗНИЩЕНО' },
+    { branch: 'rocket', kind: 'kpi', label: 'ПОШКОДЖЕНО\nПОДАВЛЕНО' }, { branch: 'air', kind: 'kpi', label: 'Не уражено' },
+    { branch: 'air', kind: 'kpi', label: 'Не відомо' }, { branch: 'air', kind: 'kpi', label: 'Ефективність' },
+    { branch: 'air', kind: 'delta', hint: 'Зміна ефективності' }, { branch: 'rocket', kind: 'tab', label: 'Пуски' },
+    { branch: 'air', kind: 'control', label: 'Тип ЛА', group: 'Розріз даних' }, { branch: 'air', kind: 'other', panelTitle: 'Час доби' },
+    { branch: 'air', kind: 'other', label: 'Щось нове' }, { branch: 'pvk', kind: 'kpi', label: 'Вильоти' }, {},
+    { branch: 'dshv', part: 'kpi', kind: 'kpi', label: '200' }, { branch: 'dshv', part: 'rank-row', kind: 'row', label: sentinel, panelTitle: 'Підрозділи за втратами о/с' },
+    { branch: 'dshv', part: 'unit-filter', kind: 'control', label: sentinel }, { branch: 'dshv', part: 'issue', kind: 'other', label: 'Від’ємне значення' },
+    { branch: 'dshv', kind: 'panel', panelTitle: 'Аркуші', label: 'Аркуші' }, { branch: 'dshv', part: 'layout', kind: 'other', label: 'hero' },
+  ];
+  for (const descriptor of descriptors) {
+    const result = explainElement(descriptor);
+    assert.deepEqual(Object.keys(result.ref).sort(), ['id', 'title']);
+    assert.equal(result.ref.title, EXPLAIN_REFS[result.ref.id], JSON.stringify(descriptor));
+    assert.ok(!JSON.stringify(result.ref).includes(sentinel));
+    if (result.status === 'found') assert.equal(result.ref.id, result.id, JSON.stringify(descriptor));
+    else assert.equal(result.ref.id, EXPLAIN_REF_NONE, JSON.stringify(descriptor));
+  }
+});
+
+test('посилання береться тільки з id і статусу результату', () => {
+  assert.equal(explainRef({ status: 'found', id: 'panel', title: '99 омбр Синтетична' }).title, EXPLAIN_REFS.panel);
+  for (const result of [null, undefined, {}, { status: 'unknown', id: 'panel' }, { status: 'found', id: '99 омбр Синтетична' }, { status: 'found', id: '__proto__' }, { status: 'found', id: 'constructor' }, { status: 'found', id: 7 }]) {
+    assert.equal(explainRef(result).id, EXPLAIN_REF_NONE, JSON.stringify(result));
+  }
+  assert.equal(explainRefTitle('toString'), '');
+  assert.ok(Object.isFrozen(EXPLAIN_REFS) && Object.isFrozen(explainRef(null)));
 });
