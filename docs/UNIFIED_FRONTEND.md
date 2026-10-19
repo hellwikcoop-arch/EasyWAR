@@ -197,7 +197,7 @@ ends, and the launcher stays `inert` until sign-in.
 
 ### EasyDoc (прототип)
 
-Редактор документів на основі WordCraft (MIT OR Apache-2.0, github.com/storytold/wordcraft), зібраний у WASM. Прототип у гілці `claude/easydoc-prototype`, у `main` не зливається.
+Редактор документів на основі WordCraft (MIT OR Apache-2.0, github.com/storytold/wordcraft), зібраний у WASM. Прототип, злитий у `main` разом з рештою «Офісу».
 
 | Файл | Роль |
 | --- | --- |
@@ -470,11 +470,11 @@ by hand with narrow anchored patches (see `AGENTS.md`), then run
 
 `air.html` і `rocket.html` підключають CSS у `<head>`, а модуль — останнім `<script type="module">` (правка в обох файлах). Модуль викликає вісім Tauri-команд: `get_dashboard_module_catalog`, `list_dashboard_modules`, `create_dashboard_module` (необов'язковий `rows` — записи, підтягнуті з таблиці користувача: модуль і записи створюються однією транзакцією, а некоректний запис скасовує створення), `get_dashboard_module_data`, `replace_dashboard_module_rows` і три команди читання таблиці — `inspect_linked_module_source` (аркуші таблиці профілю й перші 25 рядків кожного; `null`, якщо таблицю не прив'язано), `pick_module_source` (вікно вибору .xlsx; шлях лишається лише в пам'яті Rust, інтерфейс шляхів не передає) і `read_module_source_sheet` (усі непорожні рядки одного аркуша); усі, крім каталогу, потребують активного локального профілю. Читач (`src-tauri/src/module_source.rs`, `calamine`) лише читає: XLSX не змінюється й нічого в нього не дописується; capabilities Tauri для цього не змінювалися. Збереження транзакційно переписує весь набір рядків модуля: рядок із `rowId` зберігає свій номер і `created_at`, рядок, якого немає у списку, видаляється (кнопка «Видалити запис» із підтвердженням у самому діалозі, без системних діалогів браузера). Клієнт завжди передає `expectedUpdatedAt` — `updatedAt` модуля, з яким відкрито таблицю; застаріла версія дає відповідь «таблицю змінено в іншому вікні», після чого інтерфейс перечитує дані (`reopenFresh`) і нічого не перезаписує. Таблиця, яку не вдалося прочитати (`failed`), і таблиця понад 10 000 рядків відкриваються лише для читання (`tableEditState`): запис замінив би рядки, яких користувач не бачить.
 
-## EasySlide (прототип, гілка `claude/easyslide-prototype`)
+## EasySlide (прототип)
 
 Редактор презентацій у модулі «Робоче середовище» → «Офіс», підключений за контрактом із
 [WORKSPACE.md](WORKSPACE.md). Це веб-збірка DeckCraft (Rust → WASM, egui, MIT OR Apache-2.0)
-з вузькими правками (`script/easyslide/easyslide-web.patch`). У `main` не зливається.
+з вузькими правками (`script/easyslide/easyslide-web.patch`). Прототип, злитий у `main` разом з рештою «Офісу».
 
 | Файл | Призначення |
 |---|---|
