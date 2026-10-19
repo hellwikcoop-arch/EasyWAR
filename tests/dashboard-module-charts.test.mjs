@@ -16,6 +16,7 @@ import {
   RIDGE_LIMIT,
   hourOf,
   takeoffHoursModel,
+  tickerItems,
 } from '../src/dashboard-module-charts-core.js';
 import { rustCatalog } from './helpers/rust-catalog.mjs';
 
@@ -354,7 +355,7 @@ test('the renderer draws every kind, stays local and never writes markup as text
 test('the catalog page mounts real charts from table rows instead of sketches', async () => {
   const source = await read('../src/dashboard-module-catalog.js');
   const css = await read('../src/dashboard-module-catalog.css');
-  assert.match(source, /import \{ chartModel, takeoffHoursModel \} from '\.\/dashboard-module-charts-core\.js';/u);
+  assert.match(source, /import \{ chartModel, takeoffHoursModel, tickerItems \} from '\.\/dashboard-module-charts-core\.js';/u);
   assert.match(source, /import \{ mountChart \} from '\.\/dashboard-module-charts\.js';/u);
   assert.match(source, /mountChart\(host, chartModel\(template, rows\), \{ height: compact \? 120 : 168, compact \}\)/u);
   assert.match(source, /visual\(module, rows\)/u, 'картка модуля малюється з його рядків');
@@ -441,4 +442,30 @@ test('flight journal: takeoffs by hour per aircraft type, rows without valid tak
   // Сама картка журналу лишається смугами нальоту.
   assert.equal(chartModel(module, rows).kind, 'horizontal-bar');
   assert.equal(takeoffHoursModel(module, []).empty, true);
+});
+
+test('ticker: one item per module from the same rows as its card, unread data marked', () => {
+  const ridge = { ...templateOf('ridgeline'), id: 'm-1', title: 'Тестові події' };
+  const kpiModule = { ...templateOf('kpi'), id: 'm-2', title: 'Тестовий показник' };
+  const data = new Map([
+    ['m-1', { rows: [{ occurred_at: '2026-10-01T09:10', series: 'Тест-А' }], failed: false }],
+    ['m-2', { rows: [], failed: true }],
+  ]);
+  const items = tickerItems([ridge, kpiModule], data);
+  assert.deepEqual(items.map(item => [item.id, item.title, item.failed]), [['m-1', 'Тестові події', false], ['m-2', 'Тестовий показник', true]]);
+  assert.match(items[0].text, /^1 запис, пік Тест-А о 09:00/u);
+  assert.equal(items[1].text, 'дані не прочитано');
+  assert.deepEqual(tickerItems(null, null), []);
+});
+
+test('dashboard: ticker under the grid and HUD corners only in the dark theme, motion can be reduced', async () => {
+  const source = await read('../src/dashboard-module-catalog.js');
+  const css = await read('../src/dashboard-module-catalog.css');
+  assert.match(source, /host\.append\(grid, ticker\(tickerItems\(state\.modules, state\.data\)\)\)/u);
+  assert.match(source, /el\('ul', \{ 'aria-hidden': 'true' \}/u, 'друга копія рядка прихована від читачів екрана');
+  assert.match(css, /@keyframes ewmc-ticker/u);
+  assert.match(css, /@media \(prefers-reduced-motion:reduce\)\{\.ewmc-ticker\{[^}]*\}\.ewmc-ticker-track\{animation:none\}/u);
+  assert.match(css, /animation-play-state:paused/u);
+  assert.match(css, /html:not\(\[data-theme=light\]\) \.ewmc-module\{--ewmc-hud:/u);
+  assert.doesNotMatch(css, /html\[data-theme=light\] \.ewmc-module\{[^}]*--ewmc-hud/u);
 });

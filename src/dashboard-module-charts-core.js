@@ -892,8 +892,24 @@ export function chartSummary(model) {
   return `${name}: ${parts.join(', ')}`;
 }
 
+/**
+ * Пункти бігучого рядка дашборда: назва модуля й словесне резюме його діаграми з тих самих
+ * рядків, що й картка. Модулі без прочитаних даних позначаються, а не пропускаються мовчки.
+ */
+export function tickerItems(modules, dataById) {
+  const list = Array.isArray(modules) ? modules : [];
+  return list.map(module => {
+    const payload = dataById?.get?.(module?.id);
+    if (!payload || payload.failed) return { id: module?.id ?? '', title: text(module?.title), text: 'дані не прочитано', failed: true };
+    const summary = chartSummary(chartModel(module, payload.rows));
+    // «Назва виду: …» → лише те, що після двокрапки: вид і так видно на картці.
+    const detail = summary.includes(': ') ? summary.slice(summary.indexOf(': ') + 2) : summary;
+    return { id: module.id, title: text(module.title), text: detail, failed: false };
+  });
+}
+
 export const dashboardModuleChartsCore = {
   SERIES_LIMIT, CATEGORY_LIMIT, OTHER_LABEL, CHART_KINDS,
   compactNumber, valueLabel, niceTicks, parseMoment, momentLabel, monthTitle, assignSlots, initialsOf, chartModel, chartSummary,
-  RIDGE_LIMIT, hourOf, takeoffHoursModel,
+  RIDGE_LIMIT, hourOf, takeoffHoursModel, tickerItems,
 };

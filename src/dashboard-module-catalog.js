@@ -30,7 +30,7 @@ import {
   tableEditState,
   visibleColumnKeys,
 } from './dashboard-module-catalog-core.js';
-import { chartModel, takeoffHoursModel } from './dashboard-module-charts-core.js';
+import { chartModel, takeoffHoursModel, tickerItems } from './dashboard-module-charts-core.js';
 import { mountChart } from './dashboard-module-charts.js';
 import {
   buildImport,
@@ -181,7 +181,17 @@ function initialize() {
     }
     const grid = el('div', { class: 'ewmc-dashboard-grid' });
     for (const module of state.modules) grid.append(renderModule(module, state.data.get(module.id)?.rows || []));
-    host.append(grid);
+    host.append(grid, ticker(tickerItems(state.modules, state.data)));
+  }
+
+  // Бігучий рядок під картками: стан усіх модулів одним рядком. Друга копія лише для безшовного
+  // кола й прихована від читачів екрана; при «зменшити рух» рядок стоїть і прокручується вручну.
+  function ticker(items) {
+    const node = item => el('li', { class: item.failed ? 'is-failed' : '' }, el('b', { text: item.title }), el('span', { text: item.text }));
+    return el('div', { class: 'ewmc-ticker', role: 'region', 'aria-label': 'Стрічка модулів', style: { '--ewmc-ticker-s': `${Math.max(24, items.length * 9)}s` } },
+      el('div', { class: 'ewmc-ticker-track' },
+        el('ul', {}, items.map(node)),
+        el('ul', { 'aria-hidden': 'true' }, items.map(node))));
   }
 
   function renderModule(module, rows) {
