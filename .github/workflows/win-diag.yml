@@ -1,0 +1,56 @@
+name: Win diag (temporary, only for the claude/ci-diag branch)
+
+# Throwaway: iterates on the Windows runner smoke test in minutes instead of rebuilding the
+# runner every time. The first push builds the runner and keeps it as the `runner-win` artifact;
+# a later push with the run id in `ci-diag-run-id` downloads that artifact and only runs the test.
+
+on:
+  push:
+    branches: [claude/ci-diag]
+    paths:
+      - "runner/**"
+      - "script/runner_smoke.sh"
+      - "script/ci_diag.sh"
+      - ".github/workflows/win-diag.yml"
+      - "ci-diag-run-id"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  smoke:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Fetch the prebuilt runner from an earlier run
+        id: pre
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -s ci-diag-run-id ]; then
+            gh run download "$(cat ci-diag-run-id)" --repo "$GITHUB_REPOSITORY" --name runner-win --dir prebuilt
+            echo found=true >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build the runner
+        if: steps.pre.outputs.found != 'true'
+        shell: bash
+        run: script/build_runner.sh x86_64-pc-windows-msvc
+      - name: Keep the build outputs for later iterations
+        if: steps.pre.outputs.found != 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: runner-win
+          path: |
+            src-tauri/binaries/easywar-llm-runner-x86_64-pc-windows-msvc.exe
+            runner/build/x86_64-pc-windows-msvc/_deps/llama-src/gguf-py
+            runner/build/x86_64-pc-windows-msvc/_deps/llama-src/models/ggml-vocab-qwen2.gguf
+          if-no-files-found: error
+      - name: Put the prebuilt files in place
+        if: steps.pre.outputs.found == 'true'
+        shell: bash
+        run: cp -r prebuilt/. .
+      - name: Smoke test
+        shell: bash
+        run: script/ci_diag.sh smoke bash script/runner_smoke.sh src-tauri/binaries/easywar-llm-runner-x86_64-pc-windows-msvc.exe
