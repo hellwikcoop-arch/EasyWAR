@@ -496,21 +496,3 @@ test('every Rust catalog template survives the frontend whitelist, so a new char
   assert.deepEqual(kept, catalog.map(item => item.id), 'вид шаблону з Rust має бути у VISUAL_KINDS (dashboard-module-catalog-core.js)');
 });
 
-test('polar «threat sector»: azimuth wraps to 0–360, invalid rows skipped, threat statuses are red', () => {
-  const rows = [
-    { label: 'Ціль-1', azimuth: 370, range_km: 12, status: 'Загроза' },
-    { label: 'Ціль-2', azimuth: -90, range_km: 4.5, status: 'Атака' },
-    { label: 'Ціль-3', azimuth: 180, range_km: 30, status: 'Супровід' },
-    { label: 'Ціль-4', azimuth: 45, range_km: -1 },
-    { label: 'Ціль-5', range_km: 3 },
-  ];
-  const model = modelOf('threat-sector', rows);
-  assert.equal(model.kind, 'polar');
-  assert.equal(model.skipped, 2);
-  assert.deepEqual(model.points.map(point => [point.label, point.azimuth, point.tone]), [['Ціль-1', 10, 'bad'], ['Ціль-2', 270, 'bad'], ['Ціль-3', 180, 'neutral']]);
-  assert.equal(model.rings.at(-1), model.maxRange);
-  assert.ok(model.maxRange >= 30);
-  assert.equal(model.points[0].rangeText, '12 км');
-  assert.equal(model.nearest.label, 'Ціль-2');
-  assert.match(chartSummary(model), /^Сектор загроз: 5 записів, найближча Ціль-2 — 4,5 км/u);
-});

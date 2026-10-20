@@ -610,51 +610,6 @@ function leaderboard(model, width, height, { compact }) {
     item.deltaText && !compact ? el('span', { class: `ewmc-delta ${item.delta > 0 ? 'good' : item.delta < 0 ? 'bad' : 'neutral'}`, text: item.deltaText }) : null))), { compact });
 }
 
-/**
- * Сектор загроз: кільця дальності, сторони світу, ціль — точка за азимутом (0° угорі, за
- * годинниковою стрілкою). Найближча ціль підписана; решта — у підказках.
- */
-function polarChart(model, width, height, { compact }) {
-  const size = Math.min(width, height + (compact ? 0 : 20));
-  const cx = width / 2;
-  const cy = size / 2;
-  const r = size / 2 - (compact ? 8 : 18);
-  const at = (azimuth, range) => {
-    const angle = azimuth / 180 * Math.PI;
-    const k = range / (model.maxRange || 1) * r;
-    return { x: cx + k * Math.sin(angle), y: cy - k * Math.cos(angle) };
-  };
-  const rings = model.rings.map(ring => [
-    svg('circle', { cx: fixed(cx), cy: fixed(cy), r: fixed(ring / (model.maxRange || 1) * r), class: 'ewmc-grid', fill: 'none' }),
-    compact ? null : svg('text', { x: fixed(cx + 3), y: fixed(cy - ring / (model.maxRange || 1) * r - 3), class: 'ewmc-tick', text: `${ring} км` }),
-  ]);
-  const cross = [0, 90].map(azimuth => {
-    const a = at(azimuth, model.maxRange);
-    const b = at(azimuth + 180, model.maxRange);
-    return svg('line', { x1: fixed(a.x), y1: fixed(a.y), x2: fixed(b.x), y2: fixed(b.y), class: 'ewmc-grid' });
-  });
-  const sides = compact ? [] : [['Пн', 0], ['Сх', 90], ['Пд', 180], ['Зх', 270]].map(([label, azimuth]) => {
-    const point = at(azimuth, model.maxRange * 1.09);
-    return svg('text', { x: fixed(point.x), y: fixed(point.y + 3.5), class: 'ewmc-tick', 'text-anchor': 'middle', text: label });
-  });
-  const dots = model.points.map(point => {
-    const position = at(point.azimuth, point.range);
-    const color = toneColor(point.tone) ?? slotColor(1);
-    return svg('g', {},
-      point.tone === 'bad' ? svg('circle', { cx: fixed(position.x), cy: fixed(position.y), r: 8, fill: color, class: 'ewmc-polar-halo' }) : null,
-      svg('circle', { cx: fixed(position.x), cy: fixed(position.y), r: 3.5, fill: color, class: 'ewmc-dot', title: `${point.label}: ${Math.round(point.azimuth)}°, ${point.rangeText}${point.status ? ` · ${point.status}` : ''}` }));
-  });
-  const nearest = model.nearest && !compact ? (() => {
-    const position = at(model.nearest.azimuth, model.nearest.range);
-    const right = position.x <= cx;
-    return svg('text', { x: fixed(position.x + (right ? 8 : -8)), y: fixed(position.y - 6), class: 'ewmc-value', 'text-anchor': right ? 'start' : 'end', text: `${truncate(model.nearest.label, 80)} · ${model.nearest.rangeText}` });
-  })() : null;
-  const body = svg('svg', { viewBox: `0 0 ${width} ${size}`, width, height: size, class: 'ewmc-svg' },
-    svg('circle', { cx: fixed(cx), cy: fixed(cy), r: fixed(r), class: 'ewmc-axis', fill: 'none' }), rings, cross, sides, dots, nearest);
-  const footer = model.skipped && !compact ? el('p', { class: 'ewmc-chart-foot', text: `Без азимуту чи дальності: ${model.skipped}` }) : null;
-  return figure('polar', model, body, { compact, footer });
-}
-
 let ridgeId = 0;
 
 /** Плавна крива через точки (Катмулл — Ром у кубічні Безьє), щоб гребінь не був ламаним. */
@@ -737,7 +692,6 @@ const RENDERERS = {
   waveform,
   leaderboard,
   ridgeline,
-  polar: polarChart,
 };
 
 /** Малює модель у задану ширину й висоту (пікселі). Невідомий вид — таблиця. */

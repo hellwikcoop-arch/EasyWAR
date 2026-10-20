@@ -771,21 +771,6 @@ pub fn catalog() -> Vec<DashboardModuleTemplate> {
                 field("delta", "Зміна, %", "real", "metric", "average", false),
             ],
         ),
-        // «Сектор загроз» за референсом власника (2026-10-19): цілі за азимутом і дальністю.
-        template(
-            "threat-sector",
-            "Сектор загроз",
-            "Оперативність",
-            "Цілі навколо точки: азимут від півночі за годинниковою стрілкою, дальність кільцями, загрози червоним.",
-            "polar",
-            1,
-            vec![
-                field("label", "Ціль", "text", "label", "none", true),
-                field("azimuth", "Азимут, °", "real", "metric", "none", true),
-                field("range_km", "Дальність, км", "real", "metric", "none", true),
-                field("status", "Стан", "text", "status", "none", false),
-            ],
-        ),
         // «Гребені» за референсом власника (2026-10-19): розподіл подій за годинами доби.
         template(
             "ridgeline",
@@ -1759,7 +1744,7 @@ mod tests {
     #[test]
     fn catalog_covers_reference_visualizations_and_flight_hours() {
         let items = catalog();
-        assert_eq!(items.len(), 26);
+        assert_eq!(items.len(), 25);
         for kind in [
             "kpi",
             "line",
@@ -1785,7 +1770,6 @@ mod tests {
             "diverging-bars",
             "leaderboard",
             "ridgeline",
-            "polar",
         ] {
             assert!(
                 items.iter().any(|item| item.visual_kind == kind),

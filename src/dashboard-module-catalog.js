@@ -1207,9 +1207,6 @@ function sampleRows(item) {
     [['Виліт пари', 'Готово', 2], ['Доповідь прийнято', 'Готово', 1], ['Затримка вильоту', 'Увага', 1], ['Повернення на базу', 'Готово', 2]].forEach(([label, status, value], index) => push({ occurred_at: stamp(index), label, status, value }));
   } else if (kind === 'waveform') {
     values.forEach((value, index) => push({ occurred_at: stamp(index), positive_value: value, negative_value: values[(index + 5) % values.length] * 0.6, series: 'Разом' }));
-  } else if (kind === 'polar') {
-    [['Ціль-1', 35, 18, 'Загроза'], ['Ціль-2', 80, 9, 'Супровід'], ['Ціль-3', 300, 24, 'Супровід'], ['Ціль-4', 200, 6, 'Загроза'], ['Ціль-5', 150, 31, 'Супровід']]
-      .forEach(([label, azimuth, range_km, status]) => push({ label, azimuth, range_km, status }));
   } else if (kind === 'ridgeline') {
     [['Мі-8', [7, 8, 8, 9, 10, 13, 14]], ['Мі-24', [5, 6, 6, 7, 16, 17]], ['Ан-26', [11, 12, 12, 13, 21]]]
       .forEach(([series, hours]) => hours.forEach((hour, index) => push({ occurred_at: `2026-10-${String(1 + index).padStart(2, '0')}T${String(hour).padStart(2, '0')}:15`, series })));

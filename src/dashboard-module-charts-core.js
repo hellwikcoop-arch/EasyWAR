@@ -727,43 +727,6 @@ function leaderboard(module, rows, info) {
   };
 }
 
-// Сектор загроз: цілі за азимутом (0° — північ, за годинниковою стрілкою) і дальністю.
-const POLAR_LIMIT = 60;
-const THREAT = /загроз|атак|ворож|небезпе/u;
-
-function polarTone(value) {
-  return THREAT.test(text(value).toLocaleLowerCase('uk')) ? 'bad' : statusTone(value);
-}
-
-function polar(module, rows, info) {
-  const azimuth = info.byKey.get('azimuth');
-  const range = info.byKey.get('range_km');
-  const valid = rows.filter(row => finite(row?.[azimuth?.key]) && finite(row?.[range?.key]) && row[range.key] >= 0);
-  // Останні записи найсвіжіші: на картці лишаються вони, а не перші за часом внесення.
-  const points = valid.slice(-POLAR_LIMIT).map((row, index) => {
-    const status = info.statusField && row?.[info.statusField.key] != null ? formatValue(row[info.statusField.key]) : '';
-    return {
-      label: info.labelField && row?.[info.labelField.key] != null ? formatValue(row[info.labelField.key]) : `№ ${index + 1}`,
-      azimuth: ((row[azimuth.key] % 360) + 360) % 360,
-      range: row[range.key],
-      rangeText: `${compactNumber(row[range.key])} км`,
-      status,
-      tone: polarTone(status),
-    };
-  });
-  const scale = niceTicks(0, Math.max(0, ...points.map(point => point.range)), 3);
-  const nearest = points.reduce((best, point) => (!best || point.range < best.range ? point : best), null);
-  return {
-    kind: 'polar',
-    empty: !rows.length,
-    points,
-    rings: scale.ticks.filter(tick => tick > 0),
-    maxRange: scale.max,
-    nearest,
-    skipped: rows.length - valid.length,
-  };
-}
-
 // Гребені: розподіл подій за годинами доби, окремий гребінь на ряд (тип ПС, підрозділ).
 const HOURS = 24;
 /** Понад стільки гребенів решта складається в «Інші»: вищі за шість картка не вміщає. */
@@ -891,7 +854,6 @@ const BUILDERS = {
   waveform,
   leaderboard,
   ridgeline,
-  polar,
 };
 
 export const CHART_KINDS = Object.freeze(Object.keys(BUILDERS));
@@ -923,7 +885,7 @@ export function chartSummary(model) {
     'horizontal-bar': 'Горизонтальні смуги', 'grouped-columns': 'Згруповані стовпчики', 'diverging-bars': 'Приріст і втрати', combo: 'Стовпчики з лінією',
     donut: 'Кільцева діаграма', 'radial-progress': 'Радіальний прогрес', 'multi-ring': 'Кілька радіальних шкал', radar: 'Радар', gauge: 'Шкала',
     'progress-bars': 'Смуги виконання', calendar: 'Календар', table: 'Таблиця', funnel: 'Воронка', map: 'Карта', cohort: 'Когорти',
-    activity: 'Стрічка подій', waveform: 'Двобічна гістограма', leaderboard: 'Рейтинг', ridgeline: 'Гребені за годинами доби', polar: 'Сектор загроз',
+    activity: 'Стрічка подій', waveform: 'Двобічна гістограма', leaderboard: 'Рейтинг', ridgeline: 'Гребені за годинами доби',
   };
   const name = names[model?.kind] ?? 'Діаграма';
   if (!model || model.empty) return `${name}: даних ще немає`;
@@ -931,7 +893,6 @@ export function chartSummary(model) {
   if (model.series?.length > 1) parts.push(`${model.series.length} ${pluralForm(model.series.length, 'ряд', 'ряди', 'рядів')}`);
   if (model.kind === 'kpi' && model.valueText) parts.push(`${model.label}: ${model.valueText}${model.unit ? ` ${model.unit}` : ''}`);
   if (model.kind === 'gauge') parts.push(`${model.label}: ${model.valueText} з ${model.maxText}`);
-  if (model.kind === 'polar' && model.nearest) parts.push(`найближча ${model.nearest.label} — ${model.nearest.rangeText}`);
   if (model.kind === 'ridgeline') parts.push(...model.series.slice(0, 3).map(item => `пік ${item.name} о ${item.peakText}`));
   return `${name}: ${parts.join(', ')}`;
 }
