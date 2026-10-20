@@ -16,6 +16,8 @@ const MAX_CORRECTIONS_PER_WRITE: usize = 20_000;
 /// Назва файла, аркуша й заголовок колонки джерела виправлення.
 const MAX_SOURCE_TEXT_LENGTH: usize = 255;
 const MAX_REASON_LENGTH: usize = 500;
+/// Стиль оформлення модуля, коли його не обрано: картка така, як була до вибору стилів.
+pub const DEFAULT_MODULE_STYLE: &str = "standard";
 
 #[derive(Clone, Debug)]
 pub struct DashboardModuleStore {
@@ -66,6 +68,9 @@ pub struct DashboardModule {
     pub visual_kind: String,
     pub default_span: u8,
     pub title: String,
+    /// Стиль оформлення: `standard`, `branch` (кольори роду військ) або `heightwell`
+    /// («Пункт керування»). Колір задає гілка модуля, тут лише назва стилю.
+    pub style: String,
     pub storage_table: String,
     pub fields: Vec<DashboardModuleField>,
     pub row_count: i64,
@@ -151,6 +156,8 @@ pub enum DashboardModuleError {
     InvalidRowId,
     #[error("виправлення значення не відповідає підтягнутим записам")]
     InvalidCorrection,
+    #[error("невідомий стиль оформлення модуля")]
+    InvalidStyle,
 }
 
 fn field(
@@ -835,11 +842,29 @@ pub fn catalog() -> Vec<DashboardModuleTemplate> {
                 field("delta", "Зміна, %", "real", "metric", "average", false),
             ],
         ),
+        // «Гребені» за референсом власника (2026-10-19): розподіл подій за годинами доби.
+        template(
+            "ridgeline",
+            "Гребені за годинами доби",
+            "Динаміка",
+            "Коли відбуваються події: окремий гребінь на ряд (тип ПС, підрозділ), пік позначено годиною.",
+            "ridgeline",
+            2,
+            vec![
+                field("occurred_at", "Час події", "datetime", "dimension", "none", true),
+                field("series", "Ряд", "text", "series", "none", true),
+                field("value", "Вага події", "real", "metric", "sum", false),
+            ],
+        ),
     ]
 }
 
 fn valid_branch(branch: &str) -> bool {
     matches!(branch, "air" | "rocket" | "pvk" | "dshv")
+}
+
+fn valid_style(style: &str) -> bool {
+    matches!(style, "standard" | "branch" | "heightwell")
 }
 
 fn valid_identifier(value: &str) -> bool {
@@ -909,6 +934,7 @@ type StoredModuleRow = (
     String,
     String,
     String,
+    String,
 );
 
 impl DashboardModuleStore {
@@ -925,7 +951,7 @@ impl DashboardModuleStore {
             return Err(DashboardModuleError::InvalidBranch);
         }
         let rows = sqlx::query_as::<_, StoredModuleRow>(
-            "SELECT id, branch, template_id, visual_kind, title, storage_table, created_at, updated_at
+            "SELECT id, branch, template_id, visual_kind, title, style, storage_table, created_at, updated_at
              FROM dashboard_modules
              WHERE profile_id = ? AND branch = ?
              ORDER BY created_at, id",
@@ -1002,8 +1028,39 @@ impl DashboardModuleStore {
         corrections: Vec<NewImportCorrection>,
         created_at: &str,
     ) -> Result<DashboardModule, DashboardModuleError> {
+        self.create_styled(
+            profile_id,
+            branch,
+            template_id,
+            requested_title,
+            None,
+            rows,
+            corrections,
+            created_at,
+        )
+        .await
+    }
+
+    /// Як `create_with_import`, але зі стилем оформлення, обраним у вікні створення.
+    /// `None` — звичайний стиль; невідома назва стилю скасовує створення.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_styled(
+        &self,
+        profile_id: &str,
+        branch: &str,
+        template_id: &str,
+        requested_title: Option<&str>,
+        requested_style: Option<&str>,
+        rows: Vec<Map<String, Value>>,
+        corrections: Vec<NewImportCorrection>,
+        created_at: &str,
+    ) -> Result<DashboardModule, DashboardModuleError> {
         if !valid_branch(branch) {
             return Err(DashboardModuleError::InvalidBranch);
+        }
+        let style = requested_style.unwrap_or(DEFAULT_MODULE_STYLE);
+        if !valid_style(style) {
+            return Err(DashboardModuleError::InvalidStyle);
         }
         let selected = catalog()
             .into_iter()
@@ -1043,8 +1100,8 @@ impl DashboardModuleStore {
         let mut transaction = self.pool.begin().await?;
         sqlx::query(
             "INSERT INTO dashboard_modules
-             (id, profile_id, branch, template_id, visual_kind, title, storage_table, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             (id, profile_id, branch, template_id, visual_kind, title, style, storage_table, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&id)
         .bind(profile_id)
@@ -1052,6 +1109,7 @@ impl DashboardModuleStore {
         .bind(selected.id)
         .bind(selected.visual_kind)
         .bind(&title)
+        .bind(style)
         .bind(&storage_table)
         .bind(created_at)
         .bind(created_at)
@@ -1111,6 +1169,31 @@ impl DashboardModuleStore {
         }
         transaction.commit().await?;
         self.get_for_profile(profile_id, &id).await
+    }
+
+    /// Змінює стиль оформлення вже створеного модуля. Це вигляд, а не дані, тож
+    /// `updated_at` не змінюється: відкрита в іншому вікні таблиця не отримує конфлікту.
+    pub async fn set_style(
+        &self,
+        profile_id: &str,
+        module_id: &str,
+        style: &str,
+    ) -> Result<DashboardModule, DashboardModuleError> {
+        if !valid_style(style) {
+            return Err(DashboardModuleError::InvalidStyle);
+        }
+        let changed =
+            sqlx::query("UPDATE dashboard_modules SET style = ? WHERE profile_id = ? AND id = ?")
+                .bind(style)
+                .bind(profile_id)
+                .bind(module_id)
+                .execute(&self.pool)
+                .await?
+                .rows_affected();
+        if changed == 0 {
+            return Err(DashboardModuleError::ModuleNotFound);
+        }
+        self.get_for_profile(profile_id, module_id).await
     }
 
     pub async fn get_data(
@@ -1341,7 +1424,7 @@ impl DashboardModuleStore {
         module_id: &str,
     ) -> Result<DashboardModule, DashboardModuleError> {
         let row = sqlx::query_as::<_, StoredModuleRow>(
-            "SELECT id, branch, template_id, visual_kind, title, storage_table, created_at, updated_at
+            "SELECT id, branch, template_id, visual_kind, title, style, storage_table, created_at, updated_at
              FROM dashboard_modules WHERE profile_id = ? AND id = ?",
         )
         .bind(profile_id)
@@ -1357,9 +1440,18 @@ impl DashboardModuleStore {
         row: StoredModuleRow,
     ) -> Result<DashboardModule, DashboardModuleError> {
         self.synchronize_template_schema(&row).await?;
-        let (id, branch, template_id, visual_kind, title, storage_table, created_at, updated_at) =
-            row;
-        if !valid_branch(&branch) || !valid_storage_table(&storage_table) {
+        let (
+            id,
+            branch,
+            template_id,
+            visual_kind,
+            title,
+            style,
+            storage_table,
+            created_at,
+            updated_at,
+        ) = row;
+        if !valid_branch(&branch) || !valid_style(&style) || !valid_storage_table(&storage_table) {
             return Err(DashboardModuleError::InvalidStoredSchema);
         }
         let fields = sqlx::query_as::<_, (String, String, String, String, String, i64, i64)>(
@@ -1399,6 +1491,7 @@ impl DashboardModuleStore {
             visual_kind,
             default_span,
             title,
+            style,
             storage_table,
             fields,
             row_count,
@@ -1414,7 +1507,7 @@ impl DashboardModuleStore {
         &self,
         row: &StoredModuleRow,
     ) -> Result<(), DashboardModuleError> {
-        let (module_id, _, template_id, _, _, storage_table, _, _) = row;
+        let (module_id, _, template_id, _, _, _, storage_table, _, _) = row;
         let Some(template) = catalog().into_iter().find(|item| item.id == template_id) else {
             return Ok(());
         };
@@ -1714,9 +1807,9 @@ mod tests {
     use super::*;
     use crate::database::{
         COMMAND_TABLES_SQL, DASHBOARD_MODULES_SQL, DASHBOARD_MODULE_CORRECTIONS_SQL,
-        INITIAL_SCHEMA_SQL, LOCAL_PROFILES_SQL, OWN_LOSSES_TABLES_SQL, PROFILE_BRANCH_TABLES_SQL,
-        PROFILE_DETAILS_SQL, PROFILE_MODULES_SQL, WORKSPACE_TEMPLATES_SQL,
-        XLSX_DUPLICATE_LINKS_SQL,
+        DASHBOARD_MODULE_STYLE_SQL, INITIAL_SCHEMA_SQL, LOCAL_PROFILES_SQL, OWN_LOSSES_TABLES_SQL,
+        PROFILE_BRANCH_TABLES_SQL, PROFILE_DETAILS_SQL, PROFILE_MODULES_SQL,
+        WORKSPACE_TEMPLATES_SQL, XLSX_DUPLICATE_LINKS_SQL,
     };
     use serde_json::json;
     use sqlx::sqlite::SqlitePoolOptions;
@@ -1778,6 +1871,7 @@ mod tests {
             PROFILE_MODULES_SQL,
             DASHBOARD_MODULES_SQL,
             DASHBOARD_MODULE_CORRECTIONS_SQL,
+            DASHBOARD_MODULE_STYLE_SQL,
         ] {
             sqlx::raw_sql(migration).execute(&pool).await.unwrap();
         }
@@ -1794,7 +1888,7 @@ mod tests {
     #[test]
     fn catalog_covers_reference_visualizations_and_flight_hours() {
         let items = catalog();
-        assert_eq!(items.len(), 25);
+        assert_eq!(items.len(), 26);
         for kind in [
             "kpi",
             "line",
@@ -1819,6 +1913,7 @@ mod tests {
             "stacked-columns",
             "diverging-bars",
             "leaderboard",
+            "ridgeline",
             "weather",
         ] {
             assert!(
@@ -2092,6 +2187,100 @@ mod tests {
         // Поля, яких немає в таблиці користувача, лишаються порожніми колонками модуля.
         assert_eq!(data.rows[0]["crew_lsh"], Value::Null);
         assert!(data.rows[0]["rowId"].as_i64() < data.rows[1]["rowId"].as_i64());
+    }
+
+    #[tokio::test]
+    async fn create_styled_keeps_the_chosen_style_and_defaults_to_standard() {
+        let store = store().await;
+        let profile = "profile-111111111111111111111111";
+        let plain = store
+            .create(profile, "air", "flight-hours", None, "2026-01-01T00:00:01Z")
+            .await
+            .unwrap();
+        assert_eq!(plain.style, DEFAULT_MODULE_STYLE);
+        for (index, style) in ["branch", "heightwell"].into_iter().enumerate() {
+            let created = store
+                .create_styled(
+                    profile,
+                    "rocket",
+                    "flight-hours",
+                    Some(&format!("Журнал {index}")),
+                    Some(style),
+                    Vec::new(),
+                    Vec::new(),
+                    &format!("2026-01-01T00:00:0{}Z", index + 2),
+                )
+                .await
+                .unwrap();
+            assert_eq!(created.style, style);
+        }
+        let listed = store
+            .list(profile, "rocket")
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|module| module.style)
+            .collect::<Vec<_>>();
+        assert_eq!(listed, ["branch", "heightwell"]);
+    }
+
+    #[tokio::test]
+    async fn set_style_changes_only_the_look_of_the_own_profile_module() {
+        let store = store().await;
+        let profile = "profile-111111111111111111111111";
+        let module = store
+            .create(profile, "air", "flight-hours", None, "2026-01-01T00:00:01Z")
+            .await
+            .unwrap();
+        let styled = store
+            .set_style(profile, &module.id, "heightwell")
+            .await
+            .unwrap();
+        assert_eq!(styled.style, "heightwell");
+        assert_eq!(styled.updated_at, module.updated_at, "стиль — не дані");
+        assert_eq!(
+            store.list(profile, "air").await.unwrap()[0].style,
+            "heightwell"
+        );
+        assert!(matches!(
+            store.set_style(profile, &module.id, "neon").await,
+            Err(DashboardModuleError::InvalidStyle)
+        ));
+        assert!(matches!(
+            store
+                .set_style("profile-222222222222222222222222", &module.id, "branch")
+                .await,
+            Err(DashboardModuleError::ModuleNotFound)
+        ));
+        assert_eq!(
+            store.list(profile, "air").await.unwrap()[0].style,
+            "heightwell"
+        );
+    }
+
+    #[tokio::test]
+    async fn create_styled_rejects_an_unknown_style_without_creating_anything() {
+        let store = store().await;
+        for style in ["", "neon", "Heightwell", "standard; DROP TABLE x"] {
+            let error = store
+                .create_styled(
+                    "profile-111111111111111111111111",
+                    "air",
+                    "flight-hours",
+                    None,
+                    Some(style),
+                    Vec::new(),
+                    Vec::new(),
+                    "2026-01-01T00:00:01Z",
+                )
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(error, DashboardModuleError::InvalidStyle),
+                "{style}"
+            );
+        }
+        assert_eq!(module_count(&store).await, 0);
     }
 
     #[tokio::test]
