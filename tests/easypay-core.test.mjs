@@ -14,18 +14,23 @@ import {
   daysInMonth,
   dueDate,
   emptyLedger,
+  filterItems,
   firstContractPayment,
   formatMoney,
   gradeCoefficient,
+  groupByMonth,
   itemStatus,
+  ledgerYears,
   ledgerSummary,
   monthTitle,
   parseLedger,
   reminders,
   removePayment,
+  round2,
   roundSalary,
   seniorityPercent,
   serializeLedger,
+  yearSeries,
 } from '../src/workspace/easypay/easypay-core.js';
 import { POSTS_317 } from '../src/workspace/easypay/posady-317.js';
 import { buildPosts, parseCsv } from '../script/easypay_posady.mjs';
@@ -74,7 +79,12 @@ test('додаткова винагорода пропорційно дням; 1
   assert.equal(line(may, 'd10'), undefined);
   assert.match(may.warnings[0], /діє з червень 2026/);
   const over = calculateMonth({ ...soldier, combatDays: { d100: 20, d30: 15 } });
-  assert.match(over.warnings.join(' '), /одну, більшу/);
+  assert.deepEqual(over.errors.map(error => error.field), ['combat'], 'дні понад місяць — помилка, а не попередження');
+  assert.match(over.errors[0].text, /одну, більшу/);
+  assert.deepEqual(calc.errors, []);
+  assert.equal(line(calc, 'd100').formula, '100\u00a0000 × 12 / 30');
+  const crowded = calculateMonth({ ...soldier, zonalDays: { d170: 20, d70: 11 }, assaultDays: { capture: 31 } });
+  assert.deepEqual(crowded.errors.map(error => error.field), ['zonal', 'assault']);
 });
 
 test('зональна: 170 000 і 70 000 пропорційно; до червня — 70 000 за 30 днів', () => {
@@ -167,11 +177,33 @@ test('нагадування: прострочені, близькі строк�
   assert.deepEqual(list.map(item => item.level), ['overdue', 'overdue', 'soon']);
   assert.match(list[0].text, /не надійшло 6 352,50 грн/);
   assert.match(list[2].text, /через 3 дн\./);
+  assert.deepEqual(list.map(item => item.days), [28, 28, 3]);
   const later = reminders(ledger, '2026-10-01');
   assert.ok(later.some(item => item.level === 'missing' && /вересень 2026/.test(item.text)));
   assert.ok(later.some(item => /рапортом/.test(item.text)), 'понад 30 днів — порада звернутися');
   assert.deepEqual(reminders(emptyLedger(), '2026-08-17'), []);
   assert.throws(() => addCustomItem(ledger, { title: 'X', expected: 1, due: '' }), /строк/);
+});
+
+test('«Мої виплати»: фільтр, групи за місяцем і графік року', () => {
+  let ledger = addCalculation(emptyLedger(), calculateMonth({ ...soldier, month: '2026-07', combatDays: { d100: 22 } }), soldier);
+  ledger = addCalculation(ledger, calculateMonth({ ...soldier, month: '2026-08' }), soldier);
+  const gz = ledger.items.find(item => item.id === '2026-07:gz');
+  ledger = addPayment(ledger, gz.id, { date: '2026-08-15', amount: gz.expected });
+  ledger = addPayment(ledger, '2026-07:dv', { date: '2026-08-28', amount: 50000 });
+  const today = '2026-10-20';
+  assert.deepEqual(filterItems(ledger.items, 'all', today).length, 3);
+  assert.deepEqual(filterItems(ledger.items, 'debts', today).map(item => item.id), ['2026-08:gz', '2026-07:dv']);
+  assert.deepEqual(filterItems(ledger.items, 'received', today).map(item => item.id), ['2026-07:gz']);
+  assert.deepEqual(groupByMonth(ledger.items).map(group => [group.month, group.items.length, group.due]), [['2026-08', 1, '2026-09-20'], ['2026-07', 2, '2026-08-20']]);
+  const series = yearSeries(ledger, '2026');
+  assert.equal(series.length, 12);
+  assert.deepEqual(series.filter(entry => entry.hasData).map(entry => entry.month), ['2026-07', '2026-08']);
+  assert.deepEqual([series[6].expected, series[6].received], [round2(gz.expected + 70967.74), round2(gz.expected + 50000)]);
+  assert.deepEqual([series[0].expected, series[0].hasData], [0, false], 'місяць без пунктів — «немає даних», не нуль');
+  assert.deepEqual(ledgerYears(ledger), ['2026']);
+  // Формули складових зберігаються у файлі.
+  assert.equal(parseLedger(serializeLedger(ledger)).items.find(item => item.id === '2026-07:dv').lines[0].formula, '100\u00a0000 × 22 / 31');
 });
 
 test('файл .easypay: збереження, читання й перевірка', () => {
@@ -226,7 +258,8 @@ test('перелік посад наказу №317 у застосунку', ()
 
 test('easyPay без мережі й сховищ браузера, лише textContent', async () => {
   for (const file of ['app.js', 'easypay-core.js', 'easypay-ui.js']) {
-    const text = await readFile(new URL(`../src/workspace/easypay/${file}`, import.meta.url), 'utf8');
+    // Простір імен SVG — ідентифікатор, а не адреса запиту.
+    const text = (await readFile(new URL(`../src/workspace/easypay/${file}`, import.meta.url), 'utf8')).replaceAll("'http://www.w3.org/2000/svg'", '');
     assert.doesNotMatch(text, /https?:\/\/|fetch\(|XMLHttpRequest|WebSocket|localStorage|sessionStorage|indexedDB|innerHTML/, file);
   }
 });

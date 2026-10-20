@@ -169,12 +169,28 @@ export function dateTitle(date) {
   return match ? `${Number(match[3])} ${MONTH_GENITIVE[Number(match[2]) - 1]} ${match[1]}` : String(date ?? '');
 }
 
-/** «12 345,67 грн» з нерозривними пробілами. */
-export function formatMoney(amount) {
+/** «12 345,67 грн» з нерозривними пробілами; `cents` — завжди з копійками («100 000,00 грн»). */
+export function formatMoney(amount, { cents: always = false } = {}) {
   const value = round2(amount);
   const [whole, cents] = Math.abs(value).toFixed(2).split('.');
   const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
-  return `${value < 0 ? '−' : ''}${grouped}${cents === '00' ? '' : `,${cents}`} грн`;
+  return `${value < 0 ? '−' : ''}${grouped}${cents === '00' && !always ? '' : `,${cents}`} грн`;
+}
+
+/** «20.08.2026». */
+export function shortDate(date) {
+  const match = DATE_RE.exec(String(date ?? ''));
+  return match ? `${match[3]}.${match[2]}.${match[1]}` : String(date ?? '');
+}
+
+/** Відмінок іменника після числа: plural(61, ['день', 'дні', 'днів']) → «день». */
+export function plural(value, [one, few, many]) {
+  const number = Math.abs(Math.trunc(Number(value) || 0));
+  const last = number % 10;
+  const tens = number % 100;
+  if (last === 1 && tens !== 11) return one;
+  if (last >= 2 && last <= 4 && (tens < 12 || tens > 14)) return few;
+  return many;
 }
 
 function count(value) {
@@ -203,7 +219,8 @@ function percentOf(value, fallback, max) {
  * - `assaultDays` { capture, restore } — доби штурму (40 000) і відновлення позицій (20 000);
  * - `kills` { count, participants } — підтверджені знищення групи; `prisonerShare` — частка за полон, грн;
  * - `extras` [{ title, amount, kind }] — інші виплати, які користувач вносить сам.
- * Повертає рядки з сумами й підставами, суми за видами виплат, попередження.
+ * Повертає рядки з сумами, формулами й підставами, суми за видами виплат, попередження й помилки.
+ * Помилки (`errors`: { field, text }) — дні понад місяць; поки вони є, розрахунок не записують у журнал.
  */
 export function calculateMonth(input = {}) {
   const month = String(input.month ?? '');
@@ -213,26 +230,32 @@ export function calculateMonth(input = {}) {
   const days = daysInMonth(month);
   const new232 = month >= RULES_232_FROM;
   const warnings = [];
+  const errors = [];
   const lines = [];
-  const line = (kind, id, title, amount, basis, note = '') => {
+  const line = (kind, id, title, amount, basis, note = '', formula = '') => {
     const value = round2(amount);
-    if (value > 0) lines.push({ kind, id, title, amount: value, basis, note });
+    if (value > 0) lines.push({ kind, id, title, amount: value, formula, basis, note });
     return value;
   };
+  const sum = value => formatMoney(value).replace('\u00a0грн', '');
 
   const gradeK = gradeCoefficient(input.grade);
   const salary = roundSalary(BASE * gradeK);
   const rankSalary = roundSalary(BASE * rank.coefficient);
-  line('gz', 'po', 'Посадовий оклад', salary, `№704 п.4, дод. 1: ${BASE} × ${gradeK.toFixed(2)}, розряд ${Number(input.grade)}`);
-  line('gz', 'oz', 'Оклад за військовим званням', rankSalary, `№704 п.4, дод. 14: ${BASE} × ${rank.coefficient.toFixed(2)}`);
+  const decimal = value => value.toFixed(2).replace('.', ',');
+  line('gz', 'po', 'Посадовий оклад', salary, `№704 п.4, дод. 1: ${BASE} × ${gradeK.toFixed(2)}, розряд ${Number(input.grade)}`, '',
+    `Розряд ${Number(input.grade)} · ${sum(BASE)} × ${decimal(gradeK)}`);
+  line('gz', 'oz', 'Оклад за військовим званням', rankSalary, `№704 п.4, дод. 14: ${BASE} × ${rank.coefficient.toFixed(2)}`, '',
+    `${rank.title.split(' (')[0]} · ${sum(BASE)} × ${decimal(rank.coefficient)}`);
   const seniority = seniorityPercent(input.years);
-  const seniorityAmount = line('gz', 'nvr', `Надбавка за вислугу років (${seniority}%)`, (salary + rankSalary) * seniority / 100, '№704 дод. 16: % від окладів');
+  const seniorityAmount = line('gz', 'nvr', 'Надбавка за вислугу років', (salary + rankSalary) * seniority / 100, '№704 дод. 16: % від окладів', '',
+    `${seniority} % від окладів`);
   const specialPct = percentOf(input.specialPct, 65, 100);
-  line('gz', 'special', `Надбавка за особливості служби (${specialPct}%)`, (salary + rankSalary + seniorityAmount) * specialPct / 100,
-    '№704 п.5: до 100% від окладів і вислуги; 65% — розмір у ЗСУ за роз\'ясненням');
-  if (input.mountain) line('gz', 'mountain', 'Підвищення окладу в гірських районах (25%)', salary * 0.25, 'постанова №648');
+  line('gz', 'special', 'Надбавка за особливості служби', (salary + rankSalary + seniorityAmount) * specialPct / 100,
+    '№704 п.5: до 100% від окладів і вислуги; 65% — розмір у ЗСУ за роз\'ясненням', '', `${specialPct} % від окладів і вислуги`);
+  if (input.mountain) line('gz', 'mountain', 'Підвищення окладу в гірських районах', salary * 0.25, 'постанова №648', '', '25 % посадового окладу');
   const premium = amountOf(input.premium);
-  if (premium) line('gz', 'premium', 'Премія', premium, 'внесено вручну: базового розміру в документах немає');
+  if (premium) line('gz', 'premium', 'Премія', premium, 'внесено вручну: базового розміру в документах немає', '', 'внесено вручну');
 
   const combat = input.combatDays || {};
   let combatTotalDays = 0;
@@ -245,12 +268,13 @@ export function calculateMonth(input = {}) {
       continue;
     }
     combatTotalDays += value;
-    const amount = line('dv', category.id, `${category.title}: ${value} з ${days} дн.`, category.amount * value / days,
-      `${category.basis}: ${formatMoney(category.amount)} × ${value} / ${days}`, 'дільник — календарні дні місяця (припущення)');
+    const amount = line('dv', category.id, category.title, category.amount * value / days,
+      `${category.basis}: ${formatMoney(category.amount)} × ${value} / ${days}`, 'дільник — календарні дні місяця (припущення)',
+      `${sum(category.amount)} × ${value} / ${days}`);
     if (category.id === 'd100') part100 = amount;
   }
   if (combatTotalDays > days) {
-    warnings.push(`Днів додаткової винагороди (${combatTotalDays}) більше, ніж днів у місяці (${days}): за один день платять лише одну, більшу категорію (XXXIV п.5).`);
+    errors.push({ field: 'combat', text: `Днів додаткової винагороди (${combatTotalDays}) більше, ніж днів у місяці (${days}): за один день платять лише одну, більшу категорію (XXXIV п.5).` });
   }
 
   const zonal = input.zonalDays || {};
@@ -258,14 +282,15 @@ export function calculateMonth(input = {}) {
   const d70 = count(zonal.d70);
   let zonalAmount = 0;
   if (new232) {
-    zonalAmount += line('zonal', 'z170', `Зональна до взводного опорного пункту: ${d170} з ${days} дн.`, 170000 * d170 / days,
-      `XXXVII п.1 (ред. №232): 170 000 × ${d170} / ${days}`, 'дільник — календарні дні місяця (припущення)');
-    zonalAmount += line('zonal', 'z70', `Зональна до ротного опорного пункту: ${d70} з ${days} дн.`, 70000 * d70 / days,
-      `XXXVII п.1 (ред. №232): 70 000 × ${d70} / ${days}`, 'дільник — календарні дні місяця (припущення)');
-    if (d170 + d70 > days) warnings.push(`Днів у зонах (${d170 + d70}) більше, ніж днів у місяці (${days}).`);
+    zonalAmount += line('zonal', 'z170', 'Зональна до взводного опорного пункту', 170000 * d170 / days,
+      `XXXVII п.1 (ред. №232): 170 000 × ${d170} / ${days}`, 'дільник — календарні дні місяця (припущення)', `170 000 × ${d170} / ${days}`);
+    zonalAmount += line('zonal', 'z70', 'Зональна до ротного опорного пункту', 70000 * d70 / days,
+      `XXXVII п.1 (ред. №232): 70 000 × ${d70} / ${days}`, 'дільник — календарні дні місяця (припущення)', `70 000 × ${d70} / ${days}`);
+    if (d170 + d70 > days) errors.push({ field: 'zonal', text: `Днів у зонах (${d170 + d70}) більше, ніж днів у місяці (${days}).` });
   } else if (d170 + d70) {
-    zonalAmount += line('zonal', 'z70old', `Зональна (до червня 2026): ${d170 + d70} дн.`, 70000 * (d170 + d70) / 30,
-      `XXXVII (до ред. №232): 70 000 за кожні 30 днів, ${d170 + d70} / 30`, 'дні рахуються сумарно; переходи між місяцями — вручну');
+    zonalAmount += line('zonal', 'z70old', 'Зональна (до червня 2026)', 70000 * (d170 + d70) / 30,
+      `XXXVII (до ред. №232): 70 000 за кожні 30 днів, ${d170 + d70} / 30`, 'дні рахуються сумарно; переходи між місяцями — вручну',
+      `70 000 × ${d170 + d70} / 30`);
   }
 
   const assault = input.assaultDays || {};
@@ -273,9 +298,9 @@ export function calculateMonth(input = {}) {
   const restore = count(assault.restore);
   let assaultAmount = 0;
   if (new232) {
-    assaultAmount += line('assault', 'capture', `Штурм із захопленням позицій: ${capture} доб.`, 40000 * capture, `XXXVIII: 40 000 × ${capture}`);
-    assaultAmount += line('assault', 'restore', `Відновлення позицій: ${restore} доб.`, 20000 * restore, `XXXVIII: 20 000 × ${restore}`);
-    if (capture + restore > days) warnings.push(`Діб штурму (${capture + restore}) більше, ніж днів у місяці (${days}).`);
+    assaultAmount += line('assault', 'capture', 'Штурм із захопленням позицій', 40000 * capture, `XXXVIII: 40 000 × ${capture}`, '', `40 000 × ${capture} ${dayWord(capture)}`);
+    assaultAmount += line('assault', 'restore', 'Відновлення позицій', 20000 * restore, `XXXVIII: 20 000 × ${restore}`, '', `20 000 × ${restore} ${dayWord(restore)}`);
+    if (capture + restore > days) errors.push({ field: 'assault', text: `Діб штурму (${capture + restore}) більше, ніж днів у місяці (${days}).` });
   } else if (capture + restore) {
     warnings.push(`Штурмові (XXXVIII) введено наказом №232 з ${monthTitle(RULES_232_FROM)}; за ${monthTitle(month)} їх не враховано.`);
   }
@@ -283,7 +308,7 @@ export function calculateMonth(input = {}) {
   const capped = part100 + zonalAmount + assaultAmount;
   if (new232 && capped > MONTH_CAP) {
     const excess = round2(capped - MONTH_CAP);
-    lines.push({ kind: assaultAmount ? 'assault' : 'zonal', id: 'cap', title: 'Понад ліміт 460 000 (не виплачується)', amount: -excess,
+    lines.push({ kind: assaultAmount ? 'assault' : 'zonal', id: 'cap', title: 'Понад ліміт 460 000 (не виплачується)', amount: -excess, formula: `${sum(capped)} − 460 000`,
       basis: 'XXXVIII п.6: 100 000 + зональні + штурмові не більше 460 000 на місяць', note: 'з якої виплати зменшують, у документах не сказано' });
     warnings.push(`Сума 100 000 + зональних + штурмових (${formatMoney(capped)}) перевищує ліміт ${formatMoney(MONTH_CAP)}.`);
   }
@@ -293,21 +318,25 @@ export function calculateMonth(input = {}) {
   const participants = count(kills.participants);
   if (killCount) {
     if (!participants) warnings.push('Для винагороди за знищення вкажіть кількість учасників групи.');
-    else line('result', 'kills', `Знищення: ${killCount} × 15 000 / ${participants} учасн.`, 15000 * killCount / participants, 'XL: 15 000 за кожного, рівномірно між учасниками');
+    else line('result', 'kills', 'Знищення', 15000 * killCount / participants, 'XL: 15 000 за кожного, рівномірно між учасниками', '', `15 000 × ${killCount} / ${participants} учасн.`);
   }
   const prisoners = amountOf(input.prisonerShare);
-  if (prisoners) line('result', 'prisoners', 'Частка за взяття в полон', prisoners, 'XXXIX: 100 000 за полоненого на групу, розподіляє командир; внесено вручну');
+  if (prisoners) line('result', 'prisoners', 'Частка за взяття в полон', prisoners, 'XXXIX: 100 000 за полоненого на групу, розподіляє командир; внесено вручну', '', 'внесено вручну');
 
   for (const extra of Array.isArray(input.extras) ? input.extras : []) {
     const amount = amountOf(extra?.amount);
     const title = String(extra?.title ?? '').trim().slice(0, 120);
-    if (amount && title) line(PAYMENT_KINDS[extra.kind] ? extra.kind : 'other', 'extra', title, amount, 'внесено вручну');
+    if (amount && title) line(PAYMENT_KINDS[extra.kind] ? extra.kind : 'other', 'extra', title, amount, 'внесено вручну', '', 'внесено вручну');
   }
 
   const byKind = {};
   for (const item of lines) byKind[item.kind] = round2((byKind[item.kind] || 0) + item.amount);
   const total = round2(lines.reduce((sum, item) => sum + item.amount, 0));
-  return { month, days, rules: new232 ? '232' : 'before-232', lines, byKind, total, warnings };
+  return { month, days, rules: new232 ? '232' : 'before-232', lines, byKind, total, warnings, errors };
+}
+
+function dayWord(value) {
+  return plural(value, ['доба', 'доби', 'діб']);
 }
 
 /** Одноразова допомога при першому контракті: ПМ × 8 / 9 / 10 залежно від складу. */
@@ -345,7 +374,7 @@ export function addCalculation(ledger, calc, input = {}) {
     const id = itemId(calc.month, kind);
     const meta = PAYMENT_KINDS[kind] || PAYMENT_KINDS.other;
     const existing = next.items.find(item => item.id === id);
-    const lines = calc.lines.filter(entry => entry.kind === kind).map(entry => ({ title: entry.title, amount: entry.amount }));
+    const lines = calc.lines.filter(entry => entry.kind === kind).map(entry => ({ title: entry.title, amount: entry.amount, formula: entry.formula || '' }));
     if (existing) {
       existing.expected = amount;
       existing.lines = lines;
@@ -471,6 +500,50 @@ export function ledgerSummary(ledger, today) {
   return summary;
 }
 
+/** Фільтр списку «Мої виплати»: all — усі, debts — ще винні, received — отримані повністю. */
+export function filterItems(items, filter, today) {
+  if (filter === 'debts') return items.filter(item => itemStatus(item, today).owed > 0);
+  if (filter === 'received') return items.filter(item => ['paid', 'overpaid'].includes(itemStatus(item, today).status));
+  return items;
+}
+
+/** Пункти, згруповані за місяцем нарахування (новіші першими), з найпізнішим строком групи. */
+export function groupByMonth(items) {
+  const groups = new Map();
+  for (const item of items) {
+    if (!groups.has(item.month)) groups.set(item.month, { month: item.month, due: item.due, items: [] });
+    const group = groups.get(item.month);
+    group.items.push(item);
+    if (item.due > group.due) group.due = item.due;
+  }
+  return [...groups.values()].sort((a, b) => b.month.localeCompare(a.month));
+}
+
+/**
+ * Дані графіка «Рік у графіку»: 12 місяців року з нарахованим і отриманим за пунктами цього
+ * місяця нарахування. `hasData` = false — за місяць немає жодного пункту (це не нуль).
+ */
+export function yearSeries(ledger, year) {
+  const months = Array.from({ length: 12 }, (_, index) => ({ month: `${year}-${String(index + 1).padStart(2, '0')}`, expected: 0, received: 0, hasData: false }));
+  for (const item of ledger.items) {
+    if (!item.month.startsWith(`${year}-`)) continue;
+    const entry = months[Number(item.month.slice(5)) - 1];
+    entry.hasData = true;
+    entry.expected += item.expected;
+    entry.received += item.payments.reduce((total, payment) => total + payment.amount, 0);
+  }
+  for (const entry of months) {
+    entry.expected = round2(entry.expected);
+    entry.received = round2(entry.received);
+  }
+  return months;
+}
+
+/** Роки, за які в журналі є пункти (новіші першими). */
+export function ledgerYears(ledger) {
+  return [...new Set(ledger.items.map(item => item.month.slice(0, 4)))].sort().reverse();
+}
+
 /**
  * Нагадування на дату `today`: прострочені виплати (найдавніші першими), строки в найближчі
  * `soonDays` днів і місяць, за який ще не внесено розрахунок.
@@ -485,6 +558,7 @@ export function reminders(ledger, today, { soonDays = 5 } = {}) {
         level: 'overdue',
         id: item.id,
         date: item.due,
+        days: state.overdueDays,
         text: `${item.title}: ${state.partial ? 'недоплата' : 'не надійшло'} ${formatMoney(state.owed)}, строк минув ${dateTitle(item.due)} (${state.overdueDays} дн. тому).${advice}`,
       });
     } else if (state.status === 'pending') {
@@ -494,6 +568,7 @@ export function reminders(ledger, today, { soonDays = 5 } = {}) {
           level: 'soon',
           id: item.id,
           date: item.due,
+          days: left,
           text: `${item.title}: ${formatMoney(state.owed)} очікується до ${dateTitle(item.due)} (${left === 0 ? 'сьогодні' : `через ${left} дн.`}).`,
         });
       }
@@ -502,7 +577,7 @@ export function reminders(ledger, today, { soonDays = 5 } = {}) {
   const last = previousMonth(String(today).slice(0, 7));
   const months = new Set(ledger.items.filter(item => item.kind !== 'other').map(item => item.month));
   if (months.size && !months.has(last)) {
-    list.push({ level: 'missing', id: '', date: `${last}-01`, text: `Немає розрахунку за ${monthTitle(last)}: внесіть дані на вкладці «Розрахунок», щоб не пропустити виплату.` });
+    list.push({ level: 'missing', id: '', date: `${last}-01`, days: 0, text: `Немає розрахунку за ${monthTitle(last)}: внесіть дані на вкладці «Розрахунок», щоб не пропустити виплату.` });
   }
   const order = { overdue: 0, soon: 1, missing: 2 };
   list.sort((a, b) => order[a.level] - order[b.level] || a.date.localeCompare(b.date));
@@ -542,7 +617,11 @@ export function parseLedger(bytes) {
       expected: round2(expected),
       due: raw.due,
       dueBasis: String(raw.dueBasis ?? '').slice(0, 300),
-      lines: (Array.isArray(raw.lines) ? raw.lines : []).slice(0, 40).map(entry => ({ title: String(entry?.title ?? '').slice(0, 120), amount: round2(Number(entry?.amount) || 0) })),
+      lines: (Array.isArray(raw.lines) ? raw.lines : []).slice(0, 40).map(entry => ({
+        title: String(entry?.title ?? '').slice(0, 120),
+        amount: round2(Number(entry?.amount) || 0),
+        formula: String(entry?.formula ?? '').slice(0, 120),
+      })),
       payments: payments.map(payment => {
         if (!isDate(payment?.date) || !(Number(payment?.amount) > 0)) throw new Error(`${where}: неправильне надходження.`);
         return { date: payment.date, amount: round2(Number(payment.amount)), note: String(payment.note ?? '').slice(0, 200) };

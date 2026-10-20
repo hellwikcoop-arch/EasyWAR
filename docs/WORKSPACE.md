@@ -21,7 +21,10 @@
 
 easyPay: логіка — `src/workspace/easypay/easypay-core.js` (тести `tests/easypay-core.test.mjs`),
 інтерфейс — `easypay-ui.js`, перелік посад — `posady-317.js`, який генерує
-`node script/easypay_posady.mjs` з `docs/easypay/rozriady-posad-317.csv` (таблиця наказу як є).
+`node script/easypay_posady.mjs <csv>` з таблиці наказу як є (CSV у репозиторій не входить:
+`*.csv` у `.gitignore`). Вигляд — за макетами набору 1 (палітра Офісу, значки — вбудовані SVG без
+`innerHTML`); чисті функції для екранів (`filterItems`, `groupByMonth`, `yearSeries`, `errors` у
+`calculateMonth`) живуть у ядрі й мають тести.
 Журнал зберігається лише через `host.openFile` / `host.saveFile(As)`; браузерних сховищ і
 мережі немає. Нагадування показуються лише всередині застосунку: системні сповіщення
 потребують зміни capabilities, це рішення власника. Усі `WORKSPACE_APPS` (обидва розділи)
