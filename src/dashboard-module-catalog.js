@@ -18,6 +18,9 @@ import {
   inheritedValues,
   isConflictError,
   runModuleDelete,
+  readModulePayload,
+  cardReadState,
+  CARD_FAILED_TEXT,
   matchesCatalogItem,
   normalizeCatalog,
   normalizeDensity,
@@ -225,11 +228,8 @@ function initialize() {
     state.profileMissing = false;
     try {
       state.modules = normalizeModules(await invoke('list_dashboard_modules', { branch: state.branch }));
-      const loaded = await Promise.all(state.modules.map(async module => {
-        try { return [module.id, await invoke('get_dashboard_module_data', { moduleId: module.id })]; }
-        // Порожній набір після збою не можна редагувати: збереження стерло б наявні рядки.
-        catch { return [module.id, { module, rows: [], truncated: false, failed: true }]; }
-      }));
+      // Порожній набір після збою не можна редагувати: збереження стерло б наявні рядки.
+      const loaded = await Promise.all(state.modules.map(async module => [module.id, await readModulePayload(invoke, module)]));
       state.data = new Map(loaded);
     } catch (error) {
       state.modules = [];
@@ -257,7 +257,7 @@ function initialize() {
       return;
     }
     const grid = el('div', { class: 'ewmc-dashboard-grid' });
-    for (const module of state.modules) grid.append(renderModule(module, state.data.get(module.id)?.rows || []));
+    for (const module of state.modules) grid.append(renderModule(module, state.data.get(module.id)));
     host.append(grid, ticker(tickerItems(state.modules, state.data)));
   }
 
@@ -271,7 +271,18 @@ function initialize() {
         el('ul', { 'aria-hidden': 'true' }, items.map(node))));
   }
 
-  function renderModule(module, rows) {
+  // Повторне читання лише цього модуля: решта карток не перемальовується з нуля.
+  async function retryRead(module, button) {
+    if (button) button.disabled = true;
+    const payload = await readModulePayload(invoke, module);
+    state.data.set(module.id, payload);
+    if (payload.failed) showToast(`Не вдалося прочитати модуль «${module.title}».`, true);
+    renderHost();
+  }
+
+  function renderModule(module, payload) {
+    const { state: readState, rows } = cardReadState(payload);
+    const failed = readState === 'failed';
     // Видалення питає підтвердження прямо в картці: модуль зникає разом зі своєю таблицею SQLite.
     const removeButton = el('button', {
       type: 'button',
@@ -298,9 +309,13 @@ function initialize() {
     const card = el('article', { class: `ewmc-module span-${module.defaultSpan === 2 ? 2 : 1}`, 'data-kind': module.visualKind, 'data-style': module.style, 'data-branch': module.branch },
       el('header', { class: 'ewmc-module-head' },
         el('div', {}, el('h3', { text: module.title }), el('p', { text: `${rowCountLabel(module.rowCount)} · локальна SQLite` })),
-        el('span', { class: 'ewmc-live', text: module.rowCount ? 'Дані' : 'Створено' })),
-      visual(module, rows),
-      takeoffVisual(module, rows),
+        el('span', { class: `ewmc-live${failed ? ' is-failed' : ''}`, text: failed ? 'Не прочитано' : module.rowCount ? 'Дані' : 'Створено' })),
+      failed
+        ? el('div', { class: 'ewmc-visual ewmc-read-failed', role: 'alert' },
+          el('p', { text: `${CARD_FAILED_TEXT}. Показник не можна вважати нульовим: записи в таблиці збережені.` }),
+          el('button', { type: 'button', class: 'btn quiet', text: 'Прочитати знову', 'data-action': 'retry-read', 'data-module-id': module.id, onclick: event => retryRead(module, event.currentTarget) }))
+        : visual(module, rows),
+      failed ? null : takeoffVisual(module, rows),
       el('div', { class: 'ewmc-module-actions' },
         el('button', {
           type: 'button',
@@ -329,7 +344,7 @@ function initialize() {
         el('code', { text: module.storageTable }),
         el('p', { text: schemaSummary(module.fields) })),
     );
-    if (!rows.length) card.querySelector('.ewmc-visual')?.append(el('p', { class: 'ewmc-no-data', text: 'Таблиця готова · даних ще немає' }));
+    if (readState === 'empty') card.querySelector('.ewmc-visual')?.append(el('p', { class: 'ewmc-no-data', text: 'Таблиця готова · даних ще немає' }));
     return card;
   }
 
