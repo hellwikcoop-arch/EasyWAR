@@ -15,6 +15,7 @@ const COMMANDS: &[&str] = &[
     "read_module_source_sheet",
     "get_dashboard_module_data",
     "replace_dashboard_module_rows",
+    "set_dashboard_module_style",
     "get_local_profiles",
     "register_local_profile",
     "set_local_profile_modules",
