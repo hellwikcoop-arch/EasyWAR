@@ -210,3 +210,10 @@ test('вікно УДШВ: підпис «Десантно-штурмові ві
   assert.match(html, /dataset\.command==='dshv'\?'Десантно-штурмові війська'/u);
   assert.doesNotMatch(html, /udshv-open\)::before \{ content:/u);
 });
+
+test('ПС і РВ: сторінка «Перевірка даних» — заголовок над списком, а не окремим стовпцем ліворуч', async () => {
+  for (const page of ['air.html', 'rocket.html']) {
+    const html = await read(page);
+    assert.match(html, /\.dmain-in\[data-view="quality"\] #p-quality \{ flex-direction: column; \}/, page);
+  }
+});
