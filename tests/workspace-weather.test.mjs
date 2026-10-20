@@ -14,6 +14,13 @@ import {
   addPlace,
   ageText,
   cloudBaseEstimate,
+  cloudLayers,
+  compassPoint,
+  directionText,
+  mmHgFromHpa,
+  pressureFromInput,
+  pressureText,
+  windsAloft,
   coverFromPercent,
   disclosureText,
   emptyState,
@@ -38,6 +45,8 @@ const read = (path) => readFile(new URL(path, root), 'utf8');
 
 const NOW = new Date('2031-03-05T09:00:00Z');
 const minutesAgo = (minutes) => new Date(NOW.getTime() - minutes * 60000);
+/** Пробіли-розділювачі тисяч uk-UA → звичайний пробіл. */
+const plain = value => String(value).replace(/\s/gu, ' ');
 const village = () => parsePlace({ name: 'Вигадане', latitude: '48,4567', longitude: '35,0412' }).place;
 
 test('«Погода» зареєстрована в розділі «Обстановка»', () => {
@@ -222,4 +231,104 @@ test('Rust: фіксовані адреси Open-Meteo, лише HTTPS і ком
   const lib = await read('src-tauri/src/lib.rs');
   assert.match(lib, /weather_online_fetch,/);
   assert.match(lib, /weather_online_search,/);
+});
+
+test('румби, тиск у мм рт. ст. і тиск з поля введення', () => {
+  assert.equal(compassPoint(0), 'Пн');
+  assert.equal(compassPoint(250), 'Зх');
+  assert.equal(compassPoint(359), 'Пн');
+  assert.equal(compassPoint(-90), 'Зх');
+  assert.equal(compassPoint(null), '');
+  assert.equal(directionText(135.4), '135° ПдСх');
+  assert.equal(mmHgFromHpa(1013.25), 760);
+  assert.equal(pressureText(1002.4), '1002,4 гПа · 752 мм рт. ст.');
+  assert.equal(pressureText(null), '—');
+  assert.equal(pressureFromInput('1013,2'), 1013.2);
+  assert.equal(pressureFromInput('760'), 1013.2);
+  assert.equal(pressureFromInput(''), null);
+  assert.ok(Number.isNaN(pressureFromInput('1500')));
+  assert.ok(Number.isNaN(pressureFromInput('високий')));
+});
+
+const UPPER_AIR = {
+  elevation: 150,
+  levels: [
+    { pressure: 1000, height: 110, cloudCover: 0 },
+    { pressure: 975, height: 330, cloudCover: 20, windSpeed: 7, windDirection: 240 },
+    { pressure: 925, height: 760, cloudCover: 80, windSpeed: 10, windDirection: 250 },
+    { pressure: 850, height: 1490, cloudCover: 95, windSpeed: 14, windDirection: 260 },
+    { pressure: 700, height: 3050, cloudCover: 30, windSpeed: 18, windDirection: 270 },
+    { pressure: 500, height: 5620, cloudCover: 70, windSpeed: 25, windDirection: 280 },
+    { pressure: 300, height: 9300, cloudCover: 10, windSpeed: 38.5, windDirection: 275 },
+  ],
+  nearWinds: [{ height: 80, windSpeed: 6, windDirection: 235 }, { height: 120, windSpeed: 6.8 }],
+};
+
+test('шари хмар за рівнями тиску відраховуються від землі', () => {
+  assert.deepEqual(cloudLayers(UPPER_AIR.levels, UPPER_AIR.elevation), [
+    { base: 610, top: 1340 },
+    { base: 5470, top: 5470 },
+  ]);
+  assert.deepEqual(cloudLayers([], 0), []);
+  assert.deepEqual(cloudLayers([{ height: 100, cloudCover: 90 }], 300), [], 'рівень під землею не враховується');
+});
+
+test('вітер на висотах: приземний шар і рівні вище 250 м', () => {
+  const rows = windsAloft(UPPER_AIR);
+  assert.deepEqual(rows.map(row => [row.height, row.level]), [[80, null], [120, null], [610, 925], [1340, 850], [2900, 700], [5470, 500], [9150, 300]]);
+  assert.equal(rows[1].direction, null);
+  assert.deepEqual(windsAloft({}), []);
+});
+
+test('онлайн-спостереження: верхня межа, тиск, пориви й вітер на висотах', () => {
+  const raw = {
+    time: '2031-03-05T11:00', temperature: 6, dewPoint: 2.4, cloudCover: 90, visibility: 8000,
+    windSpeed: 5.5, windDirection: 245, windGusts: 12, surfacePressure: 996.2, pressureMsl: 1014.6,
+    ...UPPER_AIR,
+  };
+  const observation = observationFromOnline(raw, NOW);
+  assert.equal(observation.lower, 450);
+  assert.equal(observation.upper, 1340);
+  assert.equal(observation.upperEstimated, true);
+  assert.equal(observation.pressure, 996.2);
+  assert.equal(observation.gusts, 12);
+  assert.equal(observation.windsAloft.length, 7);
+
+  const view = observationView(observation, NOW);
+  assert.equal(plain(view.upper), '≈ 1 340 м');
+  assert.match(plain(view.upperNote), /оцінка за рівнями тиску · вище ще шар до 5 470 м/);
+  assert.equal(view.windGround, '245° ПдЗх · 5,5 м/с');
+  assert.equal(view.windNote, 'пориви 12 м/с · на 10 м');
+  assert.equal(view.pressure, '996,2 гПа · 747 мм рт. ст.');
+  assert.match(view.pressureNote, /до рівня моря 1014,6 гПа/);
+  assert.deepEqual({ ...view.windsAloft[3], height: plain(view.windsAloft[3].height) }, { height: '1 340 м', level: '850 гПа', direction: '260° Зх', speed: '14 м/с' });
+
+  const low = observationFromOnline({ ...raw, temperature: 20, dewPoint: 6 }, NOW);
+  assert.equal(low.lower, 1750);
+  assert.equal(low.upper, 5470, 'перший шар нижчий за нижній край — береться наступний');
+
+  const noLevels = observationView(observationFromOnline({ cloudCover: 70, temperature: 5, dewPoint: 3 }, NOW), NOW);
+  assert.equal(noLevels.upper, '—');
+  assert.equal(noLevels.upperNote, 'служба не дала даних по шарах');
+  assert.deepEqual(noLevels.windsAloft, []);
+});
+
+test('ручне введення: верхній край, вітер і тиск', () => {
+  const { observation } = manualObservation({ lower: '400', upper: '1900', wind: '7,5', windDirection: '360', pressure: '745' }, NOW);
+  assert.equal(observation.upper, 1900);
+  assert.equal(observation.wind, 7.5);
+  assert.equal(observation.windDirection, 0);
+  assert.equal(observation.pressure, 993.3);
+  const view = observationView(observation, NOW);
+  assert.equal(plain(view.upper), '1 900 м');
+  assert.equal(view.upperNote, 'введено вручну');
+  assert.equal(view.windGround, '0° Пн · 7,5 м/с');
+  assert.equal(view.pressure, '993,3 гПа · 745 мм рт. ст.');
+  assert.equal(view.pressureNote, 'біля землі');
+  assert.match(manualObservation({ lower: '900', upper: '500' }).error, /не може бути нижчим/);
+  assert.match(manualObservation({ upper: '25000' }).error, /Верхній край/);
+  assert.match(manualObservation({ wind: '80' }).error, /Вітер/);
+  assert.match(manualObservation({ windDirection: '400' }).error, /Напрям/);
+  assert.match(manualObservation({ pressure: '300' }).error, /Тиск/);
+  assert.ok(manualObservation({ pressure: '1013' }).observation, 'одного тиску досить');
 });

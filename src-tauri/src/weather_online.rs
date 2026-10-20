@@ -19,7 +19,14 @@ pub const MAX_RESPONSE_BYTES: usize = 256 * 1024;
 const MIN_QUERY_CHARS: usize = 2;
 const MAX_QUERY_CHARS: usize = 80;
 const MAX_PLACES: usize = 10;
-const CURRENT_FIELDS: &str = "temperature_2m,dew_point_2m,cloud_cover,cloud_cover_low,visibility,wind_speed_10m,wind_direction_10m,weather_code";
+const CURRENT_FIELDS: &str = "temperature_2m,dew_point_2m,cloud_cover,cloud_cover_low,visibility,wind_speed_10m,wind_direction_10m,wind_gusts_10m,surface_pressure,pressure_msl,weather_code";
+/// Рівні тиску, гПа, від землі вгору: хмарність і геопотенціальна висота на них дають оцінку
+/// верхньої межі хмар, вітер — вітер на висотах.
+pub const PRESSURE_LEVELS: [u32; 14] = [
+    1000, 975, 950, 925, 900, 850, 800, 700, 600, 500, 400, 300, 250, 200,
+];
+/// Висоти над землею, м, для вітру в приземному шарі.
+pub const WIND_HEIGHTS: [u32; 3] = [80, 120, 180];
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum WeatherOnlineError {
@@ -54,8 +61,44 @@ pub struct WeatherObservation {
     /// Вітер на 10 м, м/с.
     pub wind_speed: Option<f64>,
     pub wind_direction: Option<f64>,
+    /// Пориви вітру на 10 м, м/с.
+    pub wind_gusts: Option<f64>,
+    /// Тиск на рівні станції (біля землі), гПа.
+    pub surface_pressure: Option<f64>,
+    /// Тиск, приведений до рівня моря, гПа.
+    pub pressure_msl: Option<f64>,
     /// Код погоди WMO.
     pub weather_code: Option<i64>,
+    /// Висота пункту над рівнем моря за моделлю служби, м.
+    pub elevation: Option<f64>,
+    /// Вітер у приземному шарі (80, 120, 180 м над землею) на поточну годину.
+    pub near_winds: Vec<HeightWind>,
+    /// Рівні тиску на поточну годину, від землі вгору, як їх дала служба.
+    pub levels: Vec<PressureLevel>,
+}
+
+/// Вітер на висоті над землею.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HeightWind {
+    /// Висота над землею, м.
+    pub height: u32,
+    pub wind_speed: Option<f64>,
+    pub wind_direction: Option<f64>,
+}
+
+/// Значення на рівні тиску.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PressureLevel {
+    /// Рівень, гПа.
+    pub pressure: u32,
+    /// Геопотенціальна висота рівня над морем, м.
+    pub height: Option<f64>,
+    /// Хмарність на рівні, %.
+    pub cloud_cover: Option<f64>,
+    pub wind_speed: Option<f64>,
+    pub wind_direction: Option<f64>,
 }
 
 /// Знайдений населений пункт.
@@ -86,6 +129,26 @@ pub fn rounded_coordinates(
     Ok((round(latitude), round(longitude)))
 }
 
+/// Погодинні поля: вітер на висотах над землею і на рівнях тиску, хмарність і висота рівнів.
+fn hourly_fields() -> String {
+    let mut fields = Vec::new();
+    for height in WIND_HEIGHTS {
+        fields.push(format!("wind_speed_{height}m"));
+        fields.push(format!("wind_direction_{height}m"));
+    }
+    for level in PRESSURE_LEVELS {
+        for name in [
+            "cloud_cover",
+            "geopotential_height",
+            "wind_speed",
+            "wind_direction",
+        ] {
+            fields.push(format!("{name}_{level}hPa"));
+        }
+    }
+    fields.join(",")
+}
+
 /// Адреса запиту поточних умов.
 pub fn forecast_url(latitude: f64, longitude: f64) -> Result<reqwest::Url, WeatherOnlineError> {
     let (lat, lon) = rounded_coordinates(latitude, longitude)?;
@@ -94,6 +157,8 @@ pub fn forecast_url(latitude: f64, longitude: f64) -> Result<reqwest::Url, Weath
         .append_pair("latitude", &format!("{lat:.2}"))
         .append_pair("longitude", &format!("{lon:.2}"))
         .append_pair("current", CURRENT_FIELDS)
+        .append_pair("hourly", &hourly_fields())
+        .append_pair("forecast_hours", "1")
         .append_pair("wind_speed_unit", "ms")
         .append_pair("timezone", "auto");
     Ok(url)
@@ -142,7 +207,30 @@ fn text(value: Option<&Value>) -> Option<String> {
         .map(|text| text.chars().take(120).collect())
 }
 
-/// Розбір відповіді прогнозу (`current=…`).
+/// Індекс погодинного запису для поточної години (`2026-10-20T13:15` → `2026-10-20T13:00`);
+/// якщо такої години немає — перший запис.
+fn hourly_index(hourly: &serde_json::Map<String, Value>, time: &str) -> Option<usize> {
+    let times = hourly.get("time")?.as_array()?;
+    if times.is_empty() {
+        return None;
+    }
+    let hour = time.get(..13).map(|prefix| format!("{prefix}:00"));
+    Some(
+        hour.and_then(|hour| times.iter().position(|item| item.as_str() == Some(&hour)))
+            .unwrap_or(0),
+    )
+}
+
+fn hourly_number(
+    hourly: Option<&serde_json::Map<String, Value>>,
+    index: Option<usize>,
+    name: &str,
+) -> Option<f64> {
+    let values = hourly?.get(name)?.as_array()?;
+    number(values.get(index?))
+}
+
+/// Розбір відповіді прогнозу (`current=…`, `hourly=…`).
 pub fn parse_forecast(body: &Value) -> Result<WeatherObservation, WeatherOnlineError> {
     let object = body.as_object().ok_or(WeatherOnlineError::BadResponse)?;
     let current = object
@@ -152,6 +240,36 @@ pub fn parse_forecast(body: &Value) -> Result<WeatherObservation, WeatherOnlineE
     let time = text(current.get("time")).ok_or(WeatherOnlineError::NoCurrent)?;
     let latitude = number(object.get("latitude")).ok_or(WeatherOnlineError::BadResponse)?;
     let longitude = number(object.get("longitude")).ok_or(WeatherOnlineError::BadResponse)?;
+    let hourly = object.get("hourly").and_then(Value::as_object);
+    let index = hourly.and_then(|hourly| hourly_index(hourly, &time));
+    let near_winds = WIND_HEIGHTS
+        .iter()
+        .map(|&height| HeightWind {
+            height,
+            wind_speed: hourly_number(hourly, index, &format!("wind_speed_{height}m")),
+            wind_direction: hourly_number(hourly, index, &format!("wind_direction_{height}m")),
+        })
+        .filter(|wind| wind.wind_speed.is_some() || wind.wind_direction.is_some())
+        .collect();
+    let levels = PRESSURE_LEVELS
+        .iter()
+        .map(|&pressure| {
+            let value = |name: &str| hourly_number(hourly, index, &format!("{name}_{pressure}hPa"));
+            PressureLevel {
+                pressure,
+                height: value("geopotential_height"),
+                cloud_cover: value("cloud_cover"),
+                wind_speed: value("wind_speed"),
+                wind_direction: value("wind_direction"),
+            }
+        })
+        .filter(|level| {
+            level.height.is_some()
+                || level.cloud_cover.is_some()
+                || level.wind_speed.is_some()
+                || level.wind_direction.is_some()
+        })
+        .collect();
     Ok(WeatherObservation {
         time,
         timezone: text(object.get("timezone")),
@@ -165,7 +283,13 @@ pub fn parse_forecast(body: &Value) -> Result<WeatherObservation, WeatherOnlineE
         visibility: number(current.get("visibility")),
         wind_speed: number(current.get("wind_speed_10m")),
         wind_direction: number(current.get("wind_direction_10m")),
+        wind_gusts: number(current.get("wind_gusts_10m")),
+        surface_pressure: number(current.get("surface_pressure")),
+        pressure_msl: number(current.get("pressure_msl")),
         weather_code: current.get("weather_code").and_then(Value::as_i64),
+        elevation: number(object.get("elevation")),
+        near_winds,
+        levels,
     })
 }
 
@@ -280,10 +404,19 @@ mod tests {
                 "latitude",
                 "longitude",
                 "current",
+                "hourly",
+                "forecast_hours",
                 "wind_speed_unit",
                 "timezone"
             ]
         );
+        let hourly = &pairs.iter().find(|(name, _)| name == "hourly").unwrap().1;
+        assert!(hourly.contains("cloud_cover_850hPa"));
+        assert!(hourly.contains("geopotential_height_200hPa"));
+        assert!(hourly.contains("wind_direction_120m"));
+        let current = &pairs.iter().find(|(name, _)| name == "current").unwrap().1;
+        assert!(current.contains("surface_pressure"));
+        assert!(current.contains("pressure_msl"));
     }
 
     #[test]
@@ -322,6 +455,53 @@ mod tests {
         assert_eq!(observation.visibility, Some(4200.0));
         assert_eq!(observation.dew_point, Some(7.0));
         assert_eq!(observation.weather_code, Some(61));
+        assert!(observation.levels.is_empty());
+        assert!(observation.near_winds.is_empty());
+    }
+
+    #[test]
+    fn pressure_and_upper_air_are_taken_for_the_current_hour() {
+        let body = json!({
+            "latitude": 48.12, "longitude": 35.99, "elevation": 120.0,
+            "current": {
+                "time": "2026-10-20T13:15", "surface_pressure": 1002.4,
+                "pressure_msl": 1016.8, "wind_gusts_10m": 11.5
+            },
+            "hourly": {
+                "time": ["2026-10-20T12:00", "2026-10-20T13:00"],
+                "wind_speed_120m": [1.0, 9.5], "wind_direction_120m": [10, 260],
+                "geopotential_height_850hPa": [1450.0, 1480.0],
+                "cloud_cover_850hPa": [10, 90],
+                "wind_speed_850hPa": [2.0, 14.0], "wind_direction_850hPa": [20, 270],
+                "geopotential_height_700hPa": [3020.0, 3050.0]
+            }
+        });
+        let observation = parse_forecast(&body).unwrap();
+        assert_eq!(observation.surface_pressure, Some(1002.4));
+        assert_eq!(observation.pressure_msl, Some(1016.8));
+        assert_eq!(observation.wind_gusts, Some(11.5));
+        assert_eq!(observation.elevation, Some(120.0));
+        assert_eq!(
+            observation.near_winds,
+            vec![HeightWind {
+                height: 120,
+                wind_speed: Some(9.5),
+                wind_direction: Some(260.0)
+            }]
+        );
+        assert_eq!(observation.levels.len(), 2);
+        assert_eq!(
+            observation.levels[0],
+            PressureLevel {
+                pressure: 850,
+                height: Some(1480.0),
+                cloud_cover: Some(90.0),
+                wind_speed: Some(14.0),
+                wind_direction: Some(270.0)
+            }
+        );
+        assert_eq!(observation.levels[1].pressure, 700);
+        assert_eq!(observation.levels[1].wind_speed, None);
     }
 
     #[test]

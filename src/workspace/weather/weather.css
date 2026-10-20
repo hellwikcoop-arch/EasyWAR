@@ -22,7 +22,15 @@
 .wx-card[data-tone="bad"]{border-left-color:var(--danger)}
 .wx-card-head{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:4px 12px}
 .wx-card-head h2{margin:0;font:600 20px/1.25 var(--sans)}
-.wx-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.wx-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px}
+.wx-metrics-wide{grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+.wx-metrics-wide .wx-metric-value{font-size:20px}
+.wx-aloft{overflow-x:auto}
+.wx-table{width:100%;border-collapse:collapse;font-size:13px}
+.wx-table caption{text-align:left;padding-bottom:6px}
+.wx-table th,.wx-table td{padding:6px 10px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+.wx-table th{font:400 11px/1.4 var(--mono);color:var(--faint);letter-spacing:.06em}
+.wx-table td:last-child,.wx-table th:last-child{text-align:right}
 .wx-metric{display:grid;gap:4px;padding:12px;border:1px solid var(--line);border-radius:10px;background:#18191d}
 .wx-metric-value{font:600 28px/1.1 var(--sans)}
 .wx-metric-note{font:400 11px/1.4 var(--mono);color:var(--faint)}
@@ -41,4 +49,4 @@
 .wx-results:empty{display:none}
 .wx-result{text-align:left}
 .wx-status{min-height:1.5em;margin:0;font:400 12px/1.5 var(--mono);color:var(--dim)}
-@media (max-width:560px){.wx-root{padding:12px}.wx-metrics{grid-template-columns:1fr}.wx-metric-value{font-size:24px}}
+@media (max-width:560px){.wx-root{padding:12px}.wx-metrics{grid-template-columns:1fr 1fr}.wx-metrics-wide{grid-template-columns:1fr}.wx-metric-value{font-size:24px}}

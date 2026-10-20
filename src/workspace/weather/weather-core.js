@@ -18,6 +18,13 @@ export const FORECAST_HOST = 'api.open-meteo.com';
 export const GEOCODE_HOST = 'geocoding-api.open-meteo.com';
 /** Нижче цієї хмарності (бали з 10) нижній край хмар не оцінюється: хмар майже немає. */
 export const CLEAR_SKY_COVER = 2;
+/** Від цієї хмарності на рівні тиску, %, рівень вважається в хмарі (оцінка верхньої межі). */
+export const CLOUDY_LEVEL_PERCENT = 50;
+/** Рівні тиску, гПа, які показуються в таблиці вітру на висотах. */
+export const WIND_ALOFT_LEVELS = [925, 850, 700, 500, 300];
+/** Нижче цієї висоти над землею, м, вітер рівня тиску не показується: там є вітер 80–180 м. */
+const MIN_LEVEL_WIND_HEIGHT = 250;
+const MM_HG_PER_HPA = 0.750062;
 /** Метрів на градус різниці температури й точки роси (оцінка висоти основи хмар). */
 const METRES_PER_DEGREE_SPREAD = 125;
 const MAX_NAME = 80;
@@ -108,19 +115,88 @@ export function phenomenonFromCode(code) {
   return '';
 }
 
+/** Тиск у мм рт. ст. з гПа, до цілих. */
+export function mmHgFromHpa(hpa) {
+  return finite(hpa) ? Math.round(hpa * MM_HG_PER_HPA) : null;
+}
+
+const COMPASS = ['Пн', 'ПнСх', 'Сх', 'ПдСх', 'Пд', 'ПдЗх', 'Зх', 'ПнЗх'];
+
+/** Румб вітру (звідки дме) з градусів: 8 напрямків. */
+export function compassPoint(degrees) {
+  if (!finite(degrees)) return '';
+  const normalized = ((degrees % 360) + 360) % 360;
+  return COMPASS[Math.round(normalized / 45) % 8];
+}
+
+/** Висота рівня над землею, м: геопотенціальна висота мінус висота пункту, до 10 м. */
+function aboveGround(height, elevation) {
+  if (!finite(height)) return null;
+  return Math.round((height - (finite(elevation) ? elevation : 0)) / 10) * 10;
+}
+
+/**
+ * Шари хмар за рівнями тиску: суміжні рівні з хмарністю від CLOUDY_LEVEL_PERCENT, від землі вгору.
+ * Повертає `[{ base, top }]` у метрах над землею (межі — висоти крайніх хмарних рівнів, тож точність
+ * обмежена відстанню між рівнями: сотні метрів унизу, кілометр і більше вгорі).
+ */
+export function cloudLayers(levels = [], elevation = null) {
+  const points = (Array.isArray(levels) ? levels : [])
+    .map(level => ({ height: aboveGround(level?.height, elevation), cloudy: finite(level?.cloudCover) && level.cloudCover >= CLOUDY_LEVEL_PERCENT }))
+    .filter(point => finite(point.height) && point.height >= 0)
+    .sort((a, b) => a.height - b.height);
+  const layers = [];
+  let current = null;
+  for (const point of points) {
+    if (point.cloudy) {
+      if (current) current.top = point.height;
+      else current = { base: point.height, top: point.height };
+    } else if (current) {
+      layers.push(current);
+      current = null;
+    }
+  }
+  if (current) layers.push(current);
+  return layers;
+}
+
+/** Вітер на висотах: 80–180 м над землею і рівні WIND_ALOFT_LEVELS вище 250 м, знизу вгору. */
+export function windsAloft(raw = {}) {
+  const rows = [];
+  for (const wind of Array.isArray(raw.nearWinds) ? raw.nearWinds : []) {
+    if (!finite(wind?.height) || !(finite(wind.windSpeed) || finite(wind.windDirection))) continue;
+    rows.push({ height: wind.height, level: null, speed: finite(wind.windSpeed) ? wind.windSpeed : null, direction: finite(wind.windDirection) ? wind.windDirection : null });
+  }
+  for (const level of Array.isArray(raw.levels) ? raw.levels : []) {
+    if (!WIND_ALOFT_LEVELS.includes(level?.pressure)) continue;
+    const height = aboveGround(level.height, raw.elevation);
+    if (!finite(height) || height < MIN_LEVEL_WIND_HEIGHT) continue;
+    if (!(finite(level.windSpeed) || finite(level.windDirection))) continue;
+    rows.push({ height, level: level.pressure, speed: finite(level.windSpeed) ? level.windSpeed : null, direction: finite(level.windDirection) ? level.windDirection : null });
+  }
+  return rows.sort((a, b) => a.height - b.height);
+}
+
 /** Спостереження з відповіді Rust-команди weather_online_fetch. */
 export function observationFromOnline(raw = {}, receivedAt = new Date()) {
   const cover = coverFromPercent(raw.cloudCover);
   const lowCover = coverFromPercent(raw.cloudCoverLow);
   const estimate = cloudBaseEstimate(raw.temperature, raw.dewPoint);
   const cloudy = finite(cover) && cover >= CLEAR_SKY_COVER;
+  const lower = cloudy ? estimate : null;
+  const layers = cloudy ? cloudLayers(raw.levels, raw.elevation) : [];
+  // Верхня межа — верх першого шару, що закінчується вище нижнього краю.
+  const firstLayer = layers.find(layer => layer.top > (finite(lower) ? lower : 0));
   return {
     source: 'online',
     time: text(raw.time),
     timezone: text(raw.timezone),
     receivedAt: new Date(receivedAt).toISOString(),
-    lower: cloudy ? estimate : null,
+    lower,
     lowerEstimated: true,
+    upper: firstLayer ? firstLayer.top : null,
+    upperEstimated: true,
+    layers,
     clearSky: finite(cover) && !cloudy,
     visibility: finite(raw.visibility) ? Math.round(raw.visibility / 100) / 10 : null,
     cover,
@@ -128,23 +204,49 @@ export function observationFromOnline(raw = {}, receivedAt = new Date()) {
     temperature: finite(raw.temperature) ? raw.temperature : null,
     wind: finite(raw.windSpeed) ? raw.windSpeed : null,
     windDirection: finite(raw.windDirection) ? raw.windDirection : null,
+    gusts: finite(raw.windGusts) ? raw.windGusts : null,
+    pressure: finite(raw.surfacePressure) ? raw.surfacePressure : null,
+    pressureMsl: finite(raw.pressureMsl) ? raw.pressureMsl : null,
+    windsAloft: windsAloft(raw),
     phenomenon: phenomenonFromCode(raw.weatherCode),
   };
 }
 
 /**
- * Спостереження з ручного введення: нижній край хмар, м (0–20 000), видимість, км (0–100),
- * хмарність, бали 0–10. Порожнє поле — немає значення, але хоч одне має бути.
- * Повертає `{ observation }` або `{ error }`.
+ * Тиск з поля введення в гПа: 850–1100 — уже гПа, 500–850 — мм рт. ст. (переводиться).
+ * Порожнє — null; інше — NaN.
+ */
+export function pressureFromInput(input) {
+  const value = parseNumber(input);
+  if (value == null || Number.isNaN(value)) return value;
+  if (value >= 850 && value <= 1100) return value;
+  if (value >= 500 && value < 850) return Math.round((value / MM_HG_PER_HPA) * 10) / 10;
+  return Number.NaN;
+}
+
+/**
+ * Спостереження з ручного введення: нижній і верхній край хмар, м (0–20 000), видимість, км (0–100),
+ * хмарність, бали 0–10, вітер біля землі, м/с (0–60) і напрям, ° (0–360), тиск (гПа або мм рт. ст.).
+ * Порожнє поле — немає значення, але хоч одне має бути. Повертає `{ observation }` або `{ error }`.
  */
 export function manualObservation(form = {}, enteredAt = new Date()) {
   const lower = parseNumber(form.lower);
+  const upper = parseNumber(form.upper);
   const visibility = parseNumber(form.visibility);
   const cover = parseNumber(form.cover);
-  if (Number.isNaN(lower) || (finite(lower) && (lower < 0 || lower > 20000))) return { error: 'Нижній край хмар — метри від 0 до 20 000.' };
-  if (Number.isNaN(visibility) || (finite(visibility) && (visibility < 0 || visibility > 100))) return { error: 'Видимість — кілометри від 0 до 100.' };
-  if (Number.isNaN(cover) || (finite(cover) && (cover < 0 || cover > 10))) return { error: 'Хмарність — бали від 0 до 10.' };
-  if (![lower, visibility, cover].some(finite)) return { error: 'Заповніть хоча б одне значення.' };
+  const wind = parseNumber(form.wind);
+  const windDirection = parseNumber(form.windDirection);
+  const pressure = pressureFromInput(form.pressure);
+  const outside = (value, min, max) => Number.isNaN(value) || (finite(value) && (value < min || value > max));
+  if (outside(lower, 0, 20000)) return { error: 'Нижній край хмар — метри від 0 до 20 000.' };
+  if (outside(upper, 0, 20000)) return { error: 'Верхній край хмар — метри від 0 до 20 000.' };
+  if (finite(lower) && finite(upper) && upper < lower) return { error: 'Верхній край хмар не може бути нижчим за нижній.' };
+  if (outside(visibility, 0, 100)) return { error: 'Видимість — кілометри від 0 до 100.' };
+  if (outside(cover, 0, 10)) return { error: 'Хмарність — бали від 0 до 10.' };
+  if (outside(wind, 0, 60)) return { error: 'Вітер — метри за секунду від 0 до 60.' };
+  if (outside(windDirection, 0, 360)) return { error: 'Напрям вітру — градуси від 0 до 360 (звідки дме).' };
+  if (Number.isNaN(pressure)) return { error: 'Тиск — гПа (850–1100) або мм рт. ст. (500–850).' };
+  if (![lower, upper, visibility, cover, wind, windDirection, pressure].some(finite)) return { error: 'Заповніть хоча б одне значення.' };
   const at = new Date(enteredAt);
   return {
     observation: {
@@ -154,13 +256,20 @@ export function manualObservation(form = {}, enteredAt = new Date()) {
       receivedAt: at.toISOString(),
       lower: finite(lower) ? lower : null,
       lowerEstimated: false,
+      upper: finite(upper) ? upper : null,
+      upperEstimated: false,
+      layers: [],
       clearSky: false,
       visibility: finite(visibility) ? visibility : null,
       cover: finite(cover) ? cover : null,
       lowCover: null,
       temperature: null,
-      wind: null,
-      windDirection: null,
+      wind: finite(wind) ? wind : null,
+      windDirection: finite(windDirection) ? windDirection % 360 : null,
+      gusts: null,
+      pressure: finite(pressure) ? pressure : null,
+      pressureMsl: null,
+      windsAloft: [],
       phenomenon: text(form.phenomenon).slice(0, 60),
     },
   };
@@ -194,6 +303,18 @@ export function needsRefresh(observation, now = new Date()) {
   return age == null || age >= REFRESH_MINUTES;
 }
 
+const decimal = (value, digits = 0) => new Intl.NumberFormat('uk-UA', { maximumFractionDigits: digits, useGrouping: false }).format(value);
+
+/** «250° Зх»; без напрямку — порожньо. */
+export function directionText(degrees) {
+  return finite(degrees) ? `${Math.round(degrees)}° ${compassPoint(degrees)}` : '';
+}
+
+/** «1002 гПа · 752 мм рт. ст.» */
+export function pressureText(hpa) {
+  return finite(hpa) ? `${decimal(hpa, 1)} гПа · ${mmHgFromHpa(hpa)} мм рт. ст.` : '—';
+}
+
 /** Підписи для екрана й оцінка небезпеки. */
 export function observationView(observation, now = new Date()) {
   if (!observation) return null;
@@ -202,9 +323,30 @@ export function observationView(observation, now = new Date()) {
   let lowerText = weatherText.height(observation.lower);
   if (observation.clearSky) lowerText = 'хмар немає';
   else if (observation.lowerEstimated && finite(observation.lower)) lowerText = `≈ ${lowerText}`;
+  let upperText = weatherText.height(observation.upper);
+  if (observation.clearSky) upperText = 'хмар немає';
+  else if (observation.upperEstimated && finite(observation.upper)) upperText = `≈ ${upperText}`;
+  const layers = Array.isArray(observation.layers) ? observation.layers : [];
+  const higher = layers.filter(layer => layer.top > (finite(observation.upper) ? observation.upper : Infinity));
+  let upperNote = observation.upperEstimated ? 'оцінка за рівнями тиску' : 'введено вручну';
+  if (observation.upperEstimated && !finite(observation.upper) && !observation.clearSky) upperNote = 'служба не дала даних по шарах';
+  if (higher.length) upperNote += ` · вище ще шар до ${weatherText.height(higher[higher.length - 1].top)}`;
+  const windParts = [directionText(observation.windDirection), finite(observation.wind) ? weatherText.wind(observation.wind) : ''].filter(Boolean);
   return {
     lower: lowerText,
     lowerNote: observation.lowerEstimated ? 'оцінка за точкою роси' : 'введено вручну',
+    upper: upperText,
+    upperNote,
+    windGround: windParts.length ? windParts.join(' · ') : '—',
+    windNote: finite(observation.gusts) ? `пориви ${weatherText.wind(observation.gusts)} · на 10 м` : (observation.source === 'online' ? 'на 10 м' : ''),
+    pressure: pressureText(observation.pressure),
+    pressureNote: finite(observation.pressureMsl) ? `біля землі · до рівня моря ${decimal(observation.pressureMsl, 1)} гПа` : (finite(observation.pressure) ? 'біля землі' : ''),
+    windsAloft: (Array.isArray(observation.windsAloft) ? observation.windsAloft : []).map(row => ({
+      height: weatherText.height(row.height),
+      level: finite(row.level) ? `${row.level} гПа` : '',
+      direction: directionText(row.direction) || '—',
+      speed: weatherText.wind(row.speed),
+    })),
     visibility: weatherText.visibility(observation.visibility),
     cover: weatherText.cover(observation.cover),
     coverNote: finite(observation.lowCover) ? `нижня ${weatherText.cover(observation.lowCover)}` : '',

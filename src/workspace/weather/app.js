@@ -1,5 +1,5 @@
-// «Погода» у «Робочому середовищі» → «Обстановка» (контракт docs/WORKSPACE.md): нижній край хмар,
-// видимість і хмарність у вибраному населеному пункті. Дані — вручну або, якщо користувач увімкнув
+// «Погода» у «Робочому середовищі» → «Обстановка» (контракт docs/WORKSPACE.md): нижній і верхній край
+// хмар, видимість, хмарність, вітер біля землі й на висотах і тиск у вибраному населеному пункті. Дані — вручну або, якщо користувач увімкнув
 // онлайн-оновлення, з Open-Meteo через Rust-команди weather_online_fetch / weather_online_search.
 // Мережу вимкнено за замовчуванням; перед кожним запитом видно, що саме піде назовні.
 // Пункти й останні спостереження зберігаються лише в цьому браузері (localStorage).
@@ -124,17 +124,25 @@ export async function mount(container, host) {
   const manualSummary = el('summary', '', 'Ввести спостереження вручну');
   const manualRow = el('div', 'wx-row');
   const lower = input('lower', '450', 'numeric');
+  const upper = input('upper', '1800', 'numeric');
   const visibility = input('visibility', '6', 'decimal');
   const cover = input('cover', '7', 'numeric');
+  const windSpeed = input('wind', '5', 'decimal');
+  const windDirection = input('windDirection', '250', 'numeric');
+  const pressure = input('pressure', '1013 або 760', 'decimal');
   const phenomenon = input('phenomenon', 'дощ, туман…');
   const manualSave = button('Зберегти', 'wx-primary');
-  manualRow.append(
+  const manualFields = [
     field('Нижній край хмар, м', lower),
+    field('Верхній край хмар, м', upper),
     field('Видимість, км', visibility),
     field('Хмарність, бали з 10', cover),
+    field('Вітер біля землі, м/с', windSpeed),
+    field('Напрям вітру, ° (звідки)', windDirection),
+    field('Тиск, гПа або мм рт. ст.', pressure),
     field('Явище', phenomenon),
-    manualSave,
-  );
+  ];
+  manualRow.append(...manualFields, manualSave);
   manual.append(manualSummary, manualRow);
 
   const status = el('p', 'wx-status');
@@ -192,6 +200,25 @@ export async function mount(container, host) {
     return box;
   }
 
+  function aloftTable(rows) {
+    const wrap = el('div', 'wx-aloft');
+    const table = el('table', 'wx-table');
+    table.append(el('caption', 'wx-metric-label', 'Вітер на висотах (над землею)'));
+    const head = el('tr');
+    for (const name of ['Висота', 'Напрям (звідки)', 'Швидкість']) head.append(el('th', '', name));
+    table.append(el('thead'), el('tbody'));
+    table.tHead.append(head);
+    for (const row of rows) {
+      const line = el('tr');
+      const height = el('td', '', row.height);
+      if (row.level) height.append(el('span', 'wx-metric-note', ` ${row.level}`));
+      line.append(height, el('td', '', row.direction), el('td', '', row.speed));
+      table.tBodies[0].append(line);
+    }
+    wrap.append(table);
+    return wrap;
+  }
+
   function renderCard() {
     const place = current();
     if (!place) {
@@ -212,12 +239,21 @@ export async function mount(container, host) {
     const metrics = el('div', 'wx-metrics');
     metrics.append(
       metric('Нижній край хмар', view.lower, view.lowerNote),
+      metric('Верхній край хмар', view.upper, view.upperNote),
       metric('Видимість', view.visibility),
       metric('Хмарність', view.cover, view.coverNote),
     );
-    const extra = el('p', 'wx-extra', [view.temperature, view.wind ? `вітер ${view.wind}` : '', view.phenomenon].filter(Boolean).join(' · '));
+    const ground = el('div', 'wx-metrics wx-metrics-wide');
+    ground.append(
+      metric('Вітер біля землі', view.windGround, view.windNote),
+      metric('Атмосферний тиск', view.pressure, view.pressureNote),
+    );
+    const extra = el('p', 'wx-extra', [view.temperature, view.phenomenon].filter(Boolean).join(' · '));
     const hazard = el('p', 'wx-hazard', view.hazardText);
-    card.replaceChildren(heading, hazard, metrics, extra);
+    const parts = [heading, hazard, metrics, ground];
+    if (view.windsAloft.length) parts.push(aloftTable(view.windsAloft));
+    if (extra.textContent) parts.push(extra);
+    card.replaceChildren(...parts);
   }
 
   function render() {
@@ -324,9 +360,18 @@ export async function mount(container, host) {
   manualSave.addEventListener('click', () => {
     const place = current();
     if (!place) return say('Спершу додайте населений пункт.', 'warn');
-    const parsed = manualObservation({ lower: lower.value, visibility: visibility.value, cover: cover.value, phenomenon: phenomenon.value });
+    const parsed = manualObservation({
+      lower: lower.value,
+      upper: upper.value,
+      visibility: visibility.value,
+      cover: cover.value,
+      wind: windSpeed.value,
+      windDirection: windDirection.value,
+      pressure: pressure.value,
+      phenomenon: phenomenon.value,
+    });
     if (parsed.error) return say(parsed.error, 'bad');
-    lower.value = visibility.value = cover.value = phenomenon.value = '';
+    for (const node of [lower, upper, visibility, cover, windSpeed, windDirection, pressure, phenomenon]) node.value = '';
     manual.open = false;
     save({ ...state, observations: { ...state.observations, [place.id]: parsed.observation } });
     say('Спостереження збережено.');
