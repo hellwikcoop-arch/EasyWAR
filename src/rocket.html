@@ -352,6 +352,39 @@ html { scroll-padding-top: 70px; }
 /* без таблиці бічну панель приховано: головна колонка займає всю сітку, а картка «Відкрийте таблицю» стоїть по центру нормальної ширини */
 #view-dash.shell > .side[hidden] ~ .dmain { grid-column: 1 / -1; }
 .dmain > .dpanel.empty-state { justify-self: center; width: min(640px, 100%); box-sizing: border-box; }
+/* стартовий екран без таблиці */
+.dmain > .dpanel.empty-state.es { width: min(1100px, 100%); max-width: none; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .95fr); gap: 34px; align-items: center; padding: 34px 36px; position: relative; overflow: hidden; background: radial-gradient(120% 90% at 0 0, color-mix(in srgb, var(--accent) 16%, transparent), transparent 60%), var(--surface); }
+.es .es-kick { display: flex; align-items: center; gap: 10px; font: 650 11px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--accent); }
+.es .es-kick img { height: 30px; width: auto; }
+.dpanel.es h2 { font: 700 30px/1.12 var(--display); margin: 16px 0 0; letter-spacing: -.01em; }
+.es .es-lead { margin: 10px 0 18px; max-width: 46ch; }
+.es-steps { list-style: none; margin: 0 0 22px; padding: 0; display: grid; gap: 10px; }
+.es-steps li { display: flex; gap: 12px; align-items: baseline; color: var(--ink); font-size: 14px; }
+.es-steps b { font: 700 12px/1 var(--mono); color: var(--accent); padding: 5px 7px; border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); border-radius: 6px; }
+.es-act { display: flex; flex-wrap: wrap; gap: 10px; }
+.es-act .btn[hidden] { display: none; }
+.es-drop { margin-top: 14px; padding: 14px; border: 1.5px dashed color-mix(in srgb, var(--accent) 40%, var(--line)); border-radius: 10px; text-align: center; color: var(--muted); font-size: 13px; }
+.es .es-safe { margin: 14px 0 0; font-size: 12px; color: var(--muted); }
+.es .es-safe::before { content: '●'; color: #3ecf8e; margin-right: 8px; font-size: 9px; vertical-align: 2px; }
+.es-prev { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--surface-2) 70%, transparent); opacity: .9; transform: perspective(1200px) rotateY(-8deg); box-shadow: 0 30px 60px -30px #000; }
+.es-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.es-tile, .es-list i { display: block; height: 52px; border-radius: 8px; background: var(--surface); border: 1px solid var(--line); position: relative; }
+.es-tile em, .es-list em { position: absolute; left: 10px; bottom: 10px; height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--accent) 70%, transparent); }
+.es-tile::before { content: ''; position: absolute; left: 10px; top: 10px; width: 40%; height: 12px; border-radius: 3px; background: var(--line); }
+.es-row { display: grid; grid-template-columns: 1.3fr 1fr; gap: 8px; }
+.es-map, .es-bars { height: 150px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); position: relative; overflow: hidden; }
+.es-map { background: radial-gradient(60% 55% at 62% 48%, color-mix(in srgb, var(--accent) 16%, transparent), transparent), var(--surface); }
+.es-map i { position: absolute; width: 6px; height: 6px; margin: -3px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+.es-map i:nth-child(3n) { opacity: .45; } .es-map i:nth-child(4n) { background: #f2a33a; box-shadow: 0 0 8px #f2a33a; }
+.es-map svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.es-map path { fill: none; stroke: color-mix(in srgb, var(--accent) 45%, transparent); stroke-width: 1.5; stroke-dasharray: 4 4; }
+.es-map span, .es-bars span { position: absolute; left: 10px; top: 8px; font: 650 10px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.es-bars div { position: absolute; inset: 30px 10px 10px; display: flex; align-items: flex-end; gap: 6px; }
+.es-bars i { flex: 1; border-radius: 3px 3px 0 0; background: linear-gradient(color-mix(in srgb, var(--accent) 80%, transparent), color-mix(in srgb, var(--accent) 20%, transparent)); }
+.es-list { display: grid; gap: 6px; }
+.es-list i { height: 26px; }
+.es-list em { bottom: 10px; }
+@media (max-width: 900px) { .dmain > .dpanel.empty-state.es { grid-template-columns: minmax(0, 1fr); padding: 24px 20px; } .es-prev { display: none; } .dpanel.es h2 { font-size: 24px; } }
 @media (max-width: 720px) {
   .issues .t { grid-column: 1 / -1; }
   .map-legend { position: static; display: flex; flex-wrap: wrap; gap: 4px 14px; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: var(--map-bg); }
@@ -4523,7 +4556,7 @@ function init() {
       if (perm === 'granted' && opened !== 'wrong-kind') idbSet(HANDLE_KEY, fh).catch(() => {});
     } else if (e.dataTransfer.files[0]) fromFileObject(e.dataTransfer.files[0]);
   });
-  if (window.showOpenFilePicker && window.indexedDB) idbGet(HANDLE_KEY).then(fh => { if (fh && fh.kind === 'file') { S.storedHandle = fh; if (!S.wb) renderFile(); } }).catch(() => {});
+  if (window.showOpenFilePicker && window.indexedDB) idbGet(HANDLE_KEY).then(fh => { if (fh && fh.kind === 'file') { S.storedHandle = fh; if (!S.wb) renderFile(); document.dispatchEvent(new Event('ew-stored-handle')); } }).catch(() => {});
   renderAll();
 }
 
@@ -4550,7 +4583,7 @@ const autoRefresh = () => { clearTimeout(__refreshT); __refreshT = setTimeout(()
 window.addEventListener('focus', autoRefresh);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) autoRefresh(); });
 
-window.__AV = { S, connect, doParse, addSelected, pickFile, showError, downloadCurrent, toast, refresh: refreshFromDisk }; // для налагодження
+window.__AV = { S, connect, doParse, addSelected, pickFile, showError, downloadCurrent, toast, refresh: refreshFromDisk, resume: resumeStored }; // для налагодження
 document.addEventListener('DOMContentLoaded', init);
 })();
 </script>
@@ -4826,12 +4859,32 @@ function applyPreset() {
 /* ------------------------------ каркас ------------------------------ */
 const root = $('#view-dash');
 const el = {};
+/* Стартовий екран без таблиці: що відкрити, три кроки, перетягування і ескіз майбутнього дашборда. */
+function startScreen() {
+  const mark = $('.brand .branch-service-mark');
+  const branch = { pvk: 'Повітряне командування', dshv: 'Десантно-штурмові війська' }[document.documentElement.dataset.command] || ($('.brand small') || {}).textContent || (mark && mark.alt) || '';
+  const step = (n, t) => h('li', {}, h('b', { text: n }), h('span', { text: t }));
+  el.resume = h('button', { class: 'btn big', type: 'button', hidden: true, onclick: () => AV.resume && AV.resume() });
+  const syncResume = () => { const fh = AV.S.storedHandle; el.resume.hidden = !fh; if (fh) el.resume.textContent = 'Продовжити з «' + fh.name + '»'; };
+  document.addEventListener('ew-stored-handle', syncResume); syncResume();
+  const tile = w => h('i', { class: 'es-tile' }, h('em', { style: 'width:' + w + '%' }));
+  const bars = [38, 56, 44, 72, 60, 84, 66, 92].map(v => h('i', { style: 'height:' + v + '%' }));
+  return h('section', { class: 'dpanel empty-state es', hidden: true },
+    h('div', { class: 'es-main' },
+      h('div', { class: 'es-kick' }, mark ? h('img', { src: mark.src, alt: '' }) : null, h('span', { text: (branch.trim() || 'EasyWAR') + ' · дашборд' })),
+      h('h2', { text: 'Відкрийте таблицю, щоб побачити дашборд' }),
+      h('p', { class: 'es-lead', text: 'Дашборд рахується з аркуша «Зведена» вашого файлу .xlsx — того самого, куди інструмент вносить доповіді.' }),
+      h('ol', { class: 'es-steps' }, step('01', 'Відкрийте таблицю .xlsx'), step('02', 'Показники, карта й підрозділи перераховуються одразу'), step('03', 'Виправили в Excel — натисніть «Оновити»')),
+      h('div', { class: 'es-act' }, h('button', { class: 'btn primary big', type: 'button', onclick: () => AV.pickFile() }, 'Відкрити таблицю…'), el.resume),
+      h('div', { class: 'es-drop', text: 'або перетягніть файл у це вікно' }),
+      h('p', { class: 'es-safe', text: 'Дані обробляються на цьому пристрої й нікуди не надсилаються.' })),
+    h('div', { class: 'es-prev', 'aria-hidden': 'true' },
+      h('div', { class: 'es-kpis' }, tile(62), tile(48), tile(74), tile(36)),
+      h('div', { class: 'es-row' }, h('div', { class: 'es-map' }, h('svg:svg', { viewBox: '0 0 100 100', preserveAspectRatio: 'none' }, h('svg:path', { d: 'M70 4 C60 24 74 38 62 54 S66 84 54 98' })), h('span', { text: 'Карта' }), ...[[58, 26], [66, 36], [50, 40], [76, 46], [60, 54], [82, 60], [42, 62], [70, 70], [56, 78], [80, 30], [34, 48], [64, 86], [76, 80], [28, 70], [46, 30], [86, 72]].map(([x, y]) => h('i', { style: 'left:' + x + '%;top:' + y + '%' }))), h('div', { class: 'es-bars' }, h('span', { text: 'Динаміка' }), h('div', {}, ...bars))),
+      h('div', { class: 'es-list' }, ...[88, 70, 54].map(w => h('i', {}, h('em', { style: 'width:' + w + '%' }))))));
+}
 function skeleton() {
-  el.empty = h('section', { class: 'dpanel empty-state', hidden: true },
-    h('h2', { text: 'Відкрийте таблицю, щоб побачити дашборд' }),
-    h('p', { text: 'Дашборд рахується з аркуша «Зведена» вашого файлу .xlsx — того самого, куди інструмент вносить доповіді. Дані з таблиці обробляються на вашому пристрої й нікуди не надсилаються.' }),
-    h('button', { class: 'btn primary big', type: 'button', onclick: () => AV.pickFile() }, 'Відкрити таблицю…'),
-    h('p', { class: 'small', style: 'margin-top:12px', text: 'Файл можна й просто перетягнути в це вікно.' }));
+  el.empty = startScreen();
   el.from = h('input', { type: 'date', id: 'dFrom', 'aria-label': 'Початок періоду', onchange: e => onRange('from', e.target.value) });
   el.to = h('input', { type: 'date', id: 'dTo', 'aria-label': 'Кінець періоду', onchange: e => onRange('to', e.target.value) });
   el.presets = h('div', { class: 'seg', id: 'presets', role: 'group', 'aria-label': 'Швидкий вибір періоду' },
