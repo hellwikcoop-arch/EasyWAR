@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   CATEGORY_LIMIT,
   CHART_KINDS,
+  FOLDED_LABEL,
   OTHER_LABEL,
   SERIES_LIMIT,
   assignSlots,
@@ -497,3 +498,43 @@ test('every Rust catalog template survives the frontend whitelist, so a new char
   assert.deepEqual(kept, catalog.map(item => item.id), 'вид шаблону з Rust має бути у VISUAL_KINDS (dashboard-module-catalog-core.js)');
 });
 
+
+test('a real category named «Інші» is counted, and never mixed with the folded tail', () => {
+  const only = modelOf('columns', [{ category: 'Інші', value: 5 }]);
+  assert.deepEqual(only.categories, [OTHER_LABEL]);
+  assert.equal(only.series[0].values[0], 5, 'a single real «Інші» row keeps its value');
+
+  const donut = modelOf('donut', [{ category: 'Інші', value: 5 }, { category: 'Тест-А', value: 7 }]);
+  assert.equal(donut.total, 12);
+  assert.equal(donut.slices.find(slice => slice.label === OTHER_LABEL).value, 5);
+
+  // 12+ категорій і справжня «Інші»: сума всіх вихідних значень рівно один раз.
+  const rows = Array.from({ length: 14 }, (_, index) => ({ category: `К${index + 1}`, value: index + 1 }));
+  rows.unshift({ category: 'Інші', value: 1000 });
+  const total = rows.reduce((sum, row) => sum + row.value, 0);
+  const columns = modelOf('columns', rows);
+  assert.equal(columns.categories.length, CATEGORY_LIMIT);
+  assert.equal(columns.categories.at(-1), FOLDED_LABEL, 'the folded tail is labelled apart from the real category');
+  assert.equal(columns.categories[0], OTHER_LABEL);
+  assert.equal(columns.series[0].values.reduce((sum, value) => sum + (value ?? 0), 0), total);
+  const bars = modelOf('horizontal-bars', rows);
+  assert.ok(bars.categories.includes(OTHER_LABEL) && bars.categories.includes(FOLDED_LABEL));
+  assert.equal(new Set(bars.categories).size, bars.categories.length, 'labels are distinct');
+  const ring = modelOf('donut', rows);
+  assert.equal(ring.total, total);
+  assert.equal(ring.slices.reduce((sum, slice) => sum + slice.value, 0), total);
+  assert.equal(new Set(ring.slices.map(slice => slice.label)).size, ring.slices.length);
+});
+
+test('a real series named «Інші» stays apart from the folded series', () => {
+  const rows = [{ category: 'А', value: 100, series: 'Інші' }];
+  for (let index = 1; index <= SERIES_LIMIT + 1; index += 1) rows.push({ category: 'А', value: index, series: `Ряд ${index}` });
+  const model = modelOf('stacked-columns', rows);
+  const names = model.series.map(series => series.name);
+  assert.equal(model.series.length, SERIES_LIMIT);
+  assert.equal(new Set(names).size, names.length);
+  assert.ok(names.includes(OTHER_LABEL) && names.at(-1) === FOLDED_LABEL);
+  const sum = model.series.reduce((acc, series) => acc + (series.values[0] ?? 0), 0);
+  assert.equal(sum, rows.reduce((acc, row) => acc + row.value, 0), 'every source value is counted exactly once');
+  assert.equal(model.series.find(series => series.name === OTHER_LABEL).values[0], 100);
+});

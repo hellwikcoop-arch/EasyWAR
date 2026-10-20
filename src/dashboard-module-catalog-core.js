@@ -726,6 +726,24 @@ export function tableEditState(payload) {
   return { editable: true, reason: '' };
 }
 
+/**
+ * Читає дані одного модуля. Збій не стає порожнім набором: повертається `failed: true`, і
+ * картка не видає його за «даних ще немає», а таблиця лишається лише для читання.
+ */
+export async function readModulePayload(invoke, module) {
+  try { return await invoke('get_dashboard_module_data', { moduleId: module.id }); }
+  catch { return { module, rows: [], truncated: false, failed: true }; }
+}
+
+/** Стан картки за відповіддю читання: `failed` — збій, `empty` — прочитано й порожньо, `ready`. */
+export function cardReadState(payload) {
+  if (!payload || typeof payload !== 'object' || payload.failed === true) return { state: 'failed', rows: [] };
+  const rows = Array.isArray(payload.rows) ? payload.rows : [];
+  return { state: rows.length ? 'ready' : 'empty', rows };
+}
+
+export const CARD_FAILED_TEXT = 'Дані не прочитано';
+
 export function previewModel(module, rows) {
   const safeRows = Array.isArray(rows) ? rows.slice(0, 10_000) : [];
   const fields = Array.isArray(module?.fields) ? module.fields : [];
@@ -830,6 +848,8 @@ export const dashboardModuleCore = {
   replaceRowsRequest,
   deleteModuleRequest,
   runModuleDelete,
+  readModulePayload,
+  cardReadState,
   isConflictError,
   tableEditState,
   previewModel,

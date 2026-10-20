@@ -12,6 +12,11 @@ export const SERIES_LIMIT = 8;
 /** Скільки категорій показує стовпчикова або смугова діаграма; решта — «Інші». */
 export const CATEGORY_LIMIT = 12;
 export const OTHER_LABEL = 'Інші';
+/** Підпис згорнутої групи, коли в даних уже є справжня категорія чи ряд «Інші». */
+export const FOLDED_LABEL = 'Інші (згруповано)';
+// Службовий ключ згорнутої групи: не збігається з жодною назвою з даних (в тексті немає нуль-символу).
+const FOLD_KEY = '\u0000fold';
+const foldedLabel = names => (names.includes(OTHER_LABEL) ? FOLDED_LABEL : OTHER_LABEL);
 const ROW_LIMIT = 10_000;
 
 const finite = value => typeof value === 'number' && Number.isFinite(value);
@@ -126,6 +131,7 @@ export function assignSlots(names, limit = SERIES_LIMIT) {
   const slots = new Map(kept.map((name, index) => [name, index + 1]));
   for (const name of unique.slice(limit - 1)) slots.set(name, limit);
   slots.set(OTHER_LABEL, limit);
+  slots.set(FOLDED_LABEL, limit);
   return slots;
 }
 
@@ -142,7 +148,7 @@ const byTotalDesc = (left, right, totals) => (totals.get(right) ?? 0) - (totals.
 function foldSeries(names, limit = SERIES_LIMIT) {
   const unique = [...new Set(names)];
   if (unique.length <= limit) return { kept: unique, folded: new Set() };
-  return { kept: [...unique.slice(0, limit - 1), OTHER_LABEL], folded: new Set(unique.slice(limit - 1)) };
+  return { kept: [...unique.slice(0, limit - 1), FOLD_KEY], folded: new Set(unique.slice(limit - 1)) };
 }
 
 /**
@@ -173,21 +179,23 @@ function matrix(rows, { categoryOf, categoryLabel, seriesOf, metric, categoryLim
   let foldedCategories = [];
   if (categories.length > categoryLimit) {
     foldedCategories = categories.slice(categoryLimit - 1);
-    categories = [...categories.slice(0, categoryLimit - 1), OTHER_LABEL];
+    categories = [...categories.slice(0, categoryLimit - 1), FOLD_KEY];
   }
   const valueOf = (categoryKey, series) => {
-    const sources = categoryKey === OTHER_LABEL ? foldedCategories : [categoryKey];
+    const sources = categoryKey === FOLD_KEY ? foldedCategories : [categoryKey];
     const values = sources.flatMap(key => {
       const bucket = cells.get(key);
       if (!bucket) return [];
-      if (series === OTHER_LABEL && folded.size) return [...folded].flatMap(name => bucket.get(name) ?? []);
+      if (series === FOLD_KEY) return [...folded].flatMap(name => bucket.get(name) ?? []);
       return bucket.get(series) ?? [];
     });
     return values.length ? aggregate(values, metric.aggregation) : null;
   };
+  const categoryFold = foldedLabel(categories.map(key => (key === FOLD_KEY ? null : categoryLabel(key))));
+  const seriesFold = foldedLabel(seriesNames.filter(name => name !== FOLD_KEY));
   return {
-    categories: categories.map(key => ({ key, label: key === OTHER_LABEL ? OTHER_LABEL : categoryLabel(key) })),
-    series: seriesNames.map(name => ({ name, values: categories.map(key => valueOf(key, name)) })),
+    categories: categories.map(key => (key === FOLD_KEY ? { key: categoryFold, label: categoryFold } : { key, label: categoryLabel(key) })),
+    series: seriesNames.map(name => ({ name: name === FOLD_KEY ? seriesFold : name, values: categories.map(key => valueOf(key, name)) })),
   };
 }
 
@@ -773,7 +781,8 @@ function ridgeModel(rows, { hourField, seriesField, metric, unit }) {
   if (named.length > RIDGE_LIMIT) {
     const rest = new Array(HOURS).fill(0);
     for (const [, values] of named.slice(RIDGE_LIMIT - 1)) values.forEach((value, hour) => { rest[hour] += value; });
-    named = [...named.slice(0, RIDGE_LIMIT - 1), [OTHER_LABEL, rest]];
+    const kept = named.slice(0, RIDGE_LIMIT - 1);
+    named = [...kept, [foldedLabel(kept.map(([name]) => name)), rest]];
   }
   const slots = assignSlots(named.map(([name]) => name));
   const valueText = value => (metric ? valueLabel(metric, value) : compactNumber(value));
@@ -921,7 +930,7 @@ export function tickerItems(modules, dataById) {
 }
 
 export const dashboardModuleChartsCore = {
-  SERIES_LIMIT, CATEGORY_LIMIT, OTHER_LABEL, CHART_KINDS,
+  SERIES_LIMIT, CATEGORY_LIMIT, OTHER_LABEL, FOLDED_LABEL, CHART_KINDS,
   compactNumber, valueLabel, niceTicks, parseMoment, momentLabel, monthTitle, assignSlots, initialsOf, chartModel, chartSummary,
   RIDGE_LIMIT, hourOf, takeoffHoursModel, tickerItems,
 };

@@ -15,6 +15,8 @@ import {
   deleteModuleRequest,
   runModuleDelete,
   DELETE_CONFLICT_MESSAGE,
+  readModulePayload,
+  cardReadState,
   fieldColumnWidth,
   fieldHint,
   fieldInputText,
@@ -1229,4 +1231,35 @@ test('the personal tab exists only where the local database does', async () => {
   assert.equal(hasPersonalDashboard({ __TAURI_INTERNALS__: { invoke } }), true);
   assert.equal(hasPersonalDashboard({ parent: { __TAURI_INTERNALS__: { invoke } } }), true, 'a module page inside the launcher frame');
   assert.deepEqual(personalNavItem({ __TAURI_INTERNALS__: { invoke } }), ['my-dashboard', 'Мій дашборд']);
+});
+
+test('a failed read is a failed card, not an empty module; a real empty table stays empty', async () => {
+  const module = { id: 'm1', title: 'Журнал' };
+  const failing = await readModulePayload(async () => { throw new Error('диск'); }, module);
+  assert.equal(failing.failed, true);
+  assert.deepEqual(failing.rows, []);
+  assert.equal(cardReadState(failing).state, 'failed');
+  assert.equal(cardReadState(undefined).state, 'failed');
+  const empty = await readModulePayload(async () => ({ module, rows: [], truncated: false }), module);
+  assert.equal(cardReadState(empty).state, 'empty');
+  const ready = await readModulePayload(async () => ({ module, rows: [{ row_id: 1 }] }), module);
+  assert.deepEqual(cardReadState(ready), { state: 'ready', rows: [{ row_id: 1 }] });
+  // Повторне читання відновлює показник; помилка одного модуля не торкається сусіднього.
+  let broken = true;
+  const invoke = async (_name, { moduleId }) => {
+    if (moduleId === 'm1' && broken) throw new Error('диск');
+    return { module: { id: moduleId }, rows: [{ row_id: 1 }] };
+  };
+  const both = await Promise.all([module, { id: 'm2', title: 'Сусід' }].map(item => readModulePayload(invoke, item)));
+  assert.deepEqual(both.map(payload => cardReadState(payload).state), ['failed', 'ready']);
+  broken = false;
+  assert.equal(cardReadState(await readModulePayload(invoke, module)).state, 'ready');
+});
+
+test('the module card shows the failure and a retry instead of an empty chart', async () => {
+  const source = await readFile(new URL('../src/dashboard-module-catalog.js', import.meta.url), 'utf8');
+  assert.ok(source.includes("renderModule(module, state.data.get(module.id))"), 'the card gets the whole read state');
+  assert.match(source, /failed\s*\?\s*el\('div', \{ class: 'ewmc-visual ewmc-read-failed'/);
+  assert.ok(source.includes('Прочитати знову'));
+  assert.ok(source.includes("readState === 'empty'"), '«даних ще немає» only after a successful empty read');
 });
