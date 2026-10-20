@@ -202,7 +202,7 @@ function unitShares(units, t) {
   const rows = units.filter(r => r.spent || r.left);
   const pct = (n, total) => (total ? Math.round(n / total * 100) : 0);
   const share = (label, total, pick) => h('div', { class: 'share-col' }, h('h3', null, label),
-    ...rows.map(r => h('div', { class: 'share-row' }, h('span', { class: 'share-name' }, r.unit.name),
+    ...rows.map(r => h('div', { class: 'share-row' }, h('span', { class: 'share-name' }, (em => em ? h('img', { class: 'crest-s', src: em, alt: '' }) : null)(emblemOf(r.unit.name)), r.unit.name),
       h('div', { class: 'bar' }, h('i', { style: `width:${pct(pick(r), total)}%` })), h('b', { class: 'num' }, `${pct(pick(r), total)}%`))));
   return h('section', { class: 'panel' }, h('div', { class: 'panel-head' }, h('h2', null, 'Частка підрозділів'), h('span', { class: 'muted small' }, 'від загальної витрати та залишку')),
     rows.length ? h('div', { class: 'shares' }, share('Витрата', t.spent, r => r.spent), share('Залишок', t.left, r => r.left)) : h('p', { class: 'muted' }, 'Даних за підрозділами ще немає.'));

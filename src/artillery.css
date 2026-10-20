@@ -359,3 +359,4 @@ td.unit-cell span, td.unit-cell b { vertical-align: middle; }
 .share-row { display: grid; grid-template-columns: minmax(90px, 1.2fr) 2fr 44px; gap: 10px; align-items: center; padding: 4px 0; font-size: 13px; }
 .share-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .share-row .num { text-align: right; }
+.share-name { display: flex; align-items: center; gap: 8px; }
