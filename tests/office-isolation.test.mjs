@@ -8,8 +8,9 @@
 // 5) Rust перевіряє мітку вікна в кожній команді office_*.
 // Поведінку справжнього webview цей тест не доводить: див. docs/WORKSPACE.md, «Ізоляція».
 import assert from 'node:assert/strict';
-import { readFile, readdir } from 'node:fs/promises';
+import { access, readFile, readdir } from 'node:fs/promises';
 import test from 'node:test';
+import { SITUATION_APPS, WORKSPACE_APPS } from '../src/workspace/workspace-core.js';
 
 const root = new URL('../', import.meta.url);
 const read = path => readFile(new URL(path, root), 'utf8');
@@ -105,4 +106,21 @@ test('оболонка відкриває застосунок в окремом
   const desktop = await read('src-tauri/src/desktop_shell.rs');
   assert.match(desktop, /WebviewUrl::App\("workspace\/index\.html"\.into\(\)\)/);
   assert.match(desktop, /initialization_script\(editor_init_script\(app_id\)\)/);
+});
+
+test('вікно редактора відкриває всі підключені застосунки модуля, і лише їх', async () => {
+  const files = await read('src-tauri/src/office_files.rs');
+  const list = files.match(/pub const EDITOR_APPS: \[&str; (\d+)\] = \[([^\]]*)\];/);
+  assert.ok(list, 'EDITOR_APPS в office_files.rs');
+  const allowed = [...list[2].matchAll(/"([a-z0-9]+)"/g)].map(match => match[1]);
+  assert.equal(Number(list[1]), allowed.length, 'довжина масиву збігається зі списком');
+  const connected = [];
+  // Застосунки «Обстановки» (погода) лишаються в головному вікні й у вікно редактора не потрапляють.
+  for (const app of WORKSPACE_APPS.filter(entry => !SITUATION_APPS.includes(entry))) {
+    const present = await access(new URL(`src/workspace/${app.id}/app.js`, root)).then(() => true, () => false);
+    if (present) connected.push(app.id);
+  }
+  // Підключений застосунок, якого немає в списку, у настільному застосунку не відкриється
+  // («Не вдалося відкрити»): office_* не працюють поза вікном редактора.
+  assert.deepEqual([...allowed].sort(), connected.sort(), 'EDITOR_APPS (Rust) і підключені застосунки WORKSPACE_APPS (JS)');
 });

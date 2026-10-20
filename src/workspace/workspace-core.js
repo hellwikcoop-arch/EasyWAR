@@ -1,4 +1,4 @@
-// Чиста логіка модуля «Робоче середовище»: реєстр застосунків розділів «Офіс» і «Обстановка», контракт
+// Чиста логіка модуля «Робоче середовище»: реєстр застосунків розділів «Офіс», «Обстановка» і «Особисте», контракт
 // підключення застосунку (версія, перевірка того, що повертає mount), параметри вікон
 // відкриття/збереження. Без DOM і Tauri, щоб її можна було перевірити в node --test.
 // Оболонка — workspace.js, сторінка одного застосунку — app-frame.js, файли — workspace-host.js.
@@ -63,20 +63,35 @@ export const SITUATION_APPS = Object.freeze([
   }),
 ]);
 
-/** Усі застосунки модуля в порядку розділів. */
-export const WORKSPACE_APPS = Object.freeze([...OFFICE_APPS, ...SITUATION_APPS]);
+/**
+ * Застосунки розділу «Особисте»: дані однієї людини для неї самої, лише у її власних файлах.
+ */
+export const PERSONAL_APPS = Object.freeze([
+  app({
+    id: 'easypay',
+    title: 'easyPay',
+    kind: 'Грошове забезпечення',
+    hint: 'Калькулятор виплат і журнал того, що вам мають виплатити, з нагадуваннями',
+    extensions: ['easypay'],
+    filterName: 'Журнал easyPay',
+  }),
+]);
 
-/** Розділи модуля: «Офіс» і «Обстановка». */
+/** Усі застосунки модуля в порядку розділів. */
+export const WORKSPACE_APPS = Object.freeze([...OFFICE_APPS, ...SITUATION_APPS, ...PERSONAL_APPS]);
+
+/** Розділи модуля: «Офіс», «Обстановка» і «Особисте». */
 export const WORKSPACE_SECTIONS = Object.freeze([
   Object.freeze({ id: 'office', title: 'Офіс', apps: Object.freeze(OFFICE_APPS.map(entry => entry.id)) }),
   Object.freeze({ id: 'situation', title: 'Обстановка', apps: Object.freeze(SITUATION_APPS.map(entry => entry.id)) }),
+  Object.freeze({ id: 'personal', title: 'Особисте', apps: Object.freeze(PERSONAL_APPS.map(entry => entry.id)) }),
 ]);
 
 export function appById(id) {
   return WORKSPACE_APPS.find(entry => entry.id === id) || null;
 }
 
-/** Розділ, у якому лежить застосунок (для кнопки «← <розділ>»), або null. */
+/** Розділ, у якому лежить застосунок, або null. */
 export function sectionOfApp(id) {
   return WORKSPACE_SECTIONS.find(section => section.apps.includes(id)) || null;
 }

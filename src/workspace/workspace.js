@@ -1,11 +1,11 @@
-// Оболонка модуля «Робоче середовище»: розділи «Офіс» і «Обстановка» з картками застосунків і перегляд одного
+// Оболонка модуля «Робоче середовище»: розділи «Офіс», «Обстановка» і «Особисте» з картками застосунків і перегляд одного
 // застосунку в iframe (app.html?app=<id>). Незбережені зміни застосунок повідомляє через
 // postMessage; перед закриттям оболонка просить підтвердження у власній смузі, без системних
 // діалогів. Лаунчер (workspace-launcher.js) питає дозволу закритися через EW_WORKSPACE.requestClose().
 // У настільному застосунку застосунок працює не в головному вікні, а в окремому вікні
 // редактора з дозволом лише на команди office_* (shellMode, docs/WORKSPACE.md, «Ізоляція»).
-// «Погода» та інші застосунки «Обстановки» — наш код без чужого WASM: вони лишаються в iframe головного вікна.
-import { OFFICE_APPS, WORKSPACE_APPS, WORKSPACE_SECTIONS, appById, appPageUrl, frameTitle, parseFrameMessage, sectionOfApp, shellMode } from './workspace-core.js';
+// «Погода» та інші застосунки «Обстановки» — наш код без чужого WASM і файлів: вони лишаються в iframe головного вікна.
+import { SITUATION_APPS, WORKSPACE_APPS, WORKSPACE_SECTIONS, appById, appPageUrl, frameTitle, parseFrameMessage, shellMode } from './workspace-core.js';
 import { findInvoke } from './workspace-host.js';
 import { isConnected } from './workspace-registry.js';
 
@@ -50,7 +50,7 @@ function renderSections() {
         element('span', 'ws-status', isConnected(app.id) ? 'Відкрити' : 'У розробці'),
       );
       card.addEventListener('click', () => {
-        if (shell.mode === 'desktop' && isConnected(app.id) && isOfficeApp(app.id)) openEditorWindow(app.id, card);
+        if (shell.mode === 'desktop' && isConnected(app.id) && opensInEditorWindow(app.id)) openEditorWindow(app.id, card);
         else openApp(app.id, card);
       });
       cards.append(card);
@@ -60,8 +60,8 @@ function renderSections() {
   }
 }
 
-function isOfficeApp(id) {
-  return OFFICE_APPS.some(entry => entry.id === id);
+function opensInEditorWindow(id) {
+  return !SITUATION_APPS.some(entry => entry.id === id);
 }
 
 function openEditorWindow(id, card) {
@@ -76,7 +76,6 @@ function openApp(id, card) {
   const app = appById(id);
   current = { app, dirty: false, card };
   titleNode.textContent = frameTitle(app, '', false);
-  back.textContent = `← ${sectionOfApp(id)?.title || 'Робоче середовище'}`;
   document.title = `${app.title} — EasyWAR`;
   frame.src = appPageUrl(id);
   home.hidden = true;
