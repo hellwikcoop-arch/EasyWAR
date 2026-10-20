@@ -406,6 +406,11 @@ by hand with narrow anchored patches (see `AGENTS.md`), then run
 карток не вилучаються. Дашборди ПВК і УДШВ мають власний акцент (синій і малиновий) через
 локальні `--ew-accent`; тло шапки ПВК — абстрактний рельєф `src/pvk-art/relief-banner.webp`.
 
+Технологічний шар модулів — `src/public/module-tech.css`: `ui-kit.js` додає `<link id="ew-tech-css">`
+усюди, крім `file://` (файли для телефона його не мають). Стилізує порожній екран (`.dpanel.empty-state`
+у ПС/РВ, `.panel.welcome` в артилерії; `::after` вітальної панелі артилерії не чіпає — там зображення роду
+військ) і заголовки секцій `.dpanel > .ph > h2`. Колір — `--accent` модуля; при `html[data-skin]` не діє.
+
 Стиль «Пункт керування» (за довідником Heightwell) живе окремо в `src/public/heightwell-theme.css`
 і `src/public/fonts/heightwell/` (Space Grotesk для латиниці й цифр, Onest для кирилиці в одній гарнітурі
 «HW Grotesk», IBM Plex Mono для міток; усі SIL OFL 1.1, ліцензії поруч). Сторінки його не підключають:
