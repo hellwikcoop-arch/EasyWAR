@@ -760,14 +760,30 @@ async function save() {
 // ---------- основний рендер ----------
 function viewWelcome() {
   const recent = S.storedHandle;
-  return h('section', { class: 'panel welcome' },
-    h('h2', null, 'Облік витрати й залишку боєприпасів'),
-    h('p', { class: 'muted' }, 'Відкрийте спільну таблицю артилерії (файл .xlsx з Nextcloud). Зведення побудується одразу, а бригади зможуть вносити свої дані прямо в цей файл.'),
-    h('ol', null, h('li', null, 'Відкрийте спільний файл.'), h('li', null, 'Оберіть свою бригаду на вкладці «Внесення» та введіть витрату й залишок.'), h('li', null, 'Збережіть: запишуться лише колонки вашого підрозділу, формули не змінюються.')),
-    h('div', { class: 'row' },
-      h('button', { class: 'btn primary', type: 'button', onclick: pickFile }, 'Відкрити таблицю…'),
-      recent ? h('button', { class: 'btn', type: 'button', onclick: resumeStored }, `Продовжити: ${recent.name}`) : null),
-    h('p', { class: 'muted small' }, 'Можна перетягнути файл у це вікно. Дані залишаються на вашому комп\'ютері.'));
+  const step = (n, t) => h('li', null, h('b', null, n), h('span', null, t));
+  const tile = (w) => h('i', { class: 'es-tile' }, h('em', { style: `width:${w}%` }));
+  const stock = [86, 64, 72, 38, 55].map((w) => h('i', null, h('em', { style: `width:${w}%` })));
+  const bars = [44, 62, 38, 70, 52, 80, 58, 66].map((v) => h('i', { style: `height:${v}%` }));
+  return h('section', { class: 'panel es' },
+    h('div', { class: 'es-main' },
+      h('div', { class: 'es-kick' }, h('img', { src: document.querySelector('.brand .brand-mark')?.src || '', alt: '' }), h('span', null, 'Артилерія · облік боєприпасів')),
+      h('h2', null, 'Облік витрати й залишку боєприпасів'),
+      h('p', { class: 'es-lead' }, 'Відкрийте спільну таблицю артилерії (файл .xlsx з Nextcloud). Зведення побудується одразу, а бригади зможуть вносити свої дані прямо в цей файл.'),
+      h('ol', { class: 'es-steps' },
+        step('01', 'Відкрийте спільний файл.'),
+        step('02', 'Оберіть свою бригаду на вкладці «Внесення» та введіть витрату й залишок.'),
+        step('03', 'Збережіть: запишуться лише колонки вашого підрозділу, формули не змінюються.')),
+      h('div', { class: 'row' },
+        h('button', { class: 'btn primary', type: 'button', onclick: pickFile }, 'Відкрити таблицю…'),
+        recent ? h('button', { class: 'btn', type: 'button', onclick: resumeStored }, `Продовжити: ${recent.name}`) : null),
+      h('div', { class: 'es-drop' }, 'або перетягніть файл у це вікно'),
+      h('p', { class: 'es-safe' }, 'Дані залишаються на вашому комп\'ютері.')),
+    h('div', { class: 'es-prev', 'aria-hidden': 'true' },
+      h('div', { class: 'es-kpis' }, tile(62), tile(48), tile(74), tile(36)),
+      h('div', { class: 'es-row' },
+        h('div', { class: 'es-stock' }, h('span', null, 'Залишок за бригадами'), h('div', null, ...stock)),
+        h('div', { class: 'es-bars' }, h('span', null, 'Витрата'), h('div', null, ...bars))),
+      h('div', { class: 'es-list' }, ...[88, 70, 54].map((w) => h('i', null, h('em', { style: `width:${w}%` }))))));
 }
 
 function renderAll() {

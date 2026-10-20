@@ -24,7 +24,7 @@ function notice(app, heading, text) {
 async function start() {
   const app = appFromSearch(location.search);
   if (!app) {
-    notice(null, 'Застосунок не знайдено', 'Поверніться до розділу «Офіс» і оберіть застосунок ще раз.');
+    notice(null, 'Застосунок не знайдено', 'Поверніться до робочого середовища й оберіть застосунок ще раз.');
     return;
   }
   document.title = `${app.title} — EasyWAR`;

@@ -44,7 +44,12 @@ catalog template, not from the migration. Migration
 `0011_dashboard_module_corrections.sql` adds `dashboard_module_corrections`: the
 values corrected on the «Перевірка» screen before rows from the user's XLSX were
 brought into a new module, kept apart from the module records (raw cell text,
-typed text, reason, file name, sheet, row and column). Migrations contain no
+typed text, reason, file name, sheet, row and column). Migration
+`0012_dashboard_module_style.sql` adds `dashboard_modules.style` — the look chosen
+when the module was created: `standard` (default for existing modules), `branch`
+(colours of the dashboard's service branch) or `heightwell` («Пункт керування»);
+the colour itself follows the module's `branch`, so only the style name is
+stored. Migrations contain no
 operational fixtures and create no external integration.
 
 ## Provenance layers

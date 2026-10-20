@@ -286,7 +286,8 @@ html[data-ew-module="air"] { --sw: 188px; }
   html[data-ew-module] .dmain-in[data-view="overview"] > .lrow:has(#p-map) #p-map .mapwrap > svg { height: 100%; aspect-ratio: auto; }
   html[data-ew-module] .dmain-in[data-view="overview"] > .lrow:has(#p-map) #p-units,
   html[data-ew-module] .dmain-in[data-view="overview"] > .lrow:has(#p-map) #p-types { flex: 1 1 auto; min-height: 0; overflow: hidden; }
-  html[data-ew-module] .dmain-in[data-view="overview"] > .lrow:has(#p-map) #p-units { flex-grow: 0; }
+  /* «Топ-5» не стискаємо: інакше нижні рядки обрізаються. Місце віддає «Тип цілі» — у нього свій скрол. */
+  html[data-ew-module] .dmain-in[data-view="overview"] > .lrow:has(#p-map) #p-units { flex-grow: 0; flex-shrink: 0; }
   html[data-ew-module] .dmain-in[data-view="overview"] > .lrow:has(#p-map) #p-types { flex-grow: 1; }
   html[data-ew-module] .dmain-in[data-view="overview"] > .lrow:has(#p-map) #p-map .m3-hint { display: none; }
   html[data-ew-module] .dmain-in[data-view="overview"] #p-units .ph, html[data-ew-module] .dmain-in[data-view="overview"] #p-types .ph { flex-wrap: nowrap; align-items: baseline; gap: 6px 10px; margin-bottom: 4px; }
@@ -546,3 +547,20 @@ html[data-theme="light"][data-ew-module="rocket"] .kc.kc-amber .ewr-ksub { color
 /* Легенда кільцевої діаграми: назва може переноситись і не виштовхує підсумки за межі панелі. */
 html[data-ew-module] .dl div { grid-template-columns: 12px minmax(0, 1fr) auto auto; }
 html[data-ew-module] .dl div > * { min-width: 0; overflow-wrap: anywhere; }
+
+/* Кнопка стилю «Пункт керування» (додає ui-kit.js поруч із кнопкою теми): лише значок, щоб рядок не переповнювався. */
+.ew-skin-btn { width: 32px; min-width: 32px; height: 32px; padding: 0; display: inline-grid; place-items: center; font-size: 15px; line-height: 1; border-radius: 999px; }
+.ew-skin-btn[aria-pressed="true"] { opacity: 1; color: var(--accent); border-color: var(--accent); }
+
+/* Поля дат «дд.мм.рррр» (ui-kit.js, розділ 4): текст показує поле .ew-date-t поверх input[type=date];
+   власний текст і значок календаря браузера приховані, але клік справа відкриває календар. */
+.ew-date { position: relative; vertical-align: middle; }
+.ew-date > .ew-date-n { -webkit-text-fill-color: transparent; width: 100%; }
+.ew-date > .ew-date-n::-webkit-datetime-edit { opacity: 0; }
+.ew-date > .ew-date-n::-webkit-calendar-picker-indicator { opacity: 0; cursor: pointer; }
+.ew-date > .ew-date-t { position: absolute; inset: 0 26px 0 0; z-index: 1; width: auto; min-width: 0; margin: 0; padding: 0; border: 0; background: transparent; box-shadow: none; outline: none; font-variant-numeric: tabular-nums; }
+.ew-date > .ew-date-t::placeholder { color: inherit; opacity: .45; }
+.ew-date:focus-within > .ew-date-n { outline: 2px solid var(--accent, #3b82f6); outline-offset: 1px; }
+.ew-date > .ew-date-t[aria-invalid="true"] { text-decoration: wavy underline #d9534f; }
+.ew-date::after { content: ""; position: absolute; right: 8px; top: 50%; width: 14px; height: 14px; transform: translateY(-50%); pointer-events: none; opacity: .65;
+  background: currentColor; --ew-cal: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 1h1.5v2h5V1H12v2h2v12H2V3h2zM3.5 6.5v7h9v-7z'/%3E%3C/svg%3E") center / contain no-repeat; -webkit-mask: var(--ew-cal); mask: var(--ew-cal); }
