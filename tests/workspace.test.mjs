@@ -6,21 +6,31 @@ import { readFile, readdir } from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
 import {
+  APP_ICONS,
+  CLOSE_MESSAGE,
   CONTRACT_VERSION,
+  LOADING_STEPS,
   OFFICE_APPS,
+  PERSONAL_APPS,
+  WORKSPACE_APPS,
   WORKSPACE_SECTIONS,
   acceptAttribute,
   appById,
   appFromSearch,
   appPageUrl,
+  branchFromSearch,
+  DEFAULT_BRANCH,
+  normalizeBranch,
   bytesForInvoke,
   dialogOptions,
   entryError,
   entryKey,
   findEntry,
+  formatsLabel,
   frameMessage,
   frameTitle,
   graphicsProblem,
+  isCloseMessage,
   nameWithExtension,
   normalizeExtensions,
   normalizeMounted,
@@ -28,6 +38,7 @@ import {
   parsePendingFile,
   pendingFileNotice,
   shellMode,
+  titleParts,
   toBytes,
 } from '../src/workspace/workspace-core.js';
 import { createHost, findInvoke, findPendingFile, listenTauriEvent, markPendingTaken } from '../src/workspace/workspace-host.js';
@@ -35,12 +46,17 @@ import { createHost, findInvoke, findPendingFile, listenTauriEvent, markPendingT
 const root = new URL('../', import.meta.url);
 const read = (path) => readFile(new URL(path, root), 'utf8');
 
-test('розділ «Офіс» має три застосунки в порядку EasyGreen, EasyDoc, EasySlide', () => {
+test('розділ «Офіс» має EasyGreen, EasyDoc, EasySlide, розділ «Особисте» — easyPay', () => {
   assert.deepEqual(OFFICE_APPS.map(app => app.id), ['easygreen', 'easydoc', 'easyslide']);
   assert.deepEqual(OFFICE_APPS.map(app => app.title), ['EasyGreen', 'EasyDoc', 'EasySlide']);
-  assert.deepEqual(WORKSPACE_SECTIONS.map(section => section.title), ['Офіс']);
+  assert.deepEqual(WORKSPACE_SECTIONS.map(section => section.title), ['Офіс', 'Особисте']);
   assert.deepEqual(WORKSPACE_SECTIONS[0].apps, ['easygreen', 'easydoc', 'easyslide']);
-  for (const app of OFFICE_APPS) {
+  assert.deepEqual(WORKSPACE_SECTIONS[1].apps, ['easypay']);
+  assert.deepEqual(PERSONAL_APPS.map(app => app.id), ['easypay']);
+  assert.deepEqual(WORKSPACE_APPS.map(app => app.id), ['easygreen', 'easydoc', 'easyslide', 'easypay']);
+  assert.equal(appById('easypay').title, 'easyPay');
+  assert.deepEqual(dialogOptions(appById('easypay')).extensions, ['easypay']);
+  for (const app of WORKSPACE_APPS) {
     assert.ok(Object.isFrozen(app) && Object.isFrozen(app.extensions));
     assert.deepEqual(normalizeExtensions(app.extensions), [...app.extensions], `${app.id}: типові розширення коректні`);
     assert.match(app.hint, /[а-яіїєґ]/i, `${app.id}: підказка українською`);
@@ -48,7 +64,9 @@ test('розділ «Офіс» має три застосунки в поряд
 });
 
 test('адреса сторінки застосунку й розбір ?app=', () => {
-  assert.equal(appPageUrl('easydoc'), 'app.html?app=easydoc');
+  assert.equal(appPageUrl('easydoc'), 'app.html?app=easydoc&branch=air');
+  assert.equal(appPageUrl('easydoc', 'rocket'), 'app.html?app=easydoc&branch=rocket');
+  assert.equal(appPageUrl('easydoc', 'x"><'), 'app.html?app=easydoc&branch=air');
   assert.throws(() => appPageUrl('word'), /Невідомий застосунок/);
   assert.equal(appFromSearch('?app=easyslide'), appById('easyslide'));
   assert.equal(appFromSearch('?app=../../index'), null);
@@ -289,7 +307,8 @@ test('модуль підключено в лаунчері, у збірці й 
 
   const dir = new URL('src/workspace/', root);
   for (const file of (await readdir(dir)).filter(name => /\.(js|html)$/.test(name))) {
-    const text = await read(`src/workspace/${file}`);
+    // Простір імен SVG (createElementNS) — не мережеве посилання.
+    const text = (await read(`src/workspace/${file}`)).replaceAll("'http://www.w3.org/2000/svg'", '');
     assert.doesNotMatch(text, /https?:\/\/|fetch\(|XMLHttpRequest|WebSocket|localStorage|sessionStorage|indexedDB/, `${file}: без мережі й сховищ браузера`);
     assert.doesNotMatch(text, /innerHTML/, `${file}: лише textContent`);
   }
@@ -297,7 +316,66 @@ test('модуль підключено в лаунчері, у збірці й 
   assert.match(index, /<html lang="uk">/);
   assert.match(index, /<script type="module" src="\.\/workspace\.js"><\/script>/);
   assert.match(await read('src/workspace/app.html'), /<script type="module" src="\.\/app-frame\.js"><\/script>/);
-  assert.match(await read('src/workspace/app-frame.js'), /у розробці/);
+  const frame = await read('src/workspace/app-frame.js');
+  for (const text of ['поки недоступний', 'Підготовка редактора…', 'ПОМИЛКА ЗАПУСКУ', 'Спробувати ще раз']) assert.ok(frame.includes(text), text);
+});
+
+test('картки, верхня смуга й стани за макетом: формати, іконки, етапи, назва файлу', () => {
+  assert.deepEqual(OFFICE_APPS.map(formatsLabel), ['XLSX · CSV', 'DOCX · TXT', 'PPTX']);
+  assert.deepEqual(OFFICE_APPS.map(app => app.hint), [
+    'Таблиці для роботи з локальними файлами.',
+    'Тексти й документи в одному робочому просторі.',
+    'Слайди для нарад і робочих матеріалів.',
+  ]);
+  for (const app of OFFICE_APPS) {
+    const shapes = APP_ICONS[app.id];
+    assert.ok(shapes?.length, `${app.id}: є іконка`);
+    for (const [tag, attrs] of shapes) {
+      assert.ok(['rect', 'path'].includes(tag), `${app.id}: лише контури`);
+      assert.ok(Object.keys(attrs).every(name => ['x', 'y', 'width', 'height', 'rx', 'd'].includes(name)), `${app.id}: без стилів і тексту`);
+    }
+  }
+  assert.deepEqual([...LOADING_STEPS], ['Завантаження…', 'Підготовка…', 'Готово']);
+  const app = appById('easygreen');
+  assert.deepEqual(titleParts(app, '  звіт.xlsx ', true), { name: 'EasyGreen', file: 'звіт.xlsx', dirty: true });
+  assert.deepEqual(titleParts(app, '', 0), { name: 'EasyGreen', file: '', dirty: false });
+  assert.equal(isCloseMessage({ type: CLOSE_MESSAGE }), true);
+  assert.equal(isCloseMessage({ type: 'easywar-workspace-app' }), false);
+  assert.equal(isCloseMessage(null), false);
+});
+
+test('оболонка: «← На стартову», «Закрити», смуга підтвердження як region, лаунчер без власної смуги', async () => {
+  const index = await read('src/workspace/index.html');
+  for (const text of ['РОБОЧЕ СЕРЕДОВИЩЕ', '← На стартову', '← Розділи', 'Закрити', 'Є незбережені зміни.', 'Закрити без збереження?', 'Залишитися', 'Закрити без збереження']) {
+    assert.ok(index.includes(text), text);
+  }
+  assert.match(index, /id="ws-confirm" role="region" aria-live="assertive"/);
+  assert.match(index, /aria-label="Є незбережені зміни"/);
+  const shell = await read('src/workspace/workspace.js');
+  assert.match(shell, /card\.disabled = true;/, 'непідключений застосунок — справжній disabled');
+  assert.match(shell, /postMessage\(\{ type: CLOSE_MESSAGE \}, location\.origin\)/);
+  const launcher = await read('src/workspace-launcher.js');
+  assert.ok(launcher.includes(`const CLOSE_MESSAGE = '${CLOSE_MESSAGE}';`), 'лаунчер знає повідомлення закриття');
+  assert.match(launcher, /event\.source !== frame\.contentWindow/);
+  assert.doesNotMatch(launcher, /ew-workspace-bar/, 'верхню смугу малює модуль');
+  const css = await read('src/workspace/workspace.css');
+  for (const token of ['--bg:#07111c', '--interactive-line:#5d7690', '--weak:#9fb1c4', '--danger-ground:#2a1a20', 'prefers-reduced-motion']) assert.ok(css.includes(token), token);
+});
+
+test('акцент роду військ: відомі ключі проходять, решта — ПС', async () => {
+  assert.equal(DEFAULT_BRANCH, 'air');
+  for (const id of ['air', 'rocket', 'artillery', 'pvk', 'dshv']) {
+    assert.equal(normalizeBranch(id), id);
+    assert.equal(branchFromSearch(`?branch=${id}`), id);
+  }
+  assert.equal(branchFromSearch(''), 'air');
+  assert.equal(branchFromSearch('?branch=navy'), 'air');
+  assert.equal(normalizeBranch(undefined), 'air');
+  const css = await readFile(new URL('../src/workspace/workspace.css', import.meta.url), 'utf8');
+  for (const id of ['pvk', 'rocket', 'artillery', 'dshv']) assert.match(css, new RegExp(`:root\\[data-branch="${id}"\\]\\{--accent:`));
+  const launcher = await readFile(new URL('../src/workspace-launcher.js', import.meta.url), 'utf8');
+  assert.match(launcher, /\?branch=\$\{lastBranch\}/);
+  assert.match(launcher, /data-active-branch/);
 });
 
 test('очікуваний файл з бібліотеки: розбір значення __EW_PENDING_FILE', () => {
@@ -398,12 +476,12 @@ test('байти з іншого realm (invoke головного вікна) с
   assert.deepEqual([...toBytes(view)], [4, 5]);
 });
 
-test('оболонка: вкладки «Офіс» і «Бібліотека», блокування при закритті, підказка у вікні редактора', async () => {
+test('оболонка: вкладки «Розділи» і «Бібліотека», блокування при закритті, підказка у вікні редактора', async () => {
   const index = await read('src/workspace/index.html');
   assert.match(index, /role="tablist"/);
-  assert.match(index, /id="ws-tab-office" role="tab" data-tab="office" aria-controls="ws-sections" aria-selected="true">Офіс</);
+  assert.match(index, /id="ws-tab-office" role="tab" data-tab="office" aria-controls="ws-sections" aria-selected="true">Розділи</);
   assert.match(index, /id="ws-tab-library" role="tab" data-tab="library" aria-controls="ws-library" aria-selected="false" tabindex="-1">Бібліотека</);
-  assert.match(index, /<section class="ws-library" id="ws-library" role="tabpanel" aria-labelledby="ws-tab-library" hidden><\/section>/);
+  assert.match(index, /<section class="ws-home-main ws-library" id="ws-library" role="tabpanel" aria-labelledby="ws-tab-library" hidden><\/section>/);
   assert.match(index, /<div class="ws-notice" id="ws-notice" role="status" hidden>/);
   const shell = await read('src/workspace/workspace.js');
   assert.match(shell, /import\('\.\/library\.js'\)/, 'бібліотека — окремий чанк, вантажиться з вкладкою');

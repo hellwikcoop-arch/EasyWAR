@@ -4,35 +4,44 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Робоче середовище — EasyWAR</title>
-<link rel="stylesheet" href="../guides/fonts/fonts.css">
 <link rel="stylesheet" href="./workspace.css">
 </head>
 <body>
-<main class="ws" id="ws-home">
-  <header class="ws-head">
-    <h1>Робоче середовище</h1>
-    <p>Працює без інтернету · файли лише на цьому пристрої</p>
+<section class="ws-screen" id="ws-home" aria-label="Робоче середовище">
+  <header class="ws-topbar ws-topbar-home">
+    <span class="ws-topbar-title">РОБОЧЕ СЕРЕДОВИЩЕ</span>
+    <button type="button" class="ws-button ws-button-quiet" id="ws-exit">← На стартову</button>
   </header>
-  <div class="ws-tabs" id="ws-tabs" role="tablist" aria-label="Розділи робочого середовища">
-    <button type="button" class="ws-tab" id="ws-tab-office" role="tab" data-tab="office" aria-controls="ws-sections" aria-selected="true">Офіс</button>
+  <div class="ws-tabs" id="ws-tabs" role="tablist" aria-label="Вкладки робочого середовища">
+    <button type="button" class="ws-tab" id="ws-tab-office" role="tab" data-tab="office" aria-controls="ws-sections" aria-selected="true">Розділи</button>
     <button type="button" class="ws-tab" id="ws-tab-library" role="tab" data-tab="library" aria-controls="ws-library" aria-selected="false" tabindex="-1">Бібліотека<span class="ws-badge" id="ws-library-badge" hidden></span></button>
   </div>
-  <div id="ws-sections" role="tabpanel" aria-labelledby="ws-tab-office"></div>
-  <section class="ws-library" id="ws-library" role="tabpanel" aria-labelledby="ws-tab-library" hidden></section>
-</main>
-<section class="ws-app" id="ws-app" hidden aria-labelledby="ws-app-title">
-  <div class="ws-bar">
-    <button type="button" class="ws-back" id="ws-back">← Офіс</button>
-    <span class="ws-app-title" id="ws-app-title"></span>
-  </div>
+  <main class="ws-home-main" id="ws-sections" role="tabpanel" aria-labelledby="ws-tab-office"></main>
+  <section class="ws-home-main ws-library" id="ws-library" role="tabpanel" aria-labelledby="ws-tab-library" hidden></section>
+</section>
+<section class="ws-workspace" id="ws-app" hidden aria-labelledby="ws-app-name">
+  <header class="ws-topbar ws-appbar">
+    <button type="button" class="ws-button ws-button-quiet" id="ws-back">← Розділи</button>
+    <span class="ws-appbar-separator" aria-hidden="true"></span>
+    <span class="ws-appbar-icon" id="ws-app-icon"></span>
+    <div class="ws-appbar-label">
+      <span class="ws-appbar-name" id="ws-app-name"></span>
+      <span class="ws-filename" id="ws-app-file" hidden></span>
+      <span class="ws-dirty-dot" id="ws-app-dirty" role="img" aria-label="Є незбережені зміни" hidden>•</span>
+    </div>
+    <button type="button" class="ws-button ws-button-quiet ws-close-button" id="ws-close">Закрити</button>
+  </header>
   <div class="ws-notice" id="ws-notice" role="status" hidden>
     <span id="ws-notice-text"></span>
-    <button type="button" class="ws-btn" id="ws-notice-close">Зрозуміло</button>
+    <button type="button" class="ws-button" id="ws-notice-close">Зрозуміло</button>
   </div>
-  <div class="ws-confirm" id="ws-confirm" role="alertdialog" aria-labelledby="ws-confirm-text" hidden>
-    <span id="ws-confirm-text">Є незбережені зміни. Закрити застосунок без збереження?</span>
-    <button type="button" class="ws-btn" data-confirm="stay">Залишитися</button>
-    <button type="button" class="ws-btn ws-danger" data-confirm="leave">Закрити без збереження</button>
+  <div class="ws-confirm" id="ws-confirm" role="region" aria-live="assertive" aria-labelledby="ws-confirm-title" aria-describedby="ws-confirm-desc" hidden>
+    <span class="ws-confirm-icon" aria-hidden="true">!</span>
+    <div class="ws-confirm-copy"><strong id="ws-confirm-title">Є незбережені зміни.</strong><span id="ws-confirm-desc">Закрити без збереження?</span></div>
+    <div class="ws-confirm-actions">
+      <button type="button" class="ws-button" data-confirm="stay">Залишитися</button>
+      <button type="button" class="ws-button ws-button-danger" data-confirm="leave">Закрити без збереження</button>
+    </div>
   </div>
   <iframe class="ws-frame" id="ws-frame" title="Застосунок робочого середовища"></iframe>
 </section>

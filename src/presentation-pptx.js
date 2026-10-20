@@ -61,11 +61,11 @@ function drawOwnCallout(slide, theme, callout, brand) {
 
 function drawTiles(slide, theme, tiles) {
   const gap = 0.16;
-  const width = 1.92;
+  const width = tiles.length > 6 ? (W - 2 * M - gap * (tiles.length - 1)) / tiles.length : 1.92;
   tiles.forEach((tile, i) => {
     const x = M + i * (width + gap);
     slide.addShape('roundRect', { x, y: 1.29, w: width, h: 1.38, rectRadius: 0.1, fill: { color: theme.card }, line: { color: theme.line, width: 0.5 }, shadow: SHADOW });
-    slide.addText(tile.name, { x: x + 0.15, y: 1.38, w: width - 0.3, h: 0.35, fontFace: theme.font, fontSize: 10.5, color: theme.muted, valign: 'top', margin: 0 });
+    slide.addText(tile.name, { x: x + 0.15, y: 1.38, w: width - 0.3, h: 0.35, fontFace: theme.font, fontSize: width < 1.6 ? 9 : 10.5, color: theme.muted, valign: 'top', margin: 0 });
     slide.addText(tile.totalText, { x: x + 0.15, y: 1.72, w: width - 0.3, h: 0.5, fontFace: theme.font, fontSize: 30, bold: true, color: theme.text, valign: 'middle', margin: 0, fit: 'shrink' });
     if (tile.deltaText) {
       const arrow = tile.delta > 0 ? '▲ ' : tile.delta < 0 ? '▼ ' : '';
@@ -100,6 +100,44 @@ function drawBlocks(slide, theme, data, brand) {
     for (const item of list) runs.push({ text: item.text, options: { color: item.muted ? theme.muted : theme.text, fontSize: size, bullet: { indent: 12 }, breakLine: true, paraSpaceAfter: 3 } });
   });
   slide.addText(runs, { x: 8.15, y: 2.98, w: 4.42, h: 3.54, fontFace: theme.font, valign: 'top', margin: 0 });
+}
+
+// Колір кожного типу цілі закріплений за назвою, щоб він не змінювався між слайдами; решта — за порядком.
+const TARGET_TYPE_COLORS = { 'Артилерія': '9E3B3B', 'міномети': 'C7803A', 'РЕБ': '7C8794', 'ПУ, КП, КСП': '4F7CA3', 'КП, ПУ, КСП': '4F7CA3', 'ПУ БпЛА': 'B8A64A', 'АТ різних типів (квадро, мото)': '8A6FA0', 'Танки, ББМ': '8B6B4A', 'переправа': '6FA3A8', 'склади БК, ПММ': 'C27C8A', 'ІФС': '7E9450' };
+const TARGET_TYPE_SPARE = ['B89B4F', '5E6FA0', '9A7F6A', 'A65E5E', '5F8F9C'];
+const targetTypeColors = categories => categories.map((name, i) => TARGET_TYPE_COLORS[name] || TARGET_TYPE_COLORS[Object.keys(TARGET_TYPE_COLORS).find(k => k.toLowerCase() === String(name).toLowerCase())] || TARGET_TYPE_SPARE[i % TARGET_TYPE_SPARE.length]);
+
+/** Права панель слайдів УДШВ без тексту: горизонтальна діаграма «Типи уражених цілей». */
+function drawTargetTypes(slide, theme, pptx, chart) {
+  slide.addShape('roundRect', { x: 7.92, y: PANEL_Y, w: 4.9, h: 3.85, rectRadius: 0.1, fill: { color: theme.card }, line: { color: theme.line, width: 0.5 }, shadow: SHADOW });
+  slide.addText(chart.title, { x: 8.1, y: PANEL_Y + 0.09, w: 4.54, h: 0.26, fontFace: theme.font, fontSize: 11, bold: true, color: theme.accent, margin: 0 });
+  const data = chart.series.map(s => ({ name: s.name, labels: chart.categories, values: s.values }));
+  slide.addChart(pptx.charts.BAR, data, {
+    x: 8.0, y: PANEL_Y + 0.4, w: 4.74, h: 3.35, barDir: 'bar', barGrouping: 'clustered', barGapWidthPct: 45,
+    chartColors: targetTypeColors(chart.categories),
+    catAxisLabelFontFace: theme.font, catAxisLabelFontSize: 9, catAxisLabelColor: theme.muted, catAxisOrientation: 'maxMin',
+    valAxisLabelFontFace: theme.font, valAxisLabelFontSize: 8, valAxisLabelColor: theme.muted,
+    valGridLine: { color: theme.line, size: 0.5 }, catGridLine: { style: 'none' }, catAxisLineShow: false, valAxisLineShow: false,
+    showLegend: false,
+    showValue: true, dataLabelFontFace: theme.font, dataLabelFontSize: 8, dataLabelColor: theme.text,
+  });
+}
+
+/** Права панель слайда власних втрат: дві кругові діаграми «Втрати артилерії противника в порівнянні з нашими». */
+// Противник — червоний, наші втрати — синій.
+const ENEMY_OWN_COLORS = ['C0392B', '2F6EA5'];
+
+function drawArtilleryPies(slide, theme, pptx, pies) {
+  slide.addShape('roundRect', { x: 7.92, y: PANEL_Y, w: 4.9, h: 3.85, rectRadius: 0.1, fill: { color: theme.card }, line: { color: theme.line, width: 0.5 }, shadow: SHADOW });
+  pies.forEach((pie, i) => {
+    const x = 8.02 + i * 2.4;
+    slide.addText(pie.title, { x, y: PANEL_Y + 0.12, w: 2.3, h: 0.7, fontFace: theme.font, fontSize: 9, bold: true, color: theme.accent, align: 'center', valign: 'top', margin: 0 });
+    slide.addChart(pptx.charts.PIE, [{ name: 'Артилерія', labels: pie.labels, values: pie.values }], {
+      x, y: PANEL_Y + 0.9, w: 2.3, h: 2.8, chartColors: ENEMY_OWN_COLORS, dataBorder: { pt: 1, color: 'FFFFFF' },
+      showLegend: true, legendPos: 'b', legendFontFace: theme.font, legendFontSize: 9, legendColor: theme.muted,
+      showValue: true, showPercent: false, dataLabelColor: 'FFFFFF', dataLabelFontFace: theme.font, dataLabelFontSize: 10, dataLabelFontBold: true,
+    });
+  });
 }
 
 function drawCharts(slide, theme, pptx, charts) {
@@ -153,7 +191,11 @@ function periodSlide(pptx, theme, deck, data, number, art) {
   drawOwnCallout(slide, theme, data.ownCallout, brand);
   drawTiles(slide, theme, data.tiles);
   drawCharts(slide, theme, pptx, data.charts);
-  drawBlocks(slide, theme, data, brand);
+  if (data.targetChart) drawTargetTypes(slide, theme, pptx, data.targetChart);
+  else if (data.artilleryPies) drawArtilleryPies(slide, theme, pptx, data.artilleryPies);
+  else drawBlocks(slide, theme, data, brand);
+  // Слайди УДШВ: текст висновків лежить в анотаціях слайда, а не на ньому.
+  if (data.annotation && slide.addNotes) slide.addNotes(data.annotation);
   if (data.notes.length) slide.addText(data.notes.join(' '), { x: M, y: 6.82, w: W - 2 * M, h: 0.22, fontFace: theme.font, fontSize: 8.6, italic: true, color: theme.muted, margin: 0 });
   footer(slide, theme, deck, number, footerText(deck));
 }
