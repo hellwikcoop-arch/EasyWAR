@@ -497,7 +497,7 @@ function initialize() {
   function sourceBlock(item, onChange, openReview) {
     // `corrections` — виправлення з екрана «Перевірка» (ідентифікатор → введений текст); `build` — записи з ними.
     const model = {
-      phase: 'loading', pending: true, message: '', origin: '', workbook: null, ranked: [], sheet: '', plan: null,
+      phase: 'loading', pending: true, message: '', origin: '', selection: '', workbook: null, ranked: [], sheet: '', plan: null,
       use: false, carry: true, corrections: new Map(), build: null,
     };
     let request = 0;
@@ -513,6 +513,13 @@ function initialize() {
       model.pending = phase === 'loading' || phase === 'reading';
       render();
       onChange();
+    }
+
+    // Забуває попередній огляд таблиці в Rust (після закриття форми чи вибору іншої таблиці).
+    function release() {
+      const selection = model.selection;
+      model.selection = '';
+      if (selection) invoke('read_module_source_sheet', { selection, release: true }).catch(() => {});
     }
 
     async function start() {
@@ -544,8 +551,11 @@ function initialize() {
     }
 
     async function useWorkbook(workbook, id) {
+      release();
       model.workbook = workbook;
       model.origin = workbook.origin;
+      // Непрозорий ідентифікатор огляду: аркуш читається лише за ним, шляху інтерфейс не знає.
+      model.selection = workbook.selection;
       model.ranked = rankSheets(item.fields, workbook);
       const best = model.ranked[0];
       if (!best || best.matched === 0) setPhase('empty');
@@ -556,7 +566,7 @@ function initialize() {
       model.sheet = name;
       setPhase('reading', name);
       try {
-        const sheet = await invoke('read_module_source_sheet', { origin: model.origin, branch: state.branch, sheet: name });
+        const sheet = await invoke('read_module_source_sheet', { selection: model.selection, sheet: name });
         if (id !== request) return;
         model.plan = planImport(item.fields, sheet);
         // Виправлення належать рядкам конкретного аркуша: інший аркуш починає перевірку з чистого.
@@ -596,8 +606,11 @@ function initialize() {
             el('div', { class: 'ewmc-source-actions' }, pickButton('Обрати файл XLSX…', true)));
           break;
         case 'error':
+          // Таблицю змінено після огляду чи огляд застарів: її можна перечитати, а не лише обрати інший файл.
           nodes.push(el('p', { class: 'error', text: `Не вдалося прочитати таблицю: ${model.message}` }),
-            el('div', { class: 'ewmc-source-actions' }, pickButton('Обрати файл XLSX…', true)));
+            el('div', { class: 'ewmc-source-actions' },
+              el('button', { type: 'button', class: 'btn quiet', text: 'Перечитати таблицю профілю', disabled: model.pending, onclick: start }),
+              pickButton('Обрати файл XLSX…', true)));
           break;
         case 'empty':
           nodes.push(fileLine(),
@@ -704,8 +717,8 @@ function initialize() {
           model.build = model.corrections.size ? buildImport(item.fields, model.plan, model.corrections) : null;
         },
       }),
-      // Після закриття вікна пізні відповіді таблиці вже нікуди не потраплять.
-      dispose: () => { request += 1; },
+      // Після закриття вікна пізні відповіді таблиці вже нікуди не потраплять, а огляд таблиці забувається.
+      dispose: () => { request += 1; release(); },
     };
   }
 

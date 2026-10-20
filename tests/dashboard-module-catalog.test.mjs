@@ -1031,9 +1031,23 @@ test('creating a module can bring rows from the table of the profile, and only r
   assert.doesNotMatch(production, /fs::write|File::create|OpenOptions|write_all|remove_file|rename\(|rust_xlsxwriter|xlsxwriter|umya/);
   assert.match(production, /Xlsx::new|open_workbook_from_rs|calamine/);
   // Шлях файла, який обрав користувач, береться лише з вікна вибору, а не від інтерфейсу.
-  const commands = lib.slice(lib.indexOf('struct ModuleSourceSelection'), lib.indexOf('async fn get_dashboard_module_data'));
-  assert.doesNotMatch(commands, /\bpath:\s*(?:String|PathBuf)/);
+  const commands = lib.slice(lib.indexOf('fn read_source_file('), lib.indexOf('async fn get_dashboard_module_data'));
+  assert.ok(commands.length > 1000, 'the source commands were found');
+  assert.doesNotMatch(commands, /\bpath:\s*(?:String|PathBuf),?\n\s*\) -> Result<Option<module_source/);
   assert.match(commands, /blocking_pick_file\(\)/);
+  // Аркуш читається лише за непрозорим ідентифікатором огляду, прив'язаним до вікна, профілю,
+  // сеансу й відбитка вмісту; інтерфейс не передає ні шляху, ні походження таблиці.
+  const read = commands.slice(commands.indexOf('async fn read_module_source_sheet('));
+  assert.match(read, /window: tauri::Window,/);
+  assert.match(read, /selection: String,\n\s+sheet: Option<String>,\n\s+release: Option<bool>,\n\)/);
+  assert.doesNotMatch(read.slice(0, read.indexOf(') ->')), /origin: String|path:/);
+  assert.match(read, /selections\s*\.resolve\(&selection, &owner\)/);
+  assert.match(read, /SelectionError::Changed/);
+  assert.match(read, /SelectionError::Rebound/);
+  assert.match(source, /invoke\('read_module_source_sheet', \{ selection: model\.selection, sheet: name \}\)/);
+  assert.match(source, /invoke\('read_module_source_sheet', \{ selection, release: true \}\)/, 'closing the form forgets the selection');
+  assert.match(source, /dispose: \(\) => \{ request \+= 1; release\(\); \}/);
+  assert.ok(source.includes('Перечитати таблицю профілю'), 'a changed table can be read again');
 });
 
 test('the data-from-table block sits in the left column of the create form, above the long column list', async () => {
