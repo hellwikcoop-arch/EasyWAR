@@ -44,6 +44,8 @@
     "allow-export-phone-file",
     "allow-save-presentation",
     "allow-workspace-open-editor",
+    "allow-weather-online-fetch",
+    "allow-weather-online-search",
     "allow-clear-profile-database",
     "allow-read-profile-database",
     "allow-write-profile-database",
