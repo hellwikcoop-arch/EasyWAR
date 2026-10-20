@@ -407,7 +407,8 @@ html { scroll-padding-top: 70px; }
 /* емблеми підрозділів */
 .emb { flex: none; width: 30px; height: 34px; object-fit: contain; display: inline-block; vertical-align: middle; }
 .emb.sm { width: 20px; height: 24px; }
-.emb-none { border: 1.5px dashed var(--line-strong); border-radius: 4px 4px 12px 12px; opacity: .7; box-sizing: border-box; }
+.emb-none { border: 1.5px solid var(--line-strong); border-radius: 4px 4px 12px 12px; box-sizing: border-box; display: inline-grid; place-items: center; padding-bottom: 2px; font: 700 10px/1 var(--display); color: var(--muted); background: color-mix(in srgb, var(--accent) 10%, transparent); letter-spacing: -.02em; overflow: hidden; }
+.ds-ic .emb-none, .dtbl2 .lead .emb-none { font-size: 13px; }
 .bar .nm.unit { display: flex; align-items: center; gap: 9px; }
 .bar .nm.unit .tx { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bars.units { gap: 12px; }
@@ -3352,9 +3353,11 @@ Object.assign(EMB, {"11 ОБрАА": "data:image/webp;base64,UklGRtoHAABXRUJQVlA
 const LAT2CYR = { A: 'А', B: 'В', C: 'С', E: 'Е', H: 'Н', I: 'І', K: 'К', M: 'М', O: 'О', P: 'Р', T: 'Т', X: 'Х', Y: 'У' };
 const unitKey = s => String(s || '').toUpperCase().replace(/[ABCEHIKMOPTXY]/g, c => LAT2CYR[c]).replace(/[^0-9А-ЯІЇЄҐ]/g, '');
 const EMBK = {}; for (const k in EMB) EMBK[unitKey(k)] = EMB[k];
+/** Позначка для підрозділу без вбудованої емблеми: номер («11 ОМБр» → «11») або перша літера. */
+const embMark = unit => { const t = String(unit || '').trim(); return (/^\d+/.exec(t) || [t.charAt(0).toUpperCase()])[0].slice(0, 3); };
 function emblem(unit, cls) {
   const src = EMBK[unitKey(unit)];
-  return src ? h('img', { class: 'emb ' + (cls || ''), src, alt: '', draggable: 'false' }) : h('span', { class: 'emb emb-none ' + (cls || ''), 'aria-hidden': 'true' });
+  return src ? h('img', { class: 'emb ' + (cls || ''), src, alt: '', draggable: 'false' }) : h('span', { class: 'emb emb-none ' + (cls || ''), 'aria-hidden': 'true', text: embMark(unit) });
 }
 
 /* ------------------------------ MGRS → широта/довгота ------------------------------ */
