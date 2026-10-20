@@ -25,10 +25,21 @@ pub struct AllowedSignalMessage {
 
 #[derive(Debug, thiserror::Error)]
 pub enum SignalIngestError {
+    /// A text message that cannot be stored because its envelope is malformed. Only an
+    /// allowed source can cause it; it is a genuine protocol error and stays fatal.
     #[error("подія Signal не відповідає дозволеному формату повідомлення")]
     InvalidEnvelope,
+    /// A well-formed envelope without `dataMessage.message` (delivery receipt, typing,
+    /// sync, reaction, attachment without caption, ...). It is not an error of the
+    /// session: the receive loop counts it as ignored.
+    #[error("подія Signal не містить текстового повідомлення")]
+    NotTextMessage,
     #[error("джерело Signal не дозволене локальною політикою")]
     SourceDenied,
+    /// The same envelope is already stored (unique identity of the raw source). The
+    /// receive loop counts it as ignored.
+    #[error("подію Signal уже збережено раніше")]
+    Duplicate,
     #[error("подія Signal надійшла для іншого локального акаунта")]
     AccountMismatch,
     #[error("не вдалося серіалізувати подію Signal")]
@@ -54,7 +65,7 @@ pub async fn persist_allowed_notification(
     let report_id = format!("signal-report:{raw_sha256}");
     let source_item_key = format!("envelope-sha256:{raw_sha256}");
 
-    repository
+    let captured = repository
         .capture_report(&CaptureReportInput {
             raw_source_id: format!("signal-source:{raw_sha256}"),
             report_id: report_id.clone(),
@@ -82,7 +93,12 @@ pub async fn persist_allowed_notification(
                 occurred_at: captured_at.to_owned(),
             },
         })
-        .await?;
+        .await;
+    match captured {
+        Ok(()) => {}
+        Err(error) if is_unique_violation(&error) => return Err(SignalIngestError::Duplicate),
+        Err(error) => return Err(error.into()),
+    }
 
     Ok(SignalCaptureResult {
         report_id,
@@ -90,6 +106,23 @@ pub async fn persist_allowed_notification(
     })
 }
 
+/// Only the unique identity of the raw source (its hash-derived primary key) can collide
+/// when an envelope is stored a second time; every other database failure is a real one.
+fn is_unique_violation(error: &RepositoryError) -> bool {
+    matches!(
+        error,
+        RepositoryError::Database(sqlx::Error::Database(database_error))
+            if database_error.is_unique_violation()
+    )
+}
+
+/// Decides whether `notification` is a text message from an allowed source.
+///
+/// The order is deny-by-default: the sender decision comes first and looks at nothing but
+/// the sender fields, so a source outside the allowlist is `SourceDenied` whatever its
+/// body contains (a malformed body from it can never end a session). Only then the body
+/// is classified: an envelope without `dataMessage.message` is `NotTextMessage`, and only
+/// a text message from an allowed sender can still be `InvalidEnvelope`.
 pub fn inspect_allowed_notification(
     config: &ValidatedSignalAdapterConfig,
     notification: &SignalReceiveNotification,
@@ -103,21 +136,32 @@ pub fn inspect_allowed_notification(
         .envelope
         .as_object()
         .ok_or(SignalIngestError::InvalidEnvelope)?;
+
+    // `permits_source(_, None)` applies the sender allowlist only; the group is checked
+    // once the text message has been recognised.
+    let senders = sender_candidates(envelope);
+    if !senders
+        .iter()
+        .any(|sender| config.permits_source(sender, None))
+    {
+        return Err(SignalIngestError::SourceDenied);
+    }
+
+    let data_message = envelope.get("dataMessage").and_then(Value::as_object);
+    let message = data_message
+        .and_then(|data_message| data_message.get("message"))
+        .and_then(Value::as_str)
+        .filter(|message| !message.trim().is_empty());
+    let (Some(data_message), Some(message)) = (data_message, message) else {
+        return Err(SignalIngestError::NotTextMessage);
+    };
+
     let timestamp = envelope
         .get("timestamp")
         .and_then(Value::as_u64)
         .ok_or(SignalIngestError::InvalidEnvelope)?;
-    let data_message = envelope
-        .get("dataMessage")
-        .and_then(Value::as_object)
-        .ok_or(SignalIngestError::InvalidEnvelope)?;
-    let message = data_message
-        .get("message")
-        .and_then(Value::as_str)
-        .filter(|message| !message.trim().is_empty())
-        .ok_or(SignalIngestError::InvalidEnvelope)?;
     let group = extract_group(data_message)?;
-    let sender = sender_candidates(envelope)
+    let sender = senders
         .into_iter()
         .find(|sender| config.permits_source(sender, group))
         .ok_or(SignalIngestError::SourceDenied)?;
@@ -309,26 +353,79 @@ mod tests {
         assert_eq!(row_count, 0);
     }
 
+    async fn row_counts(pool: &SqlitePool) -> (i64, i64, i64) {
+        sqlx::query_as(
+            "SELECT (SELECT count(*) FROM raw_sources),
+                    (SELECT count(*) FROM reports),
+                    (SELECT count(*) FROM audit_log)",
+        )
+        .fetch_one(pool)
+        .await
+        .expect("synthetic counts must query")
+    }
+
     #[tokio::test]
-    async fn malformed_or_duplicate_envelopes_fail_closed() {
+    async fn malformed_text_envelopes_from_allowed_sources_fail_closed() {
         let (repository, pool) = repository().await;
-        let malformed = SignalReceiveNotification {
+        let malformed = [
+            // Text message without a timestamp.
+            json!({
+                "sourceUuid": "synthetic-sender",
+                "dataMessage": { "message": "Синтетична доповідь" },
+            }),
+            // Text message with a group reference that has no usable group id.
+            json!({
+                "sourceUuid": "synthetic-sender",
+                "timestamp": 1_767_225_600_000_u64,
+                "dataMessage": { "message": "Синтетична доповідь", "groupInfo": {} },
+            }),
+        ];
+        for envelope in malformed {
+            let notification = SignalReceiveNotification {
+                subscription: 7,
+                account: "synthetic-account".to_owned(),
+                envelope,
+            };
+            assert!(matches!(
+                persist_allowed_notification(
+                    &repository,
+                    &enabled_config(),
+                    &notification,
+                    "synthetic-account",
+                    NOW,
+                )
+                .await,
+                Err(SignalIngestError::InvalidEnvelope)
+            ));
+        }
+        // An envelope that is not even an object is a protocol error as well.
+        let not_an_object = SignalReceiveNotification {
             subscription: 7,
             account: "synthetic-account".to_owned(),
-            envelope: json!({ "sourceUuid": "synthetic-sender" }),
+            envelope: json!("synthetic"),
         };
+        assert!(matches!(
+            inspect_allowed_notification(&enabled_config(), &not_an_object, "synthetic-account"),
+            Err(SignalIngestError::InvalidEnvelope)
+        ));
+        // An unusable capture time is rejected before anything is written.
         assert!(matches!(
             persist_allowed_notification(
                 &repository,
                 &enabled_config(),
-                &malformed,
+                &notification("synthetic-sender", None),
                 "synthetic-account",
-                NOW,
+                "",
             )
             .await,
             Err(SignalIngestError::InvalidEnvelope)
         ));
+        assert_eq!(row_counts(&pool).await, (0, 0, 0));
+    }
 
+    #[tokio::test]
+    async fn duplicate_envelope_is_typed_and_writes_nothing() {
+        let (repository, pool) = repository().await;
         let valid = notification("synthetic-sender", None);
         persist_allowed_notification(
             &repository,
@@ -339,26 +436,244 @@ mod tests {
         )
         .await
         .expect("first synthetic notification must persist");
+        for captured_at in [NOW, "2026-01-02T00:00:00Z"] {
+            assert!(matches!(
+                persist_allowed_notification(
+                    &repository,
+                    &enabled_config(),
+                    &valid,
+                    "synthetic-account",
+                    captured_at,
+                )
+                .await,
+                Err(SignalIngestError::Duplicate)
+            ));
+        }
+        assert_eq!(row_counts(&pool).await, (1, 1, 1));
+    }
+
+    #[tokio::test]
+    async fn other_database_failures_are_not_reported_as_duplicates() {
+        let (repository, pool) = repository().await;
+        sqlx::query("DROP TABLE audit_log")
+            .execute(&pool)
+            .await
+            .expect("synthetic audit table must drop");
+        let result = persist_allowed_notification(
+            &repository,
+            &enabled_config(),
+            &notification("synthetic-sender", None),
+            "synthetic-account",
+            NOW,
+        )
+        .await;
+        assert!(matches!(
+            result,
+            Err(SignalIngestError::Repository(RepositoryError::Database(_)))
+        ));
+        // The capture is one transaction: the failed audit insert leaves no partial rows.
+        let raw_sources: i64 = sqlx::query_scalar("SELECT count(*) FROM raw_sources")
+            .fetch_one(&pool)
+            .await
+            .expect("synthetic row count must query");
+        assert_eq!(raw_sources, 0);
+
+        pool.close().await;
         assert!(matches!(
             persist_allowed_notification(
                 &repository,
                 &enabled_config(),
-                &valid,
+                &notification("synthetic-sender", None),
                 "synthetic-account",
                 NOW,
             )
             .await,
             Err(SignalIngestError::Repository(RepositoryError::Database(_)))
         ));
-        let counts: (i64, i64, i64) = sqlx::query_as(
-            "SELECT (SELECT count(*) FROM raw_sources),
-                    (SELECT count(*) FROM reports),
-                    (SELECT count(*) FROM audit_log)",
-        )
-        .fetch_one(&pool)
-        .await
-        .expect("synthetic counts must query");
-        assert_eq!(counts, (1, 1, 1));
+    }
+
+    fn no_text_envelopes(sender: &str) -> Vec<(&'static str, Value)> {
+        let timestamp = 1_767_225_600_000_u64;
+        vec![
+            (
+                "delivery receipt",
+                json!({
+                    "sourceUuid": sender,
+                    "timestamp": timestamp,
+                    "receiptMessage": { "when": timestamp, "isDelivery": true, "timestamps": [timestamp] },
+                }),
+            ),
+            (
+                "typing indicator",
+                json!({
+                    "sourceUuid": sender,
+                    "timestamp": timestamp,
+                    "typingMessage": { "action": "STARTED", "timestamp": timestamp },
+                }),
+            ),
+            (
+                "sync message",
+                json!({
+                    "sourceUuid": sender,
+                    "timestamp": timestamp,
+                    "syncMessage": { "readMessages": [{ "sender": sender, "timestamp": timestamp }] },
+                }),
+            ),
+            (
+                "reaction",
+                json!({
+                    "sourceUuid": sender,
+                    "timestamp": timestamp,
+                    "dataMessage": {
+                        "timestamp": timestamp,
+                        "reaction": { "emoji": "+", "targetAuthorUuid": sender, "targetSentTimestamp": timestamp },
+                    },
+                }),
+            ),
+            (
+                "attachment without caption",
+                json!({
+                    "sourceUuid": sender,
+                    "timestamp": timestamp,
+                    "dataMessage": {
+                        "timestamp": timestamp,
+                        "attachments": [{ "contentType": "image/jpeg", "size": 1 }],
+                    },
+                }),
+            ),
+            (
+                "null message",
+                json!({
+                    "sourceUuid": sender,
+                    "timestamp": timestamp,
+                    "dataMessage": { "message": null },
+                }),
+            ),
+            (
+                "blank message",
+                json!({
+                    "sourceUuid": sender,
+                    "timestamp": timestamp,
+                    "dataMessage": { "message": " \n\t " },
+                }),
+            ),
+            (
+                "data message that is not an object",
+                json!({
+                    "sourceUuid": sender,
+                    "timestamp": timestamp,
+                    "dataMessage": "synthetic",
+                }),
+            ),
+            ("bare envelope", json!({ "sourceUuid": sender })),
+        ]
+    }
+
+    #[tokio::test]
+    async fn envelopes_without_text_are_never_stored_for_any_source() {
+        let (repository, pool) = repository().await;
+        for (sender, allowed) in [("synthetic-sender", true), ("synthetic-denied", false)] {
+            for (label, envelope) in no_text_envelopes(sender) {
+                let notification = SignalReceiveNotification {
+                    subscription: 7,
+                    account: "synthetic-account".to_owned(),
+                    envelope,
+                };
+                let inspected = inspect_allowed_notification(
+                    &enabled_config(),
+                    &notification,
+                    "synthetic-account",
+                );
+                if allowed {
+                    assert!(
+                        matches!(inspected, Err(SignalIngestError::NotTextMessage)),
+                        "{label} from an allowed source must be a non-text envelope"
+                    );
+                } else {
+                    assert!(
+                        matches!(inspected, Err(SignalIngestError::SourceDenied)),
+                        "{label} from a denied source must be denied"
+                    );
+                }
+                let persisted = persist_allowed_notification(
+                    &repository,
+                    &enabled_config(),
+                    &notification,
+                    "synthetic-account",
+                    NOW,
+                )
+                .await;
+                assert!(
+                    matches!(
+                        persisted,
+                        Err(SignalIngestError::NotTextMessage | SignalIngestError::SourceDenied)
+                    ),
+                    "{label} must never be persisted"
+                );
+            }
+        }
+        assert_eq!(row_counts(&pool).await, (0, 0, 0));
+    }
+
+    #[test]
+    fn denied_source_is_decided_before_the_body_is_inspected() {
+        let secret = "Синтетичний секретний текст";
+        let timestamp = 1_767_225_600_000_u64;
+        let denied = [
+            // Text message with a malformed group reference.
+            json!({
+                "sourceUuid": "synthetic-denied",
+                "timestamp": timestamp,
+                "dataMessage": { "message": secret, "groupInfo": "synthetic" },
+            }),
+            // Text message without a timestamp.
+            json!({
+                "sourceUuid": "synthetic-denied",
+                "dataMessage": { "message": secret },
+            }),
+            // Text message without any sender field.
+            json!({
+                "timestamp": timestamp,
+                "dataMessage": { "message": secret },
+            }),
+            // A sender field that is not a valid identifier never matches the allowlist.
+            json!({
+                "sourceUuid": " synthetic-sender",
+                "timestamp": timestamp,
+                "dataMessage": { "message": secret },
+            }),
+        ];
+        for envelope in denied {
+            let notification = SignalReceiveNotification {
+                subscription: 7,
+                account: "synthetic-account".to_owned(),
+                envelope,
+            };
+            let error =
+                inspect_allowed_notification(&enabled_config(), &notification, "synthetic-account")
+                    .expect_err("a denied source must never be inspected as a message");
+            assert!(matches!(error, SignalIngestError::SourceDenied));
+            assert!(!error.to_string().contains(secret));
+            assert!(!format!("{error:?}").contains(secret));
+        }
+
+        // The same malformed body from an allowed sender is a protocol error, and its
+        // text still does not leak into the error.
+        let malformed = SignalReceiveNotification {
+            subscription: 7,
+            account: "synthetic-account".to_owned(),
+            envelope: json!({
+                "sourceUuid": "synthetic-sender",
+                "timestamp": timestamp,
+                "dataMessage": { "message": secret, "groupInfo": "synthetic" },
+            }),
+        };
+        let error =
+            inspect_allowed_notification(&enabled_config(), &malformed, "synthetic-account")
+                .expect_err("a malformed group reference must be rejected");
+        assert!(matches!(error, SignalIngestError::InvalidEnvelope));
+        assert!(!error.to_string().contains(secret));
+        assert!(!format!("{error:?}").contains(secret));
     }
 
     #[tokio::test]

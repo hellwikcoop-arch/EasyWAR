@@ -1,4 +1,7 @@
-use crate::xlsx_import::{import_easywar_xlsx, EasyWarRecord, EASYWAR_SHEET_NAME, FIELD_SPECS};
+use crate::xlsx_import::{
+    import_easywar_xlsx, EasyWarRecord, ZipBudget, ZipLimitExceeded, ZipLimits, ZipPartError,
+    EASYWAR_SHEET_NAME, FIELD_SPECS,
+};
 use chrono::NaiveDate;
 use quick_xml::{events::Event, Reader};
 use regex::{Captures, Regex};
@@ -6,7 +9,7 @@ use serde::Serialize;
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, HashMap},
-    io::{Cursor, Read, Write},
+    io::{Cursor, Write},
     path::Path,
 };
 use tempfile::NamedTempFile;
@@ -46,6 +49,8 @@ pub enum XlsxExportError {
     InvalidReference(String),
     #[error("Еталонний XLSX використовує непідтримуване стиснення ZIP: {0:?}")]
     UnsupportedCompression(CompressionMethod),
+    #[error("Еталонний XLSX відхилено: {0}")]
+    ArchiveTooLarge(ZipLimitExceeded),
     #[error("Не вдалося створити сумісний XLSX: {0}")]
     Archive(#[from] zip::result::ZipError),
     #[error("Не вдалося записати XLSX: {0}")]
@@ -177,7 +182,7 @@ pub fn build_compatible_xlsx_from_reference(
             let table_path =
                 normalize_package_path(&package_directory(&sheet_path), &relationship.target)?;
             let table_xml = entry_text(&entries, &entry_map, &table_path)?;
-            if !table_covers_required_headers(&table_xml, &layout) {
+            if !table_covers_required_headers(&table_xml, &layout)? {
                 continue;
             }
             let updated_table =
@@ -260,8 +265,19 @@ struct SheetLayout {
 }
 
 fn read_archive_entries(bytes: &[u8]) -> Result<Vec<ArchiveEntry>, XlsxExportError> {
+    read_archive_entries_with_limits(bytes, ZipLimits::DEFAULT)
+}
+
+/// Розпаковує всі частини в пам'ять, але не більше за `limits`: один файл з
+/// невеликим ZIP-розміром не повинен розгорнутися на гігабайти. Межа міряється за
+/// реально розпакованими байтами, а не за розміром із заголовка ZIP.
+fn read_archive_entries_with_limits(
+    bytes: &[u8],
+    limits: ZipLimits,
+) -> Result<Vec<ArchiveEntry>, XlsxExportError> {
     let mut archive = ZipArchive::new(Cursor::new(bytes))?;
     let mut entries = Vec::with_capacity(archive.len());
+    let mut budget = ZipBudget::new(limits);
     for index in 0..archive.len() {
         let mut file = archive.by_index(index)?;
         if !matches!(
@@ -272,7 +288,13 @@ fn read_archive_entries(bytes: &[u8]) -> Result<Vec<ArchiveEntry>, XlsxExportErr
         }
         let mut contents = Vec::new();
         if !file.is_dir() {
-            file.read_to_end(&mut contents)?;
+            let name = file.name().to_owned();
+            budget
+                .read_part(&name, &mut file, Some(&mut contents))
+                .map_err(|error| match error {
+                    ZipPartError::Limit(exceeded) => XlsxExportError::ArchiveTooLarge(exceeded),
+                    ZipPartError::Io(error) => XlsxExportError::Io(error),
+                })?;
         }
         entries.push(ArchiveEntry {
             name: file.name().to_owned(),
@@ -764,18 +786,18 @@ fn append_records_to_reference_sheet(
 ) -> Result<(String, u32, u32, u32), XlsxExportError> {
     let mut ordered_fields = FIELD_SPECS
         .iter()
-        .map(|field| {
-            layout
+        .map(|field| -> Result<_, XlsxExportError> {
+            let column = layout
                 .columns_by_key
                 .get(field.key())
                 .cloned()
-                .map(|column| (column_number(&column), *field, column))
                 .ok_or_else(|| {
                     XlsxExportError::InvalidReference(format!(
                         "не визначено стовпець «{}»",
                         field.header()
                     ))
-                })
+                })?;
+            Ok((column_number(&column)?, *field, column))
         })
         .collect::<Result<Vec<_>, _>>()?;
     ordered_fields.sort_by_key(|(number, _, _)| *number);
@@ -909,31 +931,32 @@ fn extend_table_ranges(xml: &str, old_last_data: u32, old_max: u32, new_last: u3
     })
 }
 
-fn table_covers_required_headers(xml: &str, layout: &SheetLayout) -> bool {
+fn table_covers_required_headers(xml: &str, layout: &SheetLayout) -> Result<bool, XlsxExportError> {
     let table_range = Regex::new(r#"<(?:\w+:)?table\b[^>]*?\sref=\"([A-Z]+)(\d+):([A-Z]+)(\d+)\""#)
         .expect("static regex");
     let Some(captures) = table_range.captures(xml) else {
-        return false;
+        return Ok(false);
     };
     let Some(start_row) = captures[2].parse::<u32>().ok() else {
-        return false;
+        return Ok(false);
     };
     if start_row != 1 {
-        return false;
+        return Ok(false);
     }
-    let start_column = column_number(&captures[1]);
-    let end_column = column_number(&captures[3]);
+    let start_column = column_number(&captures[1])?;
+    let end_column = column_number(&captures[3])?;
     let required_columns = layout
         .columns_by_key
         .values()
-        .map(|column| column_number(column));
-    let Some(required_min) = required_columns.clone().min() else {
-        return false;
+        .map(|column| column_number(column))
+        .collect::<Result<Vec<_>, _>>()?;
+    let (Some(required_min), Some(required_max)) = (
+        required_columns.iter().copied().min(),
+        required_columns.iter().copied().max(),
+    ) else {
+        return Ok(false);
     };
-    let Some(required_max) = required_columns.max() else {
-        return false;
-    };
-    start_column <= required_min && end_column >= required_max
+    Ok(start_column <= required_min && end_column >= required_max)
 }
 
 fn extend_range_reference(
@@ -983,9 +1006,32 @@ fn cell_column(reference: &str) -> Result<String, XlsxExportError> {
     }
 }
 
-fn column_number(column: &str) -> usize {
-    column.bytes().fold(0usize, |number, byte| {
-        number * 26 + usize::from(byte - b'A' + 1)
+/// Номер стовпця за літерами: `A` = 1, `Z` = 26, `AA` = 27. Літери беруться з XML
+/// книги, тож довжина не обмежена: переповнення й символи поза `A`–`Z` дають
+/// помилку замість паніки чи хибного номера.
+fn column_number(column: &str) -> Result<usize, XlsxExportError> {
+    let number = if column.is_empty() {
+        None
+    } else {
+        column.bytes().try_fold(0usize, |number, byte| {
+            if !byte.is_ascii_uppercase() {
+                return None;
+            }
+            number
+                .checked_mul(26)?
+                .checked_add(usize::from(byte - b'A') + 1)
+        })
+    };
+    number.ok_or_else(|| {
+        let shown: String = column.chars().take(16).collect();
+        let ellipsis = if column.chars().count() > 16 {
+            "…"
+        } else {
+            ""
+        };
+        XlsxExportError::InvalidReference(format!(
+            "некоректна або завелика назва стовпця «{shown}{ellipsis}»"
+        ))
     })
 }
 
@@ -1395,18 +1441,216 @@ mod tests {
             next_number: 1,
         };
 
-        assert!(table_covers_required_headers(
-            r#"<table ref="A1:O2"/>"#,
-            &layout
+        assert!(table_covers_required_headers(r#"<table ref="A1:O2"/>"#, &layout).unwrap());
+        assert!(!table_covers_required_headers(r#"<table ref="Q1:S2"/>"#, &layout).unwrap());
+        assert!(!table_covers_required_headers(r#"<table ref="A2:O8"/>"#, &layout).unwrap());
+
+        // Назва стовпця з XML таблиці, що не вміщається в usize, — помилка, а не переповнення.
+        let absurd = format!(r#"<table ref="A1:{}2"/>"#, "Z".repeat(64));
+        assert!(matches!(
+            table_covers_required_headers(&absurd, &layout),
+            Err(XlsxExportError::InvalidReference(_))
         ));
-        assert!(!table_covers_required_headers(
-            r#"<table ref="Q1:S2"/>"#,
-            &layout
-        ));
-        assert!(!table_covers_required_headers(
-            r#"<table ref="A2:O8"/>"#,
-            &layout
-        ));
+    }
+
+    #[test]
+    fn column_numbers_follow_the_spreadsheet_scheme() {
+        for (letters, number) in [("A", 1), ("Z", 26), ("AA", 27), ("AZ", 52), ("XFD", 16384)] {
+            assert_eq!(column_number(letters).unwrap(), number, "{letters}");
+            assert_eq!(column_letters(number), letters);
+        }
+    }
+
+    #[test]
+    fn absurdly_long_or_foreign_column_letters_are_an_error_not_an_overflow() {
+        // 14 літер «Z» уже не вміщаються в u64, тож на 64-бітній ОС це й межа переповнення.
+        for length in [14, 15, 64, 100_000] {
+            let letters = "Z".repeat(length);
+            let result = column_number(&letters);
+            assert!(
+                matches!(&result, Err(XlsxExportError::InvalidReference(message))
+                    if message.contains("назва стовпця")),
+                "{length}: {result:?}"
+            );
+        }
+        // Повідомлення не повторює весь вхід.
+        let Err(XlsxExportError::InvalidReference(message)) = column_number(&"Z".repeat(100_000))
+        else {
+            panic!("overflow must be an error");
+        };
+        assert!(message.chars().count() < 200, "{}", message.chars().count());
+
+        for invalid in ["", "a", "A1", "Б", "A-Z", " A"] {
+            assert!(
+                matches!(
+                    column_number(invalid),
+                    Err(XlsxExportError::InvalidReference(_))
+                ),
+                "{invalid:?}"
+            );
+        }
+        // Найдовша назва, що ще вміщається: 13 літер «Z» не переповнюють 64-бітне число.
+        if usize::BITS == 64 {
+            assert!(column_number(&"Z".repeat(13)).is_ok());
+        }
+    }
+
+    #[test]
+    fn a_sheet_with_an_absurd_column_fails_closed_instead_of_overflowing() {
+        // Синтетичний лист, у якому адреса комірки заголовка «№» має 40 літер. Парсер
+        // calamine на таких адресах сам переповнюється (у debug-збірці панікує), тому
+        // перевіряється шар EasyWAR після нього: розбір розкладки й додавання рядків.
+        let reference = synthetic_reference_workbook();
+        let entries = read_archive_entries(&reference).unwrap();
+        let entry_map = archive_entry_map(&entries).unwrap();
+        let shared_strings = parse_shared_strings(
+            &entry_text(&entries, &entry_map, "xl/sharedStrings.xml").unwrap(),
+        )
+        .unwrap();
+        let xml = entry_text(&entries, &entry_map, "xl/worksheets/sheet1.xml").unwrap();
+        let absurd = xml.replace(r#"r="A1""#, &format!(r#"r="{}1""#, "Z".repeat(40)));
+        assert_ne!(xml, absurd, "the synthetic sheet must contain A1");
+        let layout = parse_sheet_layout(&absurd, &shared_strings).unwrap();
+        let records = records_from_approved_snapshots(&[approved_snapshot()]).unwrap();
+
+        let result = append_records_to_reference_sheet(&absurd, &layout, &records);
+
+        assert!(
+            matches!(&result, Err(XlsxExportError::InvalidReference(message))
+                if message.contains("назва стовпця")),
+            "{result:?}"
+        );
+    }
+
+    /// Архів з однієї або кількох частин, заповнених нулями (стискаються майже до нуля).
+    fn zip_of_zero_parts(parts: &[(&str, usize)]) -> Vec<u8> {
+        let mut archive = ZipWriter::new(Cursor::new(Vec::new()));
+        let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+        let chunk = vec![0u8; 64 * 1024];
+        for (name, size) in parts {
+            archive.start_file(*name, options).unwrap();
+            let mut left = *size;
+            while left > 0 {
+                let part = left.min(chunk.len());
+                archive.write_all(&chunk[..part]).unwrap();
+                left -= part;
+            }
+        }
+        archive.finish().unwrap().into_inner()
+    }
+
+    const TEST_LIMITS: ZipLimits = ZipLimits {
+        per_entry: 256 * 1024,
+        total: 512 * 1024,
+    };
+
+    #[test]
+    fn a_small_zip_that_inflates_past_the_part_limit_is_rejected() {
+        // ≈ 4 МБ нулів стискаються до кількох кілобайт, але межа частини — 256 КБ.
+        let bomb = zip_of_zero_parts(&[("xl/worksheets/sheet1.xml", 4 * 1024 * 1024)]);
+        assert!(
+            bomb.len() < 64 * 1024,
+            "the bomb must stay tiny: {}",
+            bomb.len()
+        );
+
+        let error = read_archive_entries_with_limits(&bomb, TEST_LIMITS)
+            .expect_err("a part over the limit must be rejected");
+
+        assert!(
+            matches!(&error, XlsxExportError::ArchiveTooLarge(ZipLimitExceeded::Entry { name, limit })
+                if name == "xl/worksheets/sheet1.xml" && *limit == TEST_LIMITS.per_entry),
+            "{error:?}"
+        );
+        let message = error.to_string();
+        assert!(message.starts_with("Еталонний XLSX відхилено"), "{message}");
+        assert!(message.contains("xl/worksheets/sheet1.xml"), "{message}");
+        assert!(message.contains("256 КБ"), "{message}");
+    }
+
+    #[test]
+    fn many_parts_that_fit_alone_but_not_together_hit_the_total_limit() {
+        let parts = [
+            ("a.xml", 200 * 1024),
+            ("b.xml", 200 * 1024),
+            ("c.xml", 200 * 1024),
+        ];
+        let bomb = zip_of_zero_parts(&parts);
+
+        let error = read_archive_entries_with_limits(&bomb, TEST_LIMITS)
+            .expect_err("the sum over the limit must be rejected");
+
+        assert!(
+            matches!(
+                &error,
+                XlsxExportError::ArchiveTooLarge(ZipLimitExceeded::Total { limit })
+                    if *limit == TEST_LIMITS.total
+            ),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn parts_at_exactly_the_limit_are_still_read() {
+        let archive = zip_of_zero_parts(&[
+            ("a.xml", TEST_LIMITS.per_entry as usize),
+            (
+                "b.xml",
+                (TEST_LIMITS.total - TEST_LIMITS.per_entry) as usize,
+            ),
+        ]);
+
+        let entries = read_archive_entries_with_limits(&archive, TEST_LIMITS)
+            .expect("parts exactly at the limits must be accepted");
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].bytes.len() as u64, TEST_LIMITS.per_entry);
+        assert_eq!(
+            entries[1].bytes.len() as u64,
+            TEST_LIMITS.total - TEST_LIMITS.per_entry
+        );
+    }
+
+    #[test]
+    fn a_forged_zip_header_does_not_hide_the_real_size() {
+        // Підробляємо в локальному заголовку й каталозі «розпакований розмір» = 100 байт.
+        let mut bomb = zip_of_zero_parts(&[("xl/worksheets/sheet1.xml", 4 * 1024 * 1024)]);
+        let declared = (4u32 * 1024 * 1024).to_le_bytes();
+        let forged = 100u32.to_le_bytes();
+        let mut patched = 0;
+        for index in 0..bomb.len().saturating_sub(4) {
+            if bomb[index..index + 4] == declared {
+                bomb[index..index + 4].copy_from_slice(&forged);
+                patched += 1;
+            }
+        }
+        assert!(
+            patched >= 2,
+            "local header and central directory: {patched}"
+        );
+
+        let result = read_archive_entries_with_limits(&bomb, TEST_LIMITS);
+
+        // Бібліотека zip 2.4.2 читає всі 4 МБ попри підроблений розмір (перевірено вручну),
+        // тож зупинити читання може лише власна межа за реально розпакованими байтами.
+        assert!(
+            matches!(
+                &result,
+                Err(XlsxExportError::ArchiveTooLarge(
+                    ZipLimitExceeded::Entry { .. }
+                ))
+            ),
+            "forged size must not be trusted: {result:?}"
+        );
+    }
+
+    #[test]
+    fn ordinary_references_stay_within_the_default_limits() {
+        let reference = synthetic_reference_workbook();
+
+        let entries = read_archive_entries(&reference).expect("synthetic reference must be read");
+
+        assert!(entries.iter().any(|entry| entry.name == "xl/workbook.xml"));
     }
 
     #[test]

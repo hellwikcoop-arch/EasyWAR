@@ -661,6 +661,70 @@ pub fn catalog() -> Vec<DashboardModuleTemplate> {
                 field("status", "Стан", "text", "status", "none", false),
             ],
         ),
+        // Погодний шаблон у стилі погодних дашбордів: темна карта з ізолініями хмарності,
+        // виноски на пунктах, шкала часу з небезпечними явищами й 3D-рельєф із хмарами.
+        template(
+            "weather",
+            "Метеоумови",
+            "Географія",
+            "Спостереження погоди на пунктах: хмарність, межі хмар, видимість, вітер і явища. На дашборді — карта з ізолініями хмарності й шкалою часу, окремо — 3D-рельєф із хмарами.",
+            "weather",
+            2,
+            vec![
+                field(
+                    "observed_at",
+                    "Час спостереження",
+                    "datetime",
+                    "dimension",
+                    "none",
+                    true,
+                ),
+                field("label", "Пункт", "text", "label", "none", true),
+                field("latitude", "Широта", "real", "latitude", "none", true),
+                field("longitude", "Довгота", "real", "longitude", "none", true),
+                field(
+                    "cloud_cover",
+                    "Хмарність, 0–10",
+                    "integer",
+                    "metric",
+                    "average",
+                    true,
+                ),
+                field(
+                    "cloud_base_lower",
+                    "Нижня межа хмар (НМХ), м",
+                    "real",
+                    "metric",
+                    "average",
+                    false,
+                ),
+                field(
+                    "cloud_base_upper",
+                    "Верхня межа хмар (ВМХ), м",
+                    "real",
+                    "metric",
+                    "average",
+                    false,
+                ),
+                field(
+                    "visibility",
+                    "Видимість, км",
+                    "real",
+                    "metric",
+                    "average",
+                    false,
+                ),
+                field(
+                    "wind_speed",
+                    "Вітер, м/с",
+                    "real",
+                    "metric",
+                    "average",
+                    false,
+                ),
+                field("phenomenon", "Явище", "text", "status", "none", false),
+            ],
+        ),
         template(
             "cohort",
             "Когортна матриця",
@@ -1626,7 +1690,7 @@ fn validate_value(
     field: &DashboardModuleField,
     value: Option<&Value>,
 ) -> Result<(), DashboardModuleError> {
-    let absent = value.map_or(true, Value::is_null);
+    let absent = value.is_none_or(Value::is_null);
     if absent {
         return if field.required {
             Err(DashboardModuleError::RequiredField(field.label.clone()))
@@ -1744,7 +1808,7 @@ mod tests {
     #[test]
     fn catalog_covers_reference_visualizations_and_flight_hours() {
         let items = catalog();
-        assert_eq!(items.len(), 25);
+        assert_eq!(items.len(), 26);
         for kind in [
             "kpi",
             "line",
@@ -1770,6 +1834,7 @@ mod tests {
             "diverging-bars",
             "leaderboard",
             "ridgeline",
+            "weather",
         ] {
             assert!(
                 items.iter().any(|item| item.visual_kind == kind),
@@ -1818,6 +1883,49 @@ mod tests {
                 .collect::<Vec<_>>(),
             FLIGHT_FIELD_KEYS
         );
+    }
+
+    #[test]
+    fn weather_template_shares_the_flight_journal_weather_columns() {
+        let items = catalog();
+        let weather = items.iter().find(|item| item.id == "weather").unwrap();
+        let flight = items.iter().find(|item| item.id == "flight-hours").unwrap();
+        assert_eq!(weather.visual_kind, "weather");
+        let required = weather
+            .fields
+            .iter()
+            .filter(|field| field.required)
+            .map(|field| field.key)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            required,
+            [
+                "observed_at",
+                "label",
+                "latitude",
+                "longitude",
+                "cloud_cover"
+            ]
+        );
+        // Ті самі ключі, типи й підписи, що в журналі польотів: таблицю погоди розбирає той самий імпорт.
+        for key in [
+            "cloud_cover",
+            "cloud_base_lower",
+            "cloud_base_upper",
+            "visibility",
+        ] {
+            let mine = weather
+                .fields
+                .iter()
+                .find(|field| field.key == key)
+                .unwrap();
+            let theirs = flight.fields.iter().find(|field| field.key == key).unwrap();
+            assert_eq!(
+                (mine.data_type, mine.label),
+                (theirs.data_type, theirs.label),
+                "{key}"
+            );
+        }
     }
 
     #[tokio::test]

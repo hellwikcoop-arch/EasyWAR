@@ -5,6 +5,11 @@ use argon2::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::{Sqlite, SqlitePool, Transaction};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex, MutexGuard},
+    time::{Duration, Instant},
+};
 
 pub const MAX_LOCAL_PROFILES: i64 = 32;
 const MAX_PROFILE_NAME_CHARS: usize = 80;
@@ -19,6 +24,8 @@ const MAX_PASSWORD_CHARS: usize = 128;
 #[derive(Clone, Debug)]
 pub struct LocalProfileStore {
     pool: SqlitePool,
+    /// Спільний для всіх клонів лічильник невдалих спроб входу: лише в пам'яті цього запуску.
+    login_throttle: Arc<LoginThrottle>,
 }
 
 /// Рід військ (або командний рівень), для якого профіль тримає окрему таблицю.
@@ -156,6 +163,111 @@ pub enum LocalProfileError {
     InvalidModules,
     #[error("пароль профілю обов'язковий")]
     PasswordRequired,
+    #[error("забагато невдалих спроб входу, спробуйте знову через {}", format_wait(*.wait_secs))]
+    TooManyAttempts { wait_secs: u64 },
+    #[error("змінити пароль можна лише після входу в цей профіль")]
+    PasswordChangeNeedsSignIn,
+    #[error(
+        "цей профіль ще без пароля: щоб його встановити, вийдіть із поточного профілю \
+         й увійдіть у цей з екрана входу"
+    )]
+    PasswordSetNeedsSignOut,
+}
+
+/// Скільки поспіль неправильних паролів дозволено, перш ніж вхід на деякий час зупиняється.
+const FREE_PASSWORD_ATTEMPTS: u32 = 5;
+/// Перша пауза після вичерпання вільних спроб; кожна наступна невдача подвоює її.
+const FIRST_LOCKOUT: Duration = Duration::from_secs(30);
+/// Найдовша пауза між спробами.
+const MAX_LOCKOUT: Duration = Duration::from_secs(600);
+
+/// «30 с», «2 хв», «1 хв 30 с».
+fn format_wait(secs: u64) -> String {
+    if secs < 60 {
+        return format!("{secs} с");
+    }
+    match (secs / 60, secs % 60) {
+        (minutes, 0) => format!("{minutes} хв"),
+        (minutes, rest) => format!("{minutes} хв {rest} с"),
+    }
+}
+
+/// Пауза після `failures`-ї поспіль невдачі: 30 с, 60 с, 120 с, ... до [`MAX_LOCKOUT`].
+fn lockout_after(failures: u32) -> Option<Duration> {
+    let beyond = failures.checked_sub(FREE_PASSWORD_ATTEMPTS)?;
+    Some(
+        FIRST_LOCKOUT
+            .saturating_mul(1u32 << beyond.min(16))
+            .min(MAX_LOCKOUT),
+    )
+}
+
+type Clock = Arc<dyn Fn() -> Instant + Send + Sync>;
+
+#[derive(Default)]
+struct AttemptState {
+    failures: u32,
+    locked_until: Option<Instant>,
+}
+
+/// Обмеження спроб входу в Rust: щоб скрипт з вебвью не перебирав паролі швидше за людину.
+/// Лічильник окремий для кожного профілю, живе лише в пам'яті процесу (після перезапуску
+/// починається заново) і скидається першим правильним паролем. Годинник підміняється в тестах.
+pub struct LoginThrottle {
+    clock: Clock,
+    attempts: Mutex<HashMap<String, AttemptState>>,
+}
+
+impl std::fmt::Debug for LoginThrottle {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("LoginThrottle")
+            .finish_non_exhaustive()
+    }
+}
+
+impl Default for LoginThrottle {
+    fn default() -> Self {
+        Self::with_clock(Arc::new(Instant::now))
+    }
+}
+
+impl LoginThrottle {
+    pub fn with_clock(clock: Clock) -> Self {
+        Self {
+            clock,
+            attempts: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn attempts(&self) -> MutexGuard<'_, HashMap<String, AttemptState>> {
+        self.attempts
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Дозволяє спробу або каже, скільки ще чекати. Дозволена спроба зараховується як
+    /// невдала одразу, ще до перевірки пароля: так паралельні запити не проскочать повз
+    /// ліміт, поки перший ще перевіряється. Правильний пароль скидає лічильник через
+    /// [`Self::succeeded`]. Відхилені під час паузи спроби не зараховуються.
+    fn begin_attempt(&self, profile_id: &str) -> Result<(), LocalProfileError> {
+        let now = (self.clock)();
+        let mut attempts = self.attempts();
+        let state = attempts.entry(profile_id.to_owned()).or_default();
+        if let Some(until) = state.locked_until.filter(|until| *until > now) {
+            let wait = until.duration_since(now);
+            return Err(LocalProfileError::TooManyAttempts {
+                wait_secs: wait.as_secs() + u64::from(wait.subsec_nanos() > 0),
+            });
+        }
+        state.failures = state.failures.saturating_add(1);
+        state.locked_until = lockout_after(state.failures).map(|pause| now + pause);
+        Ok(())
+    }
+
+    fn succeeded(&self, profile_id: &str) {
+        self.attempts().remove(profile_id);
+    }
 }
 
 /// Дані реєстрації: профіль створюється разом з обов'язковим паролем і модулями.
@@ -188,7 +300,19 @@ pub fn normalize_modules(modules: &[String]) -> Result<Vec<&'static str>, LocalP
 
 impl LocalProfileStore {
     pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            login_throttle: Arc::new(LoginThrottle::default()),
+        }
+    }
+
+    /// Те саме, але з власним годинником для лічильника спроб входу (тести).
+    #[cfg(test)]
+    fn with_login_clock(pool: SqlitePool, clock: Clock) -> Self {
+        Self {
+            pool,
+            login_throttle: Arc::new(LoginThrottle::with_clock(clock)),
+        }
     }
 
     pub async fn list(&self) -> Result<LocalProfilesState, LocalProfileError> {
@@ -467,7 +591,9 @@ impl LocalProfileStore {
     }
 
     /// Встановлює, змінює (`new_password = Some`) або знімає (`None`) пароль.
-    /// Якщо пароль уже є, потрібен чинний пароль.
+    /// Якщо пароль уже є, потрібен чинний пароль (перевірка обмежена так само, як вхід).
+    /// Хто має право це викликати для якого профілю, вирішує
+    /// [`authorize_password_change`]: сховище сесії не знає.
     pub async fn set_password(
         &self,
         id: &str,
@@ -501,23 +627,29 @@ impl LocalProfileStore {
         self.list().await
     }
 
-    /// `true`, якщо профіль без пароля або пароль правильний.
+    /// `true`, якщо профіль без пароля або пароль правильний. Для профілю з паролем
+    /// кожна перевірка проходить через [`LoginThrottle`]: після п'яти неправильних
+    /// паролів поспіль повертається `TooManyAttempts` із часом очікування. Це єдиний
+    /// шлях перевірки пароля, тож вхід і підтвердження чинного пароля при його зміні
+    /// діляють один лічильник.
     pub async fn verify_password(
         &self,
         id: &str,
         password: &str,
     ) -> Result<bool, LocalProfileError> {
         validate_profile_id(id)?;
-        match self.password_hash(id).await? {
-            None => Ok(true),
-            Some(stored) => {
-                let parsed =
-                    PasswordHash::new(&stored).map_err(|_| LocalProfileError::PasswordHash)?;
-                Ok(Argon2::default()
-                    .verify_password(password.as_bytes(), &parsed)
-                    .is_ok())
-            }
+        let Some(stored) = self.password_hash(id).await? else {
+            return Ok(true);
+        };
+        let parsed = PasswordHash::new(&stored).map_err(|_| LocalProfileError::PasswordHash)?;
+        self.login_throttle.begin_attempt(id)?;
+        let correct = Argon2::default()
+            .verify_password(password.as_bytes(), &parsed)
+            .is_ok();
+        if correct {
+            self.login_throttle.succeeded(id);
         }
+        Ok(correct)
     }
 
     pub async fn has_password(&self, id: &str) -> Result<bool, LocalProfileError> {
@@ -582,6 +714,15 @@ impl LocalProfileStore {
         self.list().await
     }
 
+    /// Шляхи всіх таблиць, прив'язаних до будь-якого профілю (EasyGreen їх не перезаписує).
+    pub async fn all_table_paths(&self) -> Result<Vec<String>, LocalProfileError> {
+        Ok(
+            sqlx::query_scalar("SELECT path FROM local_profile_tables ORDER BY path")
+                .fetch_all(&self.pool)
+                .await?,
+        )
+    }
+
     pub async fn table_path(
         &self,
         id: &str,
@@ -635,6 +776,30 @@ async fn ensure_details_row(
     .execute(&mut **transaction)
     .await?;
     Ok(())
+}
+
+/// Чи можна зараз встановити або змінити пароль профілю, виходячи з поточної сесії
+/// (`session_profile` — профіль, у який увійшли в цьому запуску).
+///
+/// - Профіль із паролем: лише з відкритої сесії цього ж профілю (і з чинним паролем,
+///   який перевіряє [`LocalProfileStore::set_password`]).
+/// - Профіль без пароля (залишився з версій до обов'язкового пароля): лише з власної
+///   сесії або поки ніхто не ввійшов. Другий випадок — екран входу, який просить такий
+///   профіль встановити пароль перед першим входом; чужий профіль без пароля з
+///   відкритої сесії іншого користувача змінити не можна.
+pub fn authorize_password_change(
+    has_password: bool,
+    session_profile: Option<&str>,
+    profile_id: &str,
+) -> Result<(), LocalProfileError> {
+    let own_session = session_profile == Some(profile_id);
+    match (has_password, session_profile) {
+        (true, _) if own_session => Ok(()),
+        (true, _) => Err(LocalProfileError::PasswordChangeNeedsSignIn),
+        (false, None) => Ok(()),
+        (false, Some(_)) if own_session => Ok(()),
+        (false, Some(_)) => Err(LocalProfileError::PasswordSetNeedsSignOut),
+    }
 }
 
 pub fn generate_profile_id(display_name: &str, created_at: &str) -> String {
@@ -800,6 +965,10 @@ mod tests {
     const NOW_2: &str = "2026-01-02T00:00:00Z";
 
     async fn store() -> LocalProfileStore {
+        LocalProfileStore::new(migrated_pool().await)
+    }
+
+    async fn migrated_pool() -> SqlitePool {
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
             .connect("sqlite::memory:")
@@ -841,7 +1010,42 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        LocalProfileStore::new(pool)
+        pool
+    }
+
+    /// Рукотворний годинник: час іде лише тоді, коли тест його посуває.
+    #[derive(Clone)]
+    struct FakeClock {
+        base: Instant,
+        offset: Arc<Mutex<Duration>>,
+    }
+
+    impl FakeClock {
+        fn new() -> Self {
+            Self {
+                base: Instant::now(),
+                offset: Arc::new(Mutex::new(Duration::ZERO)),
+            }
+        }
+
+        fn advance(&self, by: Duration) {
+            *self.offset.lock().unwrap() += by;
+        }
+
+        fn as_clock(&self) -> Clock {
+            let clock = self.clone();
+            Arc::new(move || clock.base + *clock.offset.lock().unwrap())
+        }
+    }
+
+    async fn store_with_fake_clock() -> (LocalProfileStore, FakeClock) {
+        let clock = FakeClock::new();
+        let store = LocalProfileStore::with_login_clock(migrated_pool().await, clock.as_clock());
+        (store, clock)
+    }
+
+    fn secs(value: u64) -> Duration {
+        Duration::from_secs(value)
     }
 
     fn id(seed: &str) -> String {
@@ -1007,6 +1211,219 @@ mod tests {
         assert!(!state.profiles[0].has_password);
     }
 
+    fn wait_of(result: Result<(), LocalProfileError>) -> u64 {
+        match result {
+            Err(LocalProfileError::TooManyAttempts { wait_secs }) => wait_secs,
+            other => panic!("очікувалась пауза, а вийшло {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lockout_schedule_starts_after_five_failures_doubles_and_is_capped() {
+        for failures in 0..5 {
+            assert_eq!(lockout_after(failures), None, "{failures}");
+        }
+        let schedule = (5..=11)
+            .map(|failures| lockout_after(failures).unwrap().as_secs())
+            .collect::<Vec<_>>();
+        assert_eq!(schedule, [30, 60, 120, 240, 480, 600, 600]);
+        assert_eq!(lockout_after(u32::MAX), Some(MAX_LOCKOUT));
+    }
+
+    #[test]
+    fn wait_is_written_in_seconds_and_minutes() {
+        assert_eq!(format_wait(1), "1 с");
+        assert_eq!(format_wait(30), "30 с");
+        assert_eq!(format_wait(60), "1 хв");
+        assert_eq!(format_wait(90), "1 хв 30 с");
+        assert_eq!(format_wait(600), "10 хв");
+    }
+
+    #[test]
+    fn throttle_pauses_after_five_attempts_escalates_and_ignores_rejected_ones() {
+        let clock = FakeClock::new();
+        let throttle = LoginThrottle::with_clock(clock.as_clock());
+        let profile = id("Перебір");
+        let other = id("Сусід");
+
+        // П'ять спроб вільні; п'ята, якщо хибна, вмикає першу паузу.
+        for _ in 0..5 {
+            throttle.begin_attempt(&profile).unwrap();
+        }
+        assert_eq!(wait_of(throttle.begin_attempt(&profile)), 30);
+        // Відхилені спроби не зараховуються і паузу не подовжують; лишок округлюється вгору.
+        clock.advance(Duration::from_millis(29_500));
+        assert_eq!(wait_of(throttle.begin_attempt(&profile)), 1);
+        // Інший профіль лічильник не зачіпає.
+        throttle.begin_attempt(&other).unwrap();
+
+        // Рівно через 30 с спроба знову можлива, і кожна наступна невдача подвоює паузу.
+        clock.advance(Duration::from_millis(500));
+        throttle.begin_attempt(&profile).unwrap();
+        for expected in [60, 120, 240, 480, 600, 600] {
+            assert_eq!(wait_of(throttle.begin_attempt(&profile)), expected);
+            clock.advance(secs(expected));
+            throttle.begin_attempt(&profile).unwrap();
+        }
+    }
+
+    #[test]
+    fn first_good_password_clears_the_throttle() {
+        let clock = FakeClock::new();
+        let throttle = LoginThrottle::with_clock(clock.as_clock());
+        let profile = id("Скидання");
+        for _ in 0..5 {
+            throttle.begin_attempt(&profile).unwrap();
+        }
+        assert_eq!(wait_of(throttle.begin_attempt(&profile)), 30);
+        clock.advance(secs(30));
+        throttle.begin_attempt(&profile).unwrap();
+        throttle.succeeded(&profile);
+        // Лічильник почався заново: знову п'ять вільних спроб, а перша пауза — 30 с.
+        for _ in 0..5 {
+            throttle.begin_attempt(&profile).unwrap();
+        }
+        assert_eq!(wait_of(throttle.begin_attempt(&profile)), 30);
+    }
+
+    #[tokio::test]
+    async fn login_pauses_after_five_wrong_passwords_and_a_good_one_resets_it() {
+        let (store, clock) = store_with_fake_clock().await;
+        let profile = id("Вхід");
+        store.create(&profile, "Вхід", NOW_1).await.unwrap();
+        store
+            .set_password(&profile, None, Some("секрет"), NOW_2)
+            .await
+            .unwrap();
+
+        for _ in 0..5 {
+            assert!(!store.verify_password(&profile, "хибний").await.unwrap());
+        }
+        // Під час паузи не пускає навіть правильний пароль.
+        let error = store.verify_password(&profile, "секрет").await.unwrap_err();
+        assert!(matches!(
+            error,
+            LocalProfileError::TooManyAttempts { wait_secs: 30 }
+        ));
+        let text = error.to_string();
+        assert!(text.contains("30 с"), "{text}");
+        // Інтерфейс замінює повідомлення про неправильний пароль коротким підписом, тож
+        // текст про паузу не повинен під нього підпадати: час очікування має дійти до людини.
+        assert!(
+            !text.to_lowercase().contains("неправильний пароль"),
+            "{text}"
+        );
+
+        clock.advance(secs(29));
+        assert_eq!(
+            store
+                .verify_password(&profile, "секрет")
+                .await
+                .unwrap_err()
+                .to_string(),
+            "забагато невдалих спроб входу, спробуйте знову через 1 с"
+        );
+        clock.advance(secs(1));
+        assert!(store.verify_password(&profile, "секрет").await.unwrap());
+        // Правильний пароль скинув лічильник: наступна хибна спроба проходить без паузи.
+        assert!(!store.verify_password(&profile, "хибний").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn guessing_the_current_password_through_set_password_shares_the_pause() {
+        let (store, clock) = store_with_fake_clock().await;
+        let profile = id("Зміна");
+        store.create(&profile, "Зміна", NOW_1).await.unwrap();
+        store
+            .set_password(&profile, None, Some("секрет"), NOW_2)
+            .await
+            .unwrap();
+
+        for _ in 0..5 {
+            assert!(matches!(
+                store
+                    .set_password(&profile, Some("хибний"), Some("новий-пароль"), NOW_2)
+                    .await,
+                Err(LocalProfileError::WrongPassword)
+            ));
+        }
+        assert!(matches!(
+            store
+                .set_password(&profile, Some("секрет"), Some("новий-пароль"), NOW_2)
+                .await,
+            Err(LocalProfileError::TooManyAttempts { .. })
+        ));
+        assert!(matches!(
+            store.verify_password(&profile, "секрет").await,
+            Err(LocalProfileError::TooManyAttempts { .. })
+        ));
+        // Пароль не змінився.
+        clock.advance(secs(30));
+        assert!(store.verify_password(&profile, "секрет").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn profile_without_a_password_is_never_paused() {
+        let (store, _clock) = store_with_fake_clock().await;
+        let profile = id("Старий");
+        store.create(&profile, "Старий", NOW_1).await.unwrap();
+        // Профілі без пароля (з версій до обов'язкового пароля) і далі приймають будь-що:
+        // це відома межа, яку закриває примусове встановлення пароля при вході.
+        for attempt in 0..8 {
+            assert!(store
+                .verify_password(&profile, &format!("будь-що-{attempt}"))
+                .await
+                .unwrap());
+        }
+    }
+
+    #[test]
+    fn password_change_is_tied_to_the_session() {
+        let own = id("Свій");
+        let other = id("Чужий");
+        // Профіль із паролем: лише з власної відкритої сесії.
+        assert!(authorize_password_change(true, Some(&own), &own).is_ok());
+        assert!(matches!(
+            authorize_password_change(true, None, &own),
+            Err(LocalProfileError::PasswordChangeNeedsSignIn)
+        ));
+        assert!(matches!(
+            authorize_password_change(true, Some(&other), &own),
+            Err(LocalProfileError::PasswordChangeNeedsSignIn)
+        ));
+        // Профіль без пароля: власна сесія або екран входу (ніхто не ввійшов).
+        assert!(authorize_password_change(false, Some(&own), &own).is_ok());
+        assert!(authorize_password_change(false, None, &own).is_ok());
+        let error = authorize_password_change(false, Some(&other), &own).unwrap_err();
+        assert!(matches!(error, LocalProfileError::PasswordSetNeedsSignOut));
+        assert!(error.to_string().contains("вийдіть"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn legacy_profile_gets_its_first_password_before_sign_in_but_only_once() {
+        // Екран входу просить профіль без пароля встановити його перед першим входом.
+        let store = store().await;
+        let profile = id("Спадок");
+        store.create(&profile, "Спадок", NOW_1).await.unwrap();
+        assert!(!store.has_password(&profile).await.unwrap());
+        authorize_password_change(false, None, &profile).unwrap();
+        let state = store
+            .set_password(&profile, None, Some("перший-пароль"), NOW_2)
+            .await
+            .unwrap();
+        assert!(state.profiles[0].has_password);
+        assert!(store
+            .verify_password(&profile, "перший-пароль")
+            .await
+            .unwrap());
+        // Вдруге без входу той самий виклик уже відхиляється.
+        assert!(store.has_password(&profile).await.unwrap());
+        assert!(matches!(
+            authorize_password_change(true, None, &profile),
+            Err(LocalProfileError::PasswordChangeNeedsSignIn)
+        ));
+    }
+
     #[tokio::test]
     async fn details_and_database_binding_are_stored_and_validated() {
         let store = store().await;
@@ -1149,6 +1566,28 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(orphaned, 0);
+    }
+
+    #[tokio::test]
+    async fn all_table_paths_lists_every_profile_binding() {
+        let store = store().await;
+        assert!(store.all_table_paths().await.unwrap().is_empty());
+        let first = id("Перший");
+        let second = id("Другий");
+        store.create(&first, "Перший", NOW_1).await.unwrap();
+        store.create(&second, "Другий", NOW_1).await.unwrap();
+        store
+            .set_table_path(&first, Branch::Air, Some("/synthetic/b.xlsx"), NOW_2)
+            .await
+            .unwrap();
+        store
+            .set_table_path(&second, Branch::Pvk, Some("/synthetic/a.xlsx"), NOW_2)
+            .await
+            .unwrap();
+        assert_eq!(
+            store.all_table_paths().await.unwrap(),
+            ["/synthetic/a.xlsx", "/synthetic/b.xlsx"]
+        );
     }
 
     #[tokio::test]

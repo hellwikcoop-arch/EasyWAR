@@ -569,7 +569,7 @@ function initializeSignalSettings() {
         stopped: 'зупинено користувачем і виконано відписку',
         timed_out: 'минуло 5 хвилин і виконано відписку',
       };
-      receiveStatus.textContent = `Сеанс завершено: ${reasons[summary.end] || 'невідомий результат'}. Збережено дозволених записів: ${summary.captured}; виконано команд: ${summary.commands}; пропущено поза allowlist: ${summary.ignored}.`;
+      receiveStatus.textContent = `Сеанс завершено: ${reasons[summary.end] || 'невідомий результат'}. Збережено дозволених записів: ${summary.captured}; виконано команд: ${summary.commands}; пропущено (поза allowlist, службові події, повтори): ${summary.ignored}.`;
       await refreshInbox();
     } catch (error) {
       receiveStatus.textContent = `Сеанс не завершено: ${String(error)}`;

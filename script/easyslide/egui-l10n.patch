@@ -1,0 +1,85 @@
+--- src/lib.rs
++++ src/lib.rs
+@@ -400,6 +400,7 @@
+ pub mod gui_zoom;
+ mod hit_test;
+ mod id;
++pub mod l10n;
+ mod id_salt;
+ mod input_state;
+ mod interaction;
+--- src/painter.rs
++++ src/painter.rs
+@@ -492,7 +492,7 @@
+         color: crate::Color32,
+         wrap_width: f32,
+     ) -> Arc<Galley> {
+-        self.fonts_mut(|f| f.layout(text, font_id, color, wrap_width))
++        self.fonts_mut(|f| f.layout(crate::l10n::tr(text), font_id, color, wrap_width))
+     }
+ 
+     /// Will line break at `\n`.
+@@ -506,7 +506,7 @@
+         font_id: FontId,
+         color: crate::Color32,
+     ) -> Arc<Galley> {
+-        self.fonts_mut(|f| f.layout(text, font_id, color, f32::INFINITY))
++        self.fonts_mut(|f| f.layout(crate::l10n::tr(text), font_id, color, f32::INFINITY))
+     }
+ 
+     /// Lay out this text layut job in a galley.
+--- src/widget_text.rs
++++ src/widget_text.rs
+@@ -388,7 +388,7 @@
+         default_valign: Align,
+     ) -> LayoutJob {
+         let (text, text_format) = self.into_text_and_format(style, fallback_font, default_valign);
+-        LayoutJob::single_section(text, text_format)
++        LayoutJob::single_section(crate::l10n::tr(text), text_format)
+     }
+ 
+     fn into_text_and_format(
+@@ -718,7 +718,7 @@
+     ) -> Arc<LayoutJob> {
+         match self {
+             Self::Text(text) => Arc::new(LayoutJob::simple_format(
+-                text,
++                crate::l10n::tr(text),
+                 TextFormat {
+                     font_id: FontSelection::Default.resolve(style),
+                     color: crate::Color32::PLACEHOLDER,
+@@ -776,7 +776,7 @@
+                     .fonts_mut(|f| f.row_height(&font_id) + style.spacing.extra_text_line_spacing);
+ 
+                 let mut layout_job = LayoutJob::simple_format(
+-                    text,
++                    crate::l10n::tr(text),
+                     TextFormat {
+                         font_id,
+                         color,
+--- /dev/null
++++ src/l10n.rs
+@@ -0,0 +1,23 @@
++//! Interface translation hook (EasySlide): the application sets a translator once, and egui passes
++//! every label, button, tooltip and painter text through it just before layout. Text being edited
++//! (`TextEdit`) is laid out directly and never passes through here.
++
++use std::sync::OnceLock;
++
++/// Returns the translation of a whole interface string, or `None` to keep it.
++pub type Translator = fn(&str) -> Option<String>;
++
++static TRANSLATOR: OnceLock<Translator> = OnceLock::new();
++
++/// Sets the translator; only the first call has effect.
++pub fn set_translator(translator: Translator) {
++    let _ = TRANSLATOR.set(translator);
++}
++
++/// The text as the interface shows it: for measuring text that is painted through the hook.
++pub fn tr(text: String) -> String {
++    match TRANSLATOR.get() {
++        Some(translate) if !text.is_empty() => translate(&text).unwrap_or(text),
++        _ => text,
++    }
++}

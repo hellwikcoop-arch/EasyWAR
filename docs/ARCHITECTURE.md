@@ -57,24 +57,33 @@ Use native macOS/Swift tooling only for functionality that cannot be expressed c
 
 SQLite is the application store.
 
-Initial logical domains:
-- `reports`
-- `targets`
-- `platforms`
-- `munitions`
-- `units`
-- `signal_messages`
-- `attachments`
-- `manual_reviews`
-- `revision_history`
-- `audit_log`
-- `settings`
+Tables that exist (migrations `0001`–`0011`, details in [`DATABASE.md`](DATABASE.md)):
+- provenance and audit: `raw_sources`, `reports`, `parsed_report_versions`,
+  `manual_corrections`, `review_decisions` (the manual review decisions),
+  `revision_history`, `audit_log`, `xlsx_row_fingerprints`, plus the view
+  `report_current_state`;
+- `settings`;
+- local profiles: `local_profiles`, `local_profile_state`,
+  `local_profile_details`, `local_profile_modules`, `local_profile_tables`,
+  `local_profile_workspace_templates`;
+- dashboard modules: `dashboard_modules`, `dashboard_module_fields`,
+  `dashboard_module_corrections` and the per-module tables
+  `dashboard_data_<24 hex>` that Rust creates at runtime.
+
+Logical domains that are deliberately not tables:
+- Signal messages are not a separate table: an accepted message is stored as a
+  `raw_sources` row with source type `SIGNAL` (text and the full envelope JSON)
+  plus a `reports` row. The adapter reads only the text of `dataMessage`;
+  attachments are neither downloaded nor stored.
+- targets, platforms, munitions and units are fields of the parsed and approved
+  record (JSON in `parsed_report_versions` and `revision_history`) and of the
+  reference data in the frontend; analytics reads them from approved snapshots.
 
 Schema details are versioned through migrations.
 
-The first implemented schema and its invariants are documented in
-[`DATABASE.md`](DATABASE.md). It deliberately covers provenance and audit
-foundations only; domain repositories are added incrementally.
+The implemented schema and its invariants are documented in
+[`DATABASE.md`](DATABASE.md). The provenance layer comes first; domain
+repositories are added incrementally.
 
 The first read-only SQLite analytics boundary is documented in
 [`ANALYTICS.md`](ANALYTICS.md). It exposes a versioned Tauri model derived only
@@ -170,12 +179,18 @@ Adapters are disabled by default when they can transmit source data outside the 
 межами. Чернетки тексту — окремий наступний етап.
 
 Необов'язкова локальна модель (`src-tauri/src/local_model.rs`) — дочірній
-процес-рушій із пакета, який користувач підключає вручну: фіксований шлях без
+процес-рушій із пакета, який користувач підключає вручну або який застосунок
+завантажує за кнопкою (`src-tauri/src/model_install.rs`): фіксований шлях без
 оболонки й порту, очищене середовище, SHA-256 маніфесту, рушія й моделі,
 рядки JSON у stdin/stdout, один запит за раз, зупинка при скасуванні,
-таймауті, бездіяльності, виході з профілю й закритті застосунку. Для цього є
-сім окремих Tauri-команд (стан, вибір пакета, вмикання, забування, генерація
-з `Channel`, скасування, зупинка); налаштування — один ключ
+таймауті, бездіяльності, виході з профілю й закритті застосунку. Самі ваги
+не входять до інсталятора: єдина мережева дія — завантаження Qwen3-4B з
+`huggingface.co` після підтвердження користувача (адреса, розмір і SHA-256
+зашиті в код; у Rust перед першим запитом показується системне вікно
+«Так/Ні»). Для моделі є одинадцять окремих Tauri-команд: сім для рушія (стан,
+вибір пакета, вмикання, забування, генерація з `Channel`, скасування,
+зупинка) і чотири для встановлення (відомості, завантаження, скасування,
+видалення файлів); налаштування — один ключ
 `app.local_model.v1` у наявній таблиці `settings`, без міграції. Модель бачить
 лише підготовлений запит із фактами довідки; кнопки дій і джерела формує код,
 а будь-яка помилка чи відхилена відповідь веде до точної відповіді довідки.

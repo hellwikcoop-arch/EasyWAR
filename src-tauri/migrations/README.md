@@ -11,13 +11,25 @@ triggers, and the migration is exercised only with synthetic in-memory data.
 XLSX rows and an optional link to the first previously stored exact parsed
 payload. It does not delete, merge, hide or approve either report.
 
-New migrations must be append-only, registered in `src/database.rs`, and
-covered by a migration test. Never put operational fixtures in this directory.
+`0003_local_profiles.sql` adds local profile identities: `local_profiles` (an
+opaque `profile-<hex>` id, display name and a unique normalised `name_key`) and
+the singleton `local_profile_state` that holds the active profile. Deleting the
+active profile sets the selection to `NULL`; the Rust store then selects the
+first remaining profile. A profile is a local label, not an account or a role.
+
+`0004_workspace_templates.sql` adds `local_profile_workspace_templates`: an
+optional assignment of one of five built-in presentation presets (`overview`,
+`analysis`, `quality`, `registry`, `entry`) to a profile. The definitions live in
+application code; the table stores only the key and the update time, grants no
+permissions and is deleted together with its profile. A profile without a row
+uses the overview preset, so the migration creates no rows.
 
 `0005_profile_details.sql` adds optional per-profile details in a separate
 table: position, a small avatar image (data URL), an Argon2id password hash and
-the path of the XLSX table that opens after sign-in. The password gates sign-in
-on this device only; it does not encrypt the database or the bound table.
+the path of the XLSX table that opens after sign-in. The hash column is
+nullable: profiles created before registration required a password have none.
+The password gates sign-in on this device only; it does not encrypt the
+database or the bound table.
 
 `0006_profile_branch_tables.sql` lets one profile bind a separate table for each
 branch module: `local_profile_tables` holds one path per `(profile_id, branch)`,
@@ -61,3 +73,17 @@ itself holds the corrected value. Corrections reference the record by its
 `row_id` in `dashboard_data_<id>` and never become dynamic columns of that table.
 Deleting the module (or its profile) deletes them; a record removed from the
 module table takes its corrections with it. The XLSX is never written.
+
+The `dashboard_data_<id>` tables of user-created dashboard modules are not
+migration objects: Rust creates them at runtime from a validated catalog
+template and adds columns that later appear in a template with `ALTER TABLE`,
+without a migration (details in `docs/DATABASE.md`). Table and column names come
+only from the catalog, never from user text, and a profile's module tables are
+dropped in the same transaction that deletes the profile. The restore preflight
+derives the objects it requires from the registered migrations, so these runtime
+tables are allowed but not required.
+
+New migrations must be append-only, registered in `src-tauri/src/database.rs`
+(`database::migrations()`, which a test compares with the embedded migrator),
+and covered by a migration test. Never put operational fixtures in this
+directory. A migration that has shipped is never edited.

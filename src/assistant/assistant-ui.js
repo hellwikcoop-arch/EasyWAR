@@ -88,7 +88,11 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
   let remarkSeed = Math.floor(Math.random() * 2147483647);
   // Режим «Пояснити»: результат останнього кліку в модулі. Нічого не зберігається поза сесією профілю.
   let explainResult = null, explainNote = '', explainBranch = '';
-  let proposal = { kind: 'fix', text: '', withContext: true, image: null, previewUrl: '', note: '' };
+  // Пропозиція розробнику: відомості про елемент за замовчуванням вимкнені. withContext додає лише статичні
+  // ідентифікатори з коду (модуль, назва пояснення); withLabel окремо додає підпис з екрана, що може бути з таблиці.
+  const freshProposal = () => ({ kind: 'fix', text: '', withContext: false, withLabel: false, image: null, previewUrl: '', note: '' });
+  let proposal = freshProposal();
+  let proposalVersion = '', proposalVersionLoad = null, refreshProposalPreview = null, proposalStamp = null;
   // Чернетка доповіді: текст користувача, який КОМБАТ може підставити в поле модуля лише після підтвердження.
   const freshDraft = () => ({ branch: document.body.dataset.activeBranch === 'rocket' ? 'rocket' : 'air', text: '', plan: null, note: '' });
   let draft = freshDraft();
@@ -235,6 +239,8 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
     onExplain(descriptor) {
       if (!descriptor || !session.state().enabled) return;
       explainResult = explainElement(descriptor); explainBranch = descriptor.branch || ''; explainNote = '';
+      // Згода на підпис стосувалася попереднього елемента: для нового її треба дати знову.
+      proposal.withLabel = false;
       mode = 'explain';
       if (panel.hidden) { panel.hidden = false; launcher.setAttribute('aria-expanded', 'true'); }
       render(); gesture(...(explainResult.status === 'found' ? ['point', 'nod'] : ['shake', 'explain']));
@@ -247,7 +253,7 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
     }
   });
 
-  function resetProposal() { if (proposal.previewUrl) URL.revokeObjectURL(proposal.previewUrl); proposal = { kind: 'fix', text: '', withContext: true, image: null, previewUrl: '', note: '' }; }
+  function resetProposal() { if (proposal.previewUrl) URL.revokeObjectURL(proposal.previewUrl); proposal = freshProposal(); refreshProposalPreview = null; }
   function clear() { draft = freshDraft(); explain.stop(); explainResult = null; explainBranch = ''; explainNote = ''; resetProposal(); motion.stop(); request++; history = []; pendingInput = ''; review = null; status = ''; navigationStatus = ''; busy = false; thinking = false; if (usedModel) { usedModel = false; void llm.stop(); } if (install.phase === 'running') void llm.cancelInstall(); installRun++; install = { info: null, phase: 'idle', progress: null, message: '', confirming: false }; installBar = installText = null; checkbox.checked = false; modelBox.hidden = true; modelBox.replaceChildren(); panel.hidden = true; launcher.hidden = true; launcher.setAttribute('aria-expanded', 'false'); panel.replaceChildren(); announcer.textContent = ''; }
   function updateSession(id) {
     const previous = session.state();
@@ -503,25 +509,56 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
     document.body.append(link); link.click(); link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
+  // Версію застосунку читаємо один раз, коли пакет уперше показано або зберігається; вона потрібна і для перегляду, і для файлу.
+  function loadProposalVersion() {
+    proposalVersionLoad ??= (async () => {
+      try { proposalVersion = (await getApplicationState?.('version'))?.appVersion || ''; } catch { /* версія необов'язкова */ }
+    })();
+    return proposalVersionLoad;
+  }
+  // Контекст пакета: порожній, поки користувач не позначив пункт. Підпис з екрана береться лише за окремою позначкою.
+  function proposalContext() {
+    if (!proposal.withContext || !explainResult?.ref) return null;
+    return { branch: explainBranch, explainId: explainResult.ref.id, screenLabel: proposal.withLabel ? explainResult.title : '' };
+  }
+  // Один і той самий виклик будує і перегляд, і файл, тож перегляд показує саме те, що буде збережено чи скопійовано.
+  // Час пакета фіксується під час останньої зміни (перегляду) й той самий іде у файл: назва й дата не розходяться з переглядом.
+  function proposalPackage(now) {
+    const names = proposalFileNames(now, proposal.image);
+    return { names, text: buildProposal({ kind: proposal.kind, text: proposal.text, context: proposalContext(), appVersion: proposalVersion, createdAt: now, imageName: names.image }) };
+  }
   async function proposalFiles() {
     const verdict = validateProposalText(proposal.text);
     if (!verdict.ok) { proposal.note = verdict.message; render(); return null; }
-    const now = new Date();
-    const names = proposalFileNames(now, proposal.image);
-    let appVersion = '';
-    try { appVersion = (await getApplicationState?.('version'))?.appVersion || ''; } catch { /* версія необов'язкова */ }
-    const context = proposal.withContext && explainResult ? { branch: explainBranch, title: explainResult.title } : null;
-    const text = buildProposal({ kind: proposal.kind, text: proposal.text, context, appVersion, createdAt: now, imageName: names.image });
-    return { names, text };
+    await loadProposalVersion();
+    return proposalPackage(proposalStamp || new Date());
   }
   function proposalSection() {
-    const kinds = element('select', { 'aria-label': 'Тип пропозиції', onchange: event => { proposal.kind = event.target.value; } },
+    const ref = explainResult?.ref || null;
+    const preview = element('textarea', { rows: '9', readonly: true, spellcheck: 'false', 'aria-label': 'Попередній перегляд пакета' });
+    const label = element('input', { type: 'checkbox', onchange: event => { proposal.withLabel = event.target.checked; refresh(); } });
+    const refresh = () => {
+      label.disabled = !(ref && proposal.withContext);
+      label.checked = Boolean(ref && proposal.withContext && proposal.withLabel);
+      proposalStamp = new Date();
+      preview.value = proposalPackage(proposalStamp).text;
+    };
+    const kinds = element('select', { 'aria-label': 'Тип пропозиції', onchange: event => { proposal.kind = event.target.value; refresh(); } },
       ...PROPOSAL_KINDS.map(item => element('option', { value: item.id, text: item.label, selected: item.id === proposal.kind })));
-    const area = element('textarea', { rows: '4', maxlength: String(PROPOSAL_TEXT_LIMIT), 'aria-label': 'Опис пропозиції', placeholder: 'Що змінити чи додати і навіщо…', oninput: event => { proposal.text = event.target.value; } });
+    const area = element('textarea', { rows: '4', maxlength: String(PROPOSAL_TEXT_LIMIT), 'aria-label': 'Опис пропозиції', placeholder: 'Що змінити чи додати і навіщо…', oninput: event => { proposal.text = event.target.value; refresh(); } });
     area.value = proposal.text;
     const context = element('label', { class: 'ew-assistant-proposal-check' },
-      element('input', { type: 'checkbox', checked: proposal.withContext && !!explainResult, disabled: !explainResult, onchange: event => { proposal.withContext = event.target.checked; } }),
-      element('span', { text: explainResult ? `Додати назву елемента: «${explainResult.title}»` : 'Назву елемента буде додано після пояснення' }));
+      element('input', { type: 'checkbox', checked: Boolean(ref && proposal.withContext), disabled: !ref, onchange: event => {
+        proposal.withContext = event.target.checked;
+        if (!proposal.withContext) proposal.withLabel = false;
+        refresh();
+      } }),
+      element('span', { text: ref ? `Додати модуль і назву елемента з довідки: «${ref.title}». Значень із таблиці тут немає.` : 'Відомості про елемент можна додати після пояснення.' }));
+    const screenLabel = element('label', { class: 'ew-assistant-proposal-check' }, label,
+      element('span', { text: 'Додати також підпис елемента з екрана. Він береться з вашої таблиці й може містити, наприклад, назву підрозділу.' }));
+    refreshProposalPreview = refresh;
+    if (!proposalVersionLoad) void loadProposalVersion().then(() => refreshProposalPreview?.());
+    refresh();
     const file = element('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp', 'aria-label': 'Скриншот', onchange: event => {
       const picked = event.target.files?.[0] || null;
       const verdict = validateProposalImage(picked);
@@ -548,11 +585,13 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
       } }));
     return element('section', { class: 'ew-assistant-proposal', 'aria-label': 'Запропонувати правку чи функцію' },
       element('h3', { text: 'Запропонувати правку чи функцію' }),
-      element('p', { class: 'ew-assistant-note', text: 'Опишіть, що змінити. Пакет формується на цьому пристрої й нічого не надсилає автоматично: ви самі передаєте його розробнику в Signal.' }),
-      kinds, area, context,
+      element('p', { class: 'ew-assistant-note', text: 'Опишіть, що змінити. Пакет формується на цьому пристрої й нічого не надсилає автоматично: ви самі передаєте його розробнику в Signal. Типово в ньому лише тип, версія, дата й ваш опис; відомості про елемент додаються тільки за вашою позначкою.' }),
+      kinds, area, context, screenLabel,
       element('label', { class: 'ew-assistant-proposal-file' }, element('span', { text: 'Скриншот (необов’язково)' }), file),
       proposal.previewUrl ? element('img', { class: 'ew-assistant-proposal-preview', src: proposal.previewUrl, alt: 'Попередній перегляд скриншота' }) : null,
-      element('p', { class: 'ew-assistant-note', text: 'Перед додаванням скриншота переконайтеся, що на ньому немає реальних оперативних даних.' }),
+      element('p', { class: 'ew-assistant-note', text: 'Перед додаванням скриншота переконайтеся, що на ньому немає реальних оперативних даних. Те саме стосується опису: не вставляйте в нього рядки таблиць.' }),
+      element('p', { class: 'ew-assistant-note', text: 'Попередній перегляд: саме цей текст буде збережено або скопійовано.' }),
+      preview,
       actions,
       proposal.note ? element('p', { class: 'ew-assistant-status', role: 'status', text: proposal.note }) : null);
   }
