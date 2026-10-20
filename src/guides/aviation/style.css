@@ -112,3 +112,14 @@ footer p{margin:0;max-width:110ch}
   .ov.br{left:14px;right:14px;text-align:left}
 }
 @media (prefers-reduced-motion:reduce){.mk{transition:none}}
+/* Виноски уразливих місць: лінія від номера до підпису в стовпці біля краю сцени; рядок ТТХ під сценою. */
+.mk-lines{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none}
+.mk-lines polyline{fill:none;stroke:var(--threat);stroke-width:1;opacity:.55;transition:opacity .2s}
+.mk-lines polyline.hid{opacity:.18}.mk-lines polyline.on{opacity:1;stroke-width:1.5}
+.mk-l{position:absolute;left:0;top:0;display:flex;align-items:baseline;width:max-content;gap:6px;max-width:150px;box-sizing:border-box;padding:2px 0;border:0;background:none;color:var(--dim);font:500 11px/1.25 var(--mono);text-align:left;pointer-events:auto;cursor:pointer;transition:opacity .2s}
+.mk-l.left{flex-direction:row-reverse;text-align:right;padding-right:6px}.mk-l.right{padding-left:6px}
+.mk-l b{color:var(--threat);font-weight:600}.mk-l span{display:-webkit-box;overflow:hidden;-webkit-box-orient:vertical;-webkit-line-clamp:2;letter-spacing:.02em}
+.mk-l.hid{opacity:.4}.mk-l.on span,.mk-l:hover span{color:var(--fg)}
+.ttx{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:1px;margin:0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.ttx div{padding:8px 14px}.ttx dt{color:var(--faint);font:400 10px/1.3 var(--mono);letter-spacing:.06em;text-transform:uppercase}.ttx div{min-width:0}.ttx dd{margin:2px 0 0;overflow:hidden;font:500 15px/1.25 var(--mono);font-variant-numeric:tabular-nums;text-overflow:ellipsis;white-space:nowrap}
+@media (prefers-reduced-motion:reduce){.mk-l,.mk-lines polyline{transition:none}}
