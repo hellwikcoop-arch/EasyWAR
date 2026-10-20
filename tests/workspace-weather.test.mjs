@@ -10,6 +10,7 @@ import {
   GEOCODE_HOST,
   MAX_PLACES,
   REFRESH_MINUTES,
+  photoKey,
   STALE_MINUTES,
   addPlace,
   ageText,
@@ -371,4 +372,23 @@ test('значок і назва явища: код WMO, слова, хмарн�
   assert.equal(view.coverIcon, 'cover-9');
   assert.equal(observationView(manualObservation({ visibility: 10 }, NOW).observation, NOW).toneLabel, 'Без обмежень');
   assert.equal(observationView(manualObservation({ visibility: 10 }, NOW).observation, NOW).coverIcon, '');
+});
+
+test('фото явища: код WMO, слова поза кодами, без даних — без фото; кожне фото є у папці', async () => {
+  assert.equal(photoKey(observationFromOnline({ weatherCode: 45, cloudCover: 100 }, NOW)), 'fog');
+  assert.equal(photoKey(observationFromOnline({ weatherCode: 99 }, NOW)), 'storm-heavy');
+  assert.equal(photoKey(manualObservation({ cover: 8, phenomenon: 'мокрий сніг' }, NOW).observation), 'sleet');
+  assert.equal(photoKey(manualObservation({ cover: 2, phenomenon: 'Імла' }, NOW).observation), 'haze');
+  assert.equal(photoKey(manualObservation({ cover: 9 }, NOW).observation), 'overcast');
+  assert.equal(photoKey(manualObservation({ lower: 300 }, NOW).observation), '');
+  assert.equal(photoKey(null), '');
+  const keys = new Set();
+  for (const code of Object.keys(WMO_LABELS)) keys.add(photoKey({ weatherCode: Number(code) }));
+  for (const word of ['мокрий сніг', 'град', 'імла']) keys.add(photoKey({ phenomenon: word }));
+  keys.delete('');
+  for (const key of keys) {
+    const file = await readFile(new URL(`src/workspace/weather/photos/workspace-weather-${key}.webp`, root));
+    assert.ok(file.length > 500 && file.length < 16 * 1024, key);
+  }
+  assert.equal(keys.size, 15);
 });

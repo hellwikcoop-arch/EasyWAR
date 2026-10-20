@@ -353,6 +353,27 @@ export function iconKey(observation) {
   return 'wmo-3';
 }
 
+const PHOTO_BY_CODE = {
+  0: 'clear', 1: 'partly', 2: 'cloudy', 3: 'overcast', 45: 'fog', 48: 'fog',
+  51: 'drizzle', 53: 'drizzle', 55: 'drizzle', 56: 'freezing', 57: 'freezing', 66: 'freezing', 67: 'freezing',
+  61: 'rain', 63: 'rain', 65: 'shower', 80: 'shower', 81: 'shower', 82: 'shower',
+  71: 'snow', 73: 'snow', 75: 'snow', 77: 'snow', 85: 'snow', 86: 'snow',
+  95: 'storm', 96: 'storm-heavy', 99: 'storm-heavy',
+};
+const PHOTO_BY_WORD = [[/мокр\S* сніг/u, 'sleet'], [/град/u, 'hail'], [/імл|серпан/u, 'haze']];
+
+/**
+ * Ключ фото явища (photos/workspace-weather-<ключ>.webp, аркуш власника): спершу слова, яких немає
+ * серед кодів WMO (мокрий сніг, град, імла), далі код значка. Без даних — '' і фото не показується.
+ */
+export function photoKey(observation) {
+  const event = text(observation?.phenomenon).toLocaleLowerCase('uk');
+  const byWord = event && !Number.isInteger(observation?.weatherCode) && PHOTO_BY_WORD.find(([pattern]) => pattern.test(event));
+  if (byWord) return byWord[1];
+  const match = /^wmo-(\d+)$/u.exec(iconKey(observation));
+  return match ? PHOTO_BY_CODE[Number(match[1])] ?? '' : '';
+}
+
 /** Назва явища для екрана: за кодом WMO (таблиця пакета референсів) або як введено. */
 export function phenomenonLabel(observation) {
   if (Number.isInteger(observation?.weatherCode) && WMO_LABELS[observation.weatherCode]) return WMO_LABELS[observation.weatherCode];
@@ -400,6 +421,7 @@ export function observationView(observation, now = new Date()) {
     wind: finite(observation.wind) ? weatherText.wind(observation.wind) : '',
     phenomenon: phenomenonLabel(observation),
     icon: iconKey(observation),
+    photo: photoKey(observation),
     coverIcon: finite(observation.cover) ? `cover-${Math.round(clamp(observation.cover, 0, 10))}` : '',
     toneLabel: TONE_LABELS[hazard.tone] ?? TONE_LABELS[''],
     source: observation.source === 'online' ? `Open-Meteo, ${timeLabel(observation.time)}` : `вручну, ${timeLabel(observation.time)}`,

@@ -24,6 +24,12 @@ import {
 import { CARD_ICON, WEATHER_ICONS } from './weather-icons.js';
 import './weather.css';
 
+// Фото явищ — фрагменти аркуша власника (20.10.2026); префікс workspace- тримає їх поза офлайн-кешем телефона.
+const PHOTOS = Object.fromEntries(
+  Object.entries(import.meta.glob('./photos/*.webp', { eager: true, query: '?url', import: 'default' }))
+    .map(([path, url]) => [path.replace(/^.*workspace-weather-|\.webp$/gu, ''), url]),
+);
+
 export const contract = 1;
 
 const CHECK_MS = 60 * 1000;
@@ -273,7 +279,21 @@ export async function mount(container, host) {
     const view = observationView(state.observations[place.id]);
     const heading = el('div', 'wx-card-head');
     const name = el('div', 'wx-card-title');
-    name.append(icon(view?.icon || 'unknown', 'wx-icon wx-icon-big'), el('h2', '', placeLabel(place)));
+    if (view?.photo && PHOTOS[view.photo]) {
+      const photo = el('img', 'wx-photo');
+      photo.src = PHOTOS[view.photo];
+      photo.alt = view.phenomenon || '';
+      photo.width = 120;
+      photo.height = 80;
+      name.append(photo);
+    } else {
+      name.append(icon(view?.icon || 'unknown', 'wx-icon wx-icon-big'));
+    }
+    const titleText = el('div', 'wx-card-name');
+    titleText.append(el('h2', '', placeLabel(place)));
+    const summary = [view?.temperature, view?.phenomenon].filter(Boolean).join(' · ');
+    if (summary) titleText.append(el('span', 'wx-card-phenomenon', summary));
+    name.append(titleText);
     heading.append(name);
     if (!view) {
       card.dataset.tone = '';
@@ -294,11 +314,9 @@ export async function mount(container, host) {
       metric('Вітер біля землі', view.windGround, view.windNote, 'wind'),
       metric('Атмосферний тиск', view.pressure, view.pressureNote, 'pressure'),
     );
-    const extra = el('p', 'wx-extra', [view.temperature, view.phenomenon].filter(Boolean).join(' · '));
     const hazard = el('p', 'wx-hazard', view.tone ? `${view.toneLabel} · ${view.hazardText}` : view.hazardText);
     const parts = [heading, hazard, metrics, ground];
     if (view.windsAloft.length) parts.push(aloftTable(view.windsAloft));
-    if (extra.textContent) parts.push(extra);
     card.replaceChildren(...parts);
   }
 
