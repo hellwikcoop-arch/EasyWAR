@@ -491,6 +491,53 @@ try {
   await airFrame.locator('.dpanel h2', { hasText: 'Час доби' }).first().click();
   await panel.locator('.ew-assistant-explain h3', { hasText: 'Час доби' }).waitFor();
   await page.screenshot({ path: '/tmp/easywar-shots/assistant-explain-panel.png', fullPage: true });
+  // Пропозиція після пояснення: типово в пакеті немає відомостей про елемент; статичні додаються однією позначкою,
+  // підпис з екрана (він може бути з таблиці) — окремою; перегляд показує рівно той текст, який буде збережено.
+  await airFrame.locator('.kc', { hasText: 'Вильоти' }).first().click();
+  await panel.locator('.ew-assistant-explain h3', { hasText: 'Вильоти' }).waitFor();
+  const afterExplain = panel.locator('.ew-assistant-proposal');
+  const previewBox = afterExplain.getByLabel('Попередній перегляд пакета');
+  const contextBox = afterExplain.getByLabel(/Додати модуль і назву елемента з довідки/u);
+  const labelBox = afterExplain.getByLabel(/Додати також підпис елемента з екрана/u);
+  await afterExplain.getByLabel('Опис пропозиції').fill('Пояснення вильотів неточне');
+  assert.equal(await contextBox.isChecked(), false, 'відомості про елемент вимкнені за замовчуванням');
+  assert.equal(await labelBox.isChecked(), false);
+  assert.equal(await labelBox.isDisabled(), true, 'підпис з екрана недоступний без статичного контексту');
+  let preview = await previewBox.inputValue();
+  assert.match(preview, /Пояснення вильотів неточне/u);
+  assert.match(preview, /Версія: \d+\.\d+\.\d+/u, 'версія з\u2019являється в перегляді після її читання');
+  assert.ok(!/Модуль:|Елемент:|Ідентифікатор пояснення:|Підпис на екрані/u.test(preview), preview);
+  await contextBox.check();
+  preview = await previewBox.inputValue();
+  assert.match(preview, /Модуль: ПС/u);
+  assert.match(preview, /Елемент: Картка кількості записів/u);
+  assert.match(preview, /Ідентифікатор пояснення: count/u);
+  assert.ok(!/Підпис на екрані/u.test(preview), 'статичний контекст не містить підпису з екрана');
+  assert.equal(await labelBox.isDisabled(), false);
+  await labelBox.check();
+  preview = await previewBox.inputValue();
+  assert.match(preview, /Підпис на екрані \(додано користувачем, може бути з таблиці\): Вильоти/u);
+  assert.match(preview, /може містити текст із таблиці/u);
+  const [explainDownload] = await Promise.all([page.waitForEvent('download'), afterExplain.getByRole('button', { name: 'Зберегти пакет' }).click()]);
+  assert.equal(await readFile(await explainDownload.path(), 'utf8'), preview, 'файл збігається з переглядом');
+  await labelBox.uncheck();
+  assert.ok(!/Підпис на екрані/u.test(await previewBox.inputValue()));
+  await contextBox.uncheck();
+  assert.equal(await labelBox.isDisabled(), true);
+  assert.ok(!/Модуль:|Елемент:/u.test(await previewBox.inputValue()));
+  await contextBox.check();
+  await labelBox.check();
+  // Новий клік по елементу скидає згоду на підпис (вона стосувалася попереднього), статичний контекст лишається.
+  await airFrame.locator('.kh-eff').click();
+  await panel.locator('.ew-assistant-explain h3', { hasText: 'Ефективність' }).waitFor();
+  assert.equal(await labelBox.isChecked(), false);
+  assert.equal(await contextBox.isChecked(), true);
+  assert.match(await previewBox.inputValue(), /Ідентифікатор пояснення: efficiency/u);
+  assert.ok(!/Підпис на екрані/u.test(await previewBox.inputValue()));
+  await contextBox.uncheck();
+  await afterExplain.getByLabel('Опис пропозиції').fill('');
+  // Фокус повертаємо в модуль (позначки пакета перебирали в панелі): Esc має дійти саме до нього.
+  await airFrame.evaluate(() => window.focus());
   // Esc у модулі виходить з режиму; після цього кліки знову виконують дії.
   await airFrame.locator('body').press('Escape');
   await page.waitForFunction(() => document.querySelector('.ew-assistant-explain-toggle')?.getAttribute('aria-pressed') === 'false');
@@ -512,7 +559,8 @@ try {
   await proposal.waitFor();
   await proposal.getByRole('button', { name: 'Зберегти пакет' }).click();
   assert.match(await proposal.innerText(), /Опишіть пропозицію/u);
-  await proposal.locator('textarea').fill('Додати експорт зведення у CSV для звіту');
+  await proposal.getByLabel('Опис пропозиції').fill('Додати експорт зведення у CSV для звіту');
+  assert.equal(await proposal.getByLabel(/Додати модуль і назву елемента з довідки/u).isChecked(), false, 'відомості про елемент не додаються без позначки');
   await proposal.locator('select').selectOption('feature');
   const [download] = await Promise.all([page.waitForEvent('download'), proposal.getByRole('button', { name: 'Зберегти пакет' }).click()]);
   assert.match(download.suggestedFilename(), /^easywar-propozytsiia-\d{8}-\d{4}\.md$/u);
@@ -520,6 +568,7 @@ try {
   assert.match(saved, /Тип: Нова функція/u);
   assert.match(saved, /Додати експорт зведення у CSV/u);
   assert.match(saved, /Таблиці й записи в нього не входять/u);
+  assert.ok(!/Модуль:|Елемент:|Ідентифікатор пояснення:|Підпис на екрані/u.test(saved), 'пакет без контексту не має відомостей про елемент');
   assert.match(await proposal.innerText(), /Пакет збережено/u);
 
   // Locking clears the panel and pending answers immediately.

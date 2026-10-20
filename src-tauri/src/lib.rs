@@ -2,12 +2,15 @@ pub mod analytics;
 mod app_update;
 pub mod backup;
 pub mod base_tables;
+pub mod dashboard_modules;
 mod database;
 mod desktop_shell;
 pub mod local_model;
 pub mod local_profiles;
 mod migration_startup;
 pub mod model_install;
+pub mod module_source;
+pub mod office_files;
 pub mod phone_export;
 pub mod position_templates;
 pub mod profile_table;
@@ -30,6 +33,10 @@ use app_update::{AppUpdateStatus, PendingUpdate};
 use backup::BackupStore;
 use base_tables::BaseTable;
 use chrono::{SecondsFormat, Utc};
+use dashboard_modules::{
+    DashboardModule, DashboardModuleData, DashboardModuleStore, DashboardModuleTemplate,
+    NewImportCorrection,
+};
 use database::{DatabaseStatus, DatabaseStatusStore};
 use local_model::{
     GenerationRequest, LocalModelRuntime, LocalModelSettings, LocalModelStatus, LocalModelStore,
@@ -124,6 +131,210 @@ async fn get_dashboard_model(
 }
 
 #[tauri::command]
+fn get_dashboard_module_catalog() -> Vec<DashboardModuleTemplate> {
+    dashboard_modules::catalog()
+}
+
+fn active_profile_id(session: &ProfileSession) -> Result<String, String> {
+    session
+        .get()
+        .ok_or_else(|| dashboard_modules::DashboardModuleError::ProfileRequired.to_string())
+}
+
+#[tauri::command]
+async fn list_dashboard_modules(
+    modules: tauri::State<'_, DashboardModuleStore>,
+    session: tauri::State<'_, ProfileSession>,
+    branch: String,
+) -> Result<Vec<DashboardModule>, String> {
+    modules
+        .list(&active_profile_id(&session)?, &branch)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// `rows` — дані, підтягнуті з таблиці користувача: модуль створюється разом із ними
+/// однією транзакцією. Без `rows` таблиця модуля порожня.
+#[tauri::command]
+async fn create_dashboard_module(
+    modules: tauri::State<'_, DashboardModuleStore>,
+    session: tauri::State<'_, ProfileSession>,
+    branch: String,
+    template_id: String,
+    title: Option<String>,
+    rows: Option<Vec<serde_json::Map<String, Value>>>,
+    corrections: Option<Vec<NewImportCorrection>>,
+) -> Result<DashboardModule, String> {
+    let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
+    modules
+        .create_with_import(
+            &active_profile_id(&session)?,
+            &branch,
+            &template_id,
+            title.as_deref(),
+            rows.unwrap_or_default(),
+            corrections.unwrap_or_default(),
+            &now,
+        )
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// Файл, який користувач сам обрав у вікні вибору, щоб підтягнути з нього дані в
+/// модуль. Шлях береться лише з вікна вибору: від інтерфейсу шлях не приймається.
+#[derive(Default)]
+struct ModuleSourceSelection(std::sync::Mutex<Option<PathBuf>>);
+
+impl ModuleSourceSelection {
+    fn get(&self) -> Option<PathBuf> {
+        self.0.lock().map(|guard| guard.clone()).unwrap_or(None)
+    }
+
+    fn set(&self, value: Option<PathBuf>) {
+        if let Ok(mut guard) = self.0.lock() {
+            *guard = value;
+        }
+    }
+}
+
+fn dashboard_branch(branch: &str) -> Result<Branch, String> {
+    match Branch::parse(branch) {
+        Ok(parsed @ (Branch::Air | Branch::Rocket | Branch::Pvk | Branch::Dshv)) => Ok(parsed),
+        _ => Err(dashboard_modules::DashboardModuleError::InvalidBranch.to_string()),
+    }
+}
+
+fn inspect_source_file(path: &Path, origin: &str) -> Result<module_source::SourceWorkbook, String> {
+    let bytes = read_selected_xlsx(path)?;
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    module_source::inspect_bytes(&bytes, &name, origin).map_err(|error| error.to_string())
+}
+
+/// Аркуші таблиці, прив'язаної до активного профілю для цього дашборда. З неї модуль
+/// під час створення підтягує дані. Лише читання; `None`, якщо таблицю не прив'язано.
+#[tauri::command]
+async fn inspect_linked_module_source(
+    profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
+    branch: String,
+) -> Result<Option<module_source::SourceWorkbook>, String> {
+    let branch = dashboard_branch(&branch)?;
+    let profile_id = active_profile_id(&session)?;
+    let Some(path) = profiles
+        .table_path(&profile_id, branch)
+        .await
+        .map_err(|error| error.to_string())?
+        .map(PathBuf::from)
+    else {
+        return Ok(None);
+    };
+    tauri::async_runtime::spawn_blocking(move || inspect_source_file(&path, "linked"))
+        .await
+        .map_err(|error| error.to_string())?
+        .map(Some)
+}
+
+/// Вікно вибору файла .xlsx, з якого модуль підтягне дані. Файл не прив'язується до
+/// профілю й не змінюється; його шлях лишається лише в пам'яті на час створення.
+#[tauri::command]
+async fn pick_module_source(
+    app: tauri::AppHandle,
+    session: tauri::State<'_, ProfileSession>,
+    selection: tauri::State<'_, ModuleSourceSelection>,
+) -> Result<Option<module_source::SourceWorkbook>, String> {
+    active_profile_id(&session)?;
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title("Оберіть таблицю XLSX з даними для модуля")
+            .add_filter("Таблиця XLSX", &["xlsx"])
+            .blocking_pick_file()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let path = selected.into_path().map_err(|error| error.to_string())?;
+    let inspected = {
+        let path = path.clone();
+        tauri::async_runtime::spawn_blocking(move || inspect_source_file(&path, "picked"))
+            .await
+            .map_err(|error| error.to_string())??
+    };
+    selection.set(Some(path));
+    Ok(Some(inspected))
+}
+
+/// Усі непорожні рядки одного аркуша таблиці для підтягування в модуль. `origin` —
+/// `linked` (прив'язана таблиця профілю) або `picked` (файл, обраний у вікні вибору).
+#[tauri::command]
+async fn read_module_source_sheet(
+    profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
+    selection: tauri::State<'_, ModuleSourceSelection>,
+    origin: String,
+    branch: String,
+    sheet: String,
+) -> Result<module_source::SourceSheetRows, String> {
+    let profile_id = active_profile_id(&session)?;
+    let path = match origin.as_str() {
+        "linked" => profiles
+            .table_path(&profile_id, dashboard_branch(&branch)?)
+            .await
+            .map_err(|error| error.to_string())?
+            .map(PathBuf::from)
+            .ok_or_else(|| "До профілю не прив'язано таблицю".to_owned())?,
+        "picked" => selection
+            .get()
+            .ok_or_else(|| "Файл таблиці не обрано".to_owned())?,
+        _ => return Err("Невідоме джерело таблиці".to_owned()),
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        let bytes = read_selected_xlsx(&path)?;
+        module_source::read_sheet_bytes(&bytes, &sheet).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn get_dashboard_module_data(
+    modules: tauri::State<'_, DashboardModuleStore>,
+    session: tauri::State<'_, ProfileSession>,
+    module_id: String,
+) -> Result<DashboardModuleData, String> {
+    modules
+        .get_data(&active_profile_id(&session)?, &module_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn replace_dashboard_module_rows(
+    modules: tauri::State<'_, DashboardModuleStore>,
+    session: tauri::State<'_, ProfileSession>,
+    module_id: String,
+    rows: Vec<serde_json::Map<String, Value>>,
+    expected_updated_at: Option<String>,
+) -> Result<DashboardModuleData, String> {
+    let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
+    modules
+        .replace_rows(
+            &active_profile_id(&session)?,
+            &module_id,
+            rows,
+            expected_updated_at.as_deref(),
+            &now,
+        )
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn get_local_profiles(
     profiles: tauri::State<'_, LocalProfileStore>,
 ) -> Result<LocalProfilesState, String> {
@@ -193,7 +404,11 @@ async fn rename_local_profile(
         .map_err(|error| error.to_string())
 }
 
-/// Вхід у профіль: для захищеного профілю потрібен пароль.
+/// Вхід у профіль: для захищеного профілю потрібен пароль. Після п'яти неправильних
+/// паролів поспіль вхід у цей профіль зупиняється на 30 с, далі пауза подвоюється (до
+/// 10 хв); перший правильний пароль скидає лічильник. Лічильник лише в пам'яті процесу
+/// і спільний із підтвердженням чинного пароля в `set_local_profile_password`.
+/// Профіль без пароля, як і раніше, приймає будь-який пароль.
 #[tauri::command]
 async fn activate_local_profile(
     profiles: tauri::State<'_, LocalProfileStore>,
@@ -264,7 +479,8 @@ async fn get_local_model_status(
 }
 
 /// Користувач сам обирає папку пакета моделі; перевіряються маніфест і SHA-256 файлів.
-/// Модель після цього лишається вимкненою, поки її не ввімкнуть окремо.
+/// Після успішної перевірки модель одразу вмикається (`enabled: true`); вимкнути її можна
+/// окремо командою `set_local_model_enabled`.
 #[tauri::command]
 async fn choose_local_model_package(
     app: tauri::AppHandle,
@@ -391,6 +607,9 @@ struct InstallResult {
 
 /// Явне встановлення моделі: завантаження, перевірка SHA-256, а за наявності
 /// рушія поруч — запис маніфесту й повна перевірка пакета. Починається лише з цієї команди.
+/// Підтвердження в інтерфейсі сторінки не є захистом (його може оминути будь-який скрипт
+/// вікна), тому перед першим мережевим запитом, зокрема й при поновленні завантаження,
+/// Rust сам показує нативне вікно «Так/Ні». Відмова повертає `outcome: "cancelled"`.
 #[tauri::command]
 async fn install_local_model(
     app: tauri::AppHandle,
@@ -407,13 +626,18 @@ async fn install_local_model(
     let emit: model_install::Emit = std::sync::Arc::new(move |event| {
         let _ = on_event.send(event);
     });
-    match model_install::install_model(&source, &dir, &guard, emit).await {
+    match model_install::install_model(&source, &dir, &guard, emit, model_install::native_consent())
+        .await
+    {
         Ok(_) => {}
-        Err(model_install::InstallError::Cancelled) => {
+        Err(
+            error
+            @ (model_install::InstallError::Cancelled | model_install::InstallError::Declined),
+        ) => {
             return Ok(InstallResult {
                 outcome: "cancelled",
                 status: local_model_status_now(&store, &runtime).await?,
-                message: Some(model_install::InstallError::Cancelled.to_string()),
+                message: Some(error.to_string()),
             });
         }
         Err(error) => return Err(error.to_string()),
@@ -552,6 +776,10 @@ async fn update_local_profile_details(
         .map_err(|error| error.to_string())
 }
 
+/// Встановлює або змінює пароль профілю. Профіль із паролем: лише з сесії цього профілю
+/// і з чинним паролем. Профіль без пароля (з версій до обов'язкового пароля): з власної
+/// сесії або поки ніхто не ввійшов, бо саме так екран входу просить встановити пароль
+/// перед першим входом (`local_profiles::authorize_password_change`).
 #[tauri::command]
 async fn set_local_profile_password(
     profiles: tauri::State<'_, LocalProfileStore>,
@@ -564,6 +792,12 @@ async fn set_local_profile_password(
     if new_password.is_none() {
         return Err(local_profiles::LocalProfileError::PasswordRequired.to_string());
     }
+    let has_password = profiles
+        .has_password(&profile_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    local_profiles::authorize_password_change(has_password, session.get().as_deref(), &profile_id)
+        .map_err(|error| error.to_string())?;
     let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
     let state = profiles
         .set_password(
@@ -637,7 +871,11 @@ struct CreatedBaseTable {
     path: String,
 }
 
-/// Зберігає готову презентацію (.pptx) у файл, який обирає користувач. Дані не залишають пристрій.
+/// Зберігає готову презентацію (.pptx або .pdf) у файл, який обирає користувач. Дані не
+/// залишають пристрій. Запис іде через тимчасовий файл; якщо розширення дописали ми
+/// («report» → «report.pptx») і такий файл уже є, він не затирається, а команда повертає
+/// помилку: вікно збереження про заміну саме не питало. Заміну, підтверджену самим вікном
+/// (обрано вже наявний «report.pptx»), виконано.
 #[tauri::command]
 async fn save_presentation(
     app: tauri::AppHandle,
@@ -671,19 +909,199 @@ async fn save_presentation(
     let Some(selected) = selected else {
         return Ok(None);
     };
-    let mut path = selected.into_path().map_err(|error| error.to_string())?;
-    if !path
-        .extension()
-        .is_some_and(|current| current.eq_ignore_ascii_case(extension))
-    {
-        path.as_mut_os_string().push(format!(".{extension}"));
-    }
-    let target = path.clone();
-    tauri::async_runtime::spawn_blocking(move || std::fs::write(&target, bytes))
+    let target = phone_export::save_target(
+        selected.into_path().map_err(|error| error.to_string())?,
+        &[extension],
+        extension,
+    );
+    let path = target.path.clone();
+    tauri::async_runtime::spawn_blocking(move || phone_export::save_file(&target, &bytes))
         .await
         .map_err(|error| error.to_string())?
         .map_err(|error| error.to_string())?;
     Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+/// Файл, який застосунок розділу «Офіс» відкрив через EasyWAR: шлях лишається в Rust.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OfficeOpenedFile {
+    handle: String,
+    name: String,
+    bytes: Vec<u8>,
+}
+
+/// Параметри вікна вибору чи збереження файла (`extensions` — без крапки, перше —
+/// типове для «Зберегти як…»).
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OfficeFileDialog {
+    extensions: Vec<String>,
+    title: Option<String>,
+    filter_name: Option<String>,
+    suggested_name: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OfficeSavedFile {
+    handle: String,
+    name: String,
+}
+
+/// Таблиці, прив'язані до будь-якого профілю: застосунки «Офісу» їх не перезаписують.
+async fn office_bound_tables(profiles: &LocalProfileStore) -> Result<Vec<PathBuf>, String> {
+    Ok(profiles
+        .all_table_paths()
+        .await
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .map(PathBuf::from)
+        .collect())
+}
+
+/// Вікно вибору файла для застосунку «Офісу» (EasyGreen, EasyDoc, EasySlide). Повертає
+/// номер, назву й байти; `None` — користувач закрив вікно. Потрібен активний профіль.
+#[tauri::command]
+async fn office_open_file(
+    app: tauri::AppHandle,
+    session: tauri::State<'_, ProfileSession>,
+    handles: tauri::State<'_, office_files::OfficeFileHandles>,
+    options: OfficeFileDialog,
+) -> Result<Option<OfficeOpenedFile>, String> {
+    let profile_id = active_profile_id(&session)?;
+    let extensions = office_files::normalize_extensions(&options.extensions)
+        .map_err(|error| error.to_string())?;
+    let title = office_files::clean_label(options.title.as_deref(), "Відкрити файл");
+    let filter_name = office_files::clean_label(options.filter_name.as_deref(), "Документи");
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        let filter: Vec<&str> = extensions.iter().map(String::as_str).collect();
+        app.dialog()
+            .file()
+            .set_title(title)
+            .add_filter(filter_name, &filter)
+            .blocking_pick_file()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let path = selected.into_path().map_err(|error| error.to_string())?;
+    let bytes = {
+        let path = path.clone();
+        tauri::async_runtime::spawn_blocking(move || -> Result<Vec<u8>, String> {
+            let size = std::fs::metadata(&path)
+                .map_err(|error| error.to_string())?
+                .len();
+            if size > office_files::MAX_FILE_BYTES as u64 {
+                return Err(office_files::OfficeFileError::TooLarge.to_string());
+            }
+            std::fs::read(&path).map_err(|error| error.to_string())
+        })
+        .await
+        .map_err(|error| error.to_string())??
+    };
+    let name = office_files::file_name(&path);
+    let handle = handles.remember(&profile_id, path);
+    Ok(Some(OfficeOpenedFile {
+        handle,
+        name,
+        bytes,
+    }))
+}
+
+/// «Зберегти»: записує байти у файл, раніше відкритий або збережений за цим номером.
+/// Таблицю, прив'язану до профілю, так не перезаписати: лише «Зберегти як…» в інший файл.
+#[tauri::command]
+async fn office_save_file(
+    profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
+    handles: tauri::State<'_, office_files::OfficeFileHandles>,
+    handle: String,
+    bytes: Vec<u8>,
+) -> Result<OfficeSavedFile, String> {
+    let profile_id = active_profile_id(&session)?;
+    office_files::check_size(&bytes).map_err(|error| error.to_string())?;
+    let path = handles
+        .path(&profile_id, &handle)
+        .map_err(|error| error.to_string())?;
+    office_files::ensure_not_protected(&path, &office_bound_tables(&profiles).await?)
+        .map_err(|error| error.to_string())?;
+    let name = office_files::file_name(&path);
+    let target = phone_export::SaveTarget {
+        path,
+        replace_confirmed: true,
+    };
+    tauri::async_runtime::spawn_blocking(move || phone_export::save_file(&target, &bytes))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())?;
+    Ok(OfficeSavedFile { handle, name })
+}
+
+/// «Зберегти як…»: вікно збереження й запис; повертає новий номер. `None` — вікно закрили.
+/// Перше розширення зі списку дописується, якщо користувач його прибрав.
+#[tauri::command]
+async fn office_save_file_as(
+    app: tauri::AppHandle,
+    profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
+    handles: tauri::State<'_, office_files::OfficeFileHandles>,
+    bytes: Vec<u8>,
+    options: OfficeFileDialog,
+) -> Result<Option<OfficeSavedFile>, String> {
+    let profile_id = active_profile_id(&session)?;
+    office_files::check_size(&bytes).map_err(|error| error.to_string())?;
+    let extensions = office_files::normalize_extensions(&options.extensions)
+        .map_err(|error| error.to_string())?;
+    let title = office_files::clean_label(options.title.as_deref(), "Зберегти файл");
+    let filter_name = office_files::clean_label(options.filter_name.as_deref(), "Документи");
+    let file_name =
+        office_files::suggested_file_name(options.suggested_name.as_deref(), "Документ");
+    let dialog_extensions = extensions.clone();
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        let filter: Vec<&str> = dialog_extensions.iter().map(String::as_str).collect();
+        app.dialog()
+            .file()
+            .set_title(title)
+            .set_file_name(file_name)
+            .add_filter(filter_name, &filter)
+            .blocking_save_file()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let accepted: Vec<&str> = extensions.iter().map(String::as_str).collect();
+    let target = phone_export::save_target(
+        selected.into_path().map_err(|error| error.to_string())?,
+        &accepted,
+        &extensions[0],
+    );
+    office_files::ensure_not_protected(&target.path, &office_bound_tables(&profiles).await?)
+        .map_err(|error| error.to_string())?;
+    let path = target.path.clone();
+    tauri::async_runtime::spawn_blocking(move || phone_export::save_file(&target, &bytes))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())?;
+    let name = office_files::file_name(&path);
+    let handle = handles.remember(&profile_id, path);
+    Ok(Some(OfficeSavedFile { handle, name }))
+}
+
+/// Застосунок закрив файл: номер більше не приймається.
+#[tauri::command]
+fn office_close_file(
+    session: tauri::State<'_, ProfileSession>,
+    handles: tauri::State<'_, office_files::OfficeFileHandles>,
+    handle: String,
+) -> Result<(), String> {
+    let profile_id = active_profile_id(&session)?;
+    handles.forget(&profile_id, &handle);
+    Ok(())
 }
 
 /// Зберігає порожню базову таблицю в новий файл і прив'язує її до профілю
@@ -746,7 +1164,8 @@ struct PhoneExportResult {
 /// вбудованих ресурсів у місце, яке обрав користувач. З `with_table` у файл кладеться
 /// копія таблиці, прив'язаної до плитки активного профілю (профіль із паролем має бути
 /// розблокований); без нього даних у файлі немає. Повертає `None`, якщо вікно вибору
-/// закрито.
+/// закрито. Наявний файл не затирається, якщо розширення `.html` дописали ми
+/// (див. `save_presentation`).
 #[tauri::command]
 async fn export_phone_file(
     app: tauri::AppHandle,
@@ -807,10 +1226,10 @@ async fn export_phone_file(
     let Some(selected) = selected else {
         return Ok(None);
     };
-    let path =
-        phone_export::with_html_extension(selected.into_path().map_err(|error| error.to_string())?);
-    let target = path.clone();
-    tauri::async_runtime::spawn_blocking(move || phone_export::write_file(&target, &bytes))
+    let target =
+        phone_export::html_save_target(selected.into_path().map_err(|error| error.to_string())?);
+    let path = target.path.clone();
+    tauri::async_runtime::spawn_blocking(move || phone_export::save_file(&target, &bytes))
         .await
         .map_err(|error| error.to_string())?
         .map_err(|error| format!("Не вдалося зберегти файл: {error}"))?;
@@ -1563,21 +1982,35 @@ pub fn run() {
                 .build(),
         )
         .setup(move |app| {
-            let resolved_database_file = app.path().app_config_dir()?.join(database_name);
+            // `setup` виконується вже в циклі подій, і Tauri відповідає на його помилку панікою,
+            // якої без консолі (Windows) не видно: тут помилку показує нативне вікно, далі вихід
+            // (на Linux лише stderr, бо вікно в заблокованому `setup` не з'явилося б).
+            let dialogs = startup_recovery::SetupDialogs;
+            let resolved_database_file = startup_recovery::or_exit(
+                &dialogs,
+                app.path().app_config_dir(),
+                "Не вдалося визначити директорію конфігурації EasyWAR",
+            )
+            .join(database_name);
             if resolved_database_file != setup_database_file {
-                return Err(
-                    "шлях локальної бази не збігається з перевіреним startup-шляхом".into(),
+                startup_recovery::exit_with(
+                    &dialogs,
+                    "шлях локальної бази не збігається з перевіреним startup-шляхом.",
                 );
             }
             let options = SqliteConnectOptions::new()
                 .filename(&setup_database_file)
                 .foreign_keys(true)
                 .busy_timeout(Duration::from_secs(5));
-            let pool = tauri::async_runtime::block_on(
-                SqlitePoolOptions::new()
-                    .max_connections(1)
-                    .connect_with(options),
-            )?;
+            let pool = startup_recovery::or_exit(
+                &dialogs,
+                tauri::async_runtime::block_on(
+                    SqlitePoolOptions::new()
+                        .max_connections(1)
+                        .connect_with(options),
+                ),
+                "Не вдалося підключитися до локальної бази",
+            );
             app.manage(SignalSettingsStore::new(SettingsStore::new(pool.clone())));
             app.manage(AutoUpdateStore::new(SettingsStore::new(pool.clone())));
             app.manage(Repository::new(pool.clone()));
@@ -1589,17 +2022,32 @@ pub fn run() {
             app.manage(WorkspaceTemplateStore::new(pool.clone()));
             app.manage(SignalReceiveController::default());
             app.manage(DatabaseStatusStore::new(pool.clone()));
+            app.manage(DashboardModuleStore::new(pool.clone()));
+            app.manage(ModuleSourceSelection::default());
+            app.manage(office_files::OfficeFileHandles::default());
             app.manage(BackupStore::new(pool));
             app.manage(LiveDatabasePath(setup_database_file));
             app.manage(instance_lock);
             app.manage(restore_startup_report);
             app.manage(PendingUpdate::default());
-            desktop_shell::create_main_window(app)?;
+            startup_recovery::or_exit(
+                &dialogs,
+                desktop_shell::create_main_window(app),
+                "Не вдалося створити головне вікно",
+            );
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             get_database_status,
             get_dashboard_model,
+            get_dashboard_module_catalog,
+            list_dashboard_modules,
+            create_dashboard_module,
+            inspect_linked_module_source,
+            pick_module_source,
+            read_module_source_sheet,
+            get_dashboard_module_data,
+            replace_dashboard_module_rows,
             get_local_profiles,
             register_local_profile,
             set_local_profile_modules,
@@ -1625,6 +2073,10 @@ pub fn run() {
             create_profile_base_table,
             export_phone_file,
             save_presentation,
+            office_open_file,
+            office_save_file,
+            office_save_file_as,
+            office_close_file,
             clear_profile_database,
             read_profile_database,
             write_profile_database,
@@ -1664,7 +2116,9 @@ pub fn run() {
             export_approved_xlsx_from_reference
         ])
         .build(context)
-        .expect("помилка запуску EasyWAR")
+        .unwrap_or_else(|error| {
+            startup_recovery::exit_with(&dialogs, &format!("помилка запуску EasyWAR: {error}."))
+        })
         .run(|app, event| {
             // Рушій локальної моделі — дочірній процес: при виході із застосунку його зупиняють явно.
             if matches!(event, tauri::RunEvent::Exit) {

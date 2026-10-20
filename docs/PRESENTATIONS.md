@@ -202,12 +202,15 @@ Rust-команда save_presentation                      ← нове, як wr
 ## Що потрібно змінити в коді
 
 Нові файли: `src/presentation-core.js`, `src/presentation-pptx.js`,
-`src-tauri/src/presentation_export.rs`, тести `tests/presentation-*.test.mjs`.
+`src/presentation-pdf.js`, `src/presentation-ui.js` та інші `src/presentation-*.js`,
+тести `tests/presentation-*.test.mjs`. Окремого Rust-модуля `presentation_export.rs`
+немає: запис файлу виконує команда `save_presentation`, яка разом з
+`export_phone_file` живе безпосередньо в `src-tauri/src/lib.rs`.
 
 Правки існуючих:
 
 - дашборди УДШВ і ПВК: кнопка «Презентація» і діалог вибору назви власника;
-- `lib.rs`: реєстрація команди;
+- `lib.rs`: команда `save_presentation` і її реєстрація;
 - `package.json`: залежність `pptxgenjs`;
 - профілі (`local-profiles`): поле «Назва для титулу» і мовчазне значення;
 - `docs/USER_GUIDE.md`, `docs/ROADMAP.md`, реліз-нотатки.

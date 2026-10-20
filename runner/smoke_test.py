@@ -22,6 +22,11 @@ import threading
 import time
 from pathlib import Path
 
+# У Windows stdout-канал (CI, перенаправлення) має кодову сторінку cp1252, якій невідомі літери
+# кирилиці: перша ж українська мітка перевірки падала з UnicodeEncodeError. Виводимо в UTF-8.
+for _stream in (sys.stdout, sys.stderr):
+    _stream.reconfigure(encoding="utf-8", errors="replace")
+
 LOAD_TIMEOUT = 120
 REPLY_TIMEOUT = 120
 

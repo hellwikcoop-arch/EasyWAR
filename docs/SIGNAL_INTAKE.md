@@ -59,40 +59,64 @@ subscription identifier, an explicit local account, and an object-valued raw
 envelope. Automatic-mode notifications, malformed JSON-RPC messages, invalid
 accounts, and events larger than 1 MiB are rejected.
 
-The Rust adapter also has a bounded receive operation for lifecycle testing. It
-opens the SSE stream before calling `subscribeReceive`, accepts 1–64 matching
+The Rust adapter also has a bounded receive operation (`receive_bounded`, and
+`receive_to_channel`, which streams the same lifecycle to the receive session).
+It opens the SSE stream before calling `subscribeReceive`, accepts 1–64 matching
 notifications within a caller-supplied timeout, and then calls
 `unsubscribeReceive`. The subscription is cancelled after success, timeout,
 stream termination, or decoder failure; a failed cleanup is surfaced as a
 separate error. Notifications from another subscription or account are not
 returned.
 
-The bounded operation is not registered as a Tauri command and cannot be
-started from the desktop UI. It does not run continuously, apply the allowlist,
-or persist content. Tests use a temporary loopback HTTP server that verifies
-the order `events → subscribeReceive → receive → unsubscribeReceive`, including
-cleanup after a malformed synthetic event. A production connector still needs
-acceptance against an installed local `signal-cli`; the repository currently
-proves the bounded lifecycle only against a synthetic loopback daemon.
+The bounded operation is a library function and is not itself a Tauri command.
+It does not run continuously, apply the allowlist, or persist content. The only
+way to start it from the desktop UI is the explicit receive session described
+below, which wraps it in the registered commands `run_signal_receive_session`,
+`stop_signal_receive_session` and `get_signal_receive_status` and adds the
+allowlist and persistence. Tests use a temporary loopback HTTP server that
+verifies the order `events → subscribeReceive → receive → unsubscribeReceive`,
+including cleanup after a malformed synthetic event. A production connector
+still needs acceptance against an installed local `signal-cli`; the repository
+currently proves the bounded lifecycle only against a synthetic loopback
+daemon. The adapter does not send a `version` request before
+`subscribeReceive`, so an incompatible daemon is detected only by a failing
+subscription (backlog P2-4, L9).
 
 ## Provenance capture bridge
 
 The Rust layer has a separate, non-command bridge that can accept one already
-decoded manual-receive notification. It rejects missing timestamps, sender
-identity, text messages, malformed group metadata, or a mismatch with the
-explicitly selected local account before any database write. It then requires
-intake to be enabled in a validated configuration and matches an exact sender
-plus, for group messages, an exact group. A denied or disabled source writes no
-rows.
+decoded manual-receive notification. It requires intake to be enabled in a
+validated configuration and decides in this order, all before any database
+write (`inspect_allowed_notification`):
+
+1. the notification's account must equal the explicitly selected local account
+   (`AccountMismatch`);
+2. the envelope must be a JSON object (`InvalidEnvelope`);
+3. the sender (`sourceUuid`, `sourceNumber` or `source`) must be on the
+   allowlist, by exact match; the group is not examined yet. A sender outside
+   the allowlist is always `SourceDenied`, even when the rest of the envelope
+   is malformed (no timestamp, `groupInfo` that is not an object and so on);
+4. only for an allowed sender: an envelope without `dataMessage.message` with
+   non-blank text is `NotTextMessage` (delivery receipt, typing, sync,
+   reaction, attachment without a caption, empty or whitespace message);
+5. a text message needs a numeric `timestamp` and valid `groupInfo`, otherwise
+   it is `InvalidEnvelope`;
+6. a group message is matched against the group allowlist, otherwise
+   `SourceDenied`.
+
+A denied or disabled source writes no rows.
 
 For an allowed synthetic notification, the bridge hashes the complete envelope
 and transactionally stores an immutable `SIGNAL` raw source, one `NEW` report,
 and its `CAPTURED` audit event. Deterministic hash-based identities make a
-repeated identical envelope fail closed at the database uniqueness boundary;
-the failed transaction leaves the first provenance chain unchanged. The raw
-message and envelope remain in the local provenance store but are not returned
-by the read-only Inbox list. Synthetic tests cover allowed, denied, disabled,
-wrong-group, malformed, and duplicate cases.
+repeated identical envelope (the same SHA-256, in this session or an earlier
+one) fail at the database uniqueness boundary; `persist_allowed_notification`
+reports it as the typed `SignalIngestError::Duplicate`, the transaction rolls
+back and the first provenance chain stays unchanged. The raw message and
+envelope remain in the local provenance store but are not returned by the
+read-only Inbox list. Synthetic tests cover allowed, denied, disabled,
+wrong-group, malformed text, duplicate, and non-duplicate database failure
+cases.
 
 The bridge is not itself a Tauri command and does not enable the saved desktop
 intake flag. It is used only by the explicit bounded session described below.
@@ -105,12 +129,20 @@ policy from the saved allowlist without changing the persisted
 `intake_enabled: false` setting. Only one session can run at a time. It accepts
 at most 64 matching-account notifications for at most five minutes and persists
 each allowed notification immediately through the provenance bridge. Sources
-outside the allowlist are counted, not stored, and do not terminate the session.
+outside the allowlist, envelopes without a text message (receipts, typing,
+sync, reactions, attachments without a caption) and envelopes that are already
+stored are counted as ignored, not stored, and do not terminate the session.
+The session summary has one `ignored` counter for all three. Ignored envelopes
+still count towards the 64-notification limit, so many service events can end a
+session with `limit_reached` before 64 reports are stored. Database errors
+(other than a duplicate envelope), a malformed text message from an allowed
+sender (no numeric `timestamp`, broken `groupInfo`), an account mismatch and
+daemon or protocol failures still end the session after unsubscribing.
 
 The user can press **Зупинити й відписатися**. Stop is delivered to the receive
 loop, which calls `unsubscribeReceive` before reporting completion. The same
 cleanup is required for the notification limit, timeout, decoder failure, or
-database error. The dialog cannot be dismissed while its session is active and
+a fatal error from the list above. The dialog cannot be dismissed while its session is active and
 shows an active receive state instead of the disconnected label. No session is
 started on application launch, account discovery, settings save, or Inbox
 refresh.
@@ -118,17 +150,33 @@ refresh.
 Synthetic tests verify single-session ownership, explicit Stop cleanup, bounded
 timeout/limit behavior, ephemeral policy activation, allowlist-gated capture,
 and the complete loopback path from SSE notification to a `NEW` SQLite Inbox
-record, including a denied notification followed by an allowed one. The UI and
-backend are built, but real daemon/account acceptance remains unverified because
-`signal-cli` is not installed in the current environment.
+record, including a denied notification followed by an allowed one. The
+non-fatal and fatal envelope cases are covered at the ingest level: a duplicate
+envelope is the typed `Duplicate` and writes nothing, a malformed text message
+from an allowed sender is rejected, and a database failure that is not a
+duplicate is reported as such and rolled back. The UI and backend are built, but
+real daemon/account acceptance remains unverified because `signal-cli` is not
+installed in the current environment.
 
 ## Commands during an explicit session
 
 An allowed sender can issue one of five exact slash commands while the explicit
 bounded session is active: `/help`, `/status`, `/ping`, `/queue`, or `/last`.
-Commands with arguments and unknown slash commands receive a bounded Ukrainian
-help response. The same account, sender, and group allowlist checks run before a
+Commands with arguments and unknown slash commands receive a one-line Ukrainian
+unknown-command reply that points to `/help`. The same account, sender, and group allowlist checks run before a
 command is recognized. A denied source receives no reply.
+
+Known limit: the parser treats any message that, after trimming, starts with `/`
+as a command. If it is longer than 64 characters, contains a control character
+(including a line break) or is not a single word, the reply is that unknown-command line
+and the message is not stored. So a report that starts with `/` (for example a
+date such as `/12.10 …`) from an allowed sender is answered with the one-line
+«Невідома команда EasyWAR. Надішліть /help для переліку команд.» and lost to the
+queue; the sender sees the reply, but EasyWAR keeps the raw text
+nowhere. If the reply cannot be sent, the session ends with an error. The
+proposed rule (a command is a single ASCII token `^/[A-Za-z][A-Za-z0-9_]*$` of
+up to 64 characters, everything else is stored as an ordinary report) awaits the
+owner's decision (backlog P2-15).
 
 The reply uses the local loopback JSON-RPC `send` method with the selected local
 account, an exact single `recipients` entry, and a bounded text body. Even when
@@ -211,6 +259,9 @@ XLSX rows, capture messages, or prove that a live connector is running.
 - a long-running or automatically restarted receive service;
 - account/group discovery over UNIX or raw TCP;
 - enabling or connecting a Signal account;
+- a `version` check of the daemon before `subscribeReceive` (backlog P2-4, L9);
+- storing a report that starts with `/` (backlog P2-15, L8);
+- a retention or cleanup path for stored envelopes (`raw_payload_json`, L11);
 - live-daemon acceptance of Signal Inbox capture and parsing.
 
 All tests use synthetic configuration values only, including the disconnected

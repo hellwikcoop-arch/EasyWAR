@@ -77,7 +77,11 @@ export async function buildPage({ page, command, file }, outDir) {
     logLevel: 'warn',
     publicDir: false,
     // ПВК (air.html) у командному режимі не має кнопки «Презентація»: код презентації в його файл не потрапляє.
-    define: page === 'air' ? { __EW_NO_MODULE_PRESENTATION__: 'true' } : {},
+    // 3D-рельєф погоди потребує висот із map-assets, яких в автономному файлі немає: three.js туди не вбудовується.
+    // Каталог модулів працює лише з SQLite застосунку: в автономному файлі його код мертвий і не вбудовується.
+    define: page === 'air'
+      ? { __EW_NO_MODULE_PRESENTATION__: 'true', __EW_NO_WEATHER_RELIEF__: 'true', __EW_NO_MODULE_CATALOG__: 'true' }
+      : { __EW_NO_WEATHER_RELIEF__: 'true', __EW_NO_MODULE_CATALOG__: 'true' },
     build: {
       write: false,
       target: 'safari13',

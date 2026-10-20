@@ -2,6 +2,10 @@
 //!
 //! Nothing here runs by itself: the download starts only from the explicit
 //! «Наділити КОМБАТА інтелектом» action after the user has seen the size and the source.
+//! The page confirmation alone is not trusted, because any script of the web view could
+//! skip it: [`install_model`] asks a native confirmation ([`Consent`]) right before the
+//! first network request, for a new download and for resuming a partial one alike. A
+//! declined request ends with [`InstallError::Declined`] and touches no network.
 //! The model is a single pinned file (address, size and SHA-256 are compiled
 //! in), so whatever server or mirror answers, a file that does not match is
 //! deleted and never trusted. The download goes to `<name>.part`, can be
@@ -56,6 +60,9 @@ const PROGRESS_BYTES: u64 = 512 * 1024;
 const PROGRESS_EVERY: Duration = Duration::from_millis(250);
 const HASH_BUFFER: usize = 1024 * 1024;
 const MAX_REDIRECTS: usize = 5;
+/// The model host and its CDN see this value together with the IP address. It is a generic
+/// string on purpose: it must identify neither the application nor its version.
+const DOWNLOAD_USER_AGENT: &str = "Mozilla/5.0";
 
 /// One pinned model file. Only the address is allowed to differ in tests.
 #[derive(Debug, Clone)]
@@ -102,6 +109,8 @@ pub enum InstallError {
     Busy,
     #[error("Установлення скасовано; завантажену частину збережено")]
     Cancelled,
+    #[error("Завантаження не розпочато: підтвердження не надано. До мережі не зверталися")]
+    Declined,
     #[error("Недостатньо місця на диску: потрібно ще {need_mb} МБ, вільно {free_mb} МБ")]
     NoSpace { need_mb: u64, free_mb: u64 },
     #[error("Не вдалося завантажити модель: {0}")]
@@ -237,6 +246,109 @@ impl Throttle {
     }
 }
 
+// --------------------------------------------------------------- consent --
+
+/// What the native confirmation tells the person before the network is touched.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DownloadPrompt {
+    pub title: String,
+    pub host: String,
+    pub total_bytes: u64,
+    /// Bytes of an earlier unfinished download that are kept and continued (0 for a new one).
+    pub resume_from: u64,
+}
+
+impl DownloadPrompt {
+    pub fn remaining_bytes(&self) -> u64 {
+        self.total_bytes.saturating_sub(self.resume_from)
+    }
+}
+
+/// A blocking yes/no question in a native window; `true` means «start the download».
+/// It is injected, so tests answer without a window, and it runs on a blocking thread.
+pub type Consent = Arc<dyn Fn(&DownloadPrompt) -> bool + Send + Sync>;
+
+/// Decimal units, as the page shows them («≈2,5 ГБ»).
+fn format_size(bytes: u64) -> String {
+    let gb = bytes as f64 / 1e9;
+    if gb >= 1.0 {
+        format!("{gb:.1} ГБ").replace('.', ",")
+    } else {
+        format!("{} МБ", ((bytes as f64 / 1e6).round() as u64).max(1))
+    }
+}
+
+/// Title and text of the native confirmation: what is downloaded, from which host, how
+/// much, and that the application connects to the internet.
+pub fn prompt_text(prompt: &DownloadPrompt) -> (String, String) {
+    let what = if prompt.resume_from > 0 {
+        format!(
+            "Буде продовжено завантаження мовної моделі «{}»: лишилося приблизно {} з {} (уже завантажено {}).",
+            prompt.title,
+            format_size(prompt.remaining_bytes()),
+            format_size(prompt.total_bytes),
+            format_size(prompt.resume_from),
+        )
+    } else {
+        format!(
+            "Буде завантажено мовну модель «{}» — приблизно {}.",
+            prompt.title,
+            format_size(prompt.total_bytes),
+        )
+    };
+    let message = format!(
+        "{what}\n\n\
+         Джерело: {}. Для цього EasyWAR підключиться до інтернету, а сервер побачить вашу \
+         IP-адресу. Запитання й дані таблиць не надсилаються.\n\n\
+         Завантаження можна скасувати в будь-який момент: уже завантажена частина збережеться. \
+         Готовий файл перевіряється за контрольною сумою.\n\n\
+         Почати завантаження?",
+        prompt.host,
+    );
+    ("EasyWAR: завантаження мовної моделі".to_owned(), message)
+}
+
+/// The production confirmation: a native «Так/Ні» window, the same rfd mechanism as the
+/// start-up messages. Without a graphical environment the window cannot appear and the
+/// answer is «ні», so nothing is downloaded.
+pub fn native_consent() -> Consent {
+    Arc::new(|prompt| {
+        let (title, message) = prompt_text(prompt);
+        std::panic::catch_unwind(|| {
+            rfd::MessageDialog::new()
+                .set_level(rfd::MessageLevel::Warning)
+                .set_title(title.as_str())
+                .set_description(message.as_str())
+                .set_buttons(rfd::MessageButtons::YesNo)
+                .show()
+        })
+        .is_ok_and(|answer| matches!(answer, rfd::MessageDialogResult::Yes))
+    })
+}
+
+/// Asks the question; any failure to ask counts as a refusal.
+async fn confirm_download(
+    consent: &Consent,
+    source: &ModelSource,
+    have: u64,
+) -> Result<(), InstallError> {
+    let prompt = DownloadPrompt {
+        title: source.title.clone(),
+        host: source.host(),
+        total_bytes: source.size,
+        resume_from: have,
+    };
+    let consent = consent.clone();
+    let accepted = tokio::task::spawn_blocking(move || consent(&prompt))
+        .await
+        .unwrap_or(false);
+    if accepted {
+        Ok(())
+    } else {
+        Err(InstallError::Declined)
+    }
+}
+
 // ------------------------------------------------------------------ info --
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -310,7 +422,7 @@ fn build_client(source: &ModelSource) -> Result<reqwest::Client, InstallError> {
     crate::install_tls_provider();
     reqwest::Client::builder()
         .connect_timeout(CONNECT_TIMEOUT)
-        .user_agent(concat!("EasyWAR/", env!("CARGO_PKG_VERSION")))
+        .user_agent(DOWNLOAD_USER_AGENT)
         .redirect(reqwest::redirect::Policy::custom(move |attempt| {
             if attempt.previous().len() >= MAX_REDIRECTS {
                 attempt.error("забагато перенаправлень")
@@ -380,6 +492,63 @@ async fn open_response(
     Err(InstallError::Status(416))
 }
 
+/// Opens `<name>.part` for writing without following a symbolic link: otherwise a link
+/// planted in the model folder would let `set_len` truncate, and the download overwrite,
+/// whatever file it points to. A link (or any other non-regular entry) found in the way is
+/// removed itself — never its target — and the download starts over. A new file is made with
+/// `create_new` (`O_EXCL`), which refuses a link even when it dangles, so nothing is created
+/// outside the folder; an existing regular file is opened without `create` and then compared
+/// with what is on disk ([`ensure_same_file`]) before anything is truncated or written.
+fn open_part(part: &Path) -> Result<std::fs::File, InstallError> {
+    let existing = match std::fs::symlink_metadata(part) {
+        Ok(meta) if meta.is_file() => true,
+        Ok(meta) if meta.file_type().is_symlink() => {
+            std::fs::remove_file(part).map_err(io_error)?;
+            false
+        }
+        Ok(_) => {
+            return Err(InstallError::Io(
+                "на місці файлу завантаження лежить не файл".to_owned(),
+            ));
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => return Err(io_error(error)),
+    };
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true);
+    if !existing {
+        options.create_new(true);
+    }
+    let file = options.open(part).map_err(io_error)?;
+    ensure_same_file(&file, part)?;
+    Ok(file)
+}
+
+/// Guards the gap between the link check and the open: what was opened must be the regular
+/// file that is on disk under that name now. Nothing has been truncated or written yet.
+fn ensure_same_file(file: &std::fs::File, path: &Path) -> Result<(), InstallError> {
+    let on_disk = std::fs::symlink_metadata(path).map_err(io_error)?;
+    // Unix can also compare identity; elsewhere the "regular file, not a link" check stays.
+    #[cfg(unix)]
+    let same = {
+        use std::os::unix::fs::MetadataExt;
+        let opened = file.metadata().map_err(io_error)?;
+        on_disk.is_file() && opened.dev() == on_disk.dev() && opened.ino() == on_disk.ino()
+    };
+    #[cfg(not(unix))]
+    let same = {
+        let _ = file;
+        on_disk.is_file()
+    };
+    if same {
+        Ok(())
+    } else {
+        Err(InstallError::Io(
+            "файл завантаження підмінено посиланням".to_owned(),
+        ))
+    }
+}
+
 async fn download_part(
     source: &ModelSource,
     part: &Path,
@@ -389,12 +558,7 @@ async fn download_part(
     let have = regular_len(part).unwrap_or(0);
     let client = build_client(source)?;
     let (mut response, start) = open_response(&client, source, have).await?;
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(part)
-        .map_err(io_error)?;
+    let mut file = open_part(part)?;
     file.set_len(start).map_err(io_error)?;
     file.seek(SeekFrom::Start(start)).map_err(io_error)?;
     let mut done = start;
@@ -498,12 +662,15 @@ async fn verify_file(
 
 /// Downloads (or continues) and verifies the model file; returns the path of
 /// the finished `model.gguf`. Cancelling keeps the part for a later retry; a
-/// file whose size or SHA-256 is wrong is deleted.
+/// file whose size or SHA-256 is wrong is deleted. `consent` is asked right before the
+/// first network request — and only when one is needed: a finished valid file or a
+/// complete part is just verified on disk.
 pub async fn install_model(
     source: &ModelSource,
     dir: &Path,
     guard: &InstallGuard,
     emit: Emit,
+    consent: Consent,
 ) -> Result<PathBuf, InstallError> {
     std::fs::create_dir_all(dir).map_err(io_error)?;
     let final_path = dir.join(MODEL_FILE);
@@ -524,6 +691,11 @@ pub async fn install_model(
     if have < source.size {
         if let Ok(free) = fs2::available_space(dir) {
             ensure_free_space(source.size - have, free)?;
+        }
+        confirm_download(&consent, source, have).await?;
+        // «Cancel» may have been pressed while the confirmation window was open.
+        if guard.cancelled() {
+            return Err(InstallError::Cancelled);
         }
         download_part(source, &part, guard, &emit).await?;
     }
@@ -673,6 +845,7 @@ mod tests {
         mode: Mutex<Mode>,
         requests: AtomicUsize,
         ranges: Mutex<Vec<Option<String>>>,
+        agents: Mutex<Vec<Option<String>>>,
     }
 
     impl Server {
@@ -684,6 +857,7 @@ mod tests {
                 mode: Mutex::new(Mode::Normal),
                 requests: AtomicUsize::new(0),
                 ranges: Mutex::new(Vec::new()),
+                agents: Mutex::new(Vec::new()),
             });
             let shared = state.clone();
             thread::spawn(move || {
@@ -707,6 +881,7 @@ mod tests {
     fn serve(stream: TcpStream, state: &ServerState) {
         let mut reader = BufReader::new(stream.try_clone().unwrap());
         let mut range = None;
+        let mut agent = None;
         loop {
             let mut line = String::new();
             if reader.read_line(&mut line).unwrap_or(0) == 0 {
@@ -718,9 +893,13 @@ mod tests {
             if let Some(value) = line.to_ascii_lowercase().strip_prefix("range: bytes=") {
                 range = Some(value.trim().trim_end_matches('-').to_owned());
             }
+            if line.to_ascii_lowercase().starts_with("user-agent:") {
+                agent = Some(line["user-agent:".len()..].trim().to_owned());
+            }
         }
         state.requests.fetch_add(1, Ordering::SeqCst);
         state.ranges.lock().unwrap().push(range.clone());
+        state.agents.lock().unwrap().push(agent);
         let mode = *state.mode.lock().unwrap();
         let mut out = stream;
         if let Mode::Status(code) = mode {
@@ -797,6 +976,25 @@ mod tests {
         Arc::new(|_| {})
     }
 
+    fn accept() -> Consent {
+        Arc::new(|_| true)
+    }
+
+    fn decline() -> Consent {
+        Arc::new(|_| false)
+    }
+
+    /// A confirmation that answers `answer` and records every question it was asked.
+    fn recording(answer: bool) -> (Consent, Arc<Mutex<Vec<DownloadPrompt>>>) {
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let log = asked.clone();
+        let consent: Consent = Arc::new(move |prompt| {
+            log.lock().unwrap().push(prompt.clone());
+            answer
+        });
+        (consent, asked)
+    }
+
     fn guard() -> (InstallController, InstallGuard) {
         let controller = InstallController::default();
         let guard = controller.begin().unwrap();
@@ -825,7 +1023,7 @@ mod tests {
         let emit: Emit = Arc::new(move |event| log.lock().unwrap().push(event));
         let (_c, guard) = guard();
 
-        let path = install_model(&source, dir.path(), &guard, emit)
+        let path = install_model(&source, dir.path(), &guard, emit, accept())
             .await
             .unwrap();
 
@@ -852,7 +1050,7 @@ mod tests {
         let (_c, first) = guard();
 
         server.mode(Mode::DropAfter(700_000));
-        let error = install_model(&source, dir.path(), &first, silent())
+        let error = install_model(&source, dir.path(), &first, silent(), accept())
             .await
             .unwrap_err();
         assert!(matches!(error, InstallError::Network(_)), "{error}");
@@ -863,7 +1061,7 @@ mod tests {
 
         server.mode(Mode::Normal);
         let (_c2, second) = guard();
-        let path = install_model(&source, dir.path(), &second, silent())
+        let path = install_model(&source, dir.path(), &second, silent(), accept())
             .await
             .unwrap();
 
@@ -885,7 +1083,7 @@ mod tests {
         server.mode(Mode::IgnoreRange);
         let (_c, guard) = guard();
 
-        let path = install_model(&source, dir.path(), &guard, silent())
+        let path = install_model(&source, dir.path(), &guard, silent(), accept())
             .await
             .unwrap();
 
@@ -902,7 +1100,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (_c, guard) = guard();
 
-        let error = install_model(&source, dir.path(), &guard, silent())
+        let error = install_model(&source, dir.path(), &guard, silent(), accept())
             .await
             .unwrap_err();
 
@@ -920,7 +1118,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (_c, guard) = guard();
 
-        let error = install_model(&source, dir.path(), &guard, silent())
+        let error = install_model(&source, dir.path(), &guard, silent(), accept())
             .await
             .unwrap_err();
 
@@ -937,7 +1135,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (_c, guard) = guard();
 
-        let error = install_model(&source, dir.path(), &guard, silent())
+        let error = install_model(&source, dir.path(), &guard, silent(), accept())
             .await
             .unwrap_err();
 
@@ -968,7 +1166,7 @@ mod tests {
             }
         });
 
-        let error = install_model(&source, dir.path(), &first, emit)
+        let error = install_model(&source, dir.path(), &first, emit, accept())
             .await
             .unwrap_err();
 
@@ -980,7 +1178,7 @@ mod tests {
 
         server.mode(Mode::Normal);
         let second = controller.begin().unwrap();
-        let path = install_model(&source, dir.path(), &second, silent())
+        let path = install_model(&source, dir.path(), &second, silent(), accept())
             .await
             .unwrap();
         assert_eq!(std::fs::read(path).unwrap(), data);
@@ -994,12 +1192,17 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join(MODEL_FILE), &data).unwrap();
         let (_c, guard) = guard();
+        let (consent, asked) = recording(false);
 
-        install_model(&source, dir.path(), &guard, silent())
+        install_model(&source, dir.path(), &guard, silent(), consent)
             .await
             .unwrap();
 
         assert_eq!(server.requests(), 0);
+        assert!(
+            asked.lock().unwrap().is_empty(),
+            "no network, so no question"
+        );
         assert!(info(&source, dir.path(), false, false).installed);
     }
 
@@ -1013,13 +1216,315 @@ mod tests {
         damaged[10] ^= 1;
         std::fs::write(dir.path().join(MODEL_FILE), damaged).unwrap();
         let (_c, guard) = guard();
+        let (consent, asked) = recording(true);
 
-        let path = install_model(&source, dir.path(), &guard, silent())
+        let path = install_model(&source, dir.path(), &guard, silent(), consent)
             .await
             .unwrap();
 
         assert_eq!(std::fs::read(path).unwrap(), data);
         assert_eq!(server.requests(), 1);
+        assert_eq!(asked.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn the_download_sends_a_neutral_user_agent() {
+        let data = body(300_000);
+        let server = Server::start(data.clone());
+        let source = source_for(&server, &data);
+        let dir = tempfile::tempdir().unwrap();
+        let (_c, guard) = guard();
+
+        install_model(&source, dir.path(), &guard, silent(), accept())
+            .await
+            .unwrap();
+
+        let agents = server.state.agents.lock().unwrap();
+        assert_eq!(agents.len(), 1);
+        let agent = agents[0].clone().expect("a User-Agent is sent");
+        assert_eq!(agent, DOWNLOAD_USER_AGENT);
+        let lowered = agent.to_ascii_lowercase();
+        assert!(!lowered.contains("easywar"), "{agent}");
+        assert!(!agent.contains(env!("CARGO_PKG_VERSION")), "{agent}");
+    }
+
+    #[tokio::test]
+    async fn a_declined_confirmation_touches_no_network_and_creates_no_file() {
+        let data = body(SIZE);
+        let server = Server::start(data.clone());
+        let source = source_for(&server, &data);
+        let dir = tempfile::tempdir().unwrap();
+        let (_c, guard) = guard();
+        let (consent, asked) = recording(false);
+
+        let error = install_model(&source, dir.path(), &guard, silent(), consent)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, InstallError::Declined), "{error}");
+        assert_eq!(server.requests(), 0);
+        assert_eq!(asked.lock().unwrap().len(), 1);
+        assert!(!dir.path().join(PART_FILE).exists());
+        assert!(!dir.path().join(MODEL_FILE).exists());
+    }
+
+    #[tokio::test]
+    async fn a_declined_resume_keeps_the_part_and_touches_no_network() {
+        let data = body(SIZE);
+        let server = Server::start(data.clone());
+        let source = source_for(&server, &data);
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(PART_FILE), &data[..300_000]).unwrap();
+        let (_c, guard) = guard();
+
+        let error = install_model(&source, dir.path(), &guard, silent(), decline())
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, InstallError::Declined), "{error}");
+        assert_eq!(server.requests(), 0);
+        assert_eq!(
+            std::fs::read(dir.path().join(PART_FILE)).unwrap(),
+            data[..300_000]
+        );
+    }
+
+    #[tokio::test]
+    async fn the_confirmation_names_the_source_and_the_remaining_size() {
+        let data = body(SIZE);
+        let server = Server::start(data.clone());
+        let source = source_for(&server, &data);
+        let dir = tempfile::tempdir().unwrap();
+        let (_c, first) = guard();
+        let (consent, asked) = recording(false);
+
+        let _ = install_model(&source, dir.path(), &first, silent(), consent).await;
+        std::fs::write(dir.path().join(PART_FILE), &data[..300_000]).unwrap();
+        let (consent, resumed) = recording(false);
+        let _ = install_model(&source, dir.path(), &first, silent(), consent).await;
+
+        let fresh = asked.lock().unwrap()[0].clone();
+        assert_eq!(fresh.title, source.title);
+        assert_eq!(fresh.host, "127.0.0.1");
+        assert_eq!(
+            (fresh.total_bytes, fresh.resume_from),
+            (data.len() as u64, 0)
+        );
+        let resume = resumed.lock().unwrap()[0].clone();
+        assert_eq!(resume.resume_from, 300_000);
+        assert_eq!(resume.remaining_bytes(), data.len() as u64 - 300_000);
+        assert_eq!(server.requests(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_complete_part_is_verified_without_asking() {
+        let data = body(300_000);
+        let server = Server::start(data.clone());
+        let source = source_for(&server, &data);
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(PART_FILE), &data).unwrap();
+        let (_c, guard) = guard();
+        let (consent, asked) = recording(false);
+
+        let path = install_model(&source, dir.path(), &guard, silent(), consent)
+            .await
+            .unwrap();
+
+        assert_eq!(std::fs::read(path).unwrap(), data);
+        assert_eq!(server.requests(), 0);
+        assert!(asked.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_damaged_installed_file_is_not_replaced_over_the_network_when_declined() {
+        let data = body(300_000);
+        let server = Server::start(data.clone());
+        let source = source_for(&server, &data);
+        let dir = tempfile::tempdir().unwrap();
+        let mut damaged = data.clone();
+        damaged[10] ^= 1;
+        std::fs::write(dir.path().join(MODEL_FILE), damaged).unwrap();
+        let (_c, guard) = guard();
+
+        let error = install_model(&source, dir.path(), &guard, silent(), decline())
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, InstallError::Declined), "{error}");
+        assert_eq!(server.requests(), 0);
+        assert!(!info(&source, dir.path(), false, false).installed);
+    }
+
+    #[tokio::test]
+    async fn cancel_pressed_while_the_window_is_open_stops_before_the_request() {
+        let data = body(SIZE);
+        let server = Server::start(data.clone());
+        let source = source_for(&server, &data);
+        let dir = tempfile::tempdir().unwrap();
+        let controller = InstallController::default();
+        let guard = controller.begin().unwrap();
+        let canceller = controller.clone();
+        let consent: Consent = Arc::new(move |_| {
+            canceller.cancel();
+            true
+        });
+
+        let error = install_model(&source, dir.path(), &guard, silent(), consent)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, InstallError::Cancelled), "{error}");
+        assert_eq!(server.requests(), 0);
+        assert!(!dir.path().join(PART_FILE).exists());
+    }
+
+    #[test]
+    fn the_native_text_says_what_where_how_much_and_that_it_goes_online() {
+        let (title, message) = prompt_text(&DownloadPrompt {
+            title: "Qwen3-4B (Q4_K_M)".to_owned(),
+            host: "huggingface.co".to_owned(),
+            total_bytes: 2_497_280_256,
+            resume_from: 0,
+        });
+        assert!(title.contains("модел"), "{title}");
+        assert!(message.contains("Qwen3-4B (Q4_K_M)"), "{message}");
+        assert!(message.contains("huggingface.co"), "{message}");
+        assert!(message.contains("2,5 ГБ"), "{message}");
+        assert!(message.contains("інтернет"), "{message}");
+        assert!(message.contains("IP-адрес"), "{message}");
+        assert!(message.ends_with("Почати завантаження?"), "{message}");
+        assert!(!message.contains("продовжено"), "{message}");
+    }
+
+    #[test]
+    fn the_native_text_for_a_resume_shows_what_is_left() {
+        let (_, message) = prompt_text(&DownloadPrompt {
+            title: "Qwen3-4B (Q4_K_M)".to_owned(),
+            host: "huggingface.co".to_owned(),
+            total_bytes: 2_497_280_256,
+            resume_from: 997_280_256,
+        });
+        assert!(message.contains("продовжено"), "{message}");
+        assert!(message.contains("1,5 ГБ"), "{message}");
+        assert!(message.contains("2,5 ГБ"), "{message}");
+        assert!(message.contains("997 МБ"), "{message}");
+        let (_, small) = prompt_text(&DownloadPrompt {
+            title: "t".to_owned(),
+            host: "h".to_owned(),
+            total_bytes: 300_000,
+            resume_from: 0,
+        });
+        assert!(small.contains("1 МБ"), "{small}");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_symlinked_part_is_replaced_and_its_target_is_left_alone() {
+        let data = body(SIZE);
+        let server = Server::start(data.clone());
+        let source = source_for(&server, &data);
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let target = outside.path().join("precious.txt");
+        std::fs::write(&target, b"precious synthetic content").unwrap();
+        std::os::unix::fs::symlink(&target, dir.path().join(PART_FILE)).unwrap();
+        let (_c, guard) = guard();
+
+        let path = install_model(&source, dir.path(), &guard, silent(), accept())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            std::fs::read(&target).unwrap(),
+            b"precious synthetic content"
+        );
+        assert_eq!(std::fs::read(path).unwrap(), data);
+        assert!(!dir.path().join(PART_FILE).exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_dangling_symlinked_part_does_not_create_its_target() {
+        let data = body(300_000);
+        let server = Server::start(data.clone());
+        let source = source_for(&server, &data);
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let target = outside.path().join("never-created.bin");
+        std::os::unix::fs::symlink(&target, dir.path().join(PART_FILE)).unwrap();
+        let (_c, guard) = guard();
+
+        install_model(&source, dir.path(), &guard, silent(), accept())
+            .await
+            .unwrap();
+
+        assert!(!target.exists(), "the link must not be followed");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn open_part_removes_a_link_but_never_its_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("target.bin");
+        std::fs::write(&target, b"synthetic target").unwrap();
+        let part = dir.path().join(PART_FILE);
+        std::os::unix::fs::symlink(&target, &part).unwrap();
+
+        let file = open_part(&part).unwrap();
+        drop(file);
+
+        assert_eq!(std::fs::read(&target).unwrap(), b"synthetic target");
+        assert!(std::fs::symlink_metadata(&part).unwrap().is_file());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_part_swapped_for_a_link_after_the_check_is_refused_untouched() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("target.bin");
+        std::fs::write(&target, b"synthetic target").unwrap();
+        let part = dir.path().join(PART_FILE);
+        std::os::unix::fs::symlink(&target, &part).unwrap();
+        // What the open would have done had the link appeared right after the check.
+        let followed = std::fs::OpenOptions::new().write(true).open(&part).unwrap();
+
+        let error = ensure_same_file(&followed, &part).unwrap_err();
+
+        assert!(matches!(error, InstallError::Io(_)), "{error}");
+        assert_eq!(std::fs::read(&target).unwrap(), b"synthetic target");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_planted_where_a_new_part_is_made_creates_nothing_outside() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = dir.path().join("outside.bin");
+        let part = dir.path().join(PART_FILE);
+        // The link appears after open_part saw «no file» and before it creates one.
+        std::os::unix::fs::symlink(&outside, &part).unwrap();
+
+        let refused = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&part);
+
+        assert!(refused.is_err(), "O_EXCL refuses a dangling link");
+        assert!(!outside.exists(), "nothing is created through the link");
+    }
+
+    #[test]
+    fn open_part_keeps_a_regular_part_and_refuses_a_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let part = dir.path().join(PART_FILE);
+        std::fs::write(&part, b"0123456789").unwrap();
+        drop(open_part(&part).unwrap());
+        assert_eq!(std::fs::read(&part).unwrap(), b"0123456789");
+
+        let other = tempfile::tempdir().unwrap();
+        let folder = other.path().join(PART_FILE);
+        std::fs::create_dir(&folder).unwrap();
+        assert!(matches!(open_part(&folder), Err(InstallError::Io(_))));
+        assert!(folder.is_dir());
     }
 
     #[test]

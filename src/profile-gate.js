@@ -18,7 +18,7 @@ import {
   PASSWORD_MIN,
   POSITION_MAX,
   NAME_MAX,
-  failureDelayMs,
+  registerLoginFailure,
   gateScreen,
   loginCardNote,
   modulesError,
@@ -198,12 +198,9 @@ export function createProfileGate({ el, avatar, readAvatar }) {
             await signInLocalProfile(selected.id, password.value);
             resolve('signed-in');
           } catch (failure) {
-            failures += 1;
-            blockedUntil = Date.now() + failureDelayMs(failures);
-            const text = String(failure?.message || failure);
-            error.textContent = /неправильний пароль/i.test(text)
-              ? 'Неправильний пароль.'
-              : `Не вдалося увійти: ${text}`;
+            const next = registerLoginFailure({ failures, blockedUntil }, String(failure?.message || failure), Date.now());
+            ({ failures, blockedUntil } = next);
+            error.textContent = next.message;
             password.value = '';
             if (confirm) confirm.value = '';
             password.focus();

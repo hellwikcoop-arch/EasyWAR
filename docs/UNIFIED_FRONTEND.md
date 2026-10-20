@@ -29,6 +29,7 @@ Each module isolates its `localStorage` keys and IndexedDB names by prefix
 | `src/app-update-state-core.js` | Тимчасовий знімок стану штатного оновлювача без запуску перевірки; `backup.js` публікує результати вже наявних дій |
 | `src/assistant/assistant-knowledge-core.js` | Чисті компіляція й пошук уривків фіксованої локальної довідки з джерелом «файл → розділ» |
 | `src/assistant/assistant-explain-core.js` | Чисте ядро режиму пояснень для ПС/РВ: дескриптор елемента → що це й на чому засновано (лише з `DATA_REFERENCE.md`) |
+| `src/assistant/assistant-explain-refs-core.js` | Статичні ідентифікатори й назви елементів, на яких заснована відповідь режиму пояснень: з них (без тексту з таблиць) будується пакет пропозиції розробнику |
 | `src/assistant/assistant-explain-udshv-core.js` | Те саме для УДШВ і вкладки «Наші втрати» (гілка `dshv`) |
 | `src/assistant/assistant-explain.js` | DOM-контролер режиму пояснень: перехоплення кліків у capture, підсвітка, Esc, зняття при закритті; без змін файлів модулів |
 | `src/assistant/assistant-rules-core.js` | Каталог постійних ID, пояснень і пропозицій; адаптер наявного `reviewData` без застосування виправлень |
@@ -125,6 +126,25 @@ module script before `</body>`. `script/import_unified_html.mjs` rewrites
   (backlog P2-6), so do not commit iterations.
 
 
+## Технологічний шар стартового екрана
+
+Поверх фону лаунчера і під картками лежить декоративний шар у стилі HUD: мережа вузлів на `<canvas>`,
+радарний промінь навколо кола з тризубом, кутові скоби з годинником, промінь сканування, обвідка й
+легкий нахил картки під курсором, моноширинні заголовки «Командування» / «Роди військ».
+
+| Файл | Роль |
+| --- | --- |
+| `src/start-tech-core.js` | чиста логіка: кількість і рух вузлів, лінії між ними, позиція курсора, коли анімувати, текст годинника (тести — `tests/start-tech.test.mjs`) |
+| `src/start-tech.js` | DOM: додає `canvas.ew-tech-field`, `.ew-hud`, `.ew-radar` (усі `aria-hidden`) і обробник `pointermove` на `.branch-cards` |
+| `src/start-tech.css` | стилі шару; бірюзовий акцент `#60dde8` узято із заставки |
+
+- `src/index.html` має лише два рядки: `<link>` на стилі після `startup-splash.css` і модуль після
+  `launcher-tools.js`. Після `script/import_unified_html.mjs` поверни їх; тест упаде, якщо рядків немає.
+- Canvas не малює нових кадрів, коли ввімкнено «зменшити рух» або перемикач «Анімації» вимкнено
+  (`html[data-motion="off"]`), вкладка прихована або відкрито модуль (`body[data-active-branch]`).
+- Положення радара (центр 50% / 44%, ширина 86% емблеми) підігнано під `start-brand-art`; якщо
+  емблему замінять, перевір його.
+
 ## Registration and sign-in gate
 
 After the splash the launcher is covered by a registration wizard (no profiles
@@ -166,6 +186,30 @@ ends, and the launcher stays `inert` until sign-in.
 - CSP у `tauri.conf.json` не змінювали (вона `null`). Якщо її колись посилять, довідникам, імовірно, знадобляться `'wasm-unsafe-eval'` (декодер meshopt — WASM), `blob:` для текстур із GLB і `font-src 'self'`; з посиленою CSP довідники не перевіряли.
 - Довідники налаштовано під three r160, а проєкт на r186. Різницю гасять `room-env.js` і заплатка `LEGACY_REFLECTIONS` у `guide-kit.js`; тест «вигляд, затверджений на three r160» падає, коли відповідний шматок шейдера three змінюється, — це сигнал переглянути `guide-kit.js`.
 
+## Робоче середовище (розділ «Офіс»)
+
+Кнопка «Робоче середовище» на головному екрані відкриває модуль `workspace` у накладці поверх лаунчера, так само як 3D-довідники; legacy HTML не змінювався. Модуль — окремі сторінки збірки `workspace/index.html` (оболонка з розділом «Офіс» і картками EasyGreen, EasyDoc, EasySlide) і `workspace/app.html?app=<id>` (сторінка одного застосунку в `<iframe>` оболонки). Контракт підключення застосунку, команди відкриття й збереження файлів і перелік файлів — у [WORKSPACE.md](WORKSPACE.md).
+
+- `src/workspace-launcher.js` імпортується в `launcher-tools.js` після `guides-launcher.js`, тож кнопка стоїть крайньою ліворуч; перед закриттям накладки питає `EW_WORKSPACE.requestClose()` (незбережені зміни).
+- Код застосунку — `src/workspace/<id>/app.js` з `mount(container, host)`; оболонка знаходить його через `import.meta.glob`, без змін у самій оболонці. Поки файлу немає, картка відкриває заглушку «у розробці».
+- Підключено EasyGreen: `src/workspace/easygreen/app.js` → `mountEasyGreen` (`easygreen-panel.js`), веб-збірка GridCraft — у `src/public/workspace/easygreen/app/`. Подробиці — [EASYGREEN.md](EASYGREEN.md).
+- `vite.config.js`: входи `workspace` і `workspace-app`; чанки `src/workspace/<id>/app.js` отримують назву `assets/workspace-*` (`chunkFileNames`), а кеш переглядача для телефона не бере `workspace/`, `assets/workspace-*` і `.wasm`.
+
+### EasyDoc (прототип)
+
+Редактор документів на основі WordCraft (MIT OR Apache-2.0, github.com/storytold/wordcraft), зібраний у WASM. Прототип, злитий у `main` разом з рештою «Офісу».
+
+| Файл | Роль |
+| --- | --- |
+| `src/workspace/easydoc/app.js` | `mount(container, host)` за контрактом [WORKSPACE.md](WORKSPACE.md): вкладає `<iframe>` на `host.resolve('workspace/easydoc/index.html')` і ставить `window.__easydocHost` — місток для сторінки редактора |
+| `src/workspace/easydoc/easydoc-bridge-core.js` | чиста логіка містка: `openDocument` → `host.openFile`, `saveDocument(ім'я, байти)` → `host.saveFile` (та сама назва) або `host.saveFileAs` (нова назва, експорт у PDF), `setDirty` → `host.setDirty`; номери файлів лишаються тут |
+| `src/public/workspace/easydoc/index.html`, `easydoc-host.js` | сторінка редактора: `canvas#wordcraft_canvas`, `wordcraft-web.js` і `wordcraft-web_bg.wasm` (≈ 52 МБ) без бандлера Vite; `easydoc-host.js` бере місток із батьківського вікна, а без оболонки редактор працює з браузерним вибором і завантаженням файлів |
+| `src/public/workspace/easydoc/licenses/` | ліцензії WordCraft і шрифтів (MIT, Apache-2.0, NOTICE, SIL OFL) |
+| `script/build_easydoc.sh`, `script/easydoc/wordcraft-web.patch` | збірка з розпакованого `wordcraft-main`: копія в тимчасову теку, наша правка веб-оболонки, `cargo build --target wasm32-unknown-unknown`, `wasm-bindgen --target web` |
+
+- Наша правка WordCraft лише в `apps/wordcraft-web`: модуль `easywar_host.rs`; `open_async` (документи) і `download` ідуть через місток, `on_dirty` передає позначку змін, власне браузерне «Залишити сторінку?» вимкнене, коли є місток; мова інтерфейсу завжди `uk`.
+- Мережі під час роботи немає (`tests/easydoc.test.mjs`). У самому WordCraft лишаються посилання «Discord», «Поділитися» та вкладка Zotero (лише локальний 127.0.0.1); без натискання вони нічого не роблять.
+
 ## Desktop behaviour
 
 - **Tauri IPC in the iframe.** Tauri injects its bridge only into the top-level
@@ -180,6 +224,12 @@ ends, and the launcher stays `inert` until sign-in.
   Windows (WebView2) shows its own dialogs.
 
 ## Module editor («Оформлення»)
+
+`src/public/map-hexbin.js` (pure logic, `tests/map-hexbin.test.mjs`) is a classic
+script loaded right after `map-3d-bridge.js` in both `air.html` and `rocket.html`; it
+exposes `globalThis.EWHexbin` for the «Щільність» layer of the 2D map (`drawMap`, under
+the markers, off by default, preference `aviahub.hex`). The standalone build inlines it
+like the other public classic scripts.
 
 `src/public/module-editor-core.js` (pure logic, unit-tested) and
 `src/public/module-editor.js` (UI and runtime) are loaded as classic scripts at
@@ -392,6 +442,26 @@ by hand with narrow anchored patches (see `AGENTS.md`), then run
 (іконка з чотирма квадратиками в шапці панелі; клас `options-open` на `#p-map`), шапка панелі компактна,
 як у РВ. Літак у банері «Основні показники» розтягнуто на всю ширину банера, текст і показники лежать поверх.
 
+### 3D-карта: вісім виглядів поверхні (`map.html`, `map-app.js`)
+
+Перемикач `.seg` у `src/map.html` має кнопки `m-sat`, `m-hyp`, `m-shade`, `m-con`, `m-model`, `m-wire`, `m-dots`,
+`m-neon`; номери режимів задає `MODE` (0…7) у `src/map-app.js`, і той самий номер іде в уніформу `uMode` спільного
+шейдера поверхні (базова плита, регіональні й міські клаптики ділять уніформи через `patchMaterial`). Супутник і
+рельєф беруть кольори з теми сторінки; решта шість мають власний рядок у `SCENE_STYLES` (`bg`, `paper`, `ink`,
+`wall`, `fg`, `muted`; `dark: null` означає «однаково в обох темах» — чорні вигляди). `applyTheme()` переносить рядок
+в уніформи `uBg`/`uPaper`/`uInk`/`uWall`, колір очищення, видимість тіні плінта й стиль підписів
+(`Labels.restyle({fg, bg, muted})`: `fg` — текст, `bg` — обвідка, тож їх контраст має бути ≥ 7). У фрагментному
+шейдері: `contour(h, step)` — горизонталі завширшки близько пікселя (`fwidth`), що згасають там, де на піксель
+припадає понад чверть кроку; `neon(h)` — термоградієнт із семи зупинок; сітка каркаса — `uGridDiv` (клітинок
+0,25° на всю плиту), тож її крок не залежить від роздільності `heights.png`. Режим «Точки» вмикає `THREE.Points`
+із власним `dotsMat` поверх тієї самої геометрії чанків (`ch.dots`, `farDots`; видимість — `syncOverlays()` разом із
+перемикачем «Сітка»). Забудова міст: `bldSetFor(mode)` повертає набір матеріалів — фото-фасади для супутника й
+рельєфу, матові одноколірні (`monoMats`) для макета, креслення й відмивки, дротяні для каркаса, точок і неону;
+`setMode` підміняє матеріал у вже завантажених містах, а `cityMesh` бере його під час завантаження. Легенда
+`#legend` показується для рельєфу й неону (клас `neon` перемикає градієнт у `map.css`). Вибір зберігається в
+`localStorage` `ukr3d.mode`; невідоме значення повертає до супутника. Контракт перевіряє
+`tests/map-view-modes.test.mjs` (кнопки, таблиця стилів і контраст, гілки шейдера, матеріали, збереження).
+
 ### Адаптивність і світла тема (ПС, РВ, ПВК, УДШВ)
 
 Блоки «Адаптивність і світла тема», «Панель вибору» й «Легенда кільцевої діаграми» в кінці `src/ui-kit.css`:
@@ -418,3 +488,39 @@ by hand with narrow anchored patches (see `AGENTS.md`), then run
 ### Довідник: силует і контур літаків
 
 `src/ref-art/<id>-sil.webp` (чорний силует) і `<id>-lin.webp` (лінійний профіль): чорні зображення на прозорому тлі для МіГ-29, F-16, Су-27, Су-25, Mirage 2000 (`id` статті з `ref-data.js`). `ref-wiki.js` підвантажує адреси динамічно з `ref-art-urls.js` (`import.meta.glob`, лише збірка Vite; у Node-тестах модуль не вантажиться й розділ мовчки пропускається). Розділ «Силует і контур» з'являється, коли для статті є файли; без `media.thumb` силует стає мініатюрою списку. У темній темі зображення інвертуються CSS-фільтром, у світлій показуються як є.
+
+## Каталог модулів дашборда («Каталог модулів»)
+
+Користувацькі модулі додаються на дашборд з вбудованого каталогу шаблонів; для кожного модуля Rust створює власну локальну таблицю SQLite (міграція `0010`, див. `docs/DATABASE.md`). Нових зовнішніх залежностей немає.
+
+| Файл | Призначення |
+|---|---|
+| `src/dashboard-module-catalog-core.js` | чиста логіка без DOM і Tauri: гілка за адресою (`rocket.html` → `rocket`, `?command=pvk` / `?command=dshv` → `pvk` / `dshv`, інакше `air`), нормалізація каталогу й модулів з відповіді Rust (`moduleTitle` показує нову назву «Журнал хронометражу польотів» для модуля `flight-hours`, створеного зі старою типовою назвою, не змінюючи збережену), розбір і перевірка введених значень, формати полів журналу польотів (тривалість `год:хв` ↔ десяткові години — `parseDuration`/`formatDuration`; висота польоту та межі хмар у метрах або `0,3 км` — `parseHeight`; паливо в літрах із кілограмами за густиною 0,8 — `formatFuel`; межі значень `fieldLimits`/`outsideLimits` (хмарність 0–10; видимість, паливо, вантаж, пасажири й заходи/посадки за РСП не менше 0; перевіряє лише `parseFieldInput`, без `min`/`max` у полі); значення таблиці `formatFieldValue`, підказки й плейсхолдери полів рядка `fieldHint`/`fieldPlaceholder`; `rowForWrite` не переписує незмінене поле, перевіряє НМХ ≤ ВМХ і екіпаж до `MAX_CREW` = 8 осіб — `crewCount`/`crewSummary` (позивний командира `crew_ke_callsign` — звичайне текстове поле після номера ПС, не особа: у цей підрахунок не входить); помилка значення — `FieldValueError` з ключем поля (`fieldKey`), за яким редактор ставить курсор у клітинку з помилкою; ширини колонок рядка `fieldColumnWidth`; групи колонок `fieldSections` (основні, «Метеоумови», «Екіпаж») і підстановка погоди в новий запис `inheritedValues`), підготовка рядків до збереження (`rowsAfterSave`, `rowsAfterDelete`, `replaceRowsRequest`), `tableEditState`, модель попереднього перегляду; тести — `tests/dashboard-module-catalog.test.mjs` |
+| `src/dashboard-module-catalog.js` | DOM-обв'язка: кнопка «Каталог модулів» у `.appbar-right`, секція «Мій дашборд» у `#view-dash` (для УДШВ — `#view-udshv`), діалоги каталогу й створення модуля та **сторінка модуля** (`showModulePage`). Сторінка — повноекранний модальний `<dialog data-view="table">` (шар поверх документа: дашборд під нею недосяжний, сповіщення `.ewmc-toast` додається всередину відкритого діалогу): шапка з кнопкою «← До дашборда», назвою, лічильниками й «+ Додати рядок», під нею панель запису й таблиця на всю висоту (гортається лише таблиця; шапка колонок, «№» зліва й «Дія» справа закріплені). Запис — один рядок таблиці: 35 полів у клітинках `<tr class="ewmc-editing">`, а форма `#ewmc-row-form` стоїть у панелі над таблицею й з'єднана з ними атрибутом `form` (Enter зберігає); у новому записі погода має позначку підстановки з кнопкою «Очистити», екіпаж — лічильник складу, кнопки «Перейти до» ставлять курсор у першу клітинку групи. Escape спершу скасовує рядок (`state.cancelEdit`), потім повертає на дашборд; над таблицею — пошук у записах, групи колонок і щільність (`tableColumnGroups`, `visibleColumnKeys`, `rowMatchesQuery`, `normalizeDensity` з ядра; лише показ: колонки ховаються атрибутом `hidden`, `colgroup` перебудовується, на час правки видно всі колонки, а пошук і групи вимкнено; запит і група — у `state.tableViews` на час роботи, щільність — у `localStorage` `easywar.moduleTable.density`); після додавання таблиця гортається до нового рядка, після правки лишається на місці; фокус повертається на кнопку модуля. Лише `textContent`, без `innerHTML`. Працює, лише якщо доступний `__TAURI_INTERNALS__.invoke`; у браузері без Tauri нічого не додає Вікно створення модуля має блок «Дані з вашої таблиці» (`sourceBlock`): у лівій колонці форми (`.ewmc-create-main`) під назвою, перед довгим списком колонок нової таблиці. Він знаходить таблицю профілю (`inspect_linked_module_source`) або файл, обраний у вікні вибору (`pick_module_source`), читає вибраний аркуш (`read_module_source_sheet`), показує план із `dashboard-module-source-core.js` і лише за галочкою передає записи в `create_dashboard_module` (`rows`); без галочки виклик такий самий, як раніше. Друга галочка («Протягнути метеоумови…», `model.carry`, за умовчанням увімкнена, з'являється лише коли `plan.carry.possible > 0`) вирішує, чи записи без метеоумов беруть їх із попереднього запису тієї ж льотної зміни: записи для виклику збирає `importRows(plan, { carryWeather, build })`. Екран «Перевірка» (`showReview`, `dialog.dataset.view = 'review'`; `Esc` і «← До створення» повертають ту саму форму) показує зауваження плану (`reviewState`) з сирим текстом клітинки й полем виправлення; введений текст перевіряє `correctionOutcome`, виправлення живуть у моделі блоку (`model.corrections`, `model.build = buildImport(...)`), а під час створення йдуть у `create_dashboard_module` окремим параметром `corrections` (`correctionRecords`). На сторінці модуля клітинки з виправленнями мають клас `ewmc-corrected` і позначку ✎, над таблицею — розділ «Виправлено під час підтягування з таблиці» з даних `corrections` відповіді `get_dashboard_module_data`. Кнопка створення неактивна, поки таблицю читають. В автономних файлах (`script/build_standalone.mjs` підставляє `__EW_NO_MODULE_CATALOG__`) каталогу немає: модулям потрібна SQLite застосунку. |
+| `src/dashboard-module-catalog.css` | стилі шару `ewmc-*`: картки, каталог, сторінка модуля (`.ewmc-dialog[data-view=table]`, `.ewmc-page-head`, `.ewmc-page-body`), таблиця з `table-layout: fixed`, закріплені колонки, панель запису |
+| `src/dashboard-module-charts-core.js` | чиста логіка моделей діаграм без DOM і Tauri: `chartModel(module, rows)` — за ролями полів шаблону (час/категорія, `series`, `metric`, `status`, `order`…) будує структуру для кожного з 24 видів (метеоумови — через `dashboard-module-weather-core.js`) (ряди з номерами слотів палітри в порядку появи, «гарні» поділки `niceTicks`, згортання понад 8 рядів і 12 категорій в «Інші», сортування часу, агрегація правилом показника, календар останнього місяця, когортна матриця, воронка за порядком етапів, точки карти з вагою, стрічка подій за часом, KPI з історією); `chartSummary` — словесний підпис для доступності; журнал польотів завжди — смуги нальоту за типом ПС. Невідома схема не валить дашборд: модель спадає до таблиці. |
+| `src/dashboard-module-charts.js` | малювання моделей: SVG (лінії, площі, стовпчики, смуги, кільця, шкала, радар, карта, двобічна гістограма) і DOM-списки (KPI, прогрес, таблиця, воронка, календар, когорти, стрічка, рейтинг), погодна панель (SVG-карта з ізолініями, обрізаними контуром України через `clipPath`, виноски без накладання, кнопки шкали часу перемикають кадр без читання бази, рядок показників) без innerHTML і мережі; марки за `dataviz`: стовпчики до 24 px із заокругленим кінцем даних і 2 px проміжком, лінії 2 px, маркери r=4 з кільцем кольору поверхні, тонка суцільна сітка, значення в підказках `<title>`, легенда лише для ≥ 2 рядів, текст у кольорах тексту. `mountChart(container, model)` малює під ширину контейнера й перемальовує через `ResizeObserver`; `renderChart(model, { width, height, compact })` — чиста функція розміру. Кольори — CSS-змінні `--ewmc-s1…s8` (темна й світла тема окремо, перевірені `validate_palette.js`), статуси `--ewmc-good/warn/bad`, розбіжна пара `--ewmc-pos/neg`. |
+| `src/dashboard-module-weather-core.js` | чиста логіка картки «Метеоумови» без DOM, Tauri і WebGL: `weatherModel` (кадри часу до `FRAME_LIMIT` = 24, пункти з оцінкою небезпеки `weatherHazard`, рядок показників, сітка хмарності `idwGrid` і ізолінії `contourSegments` для рівнів `CLOUD_LEVELS` 3/6/8), підписи `weatherText`, а також допоміжні функції 3D-сцени: розбір `heights.png` (`decodeHeights`, `smoothHeights`, `sampleRelief`), проєкція в кілометри сцени (`reliefProject`, `reliefSize`, `reliefY` з перебільшенням `RELIEF_EXAGGERATION` = 25) і розкладка хмар над пунктом між НМХ і ВМХ (`cloudPuffs`, детермінований `seededRandom`). Тести — `tests/dashboard-module-weather.test.mjs`. |
+| `src/dashboard-module-weather-3d.js` | 3D-рельєф погоди на весь екран (`openWeatherRelief`): `<dialog class="ewmc-wx3d">`, three.js + `OrbitControls`, рельєф із `map-assets/heights.png` (кешується на сесію) з ізогіпсами в шейдері, море, приглушена територія поза маскою, хмари `THREE.Points` з канвасною текстурою, шпильки й підписи-спрайти пунктів, кільця небезпеки, повзунок моментів часу й рядок показників. Завантажується лише динамічним `import()` з кнопки «3D-рельєф» (окремий чанк збірки); у автономному файлі (`script/build_standalone.mjs` підставляє `__EW_NO_WEATHER_RELIEF__`) кнопки й чанка немає. Закриття звільняє рендерер, геометрії, матеріали й текстури. Без WebGL — пояснення замість сцени. |
+| `src/dashboard-module-geo.js` | спрощений контур України (материк і Крим, 266 точок) для картки «Карта подій», згенерований `script/dashboard_geo.py` з `src/public/map-assets/coast.json` (geoBoundaries, © OpenStreetMap contributors, ODbL); вбудований як константа, тож карта не читає файлів під час роботи. |
+| `src/dashboard-module-source-core.js` | чиста логіка підтягування даних з таблиці без DOM і Tauri: нормалізація заголовків (`normalizeHeader`: регістр, пунктуація, `№`, латинські двійники в кириличних словах), зіставлення заголовків із полями шаблону за назвою поля, словником назв журналу польотів і загальним словником (`sourceProfile`, `matchHeaders`; повторені колонки «Вправа» — за порядком, кілька колонок «Інший екіпаж» — одне поле, метеоумови однією клітинкою — чотири поля), пошук рядка заголовків у перших 25 рядках (`findHeaderRow`), оцінка аркушів (`rankSheets`, `enoughMatches`: достатньо всіх обов'язкових і 5 колонок або 60 % шаблону), перетворення клітинок на значення полів (`convertCell`: тривалості лише `год:хв`, висота, паливо з кілограмами, час доби, СМУ, дати), план підтягування (`planImport`: записи, пропущені рядки з причинами, попередження, зауваження правил форми через `rowRuleProblem`, ліміт 10 000, `plan.carry` — метеоумови, які можна протягнути на записи без них: набір одного запису переходить на наступні записи тієї ж льотної зміни за `flight_shift_number`, поки таблиця не дасть нове значення; не переходить через зміну зміни, без номера зміни, після нерозібраної клітинки метеоумов і з погоди, що порушує правило НМХ/ВМХ; пропущений рядок теж зсуває погоду; поля метеоумов беруться з груп форми `fieldSections`), `importRows` (записи для створення модуля з протягнутою погодою або без неї), шар виправлень екрана «Перевірка» (`plan.timeline` — рядки з даними по порядку, `plan.issues` — зауваження з рядком, колонкою й сирим текстом; `correctionOutcome`, `buildImport` — записи з виправленнями на копіях, повернення пропущених записів і нове протягування погоди; `reviewState`, `correctionRecords`) і підписи для вікна (`describePlan`, `sheetOptionLabel`). Те, що неоднозначне, не вгадується. |
+
+`air.html` і `rocket.html` підключають CSS у `<head>`, а модуль — останнім `<script type="module">` (правка в обох файлах). Модуль викликає вісім Tauri-команд: `get_dashboard_module_catalog`, `list_dashboard_modules`, `create_dashboard_module` (необов'язковий `rows` — записи, підтягнуті з таблиці користувача: модуль і записи створюються однією транзакцією, а некоректний запис скасовує створення), `get_dashboard_module_data`, `replace_dashboard_module_rows` і три команди читання таблиці — `inspect_linked_module_source` (аркуші таблиці профілю й перші 25 рядків кожного; `null`, якщо таблицю не прив'язано), `pick_module_source` (вікно вибору .xlsx; шлях лишається лише в пам'яті Rust, інтерфейс шляхів не передає) і `read_module_source_sheet` (усі непорожні рядки одного аркуша); усі, крім каталогу, потребують активного локального профілю. Читач (`src-tauri/src/module_source.rs`, `calamine`) лише читає: XLSX не змінюється й нічого в нього не дописується; capabilities Tauri для цього не змінювалися. Збереження транзакційно переписує весь набір рядків модуля: рядок із `rowId` зберігає свій номер і `created_at`, рядок, якого немає у списку, видаляється (кнопка «Видалити запис» із підтвердженням у самому діалозі, без системних діалогів браузера). Клієнт завжди передає `expectedUpdatedAt` — `updatedAt` модуля, з яким відкрито таблицю; застаріла версія дає відповідь «таблицю змінено в іншому вікні», після чого інтерфейс перечитує дані (`reopenFresh`) і нічого не перезаписує. Таблиця, яку не вдалося прочитати (`failed`), і таблиця понад 10 000 рядків відкриваються лише для читання (`tableEditState`): запис замінив би рядки, яких користувач не бачить.
+
+## EasySlide (прототип)
+
+Редактор презентацій у модулі «Робоче середовище» → «Офіс», підключений за контрактом із
+[WORKSPACE.md](WORKSPACE.md). Це веб-збірка DeckCraft (Rust → WASM, egui, MIT OR Apache-2.0)
+з вузькими правками (`script/easyslide/easyslide-web.patch`). Прототип, злитий у `main` разом з рештою «Офісу».
+
+| Файл | Призначення |
+|---|---|
+| `src/workspace/easyslide/app.js` | `mount(container, host)`: полотно `#deckcraft_canvas`, `window.easyslideHost`, запуск WASM за адресою `host.resolve('workspace/easyslide/…')`; `unmount`, `isDirty` |
+| `src/workspace/easyslide/host-core.js` | міст без DOM: `createEasySlideHost(host, notify)` → `open(purpose)` через `host.openFile`, `save(name, bytes)` через `host.saveFileAs` (true лише для `.pptx`/`.deckcraft`, експорт PDF/PNG/JPG/GIF/TXT позначку змін не знімає), `setState(dirty, title)` → `host.setDirty`/`host.setTitle`. Тести — `tests/easyslide-host.test.mjs` |
+| `src/workspace/easyslide/easyslide.css` | полотно на весь контейнер; прихованому `<input>` eframe повертає `box-sizing: content-box` (з `border-box` оболонки Chromium псує введення кирилиці) |
+| `src/public/workspace/easyslide/` | зібраний редактор (`deckcraft-web_bg.wasm`, ≈48 МБ; мережа не потрібна), ліцензії DeckCraft і шрифтів (Inter, BIZ UDPGothic — OFL), `README.md` з хешами |
+| `script/easyslide/uk.tsv`, `script/easyslide/l10n.mjs` | український інтерфейс редактора: словник «англійський рядок → переклад» (з шаблонами `{}`) і генератор таблиць Rust; тести — `tests/easyslide-l10n.test.mjs` |
+| `script/easyslide/build.sh`, `*.patch` | перезбірка WASM в окремій теці поза репозиторієм; правки DeckCraft і гачок перекладу egui |
+
+Файли відкриваються й зберігаються командами оболонки `office_*` (`src-tauri/src/office_files.rs`);
+власних команд EasySlide не має. CSP і capabilities Tauri не змінювалися.

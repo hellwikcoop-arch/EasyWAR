@@ -69,7 +69,7 @@ impl SignalAllowlist {
 
     fn permits_source(&self, sender: &str, group: Option<&str>) -> bool {
         self.allowed_senders.contains(sender)
-            && group.map_or(true, |group_id| self.allowed_groups.contains(group_id))
+            && group.is_none_or(|group_id| self.allowed_groups.contains(group_id))
     }
 
     fn has_allowed_sender(&self) -> bool {

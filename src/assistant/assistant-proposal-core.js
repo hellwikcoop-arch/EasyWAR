@@ -1,5 +1,9 @@
 // Пакет пропозиції для розробника: чистий текст без даних таблиць. Нічого не надсилається автоматично:
 // користувач сам зберігає файл і передає його розробнику в Signal.
+// Відомості про елемент дашборда в пакет потрапляють лише за явним вибором користувача і лише у двох видах:
+// 1) статичні ідентифікатори з коду (модуль, ідентифікатор і назва пояснення з каталогу);
+// 2) окремо — підпис елемента з екрана, який може містити текст таблиці; його додають лише свідомо.
+import { explainRefTitle } from './assistant-explain-refs-core.js';
 
 export const PROPOSAL_KINDS = Object.freeze([
   { id: 'fix', label: 'Правка або помилка' },
@@ -40,9 +44,15 @@ export function proposalFileNames(date, image) {
   return { text: `${base}.md`, image: ext ? `${base}-skryn.${ext}` : null };
 }
 
+export const PROPOSAL_FOOTER = 'Пакет сформовано локально. Таблиці й записи в нього не входять.';
+export const PROPOSAL_FOOTER_WITH_LABEL = 'Пакет сформовано локально. Підпис елемента з екрана додано за вибором користувача: він може містити текст із таблиці. Самі таблиці й записи в пакет не входять.';
+
 /**
- * input: { kind, text, context: { branch, title } | null, appVersion, createdAt: Date, imageName }
- * Контекст містить лише назву елемента, а не його значення чи рядки таблиці.
+ * input: { kind, text, context: { branch, explainId, screenLabel } | null, appVersion, createdAt: Date, imageName }
+ * Контекст за замовчуванням порожній. Якщо його передано, до пакета входять лише статичні відомості з коду:
+ * модуль, ідентифікатор пояснення та його назва з каталогу (assistant-explain-refs-core.js). Інші поля
+ * контексту (зокрема `title`) ігноруються, тож підпис з екрана не потрапить у пакет випадково.
+ * Підпис з екрана додається лише через `context.screenLabel`, який інтерфейс заповнює після окремого вибору користувача.
  */
 export function buildProposal(input) {
   const kind = PROPOSAL_KINDS.find(item => item.id === input?.kind) || PROPOSAL_KINDS[0];
@@ -53,15 +63,18 @@ export function buildProposal(input) {
   const created = input?.createdAt;
   if (created instanceof Date && !Number.isNaN(created.getTime())) lines.push(`Дата: ${created.toISOString().slice(0, 10)}`);
   const context = input?.context;
+  let screenLabel = '';
   if (context && typeof context === 'object') {
-    const module = BRANCHES[context.branch];
-    const title = clean(context.title, 200);
+    const module = Object.prototype.hasOwnProperty.call(BRANCHES, context.branch) ? BRANCHES[context.branch] : '';
+    const title = explainRefTitle(context.explainId);
     if (module) lines.push(`Модуль: ${module}`);
-    if (title) lines.push(`Елемент: ${title}`);
+    if (title) lines.push(`Елемент: ${title}`, `Ідентифікатор пояснення: ${context.explainId}`);
+    screenLabel = title ? clean(context.screenLabel, 200).replace(/\s+/gu, ' ') : '';
+    if (screenLabel) lines.push(`Підпис на екрані (додано користувачем, може бути з таблиці): ${screenLabel}`);
   }
   lines.push('', '## Опис', '', text);
   const imageName = clean(input?.imageName, 120);
   if (imageName) lines.push('', `Скриншот додається окремим файлом: ${imageName}`);
-  lines.push('', '---', 'Пакет сформовано локально. Таблиці й записи в нього не входять.');
+  lines.push('', '---', screenLabel ? PROPOSAL_FOOTER_WITH_LABEL : PROPOSAL_FOOTER);
   return lines.join('\n') + '\n';
 }

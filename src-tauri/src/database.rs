@@ -93,6 +93,10 @@ pub(crate) const COMMAND_TABLES_SQL: &str = include_str!("../migrations/0007_com
 pub(crate) const OWN_LOSSES_TABLES_SQL: &str =
     include_str!("../migrations/0008_own_losses_tables.sql");
 pub(crate) const PROFILE_MODULES_SQL: &str = include_str!("../migrations/0009_profile_modules.sql");
+pub(crate) const DASHBOARD_MODULES_SQL: &str =
+    include_str!("../migrations/0010_dashboard_modules.sql");
+pub(crate) const DASHBOARD_MODULE_CORRECTIONS_SQL: &str =
+    include_str!("../migrations/0011_dashboard_module_corrections.sql");
 
 pub fn migrations() -> Vec<Migration> {
     vec![
@@ -150,6 +154,18 @@ pub fn migrations() -> Vec<Migration> {
             sql: PROFILE_MODULES_SQL,
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 10,
+            description: "add_dashboard_modules",
+            sql: DASHBOARD_MODULES_SQL,
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 11,
+            description: "add_dashboard_module_corrections",
+            sql: DASHBOARD_MODULE_CORRECTIONS_SQL,
+            kind: MigrationKind::Up,
+        },
     ]
 }
 
@@ -205,10 +221,10 @@ pub(crate) async fn create_migrated_database(
 mod tests {
     use super::{
         create_migrated_database, migrations, DatabaseMigrationState, DatabaseStatusError,
-        DatabaseStatusStore, COMMAND_TABLES_SQL, DATABASE_URL, EMBEDDED_MIGRATOR,
-        INITIAL_SCHEMA_SQL, LOCAL_PROFILES_SQL, OWN_LOSSES_TABLES_SQL, PROFILE_BRANCH_TABLES_SQL,
-        PROFILE_DETAILS_SQL, PROFILE_MODULES_SQL, WORKSPACE_TEMPLATES_SQL,
-        XLSX_DUPLICATE_LINKS_SQL,
+        DatabaseStatusStore, COMMAND_TABLES_SQL, DASHBOARD_MODULES_SQL,
+        DASHBOARD_MODULE_CORRECTIONS_SQL, DATABASE_URL, EMBEDDED_MIGRATOR, INITIAL_SCHEMA_SQL,
+        LOCAL_PROFILES_SQL, OWN_LOSSES_TABLES_SQL, PROFILE_BRANCH_TABLES_SQL, PROFILE_DETAILS_SQL,
+        PROFILE_MODULES_SQL, WORKSPACE_TEMPLATES_SQL, XLSX_DUPLICATE_LINKS_SQL,
     };
     use sqlx::{sqlite::SqlitePoolOptions, Row};
 
@@ -217,7 +233,7 @@ mod tests {
         assert_eq!(DATABASE_URL, "sqlite:easywar.db");
         assert!(include_str!("../tauri.conf.json").contains(DATABASE_URL));
         let registered = migrations();
-        assert_eq!(registered.len(), 9);
+        assert_eq!(registered.len(), 11);
         assert_eq!(registered[0].version, 1);
         assert_eq!(registered[0].description, "create_provenance_schema");
         assert_eq!(registered[1].version, 2);
@@ -236,6 +252,13 @@ mod tests {
         assert_eq!(registered[7].description, "add_own_losses_tables");
         assert_eq!(registered[8].version, 9);
         assert_eq!(registered[8].description, "add_profile_modules");
+        assert_eq!(registered[9].version, 10);
+        assert_eq!(registered[9].description, "add_dashboard_modules");
+        assert_eq!(registered[10].version, 11);
+        assert_eq!(
+            registered[10].description,
+            "add_dashboard_module_corrections"
+        );
         assert_eq!(
             EMBEDDED_MIGRATOR
                 .iter()
@@ -256,7 +279,7 @@ mod tests {
                 .map(|migration| migration.sql)
                 .collect::<Vec<_>>()
         );
-        assert_eq!(super::latest_schema_version(), Some(9));
+        assert_eq!(super::latest_schema_version(), Some(11));
     }
 
     #[tokio::test]
@@ -268,9 +291,9 @@ mod tests {
             DatabaseStatusStore::new(pool.clone()).load().await.unwrap(),
             super::DatabaseStatus {
                 app_version: env!("CARGO_PKG_VERSION").to_owned(),
-                schema_version: 9,
-                supported_schema_version: 9,
-                migration_count: 9,
+                schema_version: 11,
+                supported_schema_version: 11,
+                migration_count: 11,
                 migration_state: DatabaseMigrationState::Current,
             }
         );
@@ -330,6 +353,14 @@ mod tests {
             .execute(&pool)
             .await
             .expect("profile modules migration must apply");
+        sqlx::raw_sql(DASHBOARD_MODULES_SQL)
+            .execute(&pool)
+            .await
+            .expect("dashboard modules migration must apply");
+        sqlx::raw_sql(DASHBOARD_MODULE_CORRECTIONS_SQL)
+            .execute(&pool)
+            .await
+            .expect("dashboard module corrections migration must apply");
 
         pool
     }
@@ -662,5 +693,155 @@ mod tests {
         .await;
 
         assert!(cross_report_correction.is_err());
+    }
+
+    /// Синтетичний модуль для перевірки таблиці виправлень: профіль, модуль і два записи
+    /// виправлень. Таблиця даних модуля тут не потрібна — виправлення посилаються на неї лише
+    /// номером запису.
+    async fn module_with_corrections(pool: &sqlx::SqlitePool) {
+        let now = "2026-01-01T00:00:00Z";
+        sqlx::query(
+            "INSERT INTO local_profiles (id, display_name, name_key, created_at, updated_at)
+             VALUES ('profile-c0c0c0c0c0c0c0c0c0c0c0c0', 'Синтетичний', 'синтетичний', ?, ?)",
+        )
+        .bind(now)
+        .bind(now)
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO dashboard_modules
+             (id, profile_id, branch, template_id, visual_kind, title, storage_table, created_at, updated_at)
+             VALUES ('dashboard-corrections-01', 'profile-c0c0c0c0c0c0c0c0c0c0c0c0', 'air', 'flight-hours', 'horizontal-bar',
+                     'Журнал', 'dashboard_data_000000000000000000000001', ?, ?)",
+        )
+        .bind(now)
+        .bind(now)
+        .execute(pool)
+        .await
+        .unwrap();
+        for (row_id, field_key, raw, corrected) in [
+            (1_i64, "takeoff_time", "25:00", "14:25"),
+            (1_i64, "flight_altitude", "0,3", "300 м"),
+        ] {
+            sqlx::query(
+                "INSERT INTO dashboard_module_corrections
+                 (module_id, row_id, field_key, source_file, source_sheet, source_row, source_column,
+                  raw_text, corrected_text, reason, created_at)
+                 VALUES ('dashboard-corrections-01', ?, ?, 'Журнал_синтетичний.xlsx', 'Журнал', 8, 'Зліт', ?, ?, 'не розібрано', ?)",
+            )
+            .bind(row_id)
+            .bind(field_key)
+            .bind(raw)
+            .bind(corrected)
+            .bind(now)
+            .execute(pool)
+            .await
+            .unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn dashboard_module_corrections_migration_keeps_raw_and_corrected_text_apart() {
+        let pool = migrated_pool().await;
+        let columns =
+            sqlx::query("SELECT name FROM pragma_table_info('dashboard_module_corrections')")
+                .fetch_all(&pool)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|row| row.get::<String, _>("name"))
+                .collect::<Vec<_>>();
+        assert_eq!(
+            columns,
+            [
+                "id",
+                "module_id",
+                "row_id",
+                "field_key",
+                "source_file",
+                "source_sheet",
+                "source_row",
+                "source_column",
+                "raw_text",
+                "corrected_text",
+                "reason",
+                "created_at"
+            ]
+        );
+        module_with_corrections(&pool).await;
+        let stored: Vec<(String, String)> = sqlx::query_as(
+            "SELECT raw_text, corrected_text FROM dashboard_module_corrections ORDER BY id",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            stored,
+            [
+                ("25:00".to_owned(), "14:25".to_owned()),
+                ("0,3".to_owned(), "300 м".to_owned())
+            ]
+        );
+
+        // Одне поле запису — одне виправлення; порожній виправлений текст і неіснуючий модуль відхиляються.
+        let insert = "INSERT INTO dashboard_module_corrections
+             (module_id, row_id, field_key, source_file, source_sheet, source_row, source_column,
+              raw_text, corrected_text, reason, created_at)
+             VALUES (?, ?, ?, 'Журнал_синтетичний.xlsx', 'Журнал', 8, 'Зліт', '25:00', ?, '', '2026-01-01T00:00:00Z')";
+        for (module_id, row_id, field_key, corrected) in [
+            ("dashboard-corrections-01", 1_i64, "takeoff_time", "14:30"),
+            ("dashboard-corrections-01", 2_i64, "takeoff_time", "   "),
+            ("dashboard-corrections-01", 0_i64, "takeoff_time", "14:30"),
+            ("dashboard-missing-module", 1_i64, "takeoff_time", "14:30"),
+        ] {
+            assert!(
+                sqlx::query(insert)
+                    .bind(module_id)
+                    .bind(row_id)
+                    .bind(field_key)
+                    .bind(corrected)
+                    .execute(&pool)
+                    .await
+                    .is_err(),
+                "{module_id} {row_id} {field_key} «{corrected}» мало бути відхилено"
+            );
+        }
+
+        // Видалення модуля (або профілю) забирає і його виправлення.
+        sqlx::query("DELETE FROM dashboard_modules WHERE id = 'dashboard-corrections-01'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let left: i64 = sqlx::query_scalar("SELECT count(*) FROM dashboard_module_corrections")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(left, 0);
+    }
+
+    #[tokio::test]
+    async fn all_embedded_migrations_apply_to_a_new_file_with_the_corrections_table() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("corrections.sqlite3");
+        let pool = create_migrated_database(&path).await.unwrap();
+        let exists: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'dashboard_module_corrections'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(exists, 1);
+        module_with_corrections(&pool).await;
+        sqlx::query("DELETE FROM local_profiles WHERE id = 'profile-c0c0c0c0c0c0c0c0c0c0c0c0'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let left: i64 = sqlx::query_scalar("SELECT count(*) FROM dashboard_module_corrections")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(left, 0, "профіль видалено — модулі й виправлення теж");
+        pool.close().await;
     }
 }

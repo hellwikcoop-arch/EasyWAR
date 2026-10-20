@@ -1,5 +1,6 @@
 // Режим «Пояснити»: чиста логіка без DOM. Дескриптор елемента → пояснення «що це» і «на чому засновано».
 import { explainUdshv } from './assistant-explain-udshv-core.js';
+import { explainRef } from './assistant-explain-refs-core.js';
 
 // Усі формулювання спираються на docs/DATA_REFERENCE.md і на код дашбордів ПС та РВ.
 // Нічого не вигадуємо: невідомий елемент чесно позначається, а живі значення беруться з екрана.
@@ -362,7 +363,15 @@ function finish(entry, d, n) {
 }
 
 // Головна функція ядра. Дескриптор: { branch, kind, label, group, panelTitle, value, hint }.
+// Результат, окрім тексту пояснення, має `ref` — { id, title } зі статичного каталогу
+// (assistant-explain-refs-core.js). Лише його пакет пропозиції розробнику бере як «Елемент»:
+// `title`, `live` і `hint` походять з екрана й можуть містити текст таблиці.
 export function explainElement(descriptor = {}) {
+  const result = describeElement(descriptor);
+  return { ...result, ref: explainRef(result) };
+}
+
+function describeElement(descriptor) {
   const d = {
     branch: ['air', 'rocket', 'dshv'].includes(descriptor.branch) ? descriptor.branch : 'other',
     part: clip(descriptor.part, 40),

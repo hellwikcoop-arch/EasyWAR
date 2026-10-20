@@ -340,8 +340,8 @@ pub fn dashboard_model_from_snapshots_for_period(
     if is_filtered {
         records.retain(|record| match record.date.as_deref() {
             Some(date) => {
-                from.as_deref().map_or(true, |bound| date >= bound)
-                    && to.as_deref().map_or(true, |bound| date <= bound)
+                from.as_deref().is_none_or(|bound| date >= bound)
+                    && to.as_deref().is_none_or(|bound| date <= bound)
             }
             None => false,
         });

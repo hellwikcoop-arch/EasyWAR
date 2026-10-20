@@ -90,9 +90,9 @@ jobs:
       - name: Rust format
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
       - name: Rust clippy
-        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
       - name: Rust tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml
       # The XLSX contract test runs a Rust example against the legacy parser.
       - run: npm run test:unit
       - run: npm run build
@@ -124,7 +124,7 @@ jobs:
         run: cargo audit --file src-tauri/Cargo.lock
 
   macos:
-    needs: checks
+    needs: [checks, audit]
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     runs-on: macos-latest
     steps:
@@ -217,7 +217,7 @@ jobs:
           if-no-files-found: error
 
   windows:
-    needs: checks
+    needs: [checks, audit]
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     runs-on: windows-latest
     steps:
