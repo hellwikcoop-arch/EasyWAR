@@ -45,6 +45,8 @@ const COMMANDS: &[&str] = &[
     "office_save_file",
     "office_save_file_as",
     "office_close_file",
+    "weather_online_fetch",
+    "weather_online_search",
     "office_editor_close",
     "workspace_open_editor",
     "clear_profile_database",

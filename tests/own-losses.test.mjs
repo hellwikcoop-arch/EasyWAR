@@ -167,10 +167,12 @@ test('the own-losses slide renders with two native charts and the cause block', 
   const xml = await zip.file('ppt/slides/slide5.xml').async('string');
   const text = [...xml.matchAll(/<a:t>([^<]*)<\/a:t>/g)].map(m => m[1]).join(' | ');
   assert.ok(text.includes('Втрати підрозділів ДШВ'));
-  assert.ok(text.includes('Головні причини за даними таблиці'));
+  assert.ok(!text.includes('Головні причини за даними таблиці'), 'текст висновків лежить в анотації, а не на слайді');
+  assert.ok((await zip.file('ppt/notesSlides/notesSlide5.xml').async('string')).includes('Головні причини за даними таблиці'));
+  assert.ok(text.includes('Втрати артилерії противника в порівнянні з нашими'));
   assert.ok(text.includes('Наші 300'));
   assert.ok(!/undefined|NaN|\bnull\b/.test(text));
-  assert.equal(Object.keys(zip.files).filter(n => /^ppt\/charts\/chart\d+\.xml$/.test(n)).length, 3 * 2 + 2);
+  assert.equal(Object.keys(zip.files).filter(n => /^ppt\/charts\/chart\d+\.xml$/.test(n)).length, 3 * 3 + 2 + 2); // періоди УДШВ: 3 діаграми; власні втрати: 2 діаграми й 2 кругові
 });
 
 test('days are declined in the accusative: за 1 добу, за 3 доби, за 7 діб', () => {
