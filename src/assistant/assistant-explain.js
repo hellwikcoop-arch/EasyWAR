@@ -54,7 +54,7 @@ function describeUdshv(target, base) {
   if (step) return out('period', { kind: 'control', label: step.getAttribute('title') });
   const month = c('select[aria-label="Місяць"]');
   if (month) return out('period-field', { kind: 'control', label: 'Місяць' });
-  const date = c('input[type="date"]');
+  const date = c('input[type="date"], input.ew-date-t');
   if (date) return out('period-field', { kind: 'control', label: /^з/u.test(text(date.closest('label'))) ? 'Початок періоду' : 'Кінець періоду' });
   const unitSelect = c('.ol-unit, .ud-unit, .ud-multi, .ud-multi-pop');
   if (unitSelect) {
