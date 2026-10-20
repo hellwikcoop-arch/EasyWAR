@@ -12,6 +12,7 @@ import {
   correctionRecords,
   headerCandidates,
   importRows,
+  importGaps,
   matchHeaders,
   normalizeHeader,
   planImport,
@@ -886,10 +887,13 @@ test('the review state tells what is fixed, still open or wrong, and the notes c
   assert.deepEqual([state.fixed, state.open, state.applied], [1, 4, 2]);
 
   const notes = describePlan(plan, built);
-  assert.equal(notes.summary, 'Буде підтягнуто 5 записів.');
+  // Зауваження ще лишаються, тож це частковий імпорт: підсумок називає фактичні кількості.
+  assert.equal(notes.summary, 'Буде імпортовано 5 записів; пропущено 1 рядок.');
+  assert.equal(notes.partial, true);
+  assert.equal(notes.confirm, 'Підтверджую частковий імпорт: буде імпортовано 5 записів; пропущено 1 рядок; невиправлених зауважень: 4.');
   assert.equal(notes.corrected, 'Виправлено вручну: 2 значення. Сирі значення таблиці збережуться окремо й будуть видні в модулі.');
   const recovered = buildImport(flightFields, plan, new Map([[correctionId(4, 'aircraft_type'), 'Мі-8']]));
-  assert.equal(describePlan(plan, recovered).summary, 'Буде підтягнуто 6 записів.');
+  assert.equal(describePlan(plan, recovered).summary, 'Буде імпортовано 6 записів; пропущено 0 рядків.', 'a fixed required value brings the record back');
   assert.equal(describePlan(plan).corrected, '');
 });
 
@@ -905,7 +909,7 @@ test('plan notes name what was found, what becomes a new module column and what 
     [...ownerCells({ ...baseValues(), [col('Тип ПС')]: 'Разом' }), null],
   ]));
   const notes = describePlan(plan);
-  assert.equal(notes.summary, 'Буде підтягнуто 4 записи.');
+  assert.equal(notes.summary, 'Буде імпортовано 4 записи; пропущено 2 рядки.');
   assert.equal(notes.columns, 'Знайдено стовпців: 34 з 35.');
   assert.equal(notes.missing, 'Нові стовпці модуля — у вашій таблиці їх немає: Позивний командира екіпажу. Дані в них вноситимуться вручну.');
   assert.equal(notes.extra, 'Не використано стовпців таблиці: Примітки.');
@@ -946,4 +950,65 @@ test('the plan lists where each module column comes from, repeated columns inclu
   assert.equal(from('crew_other'), 'Інший екіпаж ×6');
   assert.equal(from('airborne_hours'), 'Наліт');
   assert.equal(from('cloud_cover'), 'Метеоумови (хмарність нижня межа верхня межа видимість)');
+});
+
+// ---------------------------------------------------------------------------------------------
+// Неповний імпорт
+
+test('only a complete, clean plan is complete; a totals row does not make it partial', () => {
+  const fields = catalog.find(item => item.id === 'activity').fields;
+  const clean = planImport(fields, sheetOf([['Час', 'Подія'], ['2026-01-31 14:25', 'Перша'], ['2026-01-31 15:00', 'Друга']]));
+  assert.deepEqual(importGaps(clean), { imported: 2, skipped: 0, truncated: false, open: 0, complete: true });
+  const notes = describePlan(clean);
+  assert.equal(notes.summary, 'Буде підтягнуто 2 записи.');
+  assert.equal(notes.partial, false);
+  assert.equal(notes.confirm, '');
+  const flight = planImport(flightFields, journal(ownerCells(baseValues()), ownerCells({ ...baseValues(), [col('Тип ПС')]: 'Разом' })));
+  assert.equal(flight.skippedCount, 1);
+  assert.equal(importGaps(flight).complete, true, 'the totals row is not a record');
+});
+
+test('a sheet longer than one read is a partial import with the real record count', () => {
+  const fields = catalog.find(item => item.id === 'activity').fields;
+  const long = Array.from({ length: MAX_IMPORT_ROWS + 51 }, (_, index) => [`2026-01-31 ${String(index % 24).padStart(2, '0')}:00`, `Подія ${index}`]);
+  const plan = planImport(fields, sheetOf([['Час', 'Подія'], ...long]));
+  assert.equal(plan.truncated, true);
+  assert.equal(plan.rows.length, MAX_IMPORT_ROWS);
+  const gaps = importGaps(plan);
+  assert.equal(gaps.complete, false);
+  assert.equal(gaps.truncated, true);
+  const notes = describePlan(plan);
+  assert.equal(notes.partial, true);
+  assert.equal(notes.summary, `Буде імпортовано ${MAX_IMPORT_ROWS} записів; пропущено 0 рядків; решту аркуша не прочитано.`);
+  assert.match(notes.confirm, /^Підтверджую частковий імпорт: буде імпортовано 10000 записів; пропущено 0 рядків; решту аркуша не прочитано\.$/u);
+  assert.match(notes.truncated, /решту аркуша не прочитано, буде імпортовано лише 10000 записів\. Це частковий імпорт/u);
+  // Rust відрізав аркуш (truncated), а записів менше межі через пропуски: показано фактичне число.
+  const cut = planImport(fields, sheetOf([['Час', 'Подія'], ['2026-01-31 10:00', 'Перша'], ['2026-01-31', 'Без часу'], ['2026-01-31 11:00', 'Третя']], { truncated: true }));
+  const cutNotes = describePlan(cut);
+  assert.equal(cutNotes.summary, 'Буде імпортовано 2 записи; пропущено 1 рядок; решту аркуша не прочитано.');
+  assert.match(cutNotes.truncated, /буде імпортовано лише 2 записи\./u);
+  assert.doesNotMatch(cutNotes.truncated, /перші 10000/u);
+});
+
+test('wrong required and optional cells make the import partial, and only the previewed rows are created', () => {
+  const fields = catalog.find(item => item.id === 'activity').fields;
+  const plan = planImport(fields, sheetOf([
+    ['Час', 'Подія', 'Значення'],
+    ['2026-01-31 10:00', 'Перша', 5],
+    ['2026-01-31 99:99', 'Неправильний час', 1],
+    ['2026-01-31 11:00', 'Друга', 'багато'],
+    ['2026-01-31 12:00', 'Третя', 2],
+  ]));
+  assert.deepEqual(plan.rowNumbers, [2, 4, 5]);
+  const gaps = importGaps(plan);
+  assert.deepEqual([gaps.imported, gaps.skipped, gaps.complete], [3, 1, false]);
+  assert.ok(gaps.open >= 2, 'the required and the optional cell are both open');
+  const notes = describePlan(plan);
+  assert.equal(notes.summary, 'Буде імпортовано 3 записи; пропущено 1 рядок.');
+  assert.equal(notes.partial, true);
+  // Створюються саме ті записи, які названо в попередньому перегляді.
+  const rows = importRows(plan);
+  assert.equal(rows.length, gaps.imported);
+  assert.deepEqual(rows.map(row => row.label), ['Перша', 'Друга', 'Третя']);
+  assert.equal(rows[1].value, undefined, 'an unreadable optional cell stays empty, not guessed');
 });

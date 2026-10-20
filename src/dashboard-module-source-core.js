@@ -646,6 +646,9 @@ function weatherValues(cell, wanted, fieldByKey) {
 const TOTALS_START = /^\s*(?:разом|всього|усього|підсумок|підсумки|загалом|итого|total)(?![\p{L}\p{N}])/iu;
 
 /** Рядок «Разом…»/«Всього…» — підсумок, а не запис. */
+/** Причина пропуску підсумкового рядка: це не запис, і імпорт без нього лишається повним. */
+const TOTALS_ROW = 'підсумковий рядок';
+
 function isTotalsRow(cells) {
   return cells.some(cell => typeof cell === 'string' && cell.length <= 80 && TOTALS_START.test(cell));
 }
@@ -668,7 +671,7 @@ function cellTextOf(matched, cells, key) {
 
 function readRow(row, context) {
   const cells = Array.isArray(row?.cells) ? row.cells : [];
-  if (isTotalsRow(cells)) return { skip: 'підсумковий рядок' };
+  if (isTotalsRow(cells)) return { skip: TOTALS_ROW };
   const { fieldByKey, orderedKeys, matched, multi } = context;
   const values = {};
   const issues = [];
@@ -1103,14 +1106,47 @@ export function reviewState(plan, build) {
 const valuesWord = count => `${count} ${pluralForm(count, 'значення', 'значення', 'значень')}`;
 
 /**
+ * Наскільки повний імпорт з урахуванням виправлень `build`: скільки записів буде імпортовано
+ * (`imported` — фактична довжина `rows`), скільки рядків пропущено (`skipped`), чи лишилася
+ * непрочитана частина аркуша (`truncated`) і скільки зауважень не виправлено (`open`:
+ * нерозібрані клітинки, пропущені записи, порушення правил). `complete` — імпорт повний і
+ * чистий: лише тоді підтягування вмикається саме; інакше його вмикає й підтверджує користувач.
+ */
+export function importGaps(plan, build = null) {
+  const current = build ?? plan;
+  const imported = current.rows.length;
+  // Виправлення обов'язкового поля повертає пропущений запис: він уже не рахується пропущеним.
+  const skipped = Math.max(0, (plan.skippedCount ?? 0) - Math.max(0, imported - plan.rows.length));
+  // Без виправлень відкриті всі зауваження плану.
+  const open = build ? reviewState(plan, build).open : (plan.issues ?? []).length;
+  const truncated = plan.truncated === true;
+  const totals = (plan.skipped ?? []).find(item => item.reason === TOTALS_ROW)?.count ?? 0;
+  const complete = !plan.blocked && imported > 0 && !truncated && skipped <= totals && open === 0
+    && (plan.warnings ?? []).length === 0 && (plan.rules?.count ?? 0) === 0;
+  return { imported, skipped, truncated, open, complete };
+}
+
+/**
  * Підписи плану для вікна створення. Порожній рядок — нічого показувати. `build` — записи з
  * виправленнями екрана «Перевірка» (`buildImport`); без нього — таблиця як є.
  */
 export function describePlan(plan, build = null) {
   const current = build ?? plan;
   const importable = current.rows.length;
+  const gaps = importGaps(plan, build);
+  const partialSummary = () => [
+    `Буде імпортовано ${rowCountLabel(importable)}`,
+    `пропущено ${rowsWord(gaps.skipped)}`,
+    ...(gaps.truncated ? ['решту аркуша не прочитано'] : []),
+  ].join('; ');
   const notes = {
-    summary: importable ? `Буде підтягнуто ${rowCountLabel(importable)}.` : 'Записів для підтягування немає.',
+    summary: !importable ? 'Записів для підтягування немає.'
+      : gaps.complete ? `Буде підтягнуто ${rowCountLabel(importable)}.` : `${partialSummary()}.`,
+    // Імпорт неповний: підтягування вимикається, а увімкнути його можна лише з явним підтвердженням.
+    partial: importable > 0 && !gaps.complete,
+    confirm: importable > 0 && !gaps.complete
+      ? `Підтверджую частковий імпорт: ${partialSummary().replace(/^Буде/u, 'буде')}${gaps.open ? `; невиправлених зауважень: ${gaps.open}` : ''}.`
+      : '',
     columns: `Знайдено стовпців: ${plan.matched} з ${plan.total}.`,
     blocked: plan.blocked,
     missing: '',
@@ -1147,7 +1183,10 @@ export function describePlan(plan, build = null) {
     notes.carryUnresolved = `Не вдалося протягнути метеоумови на ${rowCountLabel(carry.unresolved)} (${whereWord(carry.unresolved, carry.unresolvedFirst)}): `
       + 'почалася нова льотна зміна без метеоумов або в таблиці не вказано номер зміни. Метеополя там лишаться порожніми.';
   }
-  if (plan.truncated) notes.truncated = `У таблиці більше ${MAX_IMPORT_ROWS} рядків: підтягнуто перші ${MAX_IMPORT_ROWS} записів.`;
+  if (plan.truncated) {
+    notes.truncated = `Аркуш довший, ніж можна прочитати за раз (до ${MAX_IMPORT_ROWS} рядків даних): решту аркуша не прочитано, `
+      + `буде імпортовано лише ${rowCountLabel(importable)}. Це частковий імпорт, а не весь аркуш.`;
+  }
   if (build?.applied.length) {
     notes.corrected = `Виправлено вручну: ${valuesWord(build.applied.length)}. Сирі значення таблиці збережуться окремо й будуть видні в модулі.`;
   }
@@ -1160,6 +1199,7 @@ export function sheetOptionLabel(candidate) {
 }
 
 export const dashboardModuleSourceCore = {
+  importGaps,
   MAX_IMPORT_ROWS,
   normalizeHeader,
   headerCandidates,

@@ -1015,7 +1015,12 @@ test('creating a module can bring rows from the table of the profile, and only r
   }
   // Записи йдуть у створення лише коли користувач залишив галочку: без неї виклик такий самий, як був.
   assert.match(source, /\.\.\.\(rows \? \{ rows \} : \{\}\)/);
-  assert.match(source, /if \(state\.busy \|\| source\.pending\(\)\) return;/, 'a table that is still being read is never raced');
+  assert.match(source, /if \(state\.busy \|\| source\.pending\(\) \|\| source\.unconfirmed\(\)\) return;/, 'a table that is still being read is never raced');
+  // Неповний імпорт сам не вмикається, а створюється лише з окремим підтвердженням.
+  assert.match(source, /confident === true && importGaps\(model\.plan\)\.complete;/);
+  assert.match(source, /submit\.disabled = state\.busy \|\| source\.pending\(\) \|\| source\.unconfirmed\(\);/);
+  assert.match(source, /notes\.partial \? el\('input', \{ type: 'checkbox', disabled: !model\.use, 'data-action': 'confirm-partial' \}\)/);
+  assert.ok(source.includes('Імпорт неповний, тому підтягування вимкнено: увімкніть його свідомо й підтвердьте частковий імпорт.'));
   assert.match(lib, /rows: Option<Vec<serde_json::Map<String, Value>>>/);
   for (const text of [
     'Дані з вашої таблиці', 'Файл таблиці лише читається й не змінюється.', 'Обрати файл XLSX…', 'Обрати інший файл…',

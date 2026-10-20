@@ -43,6 +43,7 @@ import {
   correctionOutcome,
   correctionRecords,
   describePlan,
+  importGaps,
   importRows,
   planImport,
   rankSheets,
@@ -417,7 +418,10 @@ function initialize() {
     const status = el('p', { class: 'ewmc-form-status', 'aria-live': 'polite' });
     const submit = el('button', { type: 'submit', class: 'btn primary', text: 'Створити модуль і таблицю' });
     // Поки таблицю читають, створювати модуль рано: підтягування вже вимкнене за замовчуванням, але не обране.
-    const syncSubmit = () => { submit.disabled = state.busy || source.pending(); };
+    const syncSubmit = () => {
+      submit.disabled = state.busy || source.pending() || source.unconfirmed();
+      submit.title = source.unconfirmed() ? 'Підтвердьте частковий імпорт або вимкніть підтягування' : '';
+    };
     const source = sourceBlock(item, syncSubmit, () => showReview(source, form));
     const form = el('form', { class: 'ewmc-create-form' },
       el('button', { type: 'button', class: 'ewmc-back', text: '← До каталогу', onclick: showCatalog }),
@@ -442,7 +446,7 @@ function initialize() {
     );
     form.addEventListener('submit', async event => {
       event.preventDefault();
-      if (state.busy || source.pending()) return;
+      if (state.busy || source.pending() || source.unconfirmed()) return;
       state.busy = true;
       syncSubmit();
       const name = title.value.trim();
@@ -505,7 +509,7 @@ function initialize() {
     // `corrections` — виправлення з екрана «Перевірка» (ідентифікатор → введений текст); `build` — записи з ними.
     const model = {
       phase: 'loading', pending: true, message: '', origin: '', selection: '', workbook: null, ranked: [], sheet: '', plan: null,
-      use: false, carry: true, corrections: new Map(), build: null,
+      use: false, carry: true, confirmed: false, corrections: new Map(), build: null,
     };
     let request = 0;
     const body = el('div', { class: 'ewmc-source-body', 'aria-live': 'polite' });
@@ -579,8 +583,10 @@ function initialize() {
         // Виправлення належать рядкам конкретного аркуша: інший аркуш починає перевірку з чистого.
         model.corrections = new Map();
         model.build = null;
-        // Таблиця, схожа лише частково, не підтягується сама: користувач вмикає це свідомо.
-        model.use = model.ranked.find(entry => entry.name === name)?.confident === true && model.plan.rows.length > 0;
+        // Сама вмикається лише повна й чиста таблиця, схожа на модуль; частково схожу або неповну
+        // (усічення, пропущені рядки, нерозібрані клітинки, правила форми) користувач вмикає свідомо.
+        model.use = model.ranked.find(entry => entry.name === name)?.confident === true && importGaps(model.plan).complete;
+        model.confirmed = false;
         // Метеоумови, яких у записі не вказано, за умовчанням беруться з попереднього запису тієї ж льотної зміни.
         model.carry = true;
         setPhase('ready');
@@ -647,6 +653,7 @@ function initialize() {
       const add = (text, warn = false) => { if (text) lines.push(el('li', { class: warn ? 'warn' : '', text })); };
       add(notes.blocked, true);
       if (candidate && !candidate.confident && plan.rows.length) add('Таблиця схожа на модуль лише частково, тому підтягування вимкнено — увімкніть його, якщо записи розібрано правильно.', true);
+      else if (notes.partial) add('Імпорт неповний, тому підтягування вимкнено: увімкніть його свідомо й підтвердьте частковий імпорт.', true);
       add(notes.missing);
       add(notes.extra);
       add(notes.skipped, true);
@@ -669,13 +676,20 @@ function initialize() {
       // Протягнути метеоумови можна, лише якщо є на які записи й записи взагалі підтягуються.
       const carry = (model.build ?? plan).carry.possible ? el('input', { type: 'checkbox', disabled: !model.use }) : null;
       if (carry) carry.checked = model.carry;
+      // Неповний імпорт створюється лише з окремим підтвердженням, у якому названо фактичні кількості.
+      const confirm = notes.partial ? el('input', { type: 'checkbox', disabled: !model.use, 'data-action': 'confirm-partial' }) : null;
+      if (confirm) confirm.checked = model.confirmed;
       use.addEventListener('change', () => {
         model.use = use.checked;
         if (carry) carry.disabled = !use.checked;
+        if (confirm) confirm.disabled = !use.checked;
+        onChange();
       });
+      confirm?.addEventListener('change', () => { model.confirmed = confirm.checked; onChange(); });
       carry?.addEventListener('change', () => { model.carry = carry.checked; });
       nodes.push(el('label', { class: 'ewmc-source-use' }, use,
         el('span', { text: importable ? `Підтягнути ${rowCountLabel(importable)} у новий модуль` : 'Підтягувати нічого' })));
+      if (confirm) nodes.push(el('label', { class: 'ewmc-source-use ewmc-source-confirm' }, confirm, el('span', { text: notes.confirm })));
       if (carry) {
         nodes.push(el('div', { class: 'ewmc-source-carry' },
           el('label', { class: 'ewmc-source-use' }, carry, el('span', { text: notes.carryLabel })),
@@ -699,13 +713,16 @@ function initialize() {
       node,
       start,
       pending: () => model.pending,
+      // Підтягування неповного набору увімкнено, але не підтверджено: створювати модуль рано.
+      unconfirmed: () => model.phase === 'ready' && model.use && Boolean(model.plan)
+        && !importGaps(model.plan, model.build).complete && !model.confirmed,
       rows: () => {
         if (model.phase !== 'ready' || !model.use || !model.plan) return null;
         const rows = importRows(model.plan, { carryWeather: model.carry, build: model.build });
         return rows.length ? rows : null;
       },
       corrections: () => (model.build ? correctionRecords(model.plan, model.build, model.workbook?.fileName) : []),
-      refresh: render,
+      refresh: () => { render(); onChange(); },
       // Екран «Перевірка» працює з тим самим планом: виправлення лишаються в моделі блоку до створення модуля.
       review: () => ({
         plan: model.plan,
@@ -716,10 +733,12 @@ function initialize() {
         rowsCount: () => (model.build ?? model.plan).rows.length,
         outcome: (key, text) => correctionOutcome(item.fields, model.plan, key, text),
         set: (id, text) => {
+          model.confirmed = false;
           model.corrections.set(id, text);
           model.build = buildImport(item.fields, model.plan, model.corrections);
         },
         clear: id => {
+          model.confirmed = false;
           model.corrections.delete(id);
           model.build = model.corrections.size ? buildImport(item.fields, model.plan, model.corrections) : null;
         },
