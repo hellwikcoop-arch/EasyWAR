@@ -33,7 +33,7 @@ import {
   tableEditState,
   visibleColumnKeys,
 } from './dashboard-module-catalog-core.js';
-import { chartModel } from './dashboard-module-charts-core.js';
+import { chartModel, takeoffHoursModel, tickerItems } from './dashboard-module-charts-core.js';
 import { mountChart } from './dashboard-module-charts.js';
 import {
   buildImport,
@@ -52,8 +52,11 @@ import {
 const withoutRelief = typeof __EW_NO_WEATHER_RELIEF__ !== 'undefined' && __EW_NO_WEATHER_RELIEF__;
 const loadRelief = withoutRelief ? null : () => import('./dashboard-module-weather-3d.js');
 
+// Модулям потрібна локальна SQLite застосунку; в автономному файлі її немає, тож збірка підставляє true
+// і весь каталог із діаграмами з файлу випадає.
+const withoutCatalog = typeof __EW_NO_MODULE_CATALOG__ !== 'undefined' && __EW_NO_MODULE_CATALOG__;
 const invoke = window.__TAURI_INTERNALS__?.invoke || window.parent?.__TAURI_INTERNALS__?.invoke;
-if (typeof invoke === 'function') initialize();
+if (!withoutCatalog && typeof invoke === 'function') initialize();
 
 // Запис редагується прямо в рядку таблиці, а форма з підказками стоїть над нею; поля з'єднано з формою
 // атрибутом `form`. Колонки «№» і «Дія» закріплено по краях; їх ширину задає CSS (`ewmc-col-number`,
@@ -202,7 +205,17 @@ function initialize() {
     }
     const grid = el('div', { class: 'ewmc-dashboard-grid' });
     for (const module of state.modules) grid.append(renderModule(module, state.data.get(module.id)?.rows || []));
-    host.append(grid);
+    host.append(grid, ticker(tickerItems(state.modules, state.data)));
+  }
+
+  // Бігучий рядок під картками: стан усіх модулів одним рядком. Друга копія лише для безшовного
+  // кола й прихована від читачів екрана; при «зменшити рух» рядок стоїть і прокручується вручну.
+  function ticker(items) {
+    const node = item => el('li', { class: item.failed ? 'is-failed' : '' }, el('b', { text: item.title }), el('span', { text: item.text }));
+    return el('div', { class: 'ewmc-ticker', role: 'region', 'aria-label': 'Стрічка модулів', style: { '--ewmc-ticker-s': `${Math.max(24, items.length * 9)}s` } },
+      el('div', { class: 'ewmc-ticker-track' },
+        el('ul', {}, items.map(node)),
+        el('ul', { 'aria-hidden': 'true' }, items.map(node))));
   }
 
   function renderModule(module, rows) {
@@ -212,6 +225,7 @@ function initialize() {
         el('div', {}, el('h3', { text: module.title }), el('p', { text: `${rowCountLabel(module.rowCount)} · локальна SQLite` })),
         el('span', { class: 'ewmc-live', text: module.rowCount ? 'Дані' : 'Створено' })),
       visual(module, rows),
+      takeoffVisual(module, rows),
       el('div', { class: 'ewmc-module-actions' },
         el('button', {
           type: 'button',
@@ -1298,6 +1312,9 @@ function sampleRows(item) {
     [['Виліт пари', 'Готово', 2], ['Доповідь прийнято', 'Готово', 1], ['Затримка вильоту', 'Увага', 1], ['Повернення на базу', 'Готово', 2]].forEach(([label, status, value], index) => push({ occurred_at: stamp(index), label, status, value }));
   } else if (kind === 'waveform') {
     values.forEach((value, index) => push({ occurred_at: stamp(index), positive_value: value, negative_value: values[(index + 5) % values.length] * 0.6, series: 'Разом' }));
+  } else if (kind === 'ridgeline') {
+    [['Мі-8', [7, 8, 8, 9, 10, 13, 14]], ['Мі-24', [5, 6, 6, 7, 16, 17]], ['Ан-26', [11, 12, 12, 13, 21]]]
+      .forEach(([series, hours]) => hours.forEach((hour, index) => push({ occurred_at: `2026-10-${String(1 + index).padStart(2, '0')}T${String(hour).padStart(2, '0')}:15`, series })));
   } else if (kind === 'weather') {
     // Вигадані спостереження: три моменти, у третьому — гроза й низька НМХ на одному пункті.
     const points = [['Пункт «Північ»', 51.2, 30.9], ['Пункт «Захід»', 49.6, 24.8], ['Пункт «Центр»', 48.9, 32.4], ['Пункт «Південь»', 46.9, 31.2], ['Пункт «Схід»', 49.4, 36.1]];
@@ -1316,6 +1333,15 @@ function sampleRows(item) {
     units.slice(0, 5).forEach((label, index) => push({ label, category: label, value: values[index], status: index % 2 ? 'Виконується' : 'Готово' }));
   }
   return rows;
+}
+
+/** Друга діаграма картки журналу польотів: зльоти за годинами доби по типах ПС («гребені»). */
+function takeoffVisual(module, rows) {
+  if (!module.fields?.some(field => field.key === 'takeoff_time') || !module.fields.some(field => field.key === 'aircraft_type')) return null;
+  const host = el('div', { class: 'ewmc-chart-host' });
+  const box = el('div', { class: 'ewmc-visual ewmc-visual-extra', 'data-visual': 'ridgeline' }, host);
+  mountChart(host, takeoffHoursModel(module, rows), { height: 150 });
+  return box;
 }
 
 /** Картка з діаграмою модуля (або шаблону) з його рядків; перемальовується під ширину картки. */
