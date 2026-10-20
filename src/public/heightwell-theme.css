@@ -30,7 +30,7 @@ html[data-skin="heightwell"]:not([data-theme="light"]) {
   --hw-ink: #eaf1ff;
   --hw-cyan: #2ee6ff;
   --hw-citrine: #ffc83d;
-  --hw-magenta: #ff4fd8;
+  --hw-magenta: #e08ad2; /* приглушений: яскравий #ff4fd8 різав очі в написах Артилерії */
   --hw-chapter: var(--hw-cyan);
 
   --bg: var(--hw-void);
