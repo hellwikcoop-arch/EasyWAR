@@ -360,3 +360,4 @@ td.unit-cell span, td.unit-cell b { vertical-align: middle; }
 .share-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .share-row .num { text-align: right; }
 .share-name { display: flex; align-items: center; gap: 8px; }
+.share-name .crest-s { margin: 0; height: 22px; max-width: 26px; flex: none; }
