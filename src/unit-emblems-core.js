@@ -4,7 +4,7 @@
 /** Файли, що є в src/unit-art (без розширення). Тест звіряє цей перелік зі справжньою текою. */
 export const EMBLEM_FILE_NAMES = Object.freeze([
   '1-oshp', '107-reabr', '148-oabr', '225-oshp', '425-oshp', '475-oshp', '67-ombr', '71-oebr', '78-odshbr',
-  '79-odshbr', '80-odshbr', '82-odshbr', '95-odshbr', 'arez2-148-44',
+  '79-odshbr', '80-odshbr', '82-odshbr', '95-odshbr', 'arez2-148-44', 'sso-generic',
 ]);
 const KNOWN = new Set(EMBLEM_FILE_NAMES);
 
@@ -25,8 +25,9 @@ export function emblemFile(name) {
   if (hit) return hit[1];
   // «79 ОДШБр», «425 ошп», «82 ОШБр», «ГРВ 79 одшбр»: номер і тип частини наприкінці назви.
   const m = /(?:^|[^0-9])(\d{1,3})\s*(одшбр|ошп|оабр|реабр|омбр|оєбр|оебр)\s*$/.exec(text.toLowerCase().replace(/ошбр/g, 'одшбр'));
-  if (!m) return null;
-  const slug = (TYPE_SLUG.find(([re]) => re.test(m[2])) || [])[1];
+  const slug = m && (TYPE_SLUG.find(([re]) => re.test(m[2])) || [])[1];
   const file = slug ? `${+m[1]}-${slug}` : null;
-  return file && KNOWN.has(file) ? file : null;
+  if (file && KNOWN.has(file)) return file;
+  // Невідомий підрозділ із позначкою «ССО»: загальний знак ССО.
+  return /(^|[^а-яіїєґ])ссо($|[^а-яіїєґ])/i.test(text) ? 'sso-generic' : null;
 }

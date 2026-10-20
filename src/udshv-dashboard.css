@@ -214,18 +214,10 @@ body.udshv-open #view-ref { display: none !important; }
 }
 body.udshv-open .appbar .tabs { visibility: hidden; }
 
-/* Фон дашборда УДШВ: на весь екран темна підкладка EasyWAR із координатною сіткою й ізолініями (background.webp).
-   Нижній шар — запасний градієнт, поки картинка не завантажилась. Світла тема нижче лишається без картинки. */
-html:has(body.udshv-open) {
-  background:
-    url('./udshv-art/background.webp') center / cover no-repeat fixed,
-    linear-gradient(115deg, #0a1730 0%, #170f24 45%, #2a0a12 100%) fixed !important;
-}
-:root[data-theme="light"]:has(body.udshv-open) {
-  background: linear-gradient(115deg, #e9eef8 0%, #f3e9ee 55%, #f1dde1 100%) fixed !important;
-}
+/* Фон дашборда УДШВ — один колір без картинки й градієнта: темний у темній темі, світлий у світлій. */
+html:has(body.udshv-open) { background: #1b0a10 !important; }
+:root[data-theme="light"]:has(body.udshv-open) { background: #f1eaee !important; }
 html body.udshv-open, html.rocket-ref24 body.udshv-open, html:root body.udshv-open { background: transparent !important; }
-html:root:has(body.udshv-open) { background-color: #12091a !important; }
 
 /* Актуальність підрозділів */
 .ud-note { margin: 0; color: var(--ud-muted); font-size: 12.5px; line-height: 1.45; }

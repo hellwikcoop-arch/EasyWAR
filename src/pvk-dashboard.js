@@ -10,6 +10,7 @@ import {
 } from './pvk-dashboard-core.js';
 import { consumeOwnLossesTabRequest, ownLossesHost, ownLossesPage } from './own-losses-dashboard.js';
 import { playMotion, resetMotion } from './dashboard-motion.js';
+import { MINE_SLOT, MINE_VIEW, personalNavItem } from './personal-dashboard.js';
 
 const state = {
   workbook: null,
@@ -482,10 +483,13 @@ export function render(host, workbook, options = {}) {
     // «Наші втрати» — окрема таблиця з власним файлом і періодом: потребує читача xlsx від модуля.
     options.readSheets && ['own', 'Наші втрати'],
     ['quality', 'Перевірка даних'],
+    personalNavItem(),
   ].filter(Boolean);
   if (!nav.some(([key]) => key === state.view)) state.view = nav[0][0];
   const own = state.view === 'own';
+  const mine = state.view === MINE_VIEW;
   const page = own ? h('div', { class: 'pvk-page' }, ownLossesPage({ scope: 'pvk', readSheets: options.readSheets, rerender }))
+    : mine ? h('div', { class: 'pvk-page pvk-mine', [MINE_SLOT]: '' })
     : state.view === 'journal' ? journalPage(model, runtime)
     : state.view === 'summary' ? summaryPage(model)
     : state.view === 'table' ? tablePage(model, runtime)
@@ -496,7 +500,7 @@ export function render(host, workbook, options = {}) {
     h('header', { class: 'pvk-hero' },
       h('div', {}, h('span', { class: 'pvk-eyebrow', text: `${[model.journal && model.journal.name, hasSheets && 'ТАБЛ 2-3'].filter(Boolean).join(' і ')} · локальна аналітика` }), h('h1', { text: 'Дашборд ПВК' }), h('p', { text: 'Усі підпорядковані підрозділи · файл відкрито лише для читання' })),
       options.canRefresh ? h('button', { class: 'btn quiet', type: 'button', onclick: () => options.refresh?.() }, 'Оновити з файлу') : null),
-    own ? null : periodControls(workbook, rerender),
+    own || mine ? null : periodControls(workbook, rerender),
     h('nav', { class: 'pvk-nav', 'aria-label': 'Розділи дашборда ПВК' }, nav.map(([key, label]) => h('button', { type: 'button', 'data-nav': key, 'aria-pressed': String(state.view === key), onclick: () => { state.view = key; rerender(); } }, label))),
     page,
   ].filter(Boolean));

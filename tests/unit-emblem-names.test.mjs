@@ -25,6 +25,12 @@ test('emblemFile resolves unit names by number and type, ignoring case and spaci
   }
 });
 
+test('невідомий підрозділ із позначкою ССО отримує загальний знак ССО', () => {
+  for (const name of ['142 НЦ ССО', 'ссо-8', 'Група ССО']) assert.equal(emblemFile(name), 'sso-generic', name);
+  assert.equal(emblemFile('79 ОДШБр'), '79-odshbr');
+  assert.equal(emblemFile('ПСС'), null);
+});
+
 test('emblemFile returns null for units without an emblem and for junk', () => {
   for (const name of ['А ПС', '1 ДШБ', '99 омбр', '79', 'одшбр', '', null, undefined]) assert.equal(emblemFile(name), null, String(name));
 });

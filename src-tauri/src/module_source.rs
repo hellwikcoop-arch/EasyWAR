@@ -65,6 +65,9 @@ pub struct SourceWorkbook {
     /// `linked` — таблиця, прив'язана до профілю; `picked` — файл, обраний користувачем.
     pub origin: String,
     pub sheets: Vec<SourceSheet>,
+    /// Непрозорий ідентифікатор огляду (`module_source_selection`): за ним читається
+    /// аркуш. Шлях до файла інтерфейс не отримує.
+    pub selection: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -123,6 +126,7 @@ pub fn inspect_bytes(
         file_name: file_name.to_owned(),
         origin: origin.to_owned(),
         sheets,
+        selection: String::new(),
     })
 }
 

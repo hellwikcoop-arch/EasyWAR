@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Довідник бригад — EasyWAR</title>
+<link rel="stylesheet" href="../fonts/fonts.css">
+<link rel="stylesheet" href="../base.css">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<main class="bg">
+  <nav class="gx-nav"><a href="../index.html">← Довідники</a></nav>
+  <header><h1>Довідник бригад</h1><p>Емблема, назва, тип частини й рід військ · без інтернету</p></header>
+  <div class="tools">
+    <input id="q" type="search" placeholder="Пошук: номер, назва, місто" aria-label="Пошук бригади" autocomplete="off">
+    <div class="chips" id="branches" role="group" aria-label="Рід військ"></div>
+  </div>
+  <p class="count" id="count" aria-live="polite"></p>
+  <section class="grid" id="grid" aria-label="Бригади"></section>
+  <p class="hint">«—» означає, що відомості ще не внесено. Довідник не містить оперативних даних.</p>
+</main>
+<script type="module" src="./main.js"></script>
+</body>
+</html>

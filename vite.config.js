@@ -105,6 +105,7 @@ export default defineConfig({
         aircraftViewer: fileURLToPath(new URL("./src/aircraft-viewer.html", import.meta.url)),
         // 3D-довідники: хаб і шість довідників; лаунчер відкриває хаб в iframe-накладці (src/guides-launcher.js).
         guides: fileURLToPath(new URL("./src/guides/index.html", import.meta.url)),
+        "guides-brigades": fileURLToPath(new URL("./src/guides/brigades/index.html", import.meta.url)),
         "guides-rvia": fileURLToPath(new URL("./src/guides/rvia/index.html", import.meta.url)),
         "guides-ppo": fileURLToPath(new URL("./src/guides/ppo/index.html", import.meta.url)),
         "guides-ground-forces": fileURLToPath(new URL("./src/guides/ground-forces/index.html", import.meta.url)),

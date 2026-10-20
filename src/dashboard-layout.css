@@ -60,6 +60,8 @@
 .ud-nav button[data-nav="table"], .pvk-nav button[data-nav="table"] { --nav-icon: var(--ic-grid); }
 .ud-nav button[data-nav="quality"], .pvk-nav button[data-nav="quality"] { --nav-icon: var(--ic-shield); }
 .pvk-nav button[data-nav="journal"] { --nav-icon: var(--ic-doc); }
+/* «Мій дашборд»: особисті модулі (personal-dashboard.js); іконка — з dashboard-module-catalog.css, запасна — документ. */
+.ud-nav button[data-nav="my-dashboard"], .pvk-nav button[data-nav="my-dashboard"] { --nav-icon: var(--ewmc-ic-mine, var(--ic-doc)); }
 .pvk-nav button[data-nav="АА"], .pvk-nav button[data-nav="ПС"] { --nav-icon: var(--ic-plane); }
 .pvk-nav button[data-nav="Об'єкти"] { --nav-icon: var(--ic-target); }
 
@@ -116,4 +118,29 @@
 }
 @media (min-width: 2400px) {
   #udshv-dashboard-root .ud-kpis:not(.ud-kpis-3) { grid-template-columns: repeat(9, minmax(0, 1fr)); }
+}
+
+/* ---------- Активний пункт бічного меню ПС і РВ: той самий градієнтний «капсул» зі світінням, що й у УДШВ та ПВК ----------
+   Колір свій у кожного роду військ: ПС — блакитний, РВ — золотий. Світла тема не змінюється. У ПС на широких екранах пункт
+   лежить під ковзним індикатором (.snav-ind), тож градієнт малюється на ньому, а на вузьких — на самій кнопці. */
+html:not([data-theme="light"]):not(.rocket-ref24) {
+  --nav-hi: #6cb4ff; --nav-mid: #2a8cff; --nav-end: #1457b8; --nav-glow: rgba(42, 140, 255, .35); --nav-ink: #fff;
+}
+html.rocket-ref24:not([data-theme="light"]) {
+  --nav-hi: #f4d36a; --nav-mid: #d9b650; --nav-end: #8f6a1a; --nav-glow: rgba(217, 182, 80, .35); --nav-ink: #16180d;
+}
+html:not([data-theme="light"]) .snav-ind {
+  border-radius: 11px;
+  background: linear-gradient(135deg, var(--nav-hi), var(--nav-mid) 55%, var(--nav-end));
+  box-shadow: 0 6px 20px var(--nav-glow), inset 0 1px 0 rgba(255, 255, 255, .22);
+}
+html:not([data-theme="light"]) .snav-b.on {
+  color: var(--nav-ink) !important; border-color: transparent !important;
+  background: linear-gradient(135deg, var(--nav-hi), var(--nav-mid) 55%, var(--nav-end)) !important;
+  box-shadow: 0 6px 20px var(--nav-glow), inset 0 1px 0 rgba(255, 255, 255, .22) !important;
+}
+html:not([data-theme="light"]) .snav-b.on svg, html:not([data-theme="light"]) .snav-b.on .ic { color: var(--nav-ink) !important; }
+html:not([data-theme="light"]) .snav-b.on .nb { color: var(--nav-ink); background: rgba(255, 255, 255, .18); border-color: transparent; }
+@media (min-width: 1280px) {
+  html:not([data-theme="light"]):not(.rocket-ref24) .snav-b.on { background: transparent !important; box-shadow: none !important; }
 }

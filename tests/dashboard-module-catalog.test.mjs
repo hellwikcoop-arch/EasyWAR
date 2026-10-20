@@ -11,6 +11,10 @@ import {
   columnCountLabel,
   crewCount,
   crewSummary,
+  deleteModulePrompt,
+  deleteModuleRequest,
+  runModuleDelete,
+  DELETE_CONFLICT_MESSAGE,
   fieldColumnWidth,
   fieldHint,
   fieldInputText,
@@ -1030,9 +1034,23 @@ test('creating a module can bring rows from the table of the profile, and only r
   assert.doesNotMatch(production, /fs::write|File::create|OpenOptions|write_all|remove_file|rename\(|rust_xlsxwriter|xlsxwriter|umya/);
   assert.match(production, /Xlsx::new|open_workbook_from_rs|calamine/);
   // Шлях файла, який обрав користувач, береться лише з вікна вибору, а не від інтерфейсу.
-  const commands = lib.slice(lib.indexOf('struct ModuleSourceSelection'), lib.indexOf('async fn get_dashboard_module_data'));
-  assert.doesNotMatch(commands, /\bpath:\s*(?:String|PathBuf)/);
+  const commands = lib.slice(lib.indexOf('fn read_source_file('), lib.indexOf('async fn get_dashboard_module_data'));
+  assert.ok(commands.length > 1000, 'the source commands were found');
+  assert.doesNotMatch(commands, /\bpath:\s*(?:String|PathBuf),?\n\s*\) -> Result<Option<module_source/);
   assert.match(commands, /blocking_pick_file\(\)/);
+  // Аркуш читається лише за непрозорим ідентифікатором огляду, прив'язаним до вікна, профілю,
+  // сеансу й відбитка вмісту; інтерфейс не передає ні шляху, ні походження таблиці.
+  const read = commands.slice(commands.indexOf('async fn read_module_source_sheet('));
+  assert.match(read, /window: tauri::Window,/);
+  assert.match(read, /selection: String,\n\s+sheet: Option<String>,\n\s+release: Option<bool>,\n\)/);
+  assert.doesNotMatch(read.slice(0, read.indexOf(') ->')), /origin: String|path:/);
+  assert.match(read, /selections\s*\.resolve\(&selection, &owner\)/);
+  assert.match(read, /SelectionError::Changed/);
+  assert.match(read, /SelectionError::Rebound/);
+  assert.match(source, /invoke\('read_module_source_sheet', \{ selection: model\.selection, sheet: name \}\)/);
+  assert.match(source, /invoke\('read_module_source_sheet', \{ selection, release: true \}\)/, 'closing the form forgets the selection');
+  assert.match(source, /dispose: \(\) => \{ request \+= 1; release\(\); \}/);
+  assert.ok(source.includes('Перечитати таблицю профілю'), 'a changed table can be read again');
 });
 
 test('the data-from-table block sits in the left column of the create form, above the long column list', async () => {
@@ -1136,4 +1154,79 @@ test('the review screen corrects values before the import and never rewrites the
   assert.doesNotMatch(review, /innerHTML|confirm\(|alert\(/);
   assert.match(css, /\.ewmc-issue\{display:grid;/);
   assert.match(css, /\.ewmc-data-table td\.ewmc-corrected\{/);
+});
+
+test('deleting a module asks first and names what disappears with it', () => {
+  const ask = rowCount => deleteModulePrompt({ title: 'Лінійний графік', rowCount });
+  assert.equal(ask(0), 'Видалити модуль «Лінійний графік» і його порожню таблицю? Дані зникнуть остаточно, дію не можна скасувати.');
+  assert.match(ask(1), /таблицю з 1 записом\?/);
+  assert.match(ask(3), /таблицю з 3 записами\?/);
+  assert.match(ask(11), /таблицю з 11 записами\?/);
+  assert.match(ask(21), /таблицю з 21 записом\?/);
+  assert.match(deleteModulePrompt({ title: '  ' }), /модуль «без назви» і його порожню таблицю/);
+});
+
+test('a module card can be deleted through the local command after an inline confirmation', async () => {
+  const source = await readFile(new URL('../src/dashboard-module-catalog.js', import.meta.url), 'utf8');
+  for (const text of ['Видалити модуль і дані', 'Так, видалити', 'Залишити', 'runModuleDelete(invoke, module)', 'deleteModulePrompt(module)']) {
+    assert.ok(source.includes(text), text);
+  }
+  assert.doesNotMatch(source, /window\.confirm|\bconfirm\(/);
+  const css = await readFile(new URL('../src/dashboard-module-catalog.css', import.meta.url), 'utf8');
+  assert.match(css, /\.ewmc-host \[hidden\]\{display:none!important\}/, 'the hidden confirmation must not show through .ewmc-confirm{display:flex}');
+});
+
+test('deleting sends the version the user confirmed and never deletes without it', async () => {
+  assert.deepEqual(deleteModuleRequest({ id: 'm1', updatedAt: 'V1' }), { moduleId: 'm1', expectedUpdatedAt: 'V1' });
+  assert.throws(() => deleteModuleRequest({ id: 'm1' }), /позначки версії/);
+  assert.throws(() => deleteModuleRequest({ updatedAt: 'V1' }), /ідентифікатора/);
+  const calls = [];
+  const invoke = async (...call) => { calls.push(call); };
+  assert.deepEqual(await runModuleDelete(invoke, { id: 'm1', updatedAt: 'V1' }), { status: 'deleted' });
+  assert.deepEqual(calls, [['delete_dashboard_module', { moduleId: 'm1', expectedUpdatedAt: 'V1' }]]);
+  const none = await runModuleDelete(invoke, { id: 'm1' });
+  assert.equal(none.status, 'failed');
+  assert.equal(calls.length, 1, 'no version mark: the command is not even called');
+});
+
+test('after a delete conflict nothing is retried and the user must confirm again', async () => {
+  let attempts = 0;
+  const invoke = async () => { attempts += 1; throw new Error('таблицю змінено в іншому вікні; відкрийте її знову'); };
+  const result = await runModuleDelete(invoke, { id: 'm1', updatedAt: 'V1' });
+  assert.equal(result.status, 'conflict');
+  assert.equal(result.message, DELETE_CONFLICT_MESSAGE);
+  assert.match(DELETE_CONFLICT_MESSAGE, /Перевірте дані й підтвердьте видалення ще раз/);
+  assert.equal(attempts, 1);
+  const other = await runModuleDelete(async () => { throw new Error('не вдалося'); }, { id: 'm1', updatedAt: 'V1' });
+  assert.deepEqual(other, { status: 'failed', message: 'не вдалося' });
+  const source = await readFile(new URL('../src/dashboard-module-catalog.js', import.meta.url), 'utf8');
+  const body = source.slice(source.indexOf('async function deleteModule('), source.indexOf('// 3D-сцена'));
+  assert.match(body, /result\.status === 'conflict'[\s\S]*await loadModules\(\)/, 'conflict reloads the cards');
+  assert.equal(body.match(/runModuleDelete\(/g).length, 1, 'no automatic second attempt');
+});
+
+test('«Мій дашборд» lives only on its own tab of the left menu', async () => {
+  const source = await readFile(new URL('../src/dashboard-module-catalog.js', import.meta.url), 'utf8');
+  // ПВК і УДШВ малюють гніздо самі; ПС і РВ отримують пункт бічного меню від каталогу.
+  assert.match(source, /dashboard\.querySelector\(`\[\$\{MINE_SLOT\}\]`\)/);
+  assert.match(source, /nav\.insertBefore\(mineButton, nav\.querySelector\(':scope > \.snav-entry'\)\)/);
+  assert.match(source, /else if \(host\.isConnected\) host\.remove\(\)/, 'outside its tab the section is not on the page');
+  for (const page of ['udshv-dashboard.js', 'pvk-dashboard.js']) {
+    const dash = await readFile(new URL(`../src/${page}`, import.meta.url), 'utf8');
+    assert.match(dash, /personalNavItem\(\)/, page);
+    assert.match(dash, /\[MINE_SLOT\]: ''/, page);
+  }
+  const css = await readFile(new URL('../src/dashboard-module-catalog.css', import.meta.url), 'utf8');
+  assert.match(css, /body\.ewmc-mine-open #view-dash>\.dmain>:not\(\.ewmc-host\)\{display:none!important\}/);
+});
+
+test('the personal tab exists only where the local database does', async () => {
+  const { MINE_LABEL, hasPersonalDashboard, personalNavItem } = await import('../src/personal-dashboard.js');
+  const invoke = async () => null;
+  assert.equal(MINE_LABEL, 'Мій дашборд');
+  assert.equal(hasPersonalDashboard({}), false);
+  assert.equal(personalNavItem({}), null);
+  assert.equal(hasPersonalDashboard({ __TAURI_INTERNALS__: { invoke } }), true);
+  assert.equal(hasPersonalDashboard({ parent: { __TAURI_INTERNALS__: { invoke } } }), true, 'a module page inside the launcher frame');
+  assert.deepEqual(personalNavItem({ __TAURI_INTERNALS__: { invoke } }), ['my-dashboard', 'Мій дашборд']);
 });

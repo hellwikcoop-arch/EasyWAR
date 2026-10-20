@@ -528,23 +528,53 @@ function isoDate(year, month, day) {
   return valid ? `${String(year).padStart(4, '0')}-${pad2(month)}-${pad2(day)}` : null;
 }
 
-/** `{ date, time }` з тексту «2026-01-31», «2026-01-31 14:25» або «31.01.2026 14:25»; інакше `null`. */
-function dateParts(text) {
-  let match = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/u.exec(text);
-  if (match) return { date: isoDate(Number(match[1]), Number(match[2]), Number(match[3])), time: match[4] == null ? null : `${match[4]}:${match[5]}` };
-  match = /^(\d{1,2})[./](\d{1,2})[./](\d{4})(?:\s+(\d{1,2}):(\d{2}))?$/u.exec(text);
-  if (match) return { date: isoDate(Number(match[3]), Number(match[2]), Number(match[1])), time: match[4] == null ? null : `${pad2(Number(match[4]))}:${match[5]}` };
-  return null;
+/** «ГГ:ХХ», якщо години 00–23, хвилини й секунди 00–59; інакше `null`. Секунди відкидаються. */
+function clockText(hours, minutes, seconds) {
+  const h = Number(hours);
+  const m = Number(minutes);
+  const sec = seconds == null ? 0 : Number(seconds);
+  return h <= 23 && m <= 59 && sec <= 59 ? `${pad2(h)}:${pad2(m)}` : null;
 }
+
+/**
+ * `{ date, time }` з тексту «2026-01-31», «2026-01-31 14:25», «2026-01-31T14:25:30» або
+ * «31.01.2026 14:25»; інакше `null`. Текст має збігатися повністю (без суфіксів), дата —
+ * бути календарною, час — у межах 00:00–23:59. `time` — `null`, коли часу в тексті немає.
+ * Часовий пояс не приписується: значення — місцевий час так, як його записано в таблиці.
+ */
+function dateParts(text) {
+  let match = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?$/u.exec(text);
+  let date;
+  if (match) date = isoDate(Number(match[1]), Number(match[2]), Number(match[3]));
+  else {
+    match = /^(\d{1,2})[./](\d{1,2})[./](\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/u.exec(text);
+    if (!match) return null;
+    date = isoDate(Number(match[3]), Number(match[2]), Number(match[1]));
+  }
+  if (!date) return null;
+  if (match[4] == null) return { date, time: null };
+  const time = clockText(match[4], match[5], match[6]);
+  return time ? { date, time } : null;
+}
+
+const DATE_HINT = 'очікується дата, наприклад 2026-01-31 або 31.01.2026';
+const DATETIME_HINT = 'очікуються дата й час, наприклад 2026-01-31 14:25';
 
 function dateValue(field, cell) {
   const parts = typeof cell === 'string' ? dateParts(cell.trim()) : null;
-  return parts?.date ? ok(parts.date) : bad('очікується дата, наприклад 2026-01-31 або 31.01.2026');
+  return parts ? ok(parts.date) : bad(DATE_HINT);
 }
 
+/**
+ * Дата й час. Дата без часу не стає північчю: це неповне значення, яке йде на екран
+ * «Перевірка». Якщо справді мається на увазі 00:00, користувач вводить його як виправлення,
+ * а сирий текст клітинки зберігається окремо.
+ */
 function dateTimeValue(field, cell) {
   const parts = typeof cell === 'string' ? dateParts(cell.trim()) : null;
-  return parts?.date ? ok(`${parts.date}T${parts.time ?? '00:00'}`) : bad('очікуються дата й час, наприклад 2026-01-31 14:25');
+  if (!parts) return bad(DATETIME_HINT);
+  if (!parts.time) return bad(`у клітинці лише дата, без часу; ${DATETIME_HINT}`);
+  return ok(`${parts.date}T${parts.time}`);
 }
 
 const SPECIAL = new Map([

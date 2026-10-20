@@ -10,6 +10,7 @@ pub mod local_profiles;
 mod migration_startup;
 pub mod model_install;
 pub mod module_source;
+pub mod module_source_selection;
 pub mod office_files;
 pub mod office_library;
 pub mod office_sources;
@@ -82,16 +83,26 @@ struct LiveDatabasePath(PathBuf);
 /// Профіль, у який увійшли паролем у цьому запуску. Лише в пам'яті:
 /// після перезапуску захищений профіль знову потребує пароля.
 #[derive(Default)]
-struct ProfileSession(std::sync::Mutex<Option<String>>);
+struct ProfileSession(std::sync::Mutex<(Option<String>, u64)>);
 
 impl ProfileSession {
     fn get(&self) -> Option<String> {
-        self.0.lock().map(|guard| guard.clone()).unwrap_or(None)
+        self.0.lock().map(|guard| guard.0.clone()).unwrap_or(None)
+    }
+
+    /// Профіль і номер сеансу входу: номер зростає з кожним входом, зміною профілю чи
+    /// виходом, тож дані, прив'язані до попереднього сеансу, вже не збігаються.
+    fn current(&self) -> Option<(String, u64)> {
+        self.0
+            .lock()
+            .ok()
+            .and_then(|guard| guard.0.clone().map(|profile| (profile, guard.1)))
     }
 
     fn set(&self, value: Option<String>) {
         if let Ok(mut guard) = self.0.lock() {
-            *guard = value;
+            guard.0 = value;
+            guard.1 += 1;
         }
     }
 }
@@ -193,23 +204,6 @@ async fn create_dashboard_module(
         .map_err(|error| error.to_string())
 }
 
-/// Файл, який користувач сам обрав у вікні вибору, щоб підтягнути з нього дані в
-/// модуль. Шлях береться лише з вікна вибору: від інтерфейсу шлях не приймається.
-#[derive(Default)]
-struct ModuleSourceSelection(std::sync::Mutex<Option<PathBuf>>);
-
-impl ModuleSourceSelection {
-    fn get(&self) -> Option<PathBuf> {
-        self.0.lock().map(|guard| guard.clone()).unwrap_or(None)
-    }
-
-    fn set(&self, value: Option<PathBuf>) {
-        if let Ok(mut guard) = self.0.lock() {
-            *guard = value;
-        }
-    }
-}
-
 fn dashboard_branch(branch: &str) -> Result<Branch, String> {
     match Branch::parse(branch) {
         Ok(parsed @ (Branch::Air | Branch::Rocket | Branch::Pvk | Branch::Dshv)) => Ok(parsed),
@@ -217,48 +211,93 @@ fn dashboard_branch(branch: &str) -> Result<Branch, String> {
     }
 }
 
-fn inspect_source_file(path: &Path, origin: &str) -> Result<module_source::SourceWorkbook, String> {
+/// Читає таблицю й повертає її байти та назву файла (без шляху).
+fn read_source_file(path: &Path) -> Result<(Vec<u8>, String), String> {
     let bytes = read_selected_xlsx(path)?;
     let name = path
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_default();
-    module_source::inspect_bytes(&bytes, &name, origin).map_err(|error| error.to_string())
+    Ok((bytes, name))
+}
+
+/// Огляд таблиці: аркуші для інтерфейсу та запис огляду (шлях, вікно, профіль, сеанс і
+/// відбиток вмісту) у пам'яті Rust. Інтерфейс отримує лише непрозорий ідентифікатор.
+async fn inspect_and_register(
+    selections: &module_source_selection::SourceSelections,
+    path: PathBuf,
+    origin: module_source_selection::SelectionOrigin,
+    owner: module_source_selection::SelectionOwner,
+) -> Result<module_source::SourceWorkbook, String> {
+    let label = origin.as_str();
+    let (inspected, digest, path) = tauri::async_runtime::spawn_blocking(move || {
+        let (bytes, name) = read_source_file(&path)?;
+        let inspected = module_source::inspect_bytes(&bytes, &name, label)
+            .map_err(|error| error.to_string())?;
+        Ok::<_, String>((inspected, module_source_selection::digest(&bytes), path))
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    let selection = selections.register(module_source_selection::SourceSelection::new(
+        path, origin, owner, digest,
+    ));
+    Ok(module_source::SourceWorkbook {
+        selection,
+        ..inspected
+    })
+}
+
+/// Хто звертається: вікно, активний профіль і номер сеансу входу.
+fn selection_owner(
+    window: &tauri::Window,
+    session: &ProfileSession,
+) -> Result<module_source_selection::SelectionOwner, String> {
+    let (profile_id, session_epoch) = session
+        .current()
+        .ok_or_else(|| dashboard_modules::DashboardModuleError::ProfileRequired.to_string())?;
+    Ok(module_source_selection::SelectionOwner {
+        window: window.label().to_owned(),
+        profile_id,
+        session_epoch,
+    })
 }
 
 /// Аркуші таблиці, прив'язаної до активного профілю для цього дашборда. З неї модуль
 /// під час створення підтягує дані. Лише читання; `None`, якщо таблицю не прив'язано.
 #[tauri::command]
 async fn inspect_linked_module_source(
+    window: tauri::Window,
     profiles: tauri::State<'_, LocalProfileStore>,
     session: tauri::State<'_, ProfileSession>,
+    selections: tauri::State<'_, module_source_selection::SourceSelections>,
     branch: String,
 ) -> Result<Option<module_source::SourceWorkbook>, String> {
-    let branch = dashboard_branch(&branch)?;
-    let profile_id = active_profile_id(&session)?;
+    let parsed = dashboard_branch(&branch)?;
+    let owner = selection_owner(&window, &session)?;
     let Some(path) = profiles
-        .table_path(&profile_id, branch)
+        .table_path(&owner.profile_id, parsed)
         .await
         .map_err(|error| error.to_string())?
         .map(PathBuf::from)
     else {
         return Ok(None);
     };
-    tauri::async_runtime::spawn_blocking(move || inspect_source_file(&path, "linked"))
+    let origin = module_source_selection::SelectionOrigin::Linked { branch };
+    inspect_and_register(&selections, path, origin, owner)
         .await
-        .map_err(|error| error.to_string())?
         .map(Some)
 }
 
 /// Вікно вибору файла .xlsx, з якого модуль підтягне дані. Файл не прив'язується до
-/// профілю й не змінюється; його шлях лишається лише в пам'яті на час створення.
+/// профілю й не змінюється; його шлях лишається лише в пам'яті Rust на час створення.
 #[tauri::command]
 async fn pick_module_source(
     app: tauri::AppHandle,
+    window: tauri::Window,
     session: tauri::State<'_, ProfileSession>,
-    selection: tauri::State<'_, ModuleSourceSelection>,
+    selections: tauri::State<'_, module_source_selection::SourceSelections>,
 ) -> Result<Option<module_source::SourceWorkbook>, String> {
-    active_profile_id(&session)?;
+    selection_owner(&window, &session)?;
     let selected = tauri::async_runtime::spawn_blocking(move || {
         app.dialog()
             .file()
@@ -272,43 +311,56 @@ async fn pick_module_source(
         return Ok(None);
     };
     let path = selected.into_path().map_err(|error| error.to_string())?;
-    let inspected = {
-        let path = path.clone();
-        tauri::async_runtime::spawn_blocking(move || inspect_source_file(&path, "picked"))
-            .await
-            .map_err(|error| error.to_string())??
-    };
-    selection.set(Some(path));
-    Ok(Some(inspected))
+    // Профіль і сеанс беруться після вікна вибору: за цей час користувач міг вийти з профілю.
+    let owner = selection_owner(&window, &session)?;
+    let origin = module_source_selection::SelectionOrigin::Picked;
+    inspect_and_register(&selections, path, origin, owner)
+        .await
+        .map(Some)
 }
 
-/// Усі непорожні рядки одного аркуша таблиці для підтягування в модуль. `origin` —
-/// `linked` (прив'язана таблиця профілю) або `picked` (файл, обраний у вікні вибору).
+/// Усі непорожні рядки одного аркуша оглянутої таблиці. `selection` — ідентифікатор з
+/// `inspect_linked_module_source` або `pick_module_source`; шлях від інтерфейсу не
+/// приймається. Читати може лише те саме вікно в тому самому профілі й сеансі входу, і
+/// лише якщо вміст файла (а для таблиці профілю — і прив'язка) не змінився після огляду.
+/// `release: true` без аркуша забуває огляд після закриття форми й повертає `None`.
 #[tauri::command]
 async fn read_module_source_sheet(
+    window: tauri::Window,
     profiles: tauri::State<'_, LocalProfileStore>,
     session: tauri::State<'_, ProfileSession>,
-    selection: tauri::State<'_, ModuleSourceSelection>,
-    origin: String,
-    branch: String,
-    sheet: String,
-) -> Result<module_source::SourceSheetRows, String> {
-    let profile_id = active_profile_id(&session)?;
-    let path = match origin.as_str() {
-        "linked" => profiles
-            .table_path(&profile_id, dashboard_branch(&branch)?)
+    selections: tauri::State<'_, module_source_selection::SourceSelections>,
+    selection: String,
+    sheet: Option<String>,
+    release: Option<bool>,
+) -> Result<Option<module_source::SourceSheetRows>, String> {
+    if release == Some(true) {
+        selections.release(&selection, window.label());
+        return Ok(None);
+    }
+    let sheet = sheet.ok_or_else(|| "Не вказано аркуш таблиці".to_owned())?;
+    let owner = selection_owner(&window, &session)?;
+    let chosen = selections
+        .resolve(&selection, &owner)
+        .map_err(|error| error.to_string())?;
+    if let module_source_selection::SelectionOrigin::Linked { branch } = &chosen.origin {
+        let bound = profiles
+            .table_path(&owner.profile_id, dashboard_branch(branch)?)
             .await
             .map_err(|error| error.to_string())?
-            .map(PathBuf::from)
-            .ok_or_else(|| "До профілю не прив'язано таблицю".to_owned())?,
-        "picked" => selection
-            .get()
-            .ok_or_else(|| "Файл таблиці не обрано".to_owned())?,
-        _ => return Err("Невідоме джерело таблиці".to_owned()),
-    };
+            .map(PathBuf::from);
+        if bound.as_deref() != Some(chosen.path.as_path()) {
+            return Err(module_source_selection::SelectionError::Rebound.to_string());
+        }
+    }
     tauri::async_runtime::spawn_blocking(move || {
-        let bytes = read_selected_xlsx(&path)?;
-        module_source::read_sheet_bytes(&bytes, &sheet).map_err(|error| error.to_string())
+        let (bytes, _) = read_source_file(&chosen.path)?;
+        if module_source_selection::digest(&bytes) != chosen.digest {
+            return Err(module_source_selection::SelectionError::Changed.to_string());
+        }
+        module_source::read_sheet_bytes(&bytes, &sheet)
+            .map(Some)
+            .map_err(|error| error.to_string())
     })
     .await
     .map_err(|error| error.to_string())?
@@ -356,6 +408,25 @@ async fn replace_dashboard_module_rows(
             rows,
             expected_updated_at.as_deref(),
             &now,
+        )
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// Видаляє модуль активного профілю, його таблицю даних і виправлення. Без позначки версії
+/// (`expected_updated_at`) або з застарілою нічого не видаляє.
+#[tauri::command]
+async fn delete_dashboard_module(
+    modules: tauri::State<'_, DashboardModuleStore>,
+    session: tauri::State<'_, ProfileSession>,
+    module_id: String,
+    expected_updated_at: Option<String>,
+) -> Result<(), String> {
+    modules
+        .delete(
+            &active_profile_id(&session)?,
+            &module_id,
+            expected_updated_at.as_deref(),
         )
         .await
         .map_err(|error| error.to_string())
@@ -495,6 +566,7 @@ fn get_profile_session(session: tauri::State<'_, ProfileSession>) -> Option<Stri
 fn lock_local_profile(
     app: tauri::AppHandle,
     session: tauri::State<'_, ProfileSession>,
+    selections: tauri::State<'_, module_source_selection::SourceSelections>,
     model: tauri::State<'_, LocalModelRuntime>,
     installer: tauri::State<'_, InstallController>,
     library: tauri::State<'_, LibrarySession>,
@@ -505,6 +577,8 @@ fn lock_local_profile(
     // Вихід із профілю блокує його бібліотеку: ключі й індекс знищуються.
     lock_library(&library, &handles);
     notify_library_state(&app);
+    // Огляди таблиць для модулів належать сеансу: після виходу їх не прочитати.
+    selections.clear();
     // A locked profile never leaves a model answering or holding memory,
     // and never keeps downloading in the background.
     model.stop();
@@ -3330,7 +3404,7 @@ pub fn run() {
             app.manage(SignalReceiveController::default());
             app.manage(DatabaseStatusStore::new(pool.clone()));
             app.manage(DashboardModuleStore::new(pool.clone()));
-            app.manage(ModuleSourceSelection::default());
+            app.manage(module_source_selection::SourceSelections::default());
             app.manage(office_files::OfficeFileHandles::default());
             app.manage(LibraryStore::new(pool.clone()));
             app.manage(LibrarySession::default());
@@ -3366,7 +3440,16 @@ pub fn run() {
             });
             Ok(())
         })
-        .on_window_event(desktop_shell::on_window_event)
+        .on_window_event(|window, event| {
+            desktop_shell::on_window_event(window, event);
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                if let Some(selections) =
+                    window.try_state::<module_source_selection::SourceSelections>()
+                {
+                    selections.forget_window(window.label());
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             get_database_status,
             get_dashboard_model,
@@ -3378,6 +3461,7 @@ pub fn run() {
             read_module_source_sheet,
             get_dashboard_module_data,
             replace_dashboard_module_rows,
+            delete_dashboard_module,
             set_dashboard_module_style,
             get_local_profiles,
             register_local_profile,

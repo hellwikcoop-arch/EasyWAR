@@ -172,7 +172,7 @@ function goTab(id) {
   S.tab = id; renderAll();
 }
 const TABS = [
-  ['summary', 'Зведення'], ['entry', 'Внесення'], ['units', 'Підрозділи'], ['ammo', 'Боєприпаси'], ['charges', 'Заряди'], ['losses', 'Втрати противника'], ['ref', 'Довідник'], ['check', 'Перевірка'],
+  ['summary', 'Дашборд АртВ'], ['entry', 'Внесення'], ['units', 'Підрозділи'], ['ammo', 'Боєприпаси'], ['charges', 'Заряди'], ['losses', 'Втрати противника'], ['ref', 'Довідник'], ['check', 'Перевірка'],
 ];
 function renderTabs() {
   const nav = $('tabs'); nav.textContent = '';
@@ -196,7 +196,18 @@ const cellNum = (n, extra = '') => h('td', { class: `num ${n ? '' : 'zero'} ${ex
 // art — ключ фону плитки (див. «Фони плиток» в artillery.css): знімок із наявних ілюстрацій, приглушений, щоб цифри лишалися читабельними.
 function kpi(label, value, sub, cls = '', art = '') { return h('div', { class: 'kpi ' + cls, 'data-art': art || null }, h('small', null, label), h('b', null, fmt(value)), sub ? h('span', null, sub) : null); }
 
-// ---------- вкладка «Зведення» ----------
+// ---------- вкладка «Дашборд АртВ» ----------
+// Частки підрозділів у загальній витраті й залишку: заповнює праву колонку «Дашборду АртВ».
+function unitShares(units, t) {
+  const rows = units.filter(r => r.spent || r.left);
+  const pct = (n, total) => (total ? Math.round(n / total * 100) : 0);
+  const share = (label, total, pick) => h('div', { class: 'share-col' }, h('h3', null, label),
+    ...rows.map(r => h('div', { class: 'share-row' }, h('span', { class: 'share-name' }, (em => em ? h('img', { class: 'crest-s', src: em, alt: '' }) : null)(emblemOf(r.unit.name)), r.unit.name),
+      h('div', { class: 'bar' }, h('i', { style: `width:${pct(pick(r), total)}%` })), h('b', { class: 'num' }, `${pct(pick(r), total)}%`))));
+  return h('section', { class: 'panel' }, h('div', { class: 'panel-head' }, h('h2', null, 'Частка підрозділів'), h('span', { class: 'muted small' }, 'від загальної витрати та залишку')),
+    rows.length ? h('div', { class: 'shares' }, share('Витрата', t.spent, r => r.spent), share('Залишок', t.left, r => r.left)) : h('p', { class: 'muted' }, 'Даних за підрозділами ще немає.'));
+}
+
 function viewSummary() {
   const m = S.model, t = totals(m);
   const groups = byCaliberGroup(m).filter(g => g.spent || g.left);
@@ -218,8 +229,10 @@ function viewSummary() {
   wrap.append(h('div', { class: 'cols' },
     h('section', { class: 'panel' }, h('div', { class: 'panel-head' }, h('h2', null, 'За калібрами')),
       table(['Калібр', { label: 'Витрата', num: true }, { label: 'Залишок', num: true }, ''], byGroupRows)),
-    h('section', { class: 'panel' }, h('div', { class: 'panel-head' }, h('h2', null, 'За підрозділами'), h('span', { class: 'muted small' }, 'натисніть рядок, щоб побачити по типах')),
-      table(['Підрозділ', { label: 'Витрата', num: true }, { label: 'Залишок', num: true }, { label: 'Високоточні', num: true }, { label: 'ВгЗ', num: true }, { label: 'КББ', num: true }], unitRows))));
+    h('div', { class: 'stack' },
+      h('section', { class: 'panel' }, h('div', { class: 'panel-head' }, h('h2', null, 'За підрозділами'), h('span', { class: 'muted small' }, 'натисніть рядок, щоб побачити по типах')),
+        table(['Підрозділ', { label: 'Витрата', num: true }, { label: 'Залишок', num: true }, { label: 'Високоточні', num: true }, { label: 'ВгЗ', num: true }, { label: 'КББ', num: true }], unitRows)),
+      unitShares(units, t))));
   const journal = S.meta?.journal?.slice(-8).reverse() || [];
   if (journal.length) {
     wrap.append(h('section', { class: 'panel' }, h('div', { class: 'panel-head' }, h('h2', null, 'Останні внесення через застосунок')),

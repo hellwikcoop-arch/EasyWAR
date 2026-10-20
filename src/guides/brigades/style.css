@@ -1,0 +1,25 @@
+/* Довідник бригад: темна сторінка в стилі 3D-довідників. */
+:root{color-scheme:dark}
+body{background:#0c1118;color:#e7ecf3;font:14px/1.45 "IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.bg{max-width:1180px;margin:0 auto;padding:18px 20px 40px}
+header h1{margin:0;font-size:26px}
+header p{margin:4px 0 16px;color:#98a4b5}
+.tools{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+#q{flex:1 1 260px;min-width:0;padding:9px 12px;border-radius:10px;border:1px solid #2a3544;background:#131b26;color:inherit;font:inherit}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{padding:7px 12px;border-radius:999px;border:1px solid #2a3544;background:#131b26;color:#c6d0dd;font:inherit;cursor:pointer}
+.chip[aria-pressed=true]{background:linear-gradient(135deg,#f3c46a,#e0a53a 55%,#8a5a0b);border-color:transparent;color:#1b1204;font-weight:600}
+.count{margin:14px 0 8px;color:#98a4b5;font-size:12px}
+.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(360px,1fr))}
+.card{display:flex;gap:16px;align-items:flex-start;padding:14px;border-radius:14px;border:1px solid #243041;background:#111923}
+.crest{flex:none;width:84px;height:84px;object-fit:contain}
+.crest-ph{border-radius:50%;border:1px dashed #354357}
+.body{min-width:0}
+.card h2{margin:0;font-size:18px}
+.nick{margin:2px 0 6px;color:#e0a53a}
+dl{margin:8px 0 0;font-size:12.5px}
+dt{margin-top:6px;color:#8593a6;font-size:11px;letter-spacing:.05em;text-transform:uppercase}
+dd{margin:1px 0 0}
+dd.none{color:#5d6a7c}
+.empty,.hint{color:#8593a6}
+.hint{margin-top:18px;font-size:12px}

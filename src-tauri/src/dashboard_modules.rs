@@ -158,6 +158,8 @@ pub enum DashboardModuleError {
     InvalidCorrection,
     #[error("невідомий стиль оформлення модуля")]
     InvalidStyle,
+    #[error("немає позначки версії таблиці; відкрийте модуль знову")]
+    VersionRequired,
 }
 
 fn field(
@@ -1418,6 +1420,81 @@ impl DashboardModuleStore {
         self.get_data(profile_id, module_id).await
     }
 
+    /// Видаляє модуль профілю разом із його таблицею даних і виправленнями однією
+    /// транзакцією. Чужий або неіснуючий модуль — `ModuleNotFound`, нічого не
+    /// змінюється. Скидається лише таблиця з перевіреним згенерованим іменем.
+    ///
+    /// `expected_updated_at` — позначка змін, з якою користувач підтвердив видалення.
+    /// Якщо таблицю змінили після цього, видалення відхиляється з `Conflict` і нічого
+    /// не змінює. Позначки без значення немає: безумовного видалення не існує.
+    pub async fn delete(
+        &self,
+        profile_id: &str,
+        module_id: &str,
+        expected_updated_at: Option<&str>,
+    ) -> Result<(), DashboardModuleError> {
+        let expected = expected_updated_at
+            .filter(|value| !value.is_empty())
+            .ok_or(DashboardModuleError::VersionRequired)?;
+        let mut transaction = self.pool.begin().await?;
+        // Перша операція транзакції звіряє версію й бере блокування запису, як у `replace_rows`.
+        let claimed = sqlx::query(
+            "UPDATE dashboard_modules SET updated_at = updated_at
+             WHERE id = ? AND profile_id = ? AND updated_at = ?",
+        )
+        .bind(module_id)
+        .bind(profile_id)
+        .bind(expected)
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+        if claimed != 1 {
+            let exists: Option<String> = sqlx::query_scalar(
+                "SELECT id FROM dashboard_modules WHERE profile_id = ? AND id = ?",
+            )
+            .bind(profile_id)
+            .bind(module_id)
+            .fetch_optional(&mut *transaction)
+            .await?;
+            return Err(if exists.is_some() {
+                DashboardModuleError::Conflict
+            } else {
+                DashboardModuleError::ModuleNotFound
+            });
+        }
+        let storage_table: String = sqlx::query_scalar(
+            "SELECT storage_table FROM dashboard_modules WHERE profile_id = ? AND id = ?",
+        )
+        .bind(profile_id)
+        .bind(module_id)
+        .fetch_optional(&mut *transaction)
+        .await?
+        .ok_or(DashboardModuleError::ModuleNotFound)?;
+        // Каскад теж прибрав би поля й виправлення, але без нього (вимкнені ключі) вони
+        // лишилися б без власника, тож видаляємо їх явно.
+        for statement in [
+            "DELETE FROM dashboard_module_corrections WHERE module_id = ?",
+            "DELETE FROM dashboard_module_fields WHERE module_id = ?",
+        ] {
+            sqlx::query(statement)
+                .bind(module_id)
+                .execute(&mut *transaction)
+                .await?;
+        }
+        sqlx::query("DELETE FROM dashboard_modules WHERE profile_id = ? AND id = ?")
+            .bind(profile_id)
+            .bind(module_id)
+            .execute(&mut *transaction)
+            .await?;
+        if valid_storage_table(&storage_table) {
+            sqlx::query(&format!("DROP TABLE IF EXISTS \"{storage_table}\""))
+                .execute(&mut *transaction)
+                .await?;
+        }
+        transaction.commit().await?;
+        Ok(())
+    }
+
     async fn get_for_profile(
         &self,
         profile_id: &str,
@@ -1765,6 +1842,38 @@ fn validate_corrections(
     Ok(())
 }
 
+/// Дата `РРРР-ММ-ДД`, яку дає поле дати форми: увесь текст і календарна дата.
+fn is_calendar_date(text: &str) -> bool {
+    text.len() == 10
+        && text.bytes().enumerate().all(|(index, byte)| {
+            matches!(index, 4 | 7) == (byte == b'-')
+                && (matches!(index, 4 | 7) || byte.is_ascii_digit())
+        })
+        && chrono::NaiveDate::parse_from_str(text, "%Y-%m-%d").is_ok()
+}
+
+/// Дата й час `РРРР-ММ-ДДTГГ:ХХ` (секунди `:СС` необов'язкові), як у полі `datetime-local`:
+/// години 00–23, хвилини й секунди 00–59. Це місцевий час без часового поясу; дата без
+/// часу не приймається, щоб обхід інтерфейсу не записав «північ», якої не було в джерелі.
+fn is_local_datetime(text: &str) -> bool {
+    let Some((date, time)) = text.split_once('T') else {
+        return false;
+    };
+    let shape = match time.len() {
+        5 => "%H:%M",
+        8 => "%H:%M:%S",
+        _ => return false,
+    };
+    is_calendar_date(date)
+        && time.bytes().enumerate().all(|(index, byte)| {
+            matches!(index, 2 | 5) == (byte == b':')
+                && (matches!(index, 2 | 5) || byte.is_ascii_digit())
+        })
+        && chrono::NaiveTime::parse_from_str(time, shape).is_ok()
+        // chrono приймає секунду координації `:60`; поле форми її не дає.
+        && time.get(6..8).is_none_or(|seconds| seconds < "60")
+}
+
 fn validate_value(
     field: &DashboardModuleField,
     value: Option<&Value>,
@@ -1779,7 +1888,9 @@ fn validate_value(
     }
     let value = value.expect("checked above");
     let valid = match field.data_type.as_str() {
-        "text" | "date" | "datetime" => value.as_str().is_some(),
+        "text" => value.as_str().is_some(),
+        "date" => value.as_str().is_some_and(is_calendar_date),
+        "datetime" => value.as_str().is_some_and(is_local_datetime),
         "integer" => value.as_i64().is_some(),
         "real" => value.as_f64().is_some_and(f64::is_finite),
         "boolean" => value.as_bool().is_some(),
@@ -1814,6 +1925,72 @@ mod tests {
     use serde_json::json;
     use sqlx::sqlite::SqlitePoolOptions;
     use std::collections::BTreeSet;
+
+    #[test]
+    fn dates_and_datetimes_are_checked_before_they_are_stored() {
+        let typed = |data_type: &str| DashboardModuleField {
+            key: "when".into(),
+            label: "Коли".into(),
+            data_type: data_type.into(),
+            role: "dimension".into(),
+            aggregation: "none".into(),
+            required: true,
+            position: 0,
+        };
+        let date = typed("date");
+        let datetime = typed("datetime");
+        for text in ["2026-01-31", "2024-02-29"] {
+            assert!(validate_value(&date, Some(&json!(text))).is_ok(), "{text}");
+        }
+        for text in [
+            "2026-01-31T14:25",
+            "2026-01-31T00:00",
+            "2026-01-31T23:59:59",
+        ] {
+            assert!(
+                validate_value(&datetime, Some(&json!(text))).is_ok(),
+                "{text}"
+            );
+        }
+        for text in [
+            "2026-01-31abc",
+            "2026-02-30",
+            "2025-02-29",
+            "2026-1-31",
+            "31.01.2026",
+            "2026-01-31T14:25",
+            "",
+        ] {
+            assert!(
+                matches!(
+                    validate_value(&date, Some(&json!(text))),
+                    Err(DashboardModuleError::InvalidValue(..))
+                ),
+                "date {text}"
+            );
+        }
+        // Дата без часу не стає «північчю», а час поза межами не записується.
+        for text in [
+            "2026-01-31",
+            "2026-01-31T24:00",
+            "2026-01-31T99:99",
+            "2026-01-31T14:60",
+            "2026-01-31T14:25:60",
+            "2026-01-31 14:25",
+            "2026-01-31T14:25abc",
+            "2026-01-31T14:25Z",
+            "2026-02-30T10:00",
+            "2026-01-31T1:05",
+        ] {
+            assert!(
+                matches!(
+                    validate_value(&datetime, Some(&json!(text))),
+                    Err(DashboardModuleError::InvalidValue(..))
+                ),
+                "datetime {text}"
+            );
+        }
+    }
 
     const FLIGHT_FIELD_KEYS: [&str; 35] = [
         "list_number",
@@ -2958,6 +3135,163 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(left, 1);
+    }
+
+    #[tokio::test]
+    async fn deleting_a_module_drops_its_table_fields_and_corrections_only() {
+        let store = store().await;
+        let doomed = flight_module(&store).await;
+        let kept = store
+            .create(PROFILE, "air", "flight-hours", Some("Залишити"), T2)
+            .await
+            .unwrap();
+        store
+            .replace_rows(
+                PROFILE,
+                &doomed.id,
+                vec![row(flight("МіГ-29", 3.0, 4.0))],
+                None,
+                T2,
+            )
+            .await
+            .unwrap();
+        let row_id: i64 = sqlx::query_scalar(&format!(
+            "SELECT row_id FROM \"{}\" LIMIT 1",
+            doomed.storage_table
+        ))
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO dashboard_module_corrections
+             (module_id, row_id, field_key, source_file, source_sheet, source_row, source_column,
+              raw_text, corrected_text, reason, created_at)
+             VALUES (?, ?, 'aircraft_type', 'Синтетичний.xlsx', 'Журнал', 8, 'Тип', 'МіГ29', 'МіГ-29', 'тест', ?)",
+        )
+        .bind(&doomed.id)
+        .bind(row_id)
+        .bind(T2)
+        .execute(&store.pool)
+        .await
+        .unwrap();
+
+        store.delete(PROFILE, &doomed.id, Some(T2)).await.unwrap();
+
+        let tables: Vec<String> = sqlx::query_scalar(
+            "SELECT name FROM sqlite_master
+             WHERE type = 'table' AND name LIKE 'dashboard_data_%' ORDER BY name",
+        )
+        .fetch_all(&store.pool)
+        .await
+        .unwrap();
+        assert_eq!(tables, std::slice::from_ref(&kept.storage_table));
+        for table in ["dashboard_module_fields", "dashboard_module_corrections"] {
+            let left: i64 =
+                sqlx::query_scalar(&format!("SELECT count(*) FROM {table} WHERE module_id = ?"))
+                    .bind(&doomed.id)
+                    .fetch_one(&store.pool)
+                    .await
+                    .unwrap();
+            assert_eq!(left, 0, "{table}");
+        }
+        let listed = store.list(PROFILE, "air").await.unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, kept.id);
+        assert!(matches!(
+            store.delete(PROFILE, &doomed.id, Some(T2)).await,
+            Err(DashboardModuleError::ModuleNotFound)
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_module_of_another_profile_cannot_be_deleted() {
+        let store = store().await;
+        let module = flight_module(&store).await;
+        assert!(matches!(
+            store
+                .delete(
+                    "profile-222222222222222222222222",
+                    &module.id,
+                    Some(&module.updated_at)
+                )
+                .await,
+            Err(DashboardModuleError::ModuleNotFound)
+        ));
+        assert_eq!(store.list(PROFILE, "air").await.unwrap().len(), 1);
+        assert_eq!(data_table_count(&store).await, 1);
+    }
+
+    #[tokio::test]
+    async fn a_stale_confirmation_cannot_delete_rows_written_after_it() {
+        let store = store().await;
+        let module = flight_module(&store).await;
+        let opened = module.updated_at.clone();
+        // Інше вікно записало рядки вже після того, як перше показало підтвердження.
+        store
+            .replace_rows(
+                PROFILE,
+                &module.id,
+                vec![row(flight("МіГ-29", 3.0, 4.0))],
+                Some(&opened),
+                T2,
+            )
+            .await
+            .unwrap();
+        let row_id: i64 = sqlx::query_scalar(&format!(
+            "SELECT row_id FROM \"{}\" LIMIT 1",
+            module.storage_table
+        ))
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO dashboard_module_corrections
+             (module_id, row_id, field_key, source_file, source_sheet, source_row, source_column,
+              raw_text, corrected_text, reason, created_at)
+             VALUES (?, ?, 'aircraft_type', 'Синтетичний.xlsx', 'Журнал', 8, 'Тип', 'МіГ29', 'МіГ-29', 'тест', ?)",
+        )
+        .bind(&module.id)
+        .bind(row_id)
+        .bind(T2)
+        .execute(&store.pool)
+        .await
+        .unwrap();
+
+        assert!(matches!(
+            store.delete(PROFILE, &module.id, Some(&opened)).await,
+            Err(DashboardModuleError::Conflict)
+        ));
+        assert_eq!(data_table_count(&store).await, 1);
+        let data = store.get_data(PROFILE, &module.id).await.unwrap();
+        assert_eq!(data.rows.len(), 1);
+        assert_eq!(data.module.updated_at, T2);
+        for table in ["dashboard_module_fields", "dashboard_module_corrections"] {
+            let left: i64 =
+                sqlx::query_scalar(&format!("SELECT count(*) FROM {table} WHERE module_id = ?"))
+                    .bind(&module.id)
+                    .fetch_one(&store.pool)
+                    .await
+                    .unwrap();
+            assert!(left > 0, "{table}");
+        }
+
+        // Повторне підтвердження вже зі свіжою версією видаляє лише цей модуль.
+        store.delete(PROFILE, &module.id, Some(T2)).await.unwrap();
+        assert_eq!(data_table_count(&store).await, 0);
+    }
+
+    #[tokio::test]
+    async fn deleting_without_a_version_mark_removes_nothing() {
+        let store = store().await;
+        let module = flight_module(&store).await;
+        for mark in [None, Some("")] {
+            assert!(matches!(
+                store.delete(PROFILE, &module.id, mark).await,
+                Err(DashboardModuleError::VersionRequired)
+            ));
+        }
+        assert_eq!(store.list(PROFILE, "air").await.unwrap().len(), 1);
+        assert_eq!(data_table_count(&store).await, 1);
     }
 
     /// Виправлення з екрана «Перевірка»: синтетичні клітинки «25:00» → «14:25».

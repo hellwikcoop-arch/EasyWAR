@@ -240,6 +240,7 @@ function fakeDocument() {
     }
     get nodeType() { return 1; }
     setAttribute(name, value) { this.attributes[name] = String(value); }
+    removeAttribute(name) { delete this.attributes[name]; }
     addEventListener(type, listener) { this.listeners[type] = listener; }
     append(...nodes) {
       for (const node of nodes) {
@@ -287,6 +288,19 @@ test('the dashboard renders every page of a table with data', async () => {
   const base = document.createElement('section');
   dashboard.renderBase(base, workbook);
   assert.equal(base.all().filter(node => node.tagName === 'table').length, 4, 'the journal and three sheets');
+
+  // «Мій дашборд» — лише в застосунку (є Tauri): порожня сторінка-гніздо, куди каталог переносить особисті модулі.
+  assert.equal(buttons().some(node => node.textContent === 'Мій дашборд'), false, 'no personal tab without the desktop app');
+  globalThis.__TAURI_INTERNALS__ = { invoke: async () => null };
+  try {
+    dashboard.render(host, workbook, { downloadCSV: () => {} });
+    buttons().find(node => node.textContent === 'Мій дашборд').listeners.click();
+    const slot = root.all().find(node => node.attributes && 'data-ewmc-slot' in node.attributes);
+    assert.ok(slot, 'the personal tab renders the slot for the module catalog');
+    assert.equal(root.all().some(node => /\bpvk-period\b/.test(node.attributes?.class || '')), false, 'the period bar belongs to the table, not to the personal tab');
+  } finally {
+    delete globalThis.__TAURI_INTERNALS__;
+  }
 });
 
 test('«Таблиця 1» is read from the ПВК table: month rows skipped, Excel dates and times understood', async () => {
