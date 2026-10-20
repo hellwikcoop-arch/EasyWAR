@@ -3,7 +3,7 @@
  *
  * Нічний пункт керування: полотно Void, текст Bone White, крупні щільні гротескні заголовки
  * й дрібні моноширинні мітки. Світло розділу залежить від модуля: ПС — блакитне (Electric Cyan),
- * РВ — жовте (Citrine), Артилерія — пурпурове (Magenta).
+ * РВ — жовте (Citrine), Артилерія — латунне золото, УДШВ — бордове.
  *
  * Лише вигляд: розмітку, логіку й дані не чіпає. Вмикається атрибутом html[data-skin="heightwell"]
  * (ставить ui-kit.js за перемикачем «Пункт керування») і діє лише в темній темі.
@@ -30,7 +30,7 @@ html[data-skin="heightwell"]:not([data-theme="light"]) {
   --hw-ink: #eaf1ff;
   --hw-cyan: #2ee6ff;
   --hw-citrine: #ffc83d;
-  --hw-magenta: #e08ad2; /* приглушений: яскравий #ff4fd8 різав очі в написах Артилерії */
+  --hw-gold: #d9a441; /* Артилерія: латунне золото емблеми, тепліше за цитрин РВ */
   --hw-chapter: var(--hw-cyan);
 
   --bg: var(--hw-void);
@@ -54,7 +54,7 @@ html[data-skin="heightwell"]:not([data-theme="light"]) {
 /* Світло розділу за модулем. */
 /* rocket.html не має data-ew-module, тож РВ впізнаємо за її власним блоком стилів #rocket-reference-skin. */
 html[data-skin="heightwell"]:not([data-theme="light"]):is([data-ew-module="rocket"], :has(#rocket-reference-skin)) { --hw-chapter: var(--hw-citrine); }
-html[data-skin="heightwell"][data-ew-module="artillery"]:not([data-theme="light"]) { --hw-chapter: var(--hw-magenta); }
+html[data-skin="heightwell"][data-ew-module="artillery"]:not([data-theme="light"]) { --hw-chapter: var(--hw-gold); }
 
 /* ---------- Типографіка ---------- */
 html[data-skin="heightwell"]:not([data-theme="light"]) body {
