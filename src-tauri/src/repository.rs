@@ -1691,26 +1691,30 @@ fn signal_identity(prefix: &str, parts: &[&str]) -> String {
     format!("{prefix}:{:x}", digest.finalize())
 }
 
+/// The first earlier XLSX row with exactly the same parsed payload. Its
+/// `version = 1` and `parser_name` terms must stay literal: they match the
+/// partial index of migration 0012, without which every imported row scans all
+/// parsed versions.
+pub(crate) const XLSX_DUPLICATE_LOOKUP_SQL: &str = "SELECT reports.id
+     FROM reports
+     JOIN raw_sources ON raw_sources.id = reports.raw_source_id
+     JOIN parsed_report_versions ON parsed_report_versions.report_id = reports.id
+     WHERE raw_sources.source_type = 'XLSX'
+       AND parsed_report_versions.version = 1
+       AND parsed_report_versions.parser_name = 'easywar-xlsx'
+       AND parsed_report_versions.parsed_payload_json = ?
+     ORDER BY reports.created_at, reports.id
+     LIMIT 1";
+
 async fn find_prior_xlsx_duplicate(
     transaction: &mut Transaction<'_, Sqlite>,
     report_id: &str,
     parsed_payload_json: &str,
 ) -> Result<Option<String>, sqlx::Error> {
-    let canonical: Option<String> = sqlx::query_scalar(
-        "SELECT reports.id
-         FROM reports
-         JOIN raw_sources ON raw_sources.id = reports.raw_source_id
-         JOIN parsed_report_versions ON parsed_report_versions.report_id = reports.id
-         WHERE raw_sources.source_type = 'XLSX'
-           AND parsed_report_versions.version = 1
-           AND parsed_report_versions.parser_name = 'easywar-xlsx'
-           AND parsed_report_versions.parsed_payload_json = ?
-         ORDER BY reports.created_at, reports.id
-         LIMIT 1",
-    )
-    .bind(parsed_payload_json)
-    .fetch_optional(&mut **transaction)
-    .await?;
+    let canonical: Option<String> = sqlx::query_scalar(XLSX_DUPLICATE_LOOKUP_SQL)
+        .bind(parsed_payload_json)
+        .fetch_optional(&mut **transaction)
+        .await?;
     Ok(canonical.filter(|canonical_report_id| canonical_report_id != report_id))
 }
 

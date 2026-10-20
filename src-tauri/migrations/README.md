@@ -74,6 +74,14 @@ itself holds the corrected value. Corrections reference the record by its
 Deleting the module (or its profile) deletes them; a record removed from the
 module table takes its corrections with it. The XLSX is never written.
 
+`0012_xlsx_duplicate_lookup_index.sql` adds the partial index
+`idx_parsed_versions_xlsx_payload` on `parsed_report_versions(parsed_payload_json)`
+limited to `version = 1` and `parser_name = 'easywar-xlsx'`. The XLSX import
+uses it to find the first earlier row with the same parsed payload instead of
+scanning every parsed version for every imported row. It stores no new data and
+changes no rows; a test in `database.rs` checks that the lookup's query plan
+uses it.
+
 The `dashboard_data_<id>` tables of user-created dashboard modules are not
 migration objects: Rust creates them at runtime from a validated catalog
 template and adds columns that later appear in a template with `ALTER TABLE`,

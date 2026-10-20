@@ -57,7 +57,7 @@ Use native macOS/Swift tooling only for functionality that cannot be expressed c
 
 SQLite is the application store.
 
-Tables that exist (migrations `0001`–`0011`, details in [`DATABASE.md`](DATABASE.md)):
+Tables that exist (migrations `0001`–`0012`, details in [`DATABASE.md`](DATABASE.md)):
 - provenance and audit: `raw_sources`, `reports`, `parsed_report_versions`,
   `manual_corrections`, `review_decisions` (the manual review decisions),
   `revision_history`, `audit_log`, `xlsx_row_fingerprints`, plus the view

@@ -44,8 +44,12 @@ catalog template, not from the migration. Migration
 `0011_dashboard_module_corrections.sql` adds `dashboard_module_corrections`: the
 values corrected on the «Перевірка» screen before rows from the user's XLSX were
 brought into a new module, kept apart from the module records (raw cell text,
-typed text, reason, file name, sheet, row and column). Migrations contain no
-operational fixtures and create no external integration.
+typed text, reason, file name, sheet, row and column). Migration
+`0012_xlsx_duplicate_lookup_index.sql` adds the partial index
+`idx_parsed_versions_xlsx_payload` on `parsed_report_versions(parsed_payload_json)`
+for first versions written by the XLSX parser (`version = 1`,
+`parser_name = 'easywar-xlsx'`); it adds no data and changes no rows. Migrations
+contain no operational fixtures and create no external integration.
 
 ## Provenance layers
 
@@ -110,6 +114,12 @@ Each write method uses one SQLite transaction:
   parsed payload already stored from XLSX creates an immutable link and a
   `DUPLICATE_DETECTED` audit event; both reports and both source snapshots stay
   intact. An exact retry reuses the existing link and adds no audit row.
+  The lookup of that earlier payload (`XLSX_DUPLICATE_LOOKUP_SQL` in
+  `repository.rs`) goes through the partial index of migration 0012; before it,
+  every imported row scanned all parsed versions, so a large import slowed down
+  quadratically (≈6 s for 10 000 synthetic rows without the index, ≈0.3 s with
+  it). A test checks the query plan, so the index and the query cannot drift
+  apart silently.
 
 If any statement fails, none of the transaction's domain or audit rows persist.
 The repository exposes the derived current status as a read-only query. The

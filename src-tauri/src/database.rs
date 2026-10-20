@@ -97,6 +97,8 @@ pub(crate) const DASHBOARD_MODULES_SQL: &str =
     include_str!("../migrations/0010_dashboard_modules.sql");
 pub(crate) const DASHBOARD_MODULE_CORRECTIONS_SQL: &str =
     include_str!("../migrations/0011_dashboard_module_corrections.sql");
+pub(crate) const XLSX_DUPLICATE_LOOKUP_INDEX_SQL: &str =
+    include_str!("../migrations/0012_xlsx_duplicate_lookup_index.sql");
 
 pub fn migrations() -> Vec<Migration> {
     vec![
@@ -166,6 +168,12 @@ pub fn migrations() -> Vec<Migration> {
             sql: DASHBOARD_MODULE_CORRECTIONS_SQL,
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 12,
+            description: "add_xlsx_duplicate_lookup_index",
+            sql: XLSX_DUPLICATE_LOOKUP_INDEX_SQL,
+            kind: MigrationKind::Up,
+        },
     ]
 }
 
@@ -233,7 +241,7 @@ mod tests {
         assert_eq!(DATABASE_URL, "sqlite:easywar.db");
         assert!(include_str!("../tauri.conf.json").contains(DATABASE_URL));
         let registered = migrations();
-        assert_eq!(registered.len(), 11);
+        assert_eq!(registered.len(), 12);
         assert_eq!(registered[0].version, 1);
         assert_eq!(registered[0].description, "create_provenance_schema");
         assert_eq!(registered[1].version, 2);
@@ -259,6 +267,11 @@ mod tests {
             registered[10].description,
             "add_dashboard_module_corrections"
         );
+        assert_eq!(registered[11].version, 12);
+        assert_eq!(
+            registered[11].description,
+            "add_xlsx_duplicate_lookup_index"
+        );
         assert_eq!(
             EMBEDDED_MIGRATOR
                 .iter()
@@ -279,7 +292,7 @@ mod tests {
                 .map(|migration| migration.sql)
                 .collect::<Vec<_>>()
         );
-        assert_eq!(super::latest_schema_version(), Some(11));
+        assert_eq!(super::latest_schema_version(), Some(12));
     }
 
     #[tokio::test]
@@ -291,9 +304,9 @@ mod tests {
             DatabaseStatusStore::new(pool.clone()).load().await.unwrap(),
             super::DatabaseStatus {
                 app_version: env!("CARGO_PKG_VERSION").to_owned(),
-                schema_version: 11,
-                supported_schema_version: 11,
-                migration_count: 11,
+                schema_version: 12,
+                supported_schema_version: 12,
+                migration_count: 12,
                 migration_state: DatabaseMigrationState::Current,
             }
         );
@@ -842,6 +855,43 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(left, 0, "профіль видалено — модулі й виправлення теж");
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn xlsx_duplicate_lookup_uses_the_partial_payload_index() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("duplicate-index.sqlite3");
+        let pool = create_migrated_database(&path).await.unwrap();
+        let index_sql: String = sqlx::query_scalar(
+            "SELECT sql FROM sqlite_master
+             WHERE type = 'index' AND name = 'idx_parsed_versions_xlsx_payload'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(index_sql.contains("WHERE version = 1 AND parser_name = 'easywar-xlsx'"));
+
+        let plan: Vec<String> = sqlx::query(&format!(
+            "EXPLAIN QUERY PLAN {}",
+            crate::repository::XLSX_DUPLICATE_LOOKUP_SQL
+        ))
+        .bind("{}")
+        .fetch_all(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row| row.get::<String, _>("detail"))
+        .collect();
+        assert!(
+            plan.iter()
+                .any(|step| step.contains("USING INDEX idx_parsed_versions_xlsx_payload")),
+            "пошук дубліката XLSX має йти за індексом, а не перебором: {plan:?}"
+        );
+        assert!(
+            !plan.iter().any(|step| step.starts_with("SCAN")),
+            "жодна таблиця не перебирається повністю: {plan:?}"
+        );
         pool.close().await;
     }
 }
