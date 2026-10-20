@@ -49,8 +49,11 @@ import {
 const withoutRelief = typeof __EW_NO_WEATHER_RELIEF__ !== 'undefined' && __EW_NO_WEATHER_RELIEF__;
 const loadRelief = withoutRelief ? null : () => import('./dashboard-module-weather-3d.js');
 
+// Модулям потрібна локальна SQLite застосунку; в автономному файлі її немає, тож збірка підставляє true
+// і весь каталог із діаграмами з файлу випадає.
+const withoutCatalog = typeof __EW_NO_MODULE_CATALOG__ !== 'undefined' && __EW_NO_MODULE_CATALOG__;
 const invoke = window.__TAURI_INTERNALS__?.invoke || window.parent?.__TAURI_INTERNALS__?.invoke;
-if (typeof invoke === 'function') initialize();
+if (!withoutCatalog && typeof invoke === 'function') initialize();
 
 // Запис редагується прямо в рядку таблиці, а форма з підказками стоїть над нею; поля з'єднано з формою
 // атрибутом `form`. Колонки «№» і «Дія» закріплено по краях; їх ширину задає CSS (`ewmc-col-number`,
