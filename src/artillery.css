@@ -353,3 +353,9 @@ td.unit-cell span, td.unit-cell b { vertical-align: middle; }
   }
   :root:not([data-theme="light"]) .tab[aria-selected="true"]::before { background: #1b1204; }
 }
+
+.shares { display: grid; gap: 18px; }
+.share-col h3 { margin: 0 0 8px; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted, #8a97aa); }
+.share-row { display: grid; grid-template-columns: minmax(90px, 1.2fr) 2fr 44px; gap: 10px; align-items: center; padding: 4px 0; font-size: 13px; }
+.share-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.share-row .num { text-align: right; }
