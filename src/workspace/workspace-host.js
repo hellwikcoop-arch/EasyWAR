@@ -2,7 +2,8 @@
 // відкриття й збереження файлів через EasyWAR, заголовок і позначка незбережених змін.
 // У настільному застосунку файли йдуть через Tauri-команди office_* (шляхи лишаються в Rust);
 // у браузері без Tauri (vite preview) — через <input type="file"> і завантаження файлу.
-// Нічого не надсилається в мережу й не пишеться в сховища браузера.
+// `pendingFile` — документ з бібліотеки, який чекає у вікні редактора (його першим віддає
+// office_open_file, без вікна вибору). Нічого не надсилається в мережу й не пишеться в сховища браузера.
 import {
   CONTRACT_VERSION,
   UI_LANGUAGE,
@@ -11,6 +12,7 @@ import {
   bytesForInvoke,
   dialogOptions,
   nameWithExtension,
+  parsePendingFile,
   toBytes,
 } from './workspace-core.js';
 
@@ -30,13 +32,34 @@ export function findInvoke(win = globalThis.window) {
 }
 
 /**
+ * Очікуваний файл з бібліотеки (`window.__EW_PENDING_FILE`, його ставить Rust лише у верхньому
+ * кадрі вікна редактора) на цій сторінці або в батьківських — як findInvoke; чужого походження
+ * кадр не читається. → { name } або null.
+ */
+export function findPendingFile(win = globalThis.window) {
+  for (let current = win, depth = 0; current && depth < 4; depth += 1) {
+    try {
+      if (current.__EW_PENDING_FILE !== undefined) return parsePendingFile(current.__EW_PENDING_FILE);
+    } catch {
+      return null;
+    }
+    if (current.parent === current) break;
+    current = current.parent;
+  }
+  return null;
+}
+
+/**
  * Створює host для застосунку. `invoke` — Tauri invoke або null; `browser` — запасні
  * функції без Tauri ({ pickFile(accept) → File|null, download(name, bytes) }); `onState` —
  * виклик при зміні заголовка чи позначки змін ({ title, dirty }); `rootUrl` — адреса кореня
- * збірки (там лежать і статичні файли з src/public), від неї рахує `host.resolve(path)`.
+ * збірки (там лежать і статичні файли з src/public), від неї рахує `host.resolve(path)`;
+ * `pendingFile` — файл з бібліотеки, який віддасть перший openFile (типово шукається від
+ * поточного вікна, як invoke; лише в настільному застосунку, без Tauri його немає).
  */
-export function createHost({ appEntry, invoke = null, browser = null, onState = () => {}, rootUrl = '' }) {
+export function createHost({ appEntry, invoke = null, browser = null, onState = () => {}, rootUrl = '', pendingFile = findPendingFile() }) {
   const state = { title: '', dirty: false };
+  const pending = invoke ? parsePendingFile(pendingFile) : null;
   const browserFiles = new Map();
   let nextBrowserHandle = 0;
   const publish = () => onState({ ...state });
@@ -89,6 +112,7 @@ export function createHost({ appEntry, invoke = null, browser = null, onState = 
     locale: UI_LOCALE,
     desktop: Boolean(invoke),
     rootUrl,
+    pendingFile: pending,
     resolve: path => new URL(String(path).replace(/^\/+/, ''), rootUrl).href,
     openFile,
     saveFile,

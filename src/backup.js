@@ -13,6 +13,8 @@ import {
   getDatabaseStatus,
   getRestoreStartupReport,
   installAppUpdate,
+  LIBRARY_BACKUP_NOTE,
+  LIBRARY_RESTORE_NOTE,
   restoreStartupMessage,
   setAppUpdateAutoCheck,
   stageLocalRestore,
@@ -47,6 +49,7 @@ function initializeBackup() {
     </div>
     <p>Створіть окремий знімок локальної бази даних. Поточна база залишиться без змін.</p>
     <p class="ew-backup-warning">Копія може містити чутливі дані. Оберіть захищене місце зберігання; хмарні папки використовуйте лише свідомо. Наявний файл не буде перезаписано.</p>
+    <p class="ew-backup-warning">${LIBRARY_BACKUP_NOTE}</p>
     <p id="ew-backup-status" class="ew-backup-status" role="status" aria-live="polite"></p>
     <p id="ew-backup-location" class="ew-backup-location" hidden></p>
     <section class="ew-update-section" aria-labelledby="ew-update-title">
@@ -69,6 +72,7 @@ function initializeBackup() {
     <section class="ew-restore-section" aria-labelledby="ew-restore-title">
       <h3 id="ew-restore-title">Відновлення з копії</h3>
       <p>Копія двічі перевіряється й готується окремо. Поточна база замінюється лише після явного підтвердження та контрольованого перезапуску.</p>
+      <p class="ew-backup-warning">${LIBRARY_RESTORE_NOTE}</p>
       <div class="ew-backup-actions">
         <button type="button" class="btn" id="ew-restore-select">Обрати й перевірити копію</button>
         <button type="button" class="btn quiet" id="ew-restore-cancel-stage" hidden>Скасувати підготовку</button>

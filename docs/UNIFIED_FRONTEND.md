@@ -194,6 +194,7 @@ ends, and the launcher stays `inert` until sign-in.
 - Код застосунку — `src/workspace/<id>/app.js` з `mount(container, host)`; оболонка знаходить його через `import.meta.glob`, без змін у самій оболонці. Поки файлу немає, картка відкриває заглушку «у розробці».
 - Підключено EasyGreen: `src/workspace/easygreen/app.js` → `mountEasyGreen` (`easygreen-panel.js`), веб-збірка GridCraft — у `src/public/workspace/easygreen/app/`. Подробиці — [EASYGREEN.md](EASYGREEN.md).
 - `vite.config.js`: входи `workspace` і `workspace-app`; чанки `src/workspace/<id>/app.js` отримують назву `assets/workspace-*` (`chunkFileNames`), а кеш переглядача для телефона не бере `workspace/`, `assets/workspace-*` і `.wasm`.
+- Головна сторінка оболонки має вкладки «Офіс» і «Бібліотека» (`#ws-tabs`, шаблон WAI-ARIA tabs); у вікні редактора їх немає. Вкладка «Бібліотека» — `src/workspace/library.js` (DOM лише через `createElement`/`textContent`) і чиста логіка `library-ui-core.js`; код підвантажується динамічним `import('./library.js')` лише в настільному режимі й збирається в окремий чанк `assets/library-*.js` (із `jszip`). Цей чанк поки потрапляє в офлайн-кеш телефона: префікса `workspace-` він не має. Подробиці — розділ «Бібліотека» в [WORKSPACE.md](WORKSPACE.md).
 
 ### EasyDoc (прототип)
 

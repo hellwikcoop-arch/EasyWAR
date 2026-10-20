@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
 import test from 'node:test';
+import vm from 'node:vm';
 import {
   CONTRACT_VERSION,
   OFFICE_APPS,
@@ -23,10 +24,12 @@ import {
   normalizeExtensions,
   normalizeMounted,
   parseFrameMessage,
+  parsePendingFile,
+  pendingFileNotice,
   shellMode,
   toBytes,
 } from '../src/workspace/workspace-core.js';
-import { createHost, findInvoke } from '../src/workspace/workspace-host.js';
+import { createHost, findInvoke, findPendingFile } from '../src/workspace/workspace-host.js';
 
 const root = new URL('../', import.meta.url);
 const read = (path) => readFile(new URL(path, root), 'utf8');
@@ -233,4 +236,85 @@ test('модуль підключено в лаунчері, у збірці й 
   assert.match(index, /<script type="module" src="\.\/workspace\.js"><\/script>/);
   assert.match(await read('src/workspace/app.html'), /<script type="module" src="\.\/app-frame\.js"><\/script>/);
   assert.match(await read('src/workspace/app-frame.js'), /у розробці/);
+});
+
+test('очікуваний файл з бібліотеки: розбір значення __EW_PENDING_FILE', () => {
+  assert.deepEqual(parsePendingFile('Довідка.docx'), { name: 'Довідка.docx' });
+  assert.ok(Object.isFrozen(parsePendingFile('Довідка.docx')));
+  assert.deepEqual(parsePendingFile(JSON.stringify('Нарада «жовтень».pptx')), { name: 'Нарада «жовтень».pptx' }, 'назва, ще раз закодована як JSON');
+  assert.deepEqual(parsePendingFile({ name: '  Таблиця.xlsx ' }), { name: 'Таблиця.xlsx' });
+  assert.deepEqual(parsePendingFile('"Звіт".docx'), { name: '"Звіт".docx' }, 'не JSON — сама назва');
+  assert.deepEqual(parsePendingFile('Звіт\u202e.docx\n'), { name: 'Звіт.docx' }, 'без керівних символів і зміни напрямку');
+  assert.equal(Array.from(parsePendingFile('я'.repeat(500)).name).length, 200);
+  for (const value of [null, undefined, '', '   ', 42, ['a'], {}, { name: 7 }]) assert.equal(parsePendingFile(value), null);
+});
+
+test('очікуваний файл шукається вгору кадрами, як invoke; чужий кадр не читається', () => {
+  const top = { __EW_PENDING_FILE: 'Довідка.docx' };
+  top.parent = top;
+  const shell = { parent: top };
+  const app = { parent: shell };
+  assert.deepEqual(findPendingFile(app), { name: 'Довідка.docx' });
+  const empty = { __EW_PENDING_FILE: null };
+  empty.parent = empty;
+  assert.equal(findPendingFile({ parent: empty }), null, 'у вікні редактора без очікуваного файлу — null');
+  const alone = {};
+  alone.parent = alone;
+  assert.equal(findPendingFile(alone), null);
+  const foreign = { get __EW_PENDING_FILE() { throw new Error('SecurityError'); } };
+  foreign.parent = foreign;
+  assert.equal(findPendingFile({ parent: foreign }), null, 'кадр чужого походження');
+  assert.equal(findPendingFile(undefined), null);
+  // Глибше за чотири кадри не шукає (як findInvoke).
+  let deep = top;
+  for (let i = 0; i < 4; i += 1) deep = { parent: deep };
+  assert.equal(findPendingFile(deep), null);
+});
+
+test('host.pendingFile — лише в настільному застосунку', () => {
+  const { invoke } = fakeInvoke({});
+  const desktop = createHost({ appEntry: appById('easygreen'), invoke, pendingFile: { name: 'Таблиця.xlsx' } });
+  assert.deepEqual(desktop.pendingFile, { name: 'Таблиця.xlsx' });
+  assert.ok(Object.isFrozen(desktop.pendingFile));
+  assert.equal(createHost({ appEntry: appById('easygreen'), invoke }).pendingFile, null, 'без вікна з __EW_PENDING_FILE');
+  assert.equal(createHost({ appEntry: appById('easygreen'), pendingFile: { name: 'Таблиця.xlsx' } }).pendingFile, null, 'у браузері немає');
+});
+
+test('підказка про файл з бібліотеки — лише для EasyDoc і EasySlide', () => {
+  const pending = { name: 'Довідка.docx' };
+  assert.equal(pendingFileNotice('easydoc', pending), '«Довідка.docx» з бібліотеки: натисніть «Відкрити…» у редакторі — файл відкриється без вибору.');
+  assert.match(pendingFileNotice('easyslide', pending), /^«Довідка\.docx» з бібліотеки/);
+  assert.equal(pendingFileNotice('easygreen', pending), null, 'EasyGreen відкриває файл сам');
+  assert.equal(pendingFileNotice('easydoc', null), null);
+});
+
+test('байти з іншого realm (invoke головного вікна) стають Uint8Array', () => {
+  const context = vm.createContext({});
+  const buffer = vm.runInContext('new Uint8Array([1, 2, 3]).buffer', context);
+  assert.equal(buffer instanceof ArrayBuffer, false);
+  assert.deepEqual([...toBytes(buffer)], [1, 2, 3]);
+  const view = vm.runInContext('new Uint8Array([4, 5])', context);
+  assert.deepEqual([...toBytes(view)], [4, 5]);
+});
+
+test('оболонка: вкладки «Офіс» і «Бібліотека», блокування при закритті, підказка у вікні редактора', async () => {
+  const index = await read('src/workspace/index.html');
+  assert.match(index, /role="tablist"/);
+  assert.match(index, /id="ws-tab-office" role="tab" data-tab="office" aria-controls="ws-sections" aria-selected="true">Офіс</);
+  assert.match(index, /id="ws-tab-library" role="tab" data-tab="library" aria-controls="ws-library" aria-selected="false" tabindex="-1">Бібліотека</);
+  assert.match(index, /<section class="ws-library" id="ws-library" role="tabpanel" aria-labelledby="ws-tab-library" hidden><\/section>/);
+  assert.match(index, /<div class="ws-notice" id="ws-notice" role="status" hidden>/);
+  const shell = await read('src/workspace/workspace.js');
+  assert.match(shell, /import\('\.\/library\.js'\)/, 'бібліотека — окремий чанк, вантажиться з вкладкою');
+  assert.match(shell, /'Бібліотека доступна лише в застосунку EasyWAR\.'/);
+  assert.match(shell, /if \(shell\.mode !== 'desktop'\)/, 'бібліотека лише в головному вікні застосунку');
+  assert.match(shell, /if \(shell\.mode === 'desktop'\) \{\s*\/\/[^\n]*\n\s*window\.addEventListener\('pagehide', \(\) => \{ invoke\('library_lock'\)\.catch\(\(\) => \{\}\); \}\);/);
+  assert.match(shell, /showPendingNotice\(pendingFileNotice\(shell\.app\.id, findPendingFile\(window\)\)\)/);
+  const library = await read('src/workspace/library.js');
+  assert.match(library, /'Індекс будується — пошук лише за назвами'/);
+  for (const label of ['Імпортувати…', 'Імпортувати шаблон…', 'Створити з шаблону…', 'Застарілі документи', 'Зберегти архів…', 'Новий код відновлення', 'Заблокувати',
+    'Створити бібліотеку', 'Створити код відновлення', 'Розблокувати', 'Забули пароль?', 'Показати приховані', 'Історія версій', 'Перейменувати',
+    'Зберегти копію…', 'Оновити з джерела', 'Відв’язати', 'Зробити поточною', 'Оновити всі']) {
+    assert.ok(library.includes(`'${label}`) || library.includes(`${label}'`), label);
+  }
 });

@@ -13,12 +13,21 @@
     <h1>Робоче середовище</h1>
     <p>Працює без інтернету · файли лише на цьому пристрої</p>
   </header>
-  <div id="ws-sections"></div>
+  <div class="ws-tabs" id="ws-tabs" role="tablist" aria-label="Розділи робочого середовища">
+    <button type="button" class="ws-tab" id="ws-tab-office" role="tab" data-tab="office" aria-controls="ws-sections" aria-selected="true">Офіс</button>
+    <button type="button" class="ws-tab" id="ws-tab-library" role="tab" data-tab="library" aria-controls="ws-library" aria-selected="false" tabindex="-1">Бібліотека<span class="ws-badge" id="ws-library-badge" hidden></span></button>
+  </div>
+  <div id="ws-sections" role="tabpanel" aria-labelledby="ws-tab-office"></div>
+  <section class="ws-library" id="ws-library" role="tabpanel" aria-labelledby="ws-tab-library" hidden></section>
 </main>
 <section class="ws-app" id="ws-app" hidden aria-labelledby="ws-app-title">
   <div class="ws-bar">
     <button type="button" class="ws-back" id="ws-back">← Офіс</button>
     <span class="ws-app-title" id="ws-app-title"></span>
+  </div>
+  <div class="ws-notice" id="ws-notice" role="status" hidden>
+    <span id="ws-notice-text"></span>
+    <button type="button" class="ws-btn" id="ws-notice-close">Зрозуміло</button>
   </div>
   <div class="ws-confirm" id="ws-confirm" role="alertdialog" aria-labelledby="ws-confirm-text" hidden>
     <span id="ws-confirm-text">Є незбережені зміни. Закрити застосунок без збереження?</span>

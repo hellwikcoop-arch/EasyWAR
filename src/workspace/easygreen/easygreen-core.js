@@ -2,13 +2,15 @@
 // Таблиця працює в iframe того самого походження; файли передаються лише повідомленнями postMessage
 // (протокол `?host=parent` GridCraft): gridcraft:ready / gridcraft:open / gridcraft:save /
 // gridcraft:dirty / gridcraft:failed. Файли відкриває й зберігає оболонка «Робочого середовища» (host.openFile,
-// host.saveFile, host.saveFileAs — docs/WORKSPACE.md). Без DOM і сховищ — тестується окремо (tests/easygreen-core.test.mjs).
+// host.saveFile, host.saveFileAs — docs/WORKSPACE.md). Документ з бібліотеки EasyWAR (host.pendingFile) відкривається
+// сам, щойно таблиця готова. Без DOM і сховищ — тестується окремо (tests/easygreen-core.test.mjs).
 
 export const EASYGREEN_TITLE = 'EasyGreen';
 // Параметри сторінки таблиці: режим iframe з батьківською сторінкою й український інтерфейс.
 export const EASYGREEN_APP_QUERY = '?host=parent&lang=uk';
 export const MAX_OPEN_BYTES = 256 * 1024 * 1024;
 export const OPEN_EXTENSIONS = ['xlsx', 'xlsm', 'xls', 'xlsb', 'ods', 'csv', 'tsv', 'txt'];
+export const OPEN_TITLE = 'EasyGreen — відкрити таблицю';
 // Що таблиця передає на збереження: книга (Зберегти, Зберегти як) і експорт.
 export const SAVE_EXTENSIONS = ['xlsx', 'pdf', 'csv', 'html'];
 // Лише книгу .xlsx можна записати назад у відкритий файл; експорт завжди йде через «Зберегти як…».
@@ -63,6 +65,33 @@ export function parseFrameMessage(data) {
 /** Повідомлення, яке відкриває файл у таблиці. */
 export function openMessage(name, bytes) {
   return { type: 'gridcraft:open', name: cleanFileName(name), bytes };
+}
+
+/** Чи відкрити файл одразу після gridcraft:ready: у вікні редактора чекає документ з бібліотеки. */
+export function shouldAutoOpen(host) {
+  return Boolean(host?.pendingFile?.name);
+}
+
+/**
+ * Відкриває таблицю через host (вікно вибору або документ з бібліотеки, який office_open_file
+ * віддає першим) і передає її в таблицю: `post(message, transfer)` повертає false, якщо таблицю
+ * вже закрито. Результат: { status: 'opened', handle, name } | { status: 'cancelled' } |
+ * { status: 'problem', text } (файл не для EasyGreen; номер файлу закрито).
+ */
+export async function openIntoFrame(host, post) {
+  const opened = await host.openFile({ extensions: OPEN_EXTENSIONS, title: OPEN_TITLE });
+  if (!opened) return { status: 'cancelled' };
+  const problem = openProblem(opened.name, opened.bytes.byteLength);
+  if (problem) {
+    host.closeFile(opened.handle).catch(() => {});
+    return { status: 'problem', text: problem };
+  }
+  const bytes = opened.bytes.slice().buffer;
+  if (post(openMessage(opened.name, bytes), [bytes]) === false) {
+    host.closeFile(opened.handle).catch(() => {});
+    return { status: 'cancelled' };
+  }
+  return { status: 'opened', handle: opened.handle, name: opened.name };
 }
 
 /**

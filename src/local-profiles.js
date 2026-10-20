@@ -8,7 +8,7 @@ import {
   createPositionDatabaseTemplate,
   createProfileBaseTable,
   databaseFileName,
-  deleteLocalProfile,
+  deleteProfileWithLibraryFallback,
   getLocalProfiles,
   getProfileSession,
   getWorkspaceTemplates,
@@ -18,6 +18,7 @@ import {
   PROFILE_SLOTS,
   profileDatabaseHandle,
   profileTablePath,
+  purgeConfirmationMatches,
   readProfileDatabase,
   renameLocalProfile,
   setLocalProfileModules,
@@ -146,6 +147,49 @@ function askPasswords({ title, fields, submitLabel }) {
     document.body.append(dialog);
     dialog.showModal();
     inputs[0].focus();
+  });
+}
+
+/**
+ * Друге підтвердження: видалити профіль разом із захищеною бібліотекою «Робочого середовища».
+ * Кнопка спрацьовує лише тоді, коли вписано назву профілю. → true (видалити) або false.
+ */
+function confirmLibraryPurge(profile) {
+  return new Promise(resolve => {
+    const dialog = el('dialog', { class: 'ew-password-dialog', 'aria-labelledby': 'ew-purge-title' });
+    const input = el('input', { type: 'text', autocomplete: 'off', maxlength: '80', 'aria-label': `Назва профілю ${profile.displayName}` });
+    const error = el('p', { class: 'ew-password-error', role: 'alert' });
+    const form = el('form', { method: 'dialog' },
+      el('h3', { id: 'ew-purge-title', text: 'Видалити профіль разом з бібліотекою?' }),
+      el('p', { text: `У профілю «${profile.displayName}» є захищена бібліотека «Робочого середовища». Разом із профілем її ключі буде знищено, а зашифровані документи — стерто з бази EasyWAR. Відновити їх не зможе ніхто: ні паролем, ні кодом відновлення.` }),
+      el('p', { class: 'ew-profile-note', text: 'Спершу збережіть потрібне: «Робоче середовище» → «Бібліотека» → «Зберегти архів…».' }),
+      el('p', { class: 'ew-profile-note', text: 'Резервні копії бази, створені раніше, і далі містять зашифровану бібліотеку; її відкриває пароль профілю, чинний на час копії.' }),
+      el('label', {}, el('span', { text: `Щоб підтвердити, впишіть назву профілю: ${profile.displayName}` }), input),
+      error,
+      el('div', { class: 'ew-profile-actions' },
+        el('button', { type: 'button', class: 'btn quiet', text: 'Скасувати', onclick: () => finish(false) }),
+        el('button', { type: 'submit', class: 'btn ew-profile-delete', text: 'Видалити профіль разом з бібліотекою' })));
+    function finish(value) {
+      dialog.close();
+      dialog.remove();
+      resolve(value);
+    }
+    form.addEventListener('submit', event => {
+      event.preventDefault();
+      if (!purgeConfirmationMatches(input.value, profile.displayName)) {
+        error.textContent = 'Назва не збігається з назвою профілю.';
+        return;
+      }
+      finish(true);
+    });
+    dialog.addEventListener('cancel', event => {
+      event.preventDefault();
+      finish(false);
+    });
+    dialog.append(form);
+    document.body.append(dialog);
+    dialog.showModal();
+    input.focus();
   });
 }
 
@@ -376,10 +420,7 @@ function initializeLocalProfiles() {
         type: 'button',
         class: 'btn quiet ew-profile-delete',
         text: 'Видалити',
-        onclick: () => {
-          if (!window.confirm(`Видалити локальний профіль «${profile.displayName}»? Файли прив’язаних таблиць залишаться на диску.`)) return;
-          mutate(() => deleteLocalProfile(profile.id), 'Профіль видалено.');
-        },
+        onclick: () => deleteProfile(profile),
       }));
 
     row.append(
@@ -487,6 +528,21 @@ function initializeLocalProfiles() {
     }, successMessage, 'Не вдалося змінити профілі');
     if (ok) applyActiveWorkspaceTemplate();
     return ok;
+  }
+
+  /**
+   * «Видалити»: звичайне видалення; якщо в профілю є захищена бібліотека «Робочого середовища»,
+   * Rust відмовляє, і після другого підтвердження профіль видаляється разом з бібліотекою.
+   */
+  async function deleteProfile(profile) {
+    if (!window.confirm(`Видалити локальний профіль «${profile.displayName}»? Файли прив’язаних таблиць залишаться на диску.`)) return;
+    let kept = false;
+    await mutate(async () => {
+      const next = await deleteProfileWithLibraryFallback(profile.id, { confirmPurge: () => confirmLibraryPurge(profile) });
+      if (next === null) kept = true;
+      return next;
+    }, 'Профіль видалено.');
+    if (kept) status.textContent = 'Видалення скасовано: профіль і бібліотеку збережено.';
   }
 
   async function saveNameAndPosition(profile, displayName, position) {
