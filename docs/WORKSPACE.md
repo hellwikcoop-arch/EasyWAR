@@ -118,7 +118,7 @@ export async function mount(container, host) {
   `office_editor_close`, і вікно закривається; користувач повертається до карток у головному вікні.
   Системна кнопка закриття вікна спершу питає сторінку (`EW_WORKSPACE.requestClose()`); закриття
   головного вікна закриває й редактор. Без Tauri (`vite preview`) усе працює як раніше, в `<iframe>`.
-- **Дозволи Tauri.** Усі 78 власних команд перелічено в `src-tauri/build.rs`
+- **Дозволи Tauri.** Усі 79 власних команд перелічено в `src-tauri/build.rs`
   (`tauri_build::AppManifest::commands`): команда, якої немає в capability вікна, для нього заборонена.
   Без цього Tauri дозволяє кожну команду з `generate_handler!` будь-якому вікну.
   `capabilities/default.json` (вікно `main`): `core:default` і всі власні команди, крім файлових команд
