@@ -11,6 +11,7 @@ mod migration_startup;
 pub mod model_install;
 pub mod module_source;
 pub mod office_files;
+pub mod office_library;
 pub mod phone_export;
 pub mod position_templates;
 pub mod profile_table;

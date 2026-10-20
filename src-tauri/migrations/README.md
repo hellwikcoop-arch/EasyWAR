@@ -74,6 +74,31 @@ itself holds the corrected value. Corrections reference the record by its
 Deleting the module (or its profile) deletes them; a record removed from the
 module table takes its corrections with it. The XLSX is never written.
 
+`0012_office_library.sql` adds the encrypted document library of the «Офіс»
+section. `library_keyrings` holds one row per profile: the library data key
+wrapped with XChaCha20-Poly1305 under a key that Argon2id derives from the
+profile password (the KDF parameters are stored with the wrap) and, optionally,
+a second wrap under a recovery code. `library_items` (documents with encrypted
+names), `library_blobs` (encrypted content keyed by an HMAC `content_id`, stored
+once per profile), `library_versions` (immutable versions), `library_events`
+(an append-only audit without content) and `library_purges` (the purge log)
+store no plaintext document text or name. Unconditional `BEFORE` triggers keep
+versions, events and purges append-only, refuse `INSERT OR REPLACE`, `REPLACE`
+and UPSERT over an existing key, allow a keyring change only with
+`generation + 1`, and allow erasing content (`data` to `NULL`) only after the
+keyring is shredded. The tables have no foreign key to `local_profiles`;
+`local_profiles_library_guard` refuses to delete a profile with an active
+library, so the caller crypto-shreds the library in the same transaction first.
+
+`0013_document_links.sql` adds `document_links`: for a library document
+generated from a template, the immutable template version, the kind of data
+source (`approved_revisions`, `dashboard_module`, `library_table`), its
+parameters as bounded JSON (identifiers and dates only), the last generated
+version and an HMAC fingerprint of the source data. Only the generation state
+(last generated version, fingerprint, update time) can change, and only while
+the profile's keyring is active. Deleting the row is «Відв'язати від джерела»;
+the document and its versions stay intact.
+
 The `dashboard_data_<id>` tables of user-created dashboard modules are not
 migration objects: Rust creates them at runtime from a validated catalog
 template and adds columns that later appear in a template with `ALTER TABLE`,
