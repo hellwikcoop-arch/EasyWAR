@@ -124,13 +124,16 @@ function drawTargetTypes(slide, theme, pptx, chart) {
 }
 
 /** Права панель слайда власних втрат: дві кругові діаграми «Втрати артилерії противника в порівнянні з нашими». */
+// Противник — червоний, наші втрати — синій.
+const ENEMY_OWN_COLORS = ['C0392B', '2F6EA5'];
+
 function drawArtilleryPies(slide, theme, pptx, pies) {
   slide.addShape('roundRect', { x: 7.92, y: PANEL_Y, w: 4.9, h: 3.85, rectRadius: 0.1, fill: { color: theme.card }, line: { color: theme.line, width: 0.5 }, shadow: SHADOW });
   pies.forEach((pie, i) => {
     const x = 8.02 + i * 2.4;
     slide.addText(pie.title, { x, y: PANEL_Y + 0.12, w: 2.3, h: 0.7, fontFace: theme.font, fontSize: 9, bold: true, color: theme.accent, align: 'center', valign: 'top', margin: 0 });
     slide.addChart(pptx.charts.PIE, [{ name: 'Артилерія', labels: pie.labels, values: pie.values }], {
-      x, y: PANEL_Y + 0.9, w: 2.3, h: 2.8, chartColors: [theme.series[0], theme.series[1]], dataBorder: { pt: 1, color: 'FFFFFF' },
+      x, y: PANEL_Y + 0.9, w: 2.3, h: 2.8, chartColors: ENEMY_OWN_COLORS, dataBorder: { pt: 1, color: 'FFFFFF' },
       showLegend: true, legendPos: 'b', legendFontFace: theme.font, legendFontSize: 9, legendColor: theme.muted,
       showValue: true, showPercent: false, dataLabelColor: 'FFFFFF', dataLabelFontFace: theme.font, dataLabelFontSize: 10, dataLabelFontBold: true,
     });
