@@ -787,7 +787,7 @@ export function mountLibrary(root, { invoke = findInvoke(window), onBadge = () =
       await loadItems();
       await reloadVersions();
       renderContent();
-    }, `Оновлення «${item.name}» з джерела…`);
+    }, `Оновлення «${snapshot.name}» з джерела…`);
   }
 
   // Новий код відновлення -------------------------------------------------------------------

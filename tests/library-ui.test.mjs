@@ -609,3 +609,14 @@ test('«Оновити всі» оновлює лише «Джерело змі�
   const locked = fakeInvoke({ library_read_version: () => { throw LOCKED; } });
   await assert.rejects(regenerateAll({ api: libraryApi(locked.invoke), JSZip, items, statuses }), error => error === LOCKED, 'блокування зупиняє оновлення');
 });
+
+test('«Оновити з джерела»: підпис очікування бере назву зі знімка, а не з змінної всередині дії', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const code = await readFile(new URL('../src/workspace/library.js', import.meta.url), 'utf8');
+  const start = code.indexOf('function regenerate(snapshot)');
+  const end = code.indexOf('// Новий код відновлення', start);
+  const body = code.slice(start, end);
+  assert.ok(body.includes('`Оновлення «${snapshot.name}» з джерела…`'));
+  // Поза внутрішньою дією `item` не оголошено: звернення до нього кинуло б ReferenceError при кліку.
+  assert.ok(!/\}, `[^`]*\$\{item\./.test(body));
+});
