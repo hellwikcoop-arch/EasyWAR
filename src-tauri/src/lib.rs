@@ -162,24 +162,28 @@ async fn list_dashboard_modules(
 }
 
 /// `rows` — дані, підтягнуті з таблиці користувача: модуль створюється разом із ними
-/// однією транзакцією. Без `rows` таблиця модуля порожня.
+/// однією транзакцією. Без `rows` таблиця модуля порожня. `style` — стиль оформлення,
+/// обраний у вікні створення (без нього — звичайний).
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn create_dashboard_module(
     modules: tauri::State<'_, DashboardModuleStore>,
     session: tauri::State<'_, ProfileSession>,
     branch: String,
     template_id: String,
     title: Option<String>,
+    style: Option<String>,
     rows: Option<Vec<serde_json::Map<String, Value>>>,
     corrections: Option<Vec<NewImportCorrection>>,
 ) -> Result<DashboardModule, String> {
     let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
     modules
-        .create_with_import(
+        .create_styled(
             &active_profile_id(&session)?,
             &branch,
             &template_id,
             title.as_deref(),
+            style.as_deref(),
             rows.unwrap_or_default(),
             corrections.unwrap_or_default(),
             &now,
@@ -317,6 +321,20 @@ async fn get_dashboard_module_data(
 ) -> Result<DashboardModuleData, String> {
     modules
         .get_data(&active_profile_id(&session)?, &module_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// Стиль оформлення вже створеного модуля (`standard`, `branch`, `heightwell`); дані не змінюються.
+#[tauri::command]
+async fn set_dashboard_module_style(
+    modules: tauri::State<'_, DashboardModuleStore>,
+    session: tauri::State<'_, ProfileSession>,
+    module_id: String,
+    style: String,
+) -> Result<DashboardModule, String> {
+    modules
+        .set_style(&active_profile_id(&session)?, &module_id, &style)
         .await
         .map_err(|error| error.to_string())
 }
@@ -3331,6 +3349,7 @@ pub fn run() {
             read_module_source_sheet,
             get_dashboard_module_data,
             replace_dashboard_module_rows,
+            set_dashboard_module_style,
             get_local_profiles,
             register_local_profile,
             set_local_profile_modules,

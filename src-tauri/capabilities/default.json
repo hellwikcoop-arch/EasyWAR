@@ -17,6 +17,7 @@
     "allow-read-module-source-sheet",
     "allow-get-dashboard-module-data",
     "allow-replace-dashboard-module-rows",
+    "allow-set-dashboard-module-style",
     "allow-get-local-profiles",
     "allow-register-local-profile",
     "allow-set-local-profile-modules",

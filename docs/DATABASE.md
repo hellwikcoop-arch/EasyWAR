@@ -45,10 +45,15 @@ catalog template, not from the migration. Migration
 values corrected on the «Перевірка» screen before rows from the user's XLSX were
 brought into a new module, kept apart from the module records (raw cell text,
 typed text, reason, file name, sheet, row and column). Migration
-`0012_office_library.sql` adds the encrypted «Офіс» document library (key wraps,
+`0012_dashboard_module_style.sql` adds `dashboard_modules.style` — the look chosen
+when the module was created: `standard` (default for existing modules), `branch`
+(colours of the dashboard's service branch) or `heightwell` («Пункт керування»);
+the colour itself follows the module's `branch`, so only the style name is
+stored. Migration
+`0013_office_library.sql` adds the encrypted «Офіс» document library (key wraps,
 documents, encrypted content, immutable versions, events and purges), and
-migration `0013_document_links.sql` links a generated library document to its
-template version and data source, and migration `0014_library_blob_repair.sql`
+migration `0014_document_links.sql` links a generated library document to its
+template version and data source, and migration `0015_library_blob_repair.sql`
 lets a damaged ciphertext row of `library_blobs` be replaced while the keyring is
 active (see «Office library»). Migrations contain no operational fixtures and
 create no external integration.
@@ -327,7 +332,7 @@ password.
   source is the HMAC of the table content only (headers, rows, sheet name), so
   links made before this change show `source_changed` once.
 - Damaged content. If a stored ciphertext no longer decrypts, importing or
-  saving the same bytes again replaces it (migration 0014; the trigger still
+  saving the same bytes again replaces it (migration 0015; the trigger still
   forbids changing the row identity, refilling a shredded row or repairing while
   the keyring is not `active`). The repair writes no audit event.
 - Password change and recovery are two steps: the new wrap is prepared outside

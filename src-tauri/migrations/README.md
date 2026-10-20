@@ -74,7 +74,13 @@ itself holds the corrected value. Corrections reference the record by its
 Deleting the module (or its profile) deletes them; a record removed from the
 module table takes its corrections with it. The XLSX is never written.
 
-`0012_office_library.sql` adds the encrypted document library of the «Офіс»
+`0012_dashboard_module_style.sql` adds `dashboard_modules.style`, the look picked
+in the module creation window: `standard` (the default, so existing modules keep
+their look), `branch` (colours of the dashboard's service branch) or
+`heightwell` («Пункт керування»). A `CHECK` limits it to these three names; the
+colour comes from the module's `branch`, never from stored text.
+
+`0013_office_library.sql` adds the encrypted document library of the «Офіс»
 section. `library_keyrings` holds one row per profile: the library data key
 wrapped with XChaCha20-Poly1305 under a key that Argon2id derives from the
 profile password (the KDF parameters are stored with the wrap) and, optionally,
@@ -90,7 +96,7 @@ keyring is shredded. The tables have no foreign key to `local_profiles`;
 `local_profiles_library_guard` refuses to delete a profile with an active
 library, so the caller crypto-shreds the library in the same transaction first.
 
-`0013_document_links.sql` adds `document_links`: for a library document
+`0014_document_links.sql` adds `document_links`: for a library document
 generated from a template, the immutable template version, the kind of data
 source (`approved_revisions`, `dashboard_module`, `library_table`), its
 parameters as bounded JSON (identifiers and dates only), the last generated
@@ -99,7 +105,7 @@ version and an HMAC fingerprint of the source data. Only the generation state
 the profile's keyring is active. Deleting the row is «Відв'язати від джерела»;
 the document and its versions stay intact.
 
-`0014_library_blob_repair.sql` rewrites `library_blobs_update_guard` so that a
+`0015_library_blob_repair.sql` rewrites `library_blobs_update_guard` so that a
 damaged blob can be repaired. `content_id` is an HMAC of the plaintext, so the
 same content of a profile always maps to the same row; before this migration a
 row whose ciphertext no longer decrypted could never be replaced, and importing

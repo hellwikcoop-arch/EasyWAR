@@ -61,5 +61,8 @@ Minimum expectations:
 - Native Codex tasks remain the execution, messaging, and transcript authority; an explicitly requested goal Coordinator is on demand, with no heartbeat or mandatory pull-request workflow.
 - Reject cross-project notices and never store transcripts, reasoning, prompts, or tool output in Coordinator state.
 
+## Dashboard module charts
+A new chart kind for the module catalog touches: the builder in `BUILDERS` and the name in `chartSummary` (`src/dashboard-module-charts-core.js`), the renderer in `RENDERERS` (`src/dashboard-module-charts.js`), `VISUAL_KINDS` (`src/dashboard-module-catalog-core.js`), synthetic rows in `sampleRows` (`src/dashboard-module-catalog.js`), the Rust template in `catalog()` plus the template count in its Rust test and in `tests/dashboard-module-source.test.mjs`. `tests/dashboard-module-charts.test.mjs` also holds text contracts on import lines and CSS (no `stroke-dasharray`); update them with the code.
+
 ## 3D models
 Index of all 3D model files, loaders and tests: [`docs/3D_MODELS.md`](docs/3D_MODELS.md). Read it first; do not search the whole project for models. Files live in `src/models/*.glb`, procedural munitions in `src/munition-3d.js`, the reference viewer in `src/ref-viewer.js`. Interactive 3D guides (six pages and a hub, opened by the «3D-довідники» button) live in `src/guides/`; their model credits are kept only in `src/guides/credits.js` (regenerate the section in `src/models/CREDITS.md` with `node script/guides-credits.mjs`); details are in the last section of `docs/3D_MODELS.md`.

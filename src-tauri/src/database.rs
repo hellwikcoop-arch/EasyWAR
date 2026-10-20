@@ -97,10 +97,12 @@ pub(crate) const DASHBOARD_MODULES_SQL: &str =
     include_str!("../migrations/0010_dashboard_modules.sql");
 pub(crate) const DASHBOARD_MODULE_CORRECTIONS_SQL: &str =
     include_str!("../migrations/0011_dashboard_module_corrections.sql");
-pub(crate) const OFFICE_LIBRARY_SQL: &str = include_str!("../migrations/0012_office_library.sql");
-pub(crate) const DOCUMENT_LINKS_SQL: &str = include_str!("../migrations/0013_document_links.sql");
+pub(crate) const DASHBOARD_MODULE_STYLE_SQL: &str =
+    include_str!("../migrations/0012_dashboard_module_style.sql");
+pub(crate) const OFFICE_LIBRARY_SQL: &str = include_str!("../migrations/0013_office_library.sql");
+pub(crate) const DOCUMENT_LINKS_SQL: &str = include_str!("../migrations/0014_document_links.sql");
 pub(crate) const LIBRARY_BLOB_REPAIR_SQL: &str =
-    include_str!("../migrations/0014_library_blob_repair.sql");
+    include_str!("../migrations/0015_library_blob_repair.sql");
 
 pub fn migrations() -> Vec<Migration> {
     vec![
@@ -172,18 +174,24 @@ pub fn migrations() -> Vec<Migration> {
         },
         Migration {
             version: 12,
+            description: "add_dashboard_module_style",
+            sql: DASHBOARD_MODULE_STYLE_SQL,
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 13,
             description: "add_office_library",
             sql: OFFICE_LIBRARY_SQL,
             kind: MigrationKind::Up,
         },
         Migration {
-            version: 13,
+            version: 14,
             description: "add_document_links",
             sql: DOCUMENT_LINKS_SQL,
             kind: MigrationKind::Up,
         },
         Migration {
-            version: 14,
+            version: 15,
             description: "allow_library_blob_repair",
             sql: LIBRARY_BLOB_REPAIR_SQL,
             kind: MigrationKind::Up,
@@ -255,10 +263,11 @@ mod tests {
     use super::{
         create_migrated_database, migrations, DatabaseMigrationState, DatabaseStatusError,
         DatabaseStatusStore, COMMAND_TABLES_SQL, DASHBOARD_MODULES_SQL,
-        DASHBOARD_MODULE_CORRECTIONS_SQL, DATABASE_URL, DOCUMENT_LINKS_SQL, EMBEDDED_MIGRATOR,
-        INITIAL_SCHEMA_SQL, LIBRARY_BLOB_REPAIR_SQL, LOCAL_PROFILES_SQL, OFFICE_LIBRARY_SQL,
-        OWN_LOSSES_TABLES_SQL, PROFILE_BRANCH_TABLES_SQL, PROFILE_DETAILS_SQL, PROFILE_MODULES_SQL,
-        WORKSPACE_TEMPLATES_SQL, XLSX_DUPLICATE_LINKS_SQL,
+        DASHBOARD_MODULE_CORRECTIONS_SQL, DASHBOARD_MODULE_STYLE_SQL, DATABASE_URL,
+        DOCUMENT_LINKS_SQL, EMBEDDED_MIGRATOR, INITIAL_SCHEMA_SQL, LIBRARY_BLOB_REPAIR_SQL,
+        LOCAL_PROFILES_SQL, OFFICE_LIBRARY_SQL, OWN_LOSSES_TABLES_SQL, PROFILE_BRANCH_TABLES_SQL,
+        PROFILE_DETAILS_SQL, PROFILE_MODULES_SQL, WORKSPACE_TEMPLATES_SQL,
+        XLSX_DUPLICATE_LINKS_SQL,
     };
     use super::{live_connect_options, writable_connect_options};
     use sqlx::{sqlite::SqlitePoolOptions, Row};
@@ -269,7 +278,7 @@ mod tests {
         assert_eq!(DATABASE_URL, "sqlite:easywar.db");
         assert!(include_str!("../tauri.conf.json").contains(DATABASE_URL));
         let registered = migrations();
-        assert_eq!(registered.len(), 14);
+        assert_eq!(registered.len(), 15);
         assert_eq!(registered[0].version, 1);
         assert_eq!(registered[0].description, "create_provenance_schema");
         assert_eq!(registered[1].version, 2);
@@ -296,11 +305,13 @@ mod tests {
             "add_dashboard_module_corrections"
         );
         assert_eq!(registered[11].version, 12);
-        assert_eq!(registered[11].description, "add_office_library");
+        assert_eq!(registered[11].description, "add_dashboard_module_style");
         assert_eq!(registered[12].version, 13);
-        assert_eq!(registered[12].description, "add_document_links");
+        assert_eq!(registered[12].description, "add_office_library");
         assert_eq!(registered[13].version, 14);
-        assert_eq!(registered[13].description, "allow_library_blob_repair");
+        assert_eq!(registered[13].description, "add_document_links");
+        assert_eq!(registered[14].version, 15);
+        assert_eq!(registered[14].description, "allow_library_blob_repair");
         assert_eq!(
             EMBEDDED_MIGRATOR
                 .iter()
@@ -321,7 +332,7 @@ mod tests {
                 .map(|migration| migration.sql)
                 .collect::<Vec<_>>()
         );
-        assert_eq!(super::latest_schema_version(), Some(14));
+        assert_eq!(super::latest_schema_version(), Some(15));
     }
 
     #[tokio::test]
@@ -333,9 +344,9 @@ mod tests {
             DatabaseStatusStore::new(pool.clone()).load().await.unwrap(),
             super::DatabaseStatus {
                 app_version: env!("CARGO_PKG_VERSION").to_owned(),
-                schema_version: 14,
-                supported_schema_version: 14,
-                migration_count: 14,
+                schema_version: 15,
+                supported_schema_version: 15,
+                migration_count: 15,
                 migration_state: DatabaseMigrationState::Current,
             }
         );
@@ -403,6 +414,10 @@ mod tests {
             .execute(&pool)
             .await
             .expect("dashboard module corrections migration must apply");
+        sqlx::raw_sql(DASHBOARD_MODULE_STYLE_SQL)
+            .execute(&pool)
+            .await
+            .expect("dashboard module style migration must apply");
         sqlx::raw_sql(OFFICE_LIBRARY_SQL)
             .execute(&pool)
             .await
@@ -875,6 +890,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn dashboard_module_style_migration_defaults_existing_modules_to_standard() {
+        let pool = migrated_pool().await;
+        module_with_corrections(&pool).await;
+        let style: String = sqlx::query_scalar(
+            "SELECT style FROM dashboard_modules WHERE id = 'dashboard-corrections-01'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(style, "standard");
+        for (value, accepted) in [
+            ("branch", true),
+            ("heightwell", true),
+            ("neon", false),
+            ("", false),
+        ] {
+            let result = sqlx::query(
+                "UPDATE dashboard_modules SET style = ? WHERE id = 'dashboard-corrections-01'",
+            )
+            .bind(value)
+            .execute(&pool)
+            .await;
+            assert_eq!(result.is_ok(), accepted, "стиль «{value}»");
+        }
+    }
+
+    #[tokio::test]
     async fn all_embedded_migrations_apply_to_a_new_file_with_the_corrections_table() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("corrections.sqlite3");
@@ -899,7 +941,7 @@ mod tests {
         pool.close().await;
     }
 
-    // --- Бібліотека «Офісу» (міграції 0012–0014) ---------------------------
+    // --- Бібліотека «Офісу» (міграції 0013–0015) ---------------------------
 
     const LIBRARY_NOW: &str = "2026-10-20T08:00:00Z";
     const LIBRARY_PROFILE: &str = "profile-1b1b1b1b1b1b1b1b1b1b1b1b";
