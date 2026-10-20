@@ -33,3 +33,8 @@
 .ewmc-style-option[data-style=heightwell] .ewmc-style-swatch{border-color:#1f2a46;border-radius:5px;background:radial-gradient(circle at 50% 50%,var(--ewmc-branch-night) 0 3px,transparent 4px),#070a14;box-shadow:0 0 8px color-mix(in srgb,var(--ewmc-branch-night) 45%,transparent)}
 @media(prefers-reduced-motion:reduce){.ewmc-style-preview{transition:none}}
 html[data-motion=off] .ewmc-style-preview{transition:none}
+.ewmc-style-switch{display:inline-flex;align-items:center;gap:7px;color:var(--muted,#9fb0c4);font-size:11px;font-weight:700;white-space:nowrap}
+.ewmc-style-switch select{min-height:34px;padding:0 10px;border:1px solid var(--line-strong,#334155);border-radius:9px;background:var(--surface-2,#142238);color:var(--ink,#eef6ff);font:inherit;font-size:12px}
+.ewmc-style-switch select:focus-visible{outline:2px solid var(--ewmc-branch,var(--accent,#28b8ff));outline-offset:2px}
+.ewmc-dialog[data-style=heightwell] .ewmc-style-switch select{border-color:#2e3d62;background:#0d1324;color:#eaf1ff}
+@media(max-width:640px){.ewmc-style-switch{order:2}}

@@ -1157,6 +1157,31 @@ impl DashboardModuleStore {
         self.get_for_profile(profile_id, &id).await
     }
 
+    /// Змінює стиль оформлення вже створеного модуля. Це вигляд, а не дані, тож
+    /// `updated_at` не змінюється: відкрита в іншому вікні таблиця не отримує конфлікту.
+    pub async fn set_style(
+        &self,
+        profile_id: &str,
+        module_id: &str,
+        style: &str,
+    ) -> Result<DashboardModule, DashboardModuleError> {
+        if !valid_style(style) {
+            return Err(DashboardModuleError::InvalidStyle);
+        }
+        let changed =
+            sqlx::query("UPDATE dashboard_modules SET style = ? WHERE profile_id = ? AND id = ?")
+                .bind(style)
+                .bind(profile_id)
+                .bind(module_id)
+                .execute(&self.pool)
+                .await?
+                .rows_affected();
+        if changed == 0 {
+            return Err(DashboardModuleError::ModuleNotFound);
+        }
+        self.get_for_profile(profile_id, module_id).await
+    }
+
     pub async fn get_data(
         &self,
         profile_id: &str,
@@ -2182,6 +2207,40 @@ mod tests {
             .map(|module| module.style)
             .collect::<Vec<_>>();
         assert_eq!(listed, ["branch", "heightwell"]);
+    }
+
+    #[tokio::test]
+    async fn set_style_changes_only_the_look_of_the_own_profile_module() {
+        let store = store().await;
+        let profile = "profile-111111111111111111111111";
+        let module = store
+            .create(profile, "air", "flight-hours", None, "2026-01-01T00:00:01Z")
+            .await
+            .unwrap();
+        let styled = store
+            .set_style(profile, &module.id, "heightwell")
+            .await
+            .unwrap();
+        assert_eq!(styled.style, "heightwell");
+        assert_eq!(styled.updated_at, module.updated_at, "стиль — не дані");
+        assert_eq!(
+            store.list(profile, "air").await.unwrap()[0].style,
+            "heightwell"
+        );
+        assert!(matches!(
+            store.set_style(profile, &module.id, "neon").await,
+            Err(DashboardModuleError::InvalidStyle)
+        ));
+        assert!(matches!(
+            store
+                .set_style("profile-222222222222222222222222", &module.id, "branch")
+                .await,
+            Err(DashboardModuleError::ModuleNotFound)
+        ));
+        assert_eq!(
+            store.list(profile, "air").await.unwrap()[0].style,
+            "heightwell"
+        );
     }
 
     #[tokio::test]

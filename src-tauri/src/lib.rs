@@ -317,6 +317,20 @@ async fn get_dashboard_module_data(
         .map_err(|error| error.to_string())
 }
 
+/// Стиль оформлення вже створеного модуля (`standard`, `branch`, `heightwell`); дані не змінюються.
+#[tauri::command]
+async fn set_dashboard_module_style(
+    modules: tauri::State<'_, DashboardModuleStore>,
+    session: tauri::State<'_, ProfileSession>,
+    module_id: String,
+    style: String,
+) -> Result<DashboardModule, String> {
+    modules
+        .set_style(&active_profile_id(&session)?, &module_id, &style)
+        .await
+        .map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 async fn replace_dashboard_module_rows(
     modules: tauri::State<'_, DashboardModuleStore>,
@@ -2052,6 +2066,7 @@ pub fn run() {
             read_module_source_sheet,
             get_dashboard_module_data,
             replace_dashboard_module_rows,
+            set_dashboard_module_style,
             get_local_profiles,
             register_local_profile,
             set_local_profile_modules,

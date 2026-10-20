@@ -158,6 +158,9 @@ test('module styles are the three names Rust and the migration accept, with a la
   const ui = await readFile(new URL('../src/dashboard-module-catalog.js', import.meta.url), 'utf8');
   assert.match(ui, /style: style\.value\(\)/, 'вікно створення передає обраний стиль у create_dashboard_module');
   assert.match(ui, /'data-style': module\.style, 'data-branch': module\.branch/, 'картка модуля несе стиль і рід військ');
+  assert.match(ui, /invoke\('set_dashboard_module_style', \{ moduleId: module\.id, style \}\)/, 'сторінка модуля змінює стиль уже створеного модуля');
+  const lib = await readFile(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf8');
+  assert.match(lib, /^\s+set_dashboard_module_style,$/m, 'команду зареєстровано в Tauri');
   assert.match(ui, /href: '\.\/module-styles\.css'/, 'стилі модулів підвантажуються лише в застосунку');
   const pages = await Promise.all(['air.html', 'rocket.html'].map(page => readFile(new URL(`../src/${page}`, import.meta.url), 'utf8')));
   for (const page of pages) assert.ok(!page.includes('module-styles.css'), 'сторінки не вбудовують стилі модулів');

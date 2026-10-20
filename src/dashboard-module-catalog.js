@@ -731,6 +731,36 @@ function initialize() {
     if (message) showToast(message, true);
   }
 
+  // Стиль уже створеного модуля змінюється на його сторінці. Це лише вигляд: рядки не перезаписуються,
+  // тож перемикач працює й тоді, коли таблиця відкрита лише для читання.
+  function styleSelect(module) {
+    const select = el('select', { class: 'ewmc-style-select', 'aria-label': 'Стиль оформлення модуля', title: `Стиль оформлення · кольори ${BRANCH_LABELS[module.branch] || 'роду військ'}` },
+      MODULE_STYLES.map(option => el('option', { value: option.id, selected: option.id === module.style, text: option.label })));
+    select.addEventListener('change', async () => {
+      const style = normalizeStyle(select.value);
+      if (state.busy) { select.value = module.style; return; }
+      state.busy = true;
+      select.disabled = true;
+      try {
+        const saved = normalizeModules([await invoke('set_dashboard_module_style', { moduleId: module.id, style })])[0];
+        const current = saved ? saved.style : style;
+        for (const item of state.modules) if (item.id === module.id) item.style = current;
+        module.style = current;
+        loadStyleFonts(current);
+        dialog.dataset.style = current;
+        renderHost();
+        showToast(`Стиль модуля: ${MODULE_STYLES.find(option => option.id === current)?.label || current}.`);
+      } catch (error) {
+        select.value = module.style;
+        showToast(String(error || 'Не вдалося змінити стиль модуля.'), true);
+      } finally {
+        state.busy = false;
+        select.disabled = false;
+      }
+    });
+    return el('label', { class: 'ewmc-style-switch' }, el('span', { text: 'Стиль' }), select);
+  }
+
   // Таблиця модуля відкривається окремою сторінкою на весь екран, а не вікном поверх дашборда.
   // `view` — де стоїть таблиця: після додавання рядка вона гортається до кінця, після правки лишається на місці.
   function showModulePage(module, focusTarget = null, view = null) {
@@ -1136,6 +1166,7 @@ function initialize() {
           el('p', { class: 'ewmc-sub' },
             `${unreadable ? 'Дані недоступні' : rowCountLabel(rows.length)} · ${columnCountLabel(module.fields.length)} · `,
             el('code', { text: module.storageTable }))),
+        styleSelect(module),
         addButton),
       el('div', { class: 'ewmc-page-body' },
         corrections.length ? correctionsList() : null,
