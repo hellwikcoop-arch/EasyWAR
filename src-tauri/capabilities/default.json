@@ -12,7 +12,6 @@
     "allow-get-dashboard-module-catalog",
     "allow-list-dashboard-modules",
     "allow-create-dashboard-module",
-    "allow-set-dashboard-module-style",
     "allow-inspect-linked-module-source",
     "allow-pick-module-source",
     "allow-read-module-source-sheet",

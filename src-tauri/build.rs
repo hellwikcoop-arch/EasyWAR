@@ -9,7 +9,6 @@ const COMMANDS: &[&str] = &[
     "get_dashboard_module_catalog",
     "list_dashboard_modules",
     "create_dashboard_module",
-    "set_dashboard_module_style",
     "inspect_linked_module_source",
     "pick_module_source",
     "read_module_source_sheet",
