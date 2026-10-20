@@ -13,6 +13,10 @@ import {
   momentLabel,
   niceTicks,
   parseMoment,
+  RIDGE_LIMIT,
+  hourOf,
+  takeoffHoursModel,
+  tickerItems,
 } from '../src/dashboard-module-charts-core.js';
 import { rustCatalog } from './helpers/rust-catalog.mjs';
 
@@ -351,7 +355,7 @@ test('the renderer draws every kind, stays local and never writes markup as text
 test('the catalog page mounts real charts from table rows instead of sketches', async () => {
   const source = await read('../src/dashboard-module-catalog.js');
   const css = await read('../src/dashboard-module-catalog.css');
-  assert.match(source, /import \{ chartModel \} from '\.\/dashboard-module-charts-core\.js';/u);
+  assert.match(source, /import \{ chartModel, takeoffHoursModel, tickerItems \} from '\.\/dashboard-module-charts-core\.js';/u);
   assert.match(source, /import \{ mountChart \} from '\.\/dashboard-module-charts\.js';/u);
   assert.match(source, /mountChart\(host, chartModel\(template, rows\), \{ height, compact \}\)/u);
   assert.match(source, /template\.visualKind === 'weather' \? \(compact \? 150 : 360\) : \(compact \? 120 : 168\)/u, 'погодна картка вища за решту');
@@ -371,3 +375,125 @@ test('the catalog page mounts real charts from table rows instead of sketches', 
   assert.match(css, /\.ewmc-grid\{stroke:var\(--ewmc-grid\);stroke-width:1\}/u, 'сітка — тонка суцільна');
   assert.doesNotMatch(css, /stroke-dasharray/u, 'без пунктирних сіток');
 });
+
+test('ridgeline: hour of day from HH:MM text or ISO date-time, invalid times skipped', () => {
+  assert.equal(hourOf('08:10'), 8);
+  assert.equal(hourOf('8.05'), 8);
+  assert.equal(hourOf('23:59'), 23);
+  assert.equal(hourOf('25:00'), null);
+  assert.equal(hourOf('12:75'), null);
+  assert.equal(hourOf('2026-10-18T14:30'), 14);
+  assert.equal(hourOf('2026-10-18'), null);
+  assert.equal(hourOf(''), null);
+  assert.equal(hourOf(null), null);
+});
+
+test('ridgeline template: ridges by series, sorted by total, peak hour and count', () => {
+  const rows = [
+    { occurred_at: '2026-10-01T09:10', series: 'Тест-А' },
+    { occurred_at: '2026-10-02T09:40', series: 'Тест-А' },
+    { occurred_at: '2026-10-03T15:00', series: 'Тест-А' },
+    { occurred_at: '2026-10-01T21:00', series: 'Тест-Б' },
+    { occurred_at: '2026-10-01', series: 'Тест-Б' },
+  ];
+  const model = modelOf('ridgeline', rows);
+  assert.equal(model.kind, 'ridgeline');
+  assert.equal(model.skipped, 1);
+  assert.deepEqual(model.series.map(item => item.name), ['Тест-А', 'Тест-Б']);
+  const [first, second] = model.series;
+  assert.equal(first.values.length, 24);
+  assert.equal(first.total, 3);
+  assert.equal(first.peakHour, 9);
+  assert.equal(first.peakText, '09:00 · 2 под.');
+  assert.equal(second.peakHour, 21);
+  assert.deepEqual([first.slot, second.slot], [1, 2]);
+  // Згладжування по колу доби: 23:00 отримує частку від 21:00, а 00:00 — від 23:00.
+  assert.ok(second.smooth[23] > 0 && second.smooth[0] === 0 && second.smooth[22] > second.smooth[23]);
+  assert.ok(model.max >= Math.max(...first.smooth));
+  assert.equal(model.hours[0], '00:00');
+  assert.match(chartSummary(model), /^Гребені за годинами доби: 5 записів, 2 ряди, пік Тест-А о 09:00/u);
+});
+
+test('ridgeline: weight from value field, more than six series fold into «Інші»', () => {
+  const rows = Array.from({ length: 8 }, (_, index) => ({ occurred_at: `2026-10-01T${String(10 + index).padStart(2, '0')}:00`, series: `Ряд ${index + 1}`, value: 10 - index }));
+  const model = modelOf('ridgeline', rows);
+  assert.equal(model.series.length, RIDGE_LIMIT);
+  assert.equal(model.series.at(-1).name, OTHER_LABEL);
+  assert.equal(model.series.at(-1).total, 5 + 4 + 3);
+  assert.equal(model.series[0].total, 10);
+  assert.equal(model.unit, '');
+});
+
+test('flight journal: takeoffs by hour per aircraft type, rows without valid takeoff time skipped', () => {
+  const rows = [
+    { aircraft_type: 'Тестовий-1', takeoff_time: '08:10', airborne_hours: 1, total_hours: 1.5 },
+    { aircraft_type: 'Тестовий-1', takeoff_time: '08:50', airborne_hours: 1, total_hours: 1.5 },
+    { aircraft_type: 'Тестовий-2', takeoff_time: '14:25', airborne_hours: 1, total_hours: 1.5 },
+    { aircraft_type: 'Тестовий-2', takeoff_time: '25:00', airborne_hours: 1, total_hours: 1.5 },
+    { aircraft_type: 'Тестовий-2', airborne_hours: 1, total_hours: 1.5 },
+  ];
+  const module = templateOf('flight-hours');
+  const model = takeoffHoursModel(module, rows);
+  assert.equal(model.kind, 'ridgeline');
+  assert.equal(model.title, 'Зльоти за годинами доби');
+  assert.equal(model.rowCount, 5);
+  assert.equal(model.skipped, 2);
+  assert.deepEqual(model.series.map(item => [item.name, item.total, item.peakHour]), [['Тестовий-1', 2, 8], ['Тестовий-2', 1, 14]]);
+  assert.equal(model.series[0].peakText, '08:00 · 2 зл.');
+  // Сама картка журналу лишається смугами нальоту.
+  assert.equal(chartModel(module, rows).kind, 'horizontal-bar');
+  assert.equal(takeoffHoursModel(module, []).empty, true);
+});
+
+test('ticker: one item per module from the same rows as its card, unread data marked', () => {
+  const ridge = { ...templateOf('ridgeline'), id: 'm-1', title: 'Тестові події' };
+  const kpiModule = { ...templateOf('kpi'), id: 'm-2', title: 'Тестовий показник' };
+  const data = new Map([
+    ['m-1', { rows: [{ occurred_at: '2026-10-01T09:10', series: 'Тест-А' }], failed: false }],
+    ['m-2', { rows: [], failed: true }],
+  ]);
+  const items = tickerItems([ridge, kpiModule], data);
+  assert.deepEqual(items.map(item => [item.id, item.title, item.failed]), [['m-1', 'Тестові події', false], ['m-2', 'Тестовий показник', true]]);
+  assert.match(items[0].text, /^1 запис, пік Тест-А о 09:00/u);
+  assert.equal(items[1].text, 'дані не прочитано');
+  assert.deepEqual(tickerItems(null, null), []);
+});
+
+test('dashboard: ticker under the grid and HUD corners only in the dark theme, motion can be reduced', async () => {
+  const source = await read('../src/dashboard-module-catalog.js');
+  const css = await read('../src/dashboard-module-catalog.css');
+  assert.match(source, /host\.append\(grid, ticker\(tickerItems\(state\.modules, state\.data\)\)\)/u);
+  assert.match(source, /el\('ul', \{ 'aria-hidden': 'true' \}/u, 'друга копія рядка прихована від читачів екрана');
+  assert.match(css, /@keyframes ewmc-ticker/u);
+  assert.match(css, /@media \(prefers-reduced-motion:reduce\)\{\.ewmc-ticker\{[^}]*\}\.ewmc-ticker-track\{animation:none\}/u);
+  assert.match(css, /animation-play-state:paused/u);
+  assert.match(css, /html:not\(\[data-theme=light\]\) \.ewmc-module\{--ewmc-hud:/u);
+  assert.doesNotMatch(css, /html\[data-theme=light\] \.ewmc-module\{[^}]*--ewmc-hud/u);
+});
+
+test('progress bars: segmented «pills», filled share rounds to the nearest segment and never overflows', () => {
+  const rows = [
+    { label: 'Тест-1', current_value: 62, target_value: 100, ring_order: 1 },
+    { label: 'Тест-2', current_value: 0, target_value: 100, ring_order: 2 },
+    { label: 'Тест-3', current_value: 140, target_value: 100, ring_order: 3 },
+    { label: 'Тест-4', current_value: 5, ring_order: 4 },
+  ];
+  const model = modelOf('progress-bars', rows);
+  assert.equal(model.segments, 8);
+  assert.deepEqual(model.items.map(item => item.filled), [5, 0, 8, 0]);
+});
+
+test('progress bars render pills and glow only in the dark theme', async () => {
+  const renderers = await read('../src/dashboard-module-charts.js');
+  const css = await read('../src/dashboard-module-catalog.css');
+  assert.match(renderers, /class: 'ewmc-pills'/u);
+  assert.match(css, /\.ewmc-pills\{/u);
+  assert.match(css, /html:not\(\[data-theme=light\]\) \.ewmc-pills i\.on\{[^}]*drop-shadow/u);
+});
+
+test('every Rust catalog template survives the frontend whitelist, so a new chart kind is never dropped silently', async () => {
+  const { normalizeCatalog } = await import('../src/dashboard-module-catalog-core.js');
+  const kept = normalizeCatalog(catalog).map(item => item.id);
+  assert.deepEqual(kept, catalog.map(item => item.id), 'вид шаблону з Rust має бути у VISUAL_KINDS (dashboard-module-catalog-core.js)');
+});
+

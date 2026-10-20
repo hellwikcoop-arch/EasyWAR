@@ -835,6 +835,20 @@ pub fn catalog() -> Vec<DashboardModuleTemplate> {
                 field("delta", "Зміна, %", "real", "metric", "average", false),
             ],
         ),
+        // «Гребені» за референсом власника (2026-10-19): розподіл подій за годинами доби.
+        template(
+            "ridgeline",
+            "Гребені за годинами доби",
+            "Динаміка",
+            "Коли відбуваються події: окремий гребінь на ряд (тип ПС, підрозділ), пік позначено годиною.",
+            "ridgeline",
+            2,
+            vec![
+                field("occurred_at", "Час події", "datetime", "dimension", "none", true),
+                field("series", "Ряд", "text", "series", "none", true),
+                field("value", "Вага події", "real", "metric", "sum", false),
+            ],
+        ),
     ]
 }
 
@@ -1794,7 +1808,7 @@ mod tests {
     #[test]
     fn catalog_covers_reference_visualizations_and_flight_hours() {
         let items = catalog();
-        assert_eq!(items.len(), 25);
+        assert_eq!(items.len(), 26);
         for kind in [
             "kpi",
             "line",
@@ -1819,6 +1833,7 @@ mod tests {
             "stacked-columns",
             "diverging-bars",
             "leaderboard",
+            "ridgeline",
             "weather",
         ] {
             assert!(
