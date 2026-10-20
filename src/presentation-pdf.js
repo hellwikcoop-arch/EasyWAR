@@ -237,7 +237,8 @@ function drawBarChart({ page, pick }, data, o) {
     let acc = 0;
     series.forEach((s, si) => {
       const v = s.values[ci] || 0;
-      const fill = color(colors[si] || '7A1F2B');
+      // Один ряд з кількома кольорами: кожна категорія має власний колір.
+      const fill = color((series.length === 1 && colors.length > 1 ? colors[ci] : colors[si]) || '7A1F2B');
       const offset = stacked ? 0 : si * barSize;
       if (horizontal) {
         const x0 = px + (stacked ? acc / top : 0) * pw;

@@ -102,6 +102,11 @@ function drawBlocks(slide, theme, data, brand) {
   slide.addText(runs, { x: 8.15, y: 2.98, w: 4.42, h: 3.54, fontFace: theme.font, valign: 'top', margin: 0 });
 }
 
+// Колір кожного типу цілі закріплений за назвою, щоб він не змінювався між слайдами; решта — за порядком.
+const TARGET_TYPE_COLORS = { 'Артилерія': '7A1F2B', 'міномети': 'D98E04', 'РЕБ': '6B7280', 'ПУ, КП, КСП': '2F6EA5', 'КП, ПУ, КСП': '2F6EA5', 'ПУ БпЛА': '1F8F5F', 'АТ різних типів (квадро, мото)': '8E5BA8', 'Танки, ББМ': '9C6B30', 'переправа': '3AA6A6', 'склади БК, ПММ': 'C25B7A', 'ІФС': '5C7A29' };
+const TARGET_TYPE_SPARE = ['E07B39', '4C5FA8', '8A8F3C', 'B04A4A', '45879C'];
+const targetTypeColors = categories => categories.map((name, i) => TARGET_TYPE_COLORS[name] || TARGET_TYPE_COLORS[Object.keys(TARGET_TYPE_COLORS).find(k => k.toLowerCase() === String(name).toLowerCase())] || TARGET_TYPE_SPARE[i % TARGET_TYPE_SPARE.length]);
+
 /** Права панель слайдів УДШВ без тексту: горизонтальна діаграма «Типи уражених цілей». */
 function drawTargetTypes(slide, theme, pptx, chart) {
   slide.addShape('roundRect', { x: 7.92, y: PANEL_Y, w: 4.9, h: 3.85, rectRadius: 0.1, fill: { color: theme.card }, line: { color: theme.line, width: 0.5 }, shadow: SHADOW });
@@ -109,7 +114,7 @@ function drawTargetTypes(slide, theme, pptx, chart) {
   const data = chart.series.map(s => ({ name: s.name, labels: chart.categories, values: s.values }));
   slide.addChart(pptx.charts.BAR, data, {
     x: 8.0, y: PANEL_Y + 0.4, w: 4.74, h: 3.35, barDir: 'bar', barGrouping: 'clustered', barGapWidthPct: 45,
-    chartColors: [theme.series[0]],
+    chartColors: targetTypeColors(chart.categories),
     catAxisLabelFontFace: theme.font, catAxisLabelFontSize: 9, catAxisLabelColor: theme.muted, catAxisOrientation: 'maxMin',
     valAxisLabelFontFace: theme.font, valAxisLabelFontSize: 8, valAxisLabelColor: theme.muted,
     valGridLine: { color: theme.line, size: 0.5 }, catGridLine: { style: 'none' }, catAxisLineShow: false, valAxisLineShow: false,
