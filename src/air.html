@@ -1089,6 +1089,7 @@ html[data-motion="off"] .k-spark rect { animation: none; }
 .dmain-in[data-view="map"] > .lrow:has(#p-map) > .lcol:not(:has(#p-map)), .dmain-in[data-view="quality"] > .lrow:has(#p-quality) > .lcol:not(:has(#p-quality)) { display: none; }
 .dmain-in[data-view="map"] .lcol:has(#p-map) > :not(#p-map), .dmain-in[data-view="quality"] .lcol:has(#p-quality) > :not(#p-quality) { display: none !important; }
 .dmain-in[data-view="map"] #p-map, .dmain-in[data-view="quality"] #p-quality { display: flex !important; height: auto !important; }
+.dmain-in[data-view="quality"] #p-quality { flex-direction: column; }
 .snav-lay[aria-pressed="true"] { color: var(--ink); background: var(--accent-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent); }
 .lay-info { padding: 6px 10px 2px 12px; }
 @media (max-width: 1279px) { .lay-info { display: none !important; } }
