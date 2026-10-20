@@ -58,6 +58,48 @@ pub enum OfficeFileError {
     UnknownApp,
     #[error("вміст не відповідає формату «.{0}»; збережіть документ через «Зберегти як…»")]
     LibraryFormat(String),
+    #[error("це не звичайний файл")]
+    NotRegularFile,
+    #[error(
+        "бібліотека заблокована: розблокуйте її в головному вікні й натисніть «Зберегти» ще раз"
+    )]
+    LibraryLocked,
+}
+
+/// Відкриває для читання лише звичайний файл: FIFO чи пристрій заблокували б читання
+/// назавжди (або віддавали б байти без кінця), тека — не документ. Тип перевіряється
+/// за шляхом (після символьних посилань) до відкриття й ще раз за відкритим дескриптором.
+pub fn open_regular_file(path: &Path) -> Result<std::fs::File, String> {
+    let regular = std::fs::metadata(path)
+        .map_err(|error| error.to_string())?
+        .is_file();
+    if !regular {
+        return Err(OfficeFileError::NotRegularFile.to_string());
+    }
+    let file = std::fs::File::open(path).map_err(|error| error.to_string())?;
+    if !file
+        .metadata()
+        .map_err(|error| error.to_string())?
+        .is_file()
+    {
+        return Err(OfficeFileError::NotRegularFile.to_string());
+    }
+    Ok(file)
+}
+
+/// Читає звичайний файл ([`open_regular_file`]), не більше `max` байтів; більший файл —
+/// помилка з текстом `too_large`.
+pub fn read_regular_file(path: &Path, max: usize, too_large: &str) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    let file = open_regular_file(path)?;
+    let mut bytes = Vec::new();
+    file.take(max as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| error.to_string())?;
+    if bytes.len() > max {
+        return Err(too_large.to_owned());
+    }
+    Ok(bytes)
 }
 
 /// Команди `office_*` приймаються лише з вікна редактора. Мітку дає Tauri.
@@ -202,13 +244,17 @@ pub fn file_name(path: &Path) -> String {
 }
 
 /// Документ бібліотеки, на який вказує номер файлу: правка почалася від `base_version_id`.
-/// `name` — назва файлу для редактора (`<назва>.<розширення>`).
+/// `name` — назва файлу для редактора (`<назва>.<розширення>`). `library_tag` —
+/// [`crate::office_library::LibraryKeys::handle_tag`] бібліотеки, з якої документ
+/// відкрито: номер пише лише в ту саму бібліотеку (після блокування й нового
+/// розблокування — так, у створену наново чи в іншу — ні).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LibraryTarget {
     pub item_id: String,
     pub base_version_id: String,
     pub ext: String,
     pub name: String,
+    pub library_tag: String,
 }
 
 /// Нова версія документа бібліотеки має той самий формат, що й документ: книга, документ
@@ -564,6 +610,7 @@ mod tests {
             base_version_id: version.to_owned(),
             ext: "docx".to_owned(),
             name: "Довідка.docx".to_owned(),
+            library_tag: "синтетична мітка".to_owned(),
         }
     }
 
@@ -725,5 +772,51 @@ mod tests {
         let link = folder.path().join("посилання.xlsx");
         std::os::unix::fs::symlink(&table, &link).unwrap();
         assert!(is_protected_table(&link, &[table]));
+    }
+
+    #[test]
+    fn only_regular_files_are_opened() {
+        let folder = tempfile::tempdir().unwrap();
+        let file = folder.path().join("документ.txt");
+        std::fs::write(&file, "синтетичний вміст").unwrap();
+        assert_eq!(
+            read_regular_file(&file, 1024, "завеликий").unwrap(),
+            "синтетичний вміст".as_bytes()
+        );
+        assert_eq!(
+            read_regular_file(&file, 4, "завеликий").unwrap_err(),
+            "завеликий"
+        );
+        assert_eq!(
+            read_regular_file(folder.path(), 1024, "завеликий").unwrap_err(),
+            OfficeFileError::NotRegularFile.to_string()
+        );
+        assert!(read_regular_file(&folder.path().join("немає.txt"), 1024, "завеликий").is_err());
+    }
+
+    /// FIFO заблокував би читання назавжди: його відхиляють, не відкриваючи.
+    #[cfg(unix)]
+    #[test]
+    fn a_fifo_is_rejected_without_blocking() {
+        let folder = tempfile::tempdir().unwrap();
+        let fifo = folder.path().join("канал.txt");
+        let created = std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .is_ok_and(|status| status.success());
+        if !created {
+            eprintln!("mkfifo недоступний: перевірку FIFO пропущено");
+            return;
+        }
+        assert_eq!(
+            read_regular_file(&fifo, 1024, "завеликий").unwrap_err(),
+            "це не звичайний файл"
+        );
+        let link = folder.path().join("посилання.txt");
+        std::os::unix::fs::symlink(&fifo, &link).unwrap();
+        assert_eq!(
+            open_regular_file(&link).unwrap_err(),
+            "це не звичайний файл"
+        );
     }
 }

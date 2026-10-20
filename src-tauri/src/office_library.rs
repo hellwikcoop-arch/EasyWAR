@@ -21,12 +21,13 @@
 //! обмежувачем спроб); тут пароль лише виводить ключ обгортки.
 
 use std::{
+    borrow::Cow,
     collections::HashSet,
     fmt,
-    io::{Cursor, Write},
+    io::{Cursor, Seek, Write},
     str::FromStr,
-    sync::{Arc, Mutex, MutexGuard},
-    time::{Duration, Instant},
+    sync::{Arc, Mutex, MutexGuard, OnceLock},
+    time::{Duration, Instant, SystemTime},
 };
 
 use argon2::{
@@ -148,6 +149,10 @@ pub enum LibraryError {
     ExtractionLimit(String),
     #[error("не вдалося зібрати архів бібліотеки")]
     Archive,
+    #[error("у профілю немає захищеної бібліотеки")]
+    NoLibrary,
+    #[error("документ змінився після оновлення списку; оновіть список і повторіть")]
+    StaleCurrent,
 }
 
 /// Чи відмовив тригер `local_profiles_library_guard` видалити профіль з активною
@@ -197,7 +202,7 @@ impl KdfParams {
         p: 1,
     };
 
-    fn argon2(self) -> Result<Argon2<'static>, LibraryError> {
+    pub(crate) fn argon2(self) -> Result<Argon2<'static>, LibraryError> {
         // Межі ті самі, що в CHECK таблиці: підроблена база не змусить виділити
         // гігабайти пам'яті.
         if !(8..=1_048_576).contains(&self.m_kib)
@@ -432,6 +437,14 @@ impl LibraryKeys {
     /// Відбиток довільних байтів ключем відбитків цієї бібліотеки.
     pub fn fingerprint(&self, bytes: &[u8]) -> String {
         hmac_hex(&self.fingerprint, bytes)
+    }
+
+    /// Мітка цієї бібліотеки для номерів файлів редактора: та сама після блокування
+    /// й нового розблокування (і після зміни пароля), інша для іншої бібліотеки.
+    /// Відбитки джерел рахуються над JSON, який не починається з нульового байта,
+    /// тож мітка з ними не збігається.
+    pub fn handle_tag(&self) -> String {
+        hmac_hex(&self.fingerprint, b"\0easywar/library/v1/editor-handle")
     }
 
     /// `EWLB` · формат · nonce · шифротекст із тегом.
@@ -955,18 +968,22 @@ pub struct LibraryStatus {
     pub has_recovery: bool,
     pub indexing: bool,
     pub index_ready: bool,
+    /// Чому індекс вмісту не побудовано (пошук лише за назвами); `None` — помилки немає.
+    pub index_error: Option<String>,
     pub damaged: Vec<String>,
     pub idle_lock_minutes: u64,
 }
 
 impl LibraryStatus {
-    fn plain(state: LibraryState, profile_id: Option<&str>) -> Self {
+    /// Стан без даних індексу (і без коду відновлення).
+    pub fn plain(state: LibraryState, profile_id: Option<&str>) -> Self {
         Self {
             state,
             profile_id: profile_id.map(str::to_owned),
             has_recovery: false,
             indexing: false,
             index_ready: false,
+            index_error: None,
             damaged: Vec::new(),
             idle_lock_minutes: IDLE_LOCK_MINUTES,
         }
@@ -1008,13 +1025,18 @@ pub struct GeneratedDocument<'a> {
     pub ext: &'a str,
     pub bytes: &'a [u8],
     pub make_current: bool,
+    /// Для наявного документа: поточна версія, з якої виходив інтерфейс (`Some(None)` —
+    /// поточної версії не було). Інша поточна версія → [`LibraryError::StaleCurrent`].
+    /// `None` — не перевіряти.
+    pub expected_current: Option<Option<&'a str>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct GeneratedSave {
     pub item: LibraryItem,
     pub version: LibraryVersion,
-    /// `false` — вміст збігся з останньою згенерованою версією, нової не створено.
+    /// `false` — і вміст, і відбиток джерела збіглися з останньою згенерованою
+    /// версією, нової не створено.
     pub created: bool,
 }
 
@@ -1032,13 +1054,26 @@ pub struct PurgeSummary {
     pub versions: i64,
 }
 
-/// Архів поточних версій.
+/// Що потрапило до архіву поточних версій.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ArchiveSummary {
+    /// Імена файлів в архіві в порядку додавання.
+    pub entries: Vec<String>,
+    /// Документи, поточна версія яких не розшифрувалась (до архіву не потрапили).
+    pub damaged: Vec<String>,
+    /// Ті самі пропущені документи як імена файлів `<назва>.<розширення>` для повідомлення.
+    pub skipped: Vec<String>,
+}
+
+/// Архів поточних версій у пам'яті (тести й невеликі бібліотеки).
 pub struct ArchiveExport {
     pub bytes: Zeroizing<Vec<u8>>,
     /// Імена файлів в архіві в порядку додавання.
     pub entries: Vec<String>,
     /// Документи, поточна версія яких не розшифрувалась (до архіву не потрапили).
     pub damaged: Vec<String>,
+    /// Імена пропущених документів (`<назва>.<розширення>`).
+    pub skipped: Vec<String>,
 }
 
 impl fmt::Debug for ArchiveExport {
@@ -1048,6 +1083,7 @@ impl fmt::Debug for ArchiveExport {
             .field("bytes", &self.bytes.len())
             .field("entries", &self.entries)
             .field("damaged", &self.damaged)
+            .field("skipped", &self.skipped)
             .finish()
     }
 }
@@ -1066,6 +1102,8 @@ pub struct SearchHit {
 #[serde(rename_all = "camelCase")]
 pub struct SearchResponse {
     pub index_ready: bool,
+    /// Як у [`LibraryStatus::index_error`].
+    pub index_error: Option<String>,
     pub results: Vec<SearchHit>,
 }
 
@@ -1139,7 +1177,11 @@ where
 }
 
 /// Вставляє вміст, якщо такого ще немає. Наявний рядок того самого вмісту мусить
-/// розшифровуватися: нова версія не посилатиметься на пошкоджений вміст.
+/// розшифровуватися: нова версія не посилатиметься на пошкоджений вміст. Якщо ж
+/// наявний рядок пошкоджено, його дані замінює щойно зашифрована й перевірена копія
+/// тих самих байтів (міграція 0014 дозволяє лише таку заміну й лише за активної
+/// обгортки): так повторний імпорт чи збереження того самого вмісту лагодить і всі
+/// інші версії, що на нього посилаються.
 async fn store_content(
     transaction: &mut Transaction<'_, Sqlite>,
     keys: &LibraryKeys,
@@ -1154,7 +1196,27 @@ async fn store_content(
     .fetch_optional(&mut **transaction)
     .await?;
     match existing {
-        Some(Some(data)) => keys.decrypt_blob(&sealed.content_id, &data).map(|_| ()),
+        Some(Some(data)) => match keys.decrypt_blob(&sealed.content_id, &data) {
+            Ok(_) => Ok(()),
+            Err(LibraryError::Damaged) => {
+                let repaired = sqlx::query(
+                    "UPDATE library_blobs SET data = ?
+                     WHERE profile_id = ? AND content_id = ? AND plain_size = ?",
+                )
+                .bind(&sealed.data)
+                .bind(keys.profile_id())
+                .bind(&sealed.content_id)
+                .bind(sealed.plain_size)
+                .execute(&mut **transaction)
+                .await?;
+                if repaired.rows_affected() == 1 {
+                    Ok(())
+                } else {
+                    Err(LibraryError::Damaged)
+                }
+            }
+            Err(error) => Err(error),
+        },
         Some(None) => Err(LibraryError::Damaged),
         None => {
             sqlx::query(
@@ -1491,6 +1553,7 @@ impl LibraryStore {
             status.state = LibraryState::Unlocked;
             status.indexing = index.indexing;
             status.index_ready = index.ready;
+            status.index_error = index.error;
             status.damaged = index.damaged;
         }
         Ok(status)
@@ -1594,15 +1657,10 @@ impl LibraryStore {
         let ldk = self
             .unwrap_with_password(profile_id, &row, password)
             .await?;
-        insert_event(
-            &self.pool,
-            profile_id,
-            LibraryEventKind::Unlocked,
-            None,
-            None,
-            now,
-        )
-        .await?;
+        // Подія аудиту — не умова читання: якщо базу зараз не записати (диск повний,
+        // файл лише для читання), документи все одно можна відкрити й зберегти копії.
+        self.record_event_best_effort(profile_id, LibraryEventKind::Unlocked, None, None, now)
+            .await;
         Ok(LibraryKeys::derive(profile_id, &ldk))
     }
 
@@ -1993,6 +2051,26 @@ impl LibraryStore {
         Ok(())
     }
 
+    /// Подія аудиту після дії, яка вже відбулася (розблокування, збережена копія чи
+    /// архів): невдалий запис лише повідомляється в журнал процесу й не скасовує дію.
+    pub async fn record_event_best_effort(
+        &self,
+        profile_id: &str,
+        event: LibraryEventKind,
+        item_id: Option<&str>,
+        version_id: Option<&str>,
+        now: &str,
+    ) {
+        if let Err(error) =
+            insert_event(&self.pool, profile_id, event, item_id, version_id, now).await
+        {
+            eprintln!(
+                "EasyWAR: подію бібліотеки «{}» не записано: {error}",
+                event.as_str()
+            );
+        }
+    }
+
     /// Журнал подій профілю в порядку запису.
     pub async fn events(&self, profile_id: &str) -> Result<Vec<LibraryEventRecord>, LibraryError> {
         let rows = sqlx::query(
@@ -2237,17 +2315,39 @@ impl LibraryStore {
 
     // --- Архів -------------------------------------------------------------
 
-    /// ZIP у пам'яті з поточними версіями всіх документів (і прихованих), імена
-    /// `<назва>.<розширення>` без повторів. Пошкоджені документи пропускаються й
-    /// перелічуються в `damaged`.
+    /// ZIP у пам'яті з поточними версіями всіх документів (і прихованих): див.
+    /// [`LibraryStore::export_archive_to`].
     pub async fn export_archive(&self, keys: &LibraryKeys) -> Result<ArchiveExport, LibraryError> {
+        let (cursor, summary) = self
+            .export_archive_to(keys, Cursor::new(Vec::new()))
+            .await?;
+        Ok(ArchiveExport {
+            bytes: Zeroizing::new(cursor.into_inner()),
+            entries: summary.entries,
+            damaged: summary.damaged,
+            skipped: summary.skipped,
+        })
+    }
+
+    /// Пише ZIP з поточними версіями всіх документів (і прихованих) у `writer` (файл):
+    /// документи розшифровуються й стискаються по одному, тож у пам'яті щонайбільше один
+    /// документ, а не весь архів. Імена `<назва>.<розширення>` без повторів. Пошкоджені
+    /// документи пропускаються й перелічуються в підсумку. Запис — у пулі блокувальних
+    /// задач; повертає `writer` після `finish`.
+    pub async fn export_archive_to<W>(
+        &self,
+        keys: &LibraryKeys,
+        writer: W,
+    ) -> Result<(W, ArchiveSummary), LibraryError>
+    where
+        W: Write + Seek + Send + 'static,
+    {
         let items = self.list_items(keys, true).await?;
-        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
         let options = zip::write::SimpleFileOptions::default()
             .compression_method(zip::CompressionMethod::Deflated);
+        let mut zip = zip::ZipWriter::new(writer);
         let mut used = HashSet::new();
-        let mut entries = Vec::new();
-        let mut damaged = Vec::new();
+        let mut summary = ArchiveSummary::default();
         for item in &items {
             let Some(version_id) = &item.current_version_id else {
                 continue;
@@ -2255,37 +2355,38 @@ impl LibraryStore {
             let bytes = match self.read_version(keys, version_id).await {
                 Ok((_, bytes)) => bytes,
                 Err(LibraryError::Damaged) => {
-                    damaged.push(item.id.clone());
+                    summary.damaged.push(item.id.clone());
+                    summary.skipped.push(format!("{}.{}", item.name, item.ext));
                     continue;
                 }
                 Err(error) => return Err(error),
             };
             let entry = archive_entry_name(&item.name, &item.ext, &mut used);
-            writer
-                .start_file(entry.as_str(), options)
-                .map_err(|_| LibraryError::Archive)?;
-            writer
-                .write_all(&bytes)
-                .map_err(|_| LibraryError::Archive)?;
-            entries.push(entry);
+            let name = entry.clone();
+            zip = tokio::task::spawn_blocking(move || -> Result<_, LibraryError> {
+                zip.start_file(name.as_str(), options)
+                    .map_err(|_| LibraryError::Archive)?;
+                zip.write_all(&bytes).map_err(|_| LibraryError::Archive)?;
+                Ok(zip)
+            })
+            .await
+            .map_err(|_| LibraryError::Archive)??;
+            summary.entries.push(entry);
         }
-        let bytes = writer
-            .finish()
+        let writer = tokio::task::spawn_blocking(move || zip.finish())
+            .await
             .map_err(|_| LibraryError::Archive)?
-            .into_inner();
-        Ok(ArchiveExport {
-            bytes: Zeroizing::new(bytes),
-            entries,
-            damaged,
-        })
+            .map_err(|_| LibraryError::Archive)?;
+        Ok((writer, summary))
     }
 
     // --- Зв'язки з джерелами -----------------------------------------------
 
     /// Зберігає згенерований документ: новий документ із зв'язком або нову версію
     /// пов'язаного документа з оновленням зв'язку — в одній транзакції. Відбиток
-    /// перевіряє (перераховує) викликач. Вміст, що збігається з останньою
-    /// згенерованою версією, нової версії не створює.
+    /// перевіряє (перераховує) викликач. Нової версії не буде, лише якщо і вміст, і
+    /// відбиток збігаються з останньою згенерованою; ті самі байти з новим відбитком
+    /// дають нову версію (вміст спільний), щоб стан зв'язку став «актуальний».
     pub async fn save_generated(
         &self,
         keys: &LibraryKeys,
@@ -2369,6 +2470,7 @@ impl LibraryStore {
                 let link = sqlx::query(
                     "SELECT l.template_version_id, l.source_kind, l.params_json,
                             l.last_generated_version_id, lv.content_id AS last_content,
+                            lv.source_fingerprint AS last_fingerprint,
                             i.current_version_id,
                             coalesce(cv.ext, (SELECT v.ext FROM library_versions v
                                               WHERE v.item_id = i.id
@@ -2395,6 +2497,13 @@ impl LibraryStore {
                 }
                 let last_generated: Option<String> = link.get("last_generated_version_id");
                 let current: Option<String> = link.get("current_version_id");
+                // Рішення «робити поточною» інтерфейс ухвалив за поточною версією, яку
+                // бачив; якщо її тим часом змінили (ручна правка), нічого не пишемо.
+                if let Some(expected) = generated.expected_current {
+                    if current.as_deref() != expected {
+                        return Err(LibraryError::StaleCurrent);
+                    }
+                }
                 let same_source = template == generated.template_version_id
                     && link.get::<Option<String>, _>("source_kind").as_deref()
                         == Some(generated.source_kind.as_str())
@@ -2403,8 +2512,11 @@ impl LibraryStore {
                 let reused = match (
                     &last_generated,
                     link.get::<Option<String>, _>("last_content"),
+                    link.get::<Option<String>, _>("last_fingerprint"),
                 ) {
-                    (Some(last), Some(content)) if content == sealed.content_id => {
+                    (Some(last), Some(content), Some(fingerprint))
+                        if content == sealed.content_id && fingerprint == generated.fingerprint =>
+                    {
                         Some(last.clone())
                     }
                     _ => None,
@@ -2432,6 +2544,19 @@ impl LibraryStore {
                 };
                 if generated.make_current && current.as_deref() != Some(version_id.as_str()) {
                     set_current_in(&mut transaction, keys, item_id, &version_id).await?;
+                    // Нова версія має власну подію `generated`; повернення до наявної
+                    // згенерованої — зміна поточної версії, і її теж видно в журналі.
+                    if !created {
+                        insert_event(
+                            &mut *transaction,
+                            keys.profile_id(),
+                            LibraryEventKind::CurrentChanged,
+                            Some(item_id),
+                            Some(&version_id),
+                            now,
+                        )
+                        .await?;
+                    }
                 }
                 if same_source {
                     sqlx::query(
@@ -2576,14 +2701,11 @@ impl LibraryStore {
                     return Err(error);
                 }
             };
-            let ext = version.ext;
-            let extracted =
-                tokio::task::spawn_blocking(move || extract_text_with(&ext, &bytes, extract))
-                    .await
-                    .map_err(|_| LibraryError::Extraction("розбір документа перервано"))?;
-            match extracted {
-                Ok(extracted) => builder.add(&index, &item_id, &extracted).await?,
-                Err(_) => builder.report.skipped.push(item_id),
+            // Збій розбору одного документа (межі, пошкоджений архів, навіть паніка в
+            // розборі) лишає для нього лише пошук за назвою, а не зупиняє весь індекс.
+            match extract_blocking(version.ext, bytes, extract).await {
+                Some(extracted) => builder.add(&index, &item_id, &extracted).await?,
+                None => builder.report.skipped.push(item_id),
             }
         }
         if !still_wanted() {
@@ -2594,7 +2716,8 @@ impl LibraryStore {
     }
 
     /// Будує індекс для сесії й встановлює його, якщо за цей час бібліотеку не
-    /// заблоковано і не розблоковано наново. `true` — індекс встановлено.
+    /// заблоковано і не розблоковано наново. `true` — індекс встановлено. Документи,
+    /// змінені під час побудови, одразу після неї переіндексовуються.
     pub async fn run_index_build(
         &self,
         session: &LibrarySession,
@@ -2608,18 +2731,103 @@ impl LibraryStore {
                 session.is_current(epoch)
             })
             .await;
-        drop(keys);
         match built {
-            Ok(Some((index, report))) => Ok(session.finish_index(epoch, index, report)),
+            Ok(Some((index, report))) => {
+                drop(keys);
+                if !session.finish_index(epoch, index, report) {
+                    return Ok(false);
+                }
+                for item_id in session.take_stale(epoch) {
+                    self.refresh_item(session, profile_id, &item_id).await?;
+                }
+                Ok(true)
+            }
             Ok(None) => Ok(false),
             Err(error) => {
-                session.fail_index(epoch);
+                session.fail_index(epoch, &error);
+                // Пошук за вмістом недоступний, але пошкоджені документи все одно
+                // позначаються (якщо базу вдається прочитати).
+                if let Ok(damaged) = self.damaged_items(&keys).await {
+                    session.set_damaged(epoch, damaged);
+                }
                 Err(error)
             }
         }
     }
 
-    /// Пошук за назвами (завжди) і за вмістом (коли індекс готовий).
+    /// Оновлює стан одного документа в розблокованій бібліотеці після зміни його
+    /// поточної версії (імпорт, збереження з редактора, генерація, «Зробити поточною»):
+    /// чи розшифровується вона ([`IndexStatus::damaged`]) і її текст у готовому індексі.
+    /// Поки індекс будується, документ лише позначається, і його переіндексують після
+    /// побудови. Зміни одного індексу йдуть по черзі, і кожна читає поточну версію
+    /// вже під чергою, тож остання зміна документа завжди перемагає.
+    pub async fn refresh_item(
+        &self,
+        session: &LibrarySession,
+        profile_id: &str,
+        item_id: &str,
+    ) -> Result<(), LibraryError> {
+        self.refresh_item_with(
+            session,
+            profile_id,
+            item_id,
+            IndexLimits::DEFAULT,
+            ExtractLimits::DEFAULT,
+        )
+        .await
+    }
+
+    pub async fn refresh_item_with(
+        &self,
+        session: &LibrarySession,
+        profile_id: &str,
+        item_id: &str,
+        limits: IndexLimits,
+        extract: ExtractLimits,
+    ) -> Result<(), LibraryError> {
+        let Some(update) = session.begin_item_update(profile_id, item_id) else {
+            return Ok(());
+        };
+        let _turn = match &update.index {
+            Some(index) => Some(index.writer.lock().await),
+            None => None,
+        };
+        let current: Option<Option<String>> = sqlx::query_scalar(
+            "SELECT current_version_id FROM library_items WHERE id = ? AND profile_id = ?",
+        )
+        .bind(item_id)
+        .bind(profile_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        let mut damaged = false;
+        let mut text: Option<ExtractedText> = None;
+        if let Some(version_id) = current.flatten() {
+            match self.read_version(&update.keys, &version_id).await {
+                Ok((version, bytes)) if update.index.is_some() => {
+                    text = extract_blocking(version.ext, bytes, extract).await;
+                }
+                Ok(_) => {}
+                Err(LibraryError::Damaged) => damaged = true,
+                Err(error) => return Err(error),
+            }
+        }
+        if let Some(index) = &update.index {
+            if !session.is_current(update.epoch) {
+                return Ok(());
+            }
+            let others = index.text_bytes_except(item_id).await?;
+            let allowed = limits.per_document.min(limits.total.saturating_sub(others));
+            let body = text.as_ref().map_or("", |extracted| {
+                truncate_at_char_boundary(&extracted.text, allowed)
+            });
+            index.replace(item_id, body).await?;
+        }
+        session.finish_item_update(update.epoch, item_id, damaged);
+        Ok(())
+    }
+
+    /// Пошук за назвами (завжди) і за вмістом (коли індекс готовий). Ліміт результатів
+    /// індексу рахується лише серед дозволених документів (приховані — лише на запит).
     pub async fn search(
         &self,
         session: &LibrarySession,
@@ -2630,15 +2838,32 @@ impl LibraryStore {
         let items = self.list_items(keys, include_hidden).await?;
         let index = session.search_index(keys.profile_id())?;
         let index_ready = index.is_some();
+        let allowed: Vec<&str> = items.iter().map(|item| item.id.as_str()).collect();
         let content = match index {
-            Some(index) => index.search(query, SEARCH_RESULTS).await?,
+            Some(index) => index.search_in(query, SEARCH_RESULTS, &allowed).await?,
             None => Vec::new(),
         };
         Ok(SearchResponse {
             index_ready,
+            index_error: session
+                .index_status(keys.profile_id())
+                .and_then(|status| status.error),
             results: combine_hits(&items, query, content),
         })
     }
+}
+
+/// Витяг тексту в пулі блокувальних задач; будь-яка невдача (межі, пошкоджений
+/// документ, паніка розбору) — `None`: документ лишається доступним за назвою.
+async fn extract_blocking(
+    ext: String,
+    bytes: Zeroizing<Vec<u8>>,
+    limits: ExtractLimits,
+) -> Option<ExtractedText> {
+    tokio::task::spawn_blocking(move || extract_text_with(&ext, &bytes, limits))
+        .await
+        .ok()?
+        .ok()
 }
 
 /// Слот відновлення, готовий до запису, і код для показу.
@@ -2850,17 +3075,51 @@ enum IndexState {
     Pending,
     Building,
     Ready(SearchIndex),
-    Failed,
+    /// Побудова не вдалася: причина для інтерфейсу й час (повтор — не раніше ніж за хвилину).
+    Failed {
+        reason: String,
+        at: Instant,
+    },
 }
 
 struct UnlockedLibrary {
     keys: Arc<LibraryKeys>,
+    /// Остання дія за монотонним годинником і за годинником системи: перший не йде,
+    /// поки комп'ютер спить (macOS, Linux), другий іде, тож блокує той, що спрацює раніше.
     last_activity: Instant,
+    last_activity_wall: SystemTime,
     index: IndexState,
     damaged: Vec<String>,
+    /// Документи, змінені, поки індекс будувався: їх переіндексують одразу після побудови.
+    stale: HashSet<String>,
 }
 
 impl UnlockedLibrary {
+    fn new(keys: LibraryKeys) -> Self {
+        Self {
+            keys: Arc::new(keys),
+            last_activity: Instant::now(),
+            last_activity_wall: SystemTime::now(),
+            index: IndexState::Pending,
+            damaged: Vec::new(),
+            stale: HashSet::new(),
+        }
+    }
+
+    fn touch(&mut self) {
+        self.last_activity = Instant::now();
+        self.last_activity_wall = SystemTime::now();
+    }
+
+    /// Бездіяльність щонайменше `timeout` за будь-яким із двох годинників. Годинник
+    /// системи, переведений назад, нічого не продовжує й не блокує: тоді рахує монотонний.
+    fn idle_for(&self, timeout: Duration) -> bool {
+        self.last_activity.elapsed() >= timeout
+            || SystemTime::now()
+                .duration_since(self.last_activity_wall)
+                .is_ok_and(|idle| idle >= timeout)
+    }
+
     /// Закриває індекс; ключі затираються, щойно зникне останнє посилання на них
     /// (команда, що саме виконується, тримає своє до кінця).
     fn shutdown(self) {
@@ -2883,18 +3142,53 @@ struct SessionState {
 pub struct IndexStatus {
     pub indexing: bool,
     pub ready: bool,
+    /// Причина невдалої побудови (пошук лише за назвами).
+    pub error: Option<String>,
     pub damaged: Vec<String>,
 }
 
+/// Документ, стан якого треба оновити ([`LibrarySession::begin_item_update`]).
+pub struct ItemUpdate {
+    pub epoch: u64,
+    pub keys: Arc<LibraryKeys>,
+    /// Готовий індекс; `None` — індексу ще (або вже) немає: лише перевірка вмісту.
+    pub index: Option<SearchIndex>,
+}
+
+type Notifier = Box<dyn Fn() + Send + Sync>;
+
 /// Розблокована бібліотека в пам'яті (стан Tauri): щонайбільше одного профілю.
 #[derive(Default)]
-pub struct LibrarySession(Mutex<SessionState>);
+pub struct LibrarySession {
+    state: Mutex<SessionState>,
+    /// Повідомлення про зміну стану для інтерфейсу (подія `library-state`).
+    notifier: OnceLock<Notifier>,
+}
 
 impl LibrarySession {
     fn guard(&self) -> MutexGuard<'_, SessionState> {
-        self.0
+        self.state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Викликається (поза замком сесії) після кожної зміни, яку має побачити інтерфейс:
+    /// розблокування, блокування (зокрема за бездіяльністю), готовий чи невдалий індекс,
+    /// зміна переліку пошкоджених документів. Задається один раз.
+    pub fn set_notifier(&self, notifier: impl Fn() + Send + Sync + 'static) {
+        let _ = self.notifier.set(Box::new(notifier));
+    }
+
+    fn notify(&self) {
+        if let Some(notifier) = self.notifier.get() {
+            notifier();
+        }
+    }
+
+    /// Поточна епоха. Команда запам'ятовує її до повільного KDF і встановлює ключі
+    /// лише тоді, коли за цей час бібліотеку не блокували ([`LibrarySession::unlock_if`]).
+    pub fn epoch(&self) -> u64 {
+        self.guard().epoch
     }
 
     /// Встановлює ключі профілю (попередня бібліотека, якщо була, блокується).
@@ -2903,18 +3197,39 @@ impl LibrarySession {
         let (previous, epoch) = {
             let mut state = self.guard();
             state.epoch += 1;
-            let previous = state.unlocked.replace(UnlockedLibrary {
-                keys: Arc::new(keys),
-                last_activity: Instant::now(),
-                index: IndexState::Pending,
-                damaged: Vec::new(),
-            });
+            let previous = state.unlocked.replace(UnlockedLibrary::new(keys));
             (previous, state.epoch)
         };
         if let Some(previous) = previous {
             previous.shutdown();
         }
+        self.notify();
         epoch
+    }
+
+    /// Те саме, але лише якщо епоха досі `expected` і `still_signed_in()` (у профіль сесії
+    /// досі ввійдено): блокування, вихід із профілю чи перехід в інший, що сталися, поки
+    /// працював KDF, мають силу. Інакше ключі знищуються й повертається `None`.
+    pub fn unlock_if(
+        &self,
+        expected: u64,
+        keys: LibraryKeys,
+        still_signed_in: impl FnOnce() -> bool,
+    ) -> Option<u64> {
+        let (previous, epoch) = {
+            let mut state = self.guard();
+            if state.epoch != expected || !still_signed_in() {
+                return None;
+            }
+            state.epoch += 1;
+            let previous = state.unlocked.replace(UnlockedLibrary::new(keys));
+            (previous, state.epoch)
+        };
+        if let Some(previous) = previous {
+            previous.shutdown();
+        }
+        self.notify();
+        Some(epoch)
     }
 
     /// Блокує бібліотеку: ключі й індекс знищуються. `true` — було що блокувати.
@@ -2927,19 +3242,21 @@ impl LibrarySession {
         match previous {
             Some(previous) => {
                 previous.shutdown();
+                self.notify();
                 true
             }
             None => false,
         }
     }
 
-    /// Блокує, якщо з останньої дії минуло щонайменше `timeout`.
+    /// Блокує, якщо з останньої дії минуло щонайменше `timeout` (за монотонним
+    /// годинником або за годинником системи, який іде й під час сну).
     pub fn lock_if_idle(&self, timeout: Duration) -> bool {
         let idle = self
             .guard()
             .unlocked
             .as_ref()
-            .is_some_and(|unlocked| unlocked.last_activity.elapsed() >= timeout);
+            .is_some_and(|unlocked| unlocked.idle_for(timeout));
         idle && self.lock()
     }
 
@@ -2953,13 +3270,26 @@ impl LibrarySession {
 
     /// Ключі для команди профілю `profile_id`: спершу автоблокування за
     /// бездіяльністю, потім — заблоковано чи інший профіль → [`LibraryError::Locked`].
-    /// Успіх оновлює час останньої дії.
+    /// Успіх оновлює час останньої дії: так роблять команди головного вікна.
     pub fn keys(&self, profile_id: &str) -> Result<Arc<LibraryKeys>, LibraryError> {
         self.lock_if_idle(IDLE_LOCK_TIMEOUT);
         let mut state = self.guard();
         match state.unlocked.as_mut() {
             Some(unlocked) if unlocked.keys.profile_id() == profile_id => {
-                unlocked.last_activity = Instant::now();
+                unlocked.touch();
+                Ok(Arc::clone(&unlocked.keys))
+            }
+            _ => Err(LibraryError::Locked),
+        }
+    }
+
+    /// Ключі без оновлення часу останньої дії: для вікна редактора, чиї виклики самі
+    /// по собі не означають, що користувач поруч (див. [`LibrarySession::touch`]).
+    pub fn keys_quiet(&self, profile_id: &str) -> Result<Arc<LibraryKeys>, LibraryError> {
+        self.lock_if_idle(IDLE_LOCK_TIMEOUT);
+        let state = self.guard();
+        match state.unlocked.as_ref() {
+            Some(unlocked) if unlocked.keys.profile_id() == profile_id => {
                 Ok(Arc::clone(&unlocked.keys))
             }
             _ => Err(LibraryError::Locked),
@@ -2969,7 +3299,7 @@ impl LibrarySession {
     /// Оновлює час останньої дії.
     pub fn touch(&self) {
         if let Some(unlocked) = self.guard().unlocked.as_mut() {
-            unlocked.last_activity = Instant::now();
+            unlocked.touch();
         }
     }
 
@@ -2983,7 +3313,19 @@ impl LibrarySession {
         Some(IndexStatus {
             indexing: matches!(unlocked.index, IndexState::Pending | IndexState::Building),
             ready: matches!(unlocked.index, IndexState::Ready(_)),
+            error: match &unlocked.index {
+                IndexState::Failed { reason, .. } => Some(reason.clone()),
+                _ => None,
+            },
             damaged: unlocked.damaged.clone(),
+        })
+    }
+
+    /// Чи індекс бібліотеки `profile_id` не вдався щонайменше `after` тому (час повторити).
+    pub fn index_retry_due(&self, profile_id: &str, after: Duration) -> bool {
+        self.guard().unlocked.as_ref().is_some_and(|unlocked| {
+            unlocked.keys.profile_id() == profile_id
+                && matches!(&unlocked.index, IndexState::Failed { at, .. } if at.elapsed() >= after)
         })
     }
 
@@ -2994,19 +3336,28 @@ impl LibrarySession {
     }
 
     /// Починає побудову індексу: епоха й ключі, або `None`, якщо бібліотеку не
-    /// розблоковано для цього профілю чи індекс уже будується або готовий.
+    /// розблоковано для цього профілю чи індекс уже будується або готовий. Повтор після
+    /// невдачі повідомляє інтерфейс (помилка зникає, знову `indexing`).
     pub fn begin_index(&self, profile_id: &str) -> Option<(u64, Arc<LibraryKeys>)> {
-        let mut state = self.guard();
-        let epoch = state.epoch;
-        let unlocked = state
-            .unlocked
-            .as_mut()
-            .filter(|unlocked| unlocked.keys.profile_id() == profile_id)?;
-        if !matches!(unlocked.index, IndexState::Pending | IndexState::Failed) {
-            return None;
+        let (begun, retried) = {
+            let mut state = self.guard();
+            let epoch = state.epoch;
+            let unlocked = state
+                .unlocked
+                .as_mut()
+                .filter(|unlocked| unlocked.keys.profile_id() == profile_id)?;
+            let retried = match unlocked.index {
+                IndexState::Pending => false,
+                IndexState::Failed { .. } => true,
+                IndexState::Building | IndexState::Ready(_) => return None,
+            };
+            unlocked.index = IndexState::Building;
+            ((epoch, Arc::clone(&unlocked.keys)), retried)
+        };
+        if retried {
+            self.notify();
         }
-        unlocked.index = IndexState::Building;
-        Some((epoch, Arc::clone(&unlocked.keys)))
+        Some(begun)
     }
 
     /// Встановлює готовий індекс, лише якщо епоха досі чинна; інакше закриває його.
@@ -3016,6 +3367,8 @@ impl LibrarySession {
             if let Some(unlocked) = state.unlocked.as_mut() {
                 unlocked.index = IndexState::Ready(index);
                 unlocked.damaged = report.damaged;
+                drop(state);
+                self.notify();
                 return true;
             }
         }
@@ -3024,13 +3377,115 @@ impl LibrarySession {
         false
     }
 
+    /// Документи, змінені під час побудови індексу епохи `epoch` (і більше не позначені).
+    pub fn take_stale(&self, epoch: u64) -> Vec<String> {
+        let mut state = self.guard();
+        if state.epoch != epoch {
+            return Vec::new();
+        }
+        let Some(unlocked) = state.unlocked.as_mut() else {
+            return Vec::new();
+        };
+        let mut stale: Vec<String> = unlocked.stale.drain().collect();
+        stale.sort();
+        stale
+    }
+
     /// Позначає невдалу побудову (пошук лишається за назвами; можна повторити).
-    pub fn fail_index(&self, epoch: u64) {
+    pub fn fail_index(&self, epoch: u64, error: &LibraryError) {
         let mut state = self.guard();
         if state.epoch == epoch {
             if let Some(unlocked) = state.unlocked.as_mut() {
-                unlocked.index = IndexState::Failed;
+                unlocked.index = IndexState::Failed {
+                    reason: error.to_string(),
+                    at: Instant::now(),
+                };
+                drop(state);
+                self.notify();
             }
+        }
+    }
+
+    /// Початок оновлення одного документа ([`LibraryStore::refresh_item`]): `None`, якщо
+    /// бібліотеку `profile_id` не розблоковано. Поки індекс будується, документ
+    /// позначається для переіндексації після побудови.
+    pub fn begin_item_update(&self, profile_id: &str, item_id: &str) -> Option<ItemUpdate> {
+        let mut state = self.guard();
+        let epoch = state.epoch;
+        let unlocked = state
+            .unlocked
+            .as_mut()
+            .filter(|unlocked| unlocked.keys.profile_id() == profile_id)?;
+        let index = match &unlocked.index {
+            IndexState::Ready(index) => Some(index.clone()),
+            IndexState::Pending | IndexState::Building => {
+                unlocked.stale.insert(item_id.to_owned());
+                None
+            }
+            IndexState::Failed { .. } => None,
+        };
+        Some(ItemUpdate {
+            epoch,
+            keys: Arc::clone(&unlocked.keys),
+            index,
+        })
+    }
+
+    /// Кінець оновлення документа: чи його поточна версія розшифровується.
+    pub fn finish_item_update(&self, epoch: u64, item_id: &str, damaged: bool) {
+        let mut state = self.guard();
+        if state.epoch != epoch {
+            return;
+        }
+        let Some(unlocked) = state.unlocked.as_mut() else {
+            return;
+        };
+        let listed = unlocked.damaged.iter().any(|id| id == item_id);
+        if listed == damaged {
+            return;
+        }
+        if damaged {
+            unlocked.damaged.push(item_id.to_owned());
+        } else {
+            unlocked.damaged.retain(|id| id != item_id);
+        }
+        drop(state);
+        self.notify();
+    }
+
+    /// Перелік пошкоджених, перевірений без індексу (побудова індексу не вдалася).
+    pub fn set_damaged(&self, epoch: u64, damaged: Vec<String>) {
+        let mut state = self.guard();
+        if state.epoch != epoch {
+            return;
+        }
+        let Some(unlocked) = state.unlocked.as_mut() else {
+            return;
+        };
+        if unlocked.damaged == damaged {
+            return;
+        }
+        unlocked.damaged = damaged;
+        drop(state);
+        self.notify();
+    }
+
+    /// Прибирає документ із пошкоджених одразу після того, як у нього з'явилася нова
+    /// поточна версія (оновлення стану у фоні виправить, якщо й вона пошкоджена).
+    pub fn clear_damaged(&self, profile_id: &str, item_id: &str) {
+        let mut state = self.guard();
+        let Some(unlocked) = state
+            .unlocked
+            .as_mut()
+            .filter(|unlocked| unlocked.keys.profile_id() == profile_id)
+        else {
+            return;
+        };
+        let before = unlocked.damaged.len();
+        unlocked.damaged.retain(|id| id != item_id);
+        if unlocked.damaged.len() != before {
+            drop(state);
+            self.notify();
         }
     }
 
@@ -3144,6 +3599,8 @@ pub struct ContentHit {
 #[derive(Clone)]
 pub struct SearchIndex {
     pool: SqlitePool,
+    /// Черга змін тексту окремих документів ([`LibraryStore::refresh_item`]).
+    writer: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl SearchIndex {
@@ -3168,7 +3625,10 @@ impl SearchIndex {
         )
         .execute(&pool)
         .await?;
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+            writer: Arc::new(tokio::sync::Mutex::new(())),
+        })
     }
 
     /// Індекс із готових пар (документ, текст) з межами — для тестів і простих
@@ -3188,22 +3648,76 @@ impl SearchIndex {
     async fn add(&self, item_id: &str, text: &str) -> Result<(), LibraryError> {
         sqlx::query("INSERT INTO library_text (item_id, body) VALUES (?, ?)")
             .bind(item_id)
-            .bind(text)
+            .bind(normalize_apostrophes(text).as_ref())
             .execute(&self.pool)
             .await?;
         Ok(())
     }
 
+    /// Замінює текст документа (порожній — лише прибирає старий) однією транзакцією.
+    async fn replace(&self, item_id: &str, text: &str) -> Result<(), LibraryError> {
+        let mut transaction = self.pool.begin().await?;
+        sqlx::query("DELETE FROM library_text WHERE item_id = ?")
+            .bind(item_id)
+            .execute(&mut *transaction)
+            .await?;
+        if !text.is_empty() {
+            sqlx::query("INSERT INTO library_text (item_id, body) VALUES (?, ?)")
+                .bind(item_id)
+                .bind(normalize_apostrophes(text).as_ref())
+                .execute(&mut *transaction)
+                .await?;
+        }
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    /// Байтів тексту в індексі в усіх документів, крім `item_id` (межа всього індексу).
+    async fn text_bytes_except(&self, item_id: &str) -> Result<usize, LibraryError> {
+        let total: i64 = sqlx::query_scalar(
+            "SELECT coalesce(sum(length(CAST(body AS BLOB))), 0) FROM library_text
+             WHERE item_id IS NOT ?",
+        )
+        .bind(item_id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(usize::try_from(total).unwrap_or(usize::MAX))
+    }
+
     /// Пошук за всіма словами запиту (кожне — префікс). Порожній запит — порожньо.
     pub async fn search(&self, query: &str, limit: usize) -> Result<Vec<ContentHit>, LibraryError> {
+        self.search_filtered(query, limit, None).await
+    }
+
+    /// Те саме лише серед документів `allowed`: ліміт рахується вже після фільтра,
+    /// тож приховані документи не витісняють видимі збіги.
+    pub async fn search_in(
+        &self,
+        query: &str,
+        limit: usize,
+        allowed: &[&str],
+    ) -> Result<Vec<ContentHit>, LibraryError> {
+        self.search_filtered(query, limit, Some(allowed)).await
+    }
+
+    async fn search_filtered(
+        &self,
+        query: &str,
+        limit: usize,
+        allowed: Option<&[&str]>,
+    ) -> Result<Vec<ContentHit>, LibraryError> {
         let Some(expression) = fts_query(query) else {
             return Ok(Vec::new());
         };
+        let allowed = allowed.map(|ids| serde_json::Value::from(ids.to_vec()).to_string());
         let rows: Vec<(String, Option<String>)> = sqlx::query_as(
             "SELECT item_id, snippet(library_text, 1, '', '', '…', 12)
-             FROM library_text WHERE library_text MATCH ? ORDER BY rank LIMIT ?",
+             FROM library_text WHERE library_text MATCH ?1
+               AND (?2 IS NULL OR item_id IN (SELECT value FROM json_each(?2)))
+             ORDER BY rank LIMIT ?3",
         )
         .bind(expression)
+        .bind(allowed)
         .bind(i64::try_from(limit).unwrap_or(i64::MAX))
         .fetch_all(&self.pool)
         .await?;
@@ -3234,9 +3748,35 @@ impl SearchIndex {
     }
 }
 
+/// Апострофи, якими пишуть українські слова (`'`, `’`, `ʼ`, `‘`, `` ` ``), — один
+/// знак `ʼ` (U+02BC, літера-модифікатор): «об'єкт», «об’єкт» і «обʼєкт» шукаються
+/// однаково, а FTS5 (`unicode61`) не розриває на ньому слово.
+pub fn normalize_apostrophes(text: &str) -> Cow<'_, str> {
+    const APOSTROPHES: [char; 5] = ['\'', '\u{2019}', '\u{02BC}', '\u{2018}', '`'];
+    if text
+        .chars()
+        .any(|c| APOSTROPHES.contains(&c) && c != '\u{02BC}')
+    {
+        Cow::Owned(
+            text.chars()
+                .map(|c| {
+                    if APOSTROPHES.contains(&c) {
+                        '\u{02BC}'
+                    } else {
+                        c
+                    }
+                })
+                .collect(),
+        )
+    } else {
+        Cow::Borrowed(text)
+    }
+}
+
 /// Безпечний вираз FTS5: кожне слово в лапках (лапки всередині подвоєно) з `*` —
 /// жоден символ запиту не стає оператором FTS.
 pub fn fts_query(input: &str) -> Option<String> {
+    let input = normalize_apostrophes(input);
     let terms: Vec<String> = input
         .split_whitespace()
         .filter(|token| token.chars().any(char::is_alphanumeric))
@@ -3246,9 +3786,11 @@ pub fn fts_query(input: &str) -> Option<String> {
     (!terms.is_empty()).then(|| terms.join(" "))
 }
 
-/// Пошук за назвою в пам'яті: кожне слово запиту входить у назву (без регістру).
+/// Пошук за назвою в пам'яті: кожне слово запиту входить у назву (без регістру й
+/// без різниці між видами апострофа).
 pub fn name_matches(name: &str, query: &str) -> bool {
-    let name = name.to_lowercase();
+    let name = normalize_apostrophes(name).to_lowercase();
+    let query = normalize_apostrophes(query);
     let mut tokens = query.split_whitespace().peekable();
     tokens.peek().is_some() && tokens.all(|token| name.contains(&token.to_lowercase()))
 }
@@ -3402,8 +3944,14 @@ pub fn extract_text_with(
         "txt" | "csv" => {
             let mut sink = TextSink::new(limits.max_text_bytes);
             let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes);
-            let text = Zeroizing::new(String::from_utf8_lossy(bytes).into_owned());
+            // Розбирається лише початок, якого вистачить на ліміт тексту (+ один неповний
+            // символ): файл на сотні МБ у чужому кодуванні не розростається в пам'яті втричі.
+            let prefix = &bytes[..bytes.len().min(limits.max_text_bytes.saturating_add(4))];
+            let text = Zeroizing::new(String::from_utf8_lossy(prefix).into_owned());
             sink.push_str(&text);
+            if prefix.len() < bytes.len() {
+                sink.truncated = true;
+            }
             Ok(sink.finish())
         }
         "docx" => office_xml_text(bytes, limits, deadline, docx_part_order),
@@ -3605,13 +4153,27 @@ fn collect_xml_text(
     Ok(())
 }
 
+/// Частини книги, які calamine може читати: усе, крім вкладених зображень і об'єктів.
+/// Ім'я частини порівнюється без регістру й незалежно від розширення (`sheet1.XML`,
+/// `sheet1.bin`): розпакований обсяг кожної такої частини враховується в межах.
+fn xlsx_part_is_read(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    !["xl/media/", "xl/embeddings/", "docprops/thumbnail"]
+        .iter()
+        .any(|prefix| name.starts_with(prefix))
+}
+
+/// Найбільші координати клітинки XLSX (рядок 1 048 576, стовпець XFD), з нуля.
+const XLSX_MAX_ROW: u32 = 1_048_575;
+const XLSX_MAX_COLUMN: u32 = 16_383;
+
 fn xlsx_text(
     bytes: &[u8],
     limits: ExtractLimits,
     deadline: Instant,
 ) -> Result<ExtractedText, LibraryError> {
-    // calamine розпаковує частини без власних меж, тож спершу всі XML-частини
-    // розпаковуються «в нікуди» з реальним підрахунком байтів.
+    // calamine розпаковує частини без власних меж, тож спершу кожна частина, яку він
+    // може прочитати, розпаковується «в нікуди» з реальним підрахунком байтів.
     {
         let mut archive = open_archive(bytes, limits)?;
         let mut budget = ZipBudget::new(ZipLimits {
@@ -3624,7 +4186,7 @@ fn xlsx_text(
                 .by_index(index)
                 .map_err(|_| LibraryError::Extraction("архів документа пошкоджено"))?;
             let name = file.name().to_owned();
-            if file.is_dir() || !(name.ends_with(".xml") || name.ends_with(".rels")) {
+            if file.is_dir() || !xlsx_part_is_read(&name) {
                 continue;
             }
             read_limited(&mut budget, &name, file, None)?;
@@ -3635,27 +4197,50 @@ fn xlsx_text(
     let mut sink = TextSink::new(limits.max_text_bytes);
     for sheet in workbook.sheet_names() {
         check_deadline(deadline)?;
-        let range = workbook
-            .worksheet_range(&sheet)
+        // Клітинки читаються потоком: `worksheet_range` виділяв би суцільну сітку від
+        // першої до останньої клітинки (A1 і XFD1048576 — мільярди комірок).
+        let mut cells = workbook
+            .worksheet_cells_reader(&sheet)
             .map_err(|_| LibraryError::Extraction("аркуш XLSX пошкоджено"))?;
         sink.push_str(&sheet);
         sink.push_char('\n');
-        for row in range.rows() {
-            let mut first = true;
-            for cell in row {
-                if matches!(cell, Data::Empty) {
-                    continue;
-                }
-                if !first {
-                    sink.push_char('\t');
-                }
-                first = false;
-                sink.push_str(&cell.to_string());
+        let mut row: Option<u32> = None;
+        let mut first = true;
+        let mut read = 0u32;
+        while let Some(cell) = cells
+            .next_cell()
+            .map_err(|_| LibraryError::Extraction("аркуш XLSX пошкоджено"))?
+        {
+            read = read.wrapping_add(1);
+            if read.is_multiple_of(4096) {
+                check_deadline(deadline)?;
             }
-            sink.push_char('\n');
+            let (cell_row, cell_column) = cell.get_position();
+            if cell_row > XLSX_MAX_ROW || cell_column > XLSX_MAX_COLUMN {
+                return Err(LibraryError::Extraction("аркуш XLSX пошкоджено"));
+            }
+            let value = Data::from(cell.get_value().clone());
+            if matches!(value, Data::Empty) {
+                continue;
+            }
+            if row != Some(cell_row) {
+                if row.is_some() {
+                    sink.push_char('\n');
+                }
+                row = Some(cell_row);
+                first = true;
+            }
+            if !first {
+                sink.push_char('\t');
+            }
+            first = false;
+            sink.push_str(&value.to_string());
             if sink.truncated {
                 return Ok(sink.finish());
             }
+        }
+        if row.is_some() {
+            sink.push_char('\n');
         }
     }
     Ok(sink.finish())
@@ -4967,6 +5552,7 @@ mod tests {
                 &keys,
                 GeneratedDocument {
                     item_id: None,
+                    expected_current: None,
                     name: Some("Доповідь"),
                     template_version_id: &template_v1.id,
                     source_kind: SourceKind::ApprovedRevisions,
@@ -5221,6 +5807,7 @@ mod tests {
     ) -> GeneratedDocument<'a> {
         GeneratedDocument {
             item_id,
+            expected_current: None,
             name: Some("Доповідь за тиждень"),
             template_version_id: template,
             source_kind: SourceKind::ApprovedRevisions,
@@ -5607,9 +6194,15 @@ mod tests {
 
         // Невдала побудова дозволяє повторити; чинна епоха встановлює індекс.
         let (epoch, _) = session.begin_index(PROFILE).unwrap();
-        session.fail_index(epoch);
+        session.fail_index(epoch, &LibraryError::Crypto);
         let status = session.index_status(PROFILE).unwrap();
         assert!(!status.indexing && !status.ready);
+        assert_eq!(status.error, Some(LibraryError::Crypto.to_string()));
+        assert!(
+            !session.index_retry_due(PROFILE, Duration::from_secs(60)),
+            "повтор не раніше ніж за хвилину"
+        );
+        assert!(session.index_retry_due(PROFILE, Duration::ZERO));
         let (epoch, _) = session.begin_index(PROFILE).unwrap();
         let (index, report) = SearchIndex::build(&[], IndexLimits::DEFAULT).await.unwrap();
         assert!(session.finish_index(epoch, index, report));
@@ -5955,5 +6548,726 @@ mod tests {
         ));
         assert_eq!(ExtractLimits::DEFAULT.max_entries, 2000);
         assert_eq!(ExtractLimits::DEFAULT.max_xml_bytes, 32 * 1024 * 1024);
+    }
+
+    // --- Виправлення після рецензії --------------------------------------
+
+    /// Псує шифротекст вмісту версії (заміна даних дозволена міграцією 0014, поки
+    /// обгортка активна): версія далі не розшифровується.
+    async fn corrupt_blob(store: &LibraryStore, version_id: &str) {
+        let (content_id, mut data): (String, Vec<u8>) = sqlx::query_as(
+            "SELECT b.content_id, b.data FROM library_blobs b
+             JOIN library_versions v
+               ON v.content_id = b.content_id AND v.profile_id = b.profile_id
+             WHERE v.id = ?",
+        )
+        .bind(version_id)
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        let last = data.len() - 1;
+        data[last] ^= 0x55;
+        sqlx::query("UPDATE library_blobs SET data = ? WHERE profile_id = ? AND content_id = ?")
+            .bind(&data)
+            .bind(PROFILE)
+            .bind(&content_id)
+            .execute(&store.pool)
+            .await
+            .unwrap();
+    }
+
+    async fn content_hits(
+        store: &LibraryStore,
+        session: &LibrarySession,
+        query: &str,
+    ) -> Vec<String> {
+        let keys = session.keys(PROFILE).unwrap();
+        store
+            .search(session, &keys, query, true)
+            .await
+            .unwrap()
+            .results
+            .into_iter()
+            .filter(|hit| !hit.by_name)
+            .map(|hit| hit.item_id)
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn importing_the_same_bytes_again_repairs_a_damaged_blob() {
+        let (store, created) = library(false).await;
+        let keys = created.keys;
+        let bytes = b"synthetic repairable content";
+        let (item, version) = store
+            .import(&keys, text_document("Звіт", bytes), NOW)
+            .await
+            .unwrap();
+        corrupt_blob(&store, &version.id).await;
+        assert!(matches!(
+            store.read_version(&keys, &version.id).await,
+            Err(LibraryError::Damaged)
+        ));
+        assert_eq!(
+            store.damaged_items(&keys).await.unwrap(),
+            [item.id.as_str()]
+        );
+
+        // Той самий вміст ще раз: свіжа копія замінює зіпсований шифротекст, і стара
+        // версія знову читається.
+        let (copy, copy_version) = store
+            .import(&keys, text_document("Копія", bytes), LATER)
+            .await
+            .unwrap();
+        assert_ne!(copy.id, item.id);
+        let (_, read) = store.read_version(&keys, &version.id).await.unwrap();
+        assert_eq!(read.as_slice(), bytes);
+        let (_, read) = store.read_version(&keys, &copy_version.id).await.unwrap();
+        assert_eq!(read.as_slice(), bytes);
+        assert!(store.damaged_items(&keys).await.unwrap().is_empty());
+
+        // Чужий ключ не «лагодить» (і не псує) чужий рядок: інший content_id.
+        let stranger = LibraryKeys::derive(PROFILE, &[9u8; KEY_LEN]);
+        assert_ne!(stranger.content_id(bytes), keys.content_id(bytes));
+    }
+
+    #[tokio::test]
+    async fn changed_documents_are_reindexed_and_rechecked() {
+        let (store, created) = library(false).await;
+        let session = LibrarySession::default();
+        let keys = created.keys;
+        let (first, first_v1) = store
+            .import(
+                &keys,
+                text_document("Перший", "старийзміст".as_bytes()),
+                NOW,
+            )
+            .await
+            .unwrap();
+        session.unlock(keys);
+        assert!(store.run_index_build(&session, PROFILE).await.unwrap());
+        assert_eq!(
+            content_hits(&store, &session, "старийзміст").await,
+            [first.id.as_str()]
+        );
+        let keys = session.keys(PROFILE).unwrap();
+
+        // Новий документ з'являється в пошуку за вмістом після оновлення.
+        let second_bytes = "новийзміст другого".as_bytes();
+        let (second, second_v1) = store
+            .import(&keys, text_document("Другий", second_bytes), NOW)
+            .await
+            .unwrap();
+        assert!(content_hits(&store, &session, "новийзміст")
+            .await
+            .is_empty());
+        store
+            .refresh_item(&session, PROFILE, &second.id)
+            .await
+            .unwrap();
+        assert_eq!(
+            content_hits(&store, &session, "новийзміст").await,
+            [second.id.as_str()]
+        );
+
+        // Нова поточна версія замінює старий текст.
+        store
+            .save_version(
+                &keys,
+                &first.id,
+                edit("оновленийзміст".as_bytes(), Some(&first_v1.id)),
+                LATER,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        store
+            .refresh_item(&session, PROFILE, &first.id)
+            .await
+            .unwrap();
+        assert_eq!(
+            content_hits(&store, &session, "оновленийзміст").await,
+            [first.id.as_str()]
+        );
+        assert!(content_hits(&store, &session, "старийзміст")
+            .await
+            .is_empty());
+        // «Зробити поточною» стару версію повертає її текст.
+        store
+            .set_current(&keys, &first.id, &first_v1.id, LATER)
+            .await
+            .unwrap();
+        store
+            .refresh_item(&session, PROFILE, &first.id)
+            .await
+            .unwrap();
+        assert_eq!(
+            content_hits(&store, &session, "старийзміст").await,
+            [first.id.as_str()]
+        );
+
+        // Пошкоджена поточна версія потрапляє в перелік і зникає з пошуку за вмістом;
+        // відновлений вміст прибирає позначку.
+        corrupt_blob(&store, &second_v1.id).await;
+        store
+            .refresh_item(&session, PROFILE, &second.id)
+            .await
+            .unwrap();
+        assert_eq!(
+            session.index_status(PROFILE).unwrap().damaged,
+            [second.id.as_str()]
+        );
+        assert!(content_hits(&store, &session, "новийзміст")
+            .await
+            .is_empty());
+        store
+            .import(&keys, text_document("Відновлення", second_bytes), LATER)
+            .await
+            .unwrap();
+        store
+            .refresh_item(&session, PROFILE, &second.id)
+            .await
+            .unwrap();
+        assert!(session.index_status(PROFILE).unwrap().damaged.is_empty());
+        assert_eq!(
+            content_hits(&store, &session, "новийзміст").await,
+            [second.id.as_str()]
+        );
+
+        // Межа тексту одного документа діє й під час оновлення.
+        store
+            .refresh_item_with(
+                &session,
+                PROFILE,
+                &second.id,
+                IndexLimits {
+                    per_document: "новийзміст".len(),
+                    total: 1024,
+                },
+                ExtractLimits::DEFAULT,
+            )
+            .await
+            .unwrap();
+        assert!(content_hits(&store, &session, "другого").await.is_empty());
+        assert_eq!(
+            content_hits(&store, &session, "новийзміст").await,
+            [second.id.as_str()]
+        );
+
+        // Заблокована бібліотека: оновлення нічого не робить і не падає.
+        assert!(session.lock());
+        store
+            .refresh_item(&session, PROFILE, &first.id)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn content_search_limit_counts_only_allowed_documents() {
+        // Приховані документи з кращим рангом (слово двічі, короткий текст) займали б
+        // увесь ліміт результатів, якби фільтр ішов після нього.
+        let mut entries: Vec<(String, ExtractedText)> = (0..150)
+            .map(|n| {
+                (
+                    format!("doc-hidden-{n:03}"),
+                    extracted("спільнеслово спільнеслово"),
+                )
+            })
+            .collect();
+        entries.push((
+            "doc-visible".to_owned(),
+            extracted("спільнеслово серед багатьох інших слів видимого документа"),
+        ));
+        let (index, _) = SearchIndex::build(&entries, IndexLimits::DEFAULT)
+            .await
+            .unwrap();
+        let unfiltered = index.search("спільнеслово", 100).await.unwrap();
+        assert_eq!(unfiltered.len(), 100);
+        assert!(!unfiltered.iter().any(|hit| hit.item_id == "doc-visible"));
+        let allowed = index
+            .search_in("спільнеслово", 100, &["doc-visible", "doc-missing"])
+            .await
+            .unwrap();
+        assert_eq!(
+            allowed
+                .iter()
+                .map(|hit| hit.item_id.as_str())
+                .collect::<Vec<_>>(),
+            ["doc-visible"]
+        );
+        assert!(index
+            .search_in("спільнеслово", 100, &[])
+            .await
+            .unwrap()
+            .is_empty());
+        index.close().await;
+    }
+
+    #[tokio::test]
+    async fn apostrophe_variants_match_in_names_and_content() {
+        for (name, query) in [
+            ("Об'єкт", "об’єкт"),
+            ("Об’єкт", "обʼєкт"),
+            ("Обʼєкт", "об'єкт"),
+            ("Об‘єкт", "об`єкт"),
+        ] {
+            assert!(name_matches(name, query), "{name} / {query}");
+        }
+        assert_eq!(normalize_apostrophes("м'ясо"), "мʼясо");
+        assert!(matches!(
+            normalize_apostrophes("без апострофа"),
+            Cow::Borrowed(_)
+        ));
+        let (index, _) = SearchIndex::build(
+            &[("doc-a".to_owned(), extracted("Захист об’єкта та м'ясо"))],
+            IndexLimits::DEFAULT,
+        )
+        .await
+        .unwrap();
+        for query in [
+            "об'єкт",
+            "обʼєкта",
+            "об`єкт",
+            "м’ясо",
+            "мʼясо",
+            "об’єкт м'ясо",
+        ] {
+            assert_eq!(index.search(query, 10).await.unwrap().len(), 1, "{query}");
+        }
+        index.close().await;
+    }
+
+    #[test]
+    fn plain_text_extraction_decodes_only_what_fits_the_limit() {
+        let limits = ExtractLimits {
+            max_text_bytes: 16,
+            ..ExtractLimits::DEFAULT
+        };
+        let text = extract_text_with("txt", "а".repeat(1000).as_bytes(), limits).unwrap();
+        assert!(text.truncated);
+        assert!(text.text.len() <= 16 && text.text.chars().all(|c| c == 'а'));
+        let foreign = vec![0xffu8; 1024 * 1024];
+        let text = extract_text_with("csv", &foreign, limits).unwrap();
+        assert!(text.truncated && text.text.len() <= 16);
+        let short = extract_text("txt", "\u{feff}коротко".as_bytes()).unwrap();
+        assert!(!short.truncated);
+        assert_eq!(short.text.as_str(), "коротко");
+    }
+
+    #[test]
+    fn sparse_and_unordered_sheets_are_indexed_without_a_dense_grid() {
+        let sparse = xlsx(
+            "Аркуш",
+            r#"<row r="1"><c r="A1" t="inlineStr"><is><t>першаклітинка</t></is></c></row><row r="1048576"><c r="XFD1048576" t="inlineStr"><is><t>останняклітинка</t></is></c></row>"#,
+        );
+        let text = extract_text("xlsx", &sparse).unwrap();
+        assert!(text.text.contains("першаклітинка") && text.text.contains("останняклітинка"));
+        let unordered = xlsx(
+            "Аркуш",
+            r#"<row r="5"><c r="B5"><v>5</v></c></row><row r="2"><c r="A2"><v>2</v></c></row>"#,
+        );
+        let text = extract_text("xlsx", &unordered).unwrap();
+        assert!(text.text.contains('5') && text.text.contains('2'));
+        let outside = xlsx("Аркуш", r#"<row r="1"><c r="XFE1"><v>1</v></c></row>"#);
+        assert!(extract_text("xlsx", &outside).is_err());
+    }
+
+    #[test]
+    fn every_workbook_part_counts_against_the_xlsx_budget() {
+        for name in [
+            "xl/worksheets/sheet1.xml",
+            "xl/worksheets/sheet1.XML",
+            "XL/Workbook.xml",
+            "xl/sharedStrings.bin",
+            "xl/worksheets/_rels/sheet1.xml.rels",
+            "[Content_Types].xml",
+        ] {
+            assert!(xlsx_part_is_read(name), "{name}");
+        }
+        for name in [
+            "xl/media/image1.png",
+            "XL/MEDIA/image2.PNG",
+            "xl/embeddings/object1.bin",
+            "docProps/thumbnail.jpeg",
+        ] {
+            assert!(!xlsx_part_is_read(name), "{name}");
+        }
+    }
+
+    #[tokio::test]
+    async fn regeneration_records_new_fingerprints_and_checks_the_current_version() {
+        let (store, created) = library(false).await;
+        let keys = created.keys;
+        let (_, template_v1) = store
+            .import(
+                &keys,
+                NewDocument {
+                    as_template: true,
+                    ..office_document("Шаблон", "docx", &docx(&["{{period}}"]))
+                },
+                NOW,
+            )
+            .await
+            .unwrap();
+        let params = json!({"from": "2026-10-01"});
+        let fp1 = source_fingerprint(&keys, &json!({"rows": 1}));
+        let fp2 = source_fingerprint(&keys, &json!({"rows": 2}));
+        let bytes = docx(&["Той самий текст"]);
+        let first = store
+            .save_generated(
+                &keys,
+                generated(None, &template_v1.id, &params, &fp1, &bytes),
+                NOW,
+            )
+            .await
+            .unwrap();
+        assert!(first.created);
+        let item_id = first.item.id.clone();
+
+        // Ті самі байти з новим відбитком: нова версія (вміст спільний) з новим відбитком.
+        let second = store
+            .save_generated(
+                &keys,
+                GeneratedDocument {
+                    expected_current: Some(Some(&first.version.id)),
+                    ..generated(Some(&item_id), &template_v1.id, &params, &fp2, &bytes)
+                },
+                LATER,
+            )
+            .await
+            .unwrap();
+        assert!(second.created);
+        assert_ne!(second.version.id, first.version.id);
+        assert_eq!(
+            second.version.source_fingerprint.as_deref(),
+            Some(fp2.as_str())
+        );
+        assert_eq!(
+            second.item.current_version_id.as_deref(),
+            Some(second.version.id.as_str())
+        );
+        let link = store.link(&keys, &item_id).await.unwrap().unwrap();
+        assert_eq!(link.source_fingerprint.as_deref(), Some(fp2.as_str()));
+        assert_eq!(
+            link.last_generated_version_id.as_deref(),
+            Some(second.version.id.as_str())
+        );
+
+        // Ті самі байти й той самий відбиток — нічого нового.
+        let same = store
+            .save_generated(
+                &keys,
+                generated(Some(&item_id), &template_v1.id, &params, &fp2, &bytes),
+                LATER,
+            )
+            .await
+            .unwrap();
+        assert!(!same.created);
+        assert_eq!(same.version.id, second.version.id);
+
+        // Повернення поточною останньої згенерованої версії видно в журналі.
+        store
+            .set_current(&keys, &item_id, &first.version.id, LATER)
+            .await
+            .unwrap();
+        let before = event_names(&store, PROFILE).await.len();
+        let back = store
+            .save_generated(
+                &keys,
+                GeneratedDocument {
+                    expected_current: Some(Some(&first.version.id)),
+                    ..generated(Some(&item_id), &template_v1.id, &params, &fp2, &bytes)
+                },
+                LATER,
+            )
+            .await
+            .unwrap();
+        assert!(!back.created);
+        assert_eq!(
+            back.item.current_version_id.as_deref(),
+            Some(second.version.id.as_str())
+        );
+        assert_eq!(
+            event_names(&store, PROFILE).await[before..].to_vec(),
+            ["current_changed"]
+        );
+
+        // Поточна версія змінилася після оновлення списку (ручна правка): нічого не пишеться.
+        let edited = store
+            .save_version(
+                &keys,
+                &item_id,
+                NewVersion {
+                    ext: "docx",
+                    bytes: &docx(&["Ручна правка"]),
+                    origin: Origin::Edited,
+                    parent_version_id: Some(&second.version.id),
+                    source_fingerprint: Some(&fp2),
+                    make_current: true,
+                },
+                LATER,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        let versions = store.versions(&keys, &item_id).await.unwrap().len();
+        let fresh_bytes = docx(&["Нові дані"]);
+        for expected in [Some(second.version.id.as_str()), None] {
+            assert!(matches!(
+                store
+                    .save_generated(
+                        &keys,
+                        GeneratedDocument {
+                            expected_current: Some(expected),
+                            ..generated(
+                                Some(&item_id),
+                                &template_v1.id,
+                                &params,
+                                &fp1,
+                                &fresh_bytes
+                            )
+                        },
+                        LATER,
+                    )
+                    .await,
+                Err(LibraryError::StaleCurrent)
+            ));
+        }
+        assert_eq!(
+            store.versions(&keys, &item_id).await.unwrap().len(),
+            versions
+        );
+        let fresh = store
+            .save_generated(
+                &keys,
+                GeneratedDocument {
+                    expected_current: Some(Some(&edited.id)),
+                    make_current: false,
+                    ..generated(Some(&item_id), &template_v1.id, &params, &fp1, &fresh_bytes)
+                },
+                LATER,
+            )
+            .await
+            .unwrap();
+        assert!(fresh.created);
+        assert_eq!(
+            fresh.item.current_version_id.as_deref(),
+            Some(edited.id.as_str())
+        );
+        assert_eq!(
+            LibraryError::StaleCurrent.to_string(),
+            "документ змінився після оновлення списку; оновіть список і повторіть"
+        );
+    }
+
+    #[tokio::test]
+    async fn archive_streams_to_a_file_and_lists_skipped_documents() {
+        let (store, created) = library(false).await;
+        let keys = created.keys;
+        store
+            .import(&keys, text_document("Цілий", b"intact synthetic"), NOW)
+            .await
+            .unwrap();
+        let (broken, broken_v1) = store
+            .import(&keys, office_document("Зіпсований", "csv", b"a;b"), NOW)
+            .await
+            .unwrap();
+        corrupt_blob(&store, &broken_v1.id).await;
+        let file = tempfile::tempfile().unwrap();
+        let (mut file, summary) = store.export_archive_to(&keys, file).await.unwrap();
+        assert_eq!(summary.entries, ["Цілий.txt"]);
+        assert_eq!(summary.damaged, [broken.id.as_str()]);
+        assert_eq!(summary.skipped, ["Зіпсований.csv"]);
+        file.seek(std::io::SeekFrom::Start(0)).unwrap();
+        let mut zip = zip::ZipArchive::new(file).unwrap();
+        assert_eq!(zip.len(), 1);
+        let mut text = String::new();
+        zip.by_name("Цілий.txt")
+            .unwrap()
+            .read_to_string(&mut text)
+            .unwrap();
+        assert_eq!(text, "intact synthetic");
+    }
+
+    #[tokio::test]
+    async fn unlock_does_not_depend_on_writing_the_audit_event() {
+        let (store, _) = library(false).await;
+        sqlx::query(
+            "CREATE TRIGGER synthetic_events_fail BEFORE INSERT ON library_events
+             BEGIN SELECT RAISE(ABORT, 'synthetic read-only database'); END",
+        )
+        .execute(&store.pool)
+        .await
+        .unwrap();
+        let keys = store.unlock(PROFILE, PASSWORD, LATER).await.unwrap();
+        assert_eq!(keys.profile_id(), PROFILE);
+        store
+            .record_event_best_effort(PROFILE, LibraryEventKind::Exported, None, None, LATER)
+            .await;
+        let events = event_names(&store, PROFILE).await;
+        assert!(!events
+            .iter()
+            .any(|event| event == "unlocked" || event == "exported"));
+        assert!(matches!(
+            store
+                .record_event(&keys, LibraryEventKind::Exported, None, None, LATER)
+                .await,
+            Err(LibraryError::Storage(_))
+        ));
+    }
+
+    #[test]
+    fn editor_handles_are_bound_to_the_library_key() {
+        let keys = LibraryKeys::derive(PROFILE, &[3u8; KEY_LEN]);
+        let tag = keys.handle_tag();
+        assert_eq!(tag.len(), 64);
+        assert_eq!(
+            tag,
+            LibraryKeys::derive(PROFILE, &[3u8; KEY_LEN]).handle_tag()
+        );
+        assert_ne!(
+            tag,
+            LibraryKeys::derive(PROFILE, &[4u8; KEY_LEN]).handle_tag()
+        );
+        assert_ne!(tag, keys.fingerprint(b""));
+    }
+
+    #[test]
+    fn keys_from_a_slow_kdf_respect_locks_and_sign_out() {
+        let session = LibrarySession::default();
+        let keys = || LibraryKeys::derive(PROFILE, &[3u8; KEY_LEN]);
+        let epoch = session.epoch();
+        assert_eq!(
+            session.unlock_if(epoch, keys(), || false),
+            None,
+            "вийшли з профілю"
+        );
+        assert!(session.unlocked_profile().is_none());
+        // Блокування під час KDF (навіть уже заблокованої бібліотеки) має силу.
+        assert!(!session.lock());
+        assert_eq!(session.unlock_if(epoch, keys(), || true), None);
+        assert!(session.unlocked_profile().is_none());
+        let epoch = session.epoch();
+        let installed = session.unlock_if(epoch, keys(), || true).unwrap();
+        assert!(session.is_current(installed));
+        assert_eq!(session.unlocked_profile().as_deref(), Some(PROFILE));
+        // Інший виклик із тією самою, вже застарілою епохою ключів не замінює.
+        let other = LibraryKeys::derive(OTHER, &[4u8; KEY_LEN]);
+        assert_eq!(session.unlock_if(epoch, other, || true), None);
+        assert_eq!(session.unlocked_profile().as_deref(), Some(PROFILE));
+        assert!(session.is_current(installed));
+    }
+
+    /// Задає час останньої дії: `monotonic` тому і `wall` за годинником системи.
+    fn set_activity(session: &LibrarySession, monotonic: Duration, wall: SystemTime) -> bool {
+        let Some(instant) = Instant::now().checked_sub(monotonic) else {
+            return false;
+        };
+        let mut state = session.guard();
+        let unlocked = state.unlocked.as_mut().unwrap();
+        unlocked.last_activity = instant;
+        unlocked.last_activity_wall = wall;
+        true
+    }
+
+    #[test]
+    fn idle_lock_counts_sleep_and_ignores_editor_reads() {
+        let session = LibrarySession::default();
+        let keys = || LibraryKeys::derive(PROFILE, &[3u8; KEY_LEN]);
+        let ten_seconds = Duration::from_secs(10);
+        let ago = |by: Duration| SystemTime::now() - by;
+
+        // Вікно редактора бере ключі, не продовжуючи час до автоблокування.
+        session.unlock(keys());
+        if set_activity(&session, ten_seconds, ago(ten_seconds)) {
+            session.keys_quiet(PROFILE).unwrap();
+            assert!(session.lock_if_idle(Duration::from_secs(5)));
+        }
+        // Дія головного вікна продовжує.
+        session.unlock(keys());
+        if set_activity(&session, ten_seconds, ago(ten_seconds)) {
+            session.keys(PROFILE).unwrap();
+            assert!(!session.lock_if_idle(Duration::from_secs(5)));
+        }
+        // Сон комп'ютера: монотонний годинник стоїть, годинник системи йде.
+        session.unlock(keys());
+        assert!(set_activity(
+            &session,
+            Duration::ZERO,
+            ago(Duration::from_secs(2 * 3600))
+        ));
+        assert!(session.lock_if_idle(IDLE_LOCK_TIMEOUT));
+        assert!(matches!(
+            session.keys_quiet(PROFILE),
+            Err(LibraryError::Locked)
+        ));
+        // Годинник системи переведено назад: рахує монотонний.
+        session.unlock(keys());
+        assert!(set_activity(
+            &session,
+            Duration::ZERO,
+            SystemTime::now() + Duration::from_secs(2 * 3600)
+        ));
+        assert!(!session.lock_if_idle(IDLE_LOCK_TIMEOUT));
+        assert!(session.lock_if_idle(Duration::ZERO));
+    }
+
+    #[tokio::test]
+    async fn session_changes_notify_the_interface() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let session = LibrarySession::default();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&calls);
+        session.set_notifier(move || {
+            counter.fetch_add(1, Ordering::SeqCst);
+        });
+        let count = || calls.load(Ordering::SeqCst);
+
+        session.unlock(LibraryKeys::derive(PROFILE, &[3u8; KEY_LEN]));
+        assert_eq!(count(), 1);
+        let (epoch, _) = session.begin_index(PROFILE).unwrap();
+        assert_eq!(count(), 1, "перша побудова — це ще «indexing»");
+        // Документ, змінений під час побудови, позначається для переіндексації.
+        let update = session.begin_item_update(PROFILE, "doc-b").unwrap();
+        assert!(update.index.is_none());
+        assert!(session.begin_item_update(OTHER, "doc-b").is_none());
+        session.fail_index(epoch, &LibraryError::Crypto);
+        assert_eq!(count(), 2);
+        let status = session.index_status(PROFILE).unwrap();
+        assert_eq!(status.error, Some(LibraryError::Crypto.to_string()));
+        assert!(!status.indexing && !status.ready);
+        // Без індексу пошкоджені документи все одно позначаються.
+        session.set_damaged(epoch, vec!["doc-c".to_owned()]);
+        session.set_damaged(epoch, vec!["doc-c".to_owned()]);
+        session.set_damaged(epoch + 1, Vec::new());
+        assert_eq!(count(), 3);
+        assert_eq!(session.index_status(PROFILE).unwrap().damaged, ["doc-c"]);
+
+        // Повтор: помилка зникає, знову «indexing».
+        let (epoch, _) = session.begin_index(PROFILE).unwrap();
+        assert_eq!(count(), 4);
+        let status = session.index_status(PROFILE).unwrap();
+        assert!(status.indexing && status.error.is_none());
+        let (index, report) = SearchIndex::build(&[], IndexLimits::DEFAULT).await.unwrap();
+        assert!(session.finish_index(epoch, index, report));
+        assert_eq!(count(), 5);
+        assert_eq!(session.take_stale(epoch), ["doc-b"]);
+        assert!(session.take_stale(epoch).is_empty());
+
+        // Перелік пошкоджених: лише зміни повідомляються.
+        session.finish_item_update(epoch, "doc-b", true);
+        session.finish_item_update(epoch, "doc-b", true);
+        assert_eq!(count(), 6);
+        assert_eq!(session.index_status(PROFILE).unwrap().damaged, ["doc-b"]);
+        session.clear_damaged(OTHER, "doc-b");
+        session.clear_damaged(PROFILE, "doc-b");
+        session.clear_damaged(PROFILE, "doc-b");
+        assert_eq!(count(), 7);
+        assert!(session.index_status(PROFILE).unwrap().damaged.is_empty());
+
+        assert!(session.lock());
+        assert!(!session.lock());
+        assert_eq!(count(), 8);
+        session.finish_item_update(epoch, "doc-b", true);
+        assert_eq!(count(), 8, "після блокування стара епоха нічого не змінює");
     }
 }

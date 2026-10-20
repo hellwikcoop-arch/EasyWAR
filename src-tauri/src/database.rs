@@ -2,7 +2,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha384};
 use sqlx::migrate::{MigrateError, Migrator};
 use sqlx::{sqlite::SqliteConnectOptions, sqlite::SqlitePoolOptions, SqlitePool};
-use std::path::Path;
+use std::{path::Path, time::Duration};
 use tauri_plugin_sql::{Migration, MigrationKind};
 
 static EMBEDDED_MIGRATOR: Migrator = sqlx::migrate!("./migrations");
@@ -99,6 +99,8 @@ pub(crate) const DASHBOARD_MODULE_CORRECTIONS_SQL: &str =
     include_str!("../migrations/0011_dashboard_module_corrections.sql");
 pub(crate) const OFFICE_LIBRARY_SQL: &str = include_str!("../migrations/0012_office_library.sql");
 pub(crate) const DOCUMENT_LINKS_SQL: &str = include_str!("../migrations/0013_document_links.sql");
+pub(crate) const LIBRARY_BLOB_REPAIR_SQL: &str =
+    include_str!("../migrations/0014_library_blob_repair.sql");
 
 pub fn migrations() -> Vec<Migration> {
     vec![
@@ -180,6 +182,12 @@ pub fn migrations() -> Vec<Migration> {
             sql: DOCUMENT_LINKS_SQL,
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 14,
+            description: "allow_library_blob_repair",
+            sql: LIBRARY_BLOB_REPAIR_SQL,
+            kind: MigrationKind::Up,
+        },
     ]
 }
 
@@ -202,18 +210,29 @@ pub(crate) fn latest_schema_version() -> Option<i64> {
         .map(|migration| migration.version)
 }
 
+/// З'єднання, що пише в базу EasyWAR: `secure_delete` затирає нулями звільнені комірки
+/// й сторінки, тож старі обгортки ключа бібліотеки (після зміни пароля, нового коду
+/// відновлення, «Забули пароль?») і вміст після криптознищення не лишаються у вільному
+/// місці файла. Діє на кожне з'єднання окремо, тому задається для кожного пулу, що пише.
+pub(crate) fn writable_connect_options(path: &Path) -> SqliteConnectOptions {
+    SqliteConnectOptions::new()
+        .filename(path)
+        .foreign_keys(true)
+        .pragma("secure_delete", "ON")
+}
+
+/// Робоча база застосунку: як [`writable_connect_options`] і з очікуванням блокування.
+pub(crate) fn live_connect_options(path: &Path) -> SqliteConnectOptions {
+    writable_connect_options(path).busy_timeout(Duration::from_secs(5))
+}
+
 pub(crate) async fn migrate_database_file_with(
     path: &Path,
     migrator: &Migrator,
 ) -> Result<SqlitePool, DatabaseBootstrapError> {
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
-        .connect_with(
-            SqliteConnectOptions::new()
-                .filename(path)
-                .create_if_missing(true)
-                .foreign_keys(true),
-        )
+        .connect_with(writable_connect_options(path).create_if_missing(true))
         .await?;
     if let Err(error) = migrator.run(&pool).await {
         pool.close().await;
@@ -237,18 +256,20 @@ mod tests {
         create_migrated_database, migrations, DatabaseMigrationState, DatabaseStatusError,
         DatabaseStatusStore, COMMAND_TABLES_SQL, DASHBOARD_MODULES_SQL,
         DASHBOARD_MODULE_CORRECTIONS_SQL, DATABASE_URL, DOCUMENT_LINKS_SQL, EMBEDDED_MIGRATOR,
-        INITIAL_SCHEMA_SQL, LOCAL_PROFILES_SQL, OFFICE_LIBRARY_SQL, OWN_LOSSES_TABLES_SQL,
-        PROFILE_BRANCH_TABLES_SQL, PROFILE_DETAILS_SQL, PROFILE_MODULES_SQL,
+        INITIAL_SCHEMA_SQL, LIBRARY_BLOB_REPAIR_SQL, LOCAL_PROFILES_SQL, OFFICE_LIBRARY_SQL,
+        OWN_LOSSES_TABLES_SQL, PROFILE_BRANCH_TABLES_SQL, PROFILE_DETAILS_SQL, PROFILE_MODULES_SQL,
         WORKSPACE_TEMPLATES_SQL, XLSX_DUPLICATE_LINKS_SQL,
     };
+    use super::{live_connect_options, writable_connect_options};
     use sqlx::{sqlite::SqlitePoolOptions, Row};
+    use std::path::Path;
 
     #[test]
     fn database_is_local_and_registers_versioned_migrations() {
         assert_eq!(DATABASE_URL, "sqlite:easywar.db");
         assert!(include_str!("../tauri.conf.json").contains(DATABASE_URL));
         let registered = migrations();
-        assert_eq!(registered.len(), 13);
+        assert_eq!(registered.len(), 14);
         assert_eq!(registered[0].version, 1);
         assert_eq!(registered[0].description, "create_provenance_schema");
         assert_eq!(registered[1].version, 2);
@@ -278,6 +299,8 @@ mod tests {
         assert_eq!(registered[11].description, "add_office_library");
         assert_eq!(registered[12].version, 13);
         assert_eq!(registered[12].description, "add_document_links");
+        assert_eq!(registered[13].version, 14);
+        assert_eq!(registered[13].description, "allow_library_blob_repair");
         assert_eq!(
             EMBEDDED_MIGRATOR
                 .iter()
@@ -298,7 +321,7 @@ mod tests {
                 .map(|migration| migration.sql)
                 .collect::<Vec<_>>()
         );
-        assert_eq!(super::latest_schema_version(), Some(13));
+        assert_eq!(super::latest_schema_version(), Some(14));
     }
 
     #[tokio::test]
@@ -310,9 +333,9 @@ mod tests {
             DatabaseStatusStore::new(pool.clone()).load().await.unwrap(),
             super::DatabaseStatus {
                 app_version: env!("CARGO_PKG_VERSION").to_owned(),
-                schema_version: 13,
-                supported_schema_version: 13,
-                migration_count: 13,
+                schema_version: 14,
+                supported_schema_version: 14,
+                migration_count: 14,
                 migration_state: DatabaseMigrationState::Current,
             }
         );
@@ -388,6 +411,10 @@ mod tests {
             .execute(&pool)
             .await
             .expect("document links migration must apply");
+        sqlx::raw_sql(LIBRARY_BLOB_REPAIR_SQL)
+            .execute(&pool)
+            .await
+            .expect("library blob repair migration must apply");
 
         pool
     }
@@ -872,7 +899,7 @@ mod tests {
         pool.close().await;
     }
 
-    // --- Бібліотека «Офісу» (міграції 0012 і 0013) -------------------------
+    // --- Бібліотека «Офісу» (міграції 0012–0014) ---------------------------
 
     const LIBRARY_NOW: &str = "2026-10-20T08:00:00Z";
     const LIBRARY_PROFILE: &str = "profile-1b1b1b1b1b1b1b1b1b1b1b1b";
@@ -1714,6 +1741,132 @@ mod tests {
             .await
             .unwrap();
         assert!(foreign_key_problems.is_empty());
+    }
+
+    #[tokio::test]
+    async fn damaged_library_content_is_replaced_only_while_the_keyring_is_active() {
+        let pool = migrated_pool().await;
+        library_rows(&pool).await;
+        // Інший шифротекст того самого розміру (ремонт пошкодженого рядка) — дозволено.
+        let repaired = blob_literal("45574C4201FF", 48);
+        run(
+            &pool,
+            &format!("UPDATE library_blobs SET data = {repaired}"),
+        )
+        .await;
+        let data: Vec<u8> = sqlx::query_scalar("SELECT data FROM library_blobs")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!((data.len(), data[5]), (48, 0xFF));
+        // Ідентичність рядка незмінна й під час ремонту.
+        for change in [
+            "plain_size = 4".to_owned(),
+            format!("content_id = '{}'", "e5".repeat(32)),
+            format!("profile_id = '{SECOND_PROFILE}'"),
+            "created_at = 'змінено'".to_owned(),
+            "rowid = rowid + 1".to_owned(),
+        ] {
+            rejects(
+                &pool,
+                &format!("UPDATE library_blobs SET data = {repaired}, {change}"),
+                "content can only be erased after the keyring is shredded",
+            )
+            .await;
+        }
+        // Форма шифротексту лишається під CHECK таблиці.
+        rejects(
+            &pool,
+            &format!(
+                "UPDATE library_blobs SET data = {}",
+                blob_literal("45574C4201", 49)
+            ),
+            "CHECK constraint failed",
+        )
+        .await;
+        rejects(
+            &pool,
+            &format!("UPDATE library_blobs SET data = {}", blob_literal("", 48)),
+            "CHECK constraint failed",
+        )
+        .await;
+
+        // Після криптознищення — лише стирання; стертий вміст не повертається.
+        run(
+            &pool,
+            &format!(
+                "UPDATE library_keyrings
+                 SET state = 'shredded', wrap_nonce = NULL, wrapped_ldk = NULL,
+                     generation = generation + 1, updated_at = 'очищено'
+                 WHERE profile_id = '{LIBRARY_PROFILE}'"
+            ),
+        )
+        .await;
+        rejects(
+            &pool,
+            &format!("UPDATE library_blobs SET data = {}", blob_data()),
+            "content can only be repaired while the keyring is active",
+        )
+        .await;
+        run(&pool, "UPDATE library_blobs SET data = NULL").await;
+        rejects(
+            &pool,
+            &format!("UPDATE library_blobs SET data = {}", blob_data()),
+            "content can only be erased after the keyring is shredded",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn writable_connections_overwrite_deleted_content() {
+        let directory = tempfile::tempdir().expect("synthetic temp directory");
+        let path = directory.path().join("synthetic.db");
+        let marker = "СИНТЕТИЧНА-СТАРА-ОБГОРТКА-КЛЮЧА".repeat(3);
+        let contains_marker = |path: &Path| {
+            let bytes = std::fs::read(path).expect("synthetic database file");
+            bytes
+                .windows(marker.len())
+                .any(|window| window == marker.as_bytes())
+        };
+
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(writable_connect_options(&path).create_if_missing(true))
+            .await
+            .unwrap();
+        let secure_delete: i64 = sqlx::query_scalar("PRAGMA secure_delete")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(secure_delete, 1);
+        run(
+            &pool,
+            "CREATE TABLE synthetic_wraps (id INTEGER PRIMARY KEY, data BLOB NOT NULL)",
+        )
+        .await;
+        sqlx::query("INSERT INTO synthetic_wraps (data) VALUES (?)")
+            .bind(marker.as_bytes())
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+        assert!(contains_marker(&path), "запис справді потрапив у файл");
+
+        // Видалений рядок (стара обгортка, слот коду відновлення) не лишає байтів у
+        // вільному місці файла.
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(live_connect_options(&path))
+            .await
+            .unwrap();
+        let secure_delete: i64 = sqlx::query_scalar("PRAGMA secure_delete")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(secure_delete, 1);
+        run(&pool, "DELETE FROM synthetic_wraps").await;
+        pool.close().await;
+        assert!(!contains_marker(&path), "старі байти затерто");
     }
 
     #[tokio::test]

@@ -282,6 +282,21 @@ pub fn module_data(data: &DashboardModuleData) -> Value {
     })
 }
 
+/// Частина даних джерела, яка входить у відбиток. Для таблиці бібліотеки — лише
+/// вміст (аркуш, заголовки, рядки): нова версія з тими самими клітинками (інше
+/// форматування, зміна другого аркуша, повернення до старої версії) чи перейменування
+/// не роблять пов'язані документи «застарілими». Решта джерел — дані повністю.
+pub fn fingerprint_view(request: &SourceRequest, data: &Value) -> Value {
+    match request {
+        SourceRequest::LibraryTable { .. } => json!({
+            "sheet": data.pointer("/table/sheet").cloned().unwrap_or(Value::Null),
+            "headers": data.get("headers").cloned().unwrap_or(Value::Null),
+            "rows": data.get("rows").cloned().unwrap_or(Value::Null),
+        }),
+        _ => data.clone(),
+    }
+}
+
 /// Таблиця, прочитана з поточної версії документа бібліотеки.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ParsedTable {
@@ -354,6 +369,14 @@ fn clip(text: &str) -> String {
     text.trim().chars().take(MAX_CELL_CHARS).collect()
 }
 
+/// Найбільші координати клітинки XLSX (рядок 1 048 576, стовпець XFD), з нуля.
+const XLSX_MAX_ROW: u32 = 1_048_575;
+const XLSX_MAX_COLUMN: u32 = 16_383;
+
+/// Рядки першого видимого аркуша. Клітинки читаються потоком (без суцільної сітки,
+/// яку `worksheet_range` виділяв би від першої до останньої клітинки), стовпці
+/// рахуються від стовпця A аркуша: `{{A}}` у шаблоні — це справді стовпець A, навіть
+/// якщо він порожній. Рядки книги мають іти за порядком (так пише Excel).
 fn xlsx_rows(bytes: &[u8]) -> Result<(String, Vec<Vec<String>>), SourceError> {
     ensure_zip_within_limits_with(bytes, ZipLimits::DEFAULT)
         .map_err(|error| SourceError::InvalidTable(error.to_string()))?;
@@ -365,26 +388,61 @@ fn xlsx_rows(bytes: &[u8]) -> Result<(String, Vec<Vec<String>>), SourceError> {
         .find(|sheet| sheet.typ == SheetType::WorkSheet && sheet.visible == SheetVisible::Visible)
         .map(|sheet| sheet.name.clone())
         .ok_or_else(|| SourceError::InvalidTable("у книзі немає видимих аркушів".to_owned()))?;
-    let range = workbook
-        .worksheet_range(&sheet)
+    let mut cells = workbook
+        .worksheet_cells_reader(&sheet)
         .map_err(|error| SourceError::InvalidTable(error.to_string()))?;
     // Заголовок і порожні рядки над ним — у межах запасу; далі читати немає сенсу.
     let limit = MAX_TABLE_ROWS + 1;
     let mut rows = Vec::new();
-    for cells in range.rows() {
-        let row: Vec<String> = cells
-            .iter()
-            .take(MAX_TABLE_COLUMNS)
-            .map(cell_text)
-            .collect();
-        if row.iter().all(String::is_empty) {
+    let mut current: Option<(u32, Vec<String>)> = None;
+    let finish = |row: Vec<String>, rows: &mut Vec<Vec<String>>| {
+        if row.iter().any(|cell| !cell.is_empty()) {
+            rows.push(row);
+        }
+    };
+    while let Some(cell) = cells
+        .next_cell()
+        .map_err(|error| SourceError::InvalidTable(error.to_string()))?
+    {
+        let (row, column) = cell.get_position();
+        if row > XLSX_MAX_ROW || column > XLSX_MAX_COLUMN {
+            return Err(SourceError::InvalidTable(
+                "клітинка поза межами аркуша Excel".to_owned(),
+            ));
+        }
+        match &current {
+            Some((open, _)) if *open == row => {}
+            Some((open, _)) if *open > row => {
+                return Err(SourceError::InvalidTable(
+                    "рядки аркуша записано не за порядком".to_owned(),
+                ));
+            }
+            _ => {
+                if let Some((_, done)) = current.take() {
+                    finish(done, &mut rows);
+                    if rows.len() >= limit {
+                        return Ok((sheet, rows));
+                    }
+                }
+                current = Some((row, Vec::new()));
+            }
+        }
+        let index = column as usize;
+        if index >= MAX_TABLE_COLUMNS {
             continue;
         }
-        rows.push(row);
-        if rows.len() >= limit {
-            break;
+        let text = cell_text(&Data::from(cell.get_value().clone()));
+        if let Some((_, values)) = current.as_mut() {
+            if values.len() <= index {
+                values.resize(index + 1, String::new());
+            }
+            values[index] = text;
         }
     }
+    if let Some((_, done)) = current.take() {
+        finish(done, &mut rows);
+    }
+    rows.truncate(limit);
     Ok((sheet, rows))
 }
 
@@ -400,14 +458,21 @@ fn cell_text(cell: &Data) -> String {
     }
 }
 
+/// Число так, як його показує Excel: 15 значущих цифр (без хвостів двійкового дробу на
+/// кшталт 0.30000000000000004), без зайвих нулів, з десятковою комою, як у модулях.
 fn float_text(number: f64) -> String {
     if !number.is_finite() {
         return String::new();
     }
-    if number.fract() == 0.0 && number.abs() < 9.0e15 {
-        return (number as i64).to_string();
+    // Округлення до 15 значущих цифр через експоненційний запис і назад.
+    let rounded: f64 = format!("{number:.14e}").parse().unwrap_or(number);
+    if rounded == 0.0 {
+        return "0".to_owned();
     }
-    number.to_string()
+    if rounded.fract() == 0.0 && rounded.abs() < 9.0e15 {
+        return (rounded as i64).to_string();
+    }
+    rounded.to_string().replace('.', ",")
 }
 
 fn datetime_text(value: &ExcelDateTime) -> String {
@@ -522,7 +587,8 @@ pub enum LinkState {
     Edited,
     /// Поточна версія — ручна правка, а дані джерела відтоді змінилися.
     EditedStale,
-    /// Поточна версія не з джерела (імпортована чи збережена вручну) або її немає.
+    /// Поточна версія не з джерела (імпортована чи збережена вручну, або вручну обрана
+    /// з історії згенерована версія, не остання) або її немає.
     Detached,
     /// Дані джерела не вдалося зібрати (модуль видалено, таблиця пошкоджена тощо).
     SourceError,
@@ -573,6 +639,9 @@ pub struct GeneratedInput<'a> {
     pub ext: &'a str,
     pub bytes: &'a [u8],
     pub make_current: bool,
+    /// Поточна версія наявного документа, яку бачив інтерфейс
+    /// ([`GeneratedDocument::expected_current`]).
+    pub expected_current: Option<Option<&'a str>>,
 }
 
 /// Сховища, з яких збираються дані джерел для розблокованої бібліотеки профілю.
@@ -625,13 +694,15 @@ impl Sources<'_> {
         Ok(table_data(&item.id, &item.name, &version.id, &table))
     }
 
-    /// Відбиток і дані джерела.
+    /// Відбиток і дані джерела ([`fingerprint_view`]).
     pub async fn fingerprinted(
         &self,
         request: &SourceRequest,
     ) -> Result<(String, Value), SourceError> {
         let data = self.data(request).await?;
-        Ok((office_library::source_fingerprint(self.keys, &data), data))
+        let fingerprint =
+            office_library::source_fingerprint(self.keys, &fingerprint_view(request, &data));
+        Ok((fingerprint, data))
     }
 
     /// Зберігає згенерований документ, якщо дані джерела досі ті, з яких його створено:
@@ -662,6 +733,7 @@ impl Sources<'_> {
                     ext: input.ext,
                     bytes: input.bytes,
                     make_current: input.make_current,
+                    expected_current: input.expected_current,
                 },
                 now,
             )
@@ -684,6 +756,18 @@ impl Sources<'_> {
             let version_fingerprint = current
                 .as_ref()
                 .and_then(|version| version.source_fingerprint.as_deref());
+            // Поточною вручну обрано іншу згенеровану версію, ніж остання: це свідомий
+            // вибір з історії, «Оновити всі» його не чіпає.
+            let picked_from_history = origin == Some(Origin::Generated)
+                && link.last_generated_version_id.as_deref() != item.current_version_id.as_deref();
+            if picked_from_history {
+                statuses.push(LinkStatus {
+                    item_id: link.item_id,
+                    status: LinkState::Detached,
+                    detail: None,
+                });
+                continue;
+            }
             let source = if needs_source(origin) {
                 match SourceRequest::parse(link.source_kind, &link.params) {
                     Ok(request) => {
@@ -996,7 +1080,7 @@ mod tests {
         assert_eq!(table.headers, strings(&["Тип", "Наліт", ""]));
         assert_eq!(
             table.rows,
-            vec![strings(&["F-16", "1.5", "так"]), strings(&["", "3", ""])]
+            vec![strings(&["F-16", "1,5", "так"]), strings(&["", "3", ""])]
         );
         assert!(matches!(
             parse_table("xlsx", b"not a workbook"),
@@ -1219,6 +1303,7 @@ mod tests {
         // Застарілий відбиток не дає зберегти документ.
         let input = GeneratedInput {
             item_id: None,
+            expected_current: None,
             name: Some("Довідка"),
             template_version_id: &template.id,
             ext: "docx",
@@ -1249,6 +1334,7 @@ mod tests {
                 &fixture.keys,
                 GeneratedDocument {
                     item_id: None,
+                    expected_current: None,
                     name: Some("Без модуля"),
                     template_version_id: &template.id,
                     source_kind: SourceKind::DashboardModule,
@@ -1363,6 +1449,204 @@ mod tests {
         assert_eq!(
             status_of(&statuses, &generated_id),
             (LinkState::Detached, None)
+        );
+    }
+
+    #[test]
+    fn xlsx_columns_count_from_sheet_column_a() {
+        let rows = format!(
+            "<row r=\"2\">{}{}</row><row r=\"3\">{}<c r=\"C3\"><v>0.30000000000000004</v></c></row>",
+            text_cell("B2", "Тип"),
+            text_cell("C2", "Частка"),
+            text_cell("B3", "Борт-1"),
+        );
+        let table = parse_table("xlsx", &xlsx(&[("Аркуш", false, &rows)])).unwrap();
+        assert_eq!(table.headers, strings(&["", "Тип", "Частка"]));
+        assert_eq!(table.rows, vec![strings(&["", "Борт-1", "0,3"])]);
+
+        // Розріджена книга (A1 і XFD1048576) читається потоком, без суцільної сітки.
+        let sparse = format!(
+            "<row r=\"1\">{}</row><row r=\"1048576\">{}</row>",
+            text_cell("A1", "Назва"),
+            text_cell("XFD1048576", "кінець"),
+        );
+        let table = parse_table("xlsx", &xlsx(&[("Аркуш", false, &sparse)])).unwrap();
+        assert_eq!(table.headers, strings(&["Назва"]));
+        assert!(table.rows.is_empty());
+
+        // Рядки не за порядком і клітинка поза аркушем — помилка таблиці, не збій.
+        let unordered = format!(
+            "<row r=\"5\">{}</row><row r=\"2\">{}</row>",
+            text_cell("A5", "пʼять"),
+            text_cell("A2", "два"),
+        );
+        assert!(matches!(
+            parse_table("xlsx", &xlsx(&[("Аркуш", false, &unordered)])),
+            Err(SourceError::InvalidTable(_))
+        ));
+        let outside = format!("<row r=\"1\">{}</row>", text_cell("XFE1", "поза"));
+        assert!(matches!(
+            parse_table("xlsx", &xlsx(&[("Аркуш", false, &outside)])),
+            Err(SourceError::InvalidTable(_))
+        ));
+    }
+
+    #[test]
+    fn xlsx_numbers_read_as_excel_shows_them() {
+        assert_eq!(float_text(0.1 + 0.2), "0,3");
+        assert_eq!(float_text(2.5), "2,5");
+        assert_eq!(float_text(-1.25), "-1,25");
+        assert_eq!(float_text(1234.0), "1234");
+        assert_eq!(float_text(-0.0), "0");
+        assert_eq!(float_text(2.0 / 3.0), "0,666666666666667");
+        assert_eq!(float_text(1e-7), "0,0000001");
+        assert_eq!(float_text(f64::NAN), "");
+        assert_eq!(float_text(f64::INFINITY), "");
+    }
+
+    #[tokio::test]
+    async fn table_fingerprint_ignores_metadata_and_a_history_pick_is_detached() {
+        let fixture = fixture().await;
+        let sources = fixture.sources();
+        let (table, table_v1) = fixture
+            .library
+            .import(
+                &fixture.keys,
+                document("Наліт", "csv", "Тип;Наліт\nБорт-1;1,5\n".as_bytes()),
+                NOW,
+            )
+            .await
+            .unwrap();
+        let request = SourceRequest::LibraryTable {
+            item_id: table.id.clone(),
+        };
+        let save_table = |bytes: &'static str, parent: String| {
+            let library = &fixture.library;
+            let keys = &fixture.keys;
+            let item_id = table.id.clone();
+            async move {
+                library
+                    .save_version(
+                        keys,
+                        &item_id,
+                        NewVersion {
+                            ext: "csv",
+                            bytes: bytes.as_bytes(),
+                            origin: Origin::Saved,
+                            parent_version_id: Some(&parent),
+                            source_fingerprint: None,
+                            make_current: true,
+                        },
+                        LATER,
+                    )
+                    .await
+                    .unwrap()
+                    .unwrap()
+            }
+        };
+        let (before, _) = sources.fingerprinted(&request).await.unwrap();
+        // Перейменування й нова версія з тими самими клітинками відбитка не змінюють.
+        fixture
+            .library
+            .rename(&fixture.keys, &table.id, "Наліт за жовтень", LATER)
+            .await
+            .unwrap();
+        let same_cells = save_table(
+            "\"Тип\";\"Наліт\"\n\"Борт-1\";\"1,5\"\n",
+            table_v1.id.clone(),
+        )
+        .await;
+        let (after, data) = sources.fingerprinted(&request).await.unwrap();
+        assert_eq!(after, before);
+        assert_eq!(data["table"]["name"], "Наліт за жовтень");
+        assert_eq!(data["table"]["versionId"], same_cells.id);
+
+        let (_, template) = fixture
+            .library
+            .import(
+                &fixture.keys,
+                NewDocument {
+                    as_template: true,
+                    ..document("Шаблон", "docx", b"PK\x03\x04 synthetic template")
+                },
+                NOW,
+            )
+            .await
+            .unwrap();
+        let input = GeneratedInput {
+            item_id: None,
+            expected_current: None,
+            name: Some("Довідка"),
+            template_version_id: &template.id,
+            ext: "docx",
+            bytes: b"PK\x03\x04 synthetic generated 1",
+            make_current: true,
+        };
+        let first = sources
+            .save_generated(&request, &after, input, LATER)
+            .await
+            .unwrap();
+        let item_id = first.item.id.clone();
+        let status = |statuses: Vec<LinkStatus>| {
+            statuses
+                .into_iter()
+                .find(|status| status.item_id == item_id)
+                .map(|status| status.status)
+                .unwrap()
+        };
+
+        // Інші клітинки — інший відбиток; нова генерація знову «актуальна».
+        save_table("Тип;Наліт\nБорт-1;3,5\n", same_cells.id.clone()).await;
+        let (changed, _) = sources.fingerprinted(&request).await.unwrap();
+        assert_ne!(changed, before);
+        assert_eq!(
+            status(sources.link_statuses().await.unwrap()),
+            LinkState::SourceChanged
+        );
+        let second_input = GeneratedInput {
+            item_id: Some(&item_id),
+            expected_current: Some(Some(&first.version.id)),
+            bytes: b"PK\x03\x04 synthetic generated 2",
+            ..input
+        };
+        let second = sources
+            .save_generated(&request, &changed, second_input, LATER)
+            .await
+            .unwrap();
+        assert!(second.created);
+        assert_eq!(
+            status(sources.link_statuses().await.unwrap()),
+            LinkState::Current
+        );
+
+        // Ручний вибір попередньої згенерованої версії — «не з джерела».
+        fixture
+            .library
+            .set_current(&fixture.keys, &item_id, &first.version.id, LATER)
+            .await
+            .unwrap();
+        assert_eq!(
+            status(sources.link_statuses().await.unwrap()),
+            LinkState::Detached
+        );
+        // «Оновити» повертає поточною останню згенеровану (нової версії немає).
+        let back = sources
+            .save_generated(
+                &request,
+                &changed,
+                GeneratedInput {
+                    expected_current: Some(Some(&first.version.id)),
+                    ..second_input
+                },
+                LATER,
+            )
+            .await
+            .unwrap();
+        assert!(!back.created);
+        assert_eq!(back.version.id, second.version.id);
+        assert_eq!(
+            status(sources.link_statuses().await.unwrap()),
+            LinkState::Current
         );
     }
 }

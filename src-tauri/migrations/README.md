@@ -99,6 +99,18 @@ version and an HMAC fingerprint of the source data. Only the generation state
 the profile's keyring is active. Deleting the row is «Відв'язати від джерела»;
 the document and its versions stay intact.
 
+`0014_library_blob_repair.sql` rewrites `library_blobs_update_guard` so that a
+damaged blob can be repaired. `content_id` is an HMAC of the plaintext, so the
+same content of a profile always maps to the same row; before this migration a
+row whose ciphertext no longer decrypted could never be replaced, and importing
+or saving the same bytes again failed forever. Now, while the profile's keyring
+is active, `data` may be replaced by another ciphertext that passes the table's
+CHECK (header and length for the same `plain_size`); the application does this
+only when the stored row fails to decrypt and the new ciphertext has just been
+sealed with the library key. The row identity (rowid, profile, `content_id`,
+`plain_size`, `created_at`) stays immutable, erasing (`data` to `NULL`) is still
+allowed only after the keyring is shredded, and erased content never comes back.
+
 The `dashboard_data_<id>` tables of user-created dashboard modules are not
 migration objects: Rust creates them at runtime from a validated catalog
 template and adds columns that later appear in a template with `ALTER TABLE`,

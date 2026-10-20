@@ -14,7 +14,7 @@ use std::{
 
 use tauri::{
     webview::{DownloadEvent, NewWindowResponse},
-    App, AppHandle, LogicalPosition, LogicalSize, Manager, Url, WebviewUrl, WebviewWindow,
+    App, AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Url, WebviewUrl, WebviewWindow,
     WebviewWindowBuilder, Window, WindowEvent,
 };
 
@@ -22,6 +22,14 @@ use crate::office_files::{editor_init_script, OfficeFileHandles, EDITOR_WINDOW_L
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 
 pub const MAIN_WINDOW_LABEL: &str = "main";
+/// Подія головному вікну: вікно редактора закрилося (`{ app }` — його застосунок).
+/// Вкладка «Бібліотека» за нею оновлює перелік і стани зв'язків.
+pub const EDITOR_CLOSED_EVENT: &str = "office-editor-closed";
+
+#[derive(Clone, serde::Serialize)]
+struct EditorClosed {
+    app: &'static str,
+}
 
 /// Returns `true` for URLs that belong to the application itself and may be
 /// loaded inside the webview (launcher, modules, IPC, blobs, dev server).
@@ -234,10 +242,19 @@ pub fn on_window_event(window: &Window, event: &WindowEvent) {
         (EDITOR_WINDOW_LABEL, WindowEvent::Destroyed) => {
             // The pending library document and the editor's file handles die with the
             // window: the next editor starts from a clean state.
+            let mut closed_app = None;
             if let Some(handles) = window.app_handle().try_state::<OfficeFileHandles>() {
+                closed_app = handles.editor_window_app();
                 handles.clear_pending();
                 handles.set_editor_window_app(None);
                 handles.forget_webview(EDITOR_WINDOW_LABEL);
+            }
+            if let Some(app) = closed_app {
+                let _ = window.app_handle().emit_to(
+                    MAIN_WINDOW_LABEL,
+                    EDITOR_CLOSED_EVENT,
+                    EditorClosed { app },
+                );
             }
             if let Some(main) = window.app_handle().get_webview_window(MAIN_WINDOW_LABEL) {
                 let _ = main.set_focus();
