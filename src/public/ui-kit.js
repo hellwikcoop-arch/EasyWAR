@@ -5,6 +5,7 @@
  *  3) стиль «Пункт керування» (heightwell-theme.css, кнопка ◈ поруч із кнопкою теми);
  *  4) поля дат показують «дд.мм.рррр» незалежно від мови системи: поверх input[type=date] — текстове поле,
  *     значення (ISO) і події change/input лишаються на самому input[type=date].
+ *  5) технологічний шар модулів (module-tech.css): сітка й скан-лінія на порожньому екрані, заголовки секцій.
  * Без JS усе працює, просто без руху. Поважає html[data-motion="off"] і prefers-reduced-motion.
  */
 (function () {
@@ -184,6 +185,15 @@
   }
   applySkin(readSkin());
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mountSkinButton); else mountSkinButton();
+  // 5) технологічний шар модулів (module-tech.css): порожній екран і заголовки секцій як на стартовому екрані.
+  //    Файл із public/, тож у файли для телефона (file://) не вбудовується й там не вантажиться.
+  if (typeof location !== 'undefined' && location.protocol !== 'file:' && document.head && !document.getElementById('ew-tech-css')) {
+    var tech = document.createElement('link');
+    tech.id = 'ew-tech-css';
+    tech.rel = 'stylesheet';
+    tech.href = './module-tech.css';
+    document.head.appendChild(tech);
+  }
   // loadCss — лише шрифти й токени без вмикання стилю: їх бере стиль модуля «Пункт керування» (каталог модулів).
   window.EWUiSkin = { key: SKIN_KEY, name: SKIN, apply: applySkin, toggle: toggleSkin, loadCss: loadSkinCss };
 })();
