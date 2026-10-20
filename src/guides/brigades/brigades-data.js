@@ -17,6 +17,7 @@ export const TYPES = Object.freeze({
   мцспо: 'Морський центр спеціальних операцій',
   кмд: 'Командування',
   ссо: 'Підрозділ ССО без окремої емблеми',
+  цссо: 'Центр ССО',
 });
 
 // Призначення за типом частини: загальновідома роль, без відомостей про конкретну частину.
@@ -36,6 +37,7 @@ export const PURPOSES = Object.freeze({
   мцспо: 'Спеціальні операції з моря та у прибережній зоні',
   кмд: 'Керівництво військами (силами) і планування їх застосування',
   ссо: 'Загальний знак для підрозділів ССО, чиєї емблеми в довіднику ще немає',
+  цссо: 'Підготовка й забезпечення спеціальних операцій',
 });
 
 export const BRANCHES = Object.freeze({
@@ -75,4 +77,8 @@ export const BRIGADES = Object.freeze([
   { id: '142-nsso', number: 142, type: 'нцссо', branch: 'sso', art: '142-nsso' },
   { id: 'sso-command', name: 'Командування ССО', type: 'кмд', branch: 'sso', art: 'sso-command' },
   { id: 'sso-generic', name: 'Підрозділи ССО (загальний знак)', type: 'ссо', branch: 'sso', art: 'sso-generic' },
+  { id: '4-sso-ranger', name: '4 полк ССО «Рейнджер»', type: 'опсп', branch: 'sso', art: '4-sso-ranger' },
+  { id: '144-csso', name: '144 Центр ССО', type: 'цссо', branch: 'sso', art: '144-csso' },
+  { id: 'sso-ruh-oporu', name: 'Рух опору ССО', type: 'ссо', branch: 'sso', art: 'sso-ruh-oporu' },
+  { id: 'sso-medical', name: 'Медична служба ССО', type: 'ссо', branch: 'sso', art: 'sso-medical' },
 ]);
