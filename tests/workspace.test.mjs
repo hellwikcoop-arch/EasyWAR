@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
 import test from 'node:test';
+import vm from 'node:vm';
 import {
   APP_ICONS,
   CLOSE_MESSAGE,
@@ -30,16 +31,19 @@ import {
   formatsLabel,
   frameMessage,
   frameTitle,
+  graphicsProblem,
   isCloseMessage,
   nameWithExtension,
   normalizeExtensions,
   normalizeMounted,
   parseFrameMessage,
+  parsePendingFile,
+  pendingFileNotice,
   shellMode,
   titleParts,
   toBytes,
 } from '../src/workspace/workspace-core.js';
-import { createHost, findInvoke } from '../src/workspace/workspace-host.js';
+import { createHost, findInvoke, findPendingFile, listenTauriEvent, markPendingTaken } from '../src/workspace/workspace-host.js';
 
 const root = new URL('../', import.meta.url);
 const read = (path) => readFile(new URL(path, root), 'utf8');
@@ -108,6 +112,25 @@ test('результат mount: unmount/destroy та isDirty необов\'яз�
   assert.equal(destroyed, 1, 'destroy() — синонім unmount()');
   assert.equal(normalized.isDirty(), true);
   assert.equal(normalizeMounted({ isDirty() { throw new Error('x'); } }).isDirty(), false);
+  // focus(): застосунок бере фокус сам (true) або оболонка фокусує його iframe (false).
+  assert.equal(empty.focus(), false);
+  let focused = 0;
+  const withFocus = { focus() { focused += this === withFocus ? 1 : 100; } };
+  assert.equal(normalizeMounted(withFocus).focus(), true);
+  assert.equal(focused, 1);
+  assert.equal(normalizeMounted({ focus() { throw new Error('x'); } }).focus(), false);
+});
+
+test('без WebGL2 і WebGPU редактор не запускається, а сторінка пояснює це українською', async () => {
+  assert.equal(graphicsProblem({ webgl2: true, webgpu: false }), '');
+  assert.equal(graphicsProblem({ webgl2: false, webgpu: true }), '');
+  assert.match(graphicsProblem({ webgl2: false, webgpu: false }), /WebGL2 або WebGPU/);
+  assert.match(graphicsProblem(undefined), /драйвер відеокарти/);
+  const frame = await read('src/workspace/app-frame.js');
+  assert.match(frame, /graphicsProblem\(graphicsSupport\(\)\)/, 'перевірка перед mount');
+  assert.match(frame, /getContext\('webgl2'\)/);
+  assert.match(frame, /focus: \(\) =>/, 'оболонка повертає фокус у застосунок');
+  assert.match(await read('src/workspace/workspace.js'), /else focusApp\(\);/, '«Залишитися» повертає фокус у застосунок');
 });
 
 test('розширення й параметри вікон збігаються з правилами Rust', () => {
@@ -226,6 +249,42 @@ test('invoke шукається на сторінці та в батьківсь
   assert.equal(findInvoke(alone), null);
 });
 
+test('події Rust: plugin:event|listen через __TAURI_INTERNALS__ верхнього кадру або глобальний __TAURI__.event', async () => {
+  const calls = [];
+  const callbacks = new Map();
+  const unregistered = [];
+  const top = {
+    __TAURI_INTERNALS__: {
+      invoke: async (command, args) => { calls.push([command, args]); return command === 'plugin:event|listen' ? 7 : null; },
+      transformCallback: callback => { callbacks.set(41, callback); return 41; },
+    },
+    __TAURI_EVENT_PLUGIN_INTERNALS__: { unregisterListener: (event, id) => unregistered.push([event, id]) },
+  };
+  top.parent = top;
+  const shell = { parent: top };
+  const received = [];
+  const stop = await listenTauriEvent('library-state', payload => received.push(payload), { parent: shell });
+  assert.deepEqual(calls, [['plugin:event|listen', { event: 'library-state', target: { kind: 'Any' }, handler: 41 }]]);
+  // Rust викликає зворотний виклик об'єктом події; обробник отримує payload.
+  callbacks.get(41)({ event: 'library-state', id: 7, payload: { state: 'locked', profileId: 'p1' } });
+  assert.deepEqual(received, [{ state: 'locked', profileId: 'p1' }]);
+  await stop();
+  assert.deepEqual(unregistered, [['library-state', 7]]);
+  assert.deepEqual(calls[1], ['plugin:event|unlisten', { event: 'library-state', eventId: 7 }]);
+
+  // Глобальний API Tauri, якщо він є, має перевагу.
+  const global = { __TAURI__: { event: { listen: async (event, handler) => { handler({ payload: { app: 'easydoc' } }); return () => event; } } } };
+  global.parent = global;
+  const closed = [];
+  const off = await listenTauriEvent('office-editor-closed', payload => closed.push(payload), global);
+  assert.deepEqual(closed, [{ app: 'easydoc' }]);
+  assert.equal(off(), 'office-editor-closed');
+  // Без Tauri (браузер) підписки немає.
+  const alone = {};
+  alone.parent = alone;
+  assert.equal(await listenTauriEvent('library-state', () => {}, alone), null);
+});
+
 test('режим оболонки: вікно редактора, головне вікно Tauri чи браузер', () => {
   assert.deepEqual(shellMode(undefined, false), { mode: 'browser', app: null });
   assert.deepEqual(shellMode(undefined, true), { mode: 'desktop', app: null });
@@ -245,6 +304,12 @@ test('модуль підключено в лаунчері, у збірці й 
   assert.match(vite, /workspace: fileURLToPath\(new URL\("\.\/src\/workspace\/index\.html"/);
   assert.match(vite, /"workspace-app": fileURLToPath\(new URL\("\.\/src\/workspace\/app\.html"/);
   assert.match(vite, /workspace\[-\/\]/, 'робоче середовище не входить в офлайн-кеш телефона');
+  // Чанки застосунків і вкладки «Бібліотека» отримують префікс workspace- (офлайн-кеш їх не бере).
+  const chunkRule = /chunkFileNames: \(chunk\) =>\s*(\/.+\/)\.test\(/.exec(vite);
+  assert.ok(chunkRule, 'правило назв чанків');
+  const workspaceChunk = new RegExp(chunkRule[1].slice(1, -1));
+  for (const id of ['/x/src/workspace/library.js', '/x/src/workspace/easydoc/app.js', '/x/src/workspace/easyslide/app.js']) assert.ok(workspaceChunk.test(id), id);
+  for (const id of ['/x/src/workspace/library-core.js', '/x/src/launcher-tools.js', '/x/src/workspace/easydoc/easydoc-bridge-core.js']) assert.ok(!workspaceChunk.test(id), id);
   assert.match(await read('src/workspace/workspace-registry.js'), /import\.meta\.glob\('\.\/\*\/app\.js'\)/);
 
   const dir = new URL('src/workspace/', root);
@@ -318,4 +383,125 @@ test('акцент роду військ: відомі ключі проходя
   const launcher = await readFile(new URL('../src/workspace-launcher.js', import.meta.url), 'utf8');
   assert.match(launcher, /\?branch=\$\{lastBranch\}/);
   assert.match(launcher, /data-active-branch/);
+});
+
+test('очікуваний файл з бібліотеки: розбір значення __EW_PENDING_FILE', () => {
+  assert.deepEqual(parsePendingFile('Довідка.docx'), { name: 'Довідка.docx' });
+  assert.ok(Object.isFrozen(parsePendingFile('Довідка.docx')));
+  assert.deepEqual(parsePendingFile(JSON.stringify('Нарада «жовтень».pptx')), { name: 'Нарада «жовтень».pptx' }, 'назва, ще раз закодована як JSON');
+  assert.deepEqual(parsePendingFile({ name: '  Таблиця.xlsx ' }), { name: 'Таблиця.xlsx' });
+  assert.deepEqual(parsePendingFile('"Звіт".docx'), { name: '"Звіт".docx' }, 'не JSON — сама назва');
+  assert.deepEqual(parsePendingFile('Звіт\u202e.docx\n'), { name: 'Звіт.docx' }, 'без керівних символів і зміни напрямку');
+  assert.equal(Array.from(parsePendingFile('я'.repeat(500)).name).length, 200);
+  for (const value of [null, undefined, '', '   ', 42, ['a'], {}, { name: 7 }]) assert.equal(parsePendingFile(value), null);
+});
+
+test('очікуваний файл шукається вгору кадрами, як invoke; чужий кадр не читається', () => {
+  const top = { __EW_PENDING_FILE: 'Довідка.docx' };
+  top.parent = top;
+  const shell = { parent: top };
+  const app = { parent: shell };
+  assert.deepEqual(findPendingFile(app), { name: 'Довідка.docx' });
+  const empty = { __EW_PENDING_FILE: null };
+  empty.parent = empty;
+  assert.equal(findPendingFile({ parent: empty }), null, 'у вікні редактора без очікуваного файлу — null');
+  const alone = {};
+  alone.parent = alone;
+  assert.equal(findPendingFile(alone), null);
+  const foreign = { get __EW_PENDING_FILE() { throw new Error('SecurityError'); } };
+  foreign.parent = foreign;
+  assert.equal(findPendingFile({ parent: foreign }), null, 'кадр чужого походження');
+  assert.equal(findPendingFile(undefined), null);
+  // Глибше за чотири кадри не шукає (як findInvoke).
+  let deep = top;
+  for (let i = 0; i < 4; i += 1) deep = { parent: deep };
+  assert.equal(findPendingFile(deep), null);
+});
+
+test('host.pendingFile — лише в настільному застосунку', () => {
+  const { invoke } = fakeInvoke({});
+  const desktop = createHost({ appEntry: appById('easygreen'), invoke, pendingFile: { name: 'Таблиця.xlsx' } });
+  assert.deepEqual(desktop.pendingFile, { name: 'Таблиця.xlsx' });
+  assert.ok(Object.isFrozen(desktop.pendingFile));
+  assert.equal(createHost({ appEntry: appById('easygreen'), invoke }).pendingFile, null, 'без вікна з __EW_PENDING_FILE');
+  assert.equal(createHost({ appEntry: appById('easygreen'), pendingFile: { name: 'Таблиця.xlsx' } }).pendingFile, null, 'у браузері немає');
+});
+
+// Вікно з history: replaceState міняє state поточного запису, як у браузері (і зберігає його після перезавантаження).
+function fakeFrame(pending, state = null) {
+  const frame = { __EW_PENDING_FILE: pending, history: { state, replaceState(next) { this.state = structuredClone(next); } } };
+  frame.parent = frame;
+  return frame;
+}
+
+test('відданий очікуваний файл позначається в history.state і після перезавантаження вже не очікується', async () => {
+  const top = fakeFrame('Довідка.docx', { інше: 1 });
+  const app = { parent: { parent: top } };
+  assert.deepEqual(findPendingFile(app), { name: 'Довідка.docx' });
+  const { invoke } = fakeInvoke({ office_open_file: { handle: 'f1', name: 'Довідка.docx', bytes: [1] } });
+  const taken = [];
+  const host = createHost({ appEntry: appById('easydoc'), invoke, pendingFile: findPendingFile(app), onPendingTaken: name => { taken.push(name); markPendingTaken(name, app); } });
+  await host.openFile();
+  await host.openFile();
+  assert.deepEqual(taken, ['Довідка.docx'], 'позначка ставиться один раз');
+  assert.deepEqual(top.history.state, { інше: 1, ewPendingTaken: 'Довідка.docx' }, 'чужі поля state лишаються');
+  assert.equal(findPendingFile(app), null, 'після «перезавантаження» (той самий запис історії) файл не очікується');
+  // Інший документ з бібліотеки в новому вікні (новий запис історії) знову очікується.
+  assert.deepEqual(findPendingFile(fakeFrame('Інша.docx', { ewPendingTaken: 'Довідка.docx' })), { name: 'Інша.docx' });
+  // Файл, вибраний у вікні вибору, позначки не ставить.
+  const other = [];
+  const picked = createHost({
+    appEntry: appById('easydoc'),
+    invoke: fakeInvoke({ office_open_file: { handle: 'f2', name: 'вибраний.docx', bytes: [1] } }).invoke,
+    pendingFile: { name: 'Довідка.docx' },
+    onPendingTaken: name => other.push(name),
+  });
+  await picked.openFile();
+  assert.deepEqual(other, []);
+  // Без history чи без кадру з __EW_PENDING_FILE позначка не ставиться й нічого не ламає.
+  assert.equal(markPendingTaken('Довідка.docx', { parent: null }), false);
+  const broken = { __EW_PENDING_FILE: 'Довідка.docx', history: { state: null, replaceState() { throw new Error('SecurityError'); } } };
+  broken.parent = broken;
+  assert.equal(markPendingTaken('Довідка.docx', broken), false);
+  assert.deepEqual(findPendingFile(broken), { name: 'Довідка.docx' });
+});
+
+test('підказка про файл з бібліотеки — лише для EasyDoc і EasySlide', () => {
+  const pending = { name: 'Довідка.docx' };
+  assert.equal(pendingFileNotice('easydoc', pending), '«Довідка.docx» з бібліотеки: натисніть «Відкрити…» у редакторі — файл відкриється без вибору.');
+  assert.match(pendingFileNotice('easyslide', pending), /^«Довідка\.docx» з бібліотеки/);
+  assert.equal(pendingFileNotice('easygreen', pending), null, 'EasyGreen відкриває файл сам');
+  assert.equal(pendingFileNotice('easydoc', null), null);
+});
+
+test('байти з іншого realm (invoke головного вікна) стають Uint8Array', () => {
+  const context = vm.createContext({});
+  const buffer = vm.runInContext('new Uint8Array([1, 2, 3]).buffer', context);
+  assert.equal(buffer instanceof ArrayBuffer, false);
+  assert.deepEqual([...toBytes(buffer)], [1, 2, 3]);
+  const view = vm.runInContext('new Uint8Array([4, 5])', context);
+  assert.deepEqual([...toBytes(view)], [4, 5]);
+});
+
+test('оболонка: вкладки «Розділи» і «Бібліотека», блокування при закритті, підказка у вікні редактора', async () => {
+  const index = await read('src/workspace/index.html');
+  assert.match(index, /role="tablist"/);
+  assert.match(index, /id="ws-tab-office" role="tab" data-tab="office" aria-controls="ws-sections" aria-selected="true">Розділи</);
+  assert.match(index, /id="ws-tab-library" role="tab" data-tab="library" aria-controls="ws-library" aria-selected="false" tabindex="-1">Бібліотека</);
+  assert.match(index, /<section class="ws-home-main ws-library" id="ws-library" role="tabpanel" aria-labelledby="ws-tab-library" hidden><\/section>/);
+  assert.match(index, /<div class="ws-notice" id="ws-notice" role="status" hidden>/);
+  const shell = await read('src/workspace/workspace.js');
+  assert.match(shell, /import\('\.\/library\.js'\)/, 'бібліотека — окремий чанк, вантажиться з вкладкою');
+  assert.match(shell, /'Бібліотека доступна лише в застосунку EasyWAR\.'/);
+  assert.match(shell, /if \(shell\.mode !== 'desktop'\)/, 'бібліотека лише в головному вікні застосунку');
+  assert.match(shell, /if \(shell\.mode === 'desktop'\) \{\s*\/\/[^\n]*\n\s*window\.addEventListener\('pagehide', \(\) => \{ invoke\('library_lock'\)\.catch\(\(\) => \{\}\); \}\);/);
+  assert.match(shell, /showPendingNotice\(pendingFileNotice\(shell\.app\.id, findPendingFile\(window\)\)\)/);
+  const library = await read('src/workspace/library.js');
+  assert.match(library, /'Індекс будується — поки що пошук лише за назвами'/);
+  assert.match(library, /Пошук за вмістом недоступний \(\$\{failure\}\)/, 'збій індексу (indexError) — окремий текст');
+  for (const label of ['Імпортувати…', 'Імпортувати шаблон…', 'Створити з шаблону…', 'Застарілі документи', 'Зберегти архів…', 'Новий код відновлення', 'Заблокувати',
+    'Створити бібліотеку', 'Створити код відновлення', 'Розблокувати', 'Забули пароль?', 'Показати приховані', 'Історія версій', 'Перейменувати',
+    'Зберегти копію…', 'Оновити з джерела', 'Відв’язати', 'Зробити поточною', 'Оновити всі']) {
+    assert.ok(library.includes(`'${label}`) || library.includes(`${label}'`), label);
+  }
 });

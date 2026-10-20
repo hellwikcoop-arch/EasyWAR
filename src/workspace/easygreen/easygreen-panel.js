@@ -4,19 +4,23 @@
 // шляхи лишаються в Rust, а таблиці профілів і їхні копії *.easywar-prev.xlsx не перезаписуються (сире джерело
 // не змінюється). Закриття й питання про незбережені зміни — теж на оболонці.
 //
+// Документ з бібліотеки EasyWAR (host.pendingFile) відкривається сам після gridcraft:ready; «Зберегти» книги
+// пише його нову версію в бібліотеку (office_save_file знає такі номери файлів).
+//
 // Підключення: src/workspace/easygreen/app.js → mountEasyGreen(container, { host, appUrl }) → { destroy(), isDirty() }.
 import './easygreen.css';
 import {
-  EASYGREEN_APP_QUERY, EASYGREEN_TITLE, OPEN_EXTENSIONS, keepsWorkbook, openMessage, openProblem, parseFrameMessage,
-  saveAction, saveStatus,
+  EASYGREEN_APP_QUERY, EASYGREEN_TITLE, failedStatus, keepsWorkbook, openIntoFrame, parseFrameMessage, saveAction, saveStatus, shouldAutoOpen,
+  unsavedAfterSave,
 } from './easygreen-core.js';
 
 export const DEFAULT_APP_URL = 'workspace/easygreen/app/index.html';
 
 /**
  * Монтує EasyGreen у `container`. options.host — об'єкт host оболонки; options.appUrl — адреса сторінки
- * таблиці. Повертає { destroy, isDirty }: destroy() вивантажує таблицю (WebGL-контекст не лишається
- * в пам'яті); isDirty() — чи є незбережені зміни.
+ * таблиці. Повертає { destroy, isDirty, focus }: destroy() вивантажує таблицю (WebGL-контекст не лишається
+ * в пам'яті); isDirty() — чи є незбережені зміни (також після відмови чи скасування збереження книги);
+ * focus() повертає фокус у таблицю.
  */
 export function mountEasyGreen(container, options = {}) {
   const { host } = options;
@@ -42,7 +46,14 @@ export function mountEasyGreen(container, options = {}) {
 
   let ready = false;
   let dirty = false;
+  // Книгу не вдалося зберегти (відмова, скасування): таблиця вже зняла свою позначку змін, оболонка тримає свою.
+  let saveFailed = false;
   let destroyed = false;
+  const isDirty = () => dirty || saveFailed;
+  const noteSave = (name, saved) => {
+    saveFailed = unsavedAfterSave(name, saved);
+    host.setDirty(isDirty());
+  };
   // Файл, відкритий або збережений через EasyWAR: { handle, name }; «Зберегти» книги йде в нього.
   let current = null;
 
@@ -80,8 +91,10 @@ export function mountEasyGreen(container, options = {}) {
         saved = await saveAs(action, bytes);
       }
       setStatus(saveStatus(saved?.name ?? null, null));
+      noteSave(message.name, saved);
     } catch (error) {
       setStatus(saveStatus(null, error));
+      noteSave(message.name, null);
     }
   };
 
@@ -90,39 +103,55 @@ export function mountEasyGreen(container, options = {}) {
     const message = parseFrameMessage(event.data);
     if (!message) return;
     if (message.type === 'ready') {
+      const first = !ready;
       ready = true;
       openFileButton.disabled = false;
       setStatus('Готово. Відкрийте файл або створіть нову книгу.');
+      // Документ з бібліотеки EasyWAR відкривається сам (office_open_file віддає його без вікна вибору).
+      if (first && shouldAutoOpen(host)) openFile(true);
     } else if (message.type === 'dirty') {
       dirty = message.dirty;
-      host.setDirty(dirty);
+      host.setDirty(isDirty());
     } else if (message.type === 'failed') {
-      setStatus(`Таблиця не запустилася: ${message.error || 'потрібна підтримка WebGPU або WebGL2'}`);
+      setStatus(failedStatus(message.error));
     } else if (message.type === 'save') {
       save(message);
     }
   };
   window.addEventListener('message', onMessage);
 
-  openFileButton.addEventListener('click', async () => {
-    if (!ready) return;
+  // Відкриття через host.openFile (див. openIntoFrame); fromLibrary — документ з бібліотеки після ready.
+  const post = (message, transfer) => {
+    if (destroyed || !frame.contentWindow) return false;
+    frame.contentWindow.postMessage(message, window.location.origin, transfer);
+    return true;
+  };
+  let opening = false;
+  const openFile = async (fromLibrary) => {
+    if (!ready || opening) return;
+    opening = true;
     try {
-      const opened = await host.openFile({ extensions: OPEN_EXTENSIONS, title: 'EasyGreen — відкрити таблицю' });
-      if (!opened || destroyed) return;
-      const problem = openProblem(opened.name, opened.bytes.byteLength);
-      if (problem) {
-        host.closeFile(opened.handle).catch(() => {});
-        setStatus(problem);
+      const result = await openIntoFrame(host, post);
+      if (destroyed) {
+        if (result.status === 'opened') host.closeFile(result.handle).catch(() => {});
         return;
       }
-      const bytes = opened.bytes.slice().buffer;
-      frame.contentWindow?.postMessage(openMessage(opened.name, bytes), window.location.origin, [bytes]);
-      setCurrent({ handle: opened.handle, name: opened.name });
-      setStatus(`Відкрито: ${opened.name}`);
+      if (result.status === 'problem') {
+        setStatus(result.text);
+      } else if (result.status === 'opened') {
+        setCurrent({ handle: result.handle, name: result.name });
+        // Нова книга замінила ту, яку не вдалося зберегти.
+        saveFailed = false;
+        host.setDirty(isDirty());
+        setStatus(`${fromLibrary ? 'Відкрито з бібліотеки' : 'Відкрито'}: ${result.name}`);
+      }
     } catch (error) {
       setStatus(`Не вдалося відкрити файл: ${error?.message ?? error}`);
+    } finally {
+      opening = false;
     }
-  });
+  };
+  openFileButton.addEventListener('click', () => openFile(false));
 
   const destroy = () => {
     if (destroyed) return;
@@ -133,6 +162,12 @@ export function mountEasyGreen(container, options = {}) {
     root.remove();
   };
 
+  const focus = () => {
+    if (destroyed) return;
+    try { frame.contentWindow?.focus(); } catch { /* таблицю ще не завантажено */ }
+    frame.focus();
+  };
+
   frame.src = appUrl;
-  return { destroy, isDirty: () => dirty };
+  return { destroy, isDirty, focus };
 }

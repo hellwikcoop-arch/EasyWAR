@@ -195,7 +195,7 @@ ends, and the launcher stays `inert` until sign-in.
 - Код застосунку — `src/workspace/<id>/app.js` з `mount(container, host)`; оболонка знаходить його через `import.meta.glob`, без змін у самій оболонці. Поки файлу немає, картка відкриває заглушку «у розробці».
 - Підключено EasyGreen: `src/workspace/easygreen/app.js` → `mountEasyGreen` (`easygreen-panel.js`), веб-збірка GridCraft — у `src/public/workspace/easygreen/app/`. Подробиці — [EASYGREEN.md](EASYGREEN.md).
 - Підключено «Погоду»: `src/workspace/weather/app.js` (логіка — `weather-core.js`); мережа лише через Rust-команди `weather_online_*`, вимкнена за замовчуванням. Подробиці — [WORKSPACE.md](WORKSPACE.md), розділ «Обстановка: Погода».
-- `vite.config.js`: входи `workspace` і `workspace-app`; чанки `src/workspace/<id>/app.js` отримують назву `assets/workspace-*` (`chunkFileNames`), а кеш переглядача для телефона не бере `workspace/`, `assets/workspace-*` і `.wasm`.
+- Головна сторінка оболонки має вкладки «Розділи» і «Бібліотека» (`#ws-tabs`, шаблон WAI-ARIA tabs); у вікні редактора їх немає. Вкладка «Бібліотека» — `src/workspace/library.js` (DOM лише через `createElement`/`textContent`) і чиста логіка `library-ui-core.js`; код підвантажується динамічним `import('./library.js')` лише в настільному режимі й збирається в окремий чанк `assets/workspace-library-*.js` (спільний `jszip` — окремо), який офлайн-кеш телефона не бере. Вкладка слухає події Rust `library-state` і `office-editor-closed` через `listenTauriEvent` (`workspace-host.js`) і перечитує список при поверненні фокуса в головне вікно. Подробиці — розділ «Бібліотека» в [WORKSPACE.md](WORKSPACE.md).
 
 ### EasyDoc (прототип)
 
@@ -539,7 +539,7 @@ by hand with narrow anchored patches (see `AGENTS.md`), then run
 | Файл | Призначення |
 |---|---|
 | `src/workspace/easyslide/app.js` | `mount(container, host)`: полотно `#deckcraft_canvas`, `window.easyslideHost`, запуск WASM за адресою `host.resolve('workspace/easyslide/…')`; `unmount`, `isDirty` |
-| `src/workspace/easyslide/host-core.js` | міст без DOM: `createEasySlideHost(host, notify)` → `open(purpose)` через `host.openFile`, `save(name, bytes)` через `host.saveFileAs` (true лише для `.pptx`/`.deckcraft`, експорт PDF/PNG/JPG/GIF/TXT позначку змін не знімає), `setState(dirty, title)` → `host.setDirty`/`host.setTitle`. Тести — `tests/easyslide-host.test.mjs` |
+| `src/workspace/easyslide/host-core.js` | міст без DOM: `createEasySlideHost(host, notify)` → `open(purpose)` через `host.openFile`, `save(name, bytes)`: `.pptx` під назвою відкритого файлу — `host.saveFile` у той самий номер (документ бібліотеки — нова версія), інакше `host.saveFileAs` (true лише для `.pptx`/`.deckcraft`, експорт PDF/PNG/JPG/GIF/TXT позначку змін не знімає), `setState(dirty, title)` → `host.setDirty`/`host.setTitle`. Тести — `tests/easyslide-host.test.mjs` |
 | `src/workspace/easyslide/easyslide.css` | полотно на весь контейнер; прихованому `<input>` eframe повертає `box-sizing: content-box` (з `border-box` оболонки Chromium псує введення кирилиці) |
 | `src/public/workspace/easyslide/` | зібраний редактор (`deckcraft-web_bg.wasm`, ≈48 МБ; мережа не потрібна), ліцензії DeckCraft і шрифтів (Inter, BIZ UDPGothic — OFL), `README.md` з хешами |
 | `script/easyslide/uk.tsv`, `script/easyslide/l10n.mjs` | український інтерфейс редактора: словник «англійський рядок → переклад» (з шаблонами `{}`) і генератор таблиць Rust; тести — `tests/easyslide-l10n.test.mjs` |

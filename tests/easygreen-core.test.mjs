@@ -4,8 +4,8 @@ import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
 import test from 'node:test';
 import {
-  EASYGREEN_APP_QUERY, MAX_OPEN_BYTES, OPEN_EXTENSIONS, SAVE_EXTENSIONS, cleanFileName, fileExtension, keepsWorkbook,
-  openMessage, openProblem, parseFrameMessage, saveAction, saveStatus,
+  EASYGREEN_APP_QUERY, MAX_OPEN_BYTES, OPEN_EXTENSIONS, OPEN_TITLE, SAVE_EXTENSIONS, cleanFileName, failedStatus, fileExtension, keepsWorkbook,
+  openIntoFrame, openMessage, openProblem, parseFrameMessage, saveAction, saveStatus, shouldAutoOpen, unsavedAfterSave,
 } from '../src/workspace/easygreen/easygreen-core.js';
 
 const root = new URL('../', import.meta.url);
@@ -77,6 +77,25 @@ test('«Зберегти» пише у відкритий файл лише кн
   assert.equal(keepsWorkbook('Звіт.pdf'), false);
 });
 
+test('відмова чи скасування збереження книги тримає позначку незбережених змін', () => {
+  // GridCraft знімає свою позначку, щойно передав файл, тому оболонка тримає власну.
+  assert.equal(unsavedAfterSave('Звіт.xlsx', null), true, 'скасовано');
+  assert.equal(unsavedAfterSave('Звіт.xlsx', undefined), true, 'відмова (таблиця профілю)');
+  assert.equal(unsavedAfterSave('Звіт.xlsx', { handle: 'h1', name: 'Звіт.xlsx' }), false, 'збережено');
+  // Експорт книги не змінює: скасований PDF не робить таблицю «незбереженою».
+  assert.equal(unsavedAfterSave('Звіт.pdf', null), false);
+  assert.equal(unsavedAfterSave('Звіт.csv', null), false);
+});
+
+test('таблиця не запустилася: пояснення українською, технічна причина в дужках і обрізана', () => {
+  const plain = failedStatus('');
+  assert.match(plain, /^Таблиця не запустилася: потрібна підтримка графіки WebGL2 або WebGPU/);
+  assert.doesNotMatch(plain, /\(/);
+  const detailed = failedStatus('JsValue(Error: Failed to create wgpu adapter\n  at …)');
+  assert.match(detailed, /\(JsValue\(Error: Failed to create wgpu adapter at …\)\)$/);
+  assert.ok(failedStatus('x'.repeat(1000)).length < 400);
+});
+
 test('збірка GridCraft лежить локально, українською, без мережевих адрес', async () => {
   const dir = new URL('src/public/workspace/easygreen/app/', root);
   const files = await readdir(dir);
@@ -102,12 +121,58 @@ test('EasyGreen підключено до «Робочого середовищ�
   assert.match(entry, /export async function mount\(container, host\)/);
   assert.match(entry, /host\.resolve\('workspace\/easygreen\/app\/index\.html'\)/);
   const panel = await read('src/workspace/easygreen/easygreen-panel.js');
-  for (const call of ['host.openFile(', 'host.saveFile(', 'host.saveFileAs(', 'host.closeFile(', 'host.setDirty(', 'host.setTitle(']) {
+  for (const call of ['openIntoFrame(host, post)', 'host.saveFile(', 'host.saveFileAs(', 'host.closeFile(', 'host.setDirty(', 'host.setTitle(']) {
     assert.ok(panel.includes(call), call);
   }
+  assert.ok((await read('src/workspace/easygreen/easygreen-core.js')).includes('host.openFile('));
+  // Документ з бібліотеки відкривається сам один раз, після першого gridcraft:ready.
+  assert.match(panel, /if \(first && shouldAutoOpen\(host\)\) openFile\(true\);/);
   // Закриття й питання про незбережені зміни — на оболонці; прямих викликів Tauri в панелі немає.
   assert.doesNotMatch(panel, /window\.confirm|__TAURI|invoke\(/);
   const config = await read('vite.config.js');
   // Таблиця (≈19 МБ WASM) не потрапляє в офлайн-кеш телефона.
   assert.ok(config.includes('!/(^|\\/)workspace[-/]/.test(rel)') && config.includes('!name.endsWith(".wasm")'));
+});
+
+function fakeHost({ pendingFile = null, opened = null } = {}) {
+  const calls = [];
+  return {
+    calls,
+    pendingFile,
+    openFile: async options => { calls.push(['openFile', options]); return opened; },
+    closeFile: async handle => { calls.push(['closeFile', handle]); },
+  };
+}
+
+test('документ з бібліотеки відкривається сам: host.openFile і gridcraft:open у таблицю', async () => {
+  assert.equal(shouldAutoOpen(fakeHost({ pendingFile: { name: 'Синтетична.xlsx' } })), true);
+  assert.equal(shouldAutoOpen(fakeHost()), false);
+  assert.equal(shouldAutoOpen(null), false);
+
+  const host = fakeHost({ pendingFile: { name: 'Синтетична.xlsx' }, opened: { handle: 'f7', name: 'Синтетична.xlsx', bytes: new Uint8Array([80, 75, 3, 4]) } });
+  const posted = [];
+  const result = await openIntoFrame(host, (message, transfer) => { posted.push([message, transfer]); return true; });
+  assert.deepEqual(result, { status: 'opened', handle: 'f7', name: 'Синтетична.xlsx' });
+  assert.deepEqual(host.calls, [['openFile', { extensions: OPEN_EXTENSIONS, title: OPEN_TITLE }]], 'ті самі параметри, що й у кнопки «Відкрити файл…»');
+  assert.equal(posted.length, 1);
+  const [message, transfer] = posted[0];
+  assert.equal(message.type, 'gridcraft:open');
+  assert.equal(message.name, 'Синтетична.xlsx');
+  assert.ok(message.bytes instanceof ArrayBuffer);
+  assert.deepEqual([...new Uint8Array(message.bytes)], [80, 75, 3, 4]);
+  assert.deepEqual(transfer, [message.bytes], 'байти передаються без копії');
+});
+
+test('відкриття через host: скасування, чужий формат, закрита таблиця', async () => {
+  assert.deepEqual(await openIntoFrame(fakeHost({ opened: null }), () => true), { status: 'cancelled' });
+
+  const pdf = fakeHost({ opened: { handle: 'f8', name: 'звіт.pdf', bytes: new Uint8Array([1]) } });
+  const problem = await openIntoFrame(pdf, () => { throw new Error('не має надсилатися'); });
+  assert.equal(problem.status, 'problem');
+  assert.match(problem.text, /відкриває таблиці/);
+  assert.deepEqual(pdf.calls.at(-1), ['closeFile', 'f8'], 'номер файлу закрито');
+
+  const closed = fakeHost({ opened: { handle: 'f9', name: 'Таблиця.xlsx', bytes: new Uint8Array([1, 2]) } });
+  assert.deepEqual(await openIntoFrame(closed, () => false), { status: 'cancelled' });
+  assert.deepEqual(closed.calls.at(-1), ['closeFile', 'f9']);
 });

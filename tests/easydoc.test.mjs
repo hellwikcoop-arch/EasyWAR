@@ -110,3 +110,32 @@ test('app.js дотримується контракту «Робочого се
   assert.match(app, /unmount\(\)/);
   assert.match(app, /isDirty:/);
 });
+
+test('scrubRecentFiles прибирає лише поле recent зі стану WordCraft', async () => {
+  const { scrubRecentFiles } = await import('../src/workspace/easydoc/recent-scrub.js');
+  const data = new Map([['wordcraft.ui', JSON.stringify({ tab: 'Home', recent: ['Звіт.docx', 'Інший.docx'], zoom: 120 })]]);
+  const win = { localStorage: { getItem: key => data.get(key) ?? null, setItem: (key, value) => data.set(key, value) } };
+  assert.equal(scrubRecentFiles(win), true);
+  assert.deepEqual(JSON.parse(data.get('wordcraft.ui')), { tab: 'Home', recent: [], zoom: 120 });
+  assert.equal(scrubRecentFiles(win), false, 'порожній список не переписується');
+  assert.equal(scrubRecentFiles({ localStorage: { getItem: () => '{не json', setItem() {} } }), false);
+  assert.equal(scrubRecentFiles(null), false);
+  assert.equal(scrubRecentFiles({ get localStorage() { throw new Error('заблоковано'); } }), false);
+});
+
+test('guardRecentFiles не пускає імена файлів у сховище WordCraft', async () => {
+  const { guardRecentFiles } = await import('../src/workspace/easydoc/recent-scrub.js');
+  const written = [];
+  class Storage { setItem(key, value) { written.push([key, value]); } }
+  const win = { Storage };
+  assert.equal(guardRecentFiles(win), true);
+  assert.equal(guardRecentFiles(win), false, 'повторно не обгортається');
+  const storage = new Storage();
+  storage.setItem('wordcraft.ui', JSON.stringify({ tab: 'Home', recent: ['Секрет.docx'] }));
+  storage.setItem('other', 'Секрет.docx');
+  storage.setItem('wordcraft.ui', 'не json');
+  assert.deepEqual(JSON.parse(written[0][1]), { tab: 'Home', recent: [] });
+  assert.equal(written[1][1], 'Секрет.docx', 'чужі ключі не чіпаємо');
+  assert.equal(written[2][1], 'не json');
+  assert.equal(guardRecentFiles(null), false);
+});

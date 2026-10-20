@@ -6,6 +6,9 @@
 // У настільному застосунку застосунок працює не в головному вікні, а в окремому вікні
 // редактора з дозволом лише на команди office_* (shellMode, docs/WORKSPACE.md, «Ізоляція»).
 // Застосунки «Обстановки» (погода) лишаються в iframe головного вікна (opensInEditorWindow).
+// Вкладка «Бібліотека» (лише в головному вікні застосунку) — library.js, окремий чанк, що
+// вантажиться при першому відкритті вкладки; закриття сторінки блокує бібліотеку (library_lock).
+// У вікні редактора смуга підказує, як відкрити документ, що чекає з бібліотеки (EasyDoc, EasySlide).
 import {
   CLOSE_MESSAGE,
   WORKSPACE_APPS,
@@ -17,10 +20,11 @@ import {
   opensInEditorWindow,
   branchFromSearch,
   parseFrameMessage,
+  pendingFileNotice,
   shellMode,
   titleParts,
 } from './workspace-core.js';
-import { findInvoke } from './workspace-host.js';
+import { findInvoke, findPendingFile } from './workspace-host.js';
 import { appIcon, arrowIcon, element as make } from './workspace-dom.js';
 import { isConnected } from './workspace-registry.js';
 
@@ -41,6 +45,10 @@ const back = document.getElementById('ws-back');
 const closeButton = document.getElementById('ws-close');
 const exitButton = document.getElementById('ws-exit');
 const confirmBar = document.getElementById('ws-confirm');
+const tabs = document.getElementById('ws-tabs');
+const libraryPanel = document.getElementById('ws-library');
+const libraryBadge = document.getElementById('ws-library-badge');
+const notice = document.getElementById('ws-notice');
 
 const invoke = findInvoke(window);
 const shell = shellMode(window.__EW_EDITOR_APP, Boolean(invoke));
@@ -48,6 +56,7 @@ const shell = shellMode(window.__EW_EDITOR_APP, Boolean(invoke));
 let current = null; // { app, dirty, card }
 let pendingConfirm = null; // resolve смуги підтвердження
 let pendingClose = null;   // проміс, який чекає на відповідь
+let library = null;        // проміс { activate } вкладки «Бібліотека» після першого відкриття
 
 const element = (tag, className, text) => make(document, tag, className, text);
 
@@ -110,6 +119,66 @@ function renderSections() {
   }
 }
 
+// Вкладки «Розділи» й «Бібліотека» (шаблон WAI-ARIA tabs: стрілки, Home, End).
+const tabButtons = () => [...tabs.querySelectorAll('[role="tab"]')];
+
+function selectTab(id, focus = false) {
+  for (const tab of tabButtons()) {
+    const selected = tab.dataset.tab === id;
+    tab.setAttribute('aria-selected', String(selected));
+    tab.tabIndex = selected ? 0 : -1;
+    if (selected && focus) tab.focus();
+  }
+  sections.hidden = id !== 'office';
+  libraryPanel.hidden = id !== 'library';
+  if (id === 'library') openLibrary();
+}
+
+function setLibraryBadge(count) {
+  const tab = document.getElementById('ws-tab-library');
+  libraryBadge.textContent = count ? String(count) : '';
+  libraryBadge.hidden = !count;
+  if (count) tab.setAttribute('aria-label', `Бібліотека, застарілих документів: ${count}`);
+  else tab.removeAttribute('aria-label');
+}
+
+function openLibrary() {
+  if (shell.mode !== 'desktop') {
+    if (!libraryPanel.childElementCount) libraryPanel.append(element('p', 'ws-lib-note', 'Бібліотека доступна лише в застосунку EasyWAR.'));
+    return;
+  }
+  if (!library) library = import('./library.js').then(module => module.mountLibrary(libraryPanel, { invoke, onBadge: setLibraryBadge }));
+  library.then(mounted => mounted.activate()).catch(error => {
+    console.error(error);
+    library = null;
+    libraryPanel.replaceChildren(element('p', 'ws-lib-note', 'Не вдалося відкрити бібліотеку. Закрийте «Робоче середовище» й відкрийте його знову.'));
+  });
+}
+
+tabs.addEventListener('click', event => {
+  const tab = event.target.closest('[role="tab"]');
+  if (tab && tab.getAttribute('aria-selected') !== 'true') selectTab(tab.dataset.tab);
+});
+tabs.addEventListener('keydown', event => {
+  const list = tabButtons();
+  const index = list.indexOf(document.activeElement);
+  if (index < 0) return;
+  const next = { ArrowRight: index + 1, ArrowLeft: index - 1, Home: 0, End: list.length - 1 }[event.key];
+  if (next === undefined) return;
+  event.preventDefault();
+  selectTab(list[(next + list.length) % list.length].dataset.tab, true);
+});
+
+function showPendingNotice(text) {
+  if (!text) return;
+  document.getElementById('ws-notice-text').textContent = text;
+  notice.hidden = false;
+}
+document.getElementById('ws-notice-close').addEventListener('click', () => {
+  notice.hidden = true;
+  back.focus();
+});
+
 function showTitle(app, title, dirty) {
   const parts = titleParts(app, title, dirty);
   nameNode.textContent = parts.name;
@@ -170,6 +239,15 @@ function appIsDirty() {
   }
 }
 
+/** Після «Залишитися» фокус повертається в застосунок, а не на кнопку «← Розділи». */
+function focusApp() {
+  try {
+    const app = frame.contentWindow?.EW_WORKSPACE_APP;
+    if (typeof app?.focus === 'function') { app.focus(); return; }
+  } catch { /* сторінку застосунку ще не завантажено */ }
+  frame.focus();
+}
+
 /** true — застосунок закрито (або нічого не було відкрито), false — користувач залишився. */
 function requestCloseApp() {
   if (!current) return Promise.resolve(true);
@@ -183,7 +261,7 @@ function requestCloseApp() {
   pendingClose = new Promise(resolve => { pendingConfirm = resolve; }).then(leave => {
     pendingClose = null;
     if (leave) closeApp();
-    else back.focus();
+    else focusApp();
     return leave;
   });
   return pendingClose;
@@ -219,8 +297,16 @@ window.addEventListener('message', event => {
 window.EW_WORKSPACE = Object.freeze({ requestClose: requestCloseApp, apps: WORKSPACE_APPS.map(app => app.id) });
 if (shell.mode === 'editor') {
   home.hidden = true;
-  if (shell.app) openApp(shell.app.id, null);
-  else invoke('office_editor_close').catch(error => console.error(error));
+  if (shell.app) {
+    openApp(shell.app.id, null);
+    showPendingNotice(pendingFileNotice(shell.app.id, findPendingFile(window)));
+  } else {
+    invoke('office_editor_close').catch(error => console.error(error));
+  }
 } else {
   renderSections();
+  if (shell.mode === 'desktop') {
+    // Закриття «Робочого середовища» в головному вікні блокує бібліотеку: ключі в Rust знищуються.
+    window.addEventListener('pagehide', () => { invoke('library_lock').catch(() => {}); });
+  }
 }

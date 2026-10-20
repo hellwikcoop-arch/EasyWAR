@@ -49,8 +49,14 @@ typed text, reason, file name, sheet, row and column). Migration
 when the module was created: `standard` (default for existing modules), `branch`
 (colours of the dashboard's service branch) or `heightwell` («Пункт керування»);
 the colour itself follows the module's `branch`, so only the style name is
-stored. Migrations contain no
-operational fixtures and create no external integration.
+stored. Migration
+`0013_office_library.sql` adds the encrypted «Офіс» document library (key wraps,
+documents, encrypted content, immutable versions, events and purges), and
+migration `0014_document_links.sql` links a generated library document to its
+template version and data source, and migration `0015_library_blob_repair.sql`
+lets a damaged ciphertext row of `library_blobs` be replaced while the keyring is
+active (see «Office library»). Migrations contain no operational fixtures and
+create no external integration.
 
 ## Provenance layers
 
@@ -75,6 +81,8 @@ operational fixtures and create no external integration.
 | Dashboard module fields | `dashboard_module_fields` | The checked field list copied from the catalog template: key, Ukrainian label, data type, role, aggregation, required flag and position. Cascades with the module. |
 | Dashboard module data | `dashboard_data_<24 hex>` | Created at runtime, one table per module: `row_id`, `created_at` and one column per catalog field. Table and column names come only from the validated catalog, never from user text. `row_id` is `INTEGER PRIMARY KEY AUTOINCREMENT`, so the number of a deleted row is never reused; a save keeps the `row_id` and `created_at` of every row that comes back with its `rowId`. `dashboard_modules.updated_at` is the version of the whole table: a save that carries `expected_updated_at` is applied only if it still matches (compare-and-swap in the first statement of the transaction), otherwise nothing changes and the caller gets a conflict. Deleting one module (`delete_dashboard_module`, own profile only) removes its metadata, fields and corrections and drops its table in one transaction; deleting a profile drops its module tables in the same transaction as the metadata cascade. Only names that match the generated `dashboard_data_<24 hex>` pattern are ever dropped. In the built-in `flight-hours` template the unit-bearing `REAL` columns hold plain numbers and the unit is part of the field label: durations (`airborne_hours`, `total_hours`, `engine_test_time`, `time_in_clouds`, `hood_time`) are decimal hours (`0:32` is stored as `32/60` and shown as `год:хв`), `flight_altitude`, `cloud_base_upper` and `cloud_base_lower` are metres, `cloud_cover` is an integer 0–10, `visibility` is kilometres, `fuel_consumption` is litres and `cargo_kg` is kilograms; `passengers`, `rsp_approaches` and `rsp_landings` are counts. Fuel mass is not stored: the UI derives it at 0.8 kg/L. The crew columns (`crew_ke`, `crew_lsh`, `crew_bt`, `crew_other`) are `TEXT` with surnames, `crew_other` comma-separated. `crew_ke_callsign`, the crew commander's call sign placed right after `aircraft_number`, is `TEXT` as well (leading zeros are kept) and is not counted in the crew of at most 8. Value ranges (cloud cover 0–10, non-negative visibility, fuel, cargo, passengers and RSP counts, crew of at most 8, lower cloud base not above the upper one) are checked by the form only; the backend stores what it receives so that an old out-of-range row cannot block saving the table. Template fields appended later are added to existing tables by the runtime schema synchronisation, without a migration. A module can be created together with its first rows (`create_dashboard_module` with `rows`, read from the user's own XLSX by `module_source.rs`): the metadata, the table and the rows are written in one transaction, a row that fails `validate_value` (or more than 10 000 rows) leaves nothing behind, and the XLSX is only read, never changed. Columns the XLSX does not have simply stay empty in the new table. |
 | Dashboard module corrections | `dashboard_module_corrections` | Values corrected on the «Перевірка» screen before an XLSX import: module, the record's `row_id`, field key, raw cell text (as it is in the user's file), the text the user typed, the reason the cell could not be used, and where it was (file name only, sheet, row number, column header). The record in `dashboard_data_<24 hex>` holds the corrected value; corrections never become dynamic columns of that table. One correction per field of a record; cascades with the module (and so with the profile); a record removed by a save takes its corrections with it in the same transaction. The XLSX is never written. |
+| Office library | `library_keyrings`, `library_items`, `library_blobs`, `library_versions`, `library_events`, `library_purges` | One key wrap per profile with a password (Argon2id from the password, optional recovery-code slot), documents with encrypted names, encrypted content stored once per profile under an HMAC `content_id`, immutable versions, an append-only audit of event kinds and IDs, and the purge log. No plaintext document text or name. No foreign key to `local_profiles`: a profile with an active library cannot be deleted until the library is crypto-shredded (see «Office library»). |
+| Document links | `document_links` | For a generated library document: the template version, the data-source kind and bounded JSON parameters, the last generated version and an HMAC fingerprint of the source data. Only the generation state changes; deleting the row unlinks the document and keeps its versions. |
 
 The `report_current_state` view derives `NEW`, `PARSED`, or the latest review
 decision without overwriting source or parser records.
@@ -168,7 +176,10 @@ does not merge stale client copies.
 
 Registration is one transaction (`register_local_profile`): identity, mandatory
 password (6–128 characters, stored only as an Argon2id hash in
-`local_profile_details`), optional position and avatar, and at least one module
+`local_profile_details`; new hashes use the same cost as the library key
+derivation, 64 MiB, 3 passes, 1 lane, so the sign-in hash is no cheaper to guess
+than the library wrap; a successful sign-in with an older, weaker hash rehashes it
+in place), optional position and avatar, and at least one module
 are written together, the profile becomes active and the session is unlocked. A
 failed registration leaves no partial rows. The old `create_local_profile`
 command is removed, so a profile without a password cannot be created;
@@ -182,11 +193,19 @@ profile as having no password and accepts any input, so signing in to it
 protects nothing until a password is set. This is a known limit that depends on
 an owner decision about migrating old profiles (backlog P2-14).
 
+While the «Офіс» editor window is open, signing out (`lock_local_profile`),
+switching to another profile, registering a profile, recovering another profile
+and deleting a profile are refused with «спершу закрийте вікно редактора»: file
+handles of the editor are bound to the signed-in profile, and the session stays
+as it was. The editor check runs before the password check.
+
 Profiles are not accounts in a service, roles or permissions. The sign-in screen
 gates the UI and the unlock checks of data commands on this device only; it does
 not encrypt table files and is not a boundary against someone who can modify the
-installed application or read the disk. A forgotten password cannot be
-recovered. Profiles contain no plaintext secrets and are not transmitted to a
+installed application or read the disk. A forgotten password can be replaced
+only with the recovery code of the profile's «Офіс» library
+(`library_recover` with `profileId` from the sign-in screen); a profile without
+a library or without a recovery code cannot be recovered. Profiles contain no plaintext secrets and are not transmitted to a
 service. Profile changes
 do not rewrite immutable raw sources, parsed values, corrections, approved
 revisions, reviewer labels or audit events. Role binding and workspace
@@ -280,6 +299,103 @@ automated restore tests use temporary synthetic databases; acceptance of the
 full restart flow in packaged macOS and Windows applications remains a release
 gate.
 
+## Office library
+
+`src-tauri/src/office_library.rs` is the core of the «Офіс» library (its Tauri
+commands are wired separately). A library exists only for a profile with a
+password.
+
+- Keys. A random 32-byte library data key (LDK) is wrapped with
+  XChaCha20-Poly1305 under a key that Argon2id derives from the profile password
+  (64 MiB, 3 passes, 1 lane; the parameters are stored with the wrap) and,
+  optionally, under a recovery code: 32 random bytes plus a 2-byte SHA-256
+  checksum, Base32 in 11 groups of 5, with the key derived by HKDF-SHA256 and
+  `recovery_salt`. HKDF subkeys of the LDK encrypt content and names, compute the
+  `content_id` HMAC and fingerprint source data. The AAD binds a wrap to profile,
+  format and slot, content to profile and `content_id`, a name to profile and
+  document, so rows cannot be moved between them.
+- No plaintext in SQLite: content is `EWLB`, format byte, nonce and ciphertext;
+  a name is nonce and ciphertext; events carry only the event kind and IDs.
+  Ciphertext is decrypted back before it is inserted.
+- Versions are immutable. A save whose content equals the current or the parent
+  version writes nothing; equal content is stored once per profile. A generated
+  save (`library_save_generated`) with the same bytes but a new source
+  fingerprint still adds a generated version row (sharing the blob), so the link
+  status becomes `current`; same bytes and the same fingerprint add nothing
+  (`created: false`). When the document already exists, the caller passes
+  `expectedCurrentVersionId`; inside the write transaction a different current
+  version fails with «документ змінився після оновлення списку; оновіть список і
+  повторіть» (optimistic concurrency against editor saves and other windows).
+- Link status `detached`: the current version is a generated version other than
+  the link's `last_generated_version_id` (an older one picked from history).
+  `«Оновити всі»` skips it like manual edits. The fingerprint of a `library_table`
+  source is the HMAC of the table content only (headers, rows, sheet name), so
+  links made before this change show `source_changed` once.
+- Damaged content. If a stored ciphertext no longer decrypts, importing or
+  saving the same bytes again replaces it (migration 0015; the trigger still
+  forbids changing the row identity, refilling a shredded row or repairing while
+  the keyring is not `active`). The repair writes no audit event.
+- Password change and recovery are two steps: the new wrap is prepared outside
+  any transaction (Argon2id is slow), then written in the caller's transaction
+  together with the new sign-in hash, `WHERE generation = <old>`, so both change
+  or neither does. Using a recovery code also issues a new code; the old one
+  stops working in this database. From the sign-in screen `library_recover`
+  takes `profileId` (no session yet); on success that profile is signed in and
+  becomes the active one. A profile without a password or without an active
+  library gets «у профілю немає захищеної бібліотеки». The new code is returned
+  even when the status cannot be built, and when a lock or sign-out happened
+  while Argon2id was running, the code is returned but the library stays locked.
+- **Known limit C05: the data key is never rotated.** A password change, a
+  recovery and «Новий код відновлення» rewrap the same LDK. The old password or
+  code no longer opens this database, but together with any copy made earlier
+  (backup, file copy, snapshot) it yields the LDK and so decrypts every later
+  document of a newer copy too. The only remedy is a purge and destroying the
+  old copies.
+- **Known limit C06: no quota.** Versions are append-only and each may be up to
+  256 MiB; nothing caps the number of versions or the total size per profile,
+  and single versions cannot be deleted (only the whole library is purged).
+- `secure_delete`. Every pool that writes `easywar.db` (the main pool, the
+  migration pool and the restore pool) opens with `PRAGMA secure_delete = ON`, so freed cells and
+  pages are zeroed: old key wraps after a password change, reissue or recovery,
+  and content after a purge do not stay in free space of the file. No `VACUUM`
+  runs: free space left by versions before this change is not rewritten (no
+  released database had library keyrings yet).
+- Purge (crypto-shredding) runs in the caller's transaction before the profile is
+  deleted: `secure_delete` is switched on, the keyring becomes `shredded` with no
+  wraps, content `data` becomes `NULL`, links are removed, and a `purged` event and
+  a `library_purges` row are written. Documents and versions remain as unreadable
+  tombstones (names stay ciphertext under the destroyed key). Deleting a profile
+  with an active library fails in the `local_profiles_library_guard` trigger;
+  `office_library::profile_delete_blocked` maps that error to «у профілю є
+  захищена бібліотека; видаліть профіль разом з бібліотекою окремою дією».
+  **Known limit C07:** SQLite cannot guarantee physical erasure: the deleted
+  rollback journal of the purge transaction, file-system free blocks and SSD
+  remapping may still hold the wrap and ciphertext. Full-disk encryption of the
+  OS covers this.
+- Session and search. At most one library is unlocked in memory and it locks
+  after 30 minutes without activity. The full-text index is a separate in-memory
+  SQLite database (`sqlite::memory:`, FTS5) built after unlocking: at most 1 MB
+  of text per document and 64 MB in total; text extraction stops at 2000 ZIP
+  entries, 32 MB of XML per document (counted while inflating) or 10 seconds.
+  Locking closes the index, and an index whose build started before a lock is
+  closed instead of installed. The index is updated in the background after an
+  import, an editor save, a generated save and «Зробити поточною»; hidden
+  documents are filtered inside the FTS query (the 100-result cap counts only
+  allowed documents), and the apostrophes ' ’ ʼ ‘ ` are treated as one character.
+  A failed build is reported as `indexError` in `LibraryStatus`; a
+  `library_status` call at least 60 s later, or the next unlock, starts a new
+  build. Every lock, unlock, create, recovery, finished or failed index and
+  change of the damaged list is pushed to the main window as the `library-state`
+  event (payload = `LibraryStatus`).
+- **Deviation В-1 from the protection design:** encrypted content lives in
+  `easywar.db` (`library_blobs.data`), not in separate files. A local backup
+  (`VACUUM INTO`) and a restore therefore carry the library ciphertext together
+  with the key wraps: such a copy opens only with the password or recovery code
+  that was valid when it was made, and restoring an older backup brings back the
+  older wraps (and so the older password). A purge zeroes the freed space with
+  `secure_delete`, but copies made before it (backups, file-system snapshots)
+  keep both the ciphertext and the wraps.
+
 ## Invariants
 
 - Raw source, parsed payload, corrections and approval decisions are separate.
@@ -288,6 +404,9 @@ gate.
 - JSON-bearing columns are validated with SQLite `json_valid`.
 - Cross-table keys prevent a correction, decision or revision from referencing
   a parser version belonging to another report.
+- Office library tables hold no plaintext document content or names; versions,
+  events and purges are append-only, and content is erased only after the
+  keyring is shredded.
 - Tests use a temporary in-memory database and synthetic values only.
 - Application code must use the repository write boundary so domain records and
   matching audit events remain atomic.

@@ -40,6 +40,43 @@ export function deleteLocalProfile(profileId, invokeCommand = invoke) {
   return invokeCommand('delete_local_profile', { profileId });
 }
 
+/**
+ * Початок помилки delete_local_profile, коли в профілю є захищена бібліотека «Робочого
+ * середовища»: звичайне видалення відмовляє, потрібна окрема дія з криптознищенням бібліотеки.
+ */
+export const LIBRARY_DELETE_BLOCKED_PREFIX = 'у профілю є захищена бібліотека';
+
+export function isLibraryDeleteBlocked(error) {
+  const text = typeof error === 'string' ? error : typeof error?.message === 'string' ? error.message : '';
+  return text.trim().toLowerCase().startsWith(LIBRARY_DELETE_BLOCKED_PREFIX);
+}
+
+/** Видаляє профіль разом з бібліотекою: ключі знищуються, вміст стирається (не відновити). */
+export function deleteLocalProfileWithLibrary(profileId, invokeCommand = invoke) {
+  return invokeCommand('delete_local_profile_with_library', { profileId });
+}
+
+/** Друге підтвердження видалення з бібліотекою: користувач має вписати назву профілю. */
+export function purgeConfirmationMatches(typed, displayName) {
+  const clean = value => String(value ?? '').replace(/\s+/g, ' ').trim();
+  return clean(typed) !== '' && clean(typed) === clean(displayName);
+}
+
+/**
+ * Видалення профілю: спершу звичайне; якщо в профілю є захищена бібліотека — питає
+ * `confirmPurge()` (друге підтвердження) і лише тоді видаляє разом з бібліотекою.
+ * → стан профілів або null (користувач відмовився від видалення з бібліотекою).
+ */
+export async function deleteProfileWithLibraryFallback(profileId, { confirmPurge, invokeCommand = invoke }) {
+  try {
+    return await deleteLocalProfile(profileId, invokeCommand);
+  } catch (error) {
+    if (!isLibraryDeleteBlocked(error)) throw error;
+    if (!(await confirmPurge())) return null;
+    return deleteLocalProfileWithLibrary(profileId, invokeCommand);
+  }
+}
+
 export function getWorkspaceTemplates(invokeCommand = invoke) {
   return invokeCommand('get_workspace_templates');
 }
@@ -68,6 +105,16 @@ export function workspaceTemplateLabel(template) {
 
 export function signInLocalProfile(profileId, password, invokeCommand = invoke) {
   return invokeCommand('activate_local_profile', { profileId, password });
+}
+
+/**
+ * «Забули пароль?» на екрані входу: код відновлення бібліотеки «Робочого середовища» задає новий
+ * пароль профілю `profileId`, розблоковує бібліотеку й входить у профіль (Rust: library_recover;
+ * профіль без захищеної бібліотеки — «у профілю немає захищеної бібліотеки»).
+ * → { recoveryCode, status }: новий код показується людині один раз.
+ */
+export function recoverProfileWithCode(profileId, code, newPassword, invokeCommand = invoke) {
+  return invokeCommand('library_recover', { code, newPassword, profileId });
 }
 
 export function getProfileSession(invokeCommand = invoke) {

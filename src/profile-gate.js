@@ -8,6 +8,7 @@ import {
   databaseFileName,
   getLocalProfiles,
   lockLocalProfile,
+  recoverProfileWithCode,
   registerLocalProfile,
   setLocalProfilePassword,
   signInLocalProfile,
@@ -23,8 +24,10 @@ import {
   loginCardNote,
   modulesError,
   passwordError,
+  recoveryFailure,
   slotsForModules,
   validateProfileStep,
+  validateRecoveryStep,
 } from './profile-gate-core.js';
 
 const SKIPPED_TAGS = new Set(['SCRIPT', 'STYLE', 'LINK', 'TEMPLATE', 'NOSCRIPT']);
@@ -120,13 +123,14 @@ export function createProfileGate({ el, avatar, readAvatar }) {
       let failures = 0;
       let blockedUntil = 0;
       let busy = false;
+      let recovering = false;   // «Забули пароль?»: форма коду відновлення замість пароля
 
       function render() {
         const cards = state.profiles.map(profile => el('button', {
           type: 'button',
           class: `ew-gate-user${selected?.id === profile.id ? ' is-selected' : ''}`,
           'aria-pressed': selected?.id === profile.id ? 'true' : 'false',
-          onclick: () => { selected = profile; render(); },
+          onclick: () => { if (busy) return; selected = profile; recovering = false; render(); },
         },
         avatar(profile, 'lg'),
         el('strong', { text: profile.displayName }),
@@ -142,9 +146,9 @@ export function createProfileGate({ el, avatar, readAvatar }) {
 
         show(
           el('h1', { id: 'ew-gate-title', text: 'Вхід' }),
-          el('p', { class: 'ew-gate-lead', text: selected ? 'Введіть пароль, щоб відкрити easyWAR.' : 'Оберіть користувача.' }),
+          el('p', { class: 'ew-gate-lead', text: !selected ? 'Оберіть користувача.' : recovering ? 'Задайте новий пароль кодом відновлення.' : 'Введіть пароль, щоб відкрити easyWAR.' }),
           el('div', { class: 'ew-gate-users' }, cards),
-          selected ? loginForm() : null,
+          selected ? (recovering && selected.hasPassword ? recoveryForm() : loginForm()) : null,
           el('div', { class: 'ew-gate-foot' }, addButton),
         );
       }
@@ -171,7 +175,9 @@ export function createProfileGate({ el, avatar, readAvatar }) {
           confirm ? field('Повторіть пароль', confirm, 'confirm') : null,
           showPasswordToggle(confirm ? [password, confirm] : [password]),
           error,
-          submit);
+          submit,
+          needsPassword ? null : el('div', { class: 'ew-gate-foot' },
+            el('button', { type: 'button', class: 'ew-gate-link', text: 'Забули пароль?', onclick: () => { if (busy) return; recovering = true; render(); } })));
 
         form.addEventListener('submit', async event => {
           event.preventDefault();
@@ -212,8 +218,93 @@ export function createProfileGate({ el, avatar, readAvatar }) {
         return form;
       }
 
+      // «Забули пароль?»: код відновлення бібліотеки «Робочого середовища» задає новий пароль
+      // профілю й одразу входить у нього (library_recover з profileId). Профіль без бібліотеки
+      // ядро відхиляє. Невдалі спроби тут не рахуються в затримку входу: код перевіряє ядро.
+      function recoveryForm() {
+        const code = textInput({ 'data-autofocus': true, 'aria-label': 'Код відновлення' });
+        const password = passwordInput({ 'aria-label': 'Новий пароль' });
+        const confirm = passwordInput({ 'aria-label': 'Повторіть новий пароль' });
+        const error = el('p', { class: 'ew-gate-message', role: 'alert' });
+        const submit = el('button', { type: 'submit', class: 'ew-gate-button', text: 'Задати пароль і увійти' });
+        const form = el('form', { class: 'ew-gate-form', novalidate: true },
+          el('p', { class: 'ew-gate-lead', text: `Код відновлення бібліотеки «Робочого середовища» задає новий пароль профілю «${selected.displayName}»: ним ви й надалі входите в профіль і відкриваєте бібліотеку. Старий код після цього перестає діяти — ви отримаєте новий.` }),
+          field('Код відновлення', code, 'code'),
+          field('Новий пароль', password, 'password', `Від ${PASSWORD_MIN} символів.`),
+          field('Повторіть новий пароль', confirm, 'confirm'),
+          showPasswordToggle([password, confirm]),
+          error,
+          el('div', { class: 'ew-gate-actions' },
+            el('button', { type: 'button', class: 'ew-gate-link', text: 'Назад до входу', onclick: () => { if (busy) return; recovering = false; render(); } }),
+            submit));
+
+        form.addEventListener('submit', async event => {
+          event.preventDefault();
+          if (busy) return;
+          error.textContent = '';
+          const errors = validateRecoveryStep({ code: code.value, password: password.value, confirm: confirm.value });
+          setErrors(form, errors);
+          if (Object.keys(errors).length) return;
+          busy = true;
+          submit.disabled = true;
+          try {
+            const recovered = await recoverProfileWithCode(selected.id, code.value.trim(), password.value);
+            code.value = '';
+            password.value = '';
+            confirm.value = '';
+            if (recovered?.recoveryCode) showNewRecoveryCode(recovered, () => resolve('signed-in'));
+            else resolve('signed-in');
+          } catch (failure) {
+            error.textContent = recoveryFailure(String(failure?.message || failure));
+            password.value = '';
+            confirm.value = '';
+            code.focus();
+          } finally {
+            busy = false;
+            submit.disabled = false;
+          }
+        });
+        return form;
+      }
+
       render();
     });
+  }
+
+  /** Новий код відновлення після «Забули пароль?»: показується один раз, ніде не зберігається. */
+  function showNewRecoveryCode({ recoveryCode, status }, done) {
+    const codeNode = el('p', { class: 'ew-gate-code', text: recoveryCode, tabindex: '0', 'aria-label': 'Новий код відновлення' });
+    const message = el('p', { class: 'ew-gate-hint', role: 'status' });
+    const canCopy = typeof navigator !== 'undefined' && typeof navigator.clipboard?.writeText === 'function';
+    const copy = canCopy ? el('button', {
+      type: 'button',
+      class: 'ew-gate-button ew-gate-button-quiet',
+      text: 'Скопіювати',
+      onclick: async () => {
+        try {
+          await navigator.clipboard.writeText(recoveryCode);
+          message.textContent = 'Код скопійовано. Вставте його туди, де зберігаєте, і очистьте буфер обміну.';
+        } catch {
+          message.textContent = 'Не вдалося скопіювати: виділіть код і скопіюйте вручну (Ctrl+C або ⌘C).';
+        }
+      },
+    }) : null;
+    show(
+      el('h1', { id: 'ew-gate-title', text: 'Новий код відновлення' }),
+      el('p', { class: 'ew-gate-lead', text: status?.state === 'unlocked'
+        ? 'Новий пароль профілю задано, бібліотеку розблоковано.'
+        : 'Новий пароль профілю задано.' }),
+      el('p', { class: 'ew-gate-message', text: 'Код показується лише зараз: EasyWAR його не зберігає й більше не покаже.' }),
+      codeNode,
+      el('ul', { class: 'ew-gate-lines' },
+        el('li', { text: 'Запишіть код на папері й тримайте окремо від цього комп’ютера.' }),
+        el('li', { text: 'Хто має код, може задати новий пароль профілю й відкрити бібліотеку.' }),
+        el('li', { text: 'Попередній код більше не діє.' })),
+      message,
+      el('div', { class: 'ew-gate-actions' },
+        copy,
+        el('button', { type: 'button', class: 'ew-gate-button', text: 'Я записав код — далі', 'data-autofocus': true, onclick: done })),
+    );
   }
 
   // ---------- реєстрація ----------
@@ -273,7 +364,7 @@ export function createProfileGate({ el, avatar, readAvatar }) {
             picker),
           field('Ім’я або позивний', name, 'displayName'),
           field('Посада (необов’язково)', position, 'position'),
-          field('Пароль', password, 'password', `Від ${PASSWORD_MIN} символів. Закриває вхід у застосунок на цьому комп’ютері; файли таблиць не шифрує. Забутий пароль відновити неможливо.`),
+          field('Пароль', password, 'password', `Від ${PASSWORD_MIN} символів. Закриває вхід у застосунок на цьому комп’ютері; файли таблиць не шифрує. Забутий пароль можна задати заново лише кодом відновлення бібліотеки «Робочого середовища».`),
           field('Повторіть пароль', confirm, 'confirm'),
           showPasswordToggle([password, confirm]),
           el('div', { class: 'ew-gate-actions' },

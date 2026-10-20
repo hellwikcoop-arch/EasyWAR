@@ -156,6 +156,42 @@ export function shellMode(editorApp, hasInvoke) {
   return { mode: hasInvoke ? 'desktop' : 'browser', app: null };
 }
 
+// Найдовша назва очікуваного файлу, яку показує оболонка (назва документа бібліотеки — до 120
+// символів, з розширенням трохи більше).
+const MAX_PENDING_NAME_CHARS = 200;
+// Керівні символи й символи зміни напрямку тексту (ними можна підмінити видиму назву).
+const PENDING_NAME_FORBIDDEN = /[\p{Cc}‪-‮⁦-⁩]/gu;
+
+/**
+ * Очікуваний файл з бібліотеки EasyWAR: значення `window.__EW_PENDING_FILE`, яке Rust ставить у
+ * вікні редактора після «Відкрити» в бібліотеці (назва документа рядком або null) → `{ name }`
+ * або null. Приймає й назву, ще раз закодовану як рядок JSON, і об'єкт `{ name }`.
+ */
+export function parsePendingFile(value) {
+  let name = value && typeof value === 'object' && !Array.isArray(value) ? value.name : value;
+  if (typeof name !== 'string') return null;
+  if (name.length >= 2 && name.startsWith('"') && name.endsWith('"')) {
+    try {
+      const decoded = JSON.parse(name);
+      if (typeof decoded === 'string') name = decoded;
+    } catch {
+      // не JSON — це сама назва
+    }
+  }
+  const cleaned = Array.from(name.replace(PENDING_NAME_FORBIDDEN, '')).slice(0, MAX_PENDING_NAME_CHARS).join('').trim();
+  return cleaned ? Object.freeze({ name: cleaned }) : null;
+}
+
+// Редактори, які беруть очікуваний файл лише після «Відкрити…» в їхньому меню (WASM не змінювали);
+// EasyGreen відкриває його сам, щойно таблиця готова.
+const PENDING_BY_MENU = new Set(['easydoc', 'easyslide']);
+
+/** Підказка в смузі вікна редактора про файл з бібліотеки, або null (підказка не потрібна). */
+export function pendingFileNotice(appId, pending) {
+  if (!pending?.name || !PENDING_BY_MENU.has(appId)) return null;
+  return `«${pending.name}» з бібліотеки: натисніть «Відкрити…» у редакторі — файл відкриється без вибору.`;
+}
+
 /** Застосунок з рядка адреси `?app=<id>` або null. */
 export function appFromSearch(search) {
   const id = new URLSearchParams(String(search || '')).get('app');
@@ -190,18 +226,34 @@ export function entryError(entry) {
 
 /**
  * Що повернув mount: необов'язковий об'єкт з `unmount()` (або `destroy()`) — викликається при
- * закритті, і `isDirty()` — чи є незбережені зміни (на додачу до host.setDirty).
+ * закритті, `isDirty()` — чи є незбережені зміни (на додачу до host.setDirty), і `focus()` —
+ * повернути фокус у застосунок (після «Залишитися»); повертає true, якщо застосунок його взяв.
  */
 export function normalizeMounted(result) {
   const value = result && typeof result === 'object' ? result : {};
   const unmount = [value.unmount, value.destroy].find(fn => typeof fn === 'function');
   const isDirty = typeof value.isDirty === 'function' ? value.isDirty : null;
+  const focus = typeof value.focus === 'function' ? value.focus : null;
   return {
     unmount: unmount ? () => unmount.call(value) : () => {},
     isDirty: () => {
       try { return Boolean(isDirty?.call(value)); } catch { return false; }
     },
+    focus: () => {
+      if (!focus) return false;
+      try { focus.call(value); return true; } catch { return false; }
+    },
   };
+}
+
+/**
+ * Редактори «Офісу» (GridCraft, WordCraft, DeckCraft — wgpu у WASM) малюють через WebGL2 або WebGPU.
+ * `support` — { webgl2, webgpu } з перевірки сторінки; повертає пояснення українською, якщо
+ * жодного немає, інакше '' (без перевірки редактор падає з технічним текстом англійською).
+ */
+export function graphicsProblem(support) {
+  if (support?.webgl2 || support?.webgpu) return '';
+  return 'У цьому вікні немає підтримки графіки WebGL2 або WebGPU, потрібної редакторам «Офісу». Оновіть драйвер відеокарти чи системний переглядач вебсторінок або відкрийте EasyWAR на іншому пристрої.';
 }
 
 /** Розширення без крапки, малими літерами, лише латиниця й цифри (як у Rust). */
@@ -260,10 +312,14 @@ export function bytesForInvoke(bytes) {
   return Array.from(view);
 }
 
-/** Uint8Array з Uint8Array, ArrayBuffer, типізованого масиву або масиву чисел. */
+/**
+ * Uint8Array з Uint8Array, ArrayBuffer, типізованого масиву або масиву чисел. ArrayBuffer може
+ * прийти з іншого кадру: invoke головного вікна повертає байти (library_read_version) у своєму
+ * realm, і `instanceof ArrayBuffer` у вкладеному кадрі для них хибне.
+ */
 export function toBytes(bytes) {
   if (bytes instanceof Uint8Array) return bytes;
-  if (bytes instanceof ArrayBuffer) return new Uint8Array(bytes);
+  if (bytes instanceof ArrayBuffer || Object.prototype.toString.call(bytes) === '[object ArrayBuffer]') return new Uint8Array(bytes);
   if (ArrayBuffer.isView(bytes)) return new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   if (Array.isArray(bytes)) return Uint8Array.from(bytes);
   throw new Error('Очікуються байти файлу (Uint8Array або ArrayBuffer).');

@@ -18,6 +18,7 @@ function fakeHost() {
   return {
     calls,
     async openFile(options) { calls.push(['openFile', options.extensions[0]]); return { handle: `h${next++}`, name: 'синтетика.pptx', bytes: new Uint8Array([80, 75]) }; },
+    async saveFile({ handle, bytes }) { calls.push(['saveFile', handle, bytes.length]); return { handle, name: 'синтетика.pptx' }; },
     async saveFileAs({ bytes, suggestedName, extensions }) { calls.push(['saveFileAs', suggestedName, extensions[0], bytes.length]); return { handle: `h${next++}`, name: suggestedName }; },
     async closeFile(handle) { calls.push(['closeFile', handle]); },
     setDirty(flag) { calls.push(['setDirty', flag]); },
@@ -46,6 +47,55 @@ test('збереження: презентація знімає позначку
   assert.deepEqual(host.calls, [['saveFileAs', 'звіт.pptx', 'pptx', 3], ['saveFileAs', 'звіт.pdf', 'pdf', 1], ['closeFile', 'h2']]);
   assert.match(messages[0], /Збережено: звіт.pptx/);
   assert.match(messages.at(-1), /не зберігає/);
+});
+
+test('«Зберегти» під назвою відкритої презентації пише в той самий файл (бібліотека — нова версія)', async () => {
+  const host = fakeHost();
+  const messages = [];
+  const bridge = createEasySlideHost(host, (text) => messages.push(text));
+  await bridge.open('presentation');
+  assert.equal(await bridge.save('синтетика.pptx', new Uint8Array([1, 2])), true);
+  assert.equal(await bridge.save('Синтетика.PPTX', new Uint8Array([3])), true);
+  // Інший формат — «Зберегти як…»; далі редактор працює з новим файлом .deckcraft.
+  assert.equal(await bridge.save('синтетика.deckcraft', new Uint8Array([4])), true);
+  assert.equal(await bridge.save('синтетика.pptx', new Uint8Array([5])), true);
+  assert.deepEqual(host.calls, [
+    ['openFile', 'pptx'],
+    ['saveFile', 'h1', 2],
+    ['saveFile', 'h1', 1],
+    ['saveFileAs', 'синтетика.deckcraft', 'deckcraft', 1],
+    ['closeFile', 'h1'],
+    ['saveFileAs', 'синтетика.pptx', 'pptx', 1],
+    ['closeFile', 'h2'],
+  ]);
+  assert.equal(messages[0], 'Збережено: синтетика.pptx');
+});
+
+test('інша назва — «Зберегти як…»; помилка збереження в той самий файл не закриває його', async () => {
+  const host = fakeHost();
+  let locked = true;
+  host.saveFile = async ({ handle, bytes }) => {
+    host.calls.push(['saveFile', handle, bytes.length]);
+    if (locked) throw new Error('бібліотека заблокована: розблокуйте її в головному вікні й натисніть «Зберегти» ще раз');
+    return { handle, name: 'синтетика.pptx' };
+  };
+  const messages = [];
+  const bridge = createEasySlideHost(host, (text) => messages.push(text));
+  await bridge.open('presentation');
+  assert.equal(await bridge.save('синтетика.pptx', new Uint8Array([1])), false);
+  assert.match(messages.at(-1), /^Не вдалося зберегти: бібліотека заблокована/);
+  locked = false;
+  assert.equal(await bridge.save('синтетика.pptx', new Uint8Array([2])), true);
+  assert.equal(await bridge.save('копія.pptx', new Uint8Array([3])), true);
+  assert.equal(await bridge.save('копія.pptx', new Uint8Array([4])), true);
+  assert.deepEqual(host.calls, [
+    ['openFile', 'pptx'],
+    ['saveFile', 'h1', 1],
+    ['saveFile', 'h1', 1],
+    ['saveFileAs', 'копія.pptx', 'pptx', 1],
+    ['closeFile', 'h1'],
+    ['saveFile', 'h2', 1],
+  ]);
 });
 
 test('скасування й помилки не ламають редактор', async () => {

@@ -14,14 +14,22 @@ use std::{
 
 use tauri::{
     webview::{DownloadEvent, NewWindowResponse},
-    App, AppHandle, LogicalPosition, LogicalSize, Manager, Url, WebviewUrl, WebviewWindow,
+    App, AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Url, WebviewUrl, WebviewWindow,
     WebviewWindowBuilder, Window, WindowEvent,
 };
 
-use crate::office_files::{editor_init_script, EDITOR_WINDOW_LABEL};
+use crate::office_files::{editor_init_script, OfficeFileHandles, EDITOR_WINDOW_LABEL};
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 
 pub const MAIN_WINDOW_LABEL: &str = "main";
+/// Подія головному вікну: вікно редактора закрилося (`{ app }` — його застосунок).
+/// Вкладка «Бібліотека» за нею оновлює перелік і стани зв'язків.
+pub const EDITOR_CLOSED_EVENT: &str = "office-editor-closed";
+
+#[derive(Clone, serde::Serialize)]
+struct EditorClosed {
+    app: &'static str,
+}
 
 /// Returns `true` for URLs that belong to the application itself and may be
 /// loaded inside the webview (launcher, modules, IPC, blobs, dev server).
@@ -146,15 +154,37 @@ pub fn create_main_window(app: &App) -> tauri::Result<()> {
 
 /// Opens (or brings forward) the separate window for an «Офіс» editor. It covers the main
 /// window exactly, so the user still sees one application screen; its own capability
-/// (`capabilities/office-editor.json`) allows only the `office_*` commands.
+/// (`capabilities/office-editor.json`) allows only the `office_*` commands. `pending` is the
+/// name of a library document waiting for this editor (`window.__EW_PENDING_FILE`); the
+/// editor app is recorded so `office_open_file` hands the document only to that app.
 pub fn open_office_editor(
     app: &AppHandle,
     main: &WebviewWindow,
     app_id: &'static str,
+    pending: Option<&str>,
 ) -> tauri::Result<()> {
     if let Some(editor) = app.get_webview_window(EDITOR_WINDOW_LABEL) {
         return editor.set_focus();
     }
+    let handles = app.try_state::<OfficeFileHandles>();
+    if let Some(handles) = &handles {
+        handles.set_editor_window_app(Some(app_id));
+    }
+    let built = build_office_editor(app, main, app_id, pending);
+    if built.is_err() && app.get_webview_window(EDITOR_WINDOW_LABEL).is_none() {
+        if let Some(handles) = &handles {
+            handles.set_editor_window_app(None);
+        }
+    }
+    built
+}
+
+fn build_office_editor(
+    app: &AppHandle,
+    main: &WebviewWindow,
+    app_id: &'static str,
+    pending: Option<&str>,
+) -> tauri::Result<()> {
     let scale = main.scale_factor()?;
     let size: LogicalSize<f64> = main.inner_size()?.to_logical(scale);
     let position: LogicalPosition<f64> = main.outer_position()?.to_logical(scale);
@@ -168,7 +198,7 @@ pub fn open_office_editor(
     .min_inner_size(1024.0, 700.0)
     .position(position.x, position.y)
     .maximized(main.is_maximized()?)
-    .initialization_script(editor_init_script(app_id))
+    .initialization_script(editor_init_script(app_id, pending))
     .on_navigation(|url| {
         if is_app_url(url) {
             true
@@ -191,6 +221,12 @@ pub fn open_office_editor(
     editor.set_focus()
 }
 
+/// Script the system close button runs in the editor page: the shell asks about unsaved
+/// changes and closes the window itself through `office_editor_close`; a page whose shell has
+/// not loaded (still starting, or its script failed) closes at once through the same command,
+/// so the window never stays stuck open without a working «← Офіс».
+pub(crate) const EDITOR_CLOSE_SCRIPT: &str = "(window.EW_WORKSPACE && window.EW_WORKSPACE.requestClose) ? window.EW_WORKSPACE.requestClose() : (window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke('office_editor_close'));";
+
 /// The system close button of the editor asks the page first (unsaved changes); the page
 /// closes the window itself through `office_editor_close`. If the page cannot be asked, the
 /// window closes. Closing the main window closes the editor too, as before with the iframe.
@@ -200,16 +236,28 @@ pub fn on_window_event(window: &Window, event: &WindowEvent) {
             let asked = window
                 .app_handle()
                 .get_webview_window(EDITOR_WINDOW_LABEL)
-                .is_some_and(|editor| {
-                    editor
-                        .eval("window.EW_WORKSPACE && window.EW_WORKSPACE.requestClose();")
-                        .is_ok()
-                });
+                .is_some_and(|editor| editor.eval(EDITOR_CLOSE_SCRIPT).is_ok());
             if asked {
                 api.prevent_close();
             }
         }
         (EDITOR_WINDOW_LABEL, WindowEvent::Destroyed) => {
+            // The pending library document and the editor's file handles die with the
+            // window: the next editor starts from a clean state.
+            let mut closed_app = None;
+            if let Some(handles) = window.app_handle().try_state::<OfficeFileHandles>() {
+                closed_app = handles.editor_window_app();
+                handles.clear_pending();
+                handles.set_editor_window_app(None);
+                handles.forget_webview(EDITOR_WINDOW_LABEL);
+            }
+            if let Some(app) = closed_app {
+                let _ = window.app_handle().emit_to(
+                    MAIN_WINDOW_LABEL,
+                    EDITOR_CLOSED_EVENT,
+                    EditorClosed { app },
+                );
+            }
             if let Some(main) = window.app_handle().get_webview_window(MAIN_WINDOW_LABEL) {
                 let _ = main.set_focus();
             }
@@ -340,6 +388,16 @@ mod tests {
 
     fn url(value: &str) -> Url {
         Url::parse(value).expect("valid test URL")
+    }
+
+    #[test]
+    fn close_button_asks_the_shell_or_closes_a_page_without_one() {
+        // Оболонка питає про незбережені зміни; без неї вікно закривається тією ж командою,
+        // яку дозволяє capability редактора, і не лишається відкритим без «← Офіс».
+        assert!(EDITOR_CLOSE_SCRIPT.contains("window.EW_WORKSPACE.requestClose()"));
+        assert!(EDITOR_CLOSE_SCRIPT.contains("invoke('office_editor_close')"));
+        assert!(include_str!("../capabilities/office-editor.json")
+            .contains("allow-office-editor-close"));
     }
 
     #[test]

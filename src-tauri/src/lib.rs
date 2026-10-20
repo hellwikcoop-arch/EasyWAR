@@ -12,6 +12,8 @@ pub mod model_install;
 pub mod module_source;
 pub mod module_source_selection;
 pub mod office_files;
+pub mod office_library;
+pub mod office_sources;
 pub mod phone_export;
 pub mod position_templates;
 pub mod profile_table;
@@ -46,6 +48,11 @@ use local_model::{
 };
 use local_profiles::{Branch, LocalProfileStore, LocalProfilesState};
 use model_install::{Finalized, InstallController, InstallEvent, InstallInfo};
+use office_library::{
+    LibraryError, LibraryItem, LibraryKeys, LibrarySession, LibraryState, LibraryStatus,
+    LibraryStore, LibraryVersion,
+};
+use office_sources::{SourceRequest, Sources};
 use phone_export::PhoneDashboard;
 use position_templates::PositionDatabaseTemplate;
 use repository::{
@@ -58,13 +65,14 @@ use signal_daemon::{SignalAccountSummary, SignalGroupSummary, SignalLinkStart};
 use signal_policy::SignalAdapterConfig;
 use signal_session::{SignalReceiveController, SignalSessionStatus, SignalSessionSummary};
 use signal_settings::SignalSettingsStore;
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+use sqlx::sqlite::SqlitePoolOptions;
 use std::{
     io::Read,
     path::{Path, PathBuf},
+    sync::Arc,
     time::Duration,
 };
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
 use update_settings::{AutoUpdateSettings, AutoUpdateStore};
 use workspace_templates::{WorkspaceTemplateStore, WorkspaceTemplatesState};
@@ -435,15 +443,22 @@ async fn get_local_profiles(
 /// створюються одним кроком, а новий користувач одразу входить у свій профіль.
 /// Профілю без пароля цей шлях не створює.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn register_local_profile(
+    app: tauri::AppHandle,
     profiles: tauri::State<'_, LocalProfileStore>,
     session: tauri::State<'_, ProfileSession>,
+    library: tauri::State<'_, LibrarySession>,
+    handles: tauri::State<'_, office_files::OfficeFileHandles>,
     display_name: String,
     password: String,
     position: Option<String>,
     avatar_data_url: Option<String>,
     modules: Vec<String>,
 ) -> Result<LocalProfilesState, String> {
+    // Новий користувач одразу входить у свій профіль: вікно редактора з документом
+    // попереднього профілю спершу треба закрити.
+    ensure_editor_closed(&app, &handles)?;
     let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
     let profile_id = local_profiles::generate_profile_id(&display_name, &now);
     let state = profiles
@@ -460,7 +475,10 @@ async fn register_local_profile(
         )
         .await
         .map_err(|error| error.to_string())?;
+    // Новий користувач не успадковує розблоковану бібліотеку попереднього.
+    lock_library(&library, &handles);
     session.set(Some(profile_id));
+    notify_library_state(&app);
     Ok(state)
 }
 
@@ -499,13 +517,22 @@ async fn rename_local_profile(
 /// 10 хв); перший правильний пароль скидає лічильник. Лічильник лише в пам'яті процесу
 /// і спільний із підтвердженням чинного пароля в `set_local_profile_password`.
 /// Профіль без пароля, як і раніше, приймає будь-який пароль.
+/// Поки відкрите вікно редактора, перейти в інший профіль не можна: у вікні може бути
+/// розшифрований документ бібліотеки поточного.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn activate_local_profile(
+    app: tauri::AppHandle,
     profiles: tauri::State<'_, LocalProfileStore>,
     session: tauri::State<'_, ProfileSession>,
+    library: tauri::State<'_, LibrarySession>,
+    handles: tauri::State<'_, office_files::OfficeFileHandles>,
     profile_id: String,
     password: Option<String>,
 ) -> Result<LocalProfilesState, String> {
+    if session.get().as_deref() != Some(profile_id.as_str()) {
+        ensure_editor_closed(&app, &handles)?;
+    }
     if !profiles
         .verify_password(&profile_id, password.as_deref().unwrap_or(""))
         .await
@@ -518,7 +545,12 @@ async fn activate_local_profile(
         .activate(&profile_id, &now)
         .await
         .map_err(|error| error.to_string())?;
+    // Перехід в інший профіль блокує бібліотеку попереднього.
+    if library.unlocked_profile().as_deref() != Some(profile_id.as_str()) {
+        lock_library(&library, &handles);
+    }
     session.set(Some(profile_id));
+    notify_library_state(&app);
     Ok(state)
 }
 
@@ -528,20 +560,30 @@ fn get_profile_session(session: tauri::State<'_, ProfileSession>) -> Option<Stri
     session.get()
 }
 
+/// Вихід із профілю. Поки відкрите вікно редактора (у ньому може бути розшифрований
+/// документ бібліотеки), вийти не можна: спершу його треба закрити.
 #[tauri::command]
 fn lock_local_profile(
+    app: tauri::AppHandle,
     session: tauri::State<'_, ProfileSession>,
     selections: tauri::State<'_, module_source_selection::SourceSelections>,
     model: tauri::State<'_, LocalModelRuntime>,
     installer: tauri::State<'_, InstallController>,
-) {
+    library: tauri::State<'_, LibrarySession>,
+    handles: tauri::State<'_, office_files::OfficeFileHandles>,
+) -> Result<(), String> {
+    ensure_editor_closed(&app, &handles)?;
     session.set(None);
+    // Вихід із профілю блокує його бібліотеку: ключі й індекс знищуються.
+    lock_library(&library, &handles);
+    notify_library_state(&app);
     // Огляди таблиць для модулів належать сеансу: після виходу їх не прочитати.
     selections.clear();
     // A locked profile never leaves a model answering or holding memory,
     // and never keeps downloading in the background.
     model.stop();
     installer.cancel();
+    Ok(())
 }
 
 fn local_model_signed_in(session: &ProfileSession) -> Result<(), String> {
@@ -876,6 +918,7 @@ async fn update_local_profile_details(
 #[tauri::command]
 async fn set_local_profile_password(
     profiles: tauri::State<'_, LocalProfileStore>,
+    library: tauri::State<'_, LibraryStore>,
     session: tauri::State<'_, ProfileSession>,
     profile_id: String,
     current_password: Option<String>,
@@ -891,12 +934,41 @@ async fn set_local_profile_password(
         .map_err(|error| error.to_string())?;
     local_profiles::authorize_password_change(has_password, session.get().as_deref(), &profile_id)
         .map_err(|error| error.to_string())?;
+    // Ключ захищеної бібліотеки загорнуто паролем профілю: новий пароль загортає його
+    // заново (повільний KDF — до транзакції), а запис іде разом із новим хешем входу.
+    let rewrap = match (
+        library
+            .has_active_keyring(&profile_id)
+            .await
+            .map_err(|error| error.to_string())?,
+        new_password.as_deref(),
+    ) {
+        (true, Some(new)) => {
+            let current = current_password.as_deref().ok_or_else(|| {
+                local_profiles::LocalProfileError::LibraryNeedsCurrentPassword.to_string()
+            })?;
+            local_profiles::validate_password(new).map_err(|error| error.to_string())?;
+            if !profiles
+                .verify_password(&profile_id, current)
+                .await
+                .map_err(|error| error.to_string())?
+            {
+                return Err(local_profiles::LocalProfileError::WrongPassword.to_string());
+            }
+            library
+                .prepare_password_rewrap(&profile_id, current, new)
+                .await
+                .map_err(|error| error.to_string())?
+        }
+        _ => None,
+    };
     let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
     let state = profiles
         .set_password(
             &profile_id,
             current_password.as_deref(),
             new_password.as_deref(),
+            rewrap.as_ref(),
             &now,
         )
         .await
@@ -1055,18 +1127,51 @@ async fn office_bound_tables(profiles: &LocalProfileStore) -> Result<Vec<PathBuf
 
 /// Вікно вибору файла для застосунку «Офісу» (EasyGreen, EasyDoc, EasySlide). Повертає
 /// номер, назву й байти; `None` — користувач закрив вікно. Потрібен активний профіль.
+/// Якщо головне вікно передало цьому застосунку документ бібліотеки (`library_open_in_editor`),
+/// перший виклик віддає його без вікна вибору; номер такого файлу пише нові версії.
 #[tauri::command]
 async fn office_open_file(
     app: tauri::AppHandle,
     webview: tauri::Webview,
     session: tauri::State<'_, ProfileSession>,
     handles: tauri::State<'_, office_files::OfficeFileHandles>,
+    store: tauri::State<'_, LibraryStore>,
+    library: tauri::State<'_, LibrarySession>,
     options: OfficeFileDialog,
 ) -> Result<Option<OfficeOpenedFile>, String> {
     office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
     let profile_id = active_profile_id(&session)?;
     let extensions = office_files::normalize_extensions(&options.extensions)
         .map_err(|error| error.to_string())?;
+    let pending = handles
+        .editor_window_app()
+        .and_then(|app_id| handles.take_pending(&profile_id, app_id, &extensions));
+    if let Some(pending) = pending {
+        // Відкриття у вікні редактора не продовжує час до автоблокування.
+        let keys = library
+            .keys_quiet(&profile_id)
+            .map_err(|error| error.to_string())?;
+        let (version, mut bytes) = store
+            .read_version(&keys, &pending.version_id)
+            .await
+            .map_err(|error| error.to_string())?;
+        let handle = handles.remember_library(
+            &profile_id,
+            webview.label(),
+            office_files::LibraryTarget {
+                item_id: version.item_id,
+                base_version_id: version.id,
+                ext: version.ext,
+                name: pending.name.clone(),
+                library_tag: keys.handle_tag(),
+            },
+        );
+        return Ok(Some(OfficeOpenedFile {
+            handle,
+            name: pending.name,
+            bytes: std::mem::take(&mut *bytes),
+        }));
+    }
     let title = office_files::clean_label(options.title.as_deref(), "Відкрити файл");
     let filter_name = office_files::clean_label(options.filter_name.as_deref(), "Документи");
     let selected = tauri::async_runtime::spawn_blocking(move || {
@@ -1085,14 +1190,12 @@ async fn office_open_file(
     let path = selected.into_path().map_err(|error| error.to_string())?;
     let bytes = {
         let path = path.clone();
-        tauri::async_runtime::spawn_blocking(move || -> Result<Vec<u8>, String> {
-            let size = std::fs::metadata(&path)
-                .map_err(|error| error.to_string())?
-                .len();
-            if size > office_files::MAX_FILE_BYTES as u64 {
-                return Err(office_files::OfficeFileError::TooLarge.to_string());
-            }
-            std::fs::read(&path).map_err(|error| error.to_string())
+        tauri::async_runtime::spawn_blocking(move || {
+            office_files::read_regular_file(
+                &path,
+                office_files::MAX_FILE_BYTES,
+                &office_files::OfficeFileError::TooLarge.to_string(),
+            )
         })
         .await
         .map_err(|error| error.to_string())??
@@ -1108,21 +1211,85 @@ async fn office_open_file(
 
 /// «Зберегти»: записує байти у файл, раніше відкритий або збережений за цим номером.
 /// Таблицю, прив'язану до профілю, так не перезаписати: лише «Зберегти як…» в інший файл.
+/// Номер документа бібліотеки додає нову поточну версію (`edited` після згенерованої
+/// чи вже правленої, інакше `saved`); той самий вміст нової версії не створює. Поки
+/// бібліотека заблокована, збереження відмовляє, а номер лишається: після нового
+/// розблокування тієї самої бібліотеки «Зберегти» спрацює. Лише нова версія продовжує
+/// час до автоблокування.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn office_save_file(
+    app: tauri::AppHandle,
     webview: tauri::Webview,
     profiles: tauri::State<'_, LocalProfileStore>,
     session: tauri::State<'_, ProfileSession>,
     handles: tauri::State<'_, office_files::OfficeFileHandles>,
+    store: tauri::State<'_, LibraryStore>,
+    library: tauri::State<'_, LibrarySession>,
     handle: String,
     bytes: Vec<u8>,
 ) -> Result<OfficeSavedFile, String> {
     office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
     let profile_id = active_profile_id(&session)?;
     office_files::check_size(&bytes).map_err(|error| error.to_string())?;
-    let path = handles
-        .path(&profile_id, webview.label(), &handle)
-        .map_err(|error| error.to_string())?;
+    let path = match handles
+        .target(&profile_id, webview.label(), &handle)
+        .map_err(|error| error.to_string())?
+    {
+        office_files::HandleTarget::Disk(path) => path,
+        office_files::HandleTarget::Library(target) => {
+            office_files::ensure_library_format(&target.ext, &bytes)
+                .map_err(|error| error.to_string())?;
+            let keys = library
+                .keys_quiet(&profile_id)
+                .map_err(|_| office_files::OfficeFileError::LibraryLocked.to_string())?;
+            // Номер прив'язаний до ключа бібліотеки, з якої відкрито документ.
+            if keys.handle_tag() != target.library_tag {
+                return Err(office_files::OfficeFileError::UnknownHandle.to_string());
+            }
+            let base = store
+                .version(&keys, &target.base_version_id)
+                .await
+                .map_err(|error| error.to_string())?;
+            // Правка згенерованого документа лишається прив'язаною до тих самих даних джерела.
+            let (origin, fingerprint) = match base.origin {
+                office_library::Origin::Generated | office_library::Origin::Edited => (
+                    office_library::Origin::Edited,
+                    base.source_fingerprint.clone(),
+                ),
+                _ => (office_library::Origin::Saved, None),
+            };
+            let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
+            let saved = store
+                .save_version(
+                    &keys,
+                    &target.item_id,
+                    office_library::NewVersion {
+                        ext: &target.ext,
+                        bytes: &bytes,
+                        origin,
+                        parent_version_id: Some(&base.id),
+                        source_fingerprint: fingerprint.as_deref(),
+                        make_current: true,
+                    },
+                    &now,
+                )
+                .await
+                .map_err(|error| error.to_string())?;
+            if let Some(version) = saved {
+                library.touch();
+                library.clear_damaged(&profile_id, &target.item_id);
+                refresh_library_item(&app, &profile_id, &target.item_id);
+                handles
+                    .set_library_base(&profile_id, webview.label(), &handle, &version.id)
+                    .map_err(|error| error.to_string())?;
+            }
+            return Ok(OfficeSavedFile {
+                handle,
+                name: target.name,
+            });
+        }
+    };
     office_files::ensure_not_protected(&path, &office_bound_tables(&profiles).await?)
         .map_err(|error| error.to_string())?;
     let name = office_files::file_name(&path);
@@ -1228,8 +1395,9 @@ async fn weather_online_search(name: String) -> Result<Vec<weather_online::Weath
 
 /// Головне вікно відкриває застосунок «Офісу» в окремому вікні редактора (F-01): код
 /// редактора не бачить команд EasyWAR, крім `office_*`. Відкрите вікно лише виводиться наперед.
+/// Асинхронна команда: нове вікно не створюють із синхронної (на Windows це блокує цикл подій).
 #[tauri::command]
-fn workspace_open_editor(
+async fn workspace_open_editor(
     app: tauri::AppHandle,
     window: tauri::WebviewWindow,
     app_id: String,
@@ -1238,7 +1406,8 @@ fn workspace_open_editor(
         return Err("редактор відкривається лише з головного вікна".to_owned());
     }
     let app_id = office_files::editor_app(&app_id).map_err(|error| error.to_string())?;
-    desktop_shell::open_office_editor(&app, &window, app_id).map_err(|error| error.to_string())
+    desktop_shell::open_office_editor(&app, &window, app_id, None)
+        .map_err(|error| error.to_string())
 }
 
 /// Вікно редактора закриває саме себе (після підтвердження незбережених змін в оболонці).
@@ -1246,6 +1415,1028 @@ fn workspace_open_editor(
 fn office_editor_close(window: tauri::WebviewWindow) -> Result<(), String> {
     office_files::ensure_editor_window(window.label()).map_err(|error| error.to_string())?;
     window.destroy().map_err(|error| error.to_string())
+}
+
+// --- Захищена бібліотека «Офісу» (office_library, контракт library_*) -------------------
+//
+// Усі команди — лише з головного вікна (capability `default.json`). Крім стану, створення,
+// розблокування й відновлення, кожна потребує бібліотеки, розблокованої для профілю сесії;
+// інакше — помилка «бібліотека заблокована…». Паролі перевіряються тим самим обмежувачем
+// спроб, що й вхід у профіль, і лише потім іде повільний KDF бібліотеки.
+
+/// Блокує бібліотеку й прибирає документ, що чекав на вікно редактора. Відкрите вікно
+/// редактора лишається: його документ збережеться після нового розблокування.
+fn lock_library(library: &LibrarySession, handles: &office_files::OfficeFileHandles) {
+    library.lock();
+    handles.clear_pending();
+}
+
+/// Відмова змінити профіль сесії, поки відкрите вікно редактора.
+const EDITOR_OPEN_MESSAGE: &str = "спершу закрийте вікно редактора";
+
+/// Чи відкрите (або ще закривається) вікно редактора «Офісу».
+fn editor_open(app: &tauri::AppHandle, handles: &office_files::OfficeFileHandles) -> bool {
+    app.get_webview_window(office_files::EDITOR_WINDOW_LABEL)
+        .is_some()
+        || handles.editor_window_app().is_some()
+}
+
+/// Вихід із профілю, перехід в інший, реєстрація й видалення профілю чекають, поки
+/// закриють вікно редактора: у ньому може бути розшифрований документ бібліотеки
+/// поточного профілю.
+fn ensure_editor_closed(
+    app: &tauri::AppHandle,
+    handles: &office_files::OfficeFileHandles,
+) -> Result<(), String> {
+    if editor_open(app, handles) {
+        Err(EDITOR_OPEN_MESSAGE.to_owned())
+    } else {
+        Ok(())
+    }
+}
+
+/// Подія для головного вікна з новим станом бібліотеки (той самий JSON, що й `library_status`).
+const LIBRARY_STATE_EVENT: &str = "library-state";
+/// Повтор невдалої побудови індексу вмісту — не раніше ніж за хвилину.
+const LIBRARY_INDEX_RETRY: Duration = Duration::from_secs(60);
+
+/// Черга подій `library-state`: кожна обчислює стан у момент надсилання, тож остання
+/// подія завжди показує найсвіжіший стан.
+#[derive(Default)]
+struct LibraryStateEvents(tokio::sync::Mutex<()>);
+
+/// Надсилає головному вікну `library-state` (у фоні: можна викликати з будь-якого місця).
+fn notify_library_state(app: &tauri::AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let Some(events) = app.try_state::<LibraryStateEvents>() else {
+            return;
+        };
+        let _turn = events.0.lock().await;
+        let store = app.state::<LibraryStore>();
+        let session = app.state::<ProfileSession>();
+        let library = app.state::<LibrarySession>();
+        match library_status_now(&store, &session, &library).await {
+            Ok(status) => {
+                if let Err(error) = app.emit_to(
+                    desktop_shell::MAIN_WINDOW_LABEL,
+                    LIBRARY_STATE_EVENT,
+                    status,
+                ) {
+                    eprintln!("EasyWAR: не вдалося надіслати стан бібліотеки: {error}");
+                }
+            }
+            Err(error) => eprintln!("EasyWAR: не вдалося прочитати стан бібліотеки: {error}"),
+        }
+    });
+}
+
+/// Профіль сесії й ключі його розблокованої бібліотеки.
+fn library_keys(
+    session: &ProfileSession,
+    library: &LibrarySession,
+) -> Result<(String, Arc<LibraryKeys>), String> {
+    let profile_id = session
+        .get()
+        .ok_or_else(|| LibraryError::Locked.to_string())?;
+    let keys = library
+        .keys(&profile_id)
+        .map_err(|error| error.to_string())?;
+    Ok((profile_id, keys))
+}
+
+async fn library_status_now(
+    store: &LibraryStore,
+    session: &ProfileSession,
+    library: &LibrarySession,
+) -> Result<LibraryStatus, String> {
+    store
+        .status(session.get().as_deref(), library)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// Пароль профілю сесії через обмежувач спроб входу (до KDF бібліотеки).
+async fn verify_library_password(
+    profiles: &LocalProfileStore,
+    profile_id: &str,
+    password: &str,
+) -> Result<(), String> {
+    if profiles
+        .verify_password(profile_id, password)
+        .await
+        .map_err(|error| error.to_string())?
+    {
+        Ok(())
+    } else {
+        Err(LibraryError::WrongPassword.to_string())
+    }
+}
+
+/// Тимчасовий індекс вмісту будується у фоні; блокування бібліотеки його зупиняє.
+fn start_library_index(app: &tauri::AppHandle, profile_id: String) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let store = app.state::<LibraryStore>();
+        let session = app.state::<LibrarySession>();
+        if let Err(error) = store.run_index_build(&session, &profile_id).await {
+            eprintln!("EasyWAR: не вдалося побудувати пошуковий індекс бібліотеки: {error}");
+        }
+    });
+}
+
+/// Розблоковує бібліотеку ключами, отриманими після повільного KDF, і починає індекс,
+/// лише якщо з епохи `epoch` (запам'ятованої до KDF) бібліотеку не блокували й у профіль
+/// ключів досі ввійдено: блокування, вихід із профілю чи перехід в інший під час KDF
+/// мають силу (тоді ключі знищуються). `true` — розблоковано.
+fn install_library_keys(
+    app: &tauri::AppHandle,
+    library: &LibrarySession,
+    handles: &office_files::OfficeFileHandles,
+    session: &ProfileSession,
+    epoch: u64,
+    keys: LibraryKeys,
+) -> bool {
+    let profile_id = keys.profile_id().to_owned();
+    let installed = library
+        .unlock_if(epoch, keys, || {
+            session.get().as_deref() == Some(profile_id.as_str())
+        })
+        .is_some();
+    if installed {
+        handles.clear_pending();
+        start_library_index(app, profile_id);
+    }
+    installed
+}
+
+/// Після зміни поточної версії документа у фоні оновлює його текст в індексі вмісту
+/// й перелік пошкоджених (тоді ж перевіряються й інші пошкоджені: той самий вміст,
+/// збережений наново, відновлює їх). Блокування бібліотеки зупиняє оновлення.
+fn refresh_library_item(app: &tauri::AppHandle, profile_id: &str, item_id: &str) {
+    let app = app.clone();
+    let profile_id = profile_id.to_owned();
+    let item_id = item_id.to_owned();
+    tauri::async_runtime::spawn(async move {
+        let store = app.state::<LibraryStore>();
+        let session = app.state::<LibrarySession>();
+        let mut items = vec![item_id.clone()];
+        if let Some(index) = session.index_status(&profile_id) {
+            items.extend(index.damaged.into_iter().filter(|id| *id != item_id));
+        }
+        for item in items {
+            if let Err(error) = store.refresh_item(&session, &profile_id, &item).await {
+                if session.unlocked_profile().as_deref() == Some(profile_id.as_str()) {
+                    eprintln!("EasyWAR: не вдалося оновити документ в індексі бібліотеки: {error}");
+                }
+                return;
+            }
+        }
+    });
+}
+
+/// Стан після дії, яка вже записана в базу (створення, відновлення): якщо його не
+/// вдалося прочитати, команда все одно повертає код відновлення зі спрощеним станом.
+async fn library_status_after_commit(
+    store: &LibraryStore,
+    session: &ProfileSession,
+    library: &LibrarySession,
+    profile_id: &str,
+    has_recovery: bool,
+) -> LibraryStatus {
+    // Відновлення з екрана входу під чужим сеансом (інший профіль увійшов під час Argon2):
+    // відповідь стосується профілю, чий код прийнято, а не поточного сеансу.
+    if session.get().as_deref() != Some(profile_id) {
+        let mut status = LibraryStatus::plain(LibraryState::Locked, Some(profile_id));
+        status.has_recovery = has_recovery;
+        return status;
+    }
+    match library_status_now(store, session, library).await {
+        Ok(status) => status,
+        Err(error) => {
+            eprintln!("EasyWAR: не вдалося прочитати стан бібліотеки: {error}");
+            let state = if library.unlocked_profile().as_deref() == Some(profile_id) {
+                LibraryState::Unlocked
+            } else {
+                LibraryState::Locked
+            };
+            let mut status = LibraryStatus::plain(state, Some(profile_id));
+            status.has_recovery = has_recovery;
+            status
+        }
+    }
+}
+
+fn library_now() -> String {
+    Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true)
+}
+
+/// Розширення файлів, які можна додати до бібліотеки.
+const LIBRARY_IMPORT_EXTENSIONS: [&str; 5] = ["xlsx", "csv", "docx", "txt", "pptx"];
+
+/// Читає звичайний файл лише для читання, не більше 256 МБ.
+fn read_library_file(path: &Path) -> Result<Vec<u8>, String> {
+    let bytes = office_files::read_regular_file(
+        path,
+        office_library::MAX_DOCUMENT_BYTES,
+        &LibraryError::TooLarge.to_string(),
+    )?;
+    if bytes.is_empty() {
+        return Err(office_files::OfficeFileError::Empty.to_string());
+    }
+    Ok(bytes)
+}
+
+/// Вікно збереження копії з бібліотеки: шлях без перезапису наявного файла. `None` — закрили.
+async fn library_save_dialog(
+    app: tauri::AppHandle,
+    profiles: &LocalProfileStore,
+    title: &'static str,
+    suggested_name: String,
+    ext: String,
+) -> Result<Option<phone_export::SaveTarget>, String> {
+    let dialog_ext = ext.clone();
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title(title)
+            .set_file_name(suggested_name)
+            .add_filter(format!(".{dialog_ext}"), &[dialog_ext.as_str()])
+            .blocking_save_file()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let mut target = phone_export::save_target(
+        selected.into_path().map_err(|error| error.to_string())?,
+        &[ext.as_str()],
+        &ext,
+    );
+    // Копія з бібліотеки ніколи не затирає наявний файл (і таблицю профілю).
+    target.replace_confirmed = false;
+    office_files::ensure_not_protected(&target.path, &office_bound_tables(profiles).await?)
+        .map_err(|error| error.to_string())?;
+    Ok(Some(target))
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LibraryCreated {
+    recovery_code: Option<String>,
+    status: LibraryStatus,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LibraryRecovered {
+    recovery_code: String,
+    status: LibraryStatus,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LibraryRecoveryCode {
+    recovery_code: String,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LibrarySourceData {
+    fingerprint: String,
+    source_kind: office_library::SourceKind,
+    data: Value,
+    profile: office_sources::SourceProfile,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LibraryGenerated {
+    item: LibraryItem,
+    version: LibraryVersion,
+    /// `false` — той самий вміст і той самий відбиток джерела, що й в останній
+    /// згенерованій версії: нової не створено.
+    created: bool,
+}
+
+/// Стан бібліотеки. Індекс вмісту, побудова якого не вдалася щонайменше хвилину тому,
+/// починає будуватися наново (наступний стан — `indexing`).
+#[tauri::command]
+async fn library_status(
+    app: tauri::AppHandle,
+    store: tauri::State<'_, LibraryStore>,
+    session: tauri::State<'_, ProfileSession>,
+    library: tauri::State<'_, LibrarySession>,
+) -> Result<LibraryStatus, String> {
+    if let Some(profile_id) = session.get() {
+        if library.index_retry_due(&profile_id, LIBRARY_INDEX_RETRY) {
+            start_library_index(&app, profile_id);
+        }
+    }
+    library_status_now(&store, &session, &library).await
+}
+
+/// Створює бібліотеку профілю сесії (лише профілю з паролем) і одразу розблоковує її.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+async fn library_create(
+    app: tauri::AppHandle,
+    profiles: tauri::State<'_, LocalProfileStore>,
+    store: tauri::State<'_, LibraryStore>,
+    session: tauri::State<'_, ProfileSession>,
+    library: tauri::State<'_, LibrarySession>,
+    handles: tauri::State<'_, office_files::OfficeFileHandles>,
+    password: String,
+    with_recovery: bool,
+) -> Result<LibraryCreated, String> {
+    let password = zeroize::Zeroizing::new(password);
+    let profile_id = active_profile_id(&session)?;
+    if !profiles
+        .has_password(&profile_id)
+        .await
+        .map_err(|error| error.to_string())?
+    {
+        return Err(LibraryError::ProfileWithoutPassword.to_string());
+    }
+    let epoch = library.epoch();
+    verify_library_password(&profiles, &profile_id, &password).await?;
+    let created = store
+        .create(&profile_id, &password, with_recovery, &library_now())
+        .await
+        .map_err(|error| error.to_string())?;
+    // Бібліотеку вже записано: код відновлення повертається за будь-якого стану після.
+    let recovery_code = created
+        .recovery_code
+        .as_ref()
+        .map(|code| code.as_str().to_owned());
+    install_library_keys(&app, &library, &handles, &session, epoch, created.keys);
+    notify_library_state(&app);
+    Ok(LibraryCreated {
+        status: library_status_after_commit(
+            &store,
+            &session,
+            &library,
+            &profile_id,
+            recovery_code.is_some(),
+        )
+        .await,
+        recovery_code,
+    })
+}
+
+#[tauri::command]
+async fn library_unlock(
+    app: tauri::AppHandle,
+    profiles: tauri::State<'_, LocalProfileStore>,
+    store: tauri::State<'_, LibraryStore>,
+    session: tauri::State<'_, ProfileSession>,
+    library: tauri::State<'_, LibrarySession>,
+    handles: tauri::State<'_, office_files::OfficeFileHandles>,
+    password: String,
+) -> Result<LibraryStatus, String> {
+    let password = zeroize::Zeroizing::new(password);
+    let profile_id = active_profile_id(&session)?;
+    let epoch = library.epoch();
+    verify_library_password(&profiles, &profile_id, &password).await?;
+    let keys = store
+        .unlock(&profile_id, &password, &library_now())
+        .await
+        .map_err(|error| error.to_string())?;
+    if !install_library_keys(&app, &library, &handles, &session, epoch, keys) {
+        // Під час KDF бібліотеку заблокували або вийшли з профілю: це має силу. Та сама
+        // бібліотека, яку тим часом розблокував інший виклик, — не помилка.
+        let same_session = session.get().as_deref() == Some(profile_id.as_str());
+        if !same_session || library.unlocked_profile().as_deref() != Some(profile_id.as_str()) {
+            return Err(LibraryError::Locked.to_string());
+        }
+    }
+    library_status_now(&store, &session, &library).await
+}
+
+#[tauri::command]
+async fn library_lock(
+    store: tauri::State<'_, LibraryStore>,
+    session: tauri::State<'_, ProfileSession>,
+    library: tauri::State<'_, LibrarySession>,
+    handles: tauri::State<'_, office_files::OfficeFileHandles>,
+) -> Result<LibraryStatus, String> {
+    lock_library(&library, &handles);
+    library_status_now(&store, &session, &library).await
+}
+
+#[tauri::command]
+async fn library_list(
+    store: tauri::State<'_, LibraryStore>,
+    session: tauri::State<'_, ProfileSession>,
+    library: tauri::State<'_, LibrarySession>,
+    include_hidden: Option<bool>,
+) -> Result<Vec<LibraryItem>, String> {
+    let (_, keys) = library_keys(&session, &library)?;
+    store
+        .list_items(&keys, include_hidden.unwrap_or(false))
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn library_versions(
+    store: tauri::State<'_, LibraryStore>,
+    session: tauri::State<'_, ProfileSession>,
+    library: tauri::State<'_, LibrarySession>,
+    item_id: String,
+) -> Result<Vec<LibraryVersion>, String> {
+    let (_, keys) = library_keys(&session, &library)?;
+    store
+        .versions(&keys, &item_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// Додає файл з диска до бібліотеки: вікно вибору, читання без змін у файлі (до 256 МБ).
+/// Таблиця, прив'язана до цього профілю (або її `.easywar-prev`), позначається як копія.
+/// `None` — вікно закрили.
+#[tauri::command]
+async fn library_import(
+    app: tauri::AppHandle,
+    profiles: tauri::State<'_, LocalProfileStore>,
+    store: tauri::State<'_, LibraryStore>,
+    session: tauri::State<'_, ProfileSession>,
+    library: tauri::State<'_, LibrarySession>,
+    as_template: Option<bool>,
+) -> Result<Option<LibraryItem>, String> {
+    let (profile_id, keys) = library_keys(&session, &library)?;
+    drop(keys);
+    let dialog_app = app.clone();
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        dialog_app
+            .dialog()
+            .file()
+            .set_title("Додати файл до бібліотеки")
+            .add_filter(
+                "Таблиці, документи й презентації",
+                &LIBRARY_IMPORT_EXTENSIONS,
+            )
+            .blocking_pick_file()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let path = selected.into_path().map_err(|error| error.to_string())?;
+    let ext = path
+        .extension()
+        .map(|ext| ext.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let ext = office_library::normalize_ext(&ext).map_err(|error| error.to_string())?;
+    let file_name = office_files::file_name(&path);
+    let own_tables: Vec<PathBuf> = profiles
+        .profile_table_paths(&profile_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .map(PathBuf::from)
+        .collect();
+    let (bytes, profile_table_copy) = tauri::async_runtime::spawn_blocking(move || {
+        let copy = office_files::is_protected_table(&path, &own_tables);
+        read_library_file(&path).map(|bytes| (bytes, copy))
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    let keys = library
+        .keys(&profile_id)
+        .map_err(|error| error.to_string())?;
+    let (item, _) = store
+        .import(
+            &keys,
+            office_library::NewDocument {
+                name: &office_library::document_name_from_file(&file_name),
+                ext,
+                as_template: as_template.unwrap_or(false),
+                profile_table_copy,
+                bytes: &bytes,
+            },
+            &library_now(),
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    refresh_library_item(&app, &profile_id, &item.id);
+    Ok(Some(item))
+}
+
+#[tauri::command]
+async fn library_rename(
+    store: tauri::State<'_, LibraryStore>,
+    session: tauri::State<'_, ProfileSession>,
+    library: tauri::State<'_, LibrarySession>,
+    item_id: String,
+    name: String,
+) -> Result<LibraryItem, String> {
+    let (_, keys) = library_keys(&session, &library)?;
+    store
+        .rename(&keys, &item_id, &name, &library_now())
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn library_set_hidden(
+    store: tauri::State<'_, LibraryStore>,
+    session: tauri::State<'_, ProfileSession>,
+    library: tauri::State<'_, LibrarySession>,
+    item_id: String,
+    hidden: bool,
+) -> Result<LibraryItem, String> {
+    let (_, keys) = library_keys(&session, &library)?;
+    store
+        .set_hidden(&keys, &item_id, hidden, &library_now())
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn library_set_current(
+    app: tauri::AppHandle,
+    store: tauri::State<'_, LibraryStore>,
+    session: tauri::State<'_, ProfileSession>,
+    library: tauri::State<'_, LibrarySession>,
+    item_id: String,
+    version_id: String,
+) -> Result<LibraryItem, String> {
+    let (profile_id, keys) = library_keys(&session, &library)?;
+    let item = store
+        .set_current(&keys, &item_id, &version_id, &library_now())
+        .await
+        .map_err(|error| error.to_string())?;
+    library.clear_damaged(&profile_id, &item.id);
+    refresh_library_item(&app, &profile_id, &item.id);
+    Ok(item)
+}
+
+/// Зберігає копію версії на диск (вікно збереження, без перезапису наявного файла
+/// й таблиць профілів). Повертає шлях; `None` — вікно закрили.
+#[tauri::command]
+async fn library_export_copy(
+    app: tauri::AppHandle,
+    profiles: tauri::State<'_, LocalProfileStore>,
+    store: tauri::State<'_, LibraryStore>,
+    session: tauri::State<'_, ProfileSession>,
+    library: tauri::State<'_, LibrarySession>,
+    version_id: String,
+) -> Result<Option<String>, String> {
+    let (profile_id, keys) = library_keys(&session, &library)?;
+    let version = store
+        .version(&keys, &version_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    let item = store
+        .item(&keys, &version.item_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    drop(keys);
+    let suggested = office_files::suggested_file_name(
+        Some(&format!("{}.{}", item.name, version.ext)),
+        "Документ",
+    );
+    let Some(target) = library_save_dialog(
+        app,
+        &profiles,
+        "Зберегти копію з бібліотеки",
+        suggested,
+        version.ext.clone(),
+    )
+    .await?
+    else {
+        return Ok(None);
+    };
+    let keys = library
+        .keys(&profile_id)
+        .map_err(|error| error.to_string())?;
+    let (_, bytes) = store
+        .read_version(&keys, &version.id)
+        .await
+        .map_err(|error| error.to_string())?;
+    let path = target.path.clone();
+    tauri::async_runtime::spawn_blocking(move || phone_export::save_file(&target, &bytes))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())?;
+    // Копію вже збережено: невдалий запис події аудиту її не скасовує.
+    store
+        .record_event_best_effort(
+            keys.profile_id(),
+            office_library::LibraryEventKind::Exported,
+            Some(&item.id),
+            Some(&version.id),
+            &library_now(),
+        )
+        .await;
+    Ok(Some(path.display().to_string()))
+}
+
+/// Збережений архів бібліотеки: шлях і назви пошкоджених документів, яких у ньому немає.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LibraryArchiveExport {
+    path: String,
+    skipped: Vec<String>,
+}
+
+/// Переносить готовий тимчасовий архів на місце, не затираючи наявний файл.
+fn persist_archive(file: tempfile::NamedTempFile, destination: &Path) -> Result<(), String> {
+    file.as_file()
+        .sync_all()
+        .map_err(|error| error.to_string())?;
+    file.persist_noclobber(destination).map_err(|error| {
+        if error.error.kind() == std::io::ErrorKind::AlreadyExists {
+            phone_export::SaveFileError::AlreadyExists(office_files::file_name(destination))
+                .to_string()
+        } else {
+            error.error.to_string()
+        }
+    })?;
+    Ok(())
+}
+
+/// ZIP з поточними версіями всіх документів (і прихованих). Архів пишеться потоком у
+/// тимчасовий файл поруч із цільовим (у пам'яті щонайбільше один документ) і лише потім
+/// переноситься на місце без перезапису. Пошкоджені документи пропускаються й
+/// перелічуються в `skipped`. `None` — вікно закрили.
+#[tauri::command]
+async fn library_export_archive(
+    app: tauri::AppHandle,
+    profiles: tauri::State<'_, LocalProfileStore>,
+    store: tauri::State<'_, LibraryStore>,
+    session: tauri::State<'_, ProfileSession>,
+    library: tauri::State<'_, LibrarySession>,
+) -> Result<Option<LibraryArchiveExport>, String> {
+    let (profile_id, keys) = library_keys(&session, &library)?;
+    drop(keys);
+    let suggested = format!("Бібліотека EasyWAR {}.zip", Utc::now().format("%Y-%m-%d"));
+    let Some(target) = library_save_dialog(
+        app,
+        &profiles,
+        "Зберегти архів бібліотеки",
+        suggested,
+        "zip".to_owned(),
+    )
+    .await?
+    else {
+        return Ok(None);
+    };
+    let keys = library
+        .keys(&profile_id)
+        .map_err(|error| error.to_string())?;
+    let directory = target
+        .path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+    let file = tauri::async_runtime::spawn_blocking(move || {
+        tempfile::Builder::new()
+            .prefix(".easywar-archive-")
+            .suffix(".part")
+            .tempfile_in(directory)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string())?;
+    let (file, summary) = store
+        .export_archive_to(&keys, file)
+        .await
+        .map_err(|error| error.to_string())?;
+    let path = target.path.clone();
+    tauri::async_runtime::spawn_blocking(move || persist_archive(file, &target.path))
+        .await
+        .map_err(|error| error.to_string())??;
+    // Архів уже збережено: невдалий запис події аудиту його не скасовує.
+    store
+        .record_event_best_effort(
+            keys.profile_id(),
+            office_library::LibraryEventKind::ArchiveExported,
+            None,
+            None,
+            &library_now(),
+        )
+        .await;
+    Ok(Some(LibraryArchiveExport {
+        path: path.display().to_string(),
+        skipped: summary.skipped,
+    }))
+}
+
+/// Відкриває версію документа у вікні редактора її застосунку: документ чекає на перший
+/// `office_open_file` цього застосунку (без вікна вибору). Відкрите вікно редактора
+/// спершу треба закрити.
+#[tauri::command]
+async fn library_open_in_editor(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    store: tauri::State<'_, LibraryStore>,
+    session: tauri::State<'_, ProfileSession>,
+    library: tauri::State<'_, LibrarySession>,
+    handles: tauri::State<'_, office_files::OfficeFileHandles>,
+    version_id: String,
+) -> Result<(), String> {
+    if window.label() != desktop_shell::MAIN_WINDOW_LABEL {
+        return Err("редактор відкривається лише з головного вікна".to_owned());
+    }
+    let (profile_id, keys) = library_keys(&session, &library)?;
+    let version = store
+        .version(&keys, &version_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    let item = store
+        .item(&keys, &version.item_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    let app_id = office_files::editor_app(office_library::app_for_ext(&version.ext))
+        .map_err(|error| error.to_string())?;
+    if editor_open(&app, &handles) {
+        return Err(EDITOR_OPEN_MESSAGE.to_owned());
+    }
+    let name = format!("{}.{}", item.name, version.ext);
+    handles.set_pending(office_files::PendingFile {
+        profile_id,
+        app: app_id,
+        version_id: version.id,
+        ext: version.ext,
+        name: name.clone(),
+    });
+    desktop_shell::open_office_editor(&app, &window, app_id, Some(&name)).map_err(|error| {
+        handles.clear_pending();
+        error.to_string()
+    })
+}
+
+/// Розшифровані байти версії сирими (без JSON).
+#[tauri::command]
+async fn library_read_version(
+    store: tauri::State<'_, LibraryStore>,
+    session: tauri::State<'_, ProfileSession>,
+    library: tauri::State<'_, LibrarySession>,
+    version_id: String,
+) -> Result<tauri::ipc::Response, String> {
+    let (_, keys) = library_keys(&session, &library)?;
+    let (_, mut bytes) = store
+        .read_version(&keys, &version_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(tauri::ipc::Response::new(std::mem::take(&mut *bytes)))
+}
+
+/// Пошук за назвами й (коли індекс готовий) за вмістом.
+#[tauri::command]
+async fn library_search(
+    store: tauri::State<'_, LibraryStore>,
+    session: tauri::State<'_, ProfileSession>,
+    library: tauri::State<'_, LibrarySession>,
+    query: String,
+    include_hidden: Option<bool>,
+) -> Result<office_library::SearchResponse, String> {
+    let (_, keys) = library_keys(&session, &library)?;
+    store
+        .search(&library, &keys, &query, include_hidden.unwrap_or(false))
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// Дані джерела для шаблону та їхній відбиток (див. `office_sources`).
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+async fn library_source_data(
+    profiles: tauri::State<'_, LocalProfileStore>,
+    templates: tauri::State<'_, WorkspaceTemplateStore>,
+    repository: tauri::State<'_, Repository>,
+    modules: tauri::State<'_, DashboardModuleStore>,
+    store: tauri::State<'_, LibraryStore>,
+    session: tauri::State<'_, ProfileSession>,
+    library: tauri::State<'_, LibrarySession>,
+    source_kind: String,
+    params: Option<Value>,
+) -> Result<LibrarySourceData, String> {
+    let (profile_id, keys) = library_keys(&session, &library)?;
+    let kind = SourceRequest::parse_kind(&source_kind).map_err(|error| error.to_string())?;
+    let request = SourceRequest::parse(kind, &params.unwrap_or(Value::Null))
+        .map_err(|error| error.to_string())?;
+    let sources = Sources {
+        repository: &repository,
+        modules: &modules,
+        library: &store,
+        keys: &keys,
+    };
+    let (fingerprint, data) = sources
+        .fingerprinted(&request)
+        .await
+        .map_err(|error| error.to_string())?;
+    let profile = office_sources::source_profile(&profiles, &templates, &profile_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(LibrarySourceData {
+        fingerprint,
+        source_kind: kind,
+        data,
+        profile,
+    })
+}
+
+/// Зберігає документ, згенерований із шаблону: відбиток джерела перераховується, і
+/// якщо дані встигли змінитися, документ не зберігається. Нова версія наявного документа
+/// (`item_id`) зберігається, лише якщо його поточна версія досі `expected_current_version_id`
+/// (та, яку бачив користувач; `None` — документ без поточної версії).
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+async fn library_save_generated(
+    app: tauri::AppHandle,
+    repository: tauri::State<'_, Repository>,
+    modules: tauri::State<'_, DashboardModuleStore>,
+    store: tauri::State<'_, LibraryStore>,
+    session: tauri::State<'_, ProfileSession>,
+    library: tauri::State<'_, LibrarySession>,
+    item_id: Option<String>,
+    expected_current_version_id: Option<String>,
+    name: Option<String>,
+    template_version_id: String,
+    source_kind: String,
+    params: Option<Value>,
+    fingerprint: String,
+    ext: String,
+    bytes: Vec<u8>,
+    make_current: bool,
+) -> Result<LibraryGenerated, String> {
+    let (profile_id, keys) = library_keys(&session, &library)?;
+    office_files::check_size(&bytes).map_err(|error| error.to_string())?;
+    let kind = SourceRequest::parse_kind(&source_kind).map_err(|error| error.to_string())?;
+    let request = SourceRequest::parse(kind, &params.unwrap_or(Value::Null))
+        .map_err(|error| error.to_string())?;
+    let sources = Sources {
+        repository: &repository,
+        modules: &modules,
+        library: &store,
+        keys: &keys,
+    };
+    let saved = sources
+        .save_generated(
+            &request,
+            &fingerprint,
+            office_sources::GeneratedInput {
+                item_id: item_id.as_deref(),
+                expected_current: item_id
+                    .as_ref()
+                    .map(|_| expected_current_version_id.as_deref()),
+                name: name.as_deref(),
+                template_version_id: &template_version_id,
+                ext: &ext,
+                bytes: &bytes,
+                make_current,
+            },
+            &library_now(),
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    if saved.item.current_version_id.as_deref() == Some(saved.version.id.as_str()) {
+        library.clear_damaged(&profile_id, &saved.item.id);
+        refresh_library_item(&app, &profile_id, &saved.item.id);
+    }
+    Ok(LibraryGenerated {
+        item: saved.item,
+        version: saved.version,
+        created: saved.created,
+    })
+}
+
+/// Стан кожного документа, пов'язаного з джерелом.
+#[tauri::command]
+async fn library_link_statuses(
+    repository: tauri::State<'_, Repository>,
+    modules: tauri::State<'_, DashboardModuleStore>,
+    store: tauri::State<'_, LibraryStore>,
+    session: tauri::State<'_, ProfileSession>,
+    library: tauri::State<'_, LibrarySession>,
+) -> Result<Vec<office_sources::LinkStatus>, String> {
+    let (_, keys) = library_keys(&session, &library)?;
+    Sources {
+        repository: &repository,
+        modules: &modules,
+        library: &store,
+        keys: &keys,
+    }
+    .link_statuses()
+    .await
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn library_unlink(
+    store: tauri::State<'_, LibraryStore>,
+    session: tauri::State<'_, ProfileSession>,
+    library: tauri::State<'_, LibrarySession>,
+    item_id: String,
+) -> Result<LibraryItem, String> {
+    let (_, keys) = library_keys(&session, &library)?;
+    store
+        .unlink(&keys, &item_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// «Забули пароль»: код відновлення бібліотеки задає новий пароль профілю, видає новий код
+/// і входить у профіль (він стає й активним у базі). Профіль — той, у який увійшли; без
+/// входу — `profile_id` з екрана входу, а без нього — `active_profile_id` бази. Новий код
+/// повертається завжди, щойно новий пароль записано; якщо під час KDF бібліотеку
+/// заблокували чи профіль сесії змінився, вона лишається заблокованою.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+async fn library_recover(
+    app: tauri::AppHandle,
+    profiles: tauri::State<'_, LocalProfileStore>,
+    store: tauri::State<'_, LibraryStore>,
+    session: tauri::State<'_, ProfileSession>,
+    library: tauri::State<'_, LibrarySession>,
+    handles: tauri::State<'_, office_files::OfficeFileHandles>,
+    code: String,
+    new_password: String,
+    profile_id: Option<String>,
+) -> Result<LibraryRecovered, String> {
+    let code = zeroize::Zeroizing::new(code);
+    let new_password = zeroize::Zeroizing::new(new_password);
+    let signed_in = session.get();
+    let profile_id = match (signed_in.as_deref(), profile_id) {
+        (Some(current), Some(requested)) if requested != current => {
+            return Err("відновити пароль іншого профілю можна лише з екрана входу".to_owned());
+        }
+        (Some(current), _) => current.to_owned(),
+        (None, Some(requested)) => requested,
+        (None, None) => profiles
+            .list()
+            .await
+            .map_err(|error| error.to_string())?
+            .active_profile_id
+            .ok_or_else(|| local_profiles::LocalProfileError::ProfileNotFound.to_string())?,
+    };
+    if signed_in.is_none() {
+        ensure_editor_closed(&app, &handles)?;
+    }
+    if !profiles
+        .has_password(&profile_id)
+        .await
+        .map_err(|error| error.to_string())?
+        || !store
+            .has_active_keyring(&profile_id)
+            .await
+            .map_err(|error| error.to_string())?
+    {
+        return Err(LibraryError::NoLibrary.to_string());
+    }
+    local_profiles::validate_password(&new_password).map_err(|error| error.to_string())?;
+    let epoch = library.epoch();
+    let prepared = store
+        .prepare_recovery(&profile_id, &code, &new_password)
+        .await
+        .map_err(|error| error.to_string())?;
+    profiles
+        .recover_password(&profile_id, &new_password, &prepared, &library_now())
+        .await
+        .map_err(|error| error.to_string())?;
+    // Новий пароль і новий код уже записано: далі ніщо не скасовує повернення коду.
+    let (keys, recovery_code) = prepared.into_parts();
+    let recovery_code = recovery_code.as_str().to_owned();
+    let unchanged = session.get() == signed_in;
+    if unchanged && signed_in.is_none() && !editor_open(&app, &handles) {
+        session.set(Some(profile_id.clone()));
+        if let Err(error) = profiles.activate(&profile_id, &library_now()).await {
+            eprintln!("EasyWAR: профіль після відновлення пароля не став активним: {error}");
+        }
+    }
+    install_library_keys(&app, &library, &handles, &session, epoch, keys);
+    notify_library_state(&app);
+    Ok(LibraryRecovered {
+        recovery_code,
+        status: library_status_after_commit(&store, &session, &library, &profile_id, true).await,
+    })
+}
+
+/// Новий код відновлення (старий стає недійсним); потрібен пароль профілю.
+#[tauri::command]
+async fn library_reissue_recovery(
+    profiles: tauri::State<'_, LocalProfileStore>,
+    store: tauri::State<'_, LibraryStore>,
+    session: tauri::State<'_, ProfileSession>,
+    library: tauri::State<'_, LibrarySession>,
+    password: String,
+) -> Result<LibraryRecoveryCode, String> {
+    let password = zeroize::Zeroizing::new(password);
+    let (profile_id, keys) = library_keys(&session, &library)?;
+    drop(keys);
+    verify_library_password(&profiles, &profile_id, &password).await?;
+    let code = store
+        .reissue_recovery(&profile_id, &password, &library_now())
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(LibraryRecoveryCode {
+        recovery_code: code.as_str().to_owned(),
+    })
 }
 
 /// Зберігає порожню базову таблицю в новий файл і прив'язує її до профілю
@@ -1451,18 +2642,65 @@ async fn write_profile_database(
     .map_err(|error| error.to_string())?
 }
 
+/// Видаляє профіль. Профіль із захищеною бібліотекою так не видалити: для нього є
+/// окрема дія `delete_local_profile_with_library`. Поки відкрите вікно редактора, профілі
+/// не видаляються.
 #[tauri::command]
 async fn delete_local_profile(
+    app: tauri::AppHandle,
     profiles: tauri::State<'_, LocalProfileStore>,
     session: tauri::State<'_, ProfileSession>,
+    library: tauri::State<'_, LibrarySession>,
+    handles: tauri::State<'_, office_files::OfficeFileHandles>,
     profile_id: String,
 ) -> Result<LocalProfilesState, String> {
+    ensure_editor_closed(&app, &handles)?;
     ensure_profile_unlocked(&profiles, &session, &profile_id).await?;
     let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
-    profiles
+    let state = profiles
         .delete(&profile_id, &now)
         .await
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    lock_library_of_deleted(&session, &library, &handles, &profile_id);
+    notify_library_state(&app);
+    Ok(state)
+}
+
+/// Видаляє профіль разом із захищеною бібліотекою: криптознищення бібліотеки й
+/// видалення профілю — однією транзакцією (`LocalProfileStore::delete_with_library`).
+#[tauri::command]
+async fn delete_local_profile_with_library(
+    app: tauri::AppHandle,
+    profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
+    library: tauri::State<'_, LibrarySession>,
+    handles: tauri::State<'_, office_files::OfficeFileHandles>,
+    profile_id: String,
+) -> Result<LocalProfilesState, String> {
+    ensure_editor_closed(&app, &handles)?;
+    ensure_profile_unlocked(&profiles, &session, &profile_id).await?;
+    let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
+    let state = profiles
+        .delete_with_library(&profile_id, &now)
+        .await
+        .map_err(|error| error.to_string())?;
+    lock_library_of_deleted(&session, &library, &handles, &profile_id);
+    notify_library_state(&app);
+    Ok(state)
+}
+
+/// Після видалення профілю його бібліотека (якщо розблокована) блокується.
+fn lock_library_of_deleted(
+    session: &ProfileSession,
+    library: &LibrarySession,
+    handles: &office_files::OfficeFileHandles,
+    profile_id: &str,
+) {
+    if session.get().as_deref() == Some(profile_id)
+        || library.unlocked_profile().as_deref() == Some(profile_id)
+    {
+        lock_library(library, handles);
+    }
 }
 
 #[tauri::command]
@@ -2142,10 +3380,9 @@ pub fn run() {
                     "шлях локальної бази не збігається з перевіреним startup-шляхом.",
                 );
             }
-            let options = SqliteConnectOptions::new()
-                .filename(&setup_database_file)
-                .foreign_keys(true)
-                .busy_timeout(Duration::from_secs(5));
+            // `secure_delete`: видалені й переписані сторінки (зокрема старі обгортки ключа
+            // бібліотеки) затираються нулями, а не лишаються у файлі бази.
+            let options = database::live_connect_options(&setup_database_file);
             let pool = startup_recovery::or_exit(
                 &dialogs,
                 tauri::async_runtime::block_on(
@@ -2169,6 +3406,12 @@ pub fn run() {
             app.manage(DashboardModuleStore::new(pool.clone()));
             app.manage(module_source_selection::SourceSelections::default());
             app.manage(office_files::OfficeFileHandles::default());
+            app.manage(LibraryStore::new(pool.clone()));
+            app.manage(LibrarySession::default());
+            app.manage(LibraryStateEvents::default());
+            let notify_app = app.handle().clone();
+            app.state::<LibrarySession>()
+                .set_notifier(move || notify_library_state(&notify_app));
             app.manage(BackupStore::new(pool));
             app.manage(LiveDatabasePath(setup_database_file));
             app.manage(instance_lock);
@@ -2179,6 +3422,22 @@ pub fn run() {
                 desktop_shell::create_main_window(app),
                 "Не вдалося створити головне вікно",
             );
+            // Автоблокування бібліотеки після 30 хв без дій: перевірка щохвилини, разом із
+            // ключами зникає й документ, що чекав на вікно редактора.
+            let idle_app = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let mut interval = tokio::time::interval(Duration::from_secs(60));
+                loop {
+                    interval.tick().await;
+                    let library = idle_app.state::<LibrarySession>();
+                    library.lock_if_idle(office_library::IDLE_LOCK_TIMEOUT);
+                    if library.unlocked_profile().is_none() {
+                        idle_app
+                            .state::<office_files::OfficeFileHandles>()
+                            .clear_pending();
+                    }
+                }
+            });
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -2273,7 +3532,29 @@ pub fn run() {
             inspect_local_xlsx,
             stage_local_xlsx,
             export_approved_xlsx,
-            export_approved_xlsx_from_reference
+            export_approved_xlsx_from_reference,
+            delete_local_profile_with_library,
+            library_status,
+            library_create,
+            library_unlock,
+            library_lock,
+            library_list,
+            library_versions,
+            library_import,
+            library_rename,
+            library_set_hidden,
+            library_set_current,
+            library_export_copy,
+            library_export_archive,
+            library_open_in_editor,
+            library_read_version,
+            library_search,
+            library_source_data,
+            library_save_generated,
+            library_link_statuses,
+            library_unlink,
+            library_recover,
+            library_reissue_recovery
         ])
         .build(context)
         .unwrap_or_else(|error| {

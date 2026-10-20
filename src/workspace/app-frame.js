@@ -3,7 +3,7 @@
 // етапами; якщо запуск не вдався — помилка з «Спробувати ще раз»; якщо застосунок ще не
 // підключено — заглушка «у розробці». Зміни заголовка й позначки незбережених змін ідуть до
 // оболонки через postMessage.
-import { LOADING_STEPS, appFromSearch, branchFromSearch, entryError, frameMessage, normalizeMounted } from './workspace-core.js';
+import { LOADING_STEPS, appFromSearch, branchFromSearch, entryError, frameMessage, graphicsProblem, normalizeMounted } from './workspace-core.js';
 import { appIcon, element as make } from './workspace-dom.js';
 import { browserFallback, createHost, findInvoke } from './workspace-host.js';
 import { entryLoader } from './workspace-registry.js';
@@ -14,6 +14,13 @@ const container = document.getElementById('ws-container');
 const stateArea = document.getElementById('ws-state');
 
 const element = (tag, className, text) => make(document, tag, className, text);
+
+/** Чи є в цьому вікні WebGL2 або WebGPU (редактори «Офісу» без них не запускаються). */
+function graphicsSupport() {
+  let webgl2 = false;
+  try { webgl2 = Boolean(document.createElement('canvas').getContext('webgl2')); } catch { webgl2 = false; }
+  return { webgl2, webgpu: Boolean(navigator.gpu) };
+}
 
 function backToOffice() {
   try {
@@ -109,6 +116,11 @@ async function start() {
     showState(stubPanel(app, 'У РОЗРОБЦІ', `${app.title} поки недоступний`, 'Редактор ще не підключено. Поверніться до Офісу та оберіть інший застосунок.'));
     return;
   }
+  const graphics = graphicsProblem(graphicsSupport());
+  if (graphics) {
+    showState(errorPanel(app, graphics));
+    return;
+  }
   const loading = loadingPanel();
   loading.step(0);
   showState(loading.panel);
@@ -131,8 +143,17 @@ async function start() {
       },
     });
     mounted = normalizeMounted(await entry.mount(container, host));
-    // Оболонка питає перед закриттям, чи є незбережені зміни (крім host.setDirty).
-    window.EW_WORKSPACE_APP = Object.freeze({ isDirty: () => mounted.isDirty() });
+    // Оболонка питає перед закриттям, чи є незбережені зміни (крім host.setDirty) і повертає
+    // фокус у застосунок після «Залишитися» (iframe редактора, якщо застосунок не взяв фокус сам).
+    window.EW_WORKSPACE_APP = Object.freeze({
+      isDirty: () => mounted.isDirty(),
+      focus: () => {
+        if (mounted.focus()) return;
+        const frame = container.querySelector('iframe');
+        try { frame?.contentWindow?.focus(); } catch { /* сторінку ще не завантажено */ }
+        (frame ?? container).focus();
+      },
+    });
     loading.step(2);
     hideState();
   } catch (error) {

@@ -13,6 +13,8 @@ import {
   getRestoreStartupReport,
   getAppUpdateSettings,
   installAppUpdate,
+  LIBRARY_BACKUP_NOTE,
+  LIBRARY_RESTORE_NOTE,
   setAppUpdateAutoCheck,
   restoreStartupMessage,
   stageLocalRestore,
@@ -125,4 +127,15 @@ test('the automatic update check runs only after the user turns it on', async ()
   assert.equal(starts.length, 2);
   assert.match(source, /if \(settings\?\.enabled\) void autoCheck\(\);/, 'at start-up only when turned on');
   assert.match(source, /if \(settings\?\.enabled\) await autoCheck\(\);/, 'right after the user turns it on');
+});
+
+test('backup and restore warn that the encrypted office library travels with the database copy', async () => {
+  assert.match(LIBRARY_BACKUP_NOTE, /бібліотеку «Робочого середовища»/);
+  assert.match(LIBRARY_BACKUP_NOTE, /зашифрован/);
+  assert.match(LIBRARY_BACKUP_NOTE, /пароль профілю, чинний на час створення копії/);
+  assert.match(LIBRARY_RESTORE_NOTE, /до стану на час копії/);
+  assert.match(LIBRARY_RESTORE_NOTE, /до видалення профілю разом з бібліотекою/);
+  const source = await readFile(new URL('../src/backup.js', import.meta.url), 'utf8');
+  assert.match(source, /<p class="ew-backup-warning">\$\{LIBRARY_BACKUP_NOTE\}<\/p>/);
+  assert.match(source, /<p class="ew-backup-warning">\$\{LIBRARY_RESTORE_NOTE\}<\/p>/);
 });

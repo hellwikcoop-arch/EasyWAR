@@ -16,9 +16,13 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 base64 = "0.22"
 calamine = { version = "=0.26.1", features = ["dates"] }
+# Захищена бібліотека «Офісу»: AEAD для вмісту й обгорток ключа, HKDF-підключі, HMAC ідентифікаторів.
+chacha20poly1305 = "0.10"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 dirs = "7"
 fs2 = "0.4"
+hkdf = "0.12"
+hmac = "0.12"
 quick-xml = "=0.31.0"
 regex = "=1.13.1"
 # Нативні повідомлення до створення вікна; бекенд (gtk3 тощо) вмикає tauri-plugin-dialog.
@@ -36,6 +40,7 @@ tempfile = "3"
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
+zeroize = "1"
 tauri-plugin-updater = "2"
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 

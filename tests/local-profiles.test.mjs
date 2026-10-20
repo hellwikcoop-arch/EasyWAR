@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
 import {
@@ -7,7 +8,13 @@ import {
   registerLocalProfile,
   setLocalProfileModules,
   deleteLocalProfile,
+  deleteLocalProfileWithLibrary,
+  deleteProfileWithLibraryFallback,
   getLocalProfiles,
+  isLibraryDeleteBlocked,
+  LIBRARY_DELETE_BLOCKED_PREFIX,
+  purgeConfirmationMatches,
+  recoverProfileWithCode,
   renameLocalProfile,
 } from '../src/local-profiles-core.js';
 
@@ -193,4 +200,83 @@ test('profile database bytes are copied into this realm', async () => {
   assert.equal(framed.buffer instanceof frame.ArrayBuffer, true);
   assert.equal(framed.buffer instanceof ArrayBuffer, false);
   assert.deepEqual([...framed], [80, 75]);
+});
+
+const PROFILE_ID = 'profile-000000000000000000000000';
+const BLOCKED = 'у профілю є захищена бібліотека; видаліть профіль разом з бібліотекою окремою дією';
+
+test('profile with a protected library is deleted only after the second confirmation', async () => {
+  const calls = [];
+  const invoke = async (command, payload) => {
+    calls.push([command, payload]);
+    if (command === 'delete_local_profile') throw BLOCKED;
+    return { activeProfileId: null, profiles: [] };
+  };
+  let asked = 0;
+  const declined = await deleteProfileWithLibraryFallback(PROFILE_ID, { invokeCommand: invoke, confirmPurge: async () => { asked += 1; return false; } });
+  assert.equal(declined, null, 'the user kept the profile');
+  assert.deepEqual(calls, [['delete_local_profile', { profileId: PROFILE_ID }]]);
+
+  const purged = await deleteProfileWithLibraryFallback(PROFILE_ID, { invokeCommand: invoke, confirmPurge: async () => { asked += 1; return true; } });
+  assert.deepEqual(purged, { activeProfileId: null, profiles: [] });
+  assert.deepEqual(calls.slice(1), [
+    ['delete_local_profile', { profileId: PROFILE_ID }],
+    ['delete_local_profile_with_library', { profileId: PROFILE_ID }],
+  ]);
+  assert.equal(asked, 2);
+  await deleteLocalProfileWithLibrary(PROFILE_ID, invoke);
+  assert.deepEqual(calls.at(-1), ['delete_local_profile_with_library', { profileId: PROFILE_ID }]);
+});
+
+test('other delete errors and profiles without a library never reach the purge', async () => {
+  const calls = [];
+  const confirmPurge = async () => { throw new Error('must not ask'); };
+  const plain = async (command, payload) => {
+    calls.push([command, payload]);
+    return { activeProfileId: null, profiles: [] };
+  };
+  assert.deepEqual(await deleteProfileWithLibraryFallback(PROFILE_ID, { invokeCommand: plain, confirmPurge }), { activeProfileId: null, profiles: [] });
+  assert.deepEqual(calls, [['delete_local_profile', { profileId: PROFILE_ID }]]);
+  const failing = async () => { throw 'синтетична помилка сховища'; };
+  await assert.rejects(deleteProfileWithLibraryFallback(PROFILE_ID, { invokeCommand: failing, confirmPurge }), error => error === 'синтетична помилка сховища');
+
+  assert.equal(BLOCKED.startsWith(LIBRARY_DELETE_BLOCKED_PREFIX), true);
+  assert.equal(isLibraryDeleteBlocked(BLOCKED), true);
+  assert.equal(isLibraryDeleteBlocked(new Error(BLOCKED)), true);
+  assert.equal(isLibraryDeleteBlocked('бібліотека заблокована: розблокуйте її паролем профілю'), false);
+  assert.equal(isLibraryDeleteBlocked(null), false);
+});
+
+test('the purge confirmation requires the exact profile name', () => {
+  assert.equal(purgeConfirmationMatches('Навчальний  оператор ', 'Навчальний оператор'), true);
+  assert.equal(purgeConfirmationMatches('навчальний оператор', 'Навчальний оператор'), false);
+  assert.equal(purgeConfirmationMatches('', ''), false);
+  assert.equal(purgeConfirmationMatches('Інший', 'Навчальний оператор'), false);
+});
+
+test('profile dialog offers the purge with the archive hint and the typed name', async () => {
+  const source = await readFile(new URL('../src/local-profiles.js', import.meta.url), 'utf8');
+  assert.match(source, /onclick: \(\) => deleteProfile\(profile\)/);
+  assert.match(source, /deleteProfileWithLibraryFallback\(profile\.id, \{ confirmPurge: \(\) => confirmLibraryPurge\(profile\) \}\)/);
+  assert.match(source, /«Робоче середовище» → «Бібліотека» → «Зберегти архів…»/);
+  assert.match(source, /'Видалити профіль разом з бібліотекою'/);
+  assert.match(source, /purgeConfirmationMatches\(input\.value, profile\.displayName\)/);
+  assert.doesNotMatch(source, /deleteLocalProfile\(/, 'delete goes only through the library-aware helper');
+});
+
+test('forgotten password on the sign-in screen goes through library_recover with the chosen profile', async () => {
+  const calls = [];
+  const result = await recoverProfileWithCode('profile-000000000000000000000000', 'СИНТЕТИЧНИЙ-КОД', 'новий-пароль', async (command, payload) => {
+    calls.push([command, payload]);
+    return { recoveryCode: 'AAAAA-BBBBB', status: { state: 'unlocked' } };
+  });
+  assert.deepEqual(calls, [['library_recover', { code: 'СИНТЕТИЧНИЙ-КОД', newPassword: 'новий-пароль', profileId: 'profile-000000000000000000000000' }]]);
+  assert.equal(result.recoveryCode, 'AAAAA-BBBBB');
+});
+
+test('sign-out keeps the profile open and shows why when Rust refuses (editor window open)', async () => {
+  const source = await readFile(new URL('../src/local-profiles.js', import.meta.url), 'utf8');
+  const signOut = source.slice(source.indexOf("text: 'Вийти з профілю'"), source.indexOf('window.location.reload();'));
+  assert.match(signOut, /try \{\s*await lockLocalProfile\(\);\s*\} catch \(error\) \{\s*status\.textContent = `Не вдалося вийти з профілю: \$\{String\(error\)\}`;\s*return;\s*\}/);
+  assert.ok(signOut.indexOf('assistant.disable()') > signOut.indexOf('await lockLocalProfile()'), 'the assistant stays on until the lock succeeded');
 });

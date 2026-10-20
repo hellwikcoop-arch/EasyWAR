@@ -71,6 +71,13 @@ html.ew-locked, html.ew-locked body { overflow: hidden; }
 .ew-gate-hint { color: var(--gate-muted); font-size: 12px; line-height: 1.4; }
 .ew-gate-error, .ew-gate-message { min-height: 1.2em; margin: 0; color: var(--gate-bad); font-size: 13px; font-weight: 600; }
 .ew-gate-check { display: inline-flex; align-items: center; gap: 8px; color: var(--gate-muted); font-size: 13px; }
+/* Новий код відновлення після «Забули пароль?» */
+.ew-gate-code {
+  margin: 0; padding: 12px 14px; color: var(--gate-ink); font: 600 17px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: .06em; word-break: break-all; user-select: all; border: 1px dashed var(--gate-accent); border-radius: 10px;
+}
+.ew-gate-code:focus-visible { outline: 2px solid var(--gate-accent); outline-offset: 2px; }
+.ew-gate-lines { display: grid; gap: 4px; margin: 0; padding-left: 20px; color: var(--gate-muted); font-size: 13px; line-height: 1.5; }
 
 /* Кнопки */
 .ew-gate-button {

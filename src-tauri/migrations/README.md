@@ -80,6 +80,43 @@ their look), `branch` (colours of the dashboard's service branch) or
 `heightwell` («Пункт керування»). A `CHECK` limits it to these three names; the
 colour comes from the module's `branch`, never from stored text.
 
+`0013_office_library.sql` adds the encrypted document library of the «Офіс»
+section. `library_keyrings` holds one row per profile: the library data key
+wrapped with XChaCha20-Poly1305 under a key that Argon2id derives from the
+profile password (the KDF parameters are stored with the wrap) and, optionally,
+a second wrap under a recovery code. `library_items` (documents with encrypted
+names), `library_blobs` (encrypted content keyed by an HMAC `content_id`, stored
+once per profile), `library_versions` (immutable versions), `library_events`
+(an append-only audit without content) and `library_purges` (the purge log)
+store no plaintext document text or name. Unconditional `BEFORE` triggers keep
+versions, events and purges append-only, refuse `INSERT OR REPLACE`, `REPLACE`
+and UPSERT over an existing key, allow a keyring change only with
+`generation + 1`, and allow erasing content (`data` to `NULL`) only after the
+keyring is shredded. The tables have no foreign key to `local_profiles`;
+`local_profiles_library_guard` refuses to delete a profile with an active
+library, so the caller crypto-shreds the library in the same transaction first.
+
+`0014_document_links.sql` adds `document_links`: for a library document
+generated from a template, the immutable template version, the kind of data
+source (`approved_revisions`, `dashboard_module`, `library_table`), its
+parameters as bounded JSON (identifiers and dates only), the last generated
+version and an HMAC fingerprint of the source data. Only the generation state
+(last generated version, fingerprint, update time) can change, and only while
+the profile's keyring is active. Deleting the row is «Відв'язати від джерела»;
+the document and its versions stay intact.
+
+`0015_library_blob_repair.sql` rewrites `library_blobs_update_guard` so that a
+damaged blob can be repaired. `content_id` is an HMAC of the plaintext, so the
+same content of a profile always maps to the same row; before this migration a
+row whose ciphertext no longer decrypted could never be replaced, and importing
+or saving the same bytes again failed forever. Now, while the profile's keyring
+is active, `data` may be replaced by another ciphertext that passes the table's
+CHECK (header and length for the same `plain_size`); the application does this
+only when the stored row fails to decrypt and the new ciphertext has just been
+sealed with the library key. The row identity (rowid, profile, `content_id`,
+`plain_size`, `created_at`) stays immutable, erasing (`data` to `NULL`) is still
+allowed only after the keyring is shredded, and erased content never comes back.
+
 The `dashboard_data_<id>` tables of user-created dashboard modules are not
 migration objects: Rust creates them at runtime from a validated catalog
 template and adds columns that later appear in a template with `ALTER TABLE`,

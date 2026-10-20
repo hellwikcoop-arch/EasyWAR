@@ -12,6 +12,13 @@
 //! [`EDITOR_WINDOW_LABEL`], чия capability дозволяє тільки команди `office_*`. Кожна з них
 //! додатково перевіряє мітку webview, яку дає Tauri (не JavaScript), а номер файлу
 //! прив'язаний і до профілю, і до цієї мітки.
+//!
+//! Документ захищеної бібліотеки ([`crate::office_library`]) редактор отримує тим самим
+//! `office_open_file`: головне вікно лишає «очікуваний файл» ([`PendingFile`]) для профілю
+//! й застосунку, вікно редактора забирає його один раз без вікна вибору. Номер такого файлу
+//! вказує не на шлях, а на документ і версію, від якої почато правку ([`LibraryTarget`]);
+//! «Зберегти» додає нову версію. Очікуваний файл зникає, щойно його забрали, коли вікно
+//! редактора закрилося або бібліотеку заблоковано.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -52,6 +59,70 @@ pub enum OfficeFileError {
     NotEditorWindow,
     #[error("невідомий застосунок «Офісу»")]
     UnknownApp,
+    #[error("вміст не відповідає формату «.{0}»; збережіть документ через «Зберегти як…»")]
+    LibraryFormat(String),
+    #[error("це не звичайний файл")]
+    NotRegularFile,
+    #[error(
+        "бібліотека заблокована: розблокуйте її в головному вікні й натисніть «Зберегти» ще раз"
+    )]
+    LibraryLocked,
+}
+
+/// Відкриває для читання лише звичайний файл: FIFO чи пристрій заблокували б читання
+/// назавжди (або віддавали б байти без кінця), тека — не документ. Тип перевіряється
+/// за шляхом (після символьних посилань) до відкриття й ще раз за відкритим дескриптором.
+pub fn open_regular_file(path: &Path) -> Result<std::fs::File, String> {
+    let regular = std::fs::metadata(path)
+        .map_err(|error| error.to_string())?
+        .is_file();
+    if !regular {
+        return Err(OfficeFileError::NotRegularFile.to_string());
+    }
+    let file = open_without_blocking(path).map_err(|error| error.to_string())?;
+    if !file
+        .metadata()
+        .map_err(|error| error.to_string())?
+        .is_file()
+    {
+        return Err(OfficeFileError::NotRegularFile.to_string());
+    }
+    Ok(file)
+}
+
+/// Відкриття без очікування співрозмовника: FIFO, підсунутий між перевіркою типу й
+/// відкриттям, інакше заблокував би `open` назавжди. Звичайні файли прапорець не зачіпає.
+#[cfg(unix)]
+fn open_without_blocking(path: &Path) -> std::io::Result<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    #[cfg(target_os = "linux")]
+    const O_NONBLOCK: i32 = 0o4000;
+    #[cfg(not(target_os = "linux"))]
+    const O_NONBLOCK: i32 = 0x0004;
+    std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(O_NONBLOCK)
+        .open(path)
+}
+
+#[cfg(not(unix))]
+fn open_without_blocking(path: &Path) -> std::io::Result<std::fs::File> {
+    std::fs::File::open(path)
+}
+
+/// Читає звичайний файл ([`open_regular_file`]), не більше `max` байтів; більший файл —
+/// помилка з текстом `too_large`.
+pub fn read_regular_file(path: &Path, max: usize, too_large: &str) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    let file = open_regular_file(path)?;
+    let mut bytes = Vec::new();
+    file.take(max as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| error.to_string())?;
+    if bytes.len() > max {
+        return Err(too_large.to_owned());
+    }
+    Ok(bytes)
 }
 
 /// Команди `office_*` приймаються лише з вікна редактора. Мітку дає Tauri.
@@ -72,10 +143,17 @@ pub fn editor_app(id: &str) -> Result<&'static str, OfficeFileError> {
         .ok_or(OfficeFileError::UnknownApp)
 }
 
-/// Скрипт ініціалізації вікна редактора: каже оболонці, який застосунок відкрити.
-pub fn editor_init_script(app: &'static str) -> String {
+/// Скрипт ініціалізації вікна редактора: каже оболонці, який застосунок відкрити, і назву
+/// документа бібліотеки, що чекає на відкриття (`__EW_PENDING_FILE`: рядок або `null`).
+/// Назва вставляється як JSON-рядок, тож лапки й керівні символи не виходять за літерал.
+pub fn editor_init_script(app: &'static str, pending: Option<&str>) -> String {
+    let pending = serde_json::to_string(&pending)
+        .unwrap_or_else(|_| "null".to_owned())
+        .replace('\u{2028}', "\\u2028")
+        .replace('\u{2029}', "\\u2029");
     format!(
-        "Object.defineProperty(window, '__EW_EDITOR_APP', {{ value: '{app}', writable: false, configurable: false }});"
+        "Object.defineProperty(window, '__EW_EDITOR_APP', {{ value: '{app}', writable: false, configurable: false }});\
+         Object.defineProperty(window, '__EW_PENDING_FILE', {{ value: {pending}, writable: false, configurable: false }});"
     )
 }
 
@@ -188,17 +266,69 @@ pub fn file_name(path: &Path) -> String {
         .unwrap_or_default()
 }
 
+/// Документ бібліотеки, на який вказує номер файлу: правка почалася від `base_version_id`.
+/// `name` — назва файлу для редактора (`<назва>.<розширення>`). `library_tag` —
+/// [`crate::office_library::LibraryKeys::handle_tag`] бібліотеки, з якої документ
+/// відкрито: номер пише лише в ту саму бібліотеку (після блокування й нового
+/// розблокування — так, у створену наново чи в іншу — ні).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LibraryTarget {
+    pub item_id: String,
+    pub base_version_id: String,
+    pub ext: String,
+    pub name: String,
+    pub library_tag: String,
+}
+
+/// Нова версія документа бібліотеки має той самий формат, що й документ: книга, документ
+/// і презентація — це ZIP (OOXML), а `.txt` і `.csv` — ні. Так редактор не підмінить
+/// формат під тим самим розширенням.
+pub fn ensure_library_format(ext: &str, bytes: &[u8]) -> Result<(), OfficeFileError> {
+    let zip = bytes.starts_with(b"PK\x03\x04");
+    let matches = match ext {
+        "docx" | "xlsx" | "pptx" => zip,
+        "txt" | "csv" => !zip,
+        _ => false,
+    };
+    if matches {
+        Ok(())
+    } else {
+        Err(OfficeFileError::LibraryFormat(ext.to_owned()))
+    }
+}
+
+/// Куди пише номер файлу: у файл на диску або новою версією документа бібліотеки.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HandleTarget {
+    Disk(PathBuf),
+    Library(LibraryTarget),
+}
+
+/// Документ бібліотеки, який головне вікно передало редактору: його забирає перший
+/// `office_open_file` того самого профілю й застосунку з відповідним розширенням.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingFile {
+    pub profile_id: String,
+    pub app: &'static str,
+    pub version_id: String,
+    pub ext: String,
+    pub name: String,
+}
+
 #[derive(Debug, Default)]
 struct HandleTable {
     next: u64,
     entries: HashMap<String, HandleEntry>,
+    pending: Option<PendingFile>,
+    /// Застосунок, відкритий у вікні редактора зараз (`None` — вікна немає).
+    editor_app: Option<&'static str>,
 }
 
 #[derive(Debug)]
 struct HandleEntry {
     profile_id: String,
     webview: String,
-    path: PathBuf,
+    target: HandleTarget,
 }
 
 impl HandleEntry {
@@ -207,17 +337,20 @@ impl HandleEntry {
     }
 }
 
-/// Відкриті застосунками файли: номер → (профіль, мітка webview, шлях).
+/// Відкриті застосунками файли: номер → (профіль, мітка webview, шлях або документ
+/// бібліотеки), а також очікуваний документ бібліотеки й застосунок вікна редактора.
 #[derive(Debug, Default)]
 pub struct OfficeFileHandles(Mutex<HandleTable>);
 
 impl OfficeFileHandles {
-    /// Запам'ятовує шлях для профілю й webview і повертає новий номер.
-    pub fn remember(&self, profile_id: &str, webview: &str, path: PathBuf) -> String {
-        let mut table = self
-            .0
+    fn table(&self) -> std::sync::MutexGuard<'_, HandleTable> {
+        self.0
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn insert(&self, profile_id: &str, webview: &str, target: HandleTarget) -> String {
+        let mut table = self.table();
         table.next += 1;
         let handle = format!("f{}", table.next);
         table.entries.insert(
@@ -225,35 +358,79 @@ impl OfficeFileHandles {
             HandleEntry {
                 profile_id: profile_id.to_owned(),
                 webview: webview.to_owned(),
-                path,
+                target,
             },
         );
         handle
     }
 
-    /// Шлях за номером, лише якщо його відкрили той самий профіль і той самий webview.
+    /// Запам'ятовує шлях для профілю й webview і повертає новий номер.
+    pub fn remember(&self, profile_id: &str, webview: &str, path: PathBuf) -> String {
+        self.insert(profile_id, webview, HandleTarget::Disk(path))
+    }
+
+    /// Запам'ятовує документ бібліотеки для профілю й webview і повертає новий номер.
+    pub fn remember_library(
+        &self,
+        profile_id: &str,
+        webview: &str,
+        target: LibraryTarget,
+    ) -> String {
+        self.insert(profile_id, webview, HandleTarget::Library(target))
+    }
+
+    /// Ціль за номером, лише якщо його відкрили той самий профіль і той самий webview.
+    pub fn target(
+        &self,
+        profile_id: &str,
+        webview: &str,
+        handle: &str,
+    ) -> Result<HandleTarget, OfficeFileError> {
+        match self.table().entries.get(handle) {
+            Some(entry) if entry.owned_by(profile_id, webview) => Ok(entry.target.clone()),
+            _ => Err(OfficeFileError::UnknownHandle),
+        }
+    }
+
+    /// Шлях за номером, лише якщо його відкрили той самий профіль і той самий webview
+    /// і номер вказує на файл на диску.
     pub fn path(
         &self,
         profile_id: &str,
         webview: &str,
         handle: &str,
     ) -> Result<PathBuf, OfficeFileError> {
-        let table = self
-            .0
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        match table.entries.get(handle) {
-            Some(entry) if entry.owned_by(profile_id, webview) => Ok(entry.path.clone()),
+        match self.target(profile_id, webview, handle)? {
+            HandleTarget::Disk(path) => Ok(path),
+            HandleTarget::Library(_) => Err(OfficeFileError::UnknownHandle),
+        }
+    }
+
+    /// Після збереження нової версії наступна правка рахується від неї.
+    pub fn set_library_base(
+        &self,
+        profile_id: &str,
+        webview: &str,
+        handle: &str,
+        version_id: &str,
+    ) -> Result<(), OfficeFileError> {
+        let mut table = self.table();
+        match table.entries.get_mut(handle) {
+            Some(HandleEntry {
+                profile_id: owner,
+                webview: owner_webview,
+                target: HandleTarget::Library(target),
+            }) if owner == profile_id && owner_webview == webview => {
+                target.base_version_id = version_id.to_owned();
+                Ok(())
+            }
             _ => Err(OfficeFileError::UnknownHandle),
         }
     }
 
     /// Забуває номер (застосунок закрив файл). Чужий номер не чіпається.
     pub fn forget(&self, profile_id: &str, webview: &str, handle: &str) {
-        let mut table = self
-            .0
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut table = self.table();
         if table
             .entries
             .get(handle)
@@ -261,6 +438,60 @@ impl OfficeFileHandles {
         {
             table.entries.remove(handle);
         }
+    }
+
+    /// Забуває всі номери webview: вікно закрилося, а новий застосунок у ньому
+    /// не має писати у файли попереднього.
+    pub fn forget_webview(&self, webview: &str) {
+        self.table()
+            .entries
+            .retain(|_, entry| entry.webview != webview);
+    }
+
+    /// Лишає документ бібліотеки для наступного вікна редактора (попередній замінюється).
+    pub fn set_pending(&self, pending: PendingFile) {
+        self.table().pending = Some(pending);
+    }
+
+    /// Забирає очікуваний документ один раз, якщо він для цього профілю й застосунку
+    /// і його розширення є серед запитаних. Інакше документ лишається чекати.
+    pub fn take_pending(
+        &self,
+        profile_id: &str,
+        app: &str,
+        extensions: &[String],
+    ) -> Option<PendingFile> {
+        let mut table = self.table();
+        let matches = table.pending.as_ref().is_some_and(|pending| {
+            pending.profile_id == profile_id
+                && pending.app == app
+                && extensions.contains(&pending.ext)
+        });
+        if matches {
+            table.pending.take()
+        } else {
+            None
+        }
+    }
+
+    /// Чи чекає документ бібліотеки на вікно редактора.
+    pub fn has_pending(&self) -> bool {
+        self.table().pending.is_some()
+    }
+
+    /// Прибирає очікуваний документ (вікно закрилося, бібліотеку заблоковано).
+    pub fn clear_pending(&self) {
+        self.table().pending = None;
+    }
+
+    /// Записує, який застосунок відкрито у вікні редактора (`None` — вікно закрилося).
+    pub fn set_editor_window_app(&self, app: Option<&'static str>) {
+        self.table().editor_app = app;
+    }
+
+    /// Застосунок, відкритий у вікні редактора зараз.
+    pub fn editor_window_app(&self) -> Option<&'static str> {
+        self.table().editor_app
     }
 }
 
@@ -381,7 +612,9 @@ mod tests {
     fn editor_opens_only_known_apps() {
         for app in EDITOR_APPS {
             assert_eq!(editor_app(app), Ok(app));
-            assert!(editor_init_script(editor_app(app).unwrap()).contains(&format!("'{app}'")));
+            let script = editor_init_script(editor_app(app).unwrap(), None);
+            assert!(script.contains(&format!("'{app}'")));
+            assert!(script.contains("'__EW_PENDING_FILE', { value: null, writable: false"));
         }
         for id in [
             "",
@@ -392,6 +625,139 @@ mod tests {
         ] {
             assert_eq!(editor_app(id), Err(OfficeFileError::UnknownApp), "{id:?}");
         }
+    }
+
+    fn library_target(item: &str, version: &str) -> LibraryTarget {
+        LibraryTarget {
+            item_id: item.to_owned(),
+            base_version_id: version.to_owned(),
+            ext: "docx".to_owned(),
+            name: "Довідка.docx".to_owned(),
+            library_tag: "синтетична мітка".to_owned(),
+        }
+    }
+
+    #[test]
+    fn library_versions_keep_the_document_format() {
+        assert_eq!(ensure_library_format("docx", b"PK\x03\x04rest"), Ok(()));
+        assert_eq!(ensure_library_format("csv", "a;b".as_bytes()), Ok(()));
+        assert_eq!(
+            ensure_library_format("txt", b"PK\x03\x04rest"),
+            Err(OfficeFileError::LibraryFormat("txt".to_owned()))
+        );
+        assert_eq!(
+            ensure_library_format("pptx", b"plain text"),
+            Err(OfficeFileError::LibraryFormat("pptx".to_owned()))
+        );
+        assert!(ensure_library_format("png", b"PK\x03\x04").is_err());
+    }
+
+    fn pending(profile: &str, app: &'static str, ext: &str) -> PendingFile {
+        PendingFile {
+            profile_id: profile.to_owned(),
+            app,
+            version_id: "ver-1".to_owned(),
+            ext: ext.to_owned(),
+            name: format!("Довідка.{ext}"),
+        }
+    }
+
+    #[test]
+    fn pending_file_name_is_a_json_literal() {
+        let script = editor_init_script("easydoc", Some("Звіт \"№1\"\u{2028}');alert(1);//"));
+        assert!(script.contains(
+            "'__EW_PENDING_FILE', { value: \"Звіт \\\"№1\\\"\\u2028');alert(1);//\", writable: false, configurable: false }"
+        ));
+        assert!(!script.contains('\u{2028}'));
+    }
+
+    #[test]
+    fn pending_file_is_taken_once_by_the_same_profile_and_app() {
+        let handles = OfficeFileHandles::default();
+        let docx = strings(&["docx", "txt"]);
+        assert_eq!(handles.take_pending("p1", "easydoc", &docx), None);
+        handles.set_pending(pending("p1", "easydoc", "docx"));
+        assert!(handles.has_pending());
+        assert_eq!(handles.take_pending("p2", "easydoc", &docx), None);
+        assert_eq!(handles.take_pending("p1", "easygreen", &docx), None);
+        // Запит зображення в EasySlide чи EasyDoc не забирає документ.
+        assert_eq!(
+            handles.take_pending("p1", "easydoc", &strings(&["png"])),
+            None
+        );
+        let taken = handles.take_pending("p1", "easydoc", &docx).unwrap();
+        assert_eq!(taken.version_id, "ver-1");
+        assert_eq!(handles.take_pending("p1", "easydoc", &docx), None);
+        assert!(!handles.has_pending());
+
+        handles.set_pending(pending("p1", "easyslide", "pptx"));
+        handles.clear_pending();
+        assert_eq!(
+            handles.take_pending("p1", "easyslide", &strings(&["pptx"])),
+            None
+        );
+    }
+
+    #[test]
+    fn editor_window_app_is_recorded_and_cleared() {
+        let handles = OfficeFileHandles::default();
+        assert_eq!(handles.editor_window_app(), None);
+        handles.set_editor_window_app(Some("easygreen"));
+        assert_eq!(handles.editor_window_app(), Some("easygreen"));
+        handles.set_editor_window_app(None);
+        assert_eq!(handles.editor_window_app(), None);
+    }
+
+    #[test]
+    fn library_handles_belong_to_their_profile_and_webview() {
+        let handles = OfficeFileHandles::default();
+        let editor = EDITOR_WINDOW_LABEL;
+        let handle = handles.remember_library("p1", editor, library_target("doc-1", "ver-1"));
+        assert_eq!(
+            handles.target("p1", editor, &handle),
+            Ok(HandleTarget::Library(library_target("doc-1", "ver-1")))
+        );
+        // Номер документа бібліотеки не дає шляху для запису на диск.
+        assert_eq!(
+            handles.path("p1", editor, &handle),
+            Err(OfficeFileError::UnknownHandle)
+        );
+        assert_eq!(
+            handles.target("p2", editor, &handle),
+            Err(OfficeFileError::UnknownHandle)
+        );
+        assert_eq!(
+            handles.target("p1", "main", &handle),
+            Err(OfficeFileError::UnknownHandle)
+        );
+        assert_eq!(
+            handles.set_library_base("p2", editor, &handle, "ver-2"),
+            Err(OfficeFileError::UnknownHandle)
+        );
+        handles
+            .set_library_base("p1", editor, &handle, "ver-2")
+            .unwrap();
+        assert_eq!(
+            handles.target("p1", editor, &handle),
+            Ok(HandleTarget::Library(library_target("doc-1", "ver-2")))
+        );
+        let disk = handles.remember("p1", editor, PathBuf::from("/tmp/a.docx"));
+        assert_eq!(
+            handles.set_library_base("p1", editor, &disk, "ver-3"),
+            Err(OfficeFileError::UnknownHandle)
+        );
+        handles.forget("p1", editor, &handle);
+        assert_eq!(
+            handles.target("p1", editor, &handle),
+            Err(OfficeFileError::UnknownHandle)
+        );
+        let other = handles.remember("p1", "main", PathBuf::from("/tmp/b.docx"));
+        handles.forget_webview(editor);
+        assert_eq!(
+            handles.path("p1", editor, &disk),
+            Err(OfficeFileError::UnknownHandle)
+        );
+        assert!(handles.path("p1", "main", &other).is_ok());
     }
 
     #[test]
@@ -429,5 +795,51 @@ mod tests {
         let link = folder.path().join("посилання.xlsx");
         std::os::unix::fs::symlink(&table, &link).unwrap();
         assert!(is_protected_table(&link, &[table]));
+    }
+
+    #[test]
+    fn only_regular_files_are_opened() {
+        let folder = tempfile::tempdir().unwrap();
+        let file = folder.path().join("документ.txt");
+        std::fs::write(&file, "синтетичний вміст").unwrap();
+        assert_eq!(
+            read_regular_file(&file, 1024, "завеликий").unwrap(),
+            "синтетичний вміст".as_bytes()
+        );
+        assert_eq!(
+            read_regular_file(&file, 4, "завеликий").unwrap_err(),
+            "завеликий"
+        );
+        assert_eq!(
+            read_regular_file(folder.path(), 1024, "завеликий").unwrap_err(),
+            OfficeFileError::NotRegularFile.to_string()
+        );
+        assert!(read_regular_file(&folder.path().join("немає.txt"), 1024, "завеликий").is_err());
+    }
+
+    /// FIFO заблокував би читання назавжди: його відхиляють, не відкриваючи.
+    #[cfg(unix)]
+    #[test]
+    fn a_fifo_is_rejected_without_blocking() {
+        let folder = tempfile::tempdir().unwrap();
+        let fifo = folder.path().join("канал.txt");
+        let created = std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .is_ok_and(|status| status.success());
+        if !created {
+            eprintln!("mkfifo недоступний: перевірку FIFO пропущено");
+            return;
+        }
+        assert_eq!(
+            read_regular_file(&fifo, 1024, "завеликий").unwrap_err(),
+            "це не звичайний файл"
+        );
+        let link = folder.path().join("посилання.txt");
+        std::os::unix::fs::symlink(&fifo, &link).unwrap();
+        assert_eq!(
+            open_regular_file(&link).unwrap_err(),
+            "це не звичайний файл"
+        );
     }
 }

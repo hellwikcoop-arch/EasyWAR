@@ -12,7 +12,12 @@
     <span class="ws-topbar-title">РОБОЧЕ СЕРЕДОВИЩЕ</span>
     <button type="button" class="ws-button ws-button-quiet" id="ws-exit">← На стартову</button>
   </header>
-  <main class="ws-home-main" id="ws-sections"></main>
+  <div class="ws-tabs" id="ws-tabs" role="tablist" aria-label="Вкладки робочого середовища">
+    <button type="button" class="ws-tab" id="ws-tab-office" role="tab" data-tab="office" aria-controls="ws-sections" aria-selected="true">Розділи</button>
+    <button type="button" class="ws-tab" id="ws-tab-library" role="tab" data-tab="library" aria-controls="ws-library" aria-selected="false" tabindex="-1">Бібліотека<span class="ws-badge" id="ws-library-badge" hidden></span></button>
+  </div>
+  <main class="ws-home-main" id="ws-sections" role="tabpanel" aria-labelledby="ws-tab-office"></main>
+  <section class="ws-home-main ws-library" id="ws-library" role="tabpanel" aria-labelledby="ws-tab-library" hidden></section>
 </section>
 <section class="ws-workspace" id="ws-app" hidden aria-labelledby="ws-app-name">
   <header class="ws-topbar ws-appbar">
@@ -26,6 +31,10 @@
     </div>
     <button type="button" class="ws-button ws-button-quiet ws-close-button" id="ws-close">Закрити</button>
   </header>
+  <div class="ws-notice" id="ws-notice" role="status" hidden>
+    <span id="ws-notice-text"></span>
+    <button type="button" class="ws-button" id="ws-notice-close">Зрозуміло</button>
+  </div>
   <div class="ws-confirm" id="ws-confirm" role="region" aria-live="assertive" aria-labelledby="ws-confirm-title" aria-describedby="ws-confirm-desc" hidden>
     <span class="ws-confirm-icon" aria-hidden="true">!</span>
     <div class="ws-confirm-copy"><strong id="ws-confirm-title">Є незбережені зміни.</strong><span id="ws-confirm-desc">Закрити без збереження?</span></div>
