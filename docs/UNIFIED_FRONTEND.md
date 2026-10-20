@@ -168,9 +168,9 @@ ends, and the launcher stays `inert` until sign-in.
 - The gate is a UI barrier plus the Rust unlock check of data commands, not
   protection against file tampering; see `docs/DATABASE.md` (Local profiles).
 
-## 3D-довідники (хаб і шість довідників)
+## easyWIKI (хаб, шість 3D-довідників і довідник бригад)
 
-Кнопка «3D-довідники» на головному екрані відкриває хаб інтерактивних довідників у накладці поверх лаунчера. Довідники — окремі сторінки збірки, тому legacy HTML (`index.html`, `air.html`, `rocket.html`) для них не змінювався, а `script/import_unified_html.mjs` їх не чіпає. Опис моделей, авторства й завантаження — в `docs/3D_MODELS.md` (розділ «3D-довідники»).
+Кнопка «easyWIKI» на головному екрані відкриває хаб інтерактивних довідників у накладці поверх лаунчера. Довідники — окремі сторінки збірки, тому legacy HTML (`index.html`, `air.html`, `rocket.html`) для них не змінювався, а `script/import_unified_html.mjs` їх не чіпає. Опис моделей, авторства й завантаження — в `docs/3D_MODELS.md` (розділ «3D-довідники»).
 
 | Файл | Роль |
 | --- | --- |

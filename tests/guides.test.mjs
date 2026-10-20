@@ -105,7 +105,7 @@ test('довідники не ходять у мережу й не викону�
 });
 
 test('кожна сторінка довідника веде назад на хаб, а хаб перелічує всі довідники', async () => {
-  for (const id of IDS) assert.match(await read(`src/guides/${id}/index.html`), /<a href="\.\.\/index\.html">← 3D-довідники<\/a>/, id);
+  for (const id of IDS) assert.match(await read(`src/guides/${id}/index.html`), /<a href="\.\.\/index\.html">← easyWIKI<\/a>/, id);
   const hub = await read('src/guides/hub.js');
   for (const id of IDS) assert.match(hub, new RegExp(`id: '${id}'`), `хаб: ${id}`);
   assert.match(await read('src/guides/index.html'), /<a href="\.\.\/index\.html">← До EasyWAR<\/a>/);
@@ -129,7 +129,7 @@ test('збірка: хаб і шість довідників — окремі �
   assert.match(await read('src/launcher-tools.js'), /import '\.\/guides-launcher\.js';/);
   const launcher = await read('src/guides-launcher.js');
   assert.match(launcher, /const HUB_URL = 'guides\/index\.html';/);
-  assert.match(launcher, /textContent = '3D-довідники'/);
+  assert.match(launcher, /textContent = 'easyWIKI'/);
   assert.match(launcher, /frame\.src = 'about:blank'/, 'закриття вивантажує WebGL-сцену');
   await stat(new URL('src/guides/index.html', root));
 });
