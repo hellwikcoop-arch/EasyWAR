@@ -28,5 +28,5 @@ test('назви, пошук і фільтр за родом військ', () =
   assert.ok(BRIGADES.every(b => purposeOf(b)));
   const c = branchCounts(BRIGADES);
   assert.equal(c[''], BRIGADES.length);
-  assert.equal(c.ps + c.sv + c.dshv + c.rvia + c.aa + c.none, BRIGADES.length);
+  assert.equal(c.ps + c.sso + c.sv + c.dshv + c.rvia + c.aa + c.none, BRIGADES.length);
 });

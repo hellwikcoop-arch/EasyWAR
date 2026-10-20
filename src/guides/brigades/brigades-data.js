@@ -28,6 +28,7 @@ export const PURPOSES = Object.freeze({
 
 export const BRANCHES = Object.freeze({
   ps: 'Повітряні Сили',
+  sso: 'ССО',
   sv: 'Сухопутні війська',
   dshv: 'ДШВ',
   rvia: 'РВіА',
@@ -53,6 +54,6 @@ export const BRIGADES = Object.freeze([
   { id: '12-obraa', number: 12, type: 'обраа', branch: 'aa', art: '12-obraa', place: 'Новий Калинів' },
   { id: '16-obraa', number: 16, type: 'обраа', branch: 'aa', art: '16-obraa', place: 'Броди' },
   { id: '18-obraa', number: 18, type: 'обраа', branch: 'aa', art: '18-obraa', place: 'Полтава' },
-  { id: '35-zmae', number: 35, type: 'змае', branch: 'ps', art: '35-zmae' },
+  { id: '35-zmae', number: 35, type: 'змае', branch: 'sso', art: '35-zmae' },
   { id: '456-brta', number: 456, type: 'брта', branch: 'ps', art: '456-brta' },
 ]);
