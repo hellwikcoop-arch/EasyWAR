@@ -184,7 +184,9 @@ const TILE_NAMES = {
   objDamaged: 'Пошкоджено об’єктів противника',
   objSuppressed: 'Подавлено об’єктів противника',
 };
-const tileFor = (kpi, prevComplete, config) => buildTile(kpi, prevComplete, config, TILE_NAMES[kpi.key] || KPI_NAMES[kpi.key] || kpi.label);
+// Показники втрат і уражень противника: зростання — краще (зелена стрілка), спад — гірше (червона). БК на одиницю ураженого має own better: 'down'.
+const BETTER_UP = new Set(['kia', 'wia', 'personnel', 'ovtDestroyed', 'ovtDamaged', 'ovtSuppressed', 'objDestroyed', 'objDamaged', 'objSuppressed', 'affected']);
+const tileFor = (kpi, prevComplete, config) => buildTile(BETTER_UP.has(kpi.key) && !kpi.better ? { ...kpi, better: 'up' } : kpi, prevComplete, config, TILE_NAMES[kpi.key] || KPI_NAMES[kpi.key] || kpi.label);
 
 /** Показники з розділенням техніки й об'єктів у тій самій формі, що й KPI дашборда. */
 function classifiedKpis(model, workbook, units, config) {

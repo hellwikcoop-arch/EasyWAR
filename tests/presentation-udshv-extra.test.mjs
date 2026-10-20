@@ -46,3 +46,14 @@ test('УДШВ deck period slides carry the chart and the annotation; module gro
   assert.equal(group.targetChart, undefined);
   assert.ok(group.tiles.length <= 6, 'слайд групи не має більше шести плиток');
 });
+
+test('tile arrows: growth of enemy losses is green, a fall is red; ammo per target stays «less is better»', () => {
+  const dates = Array.from({ length: 20 }, (_, i) => new Date(Date.UTC(2026, 8, 1) + i * 864e5).toISOString().slice(0, 10));
+  const wb = { kind: 'udshv', sourceName: 's.xlsx', sheetName: 'x', sheets: [], metrics: [], issues: [], units: ['А'], records: dates.map((date, i) => record(date, { 'personnel|200': i < 13 ? 1 : 3, 'personnel|300': i < 13 ? 3 : 1, 'destroyed|танк': 1, 'ammo|ВСЬОГО': 10 })) };
+  const week = buildDeck(wb, {}).slides.find(s => s.id === 'week');
+  const tile = key => week.tiles.find(t => t.key === key);
+  assert.equal(tile('kia').better, 'up');
+  assert.equal(tile('wia').better, 'up');
+  assert.equal(tile('ammoPerTarget').better, 'down');
+  assert.ok(tile('kia').delta > 0 && tile('wia').delta < 0);
+});
