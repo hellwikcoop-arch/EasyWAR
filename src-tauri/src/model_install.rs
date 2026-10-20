@@ -745,19 +745,32 @@ pub fn stage_bundled_runner(bundled: &Path, dir: &Path) -> std::io::Result<bool>
     std::fs::create_dir_all(dir)?;
     let temporary = dir.join(STAGED_RUNNER_TEMP);
     let _ = std::fs::remove_file(&temporary);
-    let copied = std::fs::copy(bundled, &temporary).and_then(|_| {
+    let copied = copy_synced(bundled, &temporary).and_then(|()| {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&temporary, std::fs::Permissions::from_mode(0o755))?;
         }
-        std::fs::File::open(&temporary)?.sync_all()?;
         std::fs::rename(&temporary, &target)
     });
     if copied.is_err() {
         let _ = std::fs::remove_file(&temporary);
     }
     copied.map(|()| true)
+}
+
+/// Copies `from` into a new file and flushes it to disk through the handle that wrote it.
+/// Windows flushes only a handle opened for writing (a read-only `File::open` + `sync_all`
+/// fails there with "access denied"), and a fresh file does not inherit a read-only
+/// attribute the installed program may carry, as `std::fs::copy` would.
+fn copy_synced(from: &Path, to: &Path) -> std::io::Result<()> {
+    let mut source = std::fs::File::open(from)?;
+    let mut target = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(to)?;
+    std::io::copy(&mut source, &mut target)?;
+    target.sync_all()
 }
 
 /// Writes the manifest and runs the full package check. The runner is the bundled one when
@@ -769,8 +782,9 @@ pub fn finalize_package(
     bundled: Option<&Path>,
 ) -> Result<Finalized, ModelError> {
     if let Some(bundled) = bundled {
-        stage_bundled_runner(bundled, dir)
-            .map_err(|_| ModelError::Package("не вдалося підготувати рушій".into()))?;
+        stage_bundled_runner(bundled, dir).map_err(|error| {
+            ModelError::Package(format!("не вдалося підготувати рушій ({error})"))
+        })?;
     }
     let Some(runner) = runner_in(dir) else {
         return Ok(Finalized::NeedsRunner);
@@ -1672,6 +1686,22 @@ mod tests {
         let bundled = synthetic_bundle(installed.path(), b"synthetic runner");
         assert!(stage_bundled_runner(&bundled, models.path()).unwrap());
         assert!(!stage_bundled_runner(&bundled, models.path()).unwrap());
+    }
+
+    #[test]
+    fn staging_copies_a_read_only_runner_and_replaces_a_leftover_temporary() {
+        let models = tempfile::tempdir().unwrap();
+        let installed = tempfile::tempdir().unwrap();
+        let bundled = synthetic_bundle(installed.path(), b"synthetic runner");
+        let mut permissions = std::fs::metadata(&bundled).unwrap().permissions();
+        permissions.set_readonly(true);
+        std::fs::set_permissions(&bundled, permissions).unwrap();
+        std::fs::write(models.path().join(STAGED_RUNNER_TEMP), b"half").unwrap();
+        assert!(stage_bundled_runner(&bundled, models.path()).unwrap());
+        let staged = models.path().join(STAGED_RUNNER_FILE);
+        assert_eq!(std::fs::read(&staged).unwrap(), b"synthetic runner");
+        assert!(!std::fs::metadata(&staged).unwrap().permissions().readonly());
+        assert!(!models.path().join(STAGED_RUNNER_TEMP).exists());
     }
 
     #[test]

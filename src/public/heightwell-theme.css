@@ -1,0 +1,232 @@
+/*
+ * EasyWAR: стиль «Пункт керування» (за довідником Heightwell, AnimatedWebs).
+ *
+ * Нічний пункт керування: полотно Void, текст Bone White, крупні щільні гротескні заголовки
+ * й дрібні моноширинні мітки. Світло розділу залежить від модуля: ПС — блакитне (Electric Cyan),
+ * РВ — жовте (Citrine), Артилерія — латунне золото, УДШВ — бордове.
+ *
+ * Лише вигляд: розмітку, логіку й дані не чіпає. Вмикається атрибутом html[data-skin="heightwell"]
+ * (ставить ui-kit.js за перемикачем «Пункт керування») і діє лише в темній темі.
+ * Шрифти локальні, без мережі: Space Grotesk не має кирилиці, тому одна гарнітура «HW Grotesk»
+ * складена з латиниці й цифр Space Grotesk та кирилиці Onest (обидва — SIL OFL 1.1).
+ */
+
+@font-face { font-family: "HW Grotesk"; font-style: normal; font-display: swap; font-weight: 400; src: url("./fonts/heightwell/space-grotesk-latin-400-normal.woff2") format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "HW Grotesk"; font-style: normal; font-display: swap; font-weight: 500; src: url("./fonts/heightwell/space-grotesk-latin-500-normal.woff2") format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "HW Grotesk"; font-style: normal; font-display: swap; font-weight: 700; src: url("./fonts/heightwell/space-grotesk-latin-700-normal.woff2") format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "HW Grotesk"; font-style: normal; font-display: swap; font-weight: 400; src: url("./fonts/heightwell/onest-cyrillic-400-normal.woff2") format("woff2"); unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }
+@font-face { font-family: "HW Grotesk"; font-style: normal; font-display: swap; font-weight: 500; src: url("./fonts/heightwell/onest-cyrillic-500-normal.woff2") format("woff2"); unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }
+@font-face { font-family: "HW Grotesk"; font-style: normal; font-display: swap; font-weight: 700; src: url("./fonts/heightwell/onest-cyrillic-700-normal.woff2") format("woff2"); unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }
+/* IBM Plex Mono — копія з src/guides/fonts (SIL OFL 1.1, ліцензія поруч). */
+@font-face { font-family: "HW Mono"; font-style: normal; font-display: swap; font-weight: 400; src: url("./fonts/heightwell/ibm-plex-mono-latin-400-normal.woff2") format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "HW Mono"; font-style: normal; font-display: swap; font-weight: 400; src: url("./fonts/heightwell/ibm-plex-mono-cyrillic-400-normal.woff2") format("woff2"); unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }
+@font-face { font-family: "HW Mono"; font-style: normal; font-display: swap; font-weight: 500; src: url("./fonts/heightwell/ibm-plex-mono-latin-500-normal.woff2") format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "HW Mono"; font-style: normal; font-display: swap; font-weight: 500; src: url("./fonts/heightwell/ibm-plex-mono-cyrillic-500-normal.woff2") format("woff2"); unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }
+
+/* ---------- Токени: перевизначають базові змінні модулів ---------- */
+html[data-skin="heightwell"]:not([data-theme="light"]) {
+  color-scheme: dark;
+  --hw-void: #070a14;
+  --hw-ink: #eaf1ff;
+  --hw-cyan: #2ee6ff;
+  --hw-citrine: #ffc83d;
+  --hw-gold: #d9a441; /* Артилерія: латунне золото емблеми, тепліше за цитрин РВ */
+  --hw-chapter: var(--hw-cyan);
+
+  --bg: var(--hw-void);
+  --surface: #0d1324;
+  --surface-2: #121a30;
+  --ink: var(--hw-ink);
+  --muted: #8e9bbb;
+  --line: #1f2a46;
+  --line-strong: #2e3d62;
+  --map-bg: #090e1b;
+  --grid: #172240;
+  --accent: var(--hw-chapter);
+  --accent-ink: var(--hw-void);
+  --accent-soft: color-mix(in srgb, var(--hw-chapter) 14%, var(--hw-void));
+  --sans: "HW Grotesk", "UAF Sans", "Segoe UI", Roboto, Arial, sans-serif;
+  --display: "HW Grotesk", "UAF Sans", "Segoe UI", Roboto, Arial, sans-serif;
+  --mono: "HW Mono", ui-monospace, "Cascadia Mono", Consolas, Menlo, monospace;
+  --ew-r: 6px;
+  --ew-r-sm: 4px;
+}
+/* Світло розділу за модулем. */
+/* rocket.html не має data-ew-module, тож РВ впізнаємо за її власним блоком стилів #rocket-reference-skin. */
+html[data-skin="heightwell"]:not([data-theme="light"]):is([data-ew-module="rocket"], :has(#rocket-reference-skin)) { --hw-chapter: var(--hw-citrine); }
+html[data-skin="heightwell"][data-ew-module="artillery"]:not([data-theme="light"]) { --hw-chapter: var(--hw-gold); }
+
+/* ---------- Типографіка ---------- */
+html[data-skin="heightwell"]:not([data-theme="light"]) body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+}
+html[data-skin="heightwell"]:not([data-theme="light"]) :is(h1, h2, .ph h2, .dpanel h2) {
+  font-family: var(--display);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+html[data-skin="heightwell"]:not([data-theme="light"]) :is(.kpi .k-v, .kpi b) {
+  font-family: var(--display);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+html[data-skin="heightwell"]:not([data-theme="light"]) :is(.toolbar .lbl, .kpi .k-l, th) {
+  font-family: var(--mono);
+  font-weight: 400;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+/* ---------- Поверхні: панелі темні, акцент лише як сигнал ---------- */
+html[data-skin="heightwell"]:not([data-theme="light"]) :is(.dpanel, .panel) {
+  background:
+    radial-gradient(120% 80% at 100% 0%, color-mix(in srgb, var(--hw-chapter) 7%, transparent), transparent 55%),
+    var(--surface);
+}
+html[data-skin="heightwell"]:not([data-theme="light"]) :is(.dpanel, .panel):hover {
+  border-color: color-mix(in srgb, var(--hw-chapter) 45%, var(--line));
+}
+html[data-skin="heightwell"]:not([data-theme="light"]) :focus-visible {
+  outline: 2px solid var(--hw-chapter);
+  outline-offset: 2px;
+}
+html[data-skin="heightwell"]:not([data-theme="light"]) a {
+  color: var(--hw-chapter);
+}
+
+/* Перемикач стилю, який додає ui-kit.js поруч із кнопкою теми. */
+html[data-skin="heightwell"]:not([data-theme="light"]) #skinBtn[aria-pressed="true"] {
+  border-color: var(--hw-chapter);
+  color: var(--hw-chapter);
+}
+
+/* ---------- РВ: оливкова палітра rocket.html (#rocket-reference-skin, #rocket-reference-final-overrides)
+   прописана кольорами прямо в правилах, тож тут ті самі поверхні перефарбовуються в нічні.
+   rocket.html не змінюється; світла тема й вимкнений стиль лишаються як були. ---------- */
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) {
+  --bg: var(--hw-void); --surface: #0d1324; --surface-2: #121a30; --ink: var(--hw-ink); --muted: #8e9bbb;
+  --line: #1f2a46; --line-strong: #2e3d62; --accent: var(--hw-chapter); --accent-ink: var(--hw-void);
+  --accent-soft: color-mix(in srgb, var(--hw-chapter) 14%, var(--hw-void)); --unk: #8e9bbb;
+  --map-bg: #090e1b; --grid: #172240; --shadow: 0 8px 28px rgba(0, 0, 0, .34); --ac: var(--hw-chapter);
+  --hw-chapter-rgb: 255 200 61;
+  --ref-bg: var(--hw-void); --ref-panel: #0f1629; --ref-deep: #0a0f1e; --ref-line: #1f2a46; --ref-text: var(--hw-ink);
+  --ref-muted: #a9b5d1; --ref-soft: #a9b5d1; --ref-gold: var(--hw-chapter); --step: #2e3d62; --mundyr: #1f2a46;
+}
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin), html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) body {
+  background: radial-gradient(circle at 78% 0%, rgb(var(--hw-chapter-rgb) / .07), transparent 30%), var(--hw-void);
+}
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) body::before {
+  background-image: linear-gradient(rgba(46, 230, 255, .03) 1px, transparent 1px), linear-gradient(90deg, rgba(46, 230, 255, .022) 1px, transparent 1px);
+}
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) .appbar { background: rgba(7, 10, 20, .94); border-bottom-color: rgb(var(--hw-chapter-rgb) / .18); }
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) :is(.brand small, .tab, .kh p, .kh-tag, .units-tbl td:nth-child(2), .ph .sub, .toolbar .lbl) { color: #a9b5d1; }
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) :is(.tab:hover, .tab[aria-selected="true"], .brand b, .dpanel h2) { color: var(--hw-ink); }
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) :is(.tab[aria-selected="true"]::after, .tab.ref-active::after, .snav-b.on::after) { background: var(--hw-chapter); box-shadow: 0 0 12px rgb(var(--hw-chapter-rgb) / .45); }
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) :is(.filechip, .filechip .btn, .dt input, .seg button, .btn, .rec) {
+  border-color: var(--line-strong); background: var(--surface); color: var(--ink);
+}
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) :is(.ms, .pass-f .btn) { border-color: var(--line-strong) !important; background: var(--surface) !important; }
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) .appbar-right #themeBtn { border-left-color: var(--line); }
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) .ref-more-menu { border-color: var(--line-strong); background: var(--surface); }
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) :is(.ref-more-menu button:hover, .btn.quiet:hover, .snav-b:hover) { background: var(--surface-2); }
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) .side { background: linear-gradient(180deg, #0a0f1c 0%, var(--hw-void) 100%); border-right-color: rgb(var(--hw-chapter-rgb) / .12); }
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) :is(.snav-b, .ref-more-menu button, .nb) { color: #c3cde3; }
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) :is(.snav-entry, .side-foot) { border-top-color: var(--line); }
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) .nb { background: var(--surface-2); border-color: var(--line-strong); }
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) :is(.rocket-side-promo img, .kh-jet, .kc-photo, .carrier img, .dmain-in[data-view="eff"] #p-act .a2-hc img) {
+  filter: grayscale(.55) brightness(.66) contrast(1.1);
+}
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) .rocket-side-promo::before { background: linear-gradient(180deg, transparent 0%, rgba(7, 10, 20, .32) 42%, var(--hw-void) 100%); }
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) .seg { border-color: var(--line-strong); }
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) .dtbl td { border-color: var(--line) !important; }
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) .seg button + button { border-left-color: var(--line); }
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) .seg button[aria-pressed="true"] { background: var(--surface-2); box-shadow: inset 0 -2px 0 var(--hw-chapter); color: var(--hw-ink); }
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) .kpis { border-color: rgb(var(--hw-chapter-rgb) / .14); background: linear-gradient(180deg, var(--surface), #0a0f1c); }
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) .kh {
+  background: linear-gradient(90deg, rgba(7, 10, 20, .96) 0%, rgba(7, 10, 20, .86) 43%, rgba(13, 19, 36, .42) 72%, rgba(7, 10, 20, .82) 100%);
+  border-bottom-color: rgb(var(--hw-chapter-rgb) / .1);
+}
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) .kh-eff { border-color: var(--line-strong); background: rgba(13, 19, 36, .72); }
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) .kc { background: linear-gradient(180deg, color-mix(in srgb, var(--tc) 8%, #0d1324) 0%, #0d1324 58%, #0a0f1c 100%); }
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) .kc-t { background: rgba(18, 26, 48, .7); }
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) :is(.dpanel, .panel, .d2) { border-color: var(--line); background: linear-gradient(180deg, var(--surface), #0a0f1c); }
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) :is(.ph .link, .link) { color: var(--hw-chapter); }
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) .mapwrap { border-color: var(--line-strong); background: #0b1120; }
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) .mapwrap > svg { filter: saturate(.8) brightness(.9); }
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) :is(.map-ctl button, .map-legend) { background: rgba(7, 10, 20, .88); border-color: var(--line-strong); }
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) :is(#p-units .ph, #p-types .ph) { border-bottom-color: var(--line); }
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) :is(.ops-tbl thead th, .dtbl th) { background: var(--surface-2) !important; color: #c3cde3 !important; }
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) .ops-tbl tbody tr:hover td { background: rgb(var(--hw-chapter-rgb) / .06); }
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) :is(.btn.primary, .pass-f .btn.primary) { background: var(--hw-chapter) !important; border-color: var(--hw-chapter) !important; color: var(--hw-void) !important; }
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) .chip.on { background: rgb(var(--hw-chapter-rgb) / .16); border-color: var(--hw-chapter); color: var(--hw-ink); }
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) .dmain-in[data-view="eff"] :is(#p-plat, #p-mun, #p-units, #p-act, #p-types, #p-map, #p-ops) {
+  border-color: var(--line) !important;
+  background: radial-gradient(circle at 85% 10%, rgb(var(--hw-chapter-rgb) / .05), transparent 32%), linear-gradient(180deg, var(--surface), #0a0f1c) !important;
+}
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) .dmain-in[data-view="eff"] #p-act .a2-head { background: linear-gradient(90deg, rgba(7, 10, 20, .97) 0%, rgba(13, 19, 36, .86) 52%, rgba(13, 19, 36, .52) 100%); }
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) .dmain-in[data-view="eff"] :is(#p-act .a2-k, #p-act .a2-bot > *, #p-plat .pl-row, #p-mun .mn-row) { background: rgba(18, 26, 48, .72); border-color: var(--line-strong); }
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) .dmain-in[data-view="eff"] :is(#p-units .ph, #p-types .ph, #p-map .ph, #p-ops .ph, #p-act .a2-head) { border-bottom-color: rgb(var(--hw-chapter-rgb) / .12); }
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) :is(dialog.pass) {
+  background: radial-gradient(circle at 78% 8%, rgb(var(--hw-chapter-rgb) / .06), transparent 28%), linear-gradient(180deg, var(--surface) 0%, var(--hw-void) 100%) !important;
+  border-color: var(--line-strong) !important; color: var(--hw-ink) !important;
+}
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) :is(.pass-h, .pass-f) { background: linear-gradient(90deg, #0d1324, #070a14) !important; border-color: var(--line-strong) !important; }
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) :is(.pass-res, .pf, .pass-sec) { background: linear-gradient(180deg, rgba(13, 19, 36, .96), rgba(7, 10, 20, .96)) !important; border-color: var(--line-strong) !important; }
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) :is(.pass-mapbox, .carrier) { background: #0b1120 !important; border-color: var(--line-strong) !important; }
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) .pass-map { background: #0b1120 !important; }
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) .pass-mtool select { background: var(--surface) !important; border-color: var(--line-strong) !important; color: var(--hw-ink) !important; }
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) :is(.pass-dt, .mod-s, .pass-res .pr-l, .pass-sec > h3) { color: #a9b5d1 !important; }
+/* Ці три поверхні rocket.html і rocket-refs.js фарбують з !important, тож і тут !important. */
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) .kh {
+  background: linear-gradient(90deg, #070a14 0%, #070a14 12%, rgba(7, 10, 20, .82) 35%, transparent 55%, transparent 64%, #070a14 82%), var(--ref-hero) 66% center/auto 100% no-repeat, #070a14 !important;
+}
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) .tt-row.ewr-tt {
+  border-color: rgb(var(--hw-chapter-rgb) / .22) !important;
+  background: linear-gradient(90deg, #0d1324 0, #0d1324 38%, rgba(13, 19, 36, .2) 70%) !important;
+}
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) .tt-row.ewr-tt .tt-photo { filter: grayscale(.55) brightness(.75) contrast(1.1); }
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) .snav-b.on {
+  border-color: rgb(var(--hw-chapter-rgb) / .35) !important; color: var(--hw-ink);
+  background: linear-gradient(90deg, rgb(var(--hw-chapter-rgb) / .16), var(--surface) 88%) !important;
+  box-shadow: inset 3px 0 0 var(--hw-chapter), 0 0 17px rgb(var(--hw-chapter-rgb) / .1) !important;
+}
+
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) .a2-head {
+  background: linear-gradient(90deg, #070a14 0%, rgba(7, 10, 20, .95) 23%, rgba(7, 10, 20, .42) 44%, rgba(7, 10, 20, .14) 71%, rgba(7, 10, 20, .72) 100%), var(--ref-act-wide) center/cover no-repeat, #070a14 !important;
+}
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) .dhero.dhero-units {
+  background: linear-gradient(90deg, #070a14 0%, rgba(7, 10, 20, .96) 28%, rgba(7, 10, 20, .46) 49%, rgba(7, 10, 20, .16) 72%, rgba(7, 10, 20, .78) 100%), var(--ref-units-wide) center/cover no-repeat, #070a14 !important;
+}
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin) .dhero.dhero-types {
+  background: linear-gradient(90deg, #070a14 0%, rgba(7, 10, 20, .96) 28%, rgba(7, 10, 20, .48) 48%, rgba(7, 10, 20, .14) 72%, rgba(7, 10, 20, .8) 100%), var(--ref-types-wide) center/cover no-repeat, #070a14 !important;
+}
+
+/* ---------- УДШВ (rocket.html?command=dshv): нічна палітра з бордовим світлом розділу.
+   Фон-карта, панелі й лінії udshv-dashboard.css замінюються нічними; кольори показників лишаються. ---------- */
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin):is([data-command="dshv"], :has(body.udshv-open)) {
+  --hw-chapter: #ff5c7a; --hw-chapter-rgb: 255 92 122; --accent: #ff5c7a; --ac: #ff5c7a; --ref-gold: #ff5c7a;
+  --accent-soft: color-mix(in srgb, #ff5c7a 14%, var(--hw-void));
+}
+html[data-skin="heightwell"]:not([data-theme="light"]):has(body.udshv-open) {
+  background: radial-gradient(circle at 82% 0%, rgba(255, 92, 122, .09), transparent 34%), var(--hw-void) fixed !important;
+}
+html[data-skin="heightwell"]:not([data-theme="light"]):has(body.udshv-open) #udshv-dashboard-root {
+  --ud-panel: rgba(13, 19, 36, .9); --ud-line: #1f2a46; --ud-muted: #a9b5d1; --ud-green: #e5506a;
+  --ud-track: rgba(169, 181, 209, .14);
+}
+html[data-skin="heightwell"]:not([data-theme="light"]):has(body.udshv-open) :is(.appbar, .ud-hero, .ud-card, .ud-kpi) { border-color: #1f2a46; }
+html[data-skin="heightwell"]:not([data-theme="light"]):is([data-command="dshv"], :has(body.udshv-open)) .appbar { border-bottom-color: rgba(255, 92, 122, .2); }
+/* УДШВ до відкриття таблиці: rocket.html фарбує фон, шапку й картку бордовим з !important. */
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin)[data-command="dshv"]:not(:has(body.udshv-open)),
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin)[data-command="dshv"]:not(:has(body.udshv-open)) body {
+  background: radial-gradient(circle at 78% 0%, rgba(255, 92, 122, .09), transparent 32%), var(--hw-void) !important;
+}
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin)[data-command="dshv"]:not(:has(body.udshv-open)) .appbar {
+  background: rgba(7, 10, 20, .94) !important; border-bottom-color: rgba(255, 92, 122, .2) !important;
+}
+html[data-skin="heightwell"]:not([data-theme="light"]):has(#rocket-reference-skin)[data-command="dshv"]:not(:has(body.udshv-open)) :is(.empty-state, .filechip) {
+  background: var(--surface) !important; border-color: var(--line-strong) !important;
+}

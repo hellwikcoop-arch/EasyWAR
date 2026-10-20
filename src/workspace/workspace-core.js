@@ -1,4 +1,4 @@
-// Чиста логіка модуля «Робоче середовище»: реєстр застосунків розділу «Офіс», контракт
+// Чиста логіка модуля «Робоче середовище»: реєстр застосунків розділів «Офіс» і «Особисте», контракт
 // підключення застосунку (версія, перевірка того, що повертає mount), параметри вікон
 // відкриття/збереження. Без DOM і Tauri, щоб її можна було перевірити в node --test.
 // Оболонка — workspace.js, сторінка одного застосунку — app-frame.js, файли — workspace-host.js.
@@ -50,19 +50,51 @@ export const OFFICE_APPS = Object.freeze([
   }),
 ]);
 
-/** Розділи модуля. Поки один — «Офіс». */
+/**
+ * Застосунки розділу «Особисте»: дані однієї людини для неї самої, лише у її власних файлах.
+ */
+export const PERSONAL_APPS = Object.freeze([
+  app({
+    id: 'easypay',
+    title: 'easyPay',
+    kind: 'Грошове забезпечення',
+    hint: 'Калькулятор виплат і журнал того, що вам мають виплатити, з нагадуваннями',
+    extensions: ['easypay'],
+    filterName: 'Журнал easyPay',
+  }),
+]);
+
+/** Усі застосунки модуля в порядку розділів. */
+export const WORKSPACE_APPS = Object.freeze([...OFFICE_APPS, ...PERSONAL_APPS]);
+
+/** Розділи модуля: «Офіс» і «Особисте». */
 export const WORKSPACE_SECTIONS = Object.freeze([
   Object.freeze({ id: 'office', title: 'Офіс', apps: Object.freeze(OFFICE_APPS.map(entry => entry.id)) }),
+  Object.freeze({ id: 'personal', title: 'Особисте', apps: Object.freeze(PERSONAL_APPS.map(entry => entry.id)) }),
 ]);
 
 export function appById(id) {
-  return OFFICE_APPS.find(entry => entry.id === id) || null;
+  return WORKSPACE_APPS.find(entry => entry.id === id) || null;
 }
 
 /** Адреса сторінки застосунку відносно `workspace/index.html`. */
 export function appPageUrl(id) {
   if (!appById(id)) throw new Error(`Невідомий застосунок: ${id}`);
   return `app.html?app=${encodeURIComponent(id)}`;
+}
+
+/**
+ * Де працює оболонка. `editorApp` — window.__EW_EDITOR_APP (його ставить Rust лише у вікні
+ * редактора), `hasInvoke` — чи є Tauri. 'editor': окреме вікно редактора, застосунок
+ * відкривається одразу, закриття закриває вікно; 'desktop': головне вікно, картка відкриває
+ * вікно редактора (F-01: код редактора не працює в головному вікні); 'browser': без Tauri
+ * (vite preview), застосунок відкривається в iframe, як раніше.
+ */
+export function shellMode(editorApp, hasInvoke) {
+  if (editorApp !== undefined) {
+    return { mode: 'editor', app: typeof editorApp === 'string' ? appById(editorApp) : null };
+  }
+  return { mode: hasInvoke ? 'desktop' : 'browser', app: null };
 }
 
 /** Застосунок з рядка адреси `?app=<id>` або null. */

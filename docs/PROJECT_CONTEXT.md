@@ -178,5 +178,6 @@ script/                         standalone-збірка, випуск, мані�
 | `PRESENTATIONS.md` | Автоматичні презентації |
 | `MACOS_PACKAGING.md` | Підпис і пакування macOS |
 | `ROADMAP.md` | Віхи 0.5–1.1 |
+| `MODULES_ROADMAP.md` | Бібліотека модулів і конструктор дашборда (чернетка) |
 | `releases/vX.Y.Z.md` | Нотатки до випусків (потрапляють у `latest.json`) |
 | `codex/PVK_DASHBOARD.md`, `design/` | Дизайн-матеріали дашборда ПВК |

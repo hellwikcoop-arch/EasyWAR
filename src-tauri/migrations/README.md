@@ -74,6 +74,12 @@ itself holds the corrected value. Corrections reference the record by its
 Deleting the module (or its profile) deletes them; a record removed from the
 module table takes its corrections with it. The XLSX is never written.
 
+`0012_dashboard_module_style.sql` adds `dashboard_modules.style`, the look picked
+in the module creation window: `standard` (the default, so existing modules keep
+their look), `branch` (colours of the dashboard's service branch) or
+`heightwell` («Пункт керування»). A `CHECK` limits it to these three names; the
+colour comes from the module's `branch`, never from stored text.
+
 The `dashboard_data_<id>` tables of user-created dashboard modules are not
 migration objects: Rust creates them at runtime from a validated catalog
 template and adds columns that later appear in a template with `ALTER TABLE`,

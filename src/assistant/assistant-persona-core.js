@@ -46,6 +46,30 @@ export function languageReply(query) {
   };
 }
 
+// Пасхалка: питання про улюблену пісню КОМБАТа. Відповідь не з довідки, а лише оформлення: рядок тексту й
+// позначка `media`, за якою застосунок вмикає локальну пісню (без відео, без мережі). Лише короткі питання про
+// пісню (до 80 символів): довге речення з цими словами — звичайний запит до довідки.
+const SONG_QUESTION = Object.freeze([
+  /улюблен\p{L}*\s+(?:пісн|трек|мелод|композиц)\p{L}*/u,
+  /(?:пісн|трек|мелод|композиц)\p{L}*\s+улюблен\p{L}*/u,
+  /(?:яку|яка|які)\s+(?:пісн|мелод)\p{L}*\s+(?:ти|тобі|ви|вам)(?=$|[^\p{L}])/u,
+]);
+export const FAVORITE_SONG_ID = 'favorite-song';
+
+export function songReply(query) {
+  if (typeof query !== 'string') return null;
+  const text = query.normalize('NFKC').toLocaleLowerCase('uk-UA').replace(/\s+/gu, ' ').trim();
+  if (!text || text.length > 80 || !SONG_QUESTION.some(pattern => pattern.test(text))) return null;
+  return {
+    status: 'found',
+    text: 'Є одна. Слухай уважно, балачки відставити.',
+    sources: [],
+    warnings: [],
+    origin: 'persona',
+    media: FAVORITE_SONG_ID,
+  };
+}
+
 export function answerLead(query, answer) {
   if (!answer || answer.status !== 'found' || typeof answer.text !== 'string' || !answer.text || answer.text === UNKNOWN_ANSWER) return null;
   if (answer.origin !== 'application-state' && !(Array.isArray(answer.sources) && answer.sources.length)) return null;

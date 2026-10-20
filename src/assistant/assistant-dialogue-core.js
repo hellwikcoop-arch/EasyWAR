@@ -6,7 +6,7 @@ import {
   UNKNOWN_ANSWER, searchKnowledge, isInstructionText, knowledgeTerms, normalizeKnowledgeText,
 } from './assistant-knowledge-core.js';
 import { answerFromKnowledge, factPack } from './assistant-retrieval-core.js';
-import { languageReply } from './assistant-persona-core.js';
+import { languageReply, songReply } from './assistant-persona-core.js';
 import { stateQuestion, answerApplicationState } from './assistant-state-core.js';
 
 export const DIALOGUE_LIMITS = Object.freeze({
@@ -84,6 +84,9 @@ export function classifyQuery(query, history = []) {
   if (!text) return { kind: 'empty', query: text };
   const lower = text.toLocaleLowerCase('uk-UA');
   if (isInstructionText(text)) return { kind: 'refused', query: text, effectiveQuery: text, followUp: false };
+  // Пасхалка про улюблену пісню: не довідка й не модель, лише готова відповідь із позначкою media.
+  const song = songReply(text);
+  if (song) return { kind: 'easter', query: text, effectiveQuery: text, followUp: false, easter: song };
   const language = languageReply(text);
   if (language) return { kind: 'language', query: text, effectiveQuery: text, followUp: false, language };
 
@@ -148,6 +151,7 @@ export function answerExact({ plan, index, state }) {
   if (plan.kind === 'empty') return empty;
   if (plan.kind === 'refused') return { ...empty, result: searchKnowledge({ schemaVersion: 1, sources: [], chunks: [] }, plan.query), topic: 'unknown' };
   if (plan.kind === 'language') return { ...empty, result: plan.language, topic: 'unknown' };
+  if (plan.kind === 'easter') return { ...empty, result: plan.easter, topic: 'easter', media: plan.easter.media };
   if (plan.kind === 'clarify') {
     return { ...empty, topic: 'clarify', suggestions: [...CLARIFY_SUGGESTIONS],
       result: { status: 'clarify', text: 'Уточніть, що саме вас цікавить. Наприклад:', sources: [], warnings: [] } };
@@ -228,7 +232,7 @@ function historyMessages(history) {
 
 // Returns null when there is nothing to ground an answer in: then there is nothing for the model to say.
 export function buildGenerationRequest({ plan, history, facts }) {
-  if (!facts?.length || ['empty', 'refused', 'language', 'clarify'].includes(plan.kind)) return null;
+  if (!facts?.length || ['empty', 'refused', 'language', 'clarify', 'easter'].includes(plan.kind)) return null;
   const block = facts.map(fact => `[${fact.id}] (${fact.label}) ${clip(fact.text, DIALOGUE_LIMITS.factChars)}`).join('\n');
   const user = `ФАКТИ:\n${block}\n\nПИТАННЯ: ${clip(plan.query, 240)}${plan.followUp ? `\n(Це продовження теми: ${clip(lastTopic(history)?.query ?? '', 120)})` : ''}`;
   const messages = [...historyMessages(history), { role: 'user', content: user }];
@@ -298,7 +302,7 @@ export function finishTurn({ plan, exact, facts = [], generation = null, session
   return {
     sessionRevision, query: plan.query, effectiveQuery: plan.effectiveQuery ?? plan.query, followUp: Boolean(plan.followUp),
     topic: exact.topic, area: exact.area, factIds: generation ? generation.factIds : exact.factIds,
-    answer: text, actions: exact.actions, suggestions: exact.suggestions,
+    answer: text, actions: exact.actions, suggestions: exact.suggestions, media: exact.media ?? null,
     mode: generation ? 'local-model' : 'exact-fallback', result, voice: generation ? null : voice,
   };
 }
