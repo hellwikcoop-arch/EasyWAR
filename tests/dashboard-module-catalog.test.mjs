@@ -12,6 +12,9 @@ import {
   crewCount,
   crewSummary,
   deleteModulePrompt,
+  deleteModuleRequest,
+  runModuleDelete,
+  DELETE_CONFLICT_MESSAGE,
   fieldColumnWidth,
   fieldHint,
   fieldInputText,
@@ -1141,7 +1144,7 @@ test('the review screen corrects values before the import and never rewrites the
 
 test('deleting a module asks first and names what disappears with it', () => {
   const ask = rowCount => deleteModulePrompt({ title: 'Лінійний графік', rowCount });
-  assert.equal(ask(0), 'Видалити модуль «Лінійний графік» і його порожню таблицю? Дію не можна скасувати.');
+  assert.equal(ask(0), 'Видалити модуль «Лінійний графік» і його порожню таблицю? Дані зникнуть остаточно, дію не можна скасувати.');
   assert.match(ask(1), /таблицю з 1 записом\?/);
   assert.match(ask(3), /таблицю з 3 записами\?/);
   assert.match(ask(11), /таблицю з 11 записами\?/);
@@ -1151,12 +1154,41 @@ test('deleting a module asks first and names what disappears with it', () => {
 
 test('a module card can be deleted through the local command after an inline confirmation', async () => {
   const source = await readFile(new URL('../src/dashboard-module-catalog.js', import.meta.url), 'utf8');
-  for (const text of ['Видалити модуль', 'Так, видалити', 'Залишити', "invoke('delete_dashboard_module', { moduleId: module.id })", 'deleteModulePrompt(module)']) {
+  for (const text of ['Видалити модуль і дані', 'Так, видалити', 'Залишити', 'runModuleDelete(invoke, module)', 'deleteModulePrompt(module)']) {
     assert.ok(source.includes(text), text);
   }
   assert.doesNotMatch(source, /window\.confirm|\bconfirm\(/);
   const css = await readFile(new URL('../src/dashboard-module-catalog.css', import.meta.url), 'utf8');
   assert.match(css, /\.ewmc-host \[hidden\]\{display:none!important\}/, 'the hidden confirmation must not show through .ewmc-confirm{display:flex}');
+});
+
+test('deleting sends the version the user confirmed and never deletes without it', async () => {
+  assert.deepEqual(deleteModuleRequest({ id: 'm1', updatedAt: 'V1' }), { moduleId: 'm1', expectedUpdatedAt: 'V1' });
+  assert.throws(() => deleteModuleRequest({ id: 'm1' }), /позначки версії/);
+  assert.throws(() => deleteModuleRequest({ updatedAt: 'V1' }), /ідентифікатора/);
+  const calls = [];
+  const invoke = async (...call) => { calls.push(call); };
+  assert.deepEqual(await runModuleDelete(invoke, { id: 'm1', updatedAt: 'V1' }), { status: 'deleted' });
+  assert.deepEqual(calls, [['delete_dashboard_module', { moduleId: 'm1', expectedUpdatedAt: 'V1' }]]);
+  const none = await runModuleDelete(invoke, { id: 'm1' });
+  assert.equal(none.status, 'failed');
+  assert.equal(calls.length, 1, 'no version mark: the command is not even called');
+});
+
+test('after a delete conflict nothing is retried and the user must confirm again', async () => {
+  let attempts = 0;
+  const invoke = async () => { attempts += 1; throw new Error('таблицю змінено в іншому вікні; відкрийте її знову'); };
+  const result = await runModuleDelete(invoke, { id: 'm1', updatedAt: 'V1' });
+  assert.equal(result.status, 'conflict');
+  assert.equal(result.message, DELETE_CONFLICT_MESSAGE);
+  assert.match(DELETE_CONFLICT_MESSAGE, /Перевірте дані й підтвердьте видалення ще раз/);
+  assert.equal(attempts, 1);
+  const other = await runModuleDelete(async () => { throw new Error('не вдалося'); }, { id: 'm1', updatedAt: 'V1' });
+  assert.deepEqual(other, { status: 'failed', message: 'не вдалося' });
+  const source = await readFile(new URL('../src/dashboard-module-catalog.js', import.meta.url), 'utf8');
+  const body = source.slice(source.indexOf('async function deleteModule('), source.indexOf('// 3D-сцена'));
+  assert.match(body, /result\.status === 'conflict'[\s\S]*await loadModules\(\)/, 'conflict reloads the cards');
+  assert.equal(body.match(/runModuleDelete\(/g).length, 1, 'no automatic second attempt');
 });
 
 test('«Мій дашборд» lives only on its own tab of the left menu', async () => {

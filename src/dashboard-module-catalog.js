@@ -17,6 +17,7 @@ import {
   formatFieldValue,
   inheritedValues,
   isConflictError,
+  runModuleDelete,
   matchesCatalogItem,
   normalizeCatalog,
   normalizeDensity,
@@ -275,8 +276,8 @@ function initialize() {
     const removeButton = el('button', {
       type: 'button',
       class: 'btn quiet ewmc-danger',
-      text: 'Видалити модуль',
-      title: 'Прибрати модуль із дашборда разом із його локальною таблицею',
+      text: 'Видалити модуль і дані',
+      title: 'Назавжди видалити модуль разом із його локальною таблицею та всіма записами',
       'data-action': 'delete-module',
       'data-module-id': module.id,
     });
@@ -337,14 +338,20 @@ function initialize() {
     state.busy = true;
     for (const button of buttons) button.disabled = true;
     try {
-      await invoke('delete_dashboard_module', { moduleId: module.id });
-      state.tableViews.delete(module.id);
-      showToast(`Модуль «${module.title}» видалено.`);
-      await loadModules();
-      host.querySelector('.ewmc-add')?.focus();
-    } catch (error) {
-      showToast(String(error || 'Не вдалося видалити модуль.'), true);
-      for (const button of buttons) button.disabled = false;
+      const result = await runModuleDelete(invoke, module);
+      if (result.status === 'deleted') {
+        state.tableViews.delete(module.id);
+        showToast(`Модуль «${module.title}» видалено.`);
+        await loadModules();
+        host.querySelector('.ewmc-add')?.focus();
+      } else if (result.status === 'conflict') {
+        // Нічого не видалено: показуємо актуальну картку й чекаємо нового підтвердження.
+        await loadModules();
+        showToast(result.message, true);
+      } else {
+        showToast(result.message, true);
+        for (const button of buttons) button.disabled = false;
+      }
     } finally {
       state.busy = false;
     }

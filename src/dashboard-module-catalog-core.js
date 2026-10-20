@@ -139,7 +139,7 @@ export function deleteModulePrompt(module) {
   const title = String(module?.title || '').trim() || 'без назви';
   const count = Math.max(0, Math.trunc(Number(module?.rowCount) || 0));
   const data = count ? `його таблицю з ${count} ${pluralForm(count, 'записом', 'записами', 'записами')}` : 'його порожню таблицю';
-  return `Видалити модуль «${title}» і ${data}? Дію не можна скасувати.`;
+  return `Видалити модуль «${title}» і ${data}? Дані зникнуть остаточно, дію не можна скасувати.`;
 }
 
 /** Підпис кількості колонок таблиці: «1 колонка», «3 колонки», «34 колонки», «35 колонок». */
@@ -659,6 +659,35 @@ export function replaceRowsRequest(module, rows) {
   return { moduleId: module.id, rows, expectedUpdatedAt: module.updatedAt };
 }
 
+/**
+ * Аргументи команди видалення. Підтвердження стосується того стану, який користувач
+ * бачив у картці, тому `expectedUpdatedAt` обов'язковий: без нього видалення не виконується.
+ */
+export function deleteModuleRequest(module) {
+  if (typeof module?.id !== 'string' || !module.id) throw new Error('Немає ідентифікатора модуля.');
+  if (typeof module.updatedAt !== 'string' || !module.updatedAt) {
+    throw new Error('Немає позначки версії таблиці. Оновіть дашборд і підтвердіть видалення знову.');
+  }
+  return { moduleId: module.id, expectedUpdatedAt: module.updatedAt };
+}
+
+/** Повідомлення після конфлікту видалення; саме видалення автоматично не повторюється. */
+export const DELETE_CONFLICT_MESSAGE = 'Таблицю змінено в іншому вікні. Перевірте дані й підтвердьте видалення ще раз.';
+
+/**
+ * Видалення модуля після підтвердження. Повертає `deleted`, `conflict` (дані змінено після
+ * підтвердження, нічого не видалено) або `failed`. Не повторює видалення сама.
+ */
+export async function runModuleDelete(invoke, module) {
+  try {
+    await invoke('delete_dashboard_module', deleteModuleRequest(module));
+    return { status: 'deleted' };
+  } catch (error) {
+    if (isConflictError(error)) return { status: 'conflict', message: DELETE_CONFLICT_MESSAGE };
+    return { status: 'failed', message: String(error?.message || error || 'Не вдалося видалити модуль.') };
+  }
+}
+
 /** Відповідь Rust «таблицю змінено в іншому вікні» (див. `DashboardModuleError::Conflict`). */
 export function isConflictError(error) {
   return /змінено в іншому вікні/i.test(String(error?.message ?? error ?? ''));
@@ -779,6 +808,8 @@ export const dashboardModuleCore = {
   rowsAfterSave,
   rowsAfterDelete,
   replaceRowsRequest,
+  deleteModuleRequest,
+  runModuleDelete,
   isConflictError,
   tableEditState,
   previewModel,
