@@ -158,6 +158,8 @@ pub enum DashboardModuleError {
     InvalidCorrection,
     #[error("невідомий стиль оформлення модуля")]
     InvalidStyle,
+    #[error("немає позначки версії таблиці; відкрийте модуль знову")]
+    VersionRequired,
 }
 
 fn field(
@@ -1421,12 +1423,45 @@ impl DashboardModuleStore {
     /// Видаляє модуль профілю разом із його таблицею даних і виправленнями однією
     /// транзакцією. Чужий або неіснуючий модуль — `ModuleNotFound`, нічого не
     /// змінюється. Скидається лише таблиця з перевіреним згенерованим іменем.
+    ///
+    /// `expected_updated_at` — позначка змін, з якою користувач підтвердив видалення.
+    /// Якщо таблицю змінили після цього, видалення відхиляється з `Conflict` і нічого
+    /// не змінює. Позначки без значення немає: безумовного видалення не існує.
     pub async fn delete(
         &self,
         profile_id: &str,
         module_id: &str,
+        expected_updated_at: Option<&str>,
     ) -> Result<(), DashboardModuleError> {
+        let expected = expected_updated_at
+            .filter(|value| !value.is_empty())
+            .ok_or(DashboardModuleError::VersionRequired)?;
         let mut transaction = self.pool.begin().await?;
+        // Перша операція транзакції звіряє версію й бере блокування запису, як у `replace_rows`.
+        let claimed = sqlx::query(
+            "UPDATE dashboard_modules SET updated_at = updated_at
+             WHERE id = ? AND profile_id = ? AND updated_at = ?",
+        )
+        .bind(module_id)
+        .bind(profile_id)
+        .bind(expected)
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+        if claimed != 1 {
+            let exists: Option<String> = sqlx::query_scalar(
+                "SELECT id FROM dashboard_modules WHERE profile_id = ? AND id = ?",
+            )
+            .bind(profile_id)
+            .bind(module_id)
+            .fetch_optional(&mut *transaction)
+            .await?;
+            return Err(if exists.is_some() {
+                DashboardModuleError::Conflict
+            } else {
+                DashboardModuleError::ModuleNotFound
+            });
+        }
         let storage_table: String = sqlx::query_scalar(
             "SELECT storage_table FROM dashboard_modules WHERE profile_id = ? AND id = ?",
         )
@@ -3140,7 +3175,7 @@ mod tests {
         .await
         .unwrap();
 
-        store.delete(PROFILE, &doomed.id).await.unwrap();
+        store.delete(PROFILE, &doomed.id, Some(T2)).await.unwrap();
 
         let tables: Vec<String> = sqlx::query_scalar(
             "SELECT name FROM sqlite_master
@@ -3163,7 +3198,7 @@ mod tests {
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].id, kept.id);
         assert!(matches!(
-            store.delete(PROFILE, &doomed.id).await,
+            store.delete(PROFILE, &doomed.id, Some(T2)).await,
             Err(DashboardModuleError::ModuleNotFound)
         ));
     }
@@ -3174,10 +3209,87 @@ mod tests {
         let module = flight_module(&store).await;
         assert!(matches!(
             store
-                .delete("profile-222222222222222222222222", &module.id)
+                .delete(
+                    "profile-222222222222222222222222",
+                    &module.id,
+                    Some(&module.updated_at)
+                )
                 .await,
             Err(DashboardModuleError::ModuleNotFound)
         ));
+        assert_eq!(store.list(PROFILE, "air").await.unwrap().len(), 1);
+        assert_eq!(data_table_count(&store).await, 1);
+    }
+
+    #[tokio::test]
+    async fn a_stale_confirmation_cannot_delete_rows_written_after_it() {
+        let store = store().await;
+        let module = flight_module(&store).await;
+        let opened = module.updated_at.clone();
+        // Інше вікно записало рядки вже після того, як перше показало підтвердження.
+        store
+            .replace_rows(
+                PROFILE,
+                &module.id,
+                vec![row(flight("МіГ-29", 3.0, 4.0))],
+                Some(&opened),
+                T2,
+            )
+            .await
+            .unwrap();
+        let row_id: i64 = sqlx::query_scalar(&format!(
+            "SELECT row_id FROM \"{}\" LIMIT 1",
+            module.storage_table
+        ))
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO dashboard_module_corrections
+             (module_id, row_id, field_key, source_file, source_sheet, source_row, source_column,
+              raw_text, corrected_text, reason, created_at)
+             VALUES (?, ?, 'aircraft_type', 'Синтетичний.xlsx', 'Журнал', 8, 'Тип', 'МіГ29', 'МіГ-29', 'тест', ?)",
+        )
+        .bind(&module.id)
+        .bind(row_id)
+        .bind(T2)
+        .execute(&store.pool)
+        .await
+        .unwrap();
+
+        assert!(matches!(
+            store.delete(PROFILE, &module.id, Some(&opened)).await,
+            Err(DashboardModuleError::Conflict)
+        ));
+        assert_eq!(data_table_count(&store).await, 1);
+        let data = store.get_data(PROFILE, &module.id).await.unwrap();
+        assert_eq!(data.rows.len(), 1);
+        assert_eq!(data.module.updated_at, T2);
+        for table in ["dashboard_module_fields", "dashboard_module_corrections"] {
+            let left: i64 =
+                sqlx::query_scalar(&format!("SELECT count(*) FROM {table} WHERE module_id = ?"))
+                    .bind(&module.id)
+                    .fetch_one(&store.pool)
+                    .await
+                    .unwrap();
+            assert!(left > 0, "{table}");
+        }
+
+        // Повторне підтвердження вже зі свіжою версією видаляє лише цей модуль.
+        store.delete(PROFILE, &module.id, Some(T2)).await.unwrap();
+        assert_eq!(data_table_count(&store).await, 0);
+    }
+
+    #[tokio::test]
+    async fn deleting_without_a_version_mark_removes_nothing() {
+        let store = store().await;
+        let module = flight_module(&store).await;
+        for mark in [None, Some("")] {
+            assert!(matches!(
+                store.delete(PROFILE, &module.id, mark).await,
+                Err(DashboardModuleError::VersionRequired)
+            ));
+        }
         assert_eq!(store.list(PROFILE, "air").await.unwrap().len(), 1);
         assert_eq!(data_table_count(&store).await, 1);
     }

@@ -405,15 +405,21 @@ async fn replace_dashboard_module_rows(
         .map_err(|error| error.to_string())
 }
 
-/// Видаляє модуль активного профілю, його таблицю даних і виправлення.
+/// Видаляє модуль активного профілю, його таблицю даних і виправлення. Без позначки версії
+/// (`expected_updated_at`) або з застарілою нічого не видаляє.
 #[tauri::command]
 async fn delete_dashboard_module(
     modules: tauri::State<'_, DashboardModuleStore>,
     session: tauri::State<'_, ProfileSession>,
     module_id: String,
+    expected_updated_at: Option<String>,
 ) -> Result<(), String> {
     modules
-        .delete(&active_profile_id(&session)?, &module_id)
+        .delete(
+            &active_profile_id(&session)?,
+            &module_id,
+            expected_updated_at.as_deref(),
+        )
         .await
         .map_err(|error| error.to_string())
 }
