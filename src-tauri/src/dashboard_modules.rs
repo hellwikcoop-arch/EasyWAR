@@ -1325,10 +1325,12 @@ impl DashboardModuleStore {
                     Some(id)
                 }
             };
-            row_ids.push(row_id);
+            // Формат дати нового рядка перевіряється одразу; збереженого — нижче, проти
+            // значення в таблиці: незмінене давнє значення не блокує запис.
             for field in &module.fields {
-                validate_value(field, row.get(&field.key))?;
+                validate_typed(field, row.get(&field.key), row_id.is_none())?;
             }
+            row_ids.push(row_id);
         }
 
         let table = quoted_identifier(&module.storage_table)?;
@@ -1380,6 +1382,42 @@ impl DashboardModuleStore {
             .collect::<Result<BTreeMap<i64, String>, _>>()?;
         if requested_ids.iter().any(|id| !existing.contains_key(id)) {
             return Err(DashboardModuleError::Conflict);
+        }
+        let date_fields = module
+            .fields
+            .iter()
+            .filter(|field| matches!(field.data_type.as_str(), "date" | "datetime"))
+            .collect::<Vec<_>>();
+        let suspicious = rows
+            .iter()
+            .zip(&row_ids)
+            .filter_map(|(row, row_id)| row_id.map(|id| (id, row)))
+            .filter(|(_, row)| {
+                date_fields
+                    .iter()
+                    .any(|field| malformed_date(field, row.get(&field.key)))
+            })
+            .collect::<Vec<_>>();
+        for (id, row) in suspicious {
+            for field in &date_fields {
+                let value = row.get(&field.key);
+                if !malformed_date(field, value) {
+                    continue;
+                }
+                let stored: Option<String> = sqlx::query_scalar(&format!(
+                    "SELECT {} FROM {table} WHERE \"row_id\" = ?",
+                    quoted_identifier(&field.key)?
+                ))
+                .bind(id)
+                .fetch_one(&mut *transaction)
+                .await?;
+                if stored.as_deref() != value.and_then(Value::as_str) {
+                    return Err(DashboardModuleError::InvalidValue(
+                        field.label.clone(),
+                        field.data_type.clone(),
+                    ));
+                }
+            }
         }
         sqlx::query(&format!("DELETE FROM {table}"))
             .execute(&mut *transaction)
@@ -1866,6 +1904,26 @@ fn validate_value(
     field: &DashboardModuleField,
     value: Option<&Value>,
 ) -> Result<(), DashboardModuleError> {
+    validate_typed(field, value, true)
+}
+
+/// Чи значення поля дати не проходить повну перевірку формату (`is_calendar_date`,
+/// `is_local_datetime`), хоча й є рядком.
+fn malformed_date(field: &DashboardModuleField, value: Option<&Value>) -> bool {
+    match (field.data_type.as_str(), value.and_then(Value::as_str)) {
+        ("date", Some(text)) => !is_calendar_date(text),
+        ("datetime", Some(text)) => !is_local_datetime(text),
+        _ => false,
+    }
+}
+
+/// `strict_dates: false` — формат дати звіряється пізніше (`replace_rows`): збережений
+/// раніше рядок із давнім значенням не має блокувати збереження всієї таблиці.
+fn validate_typed(
+    field: &DashboardModuleField,
+    value: Option<&Value>,
+    strict_dates: bool,
+) -> Result<(), DashboardModuleError> {
     let absent = value.is_none_or(Value::is_null);
     if absent {
         return if field.required {
@@ -1877,8 +1935,12 @@ fn validate_value(
     let value = value.expect("checked above");
     let valid = match field.data_type.as_str() {
         "text" => value.as_str().is_some(),
-        "date" => value.as_str().is_some_and(is_calendar_date),
-        "datetime" => value.as_str().is_some_and(is_local_datetime),
+        "date" => value
+            .as_str()
+            .is_some_and(|text| !strict_dates || is_calendar_date(text)),
+        "datetime" => value
+            .as_str()
+            .is_some_and(|text| !strict_dates || is_local_datetime(text)),
         "integer" => value.as_i64().is_some(),
         "real" => value.as_f64().is_some_and(f64::is_finite),
         "boolean" => value.as_bool().is_some(),
@@ -2830,6 +2892,71 @@ mod tests {
             .create(PROFILE, "air", "flight-hours", None, "2026-01-01T00:00:01Z")
             .await
             .unwrap()
+    }
+
+    #[tokio::test]
+    async fn an_old_malformed_date_does_not_block_saving_but_a_new_one_is_refused() {
+        let store = store().await;
+        let module = store
+            .create(PROFILE, "air", "activity", None, "2026-01-01T00:00:01Z")
+            .await
+            .unwrap();
+        let saved = store
+            .replace_rows_latest(
+                PROFILE,
+                &module.id,
+                vec![row(
+                    json!({ "occurred_at": "2026-01-31T14:25", "label": "Перша" }),
+                )],
+                T2,
+            )
+            .await
+            .unwrap();
+        let id = saved.rows[0]["rowId"].clone();
+        // Давній імпорт міг записати час поза межами: так його кладемо прямо в таблицю.
+        sqlx::query(&format!(
+            "UPDATE \"{}\" SET \"occurred_at\" = '2026-01-31T99:99'",
+            module.storage_table
+        ))
+        .execute(&store.pool)
+        .await
+        .unwrap();
+        let old = || json!({ "rowId": id, "occurred_at": "2026-01-31T99:99", "label": "Перша" });
+        // Незмінене давнє значення не блокує збереження таблиці (тут додається другий рядок).
+        let kept = store
+            .replace_rows_latest(
+                PROFILE,
+                &module.id,
+                vec![
+                    row(old()),
+                    row(json!({ "occurred_at": "2026-02-01T08:00", "label": "Друга" })),
+                ],
+                T3,
+            )
+            .await
+            .unwrap();
+        assert_eq!(kept.rows.len(), 2);
+        // А нове некоректне значення — і в новому, і в збереженому рядку — не записується.
+        for rows in [
+            vec![
+                row(old()),
+                row(json!({ "occurred_at": "2026-02-01", "label": "Без часу" })),
+            ],
+            vec![row(
+                json!({ "rowId": id, "occurred_at": "2026-01-31T24:00", "label": "Перша" }),
+            )],
+        ] {
+            let refused = store
+                .replace_rows_latest(PROFILE, &module.id, rows, T4)
+                .await;
+            assert!(
+                matches!(refused, Err(DashboardModuleError::InvalidValue(..))),
+                "{refused:?}"
+            );
+        }
+        let data = store.get_data(PROFILE, &module.id).await.unwrap();
+        assert_eq!(data.rows.len(), 2);
+        assert_eq!(data.module.updated_at, T3, "a refused save changes nothing");
     }
 
     #[tokio::test]
