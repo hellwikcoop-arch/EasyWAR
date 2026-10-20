@@ -286,7 +286,8 @@ html[data-ew-module="air"] { --sw: 188px; }
   html[data-ew-module] .dmain-in[data-view="overview"] > .lrow:has(#p-map) #p-map .mapwrap > svg { height: 100%; aspect-ratio: auto; }
   html[data-ew-module] .dmain-in[data-view="overview"] > .lrow:has(#p-map) #p-units,
   html[data-ew-module] .dmain-in[data-view="overview"] > .lrow:has(#p-map) #p-types { flex: 1 1 auto; min-height: 0; overflow: hidden; }
-  html[data-ew-module] .dmain-in[data-view="overview"] > .lrow:has(#p-map) #p-units { flex-grow: 0; }
+  /* «Топ-5» не стискаємо: інакше нижні рядки обрізаються. Місце віддає «Тип цілі» — у нього свій скрол. */
+  html[data-ew-module] .dmain-in[data-view="overview"] > .lrow:has(#p-map) #p-units { flex-grow: 0; flex-shrink: 0; }
   html[data-ew-module] .dmain-in[data-view="overview"] > .lrow:has(#p-map) #p-types { flex-grow: 1; }
   html[data-ew-module] .dmain-in[data-view="overview"] > .lrow:has(#p-map) #p-map .m3-hint { display: none; }
   html[data-ew-module] .dmain-in[data-view="overview"] #p-units .ph, html[data-ew-module] .dmain-in[data-view="overview"] #p-types .ph { flex-wrap: nowrap; align-items: baseline; gap: 6px 10px; margin-bottom: 4px; }
