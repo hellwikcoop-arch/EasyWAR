@@ -1807,6 +1807,38 @@ fn validate_corrections(
     Ok(())
 }
 
+/// Дата `РРРР-ММ-ДД`, яку дає поле дати форми: увесь текст і календарна дата.
+fn is_calendar_date(text: &str) -> bool {
+    text.len() == 10
+        && text.bytes().enumerate().all(|(index, byte)| {
+            matches!(index, 4 | 7) == (byte == b'-')
+                && (matches!(index, 4 | 7) || byte.is_ascii_digit())
+        })
+        && chrono::NaiveDate::parse_from_str(text, "%Y-%m-%d").is_ok()
+}
+
+/// Дата й час `РРРР-ММ-ДДTГГ:ХХ` (секунди `:СС` необов'язкові), як у полі `datetime-local`:
+/// години 00–23, хвилини й секунди 00–59. Це місцевий час без часового поясу; дата без
+/// часу не приймається, щоб обхід інтерфейсу не записав «північ», якої не було в джерелі.
+fn is_local_datetime(text: &str) -> bool {
+    let Some((date, time)) = text.split_once('T') else {
+        return false;
+    };
+    let shape = match time.len() {
+        5 => "%H:%M",
+        8 => "%H:%M:%S",
+        _ => return false,
+    };
+    is_calendar_date(date)
+        && time.bytes().enumerate().all(|(index, byte)| {
+            matches!(index, 2 | 5) == (byte == b':')
+                && (matches!(index, 2 | 5) || byte.is_ascii_digit())
+        })
+        && chrono::NaiveTime::parse_from_str(time, shape).is_ok()
+        // chrono приймає секунду координації `:60`; поле форми її не дає.
+        && time.get(6..8).is_none_or(|seconds| seconds < "60")
+}
+
 fn validate_value(
     field: &DashboardModuleField,
     value: Option<&Value>,
@@ -1821,7 +1853,9 @@ fn validate_value(
     }
     let value = value.expect("checked above");
     let valid = match field.data_type.as_str() {
-        "text" | "date" | "datetime" => value.as_str().is_some(),
+        "text" => value.as_str().is_some(),
+        "date" => value.as_str().is_some_and(is_calendar_date),
+        "datetime" => value.as_str().is_some_and(is_local_datetime),
         "integer" => value.as_i64().is_some(),
         "real" => value.as_f64().is_some_and(f64::is_finite),
         "boolean" => value.as_bool().is_some(),
@@ -1856,6 +1890,72 @@ mod tests {
     use serde_json::json;
     use sqlx::sqlite::SqlitePoolOptions;
     use std::collections::BTreeSet;
+
+    #[test]
+    fn dates_and_datetimes_are_checked_before_they_are_stored() {
+        let typed = |data_type: &str| DashboardModuleField {
+            key: "when".into(),
+            label: "Коли".into(),
+            data_type: data_type.into(),
+            role: "dimension".into(),
+            aggregation: "none".into(),
+            required: true,
+            position: 0,
+        };
+        let date = typed("date");
+        let datetime = typed("datetime");
+        for text in ["2026-01-31", "2024-02-29"] {
+            assert!(validate_value(&date, Some(&json!(text))).is_ok(), "{text}");
+        }
+        for text in [
+            "2026-01-31T14:25",
+            "2026-01-31T00:00",
+            "2026-01-31T23:59:59",
+        ] {
+            assert!(
+                validate_value(&datetime, Some(&json!(text))).is_ok(),
+                "{text}"
+            );
+        }
+        for text in [
+            "2026-01-31abc",
+            "2026-02-30",
+            "2025-02-29",
+            "2026-1-31",
+            "31.01.2026",
+            "2026-01-31T14:25",
+            "",
+        ] {
+            assert!(
+                matches!(
+                    validate_value(&date, Some(&json!(text))),
+                    Err(DashboardModuleError::InvalidValue(..))
+                ),
+                "date {text}"
+            );
+        }
+        // Дата без часу не стає «північчю», а час поза межами не записується.
+        for text in [
+            "2026-01-31",
+            "2026-01-31T24:00",
+            "2026-01-31T99:99",
+            "2026-01-31T14:60",
+            "2026-01-31T14:25:60",
+            "2026-01-31 14:25",
+            "2026-01-31T14:25abc",
+            "2026-01-31T14:25Z",
+            "2026-02-30T10:00",
+            "2026-01-31T1:05",
+        ] {
+            assert!(
+                matches!(
+                    validate_value(&datetime, Some(&json!(text))),
+                    Err(DashboardModuleError::InvalidValue(..))
+                ),
+                "datetime {text}"
+            );
+        }
+    }
 
     const FLIGHT_FIELD_KEYS: [&str; 35] = [
         "list_number",
