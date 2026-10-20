@@ -18,6 +18,7 @@
     "allow-get-dashboard-module-data",
     "allow-replace-dashboard-module-rows",
     "allow-set-dashboard-module-style",
+    "allow-delete-dashboard-module",
     "allow-get-local-profiles",
     "allow-register-local-profile",
     "allow-set-local-profile-modules",

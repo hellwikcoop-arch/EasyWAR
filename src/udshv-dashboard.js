@@ -17,6 +17,7 @@ import {
 } from './udshv-dashboard-core.js';
 import { consumeOwnLossesTabRequest, ownLossesHost, ownLossesPage } from './own-losses-dashboard.js';
 import { playMotion, resetMotion } from './dashboard-motion.js';
+import { MINE_SLOT, MINE_VIEW, personalNavItem } from './personal-dashboard.js';
 import { crestImg } from './unit-emblems.js';
 
 /** Емблема підрозділу або порожнє місце такого ж розміру (назви стоять рівно). */
@@ -436,10 +437,12 @@ export function render(host, workbook, options = {}) {
   const range = currentRange();
   const model = createDashboardModel(workbook, { range, unit: state.units, preset: state.preset });
   // «Наші втрати» — окрема таблиця з власним файлом і періодом: потребує читача xlsx від модуля.
-  const nav = [['summary', 'Зведення УДШВ'], ['units', 'Підрозділи'], ['personnel', 'Втрати о/с'], ...(options.readSheets ? [['own', 'Наші втрати']] : []), ['ovt', 'ОВТ'], ['ammo', 'Витрата БК'], ['freshness', 'Актуальність'], ['table', 'Зведена таблиця'], ['quality', 'Перевірка даних']];
+  const nav = [['summary', 'Дашборд УДШВ'], ['units', 'Підрозділи'], ['personnel', 'Втрати о/с'], ...(options.readSheets ? [['own', 'Наші втрати']] : []), ['ovt', 'ОВТ'], ['ammo', 'Витрата БК'], ['freshness', 'Актуальність'], ['table', 'Зведена таблиця'], ['quality', 'Перевірка даних'], personalNavItem()].filter(Boolean);
   if (!nav.some(([k]) => k === state.view)) state.view = 'summary';
   const own = state.view === 'own';
+  const mine = state.view === MINE_VIEW;
   const page = own ? h('div', { class: 'ud-page' }, ownLossesPage({ scope: 'dshv', readSheets: options.readSheets, rerender: go }))
+    : mine ? h('div', { class: 'ud-page ud-mine', [MINE_SLOT]: '' })
     : state.view === 'units' ? unitsPage(model, go)
     : state.view === 'personnel' ? personnelPage(model, go)
       : state.view === 'ovt' ? ovtPage(model, go)
@@ -460,8 +463,8 @@ export function render(host, workbook, options = {}) {
         options.readSheets ? h('button', { class: 'ud-btn', type: 'button', onclick: async () => (await import('./presentation-ui.js')).openPresentationDialog(workbook, options), text: 'Презентація' }) : null,
         options.canRefresh ? h('button', { class: 'ud-btn', type: 'button', onclick: () => options.refresh?.(), text: 'Оновити з файлу' }) : null)),
     // Період і підрозділи основної таблиці не стосуються вкладки «Наші втрати»: вона має власні.
-    own ? null : periodControls(range, go),
-    own ? null : h('div', { class: 'ud-context' },
+    own || mine ? null : periodControls(range, go),
+    own || mine ? null : h('div', { class: 'ud-context' },
       h('span', { text: `${periodTitle(range)}${unitsLabel(state.units, ' · ')}` }),
       h('span', { text: `${model.activeDays} з ${model.days} днів із даними · ${compare}` }),
       state.units.length ? h('button', { type: 'button', class: 'ud-link', onclick: () => { state.units = []; go(); }, text: '× усі підрозділи' }) : null,

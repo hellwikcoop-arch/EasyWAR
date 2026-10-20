@@ -1,6 +1,7 @@
-// Хаб 3D-довідників: картки довідників і підсумок походження моделей. Кількість і назви моделей беруться з credits.js,
+// Хаб easyWIKI (довідники): картки довідників і підсумок походження моделей. Кількість і назви моделей беруться з credits.js,
 // тож хаб не розходиться з довідниками. Сторінка працює без мережі.
 import {CREDITS, KINDS} from './credits.js';
+import {BRIGADES} from './brigades/brigades-data.js';
 
 const GUIDES = [
   {id: 'rvia', title: 'РВіА та артилерія', note: 'Ракетні комплекси, РСЗВ, САУ й гаубиці: марш, вогнева позиція, підйом пускової, постріл і перезаряджання.'},
@@ -36,6 +37,12 @@ for (const guide of GUIDES) {
   card.append(names);
   cards.append(card);
 }
+
+// Довідник бригад не має 3D-моделей, тому окрема картка поза списком GUIDES.
+const brigades = el('a', 'card');
+brigades.href = './brigades/index.html';
+brigades.append(el('h2', '', 'Довідник бригад'), el('p', 'count', `${BRIGADES.length} ${plural(BRIGADES.length, 'частина', 'частини', 'частин')}`), el('p', 'note', 'Емблеми, назви, тип частини, рід військ і призначення. Пошук за номером чи назвою.'));
+cards.append(brigades);
 
 const legend = document.getElementById('legend');
 for (const [kind, label] of Object.entries(KINDS)) {

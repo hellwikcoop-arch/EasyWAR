@@ -353,6 +353,19 @@ async fn replace_dashboard_module_rows(
         .map_err(|error| error.to_string())
 }
 
+/// Видаляє модуль активного профілю, його таблицю даних і виправлення.
+#[tauri::command]
+async fn delete_dashboard_module(
+    modules: tauri::State<'_, DashboardModuleStore>,
+    session: tauri::State<'_, ProfileSession>,
+    module_id: String,
+) -> Result<(), String> {
+    modules
+        .delete(&active_profile_id(&session)?, &module_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 async fn get_local_profiles(
     profiles: tauri::State<'_, LocalProfileStore>,
@@ -2119,6 +2132,7 @@ pub fn run() {
             read_module_source_sheet,
             get_dashboard_module_data,
             replace_dashboard_module_rows,
+            delete_dashboard_module,
             set_dashboard_module_style,
             get_local_profiles,
             register_local_profile,

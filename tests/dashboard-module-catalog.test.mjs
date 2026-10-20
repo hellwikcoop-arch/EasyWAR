@@ -11,6 +11,7 @@ import {
   columnCountLabel,
   crewCount,
   crewSummary,
+  deleteModulePrompt,
   fieldColumnWidth,
   fieldHint,
   fieldInputText,
@@ -1136,4 +1137,50 @@ test('the review screen corrects values before the import and never rewrites the
   assert.doesNotMatch(review, /innerHTML|confirm\(|alert\(/);
   assert.match(css, /\.ewmc-issue\{display:grid;/);
   assert.match(css, /\.ewmc-data-table td\.ewmc-corrected\{/);
+});
+
+test('deleting a module asks first and names what disappears with it', () => {
+  const ask = rowCount => deleteModulePrompt({ title: 'Лінійний графік', rowCount });
+  assert.equal(ask(0), 'Видалити модуль «Лінійний графік» і його порожню таблицю? Дію не можна скасувати.');
+  assert.match(ask(1), /таблицю з 1 записом\?/);
+  assert.match(ask(3), /таблицю з 3 записами\?/);
+  assert.match(ask(11), /таблицю з 11 записами\?/);
+  assert.match(ask(21), /таблицю з 21 записом\?/);
+  assert.match(deleteModulePrompt({ title: '  ' }), /модуль «без назви» і його порожню таблицю/);
+});
+
+test('a module card can be deleted through the local command after an inline confirmation', async () => {
+  const source = await readFile(new URL('../src/dashboard-module-catalog.js', import.meta.url), 'utf8');
+  for (const text of ['Видалити модуль', 'Так, видалити', 'Залишити', "invoke('delete_dashboard_module', { moduleId: module.id })", 'deleteModulePrompt(module)']) {
+    assert.ok(source.includes(text), text);
+  }
+  assert.doesNotMatch(source, /window\.confirm|\bconfirm\(/);
+  const css = await readFile(new URL('../src/dashboard-module-catalog.css', import.meta.url), 'utf8');
+  assert.match(css, /\.ewmc-host \[hidden\]\{display:none!important\}/, 'the hidden confirmation must not show through .ewmc-confirm{display:flex}');
+});
+
+test('«Мій дашборд» lives only on its own tab of the left menu', async () => {
+  const source = await readFile(new URL('../src/dashboard-module-catalog.js', import.meta.url), 'utf8');
+  // ПВК і УДШВ малюють гніздо самі; ПС і РВ отримують пункт бічного меню від каталогу.
+  assert.match(source, /dashboard\.querySelector\(`\[\$\{MINE_SLOT\}\]`\)/);
+  assert.match(source, /nav\.insertBefore\(mineButton, nav\.querySelector\(':scope > \.snav-entry'\)\)/);
+  assert.match(source, /else if \(host\.isConnected\) host\.remove\(\)/, 'outside its tab the section is not on the page');
+  for (const page of ['udshv-dashboard.js', 'pvk-dashboard.js']) {
+    const dash = await readFile(new URL(`../src/${page}`, import.meta.url), 'utf8');
+    assert.match(dash, /personalNavItem\(\)/, page);
+    assert.match(dash, /\[MINE_SLOT\]: ''/, page);
+  }
+  const css = await readFile(new URL('../src/dashboard-module-catalog.css', import.meta.url), 'utf8');
+  assert.match(css, /body\.ewmc-mine-open #view-dash>\.dmain>:not\(\.ewmc-host\)\{display:none!important\}/);
+});
+
+test('the personal tab exists only where the local database does', async () => {
+  const { MINE_LABEL, hasPersonalDashboard, personalNavItem } = await import('../src/personal-dashboard.js');
+  const invoke = async () => null;
+  assert.equal(MINE_LABEL, 'Мій дашборд');
+  assert.equal(hasPersonalDashboard({}), false);
+  assert.equal(personalNavItem({}), null);
+  assert.equal(hasPersonalDashboard({ __TAURI_INTERNALS__: { invoke } }), true);
+  assert.equal(hasPersonalDashboard({ parent: { __TAURI_INTERNALS__: { invoke } } }), true, 'a module page inside the launcher frame');
+  assert.deepEqual(personalNavItem({ __TAURI_INTERNALS__: { invoke } }), ['my-dashboard', 'Мій дашборд']);
 });

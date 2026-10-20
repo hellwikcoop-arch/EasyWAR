@@ -29,3 +29,4 @@ header p{margin:0;font:400 11px/1.4 var(--mono);letter-spacing:.1em;color:var(--
 .legend li b{min-width:2.2em;font:500 13px/1.45 var(--mono);color:var(--fg);text-align:right}
 .legend p{margin:0;font:400 12px/1.5 var(--sans);color:var(--faint)}
 @media (max-width:520px){body{padding:12px}.cards{grid-template-columns:1fr}}
+.more{margin:18px 0 0}.more a{color:#e0a53a;text-decoration:none}.more a:hover{text-decoration:underline}

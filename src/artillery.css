@@ -344,6 +344,23 @@ td.unit-cell span, td.unit-cell b { vertical-align: middle; }
 :root[data-theme="light"] .kpi[data-art]::after { opacity: .3; }
 @media (max-width: 640px) { .kpi[data-art]::after { opacity: .4; } }
 
+/* Активна вкладка бічного меню — градієнтний «капсул» зі світінням у кольорі роду військ (як у УДШВ, ПВК, ПС і РВ). Лише темна тема. */
+@media (min-width: 900px) {
+  :root:not([data-theme="light"]) .tab[aria-selected="true"] {
+    color: #1b1204; border-color: transparent;
+    background: linear-gradient(135deg, #f3c46a, var(--accent) 55%, #8a5a0b);
+    box-shadow: 0 6px 20px rgba(224, 165, 58, .35), inset 0 1px 0 rgba(255, 255, 255, .22);
+  }
+  :root:not([data-theme="light"]) .tab[aria-selected="true"]::before { background: #1b1204; }
+}
+
+.shares { display: grid; gap: 18px; }
+.share-col h3 { margin: 0 0 8px; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted, #8a97aa); }
+.share-row { display: grid; grid-template-columns: minmax(90px, 1.2fr) 2fr 44px; gap: 10px; align-items: center; padding: 4px 0; font-size: 13px; }
+.share-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.share-row .num { text-align: right; }
+.share-name { display: flex; align-items: center; gap: 8px; }
+.share-name .crest-s { margin: 0; height: 22px; max-width: 26px; flex: none; }
 /* Початковий екран без таблиці: три кроки, перетягування і ескіз зведення (як у дашбордах ПС і РВ) */
 .panel.es { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .95fr); gap: 34px; align-items: center; width: min(1100px, 100%); box-sizing: border-box; margin: 6vh auto 0; padding: 34px 36px; position: relative; overflow: hidden;
   background: radial-gradient(120% 90% at 0 0, color-mix(in srgb, var(--accent) 14%, transparent), transparent 60%), var(--surface); }

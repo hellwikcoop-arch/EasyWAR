@@ -6,6 +6,7 @@ import {
   columnCountLabel,
   crewCount,
   crewSummary,
+  deleteModulePrompt,
   fieldColumnWidth,
   fieldHint,
   fieldInputText,
@@ -34,6 +35,7 @@ import {
   visibleColumnKeys,
 } from './dashboard-module-catalog-core.js';
 import { chartModel, takeoffHoursModel, tickerItems } from './dashboard-module-charts-core.js';
+import { MINE_LABEL, MINE_SLOT } from './personal-dashboard.js';
 import { mountChart } from './dashboard-module-charts.js';
 import {
   buildImport,
@@ -117,10 +119,60 @@ function initialize() {
   toolbar.prepend(openButton);
 
   const host = el('section', { class: 'ewmc-host', 'aria-labelledby': 'ewmc-host-title' });
-  const keepHost = () => { if (!dashboard.contains(host)) dashboard.append(host); };
-  const observer = new MutationObserver(keepHost);
-  observer.observe(dashboard, { childList: true });
-  keepHost();
+  // «Мій дашборд» — окрема вкладка лівого меню, а не блок під дашбордом. ПВК і УДШВ самі малюють вкладку
+  // й порожню сторінку з позначкою MINE_SLOT; у ПС і РВ вкладку в бічне меню додає цей скрипт (legacy-сторінку
+  // не змінюємо). Секція живе лише там, де відкрита вкладка, тож дашборди її не бачать.
+  const mineButton = el('button', { type: 'button', class: 'snav-b ewmc-mine-tab', 'aria-pressed': 'false', 'data-action': 'open-my-dashboard' },
+    el('span', { class: 'ewmc-mine-icon', 'aria-hidden': 'true' }), el('span', { text: MINE_LABEL }));
+  let legacyMine = false;
+  const setLegacyMine = open => {
+    legacyMine = open;
+    document.body.classList.toggle('ewmc-mine-open', open);
+    mineButton.setAttribute('aria-pressed', String(open));
+    mineButton.classList.toggle('on', open);
+    placeHost();
+    if (open) {
+      markLegacyNav();
+      window.scrollTo({ top: 0 });
+    // Дашборд сам вирішує, який пункт меню підсвітити, коли прокручується; після повернення просимо його це зробити.
+    } else window.dispatchEvent(new Event('scroll'));
+  };
+  mineButton.addEventListener('click', () => setLegacyMine(true));
+  // Підсвітка бічного меню: поки відкрито «Мій дашборд», інші пункти не позначені, а повзунок стоїть на ньому.
+  function markLegacyNav() {
+    const nav = mineButton.parentElement;
+    if (!legacyMine || !nav) return;
+    // Лише справжні зміни: кожна зміна класу знову будить спостерігача.
+    for (const other of nav.querySelectorAll('.snav-b.on')) if (other !== mineButton) other.classList.remove('on');
+    if (!mineButton.classList.contains('on')) mineButton.classList.add('on');
+    nav.style.setProperty('--iy', `${mineButton.offsetTop}px`);
+    nav.style.setProperty('--ih', `${mineButton.offsetHeight}px`);
+  }
+  function placeHost() {
+    const slot = dashboard.querySelector(`[${MINE_SLOT}]`);
+    const nav = dashboard.querySelector(':scope > .side .snav');
+    if (nav && !nav.contains(mineButton)) {
+      nav.insertBefore(mineButton, nav.querySelector(':scope > .snav-entry'));
+      // Будь-який інший пункт меню повертає до дашборда.
+      nav.addEventListener('click', event => {
+        const button = event.target.closest('.snav-b');
+        if (legacyMine && button && button !== mineButton) setLegacyMine(false);
+      });
+    }
+    // Таблицю закрили (бічне меню сховане) або відкрили ПВК: особиста вкладка ПС/РВ закривається разом із меню.
+    if (legacyMine && (!nav || nav.closest('.side')?.hidden)) {
+      legacyMine = false;
+      document.body.classList.remove('ewmc-mine-open');
+      mineButton.setAttribute('aria-pressed', 'false');
+      mineButton.classList.remove('on');
+    }
+    const target = slot || (legacyMine ? dashboard.querySelector(':scope > .dmain') : null);
+    if (target) { if (host.parentElement !== target) target.append(host); }
+    else if (host.isConnected) host.remove();
+  }
+  const observer = new MutationObserver(() => { placeHost(); markLegacyNav(); });
+  observer.observe(dashboard, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+  placeHost();
 
   const dialog = el('dialog', { class: 'ewmc-dialog', 'aria-labelledby': 'ewmc-dialog-title' });
   document.body.append(dialog);
@@ -219,6 +271,28 @@ function initialize() {
   }
 
   function renderModule(module, rows) {
+    // Видалення питає підтвердження прямо в картці: модуль зникає разом зі своєю таблицею SQLite.
+    const removeButton = el('button', {
+      type: 'button',
+      class: 'btn quiet ewmc-danger',
+      text: 'Видалити модуль',
+      title: 'Прибрати модуль із дашборда разом із його локальною таблицею',
+      'data-action': 'delete-module',
+      'data-module-id': module.id,
+    });
+    const keepButton = el('button', { type: 'button', class: 'btn quiet', text: 'Залишити' });
+    const confirmButton = el('button', { type: 'button', class: 'btn ewmc-danger solid', text: 'Так, видалити', 'data-action': 'confirm-delete-module' });
+    const confirmBox = el('div', { class: 'ewmc-confirm ewmc-module-confirm', role: 'group', 'aria-label': `Видалення модуля ${module.title}`, hidden: true },
+      el('p', { text: deleteModulePrompt(module) }),
+      el('div', { class: 'ewmc-confirm-actions' }, keepButton, confirmButton));
+    const ask = asking => {
+      confirmBox.hidden = !asking;
+      removeButton.hidden = asking;
+      (asking ? keepButton : removeButton).focus();
+    };
+    removeButton.addEventListener('click', () => ask(true));
+    keepButton.addEventListener('click', () => ask(false));
+    confirmButton.addEventListener('click', () => deleteModule(module, [keepButton, confirmButton]));
     loadStyleFonts(module.style);
     const card = el('article', { class: `ewmc-module span-${module.defaultSpan === 2 ? 2 : 1}`, 'data-kind': module.visualKind, 'data-style': module.style, 'data-branch': module.branch },
       el('header', { class: 'ewmc-module-head' },
@@ -246,7 +320,9 @@ function initialize() {
           'data-module-id': module.id,
           disabled: !rows.length,
           onclick: event => openRelief(module, rows, event.currentTarget),
-        }) : null),
+        }) : null,
+        removeButton),
+      confirmBox,
       el('details', { class: 'ewmc-schema' },
         el('summary', { text: 'Структура таблиці' }),
         el('code', { text: module.storageTable }),
@@ -254,6 +330,24 @@ function initialize() {
     );
     if (!rows.length) card.querySelector('.ewmc-visual')?.append(el('p', { class: 'ewmc-no-data', text: 'Таблиця готова · даних ще немає' }));
     return card;
+  }
+
+  async function deleteModule(module, buttons) {
+    if (state.busy) return;
+    state.busy = true;
+    for (const button of buttons) button.disabled = true;
+    try {
+      await invoke('delete_dashboard_module', { moduleId: module.id });
+      state.tableViews.delete(module.id);
+      showToast(`Модуль «${module.title}» видалено.`);
+      await loadModules();
+      host.querySelector('.ewmc-add')?.focus();
+    } catch (error) {
+      showToast(String(error || 'Не вдалося видалити модуль.'), true);
+      for (const button of buttons) button.disabled = false;
+    } finally {
+      state.busy = false;
+    }
   }
 
   // 3D-сцена завантажується лише на вимогу: three.js і висоти рельєфу не потрібні решті дашборда.
