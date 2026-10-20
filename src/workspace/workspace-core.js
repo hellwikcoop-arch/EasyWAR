@@ -48,11 +48,20 @@ export const OFFICE_APPS = Object.freeze([
     extensions: ['pptx'],
     filterName: 'Презентації',
   }),
+  app({
+    id: 'easyfly',
+    title: 'EasyFLY',
+    kind: 'Авіація',
+    hint: 'Контроль льотних перевірок і допусків, штурманські документи: ІШР, ШПП, бортжурнал, Сонце і Місяць',
+    extensions: ['easyfly'],
+    filterName: 'Дані EasyFLY',
+  }),
 ]);
 
-/** Розділи модуля. Поки один — «Офіс». */
+/** Розділи модуля: «Офіс» (редактори) і «Авіація» (EasyFLY). */
 export const WORKSPACE_SECTIONS = Object.freeze([
-  Object.freeze({ id: 'office', title: 'Офіс', apps: Object.freeze(OFFICE_APPS.map(entry => entry.id)) }),
+  Object.freeze({ id: 'office', title: 'Офіс', apps: Object.freeze(['easygreen', 'easydoc', 'easyslide']) }),
+  Object.freeze({ id: 'aviation', title: 'Авіація', apps: Object.freeze(['easyfly']) }),
 ]);
 
 export function appById(id) {
