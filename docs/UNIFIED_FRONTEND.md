@@ -302,6 +302,37 @@ table (header + Excel column letter next to each field; Rocket Forces also gets
   fails until they are applied again. Keep new fields in sync with `FIELD_ORDER` of
   the page's CORE: the form only shows columns that exist in the open table.
 
+## Каталог стовпців, плиток і блоків (крок 1: формат)
+
+`src/catalog-core.js` — чисте ядро (без DOM, мережі, сховищ, `eval`) для майбутнього
+конструктора таблиць: розбирає й перевіряє JSON-каталог (`parseCatalogText`,
+`validateCatalog`), повертає глибоко заморожену копію або список помилок зі шляхами.
+Каталог описує і вкладки лівого меню виду (`nav`: перша — незмінний «Дашборд», решта з вільними
+підписами), а `deriveTable` рахує, які стовпці потрібні обраним модулям дашборда: нова таблиця
+отримує порядок виду, наявна зберігає порядок користувача, стовпці з даними не зникають.
+`validateTableSchema` перевіряє схему таблиці `easywar.table` (порядок і заголовки, обрані із
+запропонованих): дашборд читатиме таблицю за нею, а не за позицією стовпця. Усе, що збирає
+користувач, належить його профілю й лежатиме в його базі.
+Формат, обмеження й приклад — у [CATALOG.md](CATALOG.md); `tests/catalog-core.test.mjs`
+бере приклад саме з цього документа, тож приклад і валідатор не розходяться.
+Наступні кроки (конструктор порожньої таблиці, динамічні блоки в «Розташування блоків») —
+у розділі «Дорожня карта» того ж документа й у `BACKLOG.md`.
+
+## Каталог (крок 2: картки ПС як описи)
+
+Шість карток блоку «Основні показники» модуля ПС (`src/air.html`) тепер описано як вбудований
+каталог `src/catalogs/ps-builtin.js` (шар `builtin`), а підрахунок винесено в чисте ядро
+`src/tiles-core.js` (`computeTile`/`computeTiles`, без DOM/мережі/сховищ/годинника/динамічного коду;
+семантику див. у [CATALOG.md](CATALOG.md)). Перехідник `src/ps-kpi.js` (`window.PSKpi.buildCards`)
+зводить рядки парсера до записів за id стовпців, обирає базу порівняння (попередній період / половини)
+і повертає конфіги для наявного `kpiCard`. У `air.html` блок складання карток у `renderAll` замінено
+на виклик `window.PSKpi.buildCards(...).map(kpiCard)` зі **старим кодом як запасним шляхом** у гілці
+`else`; шапку й ефективність (`el.kpiEff`, `kh`) не змінено. Підключення — `<script type="module"
+src="./ps-kpi.js">` перед `sqlite-dashboard-source.js`. Вигляд карток не змінився: «до/після» на
+9 сценаріях дають піксельно ідентичні знімки (перевірено скілом `run-easywar`). Тести —
+`tests/tiles-core.test.mjs` (ядро) і `tests/ps-kpi.test.mjs` (каталог + перехідник проти еталону
+старого коду сторінки на випадкових наборах). Картки РВіА (`rocket.html`) — наступні, ще не зроблено.
+
 ## Rocket Forces reference styling
 
 `src/public/rocket-refs.js` (built by `script/rocket-refs/build.py` from
