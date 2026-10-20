@@ -1335,6 +1335,48 @@ impl DashboardModuleStore {
         self.get_data(profile_id, module_id).await
     }
 
+    /// Видаляє модуль профілю разом із його таблицею даних і виправленнями однією
+    /// транзакцією. Чужий або неіснуючий модуль — `ModuleNotFound`, нічого не
+    /// змінюється. Скидається лише таблиця з перевіреним згенерованим іменем.
+    pub async fn delete(
+        &self,
+        profile_id: &str,
+        module_id: &str,
+    ) -> Result<(), DashboardModuleError> {
+        let mut transaction = self.pool.begin().await?;
+        let storage_table: String = sqlx::query_scalar(
+            "SELECT storage_table FROM dashboard_modules WHERE profile_id = ? AND id = ?",
+        )
+        .bind(profile_id)
+        .bind(module_id)
+        .fetch_optional(&mut *transaction)
+        .await?
+        .ok_or(DashboardModuleError::ModuleNotFound)?;
+        // Каскад теж прибрав би поля й виправлення, але без нього (вимкнені ключі) вони
+        // лишилися б без власника, тож видаляємо їх явно.
+        for statement in [
+            "DELETE FROM dashboard_module_corrections WHERE module_id = ?",
+            "DELETE FROM dashboard_module_fields WHERE module_id = ?",
+        ] {
+            sqlx::query(statement)
+                .bind(module_id)
+                .execute(&mut *transaction)
+                .await?;
+        }
+        sqlx::query("DELETE FROM dashboard_modules WHERE profile_id = ? AND id = ?")
+            .bind(profile_id)
+            .bind(module_id)
+            .execute(&mut *transaction)
+            .await?;
+        if valid_storage_table(&storage_table) {
+            sqlx::query(&format!("DROP TABLE IF EXISTS \"{storage_table}\""))
+                .execute(&mut *transaction)
+                .await?;
+        }
+        transaction.commit().await?;
+        Ok(())
+    }
+
     async fn get_for_profile(
         &self,
         profile_id: &str,
@@ -2769,6 +2811,86 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(left, 1);
+    }
+
+    #[tokio::test]
+    async fn deleting_a_module_drops_its_table_fields_and_corrections_only() {
+        let store = store().await;
+        let doomed = flight_module(&store).await;
+        let kept = store
+            .create(PROFILE, "air", "flight-hours", Some("Залишити"), T2)
+            .await
+            .unwrap();
+        store
+            .replace_rows(
+                PROFILE,
+                &doomed.id,
+                vec![row(flight("МіГ-29", 3.0, 4.0))],
+                None,
+                T2,
+            )
+            .await
+            .unwrap();
+        let row_id: i64 = sqlx::query_scalar(&format!(
+            "SELECT row_id FROM \"{}\" LIMIT 1",
+            doomed.storage_table
+        ))
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO dashboard_module_corrections
+             (module_id, row_id, field_key, source_file, source_sheet, source_row, source_column,
+              raw_text, corrected_text, reason, created_at)
+             VALUES (?, ?, 'aircraft_type', 'Синтетичний.xlsx', 'Журнал', 8, 'Тип', 'МіГ29', 'МіГ-29', 'тест', ?)",
+        )
+        .bind(&doomed.id)
+        .bind(row_id)
+        .bind(T2)
+        .execute(&store.pool)
+        .await
+        .unwrap();
+
+        store.delete(PROFILE, &doomed.id).await.unwrap();
+
+        let tables: Vec<String> = sqlx::query_scalar(
+            "SELECT name FROM sqlite_master
+             WHERE type = 'table' AND name LIKE 'dashboard_data_%' ORDER BY name",
+        )
+        .fetch_all(&store.pool)
+        .await
+        .unwrap();
+        assert_eq!(tables, std::slice::from_ref(&kept.storage_table));
+        for table in ["dashboard_module_fields", "dashboard_module_corrections"] {
+            let left: i64 =
+                sqlx::query_scalar(&format!("SELECT count(*) FROM {table} WHERE module_id = ?"))
+                    .bind(&doomed.id)
+                    .fetch_one(&store.pool)
+                    .await
+                    .unwrap();
+            assert_eq!(left, 0, "{table}");
+        }
+        let listed = store.list(PROFILE, "air").await.unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, kept.id);
+        assert!(matches!(
+            store.delete(PROFILE, &doomed.id).await,
+            Err(DashboardModuleError::ModuleNotFound)
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_module_of_another_profile_cannot_be_deleted() {
+        let store = store().await;
+        let module = flight_module(&store).await;
+        assert!(matches!(
+            store
+                .delete("profile-222222222222222222222222", &module.id)
+                .await,
+            Err(DashboardModuleError::ModuleNotFound)
+        ));
+        assert_eq!(store.list(PROFILE, "air").await.unwrap().len(), 1);
+        assert_eq!(data_table_count(&store).await, 1);
     }
 
     /// Виправлення з екрана «Перевірка»: синтетичні клітинки «25:00» → «14:25».

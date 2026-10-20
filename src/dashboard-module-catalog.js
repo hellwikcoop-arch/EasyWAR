@@ -4,6 +4,7 @@ import {
   columnCountLabel,
   crewCount,
   crewSummary,
+  deleteModulePrompt,
   fieldColumnWidth,
   fieldHint,
   fieldInputText,
@@ -98,7 +99,9 @@ function initialize() {
   toolbar.prepend(openButton);
 
   const host = el('section', { class: 'ewmc-host', 'aria-labelledby': 'ewmc-host-title' });
-  const keepHost = () => { if (!dashboard.contains(host)) dashboard.append(host); };
+  // «Мій дашборд» завжди стоїть під основним дашбордом: УДШВ малює свій вміст у той самий контейнер
+  // уже після цього скрипта, і без перенесення модулі опинялися б над ним.
+  const keepHost = () => { if (dashboard.lastElementChild !== host) dashboard.append(host); };
   const observer = new MutationObserver(keepHost);
   observer.observe(dashboard, { childList: true });
   keepHost();
@@ -190,6 +193,28 @@ function initialize() {
   }
 
   function renderModule(module, rows) {
+    // Видалення питає підтвердження прямо в картці: модуль зникає разом зі своєю таблицею SQLite.
+    const removeButton = el('button', {
+      type: 'button',
+      class: 'btn quiet ewmc-danger',
+      text: 'Видалити модуль',
+      title: 'Прибрати модуль із дашборда разом із його локальною таблицею',
+      'data-action': 'delete-module',
+      'data-module-id': module.id,
+    });
+    const keepButton = el('button', { type: 'button', class: 'btn quiet', text: 'Залишити' });
+    const confirmButton = el('button', { type: 'button', class: 'btn ewmc-danger solid', text: 'Так, видалити', 'data-action': 'confirm-delete-module' });
+    const confirmBox = el('div', { class: 'ewmc-confirm ewmc-module-confirm', role: 'group', 'aria-label': `Видалення модуля ${module.title}`, hidden: true },
+      el('p', { text: deleteModulePrompt(module) }),
+      el('div', { class: 'ewmc-confirm-actions' }, keepButton, confirmButton));
+    const ask = asking => {
+      confirmBox.hidden = !asking;
+      removeButton.hidden = asking;
+      (asking ? keepButton : removeButton).focus();
+    };
+    removeButton.addEventListener('click', () => ask(true));
+    keepButton.addEventListener('click', () => ask(false));
+    confirmButton.addEventListener('click', () => deleteModule(module, [keepButton, confirmButton]));
     const card = el('article', { class: `ewmc-module span-${module.defaultSpan === 2 ? 2 : 1}`, 'data-kind': module.visualKind },
       el('header', { class: 'ewmc-module-head' },
         el('div', {}, el('h3', { text: module.title }), el('p', { text: `${rowCountLabel(module.rowCount)} · локальна SQLite` })),
@@ -215,7 +240,9 @@ function initialize() {
           'data-module-id': module.id,
           disabled: !rows.length,
           onclick: event => openRelief(module, rows, event.currentTarget),
-        }) : null),
+        }) : null,
+        removeButton),
+      confirmBox,
       el('details', { class: 'ewmc-schema' },
         el('summary', { text: 'Структура таблиці' }),
         el('code', { text: module.storageTable }),
@@ -223,6 +250,24 @@ function initialize() {
     );
     if (!rows.length) card.querySelector('.ewmc-visual')?.append(el('p', { class: 'ewmc-no-data', text: 'Таблиця готова · даних ще немає' }));
     return card;
+  }
+
+  async function deleteModule(module, buttons) {
+    if (state.busy) return;
+    state.busy = true;
+    for (const button of buttons) button.disabled = true;
+    try {
+      await invoke('delete_dashboard_module', { moduleId: module.id });
+      state.tableViews.delete(module.id);
+      showToast(`Модуль «${module.title}» видалено.`);
+      await loadModules();
+      host.querySelector('.ewmc-add')?.focus();
+    } catch (error) {
+      showToast(String(error || 'Не вдалося видалити модуль.'), true);
+      for (const button of buttons) button.disabled = false;
+    } finally {
+      state.busy = false;
+    }
   }
 
   // 3D-сцена завантажується лише на вимогу: three.js і висоти рельєфу не потрібні решті дашборда.

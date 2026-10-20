@@ -116,6 +116,17 @@ export function rowCountLabel(count) {
   return `${n} ${pluralForm(n, 'запис', 'записи', 'записів')}`;
 }
 
+/**
+ * Питання перед видаленням модуля з дашборда: назва, що саме зникне разом із ним
+ * (локальна таблиця з записами), і що дію не скасувати.
+ */
+export function deleteModulePrompt(module) {
+  const title = String(module?.title || '').trim() || 'без назви';
+  const count = Math.max(0, Math.trunc(Number(module?.rowCount) || 0));
+  const data = count ? `його таблицю з ${count} ${pluralForm(count, 'записом', 'записами', 'записами')}` : 'його порожню таблицю';
+  return `Видалити модуль «${title}» і ${data}? Дію не можна скасувати.`;
+}
+
 /** Підпис кількості колонок таблиці: «1 колонка», «3 колонки», «34 колонки», «35 колонок». */
 export function columnCountLabel(count) {
   const n = Math.max(0, Math.trunc(Number(count) || 0));
@@ -721,6 +732,7 @@ export const dashboardModuleCore = {
   formatValue,
   pluralForm,
   rowCountLabel,
+  deleteModulePrompt,
   columnCountLabel,
   fieldKind,
   fieldLimits,

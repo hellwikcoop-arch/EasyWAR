@@ -9,6 +9,7 @@ import {
   columnCountLabel,
   crewCount,
   crewSummary,
+  deleteModulePrompt,
   fieldColumnWidth,
   fieldHint,
   fieldInputText,
@@ -1096,4 +1097,30 @@ test('the review screen corrects values before the import and never rewrites the
   assert.doesNotMatch(review, /innerHTML|confirm\(|alert\(/);
   assert.match(css, /\.ewmc-issue\{display:grid;/);
   assert.match(css, /\.ewmc-data-table td\.ewmc-corrected\{/);
+});
+
+test('deleting a module asks first and names what disappears with it', () => {
+  const ask = rowCount => deleteModulePrompt({ title: 'Лінійний графік', rowCount });
+  assert.equal(ask(0), 'Видалити модуль «Лінійний графік» і його порожню таблицю? Дію не можна скасувати.');
+  assert.match(ask(1), /таблицю з 1 записом\?/);
+  assert.match(ask(3), /таблицю з 3 записами\?/);
+  assert.match(ask(11), /таблицю з 11 записами\?/);
+  assert.match(ask(21), /таблицю з 21 записом\?/);
+  assert.match(deleteModulePrompt({ title: '  ' }), /модуль «без назви» і його порожню таблицю/);
+});
+
+test('a module card can be deleted through the local command after an inline confirmation', async () => {
+  const source = await readFile(new URL('../src/dashboard-module-catalog.js', import.meta.url), 'utf8');
+  for (const text of ['Видалити модуль', 'Так, видалити', 'Залишити', "invoke('delete_dashboard_module', { moduleId: module.id })", 'deleteModulePrompt(module)']) {
+    assert.ok(source.includes(text), text);
+  }
+  assert.doesNotMatch(source, /window\.confirm|\bconfirm\(/);
+  const css = await readFile(new URL('../src/dashboard-module-catalog.css', import.meta.url), 'utf8');
+  assert.match(css, /\.ewmc-host \[hidden\]\{display:none!important\}/, 'the hidden confirmation must not show through .ewmc-confirm{display:flex}');
+});
+
+test('«Мій дашборд» stays below the dashboard that renders into the same container later', async () => {
+  const source = await readFile(new URL('../src/dashboard-module-catalog.js', import.meta.url), 'utf8');
+  assert.match(source, /dashboard\.lastElementChild !== host\) dashboard\.append\(host\)/);
+  assert.match(source, /observer\.observe\(dashboard, \{ childList: true \}\)/);
 });
