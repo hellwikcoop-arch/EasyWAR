@@ -634,15 +634,19 @@ function ridgeline(model, width, height, { compact }) {
   const count = Math.max(1, model.series.length);
   const labelWidth = compact ? 0 : Math.min(96, Math.max(36, ...model.series.map(item => textWidth(item.name) + 10)));
   const plot = { x: labelWidth + 4, y: compact ? 6 : 14, w: Math.max(40, width - labelWidth - 16), h: Math.max(30, height - (compact ? 22 : 36)) };
-  const band = plot.h / count;
-  const ridgeHeight = Math.min(plot.h, band * (count > 1 ? 1.9 : 1));
+  // Гребені перекриваються майже на два ряди; верхній отримує запас над собою разом із підписом піку,
+  // інакше найвищий пік зрізався краєм картки.
+  const overlap = count > 1 ? 1.9 : 1;
+  const head = compact ? 0 : 12;
+  const band = (plot.h - head) / (count - 1 + overlap);
+  const ridgeHeight = band * overlap;
   const xOf = hour => plot.x + hour / 23 * plot.w;
   const id = `ewmc-ridge-${++ridgeId}`;
   const defs = svg('defs', {}, model.series.map((item, index) => svg('linearGradient', { id: `${id}-${index}`, x1: 0, y1: 0, x2: 0, y2: 1 },
     svg('stop', { offset: '0%', 'stop-color': slotColor(item.slot), 'stop-opacity': 0.85 }),
     svg('stop', { offset: '100%', 'stop-color': slotColor(item.slot), 'stop-opacity': 0.04 }))));
   const ridges = model.series.map((item, index) => {
-    const base = plot.y + band * (index + 1);
+    const base = plot.y + head + ridgeHeight + band * index;
     const yOf = value => base - value / model.max * ridgeHeight;
     const points = item.smooth.map((value, hour) => ({ x: xOf(hour), y: yOf(value) }));
     const curve = smoothPath(points);
