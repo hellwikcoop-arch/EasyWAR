@@ -1,5 +1,5 @@
-// Оболонка модуля «Робоче середовище»: розділ «Офіс» з картками застосунків і перегляд одного
-// застосунку в iframe (app.html?app=<id>) під верхньою смугою «← Офіс · назва · Закрити».
+// Оболонка модуля «Робоче середовище»: розділи «Офіс» і «Особисте» з картками застосунків і перегляд одного
+// застосунку в iframe (app.html?app=<id>) під верхньою смугою «← Розділи · назва · Закрити».
 // Незбережені зміни застосунок повідомляє через postMessage; перед закриттям оболонка просить
 // підтвердження у власній смузі, без системних діалогів. Лаунчер (workspace-launcher.js) питає
 // дозволу закритися через EW_WORKSPACE.requestClose(), а «← На стартову» просить його закритися.
@@ -7,7 +7,7 @@
 // редактора з дозволом лише на команди office_* (shellMode, docs/WORKSPACE.md, «Ізоляція»).
 import {
   CLOSE_MESSAGE,
-  OFFICE_APPS,
+  WORKSPACE_APPS,
   WORKSPACE_SECTIONS,
   appById,
   appPageUrl,
@@ -96,9 +96,9 @@ function renderSections() {
     const title = element('h1', '', section.title);
     title.id = `ws-section-${section.id}`;
     heading.append(
-      element('p', 'ws-eyebrow', 'ЛОКАЛЬНІ ЗАСТОСУНКИ'),
+      element('p', 'ws-eyebrow', section.eyebrow),
       title,
-      element('p', 'ws-home-subtitle', 'Оберіть застосунок для роботи з файлами на цьому комп’ютері.'),
+      element('p', 'ws-home-subtitle', section.subtitle),
     );
     const cards = element('div', 'ws-cards');
     cards.setAttribute('aria-label', `Застосунки розділу «${section.title}»`);
@@ -214,7 +214,7 @@ window.addEventListener('message', event => {
   showTitle(current.app, state.title, state.dirty);
 });
 
-window.EW_WORKSPACE = Object.freeze({ requestClose: requestCloseApp, apps: OFFICE_APPS.map(app => app.id) });
+window.EW_WORKSPACE = Object.freeze({ requestClose: requestCloseApp, apps: WORKSPACE_APPS.map(app => app.id) });
 if (shell.mode === 'editor') {
   home.hidden = true;
   if (shell.app) openApp(shell.app.id, null);

@@ -19,8 +19,11 @@ use std::sync::Mutex;
 
 /// Мітка вікна, у якому працюють редактори «Офісу» (див. `capabilities/office-editor.json`).
 pub const EDITOR_WINDOW_LABEL: &str = "office-editor";
-/// Застосунки «Офісу», які можна відкрити у вікні редактора.
-pub const EDITOR_APPS: [&str; 3] = ["easygreen", "easydoc", "easyslide"];
+/// Застосунки модуля «Робоче середовище» (розділи «Офіс» і «Особисте»), які можна відкрити у вікні
+/// редактора. easyPay теж тут: його файл `.easypay` ходить лише через команди `office_*`, а вони
+/// приймають тільки це вікно. Збіг зі списком підключених застосунків перевіряє
+/// `tests/office-isolation.test.mjs`.
+pub const EDITOR_APPS: [&str; 4] = ["easygreen", "easydoc", "easyslide", "easypay"];
 
 /// Найбільший файл, який застосунок може відкрити або зберегти.
 pub const MAX_FILE_BYTES: usize = 256 * 1024 * 1024;

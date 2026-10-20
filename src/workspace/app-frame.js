@@ -88,7 +88,7 @@ function stubPanel(app, eyebrow, heading, text) {
     symbol.append(appIcon(document, app.id, 48));
     panel.append(symbol);
   }
-  const back = element('button', 'ws-button ws-state-button', '← Офіс');
+  const back = element('button', 'ws-button ws-state-button', '← Розділи');
   back.type = 'button';
   back.addEventListener('click', backToOffice);
   panel.append(element('p', 'ws-state-eyebrow', eyebrow), element('h1', '', heading), element('p', 'ws-state-description', text), back);
@@ -100,7 +100,7 @@ const RETRY_TEXT = 'Редактор не відкрився. Спробуйте
 async function start() {
   const app = appFromSearch(location.search);
   if (!app) {
-    showState(stubPanel(null, 'НЕ ЗНАЙДЕНО', 'Застосунок не знайдено', 'Поверніться до Офісу та оберіть застосунок ще раз.'));
+    showState(stubPanel(null, 'НЕ ЗНАЙДЕНО', 'Застосунок не знайдено', 'Поверніться до робочого середовища й оберіть застосунок ще раз.'));
     return;
   }
   document.title = `${app.title} — EasyWAR`;

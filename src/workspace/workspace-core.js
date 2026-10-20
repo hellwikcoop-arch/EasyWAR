@@ -1,4 +1,4 @@
-// Чиста логіка модуля «Робоче середовище»: реєстр застосунків розділу «Офіс», контракт
+// Чиста логіка модуля «Робоче середовище»: реєстр застосунків розділів «Офіс» і «Особисте», контракт
 // підключення застосунку (версія, перевірка того, що повертає mount), параметри вікон
 // відкриття/збереження. Без DOM і Tauri, щоб її можна було перевірити в node --test.
 // Оболонка — workspace.js, сторінка одного застосунку — app-frame.js, файли — workspace-host.js.
@@ -50,13 +50,31 @@ export const OFFICE_APPS = Object.freeze([
   }),
 ]);
 
-/** Розділи модуля. Поки один — «Офіс». */
+/**
+ * Застосунки розділу «Особисте»: дані однієї людини для неї самої, лише у її власних файлах.
+ */
+export const PERSONAL_APPS = Object.freeze([
+  app({
+    id: 'easypay',
+    title: 'easyPay',
+    kind: 'Грошове забезпечення',
+    hint: 'Калькулятор виплат і журнал того, що вам мають виплатити, з нагадуваннями',
+    extensions: ['easypay'],
+    filterName: 'Журнал easyPay',
+  }),
+]);
+
+/** Усі застосунки модуля в порядку розділів. */
+export const WORKSPACE_APPS = Object.freeze([...OFFICE_APPS, ...PERSONAL_APPS]);
+
+/** Розділи модуля: «Офіс» і «Особисте». */
 export const WORKSPACE_SECTIONS = Object.freeze([
-  Object.freeze({ id: 'office', title: 'Офіс', apps: Object.freeze(OFFICE_APPS.map(entry => entry.id)) }),
+  Object.freeze({ id: 'office', title: 'Офіс', eyebrow: 'ЛОКАЛЬНІ ЗАСТОСУНКИ', subtitle: 'Оберіть застосунок для роботи з файлами на цьому комп’ютері.', apps: Object.freeze(OFFICE_APPS.map(entry => entry.id)) }),
+  Object.freeze({ id: 'personal', title: 'Особисте', eyebrow: 'ПЕРСОНАЛЬНІ ІНСТРУМЕНТИ', subtitle: 'Розрахунки й журнали лише для вас, у локальному файлі на цьому комп’ютері.', apps: Object.freeze(PERSONAL_APPS.map(entry => entry.id)) }),
 ]);
 
 export function appById(id) {
-  return OFFICE_APPS.find(entry => entry.id === id) || null;
+  return WORKSPACE_APPS.find(entry => entry.id === id) || null;
 }
 
 /**
@@ -222,6 +240,7 @@ export const APP_ICONS = Object.freeze({
   easygreen: [['rect', { x: '3', y: '3.5', width: '18', height: '17', rx: '2' }], ['path', { d: 'M3 9.5h18M9 3.5v17M15 9.5v11' }]],
   easydoc: [['path', { d: 'M6 2.5h8l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-17a1 1 0 0 1 1-1Z' }], ['path', { d: 'M14 2.5v4h4M8 11h7M8 14.5h7M8 18h5' }]],
   easyslide: [['rect', { x: '2.5', y: '4', width: '19', height: '14', rx: '2' }], ['path', { d: 'm6.5 14 3-3 2.5 2 4-4M12 18v3m-4 0h8' }]],
+  easypay: [['rect', { x: '3', y: '6', width: '18', height: '12', rx: '2' }], ['circle', { cx: '12', cy: '12', r: '2.5' }], ['path', { d: 'M6.5 9.5v.01M17.5 14.5v.01' }]],
 });
 
 /** Етапи запуску застосунку на екрані завантаження. */
