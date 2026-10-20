@@ -97,6 +97,7 @@ pub(crate) const DASHBOARD_MODULES_SQL: &str =
     include_str!("../migrations/0010_dashboard_modules.sql");
 pub(crate) const DASHBOARD_MODULE_CORRECTIONS_SQL: &str =
     include_str!("../migrations/0011_dashboard_module_corrections.sql");
+pub(crate) const QUERY_INDEXES_SQL: &str = include_str!("../migrations/0012_query_indexes.sql");
 
 pub fn migrations() -> Vec<Migration> {
     vec![
@@ -166,6 +167,12 @@ pub fn migrations() -> Vec<Migration> {
             sql: DASHBOARD_MODULE_CORRECTIONS_SQL,
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 12,
+            description: "add_query_indexes",
+            sql: QUERY_INDEXES_SQL,
+            kind: MigrationKind::Up,
+        },
     ]
 }
 
@@ -224,7 +231,7 @@ mod tests {
         DatabaseStatusStore, COMMAND_TABLES_SQL, DASHBOARD_MODULES_SQL,
         DASHBOARD_MODULE_CORRECTIONS_SQL, DATABASE_URL, EMBEDDED_MIGRATOR, INITIAL_SCHEMA_SQL,
         LOCAL_PROFILES_SQL, OWN_LOSSES_TABLES_SQL, PROFILE_BRANCH_TABLES_SQL, PROFILE_DETAILS_SQL,
-        PROFILE_MODULES_SQL, WORKSPACE_TEMPLATES_SQL, XLSX_DUPLICATE_LINKS_SQL,
+        PROFILE_MODULES_SQL, QUERY_INDEXES_SQL, WORKSPACE_TEMPLATES_SQL, XLSX_DUPLICATE_LINKS_SQL,
     };
     use sqlx::{sqlite::SqlitePoolOptions, Row};
 
@@ -233,7 +240,7 @@ mod tests {
         assert_eq!(DATABASE_URL, "sqlite:easywar.db");
         assert!(include_str!("../tauri.conf.json").contains(DATABASE_URL));
         let registered = migrations();
-        assert_eq!(registered.len(), 11);
+        assert_eq!(registered.len(), 12);
         assert_eq!(registered[0].version, 1);
         assert_eq!(registered[0].description, "create_provenance_schema");
         assert_eq!(registered[1].version, 2);
@@ -259,6 +266,8 @@ mod tests {
             registered[10].description,
             "add_dashboard_module_corrections"
         );
+        assert_eq!(registered[11].version, 12);
+        assert_eq!(registered[11].description, "add_query_indexes");
         assert_eq!(
             EMBEDDED_MIGRATOR
                 .iter()
@@ -279,7 +288,7 @@ mod tests {
                 .map(|migration| migration.sql)
                 .collect::<Vec<_>>()
         );
-        assert_eq!(super::latest_schema_version(), Some(11));
+        assert_eq!(super::latest_schema_version(), Some(12));
     }
 
     #[tokio::test]
@@ -291,9 +300,9 @@ mod tests {
             DatabaseStatusStore::new(pool.clone()).load().await.unwrap(),
             super::DatabaseStatus {
                 app_version: env!("CARGO_PKG_VERSION").to_owned(),
-                schema_version: 11,
-                supported_schema_version: 11,
-                migration_count: 11,
+                schema_version: 12,
+                supported_schema_version: 12,
+                migration_count: 12,
                 migration_state: DatabaseMigrationState::Current,
             }
         );
@@ -361,6 +370,10 @@ mod tests {
             .execute(&pool)
             .await
             .expect("dashboard module corrections migration must apply");
+        sqlx::raw_sql(QUERY_INDEXES_SQL)
+            .execute(&pool)
+            .await
+            .expect("query indexes migration must apply");
 
         pool
     }
@@ -385,6 +398,74 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(template_count, 0);
+    }
+
+    async fn query_plan(pool: &sqlx::SqlitePool, sql: &str, parameters: usize) -> String {
+        let explain = format!("EXPLAIN QUERY PLAN {sql}");
+        let mut query = sqlx::query(&explain);
+        for _ in 0..parameters {
+            query = query.bind(Option::<String>::None);
+        }
+        query
+            .fetch_all(pool)
+            .await
+            .expect("synthetic query plan must load")
+            .iter()
+            .map(|row| row.get::<String, _>("detail"))
+            .collect::<Vec<_>>()
+            .join(" | ")
+    }
+
+    #[tokio::test]
+    async fn query_index_migration_serves_xlsx_duplicate_and_signal_inbox_lookups() {
+        let pool = migrated_pool().await;
+
+        // Той самий текст запиту, що й у repository::find_prior_xlsx_duplicate:
+        // частковий індекс спрацьовує лише тоді, коли умови WHERE збігаються.
+        let duplicate_plan = query_plan(
+            &pool,
+            "SELECT reports.id
+             FROM reports
+             JOIN raw_sources ON raw_sources.id = reports.raw_source_id
+             JOIN parsed_report_versions ON parsed_report_versions.report_id = reports.id
+             WHERE raw_sources.source_type = 'XLSX'
+               AND parsed_report_versions.version = 1
+               AND parsed_report_versions.parser_name = 'easywar-xlsx'
+               AND parsed_report_versions.parsed_payload_json = ?
+             ORDER BY reports.created_at, reports.id
+             LIMIT 1",
+            1,
+        )
+        .await;
+        assert!(
+            duplicate_plan.contains("idx_parsed_versions_xlsx_payload"),
+            "{duplicate_plan}"
+        );
+        assert!(
+            !duplicate_plan.contains("SCAN parsed_report_versions"),
+            "{duplicate_plan}"
+        );
+
+        // Той самий текст запиту, що й у repository::list_signal_inbox.
+        let inbox_plan = query_plan(
+            &pool,
+            "SELECT reports.id, reports.source_item_key, raw_sources.source_timestamp,
+                    raw_sources.captured_at, report_current_state.current_status,
+                    raw_sources.raw_sha256
+             FROM reports
+             JOIN raw_sources ON raw_sources.id = reports.raw_source_id
+             JOIN report_current_state ON report_current_state.report_id = reports.id
+             WHERE raw_sources.source_type = 'SIGNAL'
+             ORDER BY raw_sources.captured_at DESC, reports.id DESC
+             LIMIT ?",
+            1,
+        )
+        .await;
+        assert!(
+            inbox_plan.contains("idx_raw_sources_type_captured"),
+            "{inbox_plan}"
+        );
+        assert!(!inbox_plan.contains("SCAN reports"), "{inbox_plan}");
     }
 
     #[tokio::test]

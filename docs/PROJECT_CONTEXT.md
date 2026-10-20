@@ -103,7 +103,7 @@ src/models/                     3D-моделі .glb і CREDITS.md з ліцен
 src/guides/                     3D-довідники: хаб і шість довідників техніки
 src/public/                     класичні скрипти (редактор модуля, rocket-refs), офлайн-ресурси карти, manifest PWA
 src-tauri/src/                  Rust-ядро
-src-tauri/migrations/           SQL-міграції 0001–0011 і README
+src-tauri/migrations/           SQL-міграції 0001–0012 і README
 src-tauri/resources/base-tables порожні шаблони таблиць .xlsx (без даних)
 tests/                          node --test, понад 850 тестів; fixtures/ синтетичні
 runner/                         рушій локальної моделі КОМБАТА (обгортка над llama.cpp)

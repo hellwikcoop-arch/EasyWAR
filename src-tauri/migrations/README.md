@@ -74,6 +74,16 @@ itself holds the corrected value. Corrections reference the record by its
 Deleting the module (or its profile) deletes them; a record removed from the
 module table takes its corrections with it. The XLSX is never written.
 
+`0012_query_indexes.sql` adds two indexes and changes no data. A partial index
+on `parsed_report_versions(parsed_payload_json)` for XLSX parser version 1 serves
+the duplicate-row lookup that runs for every imported XLSX row (without it, each
+row read the whole table and imports slowed down quadratically). An index on
+`raw_sources(source_type, captured_at)` serves the Signal inbox and the command
+queue, which filter by source type and sort by capture time. The duplicate
+lookup query must keep `version = 1 AND parser_name = 'easywar-xlsx'` literally
+in its `WHERE`, or SQLite stops using the partial index; a test in
+`database.rs` checks both query plans.
+
 The `dashboard_data_<id>` tables of user-created dashboard modules are not
 migration objects: Rust creates them at runtime from a validated catalog
 template and adds columns that later appear in a template with `ALTER TABLE`,

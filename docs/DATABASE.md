@@ -44,7 +44,11 @@ catalog template, not from the migration. Migration
 `0011_dashboard_module_corrections.sql` adds `dashboard_module_corrections`: the
 values corrected on the «Перевірка» screen before rows from the user's XLSX were
 brought into a new module, kept apart from the module records (raw cell text,
-typed text, reason, file name, sheet, row and column). Migrations contain no
+typed text, reason, file name, sheet, row and column). Migration
+`0012_query_indexes.sql` adds indexes only: a partial index for the XLSX
+duplicate-row lookup (it ran a full table read for every imported row) and
+`raw_sources(source_type, captured_at)` for the Signal inbox and command queue.
+Migrations contain no
 operational fixtures and create no external integration.
 
 ## Provenance layers
