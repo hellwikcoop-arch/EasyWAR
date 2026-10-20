@@ -11,6 +11,7 @@ import {
   MAX_PLACES,
   REFRESH_MINUTES,
   photoKey,
+  windsockKey,
   STALE_MINUTES,
   addPlace,
   ageText,
@@ -391,4 +392,15 @@ test('фото явища: код WMO, слова поза кодами, без 
     assert.ok(file.length > 500 && file.length < 16 * 1024, key);
   }
   assert.equal(keys.size, 15);
+});
+
+test('ковдун: лише сила вітру біля землі, пориви, без даних — немає', () => {
+  assert.equal(windsockKey({ wind: 1 }), 'calm');
+  assert.equal(windsockKey({ wind: 4 }), 'weak');
+  assert.equal(windsockKey({ wind: 8, gusts: 10 }), 'moderate');
+  assert.equal(windsockKey({ wind: 16 }), 'strong');
+  assert.equal(windsockKey({ wind: 5.5, gusts: 12 }), 'gusty');
+  assert.equal(windsockKey({ wind: 1, gusts: 9 }), 'calm');
+  assert.equal(windsockKey({}), '');
+  for (const state of ['calm', 'weak', 'moderate', 'strong', 'gusty']) assert.ok(WEATHER_ICONS[`windsock-${state}`]?.startsWith('<svg'), state);
 });

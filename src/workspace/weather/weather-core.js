@@ -374,6 +374,22 @@ export function photoKey(observation) {
   return match ? PHOTO_BY_CODE[Number(match[1])] ?? '' : '';
 }
 
+const WINDSOCK_LABELS = { calm: 'штиль', weak: 'слабкий вітер', moderate: 'помірний вітер', strong: 'сильний вітер', gusty: 'поривчастий вітер' };
+
+/**
+ * Стан «ковдуна» лише для наочності сили вітру біля землі (напрямку не показує): до 3 м/с звисає,
+ * до 6 — слабкий, до 11 — помірний, далі витягнутий; пориви на 5 м/с вище за середній — поривчастий.
+ */
+export function windsockKey(observation) {
+  const wind = observation?.wind;
+  if (!finite(wind)) return '';
+  if (wind >= 3 && finite(observation.gusts) && observation.gusts - wind >= 5) return 'gusty';
+  if (wind < 3) return 'calm';
+  if (wind < 6) return 'weak';
+  if (wind < 11) return 'moderate';
+  return 'strong';
+}
+
 /** Назва явища для екрана: за кодом WMO (таблиця пакета референсів) або як введено. */
 export function phenomenonLabel(observation) {
   if (Number.isInteger(observation?.weatherCode) && WMO_LABELS[observation.weatherCode]) return WMO_LABELS[observation.weatherCode];
@@ -422,6 +438,8 @@ export function observationView(observation, now = new Date()) {
     phenomenon: phenomenonLabel(observation),
     icon: iconKey(observation),
     photo: photoKey(observation),
+    windsock: windsockKey(observation) ? `windsock-${windsockKey(observation)}` : '',
+    windsockLabel: WINDSOCK_LABELS[windsockKey(observation)] ?? '',
     coverIcon: finite(observation.cover) ? `cover-${Math.round(clamp(observation.cover, 0, 10))}` : '',
     toneLabel: TONE_LABELS[hazard.tone] ?? TONE_LABELS[''],
     source: observation.source === 'online' ? `Open-Meteo, ${timeLabel(observation.time)}` : `вручну, ${timeLabel(observation.time)}`,

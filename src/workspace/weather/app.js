@@ -272,6 +272,8 @@ export async function mount(container, host) {
   function renderCard() {
     const place = current();
     if (!place) {
+      card.classList.remove('wx-card-photo');
+      card.style.removeProperty('--wx-photo');
       card.replaceChildren(el('p', 'wx-empty', 'Додайте населений пункт, щоб бачити нижній край хмар, видимість і хмарність.'));
       card.dataset.tone = '';
       return;
@@ -279,16 +281,12 @@ export async function mount(container, host) {
     const view = observationView(state.observations[place.id]);
     const heading = el('div', 'wx-card-head');
     const name = el('div', 'wx-card-title');
-    if (view?.photo && PHOTOS[view.photo]) {
-      const photo = el('img', 'wx-photo');
-      photo.src = PHOTOS[view.photo];
-      photo.alt = view.phenomenon || '';
-      photo.width = 120;
-      photo.height = 80;
-      name.append(photo);
-    } else {
-      name.append(icon(view?.icon || 'unknown', 'wx-icon wx-icon-big'));
-    }
+    // Фон картки — фото поточного явища; без даних фону немає, біля назви лишається значок.
+    const photoUrl = view?.photo ? PHOTOS[view.photo] : '';
+    card.classList.toggle('wx-card-photo', Boolean(photoUrl));
+    if (photoUrl) card.style.setProperty('--wx-photo', `url("${photoUrl}")`);
+    else card.style.removeProperty('--wx-photo');
+    name.append(icon(view?.icon || 'unknown', 'wx-icon wx-icon-big'));
     const titleText = el('div', 'wx-card-name');
     titleText.append(el('h2', '', placeLabel(place)));
     const summary = [view?.temperature, view?.phenomenon].filter(Boolean).join(' · ');
@@ -310,8 +308,16 @@ export async function mount(container, host) {
     if (view.coverIcon) coverTile.append(icon(view.coverIcon, 'wx-icon wx-cover-dial'));
     metrics.append(coverTile);
     const ground = el('div', 'wx-metrics wx-metrics-wide');
+    const windTile = metric('Вітер біля землі', view.windGround, view.windNote, 'wind');
+    if (view.windsock) {
+      const sock = icon(view.windsock, 'wx-icon wx-windsock');
+      sock.title = `Сила вітру: ${view.windsockLabel}`;
+      sock.setAttribute('role', 'img');
+      sock.setAttribute('aria-label', sock.title);
+      windTile.append(sock);
+    }
     ground.append(
-      metric('Вітер біля землі', view.windGround, view.windNote, 'wind'),
+      windTile,
       metric('Атмосферний тиск', view.pressure, view.pressureNote, 'pressure'),
     );
     const hazard = el('p', 'wx-hazard', view.tone ? `${view.toneLabel} · ${view.hazardText}` : view.hazardText);
