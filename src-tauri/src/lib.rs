@@ -25,6 +25,7 @@ pub mod signal_session;
 pub mod signal_settings;
 mod startup_recovery;
 pub mod update_settings;
+pub mod weather_online;
 pub mod workspace_templates;
 pub mod xlsx_export;
 pub mod xlsx_import;
@@ -1104,6 +1105,27 @@ fn office_close_file(
     Ok(())
 }
 
+/// Застосунок «Погода»: поточні умови в пункті з Open-Meteo. Назовні йдуть лише
+/// координати, округлені до 0,01°. Викликається тільки після явного ввімкнення онлайн-оновлення.
+#[tauri::command]
+async fn weather_online_fetch(
+    latitude: f64,
+    longitude: f64,
+) -> Result<weather_online::WeatherObservation, String> {
+    let url =
+        weather_online::forecast_url(latitude, longitude).map_err(|error| error.to_string())?;
+    let body = weather_online::fetch_json(url).await?;
+    weather_online::parse_forecast(&body).map_err(|error| error.to_string())
+}
+
+/// Застосунок «Погода»: пошук населеного пункту за назвою (Open-Meteo, лише Україна).
+#[tauri::command]
+async fn weather_online_search(name: String) -> Result<Vec<weather_online::WeatherPlace>, String> {
+    let url = weather_online::geocode_url(&name).map_err(|error| error.to_string())?;
+    let body = weather_online::fetch_json(url).await?;
+    weather_online::parse_places(&body).map_err(|error| error.to_string())
+}
+
 /// Зберігає порожню базову таблицю в новий файл і прив'язує її до профілю
 /// для того роду військ, чий модуль її відкриває.
 #[tauri::command]
@@ -2077,6 +2099,8 @@ pub fn run() {
             office_save_file,
             office_save_file_as,
             office_close_file,
+            weather_online_fetch,
+            weather_online_search,
             clear_profile_database,
             read_profile_database,
             write_profile_database,
