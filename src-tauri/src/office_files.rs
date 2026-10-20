@@ -7,10 +7,20 @@
 //! Запис — атомарний ([`crate::phone_export::save_file`]). Таблиці, прив'язані до профілів,
 //! і їхні ротовані копії не перезаписуються (сире джерело змінюється лише штатним записом
 //! таблиці профілю): [`is_protected_table`], перенесено з прототипу EasyGreen.
+//!
+//! Ізоляція (F-01, T-Office-06): код сторонніх редакторів працює лише в окремому вікні
+//! [`EDITOR_WINDOW_LABEL`], чия capability дозволяє тільки команди `office_*`. Кожна з них
+//! додатково перевіряє мітку webview, яку дає Tauri (не JavaScript), а номер файлу
+//! прив'язаний і до профілю, і до цієї мітки.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+
+/// Мітка вікна, у якому працюють редактори «Офісу» (див. `capabilities/office-editor.json`).
+pub const EDITOR_WINDOW_LABEL: &str = "office-editor";
+/// Застосунки «Офісу», які можна відкрити у вікні редактора.
+pub const EDITOR_APPS: [&str; 3] = ["easygreen", "easydoc", "easyslide"];
 
 /// Найбільший файл, який застосунок може відкрити або зберегти.
 pub const MAX_FILE_BYTES: usize = 256 * 1024 * 1024;
@@ -35,6 +45,35 @@ pub enum OfficeFileError {
     UnknownHandle,
     #[error("«{0}» — таблиця, прив'язана до профілю EasyWAR; збережіть під іншою назвою")]
     ProtectedTable(String),
+    #[error("файли «Офісу» відкриваються лише у вікні редактора")]
+    NotEditorWindow,
+    #[error("невідомий застосунок «Офісу»")]
+    UnknownApp,
+}
+
+/// Команди `office_*` приймаються лише з вікна редактора. Мітку дає Tauri.
+pub fn ensure_editor_window(label: &str) -> Result<(), OfficeFileError> {
+    if label == EDITOR_WINDOW_LABEL {
+        Ok(())
+    } else {
+        Err(OfficeFileError::NotEditorWindow)
+    }
+}
+
+/// Перевірений ідентифікатор застосунку для вікна редактора.
+pub fn editor_app(id: &str) -> Result<&'static str, OfficeFileError> {
+    EDITOR_APPS
+        .iter()
+        .copied()
+        .find(|app| *app == id)
+        .ok_or(OfficeFileError::UnknownApp)
+}
+
+/// Скрипт ініціалізації вікна редактора: каже оболонці, який застосунок відкрити.
+pub fn editor_init_script(app: &'static str) -> String {
+    format!(
+        "Object.defineProperty(window, '__EW_EDITOR_APP', {{ value: '{app}', writable: false, configurable: false }});"
+    )
 }
 
 /// Чи є `target` таблицею, прив'язаною до профілю, або її ротованою копією
@@ -149,42 +188,65 @@ pub fn file_name(path: &Path) -> String {
 #[derive(Debug, Default)]
 struct HandleTable {
     next: u64,
-    entries: HashMap<String, (String, PathBuf)>,
+    entries: HashMap<String, HandleEntry>,
 }
 
-/// Відкриті застосунками файли: номер → (профіль, шлях).
+#[derive(Debug)]
+struct HandleEntry {
+    profile_id: String,
+    webview: String,
+    path: PathBuf,
+}
+
+impl HandleEntry {
+    fn owned_by(&self, profile_id: &str, webview: &str) -> bool {
+        self.profile_id == profile_id && self.webview == webview
+    }
+}
+
+/// Відкриті застосунками файли: номер → (профіль, мітка webview, шлях).
 #[derive(Debug, Default)]
 pub struct OfficeFileHandles(Mutex<HandleTable>);
 
 impl OfficeFileHandles {
-    /// Запам'ятовує шлях для профілю й повертає новий номер.
-    pub fn remember(&self, profile_id: &str, path: PathBuf) -> String {
+    /// Запам'ятовує шлях для профілю й webview і повертає новий номер.
+    pub fn remember(&self, profile_id: &str, webview: &str, path: PathBuf) -> String {
         let mut table = self
             .0
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         table.next += 1;
         let handle = format!("f{}", table.next);
-        table
-            .entries
-            .insert(handle.clone(), (profile_id.to_owned(), path));
+        table.entries.insert(
+            handle.clone(),
+            HandleEntry {
+                profile_id: profile_id.to_owned(),
+                webview: webview.to_owned(),
+                path,
+            },
+        );
         handle
     }
 
-    /// Шлях за номером, лише якщо його відкрив той самий профіль.
-    pub fn path(&self, profile_id: &str, handle: &str) -> Result<PathBuf, OfficeFileError> {
+    /// Шлях за номером, лише якщо його відкрили той самий профіль і той самий webview.
+    pub fn path(
+        &self,
+        profile_id: &str,
+        webview: &str,
+        handle: &str,
+    ) -> Result<PathBuf, OfficeFileError> {
         let table = self
             .0
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         match table.entries.get(handle) {
-            Some((owner, path)) if owner == profile_id => Ok(path.clone()),
+            Some(entry) if entry.owned_by(profile_id, webview) => Ok(entry.path.clone()),
             _ => Err(OfficeFileError::UnknownHandle),
         }
     }
 
     /// Забуває номер (застосунок закрив файл). Чужий номер не чіпається.
-    pub fn forget(&self, profile_id: &str, handle: &str) {
+    pub fn forget(&self, profile_id: &str, webview: &str, handle: &str) {
         let mut table = self
             .0
             .lock()
@@ -192,7 +254,7 @@ impl OfficeFileHandles {
         if table
             .entries
             .get(handle)
-            .is_some_and(|(owner, _)| owner == profile_id)
+            .is_some_and(|entry| entry.owned_by(profile_id, webview))
         {
             table.entries.remove(handle);
         }
@@ -260,25 +322,73 @@ mod tests {
     #[test]
     fn handles_belong_to_the_profile_that_opened_the_file() {
         let handles = OfficeFileHandles::default();
-        let first = handles.remember("p1", PathBuf::from("/tmp/a.xlsx"));
-        let second = handles.remember("p1", PathBuf::from("/tmp/b.xlsx"));
+        let editor = EDITOR_WINDOW_LABEL;
+        let first = handles.remember("p1", editor, PathBuf::from("/tmp/a.xlsx"));
+        let second = handles.remember("p1", editor, PathBuf::from("/tmp/b.xlsx"));
         assert_ne!(first, second);
         assert_eq!(
-            handles.path("p1", &first).unwrap(),
+            handles.path("p1", editor, &first).unwrap(),
             PathBuf::from("/tmp/a.xlsx")
         );
         assert_eq!(
-            handles.path("p2", &first),
+            handles.path("p2", editor, &first),
             Err(OfficeFileError::UnknownHandle)
         );
-        handles.forget("p2", &first);
-        assert!(handles.path("p1", &first).is_ok());
-        handles.forget("p1", &first);
+        handles.forget("p2", editor, &first);
+        assert!(handles.path("p1", editor, &first).is_ok());
+        handles.forget("p1", editor, &first);
         assert_eq!(
-            handles.path("p1", &first),
+            handles.path("p1", editor, &first),
             Err(OfficeFileError::UnknownHandle)
         );
         assert_eq!(file_name(Path::new("/tmp/b.xlsx")), "b.xlsx");
+    }
+
+    #[test]
+    fn handles_belong_to_the_webview_that_opened_the_file() {
+        let handles = OfficeFileHandles::default();
+        let handle = handles.remember("p1", EDITOR_WINDOW_LABEL, PathBuf::from("/tmp/a.docx"));
+        assert_eq!(
+            handles.path("p1", "main", &handle),
+            Err(OfficeFileError::UnknownHandle)
+        );
+        handles.forget("p1", "main", &handle);
+        assert!(handles.path("p1", EDITOR_WINDOW_LABEL, &handle).is_ok());
+    }
+
+    #[test]
+    fn office_commands_accept_only_the_editor_window() {
+        assert_eq!(ensure_editor_window(EDITOR_WINDOW_LABEL), Ok(()));
+        for label in [
+            "main",
+            "",
+            "office-editor-2",
+            "Office-Editor",
+            "office-editor ",
+        ] {
+            assert_eq!(
+                ensure_editor_window(label),
+                Err(OfficeFileError::NotEditorWindow),
+                "{label:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn editor_opens_only_known_apps() {
+        for app in EDITOR_APPS {
+            assert_eq!(editor_app(app), Ok(app));
+            assert!(editor_init_script(editor_app(app).unwrap()).contains(&format!("'{app}'")));
+        }
+        for id in [
+            "",
+            "EasyDoc",
+            "easydoc'",
+            "../easydoc",
+            "easydoc');alert(1);//",
+        ] {
+            assert_eq!(editor_app(id), Err(OfficeFileError::UnknownApp), "{id:?}");
+        }
     }
 
     #[test]

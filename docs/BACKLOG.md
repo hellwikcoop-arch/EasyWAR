@@ -60,6 +60,9 @@
   [`WORKSPACE.md`](WORKSPACE.md)): редактори стороннього WASM в `<iframe>` того самого походження без
   `sandbox` бачать той самий `invoke`; ізоляція — окремий webview з capability лише на `office_*`
   (варіант C+D), потім `sandbox` і CSP.
+  2026-10-19 (T-Office-06, гілка `claude/office-isolation`, не злито): окреме вікно `office-editor`,
+  усі власні команди в `AppManifest::commands`, capability редактора лише на `office_*`, мітка вікна
+  перевіряється в Rust; негативний тест у WebKitGTK пройдено. Лишаються CSP, `sandbox`, macOS/Windows.
 - [ ] **P2-2** Ключ Planet — у Rust (файл 0600 або keychain); плитки через Rust-команду з
   `Authorization: Basic`; прибрати з `localStorage` і з URL. (M5) Аудит 2026-10-19:
   відкрито (`air.html`, `rocket.html`), не виправлялось.
