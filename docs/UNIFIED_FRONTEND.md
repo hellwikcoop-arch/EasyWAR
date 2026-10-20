@@ -37,6 +37,7 @@ Each module isolates its `localStorage` keys and IndexedDB names by prefix
 | `src/assistant/assistant-context.js` | Читання активного розблокованого iframe лише після явної кнопки перевірки; знімок видимих власних втрат або вже відкриті байти в пам'яті |
 | `src/assistant/assistant-retrieval-core.js` | Чистий толерантний пошук (BM25 з основами слів і синонімами) поверх строгого `searchKnowledge`; пакети фактів ≤3 уривків; слабкий збіг дає лише назви розділів |
 | `src/assistant/assistant-dialogue-core.js` | Чистий контролер розмови: маршрутизація, контекст з останніх реплік, продовження й уточнення, типізовані кнопки дій, бюджет запиту, перевірка відповіді моделі, точна відповідь-запасний варіант |
+| `src/assistant/assistant-song.js` | Контролер звуку пасхалки КОМБАТА: одна локальна пісня (`assets/favorite-song.mp3`) без відео, стани «грає / зупинено / автозапуск заблоковано / недоступна», зупинка при згортанні, очищенні й виході; мережі та сховищ немає |
 | `src/assistant/assistant-draft-core.js` | Чиста логіка чернетки доповіді: дозволені модулі (ПС, РВ), очищення тексту, перевірка стану поля, рядки підтвердження; без DOM і сховищ |
 | `src/assistant/assistant-draft.js` | DOM-обв'язка чернетки: читання стану `#paste`/`#autoToggle` і підстановка тексту у вкладці «Внесення доповідей» лише після підтвердження; кнопок модуля не натискає |
 | `src/assistant/assistant-llm.js` | Клієнт семи Tauri-команд локальної моделі (`Channel`, скасування); без DOM і сховищ, `invoke` підміняється в тестах |
@@ -421,6 +422,11 @@ by hand with narrow anchored patches (see `AGENTS.md`), then run
 розділу — `--hw-chapter` за `data-ew-module`. Файли командування для телефона (`build_standalone.mjs`,
 без `public/`) стиль не несуть: якщо файлу немає, `ui-kit.js` знімає атрибут і ховає кнопку.
 Тести — `tests/heightwell-theme.test.mjs`.
+
+Поля дат: `ui-kit.js` (розділ 4) кладе поверх кожного `input[type=date]` текстове поле `.ew-date-t`
+з форматом дд.мм.рррр, а сам `input[type=date]` (`.ew-date-n`) лишає для значення ISO, подій
+`input`/`change` і календаря. Обробники модулів не змінюються; присвоєння `input.value` оновлює текст.
+Розбір дати — `window.EWDate` (тест `tests/ui-kit-date.test.mjs`).
 
 `artillery.html` теж підключає `ui-kit.css`/`ui-kit.js` (`data-ew-module="artillery"`), але має власні токени в
 `artillery.css`: блок «Спільний вигляд дашбордів» у кінці файлу перетворює вкладки на бічне меню

@@ -211,6 +211,23 @@ test('вікно УДШВ: підпис «Десантно-штурмові ві
   assert.doesNotMatch(html, /udshv-open\)::before \{ content:/u);
 });
 
+test('стартові екрани без таблиці: три кроки, перетягування, «Продовжити з …» і ескіз дашборда', async () => {
+  for (const page of ['air.html', 'rocket.html']) {
+    const html = await read(page);
+    assert.match(html, /el\.empty = startScreen\(\);/, page);
+    assert.match(html, /h\('section', \{ class: 'dpanel empty-state es', hidden: true \}/, page);
+    assert.match(html, /\{ pvk: 'Повітряне командування', dshv: 'Десантно-штурмові війська' \}/, page);
+    assert.match(html, /refresh: refreshFromDisk, resume: resumeStored \}/, page);
+    assert.match(html, /S\.storedHandle = fh; if \(!S\.wb\) renderFile\(\); document\.dispatchEvent\(new Event\('ew-stored-handle'\)\);/, page);
+    assert.match(html, /@media \(max-width: 900px\) \{ \.dmain > \.dpanel\.empty-state\.es \{ grid-template-columns: minmax\(0, 1fr\);[^}]*\} \.es-prev \{ display: none; \}/, page);
+  }
+  const app = await readFile(new URL('../src/artillery-app.js', import.meta.url), 'utf8');
+  assert.match(app, /h\('section', \{ class: 'panel es' \}/);
+  assert.match(app, /h\('ol', \{ class: 'es-steps' \}/);
+  const css = await readFile(new URL('../src/artillery.css', import.meta.url), 'utf8');
+  assert.match(css, /\.panel\.es \{ display: grid;/);
+});
+
 test('ПС і РВ: сторінка «Перевірка даних» — заголовок над списком, а не окремим стовпцем ліворуч', async () => {
   for (const page of ['air.html', 'rocket.html']) {
     const html = await read(page);
