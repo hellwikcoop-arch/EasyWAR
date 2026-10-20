@@ -398,7 +398,7 @@ async fn replace_dashboard_module_rows(
     session: tauri::State<'_, ProfileSession>,
     module_id: String,
     rows: Vec<serde_json::Map<String, Value>>,
-    expected_updated_at: Option<String>,
+    expected_updated_at: String,
 ) -> Result<DashboardModuleData, String> {
     let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
     modules
@@ -406,7 +406,7 @@ async fn replace_dashboard_module_rows(
             &active_profile_id(&session)?,
             &module_id,
             rows,
-            expected_updated_at.as_deref(),
+            &expected_updated_at,
             &now,
         )
         .await

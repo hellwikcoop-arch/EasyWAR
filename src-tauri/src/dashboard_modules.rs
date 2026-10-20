@@ -152,6 +152,8 @@ pub enum DashboardModuleError {
     TextTooLong(String),
     #[error("таблицю змінено в іншому вікні; відкрийте її знову")]
     Conflict,
+    #[error("немає позначки версії таблиці; закрийте вікно й відкрийте таблицю знову")]
+    VersionRequired,
     #[error("некоректний або повторений ідентифікатор запису")]
     InvalidRowId,
     #[error("виправлення значення не відповідає підтягнутим записам")]
@@ -1278,17 +1280,20 @@ impl DashboardModuleStore {
     /// ідентифікатори не використовуються повторно).
     ///
     /// `expected_updated_at` — позначка змін, яку клієнт отримав разом із
-    /// таблицею. Якщо модуль уже змінено (наприклад, в іншому вікні), запис
-    /// відхиляється з `Conflict` і нічого не змінює. Без позначки запис
-    /// безумовний, як і раніше.
+    /// таблицею; вона обов'язкова. Якщо модуль уже змінено (наприклад, в іншому
+    /// вікні), запис відхиляється з `Conflict` і нічого не змінює. Порожня
+    /// позначка — `VersionRequired`: безумовного перезапису через цей шлях немає.
     pub async fn replace_rows(
         &self,
         profile_id: &str,
         module_id: &str,
         rows: Vec<Map<String, Value>>,
-        expected_updated_at: Option<&str>,
+        expected_updated_at: &str,
         updated_at: &str,
     ) -> Result<DashboardModuleData, DashboardModuleError> {
+        if expected_updated_at.trim().is_empty() {
+            return Err(DashboardModuleError::VersionRequired);
+        }
         if rows.len() > MAX_ROWS_PER_WRITE {
             return Err(DashboardModuleError::TooManyRows);
         }
@@ -1348,36 +1353,19 @@ impl DashboardModuleStore {
         let mut transaction = self.pool.begin().await?;
         // Перша операція транзакції — умовне оновлення позначки змін: воно
         // одночасно звіряє версію клієнта й бере блокування запису.
-        let claimed = if let Some(expected) = expected_updated_at {
-            sqlx::query(
-                "UPDATE dashboard_modules SET updated_at = ?
-                 WHERE id = ? AND profile_id = ? AND updated_at = ?",
-            )
-            .bind(updated_at)
-            .bind(module_id)
-            .bind(profile_id)
-            .bind(expected)
-            .execute(&mut *transaction)
-            .await?
-            .rows_affected()
-        } else {
-            sqlx::query(
-                "UPDATE dashboard_modules SET updated_at = ?
-                 WHERE id = ? AND profile_id = ?",
-            )
-            .bind(updated_at)
-            .bind(module_id)
-            .bind(profile_id)
-            .execute(&mut *transaction)
-            .await?
-            .rows_affected()
-        };
+        let claimed = sqlx::query(
+            "UPDATE dashboard_modules SET updated_at = ?
+             WHERE id = ? AND profile_id = ? AND updated_at = ?",
+        )
+        .bind(updated_at)
+        .bind(module_id)
+        .bind(profile_id)
+        .bind(expected_updated_at)
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
         if claimed != 1 {
-            return Err(if expected_updated_at.is_some() {
-                DashboardModuleError::Conflict
-            } else {
-                DashboardModuleError::ModuleNotFound
-            });
+            return Err(DashboardModuleError::Conflict);
         }
         let existing = sqlx::query(&format!("SELECT \"row_id\", \"created_at\" FROM {table}"))
             .fetch_all(&mut *transaction)
@@ -1914,6 +1902,25 @@ fn validate_value(
 }
 
 #[cfg(test)]
+impl DashboardModuleStore {
+    /// Тестовий запис від імені клієнта, який щойно відкрив таблицю: з її поточною версією.
+    async fn replace_rows_latest(
+        &self,
+        profile_id: &str,
+        module_id: &str,
+        rows: Vec<Map<String, Value>>,
+        updated_at: &str,
+    ) -> Result<DashboardModuleData, DashboardModuleError> {
+        let current = self
+            .get_for_profile(profile_id, module_id)
+            .await?
+            .updated_at;
+        self.replace_rows(profile_id, module_id, rows, &current, updated_at)
+            .await
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::database::{
@@ -2248,11 +2255,10 @@ mod tests {
         .unwrap()
         .clone()];
         let data = store
-            .replace_rows(
+            .replace_rows_latest(
                 "profile-111111111111111111111111",
                 &module.id,
                 rows,
-                None,
                 "2026-01-02T00:00:00Z",
             )
             .await
@@ -2276,11 +2282,10 @@ mod tests {
         .clone()];
         assert!(matches!(
             store
-                .replace_rows(
+                .replace_rows_latest(
                     "profile-111111111111111111111111",
                     &module.id,
                     invalid,
-                    None,
                     "2026-01-03T00:00:00Z"
                 )
                 .await,
@@ -2832,14 +2837,13 @@ mod tests {
         let store = store().await;
         let module = flight_module(&store).await;
         let first = store
-            .replace_rows(
+            .replace_rows_latest(
                 PROFILE,
                 &module.id,
                 vec![
                     row(flight("F-16", 1.0, 2.0)),
                     row(flight("МіГ-29", 3.0, 4.0)),
                 ],
-                None,
                 T2,
             )
             .await
@@ -2850,7 +2854,7 @@ mod tests {
         assert_eq!(first.rows[0]["createdAt"], T2);
 
         let second = store
-            .replace_rows(
+            .replace_rows_latest(
                 PROFILE,
                 &module.id,
                 vec![
@@ -2858,7 +2862,6 @@ mod tests {
                     row(with_row_id(flight("МіГ-29", 3.0, 4.0), json!(b))),
                     row(flight("Су-27", 5.0, 6.0)),
                 ],
-                None,
                 T3,
             )
             .await
@@ -2879,14 +2882,13 @@ mod tests {
         let store = store().await;
         let module = flight_module(&store).await;
         let first = store
-            .replace_rows(
+            .replace_rows_latest(
                 PROFILE,
                 &module.id,
                 vec![
                     row(flight("F-16", 1.0, 2.0)),
                     row(flight("МіГ-29", 3.0, 4.0)),
                 ],
-                None,
                 T2,
             )
             .await
@@ -2896,18 +2898,17 @@ mod tests {
 
         let keep = with_row_id(flight("F-16", 1.0, 2.0), json!(a));
         let after_delete = store
-            .replace_rows(PROFILE, &module.id, vec![row(keep.clone())], None, T3)
+            .replace_rows_latest(PROFILE, &module.id, vec![row(keep.clone())], T3)
             .await
             .unwrap();
         assert_eq!(after_delete.rows.len(), 1);
         assert_eq!(after_delete.module.row_count, 1);
 
         let with_new = store
-            .replace_rows(
+            .replace_rows_latest(
                 PROFILE,
                 &module.id,
                 vec![row(keep), row(flight("Су-27", 5.0, 6.0))],
-                None,
                 T4,
             )
             .await
@@ -2928,7 +2929,7 @@ mod tests {
                 PROFILE,
                 &module.id,
                 vec![row(flight("F-16", 1.0, 2.0))],
-                Some(&opened),
+                &opened,
                 T2,
             )
             .await
@@ -2941,7 +2942,7 @@ mod tests {
                 PROFILE,
                 &module.id,
                 vec![row(flight("МіГ-29", 9.0, 9.0))],
-                Some(&opened),
+                &opened,
                 T3,
             )
             .await;
@@ -2951,19 +2952,33 @@ mod tests {
         assert_eq!(current.rows[0]["aircraft_type"], "F-16");
         assert_eq!(current.module.updated_at, T2);
 
-        // Актуальна позначка проходить; запис без позначки лишається безумовним.
+        // Актуальна позначка проходить.
         store
             .replace_rows(
                 PROFILE,
                 &module.id,
                 vec![row(flight("Су-27", 5.0, 6.0))],
-                Some(T2),
+                T2,
                 T3,
             )
             .await
             .unwrap();
+        // Запис без позначки (порожньої чи з пробілів) безумовним не буває: нічого не змінюється.
+        for missing in ["", "  "] {
+            let refused = store
+                .replace_rows(PROFILE, &module.id, vec![], missing, T4)
+                .await;
+            assert!(matches!(
+                refused,
+                Err(DashboardModuleError::VersionRequired)
+            ));
+        }
+        let kept = store.get_data(PROFILE, &module.id).await.unwrap();
+        assert_eq!(kept.rows.len(), 1);
+        assert_eq!(kept.rows[0]["aircraft_type"], "Су-27");
+        assert_eq!(kept.module.updated_at, T3);
         store
-            .replace_rows(PROFILE, &module.id, vec![], None, T4)
+            .replace_rows(PROFILE, &module.id, vec![], T3, T4)
             .await
             .unwrap();
         assert!(store
@@ -2979,13 +2994,7 @@ mod tests {
         let store = store().await;
         let module = flight_module(&store).await;
         let saved = store
-            .replace_rows(
-                PROFILE,
-                &module.id,
-                vec![row(flight("F-16", 1.0, 2.0))],
-                None,
-                T2,
-            )
+            .replace_rows_latest(PROFILE, &module.id, vec![row(flight("F-16", 1.0, 2.0))], T2)
             .await
             .unwrap();
         let id = saved.rows[0]["rowId"].as_i64().unwrap();
@@ -2993,11 +3002,10 @@ mod tests {
         // Такого запису в таблиці немає: клієнт тримає застарілий стан.
         assert!(matches!(
             store
-                .replace_rows(
+                .replace_rows_latest(
                     PROFILE,
                     &module.id,
                     vec![row(with_row_id(flight("F-16", 1.0, 2.0), json!(id + 100)))],
-                    None,
                     T3
                 )
                 .await,
@@ -3006,11 +3014,10 @@ mod tests {
         for bad in [json!(0), json!(-1), json!("1"), json!(1.5), json!(true)] {
             assert!(matches!(
                 store
-                    .replace_rows(
+                    .replace_rows_latest(
                         PROFILE,
                         &module.id,
                         vec![row(with_row_id(flight("F-16", 1.0, 2.0), bad))],
-                        None,
                         T3
                     )
                     .await,
@@ -3019,14 +3026,13 @@ mod tests {
         }
         assert!(matches!(
             store
-                .replace_rows(
+                .replace_rows_latest(
                     PROFILE,
                     &module.id,
                     vec![
                         row(with_row_id(flight("F-16", 1.0, 2.0), json!(id))),
                         row(with_row_id(flight("F-16", 1.0, 2.0), json!(id)))
                     ],
-                    None,
                     T3
                 )
                 .await,
@@ -3058,23 +3064,11 @@ mod tests {
             .await
             .unwrap();
         store
-            .replace_rows(
-                PROFILE,
-                &mine.id,
-                vec![row(flight("МіГ-29", 3.0, 4.0))],
-                None,
-                T2,
-            )
+            .replace_rows_latest(PROFILE, &mine.id, vec![row(flight("МіГ-29", 3.0, 4.0))], T2)
             .await
             .unwrap();
         store
-            .replace_rows(
-                OTHER,
-                &theirs.id,
-                vec![row(flight("F-16", 1.0, 2.0))],
-                None,
-                T2,
-            )
+            .replace_rows_latest(OTHER, &theirs.id, vec![row(flight("F-16", 1.0, 2.0))], T2)
             .await
             .unwrap();
 
@@ -3146,11 +3140,10 @@ mod tests {
             .await
             .unwrap();
         store
-            .replace_rows(
+            .replace_rows_latest(
                 PROFILE,
                 &doomed.id,
                 vec![row(flight("МіГ-29", 3.0, 4.0))],
-                None,
                 T2,
             )
             .await
@@ -3513,9 +3506,9 @@ mod tests {
                     json!({"aircraft_type": "Тестовий-3", "airborne_hours": 0.5, "total_hours": 0.75, "takeoff_time": "14:25"}),
                     first.clone(),
                 ))],
-                Some(&data.module.updated_at),
+                &data.module.updated_at,
                 "2026-01-01T00:00:03Z",
-            )
+)
             .await
             .unwrap();
         assert_eq!(saved.rows.len(), 1);
