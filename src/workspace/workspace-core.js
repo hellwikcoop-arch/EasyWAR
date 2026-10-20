@@ -1,4 +1,4 @@
-// Чиста логіка модуля «Робоче середовище»: реєстр застосунків розділу «Офіс», контракт
+// Чиста логіка модуля «Робоче середовище»: реєстр застосунків розділів «Офіс» і «Особисте», контракт
 // підключення застосунку (версія, перевірка того, що повертає mount), параметри вікон
 // відкриття/збереження. Без DOM і Tauri, щоб її можна було перевірити в node --test.
 // Оболонка — workspace.js, сторінка одного застосунку — app-frame.js, файли — workspace-host.js.
@@ -50,13 +50,31 @@ export const OFFICE_APPS = Object.freeze([
   }),
 ]);
 
-/** Розділи модуля. Поки один — «Офіс». */
+/**
+ * Застосунки розділу «Особисте»: дані однієї людини для неї самої, лише у її власних файлах.
+ */
+export const PERSONAL_APPS = Object.freeze([
+  app({
+    id: 'easypay',
+    title: 'easyPay',
+    kind: 'Грошове забезпечення',
+    hint: 'Калькулятор виплат і журнал того, що вам мають виплатити, з нагадуваннями',
+    extensions: ['easypay'],
+    filterName: 'Журнал easyPay',
+  }),
+]);
+
+/** Усі застосунки модуля в порядку розділів. */
+export const WORKSPACE_APPS = Object.freeze([...OFFICE_APPS, ...PERSONAL_APPS]);
+
+/** Розділи модуля: «Офіс» і «Особисте». */
 export const WORKSPACE_SECTIONS = Object.freeze([
   Object.freeze({ id: 'office', title: 'Офіс', apps: Object.freeze(OFFICE_APPS.map(entry => entry.id)) }),
+  Object.freeze({ id: 'personal', title: 'Особисте', apps: Object.freeze(PERSONAL_APPS.map(entry => entry.id)) }),
 ]);
 
 export function appById(id) {
-  return OFFICE_APPS.find(entry => entry.id === id) || null;
+  return WORKSPACE_APPS.find(entry => entry.id === id) || null;
 }
 
 /** Адреса сторінки застосунку відносно `workspace/index.html`. */

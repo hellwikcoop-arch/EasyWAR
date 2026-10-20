@@ -1,8 +1,8 @@
-// Оболонка модуля «Робоче середовище»: розділ «Офіс» з картками застосунків і перегляд одного
+// Оболонка модуля «Робоче середовище»: розділи «Офіс» і «Особисте» з картками застосунків і перегляд одного
 // застосунку в iframe (app.html?app=<id>). Незбережені зміни застосунок повідомляє через
 // postMessage; перед закриттям оболонка просить підтвердження у власній смузі, без системних
 // діалогів. Лаунчер (workspace-launcher.js) питає дозволу закритися через EW_WORKSPACE.requestClose().
-import { OFFICE_APPS, WORKSPACE_SECTIONS, appById, appPageUrl, frameTitle, parseFrameMessage } from './workspace-core.js';
+import { WORKSPACE_APPS, WORKSPACE_SECTIONS, appById, appPageUrl, frameTitle, parseFrameMessage } from './workspace-core.js';
 import { isConnected } from './workspace-registry.js';
 
 const home = document.getElementById('ws-home');
@@ -125,5 +125,5 @@ window.addEventListener('message', event => {
   titleNode.textContent = frameTitle(current.app, state.title, state.dirty);
 });
 
-window.EW_WORKSPACE = Object.freeze({ requestClose: requestCloseApp, apps: OFFICE_APPS.map(app => app.id) });
+window.EW_WORKSPACE = Object.freeze({ requestClose: requestCloseApp, apps: WORKSPACE_APPS.map(app => app.id) });
 renderSections();
