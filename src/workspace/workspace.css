@@ -1,6 +1,8 @@
 /* Модуль «Робоче середовище»: розділ «Офіс» з картками застосунків і сторінка застосунку.
    Перенесено з макета docs/design/workspace-office (SPEC.md): темна палітра EasyWAR,
-   функціональні рамки --interactive-line (3,21:1), слабкий текст --weak (6,41:1 на панелі). */
+   функціональні рамки --interactive-line (3,21:1), слабкий текст --weak (6,41:1 на панелі).
+   Шрифт — UAF Sans (рішення власника 20.10.2026), той самий файл, що в map.css і artillery.css. */
+@font-face{font-family:"UAF Sans";src:url("../fonts/UAFSans.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:swap}
 :root{
   --bg:#111214; --panel:#151619; --raised:#1c1e22; --editor:#26282d;
   --line:#26282d; --line-2:#3a3d44; --interactive-line:#686d77;
@@ -9,8 +11,8 @@
   --danger:#e0786a; --danger-hover:#f09488; --danger-pressed:#c96759; --danger-ground:#241a1b;
   --radius-card:16px; --radius-icon:12px; --radius-button:8px;
   --shadow-hover:0 16px 40px rgba(0,0,0,.18); --duration-fast:160ms;
-  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
-  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --sans:"UAF Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:var(--sans); /* дрібні підписи великими літерами — тим самим шрифтом */
   color-scheme:dark;
 }
 *,*::before,*::after{box-sizing:border-box}
