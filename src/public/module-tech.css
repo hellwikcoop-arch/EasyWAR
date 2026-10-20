@@ -1,0 +1,58 @@
+/* Технологічний шар модулів (ПС, РВ, артилерія) у стилі стартового екрана (start-tech.css):
+   порожній екран «очікую таблицю» — сітка, кутові скоби, промінь сканування й мітка стану;
+   заголовки секцій дашборда — моноширинний штрих і лінія. Лише вигляд, колір — акцент модуля.
+   Підключає ui-kit.js; у файли для телефона (file://) не вбудовується. Зі стилем «Пункт керування» вимкнено. */
+:root { --ewt-mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace; --ewt-a: var(--accent, #60dde8); }
+
+/* Порожній екран. */
+html:not([data-skin]) :is(.dpanel.empty-state, .panel.welcome) { position: relative; overflow: hidden; isolation: isolate; }
+html:not([data-skin]) :is(.dpanel.empty-state, .panel.welcome)::before {
+  content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; justify-self: stretch; align-self: stretch;
+  background:
+    linear-gradient(180deg, transparent, color-mix(in srgb, var(--ewt-a) 16%, transparent) 85%, transparent) 0 -80px / 100% 80px no-repeat,
+    linear-gradient(color-mix(in srgb, var(--ewt-a) 9%, transparent) 1px, transparent 1px) 0 0 / 22px 22px,
+    linear-gradient(90deg, color-mix(in srgb, var(--ewt-a) 9%, transparent) 1px, transparent 1px) 0 0 / 22px 22px;
+  -webkit-mask-image: radial-gradient(120% 100% at 100% 0%, #000 20%, transparent 85%);
+  mask-image: radial-gradient(120% 100% at 100% 0%, #000 20%, transparent 85%);
+  animation: ewtScan 7s linear infinite;
+}
+@keyframes ewtScan { to { background-position: 0 calc(100% + 80px), 0 0, 0 0; } }
+/* Кутові скоби — лише в ПС і РВ: ::after вітальної панелі артилерії вже зайнятий зображенням роду військ. */
+html:not([data-skin]) .dpanel.empty-state::after {
+  --c: color-mix(in srgb, var(--ewt-a) 75%, transparent);
+  content: ""; position: absolute; inset: 8px; z-index: 2; pointer-events: none;
+  background:
+    linear-gradient(var(--c), var(--c)) 0 0 / 18px 2px, linear-gradient(var(--c), var(--c)) 0 0 / 2px 18px,
+    linear-gradient(var(--c), var(--c)) 100% 0 / 18px 2px, linear-gradient(var(--c), var(--c)) 100% 0 / 2px 18px,
+    linear-gradient(var(--c), var(--c)) 0 100% / 18px 2px, linear-gradient(var(--c), var(--c)) 0 100% / 2px 18px,
+    linear-gradient(var(--c), var(--c)) 100% 100% / 18px 2px, linear-gradient(var(--c), var(--c)) 100% 100% / 2px 18px;
+  background-repeat: no-repeat;
+}
+html:not([data-skin]) :is(.dpanel.empty-state, .panel.welcome) h2::before {
+  content: "Очікую таблицю"; display: block; width: max-content; margin-bottom: 10px; padding-left: 15px;
+  font: 600 11px/1.3 var(--ewt-mono); letter-spacing: .2em; text-transform: uppercase; color: var(--ewt-a);
+  background: radial-gradient(circle, var(--ewt-a) 0 3.5px, transparent 4.5px) 0 50% / 9px 9px no-repeat;
+  animation: ewtBlink 2s ease-in-out infinite;
+}
+@keyframes ewtBlink { 50% { opacity: .55; } }
+
+/* Заголовки секцій дашборда. */
+html:not([data-skin]) .dpanel > .ph { position: relative; padding-bottom: 8px; }
+html:not([data-skin]) .dpanel > .ph::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1px; pointer-events: none;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--ewt-a) 55%, transparent), color-mix(in srgb, var(--ewt-a) 8%, transparent) 55%, transparent);
+}
+html:not([data-skin]) .dpanel > .ph > h2 {
+  position: relative; padding-left: 12px;
+  font-family: var(--ewt-mono); font-weight: 600; font-size: 12.5px !important; letter-spacing: .1em; text-transform: uppercase;
+}
+html:not([data-skin]) .dpanel > .ph > h2::before {
+  content: ""; position: absolute; left: 0; top: .1em; bottom: .1em; width: 3px; border-radius: 1px;
+  background: var(--ewt-a); box-shadow: 0 0 8px color-mix(in srgb, var(--ewt-a) 60%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :is(.dpanel.empty-state, .panel.welcome)::before, :is(.dpanel.empty-state, .panel.welcome) h2::before { animation: none !important; }
+}
+html[data-motion="off"] :is(.dpanel.empty-state, .panel.welcome)::before,
+html[data-motion="off"] :is(.dpanel.empty-state, .panel.welcome) h2::before { animation: none !important; }
