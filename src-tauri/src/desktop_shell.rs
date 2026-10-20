@@ -221,6 +221,12 @@ fn build_office_editor(
     editor.set_focus()
 }
 
+/// Script the system close button runs in the editor page: the shell asks about unsaved
+/// changes and closes the window itself through `office_editor_close`; a page whose shell has
+/// not loaded (still starting, or its script failed) closes at once through the same command,
+/// so the window never stays stuck open without a working «← Офіс».
+pub(crate) const EDITOR_CLOSE_SCRIPT: &str = "(window.EW_WORKSPACE && window.EW_WORKSPACE.requestClose) ? window.EW_WORKSPACE.requestClose() : (window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke('office_editor_close'));";
+
 /// The system close button of the editor asks the page first (unsaved changes); the page
 /// closes the window itself through `office_editor_close`. If the page cannot be asked, the
 /// window closes. Closing the main window closes the editor too, as before with the iframe.
@@ -230,11 +236,7 @@ pub fn on_window_event(window: &Window, event: &WindowEvent) {
             let asked = window
                 .app_handle()
                 .get_webview_window(EDITOR_WINDOW_LABEL)
-                .is_some_and(|editor| {
-                    editor
-                        .eval("window.EW_WORKSPACE && window.EW_WORKSPACE.requestClose();")
-                        .is_ok()
-                });
+                .is_some_and(|editor| editor.eval(EDITOR_CLOSE_SCRIPT).is_ok());
             if asked {
                 api.prevent_close();
             }
@@ -386,6 +388,16 @@ mod tests {
 
     fn url(value: &str) -> Url {
         Url::parse(value).expect("valid test URL")
+    }
+
+    #[test]
+    fn close_button_asks_the_shell_or_closes_a_page_without_one() {
+        // Оболонка питає про незбережені зміни; без неї вікно закривається тією ж командою,
+        // яку дозволяє capability редактора, і не лишається відкритим без «← Офіс».
+        assert!(EDITOR_CLOSE_SCRIPT.contains("window.EW_WORKSPACE.requestClose()"));
+        assert!(EDITOR_CLOSE_SCRIPT.contains("invoke('office_editor_close')"));
+        assert!(include_str!("../capabilities/office-editor.json")
+            .contains("allow-office-editor-close"));
     }
 
     #[test]

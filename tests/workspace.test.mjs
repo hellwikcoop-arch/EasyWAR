@@ -20,6 +20,7 @@ import {
   findEntry,
   frameMessage,
   frameTitle,
+  graphicsProblem,
   nameWithExtension,
   normalizeExtensions,
   normalizeMounted,
@@ -86,6 +87,25 @@ test('результат mount: unmount/destroy та isDirty необов\'яз�
   assert.equal(destroyed, 1, 'destroy() — синонім unmount()');
   assert.equal(normalized.isDirty(), true);
   assert.equal(normalizeMounted({ isDirty() { throw new Error('x'); } }).isDirty(), false);
+  // focus(): застосунок бере фокус сам (true) або оболонка фокусує його iframe (false).
+  assert.equal(empty.focus(), false);
+  let focused = 0;
+  const withFocus = { focus() { focused += this === withFocus ? 1 : 100; } };
+  assert.equal(normalizeMounted(withFocus).focus(), true);
+  assert.equal(focused, 1);
+  assert.equal(normalizeMounted({ focus() { throw new Error('x'); } }).focus(), false);
+});
+
+test('без WebGL2 і WebGPU редактор не запускається, а сторінка пояснює це українською', async () => {
+  assert.equal(graphicsProblem({ webgl2: true, webgpu: false }), '');
+  assert.equal(graphicsProblem({ webgl2: false, webgpu: true }), '');
+  assert.match(graphicsProblem({ webgl2: false, webgpu: false }), /WebGL2 або WebGPU/);
+  assert.match(graphicsProblem(undefined), /драйвер відеокарти/);
+  const frame = await read('src/workspace/app-frame.js');
+  assert.match(frame, /graphicsProblem\(graphicsSupport\(\)\)/, 'перевірка перед mount');
+  assert.match(frame, /getContext\('webgl2'\)/);
+  assert.match(frame, /focus: \(\) =>/, 'оболонка повертає фокус у застосунок');
+  assert.match(await read('src/workspace/workspace.js'), /else focusApp\(\);/, '«Залишитися» повертає фокус у застосунок');
 });
 
 test('розширення й параметри вікон збігаються з правилами Rust', () => {

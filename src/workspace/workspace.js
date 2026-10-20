@@ -171,6 +171,15 @@ function hideConfirm(result) {
   resolve?.(result);
 }
 
+/** Після «Залишитися» фокус повертається в застосунок, а не на кнопку «← Офіс». */
+function focusApp() {
+  try {
+    const app = frame.contentWindow?.EW_WORKSPACE_APP;
+    if (typeof app?.focus === 'function') { app.focus(); return; }
+  } catch { /* сторінку застосунку ще не завантажено */ }
+  frame.focus();
+}
+
 /** true — застосунок закрито (або нічого не було відкрито), false — користувач залишився. */
 function appIsDirty() {
   if (current.dirty) return true;
@@ -193,7 +202,7 @@ function requestCloseApp() {
   pendingClose = new Promise(resolve => { pendingConfirm = resolve; }).then(leave => {
     pendingClose = null;
     if (leave) closeApp();
-    else back.focus();
+    else focusApp();
     return leave;
   });
   return pendingClose;

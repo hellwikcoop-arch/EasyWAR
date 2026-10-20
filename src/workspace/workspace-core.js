@@ -149,18 +149,34 @@ export function entryError(entry) {
 
 /**
  * Що повернув mount: необов'язковий об'єкт з `unmount()` (або `destroy()`) — викликається при
- * закритті, і `isDirty()` — чи є незбережені зміни (на додачу до host.setDirty).
+ * закритті, `isDirty()` — чи є незбережені зміни (на додачу до host.setDirty), і `focus()` —
+ * повернути фокус у застосунок (після «Залишитися»); повертає true, якщо застосунок його взяв.
  */
 export function normalizeMounted(result) {
   const value = result && typeof result === 'object' ? result : {};
   const unmount = [value.unmount, value.destroy].find(fn => typeof fn === 'function');
   const isDirty = typeof value.isDirty === 'function' ? value.isDirty : null;
+  const focus = typeof value.focus === 'function' ? value.focus : null;
   return {
     unmount: unmount ? () => unmount.call(value) : () => {},
     isDirty: () => {
       try { return Boolean(isDirty?.call(value)); } catch { return false; }
     },
+    focus: () => {
+      if (!focus) return false;
+      try { focus.call(value); return true; } catch { return false; }
+    },
   };
+}
+
+/**
+ * Редактори «Офісу» (GridCraft, WordCraft, DeckCraft — wgpu у WASM) малюють через WebGL2 або WebGPU.
+ * `support` — { webgl2, webgpu } з перевірки сторінки; повертає пояснення українською, якщо
+ * жодного немає, інакше '' (без перевірки редактор падає з технічним текстом англійською).
+ */
+export function graphicsProblem(support) {
+  if (support?.webgl2 || support?.webgpu) return '';
+  return 'У цьому вікні немає підтримки графіки WebGL2 або WebGPU, потрібної редакторам «Офісу». Оновіть драйвер відеокарти чи системний переглядач вебсторінок або відкрийте EasyWAR на іншому пристрої.';
 }
 
 /** Розширення без крапки, малими літерами, лише латиниця й цифри (як у Rust). */

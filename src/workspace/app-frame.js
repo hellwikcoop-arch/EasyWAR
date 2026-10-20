@@ -1,11 +1,18 @@
 // Сторінка одного застосунку (app.html?app=<id>): завантажує <id>/app.js і викликає
 // mount(container, host). Якщо застосунок ще не підключено — показує заглушку «у розробці».
 // Зміни заголовка й позначки незбережених змін іде до оболонки через postMessage.
-import { appFromSearch, entryError, frameMessage, normalizeMounted } from './workspace-core.js';
+import { appFromSearch, entryError, frameMessage, graphicsProblem, normalizeMounted } from './workspace-core.js';
 import { browserFallback, createHost, findInvoke } from './workspace-host.js';
 import { entryLoader } from './workspace-registry.js';
 
 const container = document.getElementById('ws-container');
+
+/** Чи є в цьому вікні WebGL2 або WebGPU (редактори «Офісу» без них не запускаються). */
+function graphicsSupport() {
+  let webgl2 = false;
+  try { webgl2 = Boolean(document.createElement('canvas').getContext('webgl2')); } catch { webgl2 = false; }
+  return { webgl2, webgpu: Boolean(navigator.gpu) };
+}
 
 function notice(app, heading, text) {
   const box = document.createElement('section');
@@ -33,6 +40,11 @@ async function start() {
     notice(app, `${app.title} у розробці`, 'Застосунок ще не підключено до EasyWAR. Щойно його буде готово, він відкриватиметься тут, без інтернету, а файли відкриватимуться й зберігатимуться через EasyWAR.');
     return;
   }
+  const graphics = graphicsProblem(graphicsSupport());
+  if (graphics) {
+    notice(app, `${app.title} не запустився`, graphics);
+    return;
+  }
   let mounted = null;
   try {
     const entry = await load();
@@ -51,8 +63,17 @@ async function start() {
       },
     });
     mounted = normalizeMounted(await entry.mount(container, host));
-    // Оболонка питає перед закриттям, чи є незбережені зміни (крім host.setDirty).
-    window.EW_WORKSPACE_APP = Object.freeze({ isDirty: () => mounted.isDirty() });
+    // Оболонка питає перед закриттям, чи є незбережені зміни (крім host.setDirty) і повертає
+    // фокус у застосунок після «Залишитися» (iframe редактора, якщо застосунок не взяв фокус сам).
+    window.EW_WORKSPACE_APP = Object.freeze({
+      isDirty: () => mounted.isDirty(),
+      focus: () => {
+        if (mounted.focus()) return;
+        const frame = container.querySelector('iframe');
+        try { frame?.contentWindow?.focus(); } catch { /* сторінку ще не завантажено */ }
+        (frame ?? container).focus();
+      },
+    });
   } catch (error) {
     console.error(error);
     notice(app, `${app.title} не запустився`, 'Під час запуску застосунку сталася помилка. Закрийте його й спробуйте ще раз.');

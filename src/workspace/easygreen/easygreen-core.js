@@ -120,3 +120,22 @@ export function saveStatus(name, error) {
   if (name == null) return 'Збереження скасовано.';
   return `Збережено: ${name}`;
 }
+
+/**
+ * Чи лишилися в таблиці незбережені зміни після спроби зберегти книгу: GridCraft знімає свою
+ * позначку змін одразу, як передав файл, тому відмова чи скасування збереження книги .xlsx
+ * (`saved` порожній) має тримати позначку оболонки, щоб «← Офіс» питав перед закриттям.
+ * Експорт (PDF, CSV, HTML) книги не змінює.
+ */
+export function unsavedAfterSave(name, saved) {
+  return keepsWorkbook(name) && !saved;
+}
+
+const MAX_FAILURE_DETAIL = 160;
+
+/** Текст смуги, коли таблиця не запустилася: пояснення українською, технічна причина в дужках. */
+export function failedStatus(error) {
+  const detail = String(error ?? '').replace(/\s+/g, ' ').trim().slice(0, MAX_FAILURE_DETAIL);
+  const text = 'Таблиця не запустилася: потрібна підтримка графіки WebGL2 або WebGPU у вікні застосунку. Оновіть драйвер відеокарти або відкрийте EasyWAR на іншому пристрої.';
+  return detail ? `${text} (${detail})` : text;
+}

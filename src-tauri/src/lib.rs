@@ -1508,6 +1508,13 @@ async fn library_status_after_commit(
     profile_id: &str,
     has_recovery: bool,
 ) -> LibraryStatus {
+    // Відновлення з екрана входу під чужим сеансом (інший профіль увійшов під час Argon2):
+    // відповідь стосується профілю, чий код прийнято, а не поточного сеансу.
+    if session.get().as_deref() != Some(profile_id) {
+        let mut status = LibraryStatus::plain(LibraryState::Locked, Some(profile_id));
+        status.has_recovery = has_recovery;
+        return status;
+    }
     match library_status_now(store, session, library).await {
         Ok(status) => status,
         Err(error) => {

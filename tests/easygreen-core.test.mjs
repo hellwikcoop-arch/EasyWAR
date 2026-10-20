@@ -4,8 +4,8 @@ import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
 import test from 'node:test';
 import {
-  EASYGREEN_APP_QUERY, MAX_OPEN_BYTES, OPEN_EXTENSIONS, OPEN_TITLE, SAVE_EXTENSIONS, cleanFileName, fileExtension, keepsWorkbook,
-  openIntoFrame, openMessage, openProblem, parseFrameMessage, saveAction, saveStatus, shouldAutoOpen,
+  EASYGREEN_APP_QUERY, MAX_OPEN_BYTES, OPEN_EXTENSIONS, OPEN_TITLE, SAVE_EXTENSIONS, cleanFileName, failedStatus, fileExtension, keepsWorkbook,
+  openIntoFrame, openMessage, openProblem, parseFrameMessage, saveAction, saveStatus, shouldAutoOpen, unsavedAfterSave,
 } from '../src/workspace/easygreen/easygreen-core.js';
 
 const root = new URL('../', import.meta.url);
@@ -75,6 +75,25 @@ test('«Зберегти» пише у відкритий файл лише кн
   assert.equal(saveAction('скрипт.sh', current), null);
   assert.equal(keepsWorkbook('Звіт.xlsx'), true);
   assert.equal(keepsWorkbook('Звіт.pdf'), false);
+});
+
+test('відмова чи скасування збереження книги тримає позначку незбережених змін', () => {
+  // GridCraft знімає свою позначку, щойно передав файл, тому оболонка тримає власну.
+  assert.equal(unsavedAfterSave('Звіт.xlsx', null), true, 'скасовано');
+  assert.equal(unsavedAfterSave('Звіт.xlsx', undefined), true, 'відмова (таблиця профілю)');
+  assert.equal(unsavedAfterSave('Звіт.xlsx', { handle: 'h1', name: 'Звіт.xlsx' }), false, 'збережено');
+  // Експорт книги не змінює: скасований PDF не робить таблицю «незбереженою».
+  assert.equal(unsavedAfterSave('Звіт.pdf', null), false);
+  assert.equal(unsavedAfterSave('Звіт.csv', null), false);
+});
+
+test('таблиця не запустилася: пояснення українською, технічна причина в дужках і обрізана', () => {
+  const plain = failedStatus('');
+  assert.match(plain, /^Таблиця не запустилася: потрібна підтримка графіки WebGL2 або WebGPU/);
+  assert.doesNotMatch(plain, /\(/);
+  const detailed = failedStatus('JsValue(Error: Failed to create wgpu adapter\n  at …)');
+  assert.match(detailed, /\(JsValue\(Error: Failed to create wgpu adapter at …\)\)$/);
+  assert.ok(failedStatus('x'.repeat(1000)).length < 400);
 });
 
 test('збірка GridCraft лежить локально, українською, без мережевих адрес', async () => {
