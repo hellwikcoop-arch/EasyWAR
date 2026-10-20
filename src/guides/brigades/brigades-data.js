@@ -15,6 +15,7 @@ export const TYPES = Object.freeze({
   оцспо: 'Окремий центр спеціальних операцій',
   нцссо: 'Навчальний центр ССО',
   мцспо: 'Морський центр спеціальних операцій',
+  кмд: 'Командування',
 });
 
 // Призначення за типом частини: загальновідома роль, без відомостей про конкретну частину.
@@ -32,6 +33,7 @@ export const PURPOSES = Object.freeze({
   оцспо: 'Підготовка й проведення спеціальних операцій',
   нцссо: 'Підготовка особового складу ССО',
   мцспо: 'Спеціальні операції з моря та у прибережній зоні',
+  кмд: 'Керівництво військами (силами) і планування їх застосування',
 });
 
 export const BRANCHES = Object.freeze({
@@ -43,7 +45,7 @@ export const BRANCHES = Object.freeze({
   aa: 'Армійська авіація',
 });
 
-// art — файл емблеми без розширення: unit-art/<art>.webp або guides/brigades/art/<art>.webp.
+// name — власна назва для записів без номера (наприклад, командування); art — файл емблеми без розширення: unit-art/<art>.webp або guides/brigades/art/<art>.webp.
 export const BRIGADES = Object.freeze([
   { id: '78-odshbr', number: 78, type: 'одшбр', branch: 'dshv', art: '78-odshbr' },
   { id: '79-odshbr', number: 79, type: 'одшбр', branch: 'dshv', art: '79-odshbr', nickname: 'Таврійська' },
@@ -69,4 +71,5 @@ export const BRIGADES = Object.freeze([
   { id: '73-mcspo', number: 73, type: 'мцспо', branch: 'sso', art: '73-mcspo' },
   { id: '140-ocspo', number: 140, type: 'оцспо', branch: 'sso', art: '140-ocspo' },
   { id: '142-nsso', number: 142, type: 'нцссо', branch: 'sso', art: '142-nsso' },
+  { id: 'sso-command', name: 'Командування ССО', type: 'кмд', branch: 'sso', art: 'sso-command' },
 ]);

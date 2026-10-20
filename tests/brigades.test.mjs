@@ -20,6 +20,7 @@ test('довідник бригад: унікальні id, відомі тип�
 test('назви, пошук і фільтр за родом військ', () => {
   const b79 = BRIGADES.find(b => b.id === '79-odshbr');
   assert.equal(shortName(b79), '79 ОДШБр');
+  assert.equal(shortName(BRIGADES.find(b => b.id === 'sso-command')), 'Командування ССО');
   assert.deepEqual(filterBrigades(BRIGADES, { query: 'таврій' }).map(b => b.id), ['79-odshbr']);
   assert.deepEqual(filterBrigades(BRIGADES, { query: 'херсон' }).map(b => b.id), ['11-obraa']);
   assert.deepEqual(filterBrigades(BRIGADES, { query: '' }).length, BRIGADES.length);

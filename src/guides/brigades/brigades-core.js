@@ -4,7 +4,7 @@ import { BRANCHES, PURPOSES, TYPES } from './brigades-data.js';
 const UPPER = { одшбр: 'ОДШБр', ошп: 'ОШП', оабр: 'ОАБр', реабр: 'РеАБр', омбр: 'ОМБр', оєбр: 'ОЄБр', обраа: 'ОБрАА', змае: 'ЗмАЕ', брта: 'БрТА', опсп: 'ОПСпП', оцспо: 'ОЦСпО', нцссо: 'НЦ ССО', мцспо: 'МЦСпО' };
 
 /** Коротка назва: «79 ОДШБр». */
-export const shortName = b => `${b.number} ${UPPER[b.type] || b.type.toUpperCase()}`;
+export const shortName = b => b.name || `${b.number} ${UPPER[b.type] || b.type.toUpperCase()}`;
 /** Повна назва типу частини. */
 export const typeName = b => TYPES[b.type] || '';
 export const purposeOf = b => PURPOSES[b.type] || null;
