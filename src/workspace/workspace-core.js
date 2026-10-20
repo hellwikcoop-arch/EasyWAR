@@ -79,14 +79,27 @@ export const PERSONAL_APPS = Object.freeze([
   }),
 ]);
 
-/** Усі застосунки модуля в порядку розділів. */
-export const WORKSPACE_APPS = Object.freeze([...OFFICE_APPS, ...SITUATION_APPS, ...PERSONAL_APPS]);
+/** Застосунки розділу «Авіація»: контроль льотних перевірок і штурманські документи. */
+export const AVIATION_APPS = Object.freeze([
+  app({
+    id: 'easyfly',
+    title: 'EasyFLY',
+    kind: 'Авіація',
+    hint: 'Контроль льотних перевірок і допусків, штурманські документи: ІШР, ШПП, бортжурнал, Сонце і Місяць',
+    extensions: ['easyfly'],
+    filterName: 'Дані EasyFLY',
+  }),
+]);
 
-/** Розділи модуля: «Офіс», «Обстановка» і «Особисте». */
+/** Усі застосунки модуля в порядку розділів. */
+export const WORKSPACE_APPS = Object.freeze([...OFFICE_APPS, ...SITUATION_APPS, ...PERSONAL_APPS, ...AVIATION_APPS]);
+
+/** Розділи модуля: «Офіс», «Обстановка», «Особисте» і «Авіація». */
 export const WORKSPACE_SECTIONS = Object.freeze([
   Object.freeze({ id: 'office', title: 'Офіс', eyebrow: 'ЛОКАЛЬНІ ЗАСТОСУНКИ', subtitle: 'Оберіть застосунок для роботи з файлами на цьому комп’ютері.', apps: Object.freeze(OFFICE_APPS.map(entry => entry.id)) }),
   Object.freeze({ id: 'situation', title: 'Обстановка', eyebrow: 'ПОТОЧНА ОБСТАНОВКА', subtitle: 'Погода у вибраному населеному пункті: вручну або з інтернету, якщо ви його ввімкнете.', apps: Object.freeze(SITUATION_APPS.map(entry => entry.id)) }),
   Object.freeze({ id: 'personal', title: 'Особисте', eyebrow: 'ПЕРСОНАЛЬНІ ІНСТРУМЕНТИ', subtitle: 'Розрахунки й журнали лише для вас, у локальному файлі на цьому комп’ютері.', apps: Object.freeze(PERSONAL_APPS.map(entry => entry.id)) }),
+  Object.freeze({ id: 'aviation', title: 'Авіація', eyebrow: 'ЛЬОТНА РОБОТА', subtitle: 'Льотні перевірки, допуски й штурманські документи у вашому локальному файлі.', apps: Object.freeze(AVIATION_APPS.map(entry => entry.id)) }),
 ]);
 
 export function appById(id) {

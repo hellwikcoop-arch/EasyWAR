@@ -1,0 +1,71 @@
+/* EasyFLY, екран «Сонце і Місяць»: префікс sm-. Основа (.nv-*, змінні теми) — у navigator.css. */
+
+.sm-controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-bottom: 16px; }
+.sm-date { display: inline-flex; align-items: center; border: 1px solid var(--nv-line); border-radius: 10px; background: var(--nv-panel); overflow: hidden; }
+.sm-date .nv-btn { border: 0; border-radius: 0; min-height: 42px; width: 42px; padding: 0; background: transparent; }
+.sm-date input { border: 0; background: transparent; color: var(--nv-text); font: inherit; font-weight: 600; min-height: 42px; padding: 0 6px; text-align: center; color-scheme: dark; width: 150px; }
+.sm-date input:focus-visible { outline: 2px solid var(--nv-accent); outline-offset: -2px; }
+.sm-point { min-width: 220px; flex: 0 1 260px; }
+.sm-coords { display: flex; gap: 10px; flex-wrap: wrap; }
+.sm-coords .nv-field { width: 130px; }
+
+.sm-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 16px; }
+.sm-card-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.sm-card-icon { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 12px; border: 1px solid var(--nv-line); background: color-mix(in srgb, var(--nv-bg) 60%, var(--nv-panel)); color: var(--nv-accent); flex: none; }
+.sm-card-sun .sm-card-icon { color: var(--nv-soon); }
+.sm-card-head h2 { margin: 0; font-size: 17px; }
+.sm-card-head small { display: block; color: var(--nv-muted); font-size: 12px; margin-top: 2px; }
+.sm-big { font-size: 34px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.sm-big-label { color: var(--nv-muted); font-size: 12px; margin: 4px 0 16px; }
+.sm-pairs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 24px; }
+.sm-pair { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 10px 0; border-bottom: 1px solid color-mix(in srgb, var(--nv-line) 70%, transparent); font-size: 13px; }
+.sm-pair span:first-child { color: var(--nv-muted); }
+.sm-pair strong { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sm-onb { display: flex; align-items: center; gap: 8px; margin-top: 16px; font-weight: 600; font-size: 14px; }
+.sm-onb::before { content: ''; width: 10px; height: 10px; border-radius: 50%; background: currentColor; flex: none; }
+.sm-onb-good { color: var(--nv-good); }
+.sm-onb-no { color: var(--nv-soon); }
+.sm-onb-note { margin: 6px 0 0; font-size: 12px; color: var(--nv-muted); }
+
+.sm-strip { display: flex; height: 26px; border-radius: 6px; overflow: hidden; border: 1px solid var(--nv-line); background: #0d1630; }
+.sm-seg-night { background: #0d1630; }
+.sm-seg-nautical { background: #2b3a6b; }
+.sm-seg-civil { background: #5a6aa6; }
+.sm-seg-day { background: #b8934f; }
+.sm-ticks { display: flex; justify-content: space-between; margin-top: 8px; font-size: 12px; color: var(--nv-muted); font-variant-numeric: tabular-nums; }
+.sm-legend { margin-top: 8px; font-size: 12px; color: var(--nv-muted); }
+
+.sm-table-wrap { overflow-x: auto; }
+.sm-table { width: 100%; border-collapse: collapse; min-width: 640px; }
+.sm-table th { text-align: left; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--nv-muted); font-weight: 600; padding: 6px 8px 8px; border-bottom: 1px solid var(--nv-line); }
+.sm-table td { padding: 8px; border-bottom: 1px solid color-mix(in srgb, var(--nv-line) 60%, transparent); font-variant-numeric: tabular-nums; }
+.sm-table td:first-child { font-weight: 700; }
+.sm-table tr[aria-current='true'] td { background: color-mix(in srgb, var(--nv-accent) 10%, transparent); }
+.sm-add { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin-top: 14px; }
+.sm-add .nv-field { flex: 1 1 150px; }
+.sm-error { color: var(--nv-bad); font-size: 13px; margin-top: 8px; }
+
+@media (max-width: 1099.98px) {
+  .sm-cards { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 699.98px) {
+  .sm-controls { display: grid; grid-template-columns: minmax(0, 1fr); }
+  .sm-date { width: 100%; justify-content: space-between; }
+  .sm-date input { flex: 1; width: auto; }
+  .sm-point { min-width: 0; flex: none; }
+  .sm-coords .nv-field { flex: 1; width: auto; }
+  .sm-big { font-size: 28px; }
+  .sm-pairs { grid-template-columns: minmax(0, 1fr); }
+  .sm-ticks { font-size: 11px; }
+  .sm-table { min-width: 0; display: block; }
+  .sm-table thead { display: none; }
+  .sm-table tbody { display: grid; gap: 10px; }
+  .sm-table tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 12px; padding: 12px; border: 1px solid var(--nv-line); border-radius: 12px; }
+  .sm-table td { display: grid; gap: 2px; padding: 0; border: 0; }
+  .sm-table td::before { content: attr(data-label); font-size: 11px; color: var(--nv-muted); }
+  .sm-table td:first-child { grid-column: 1 / -1; font-size: 15px; }
+  .sm-table td:first-child::before { content: none; }
+  .sm-table td.sm-wide { grid-column: 1 / -1; }
+  .sm-table tr[aria-current='true'] { background: color-mix(in srgb, var(--nv-accent) 10%, transparent); }
+  .sm-table tr[aria-current='true'] td { background: transparent; }
+}
