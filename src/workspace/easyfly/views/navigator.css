@@ -209,3 +209,9 @@ select.nv-input { appearance: auto; }
   .nv-docs-row { grid-template-columns: minmax(0, 1fr); }
 }
 @media print { .nv-root { display: none; } }
+
+/* Збережені розрахунки */
+.nv-saved { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.nv-saved-item { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border: 1px solid var(--nv-line); border-radius: 10px; }
+.nv-saved-title { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.nv-saved-actions { display: flex; flex-wrap: wrap; gap: 6px; }

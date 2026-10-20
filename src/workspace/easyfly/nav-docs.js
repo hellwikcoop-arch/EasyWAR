@@ -252,21 +252,26 @@ ${totalRow}
 // ---------- ШПП ----------
 
 const SHPP_CSS = `
-@page{size:A4 landscape;margin:8mm}
+@page{size:A4 portrait;margin:8mm}
 html,body{margin:0;padding:0;background:#fff}
-body{font-family:${FONT};font-size:12px;color:#000;width:281mm;margin:0 auto}
-h1{text-align:center;font-size:17px;letter-spacing:.5px;margin:2px 0 3px;font-weight:700}
-.rt{display:flex;justify-content:space-between;gap:12px;font-size:13px;margin-bottom:2px}
+body{font-family:${FONT};font-size:11px;color:#000;width:194mm;margin:0 auto}
+h1{text-align:center;font-size:16px;letter-spacing:.5px;margin:0 0 2px;font-weight:700}
+.rt{display:flex;justify-content:space-between;gap:10px;font-size:12px;margin-bottom:2px}
 .rt .cap{white-space:nowrap}
 svg{display:block;width:100%;height:auto}
-table{border-collapse:collapse;width:100%;table-layout:fixed;margin-top:2px}
-th,td{border:1px solid #000;padding:1.5px 2px;text-align:center;font-size:10.5px;line-height:1.25;overflow:hidden}
+table{border-collapse:collapse;width:100%;table-layout:fixed;margin-top:3px}
+th,td{border:1px solid #000;padding:2px 1px;text-align:center;font-size:9.5px;line-height:1.2;overflow:hidden;overflow-wrap:anywhere}
 th{font-weight:600;background:#f3f3f3}
 td.l,th.l{text-align:left}
 tr.tot td{font-weight:600}
 `;
 
-const SHPP_COLS = [3, 14, 4.5, 4.5, 4.5, 6, 6.5, 6.5, 4.5, 4.5, 4.5, 4.5, 4.5, 5, 5.5, 5.5, 14];
+// ширини колонок (%): №, ділянка, МК, S, t, Н, кут, поправка, V, Uр, Wр, Uи, Wи, W потр., V потр., залишок, примітка
+const SHPP_COLS = [2.5, 14.4, 4.3, 4, 3.8, 5.3, 7, 6.5, 5.5, 4.2, 4.2, 4.2, 4.2, 5, 5.6, 7, 12.3];
+
+// розмір поля схеми (портрет ≈190 × 170 мм): 760 × 680 од. ≈ 0,25 мм/од.
+export const SHPP_SCHEME_W = 760;
+export const SHPP_SCHEME_H = 680;
 
 const signed = formatSigned;
 const turnText = formatTurn;
@@ -278,8 +283,16 @@ function pointName(p) {
 function nicePow(scale) {
   const options = [5, 10, 20, 25, 50, 100, 200, 250, 500];
   let pick = options[0];
-  for (const km of options) if (km * scale <= 200) pick = km;
+  for (const km of options) if (km * scale <= 170) pick = km;
   return pick;
+}
+
+/** Зарезервовані ділянки схеми (стрілка «Пн», масштабна лінія), які підписи не займають. */
+function schemeReserved(W, H) {
+  return [
+    { x0: W - 110, y0: 4, x1: W - 4, y1: 110 },
+    { x0: 4, y0: H - 50, x1: 230, y1: H - 4 },
+  ];
 }
 
 /** SVG-схема маршруту ШПП (масштаб за відстанню, схема повернута так, щоб вписатися в аркуш). */
@@ -313,8 +326,9 @@ export function renderSchemeSvg(shpp, scheme) {
   // МК, S, t і поправка на вітер вздовж ділянки
   for (const label of labels.legLabels) {
     const [line1, line2] = label.lines;
-    const y1 = label.side === 1 ? -21 : 17;
-    const y2 = label.side === 1 ? -7 : 31;
+    const off = label.off || 0;
+    const y1 = label.side === 1 ? -21 - off : 17 + off;
+    const y2 = label.side === 1 ? -7 - off : 31 + off;
     out.push(
       `<g transform="translate(${label.x} ${label.y}) rotate(${label.angle})" font-size="13" text-anchor="middle">` +
         `<text y="${y1}" font-weight="700">${esc(line1)}</text><text y="${y2}">${esc(line2)}</text></g>`,
@@ -373,9 +387,7 @@ export function renderSchemeSvg(shpp, scheme) {
 export function renderShppHtml(flight) {
   const f = flight || {};
   const p = calcShpp(f);
-  const n = p.legs.length;
-  const height = Math.max(240, Math.min(380, 380 - 22 * Math.max(0, n - 5)));
-  const scheme = planScheme(p, { width: 1000, height });
+  const scheme = planScheme(p, { width: SHPP_SCHEME_W, height: SHPP_SCHEME_H, marginX: 85, marginY: 80, rotationStep: 5, reserve: schemeReserved(SHPP_SCHEME_W, SHPP_SCHEME_H) });
   const svg = renderSchemeSvg(p, scheme);
   const arrow = (value, arrowChar) => `${cell(value)}${arrowChar ? ` ${esc(arrowChar)}` : ''}`;
   const rows = p.legs
@@ -392,10 +404,10 @@ export function renderShppHtml(flight) {
     .join('');
   const colgroup = `<colgroup>${SHPP_COLS.map(w => `<col style="width:${w}%">`).join('')}</colgroup>`;
   const table = `<table>${colgroup}
-<tr><th rowspan="2">№</th><th rowspan="2" class="l">Ділянка</th><th rowspan="2">МК, °</th><th rowspan="2">S, км</th><th rowspan="2">t, хв</th><th rowspan="2">Н, м</th><th rowspan="2">Кут повороту</th><th rowspan="2">Поправка на вітер, ° (р / и)</th><th rowspan="2">V за приладом</th><th colspan="2">Wр (розрахунковий вітер)</th><th colspan="2">Wи (виправлений вітер)</th><th rowspan="2">W потр. = S / t</th><th rowspan="2">V потр. = W − U</th><th rowspan="2">S ост., км / t ост., хв</th><th rowspan="2" class="l">Примітка</th></tr>
+<tr><th rowspan="2">№</th><th rowspan="2" class="l">Ділянка</th><th rowspan="2">МК, °</th><th rowspan="2">S, км</th><th rowspan="2">t, хв</th><th rowspan="2">Н, м</th><th rowspan="2">Кут повороту</th><th rowspan="2">Поправка на вітер, ° (р/и)</th><th rowspan="2">V за пр.</th><th colspan="2">Wр (розр. вітер)</th><th colspan="2">Wи (випр. вітер)</th><th rowspan="2">W потр. = S / t</th><th rowspan="2">V потр. = W − U</th><th rowspan="2">S ост. / t ост.</th><th rowspan="2" class="l">Примітка</th></tr>
 <tr><th>U</th><th>Wр</th><th>U</th><th>Wи</th></tr>
 ${rows}
-<tr class="tot"><td></td><td class="l">Разом</td><td></td><td>${cell(p.totals.S)}</td><td>${cell(p.totals.T)}</td><td colspan="13"></td></tr>
+<tr class="tot"><td></td><td class="l">Разом</td><td></td><td>${cell(p.totals.S)}</td><td>${cell(p.totals.T)}</td><td colspan="12"></td></tr>
 </table>`;
   const captain = p.captain ? esc(p.captainLine) : `${esc(p.captainLine || 'капітана')} ____________`;
   const body = `

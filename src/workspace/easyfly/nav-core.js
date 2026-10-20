@@ -743,7 +743,8 @@ export function calcShpp(flight) {
  * Напрям МК відкладається від півночі за годинниковою стрілкою; `rotation` — на скільки схему
  * повернуто за годинниковою стрілкою відносно півночі вгору (стрілка «Пн» повернута на цей кут).
  * @param {{legs:Array}} shpp результат calcShpp
- * @param {{width?:number,height?:number,marginX?:number,marginY?:number,rotationStep?:number}} [options]
+ * @param {{width?:number,height?:number,marginX?:number,marginY?:number,rotationStep?:number,reserve?:Array<{x0:number,y0:number,x1:number,y1:number}>}} [options]
+ * `reserve` — зарезервовані прямокутники (стрілка «Пн», масштабна лінія), які підписи не займають.
  * Підписи (рамки висот, підписи пунктів, ділянок і кутів) розкладаються без накладань у `labels`.
  * @returns {{width,height,rotation:number,scale:number,north:{x:number,y:number},labels:object,
  *   points:Array<{index:number,x:number,y:number,code:string,name:string,kind:string,landing:boolean}>,
@@ -840,7 +841,7 @@ export function planScheme(shpp, options = {}) {
     width,
     height,
     rotation,
-    labels: layoutLabels(shpp, geometry, width, height),
+    labels: layoutLabels(shpp, geometry, width, height, options.reserve),
     scale: round4(scale),
     north: { x: round4(Math.sin(northAngle)), y: round4(-Math.cos(northAngle)) },
     points,
@@ -907,7 +908,7 @@ function rotatedBounds(cx, cy, angleDeg, x0, y0, x1, y1) {
  * пунктів → підписи ділянок → кути повороту. Кожен елемент бере першого кандидата без
  * накладання (інакше з найменшим штрафом). Повністю детермінована.
  */
-function layoutLabels(shpp, geometry, width, height) {
+function layoutLabels(shpp, geometry, width, height, reserve = []) {
   const { points, segments } = geometry;
   const legs = shpp.legs;
   const placed = [];
@@ -931,19 +932,20 @@ function layoutLabels(shpp, geometry, width, height) {
     placed.push(best.cand.rect);
     return best.cand;
   };
+  for (const r of reserve || []) placed.push(rectOf(r.x0, r.y0, r.x1, r.y1));
   points.forEach(p => placed.push(rectOf(p.x - 13, p.y - 13, p.x + 13, p.y + 13)));
 
   const heightBoxes = segments.map((seg, i) => {
     const leg = legs[i];
     const text = `${leg.h}${leg.heightArrow}`;
     const w = 12 + text.length * 8;
-    const candidates = [0.3, 0.2, 0.4, 0.15, 0.5, 0.7, 0.8].map(t => {
+    const candidates = [0.3, 0.2, 0.4, 0.15, 0.5, 0.7, 0.8, 0.6, 0.1, 0.9, 0.35, 0.45, 0.25, 0.55].map(t => {
       const cx = seg.x1 + (seg.x2 - seg.x1) * t;
       const cy = seg.y1 + (seg.y2 - seg.y1) * t;
       return { cx: round2(cx), cy: round2(cy), w, h: 18, text, rect: rectOf(cx - w / 2, cy - 9, cx + w / 2, cy + 9) };
     });
     const pick = choose(candidates, i);
-    return { index: i, cx: pick.cx, cy: pick.cy, w: pick.w, h: pick.h, text: pick.text };
+    return { index: i, cx: pick.cx, cy: pick.cy, w: pick.w, h: pick.h, text: pick.text, rect: pick.rect };
   });
 
   const pointLabels = points.map((p, i) => {
@@ -969,19 +971,21 @@ function layoutLabels(shpp, geometry, width, height) {
     const base = Math.atan2(vy / n, vx / n);
     const textLen = p.code.length + (p.name ? p.name.length + 1 : 0) + (p.landing ? 10 : 0);
     const w = textLen * CHAR_W + 4;
-    const candidates = [0, 45, -45, 90, -90, 135, -135, 180].map(offset => {
+    const spots = [];
+    for (const dist of [1, 1.6]) for (const offset of [0, 45, -45, 90, -90, 135, -135, 180]) spots.push([offset, dist]);
+    const candidates = spots.map(([offset, dist]) => {
       const ang = base + radians(offset);
       const dx = Math.cos(ang);
       const dy = Math.sin(ang);
-      const x = p.x + dx * 24;
-      const y = p.y + dy * 20;
+      const x = p.x + dx * 24 * dist;
+      const y = p.y + dy * 20 * dist;
       const anchor = dx > 0.35 ? 'start' : dx < -0.35 ? 'end' : 'middle';
       const shift = dy > 0.35 ? 12 : dy < -0.35 ? -8 : 4;
       const x0 = anchor === 'start' ? x : anchor === 'end' ? x - w : x - w / 2;
       return { x: round2(x), y: round2(y + shift), anchor, rect: rectOf(x0, y + shift - 12, x0 + w, y + shift + 4) };
     });
     const pick = choose(candidates, -1);
-    return { index: i, x: pick.x, y: pick.y, anchor: pick.anchor };
+    return { index: i, x: pick.x, y: pick.y, anchor: pick.anchor, rect: pick.rect };
   });
 
   const legLabels = segments.map((seg, i) => {
@@ -991,16 +995,18 @@ function layoutLabels(shpp, geometry, width, height) {
     let angle = seg.angle;
     if (angle > 90 || angle < -90) angle += angle > 0 ? -180 : 180;
     const candidates = [];
-    for (const t of [0.62, 0.5, 0.74, 0.38, 0.85, 0.25]) {
-      for (const side of [1, -1]) {
-        const cx = seg.x1 + (seg.x2 - seg.x1) * t;
-        const cy = seg.y1 + (seg.y2 - seg.y1) * t;
-        const rect = side === 1 ? rotatedBounds(cx, cy, angle, -w / 2, -32, w / 2, -3) : rotatedBounds(cx, cy, angle, -w / 2, 6, w / 2, 35);
-        candidates.push({ x: round2(cx), y: round2(cy), angle: round2(angle), side, rect });
+    for (const off of [0, 12, 28]) {
+      for (const t of [0.62, 0.5, 0.74, 0.38, 0.85, 0.25, 0.55, 0.68, 0.45]) {
+        for (const side of [1, -1]) {
+          const cx = seg.x1 + (seg.x2 - seg.x1) * t;
+          const cy = seg.y1 + (seg.y2 - seg.y1) * t;
+          const rect = side === 1 ? rotatedBounds(cx, cy, angle, -w / 2, -32 - off, w / 2, -3 - off) : rotatedBounds(cx, cy, angle, -w / 2, 6 + off, w / 2, 35 + off);
+          candidates.push({ x: round2(cx), y: round2(cy), angle: round2(angle), side, off, rect });
+        }
       }
     }
     const pick = choose(candidates, i);
-    return { index: i, x: pick.x, y: pick.y, angle: pick.angle, side: pick.side, lines };
+    return { index: i, x: pick.x, y: pick.y, angle: pick.angle, side: pick.side, off: pick.off, lines, rect: pick.rect };
   });
 
   const turnLabels = geometry.turns.map(turn => {
@@ -1017,8 +1023,8 @@ function layoutLabels(shpp, geometry, width, height) {
     const w = text.length * 6.2;
     const base = Math.atan2(vy, vx);
     const candidates = [];
-    for (const dist of [22, 34]) {
-      for (const offset of [0, 40, -40]) {
+    for (const dist of [22, 34, 46, 58]) {
+      for (const offset of [0, 40, -40, 80, -80, 120, -120, 160, -160, 180]) {
         const ang = base + radians(offset);
         const dx = Math.cos(ang);
         const dy = Math.sin(ang);
@@ -1030,7 +1036,7 @@ function layoutLabels(shpp, geometry, width, height) {
       }
     }
     const pick = choose(candidates, -1);
-    return { pointIndex: turn.pointIndex, x: pick.x, y: pick.y, anchor: pick.anchor, text: pick.text };
+    return { pointIndex: turn.pointIndex, x: pick.x, y: pick.y, anchor: pick.anchor, text: pick.text, rect: pick.rect };
   }).filter(Boolean);
 
   return { heightBoxes, pointLabels, legLabels, turnLabels };

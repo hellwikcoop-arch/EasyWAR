@@ -2,7 +2,11 @@
 // перевірка полів, міграції версій. Без DOM і Tauri: читання/запис файлу робить хост застосунку.
 //
 // Файл — JSON у UTF-8, до 5 МБ:
-//   { version, unit:{ name, airfield, signers, settings }, persons, checks, admissions, flights, shifts }
+//   { version, unit:{ name, airfield, signers, settings }, persons, checks, admissions, flights, shifts,
+//     navFlights? }
+// `navFlights` — збережені розрахунки штурмана ({ id, title, savedAt?, flight }); колекція необов'язкова
+// при читанні (у старих файлах її немає — отримується []). У `flight` немає ПІБ: підписантів
+// документів беруть із налаштувань частини, а поля commander/navigator/checker/captain тощо не зберігаються.
 //
 // Принцип мінімізації даних: особа ідентифікується ПОЗИВНИМ (callsign), а не прізвищем і
 // ім'ям; номерів документів, координат і маршрутів у моделі немає, аеродроми — умовні коди.
@@ -21,9 +25,16 @@ export const FILE_EXTENSION = 'easyfly';
 export const MAX_FILE_BYTES = 5 * 1024 * 1024;
 export const MAX_CALLSIGN_LEN = 40;
 export const MAX_NOTE_LEN = 500;
+export const MAX_NAV_TITLE_LEN = 120;
+/** Розмір одного збереженого розрахунку штурмана (JSON), байт. */
+export const MAX_NAV_FLIGHT_BYTES = 20000;
+/** Поля опису польоту з іменами людей: у файлі не зберігаються (принцип позивного). */
+export const NAV_FLIGHT_NAME_FIELDS = Object.freeze(['commander', 'navigator', 'checker', 'captain', 'captainRankGen', 'iasChief', 'seniorNav']);
 
 /** Колекції верхнього рівня, що є масивами записів з полем `id`. */
-export const COLLECTIONS = Object.freeze(['persons', 'checks', 'admissions', 'flights', 'shifts']);
+export const COLLECTIONS = Object.freeze(['persons', 'checks', 'admissions', 'flights', 'shifts', 'navFlights']);
+/** Колекції, яких може не бути в старих файлах: при читанні доповнюються порожнім масивом. */
+const OPTIONAL_COLLECTIONS = Object.freeze(['navFlights']);
 
 /** Порожній набір (нова частина). */
 export function createEmpty() {
@@ -40,6 +51,7 @@ export function createEmpty() {
     admissions: [],
     flights: [],
     shifts: [],
+    navFlights: [],
   };
 }
 
@@ -181,6 +193,7 @@ export function validate(data) {
   }
 
   for (const name of COLLECTIONS) {
+    if (data[name] === undefined && OPTIONAL_COLLECTIONS.includes(name)) continue;
     if (!Array.isArray(data[name])) fail(name, 'Має бути масивом.');
   }
   if (errors.length) return { ok: false, errors, warnings };
@@ -188,7 +201,7 @@ export function validate(data) {
   // ідентифікатори унікальні в межах колекції
   for (const name of COLLECTIONS) {
     const seen = new Set();
-    data[name].forEach((item, i) => {
+    (data[name] || []).forEach((item, i) => {
       if (!isObject(item)) { fail(`${name}[${i}]`, 'Запис має бути об\'єктом.'); return; }
       if (!isText(item.id)) fail(`${name}[${i}].id`, 'Відсутній ідентифікатор.');
       else if (seen.has(item.id)) fail(`${name}[${i}].id`, `Ідентифікатор «${item.id}» повторюється.`);
@@ -291,6 +304,24 @@ export function validate(data) {
     }
     if (f.source !== undefined && f.source !== null && !FLIGHT_SOURCES.includes(f.source)) fail(`${at}.source`, 'Невідоме джерело запису.');
     noteField(`${at}.note`, f.note);
+  });
+
+  (data.navFlights || []).forEach((n, i) => {
+    const at = `navFlights[${i}]`;
+    if (!isText(n.title) || n.title.length > MAX_NAV_TITLE_LEN) fail(`${at}.title`, `Назва розрахунку — текст до ${MAX_NAV_TITLE_LEN} символів.`);
+    if (n.savedAt !== undefined && n.savedAt !== null
+      && (typeof n.savedAt !== 'string' || !/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})?)?$/.test(n.savedAt))) {
+      fail(`${at}.savedAt`, 'Час збереження має бути датою-часом ISO (рррр-мм-ддTгг:хх).');
+    }
+    if (!isObject(n.flight)) { fail(`${at}.flight`, 'Розрахунок (flight) має бути об\'єктом.'); return; }
+    for (const key of NAV_FLIGHT_NAME_FIELDS) {
+      if (n.flight[key] !== undefined && n.flight[key] !== '' && n.flight[key] !== null) {
+        fail(`${at}.flight.${key}`, 'Імена осіб у розрахунку не зберігаються: підписантів беруть із налаштувань частини.');
+      }
+    }
+    if (new TextEncoder().encode(JSON.stringify(n.flight)).length > MAX_NAV_FLIGHT_BYTES) {
+      fail(`${at}.flight`, `Розрахунок завеликий (понад ${MAX_NAV_FLIGHT_BYTES} байт).`);
+    }
   });
 
   return { ok: errors.length === 0, errors, warnings };

@@ -117,6 +117,35 @@ export function createDemo() {
 
   data.shifts.push({ id: 's1', date: DEMO_TODAY, name: 'Льотна зміна 20.10.2026', note: null });
 
+  // Збережений розрахунок штурмана (синтетичний маршрут; без імен осіб).
+  data.navFlights.push({
+    id: 'n1',
+    title: '20.10.2026 · аер. Зоря – Дубки – Калина – аер. Зоря',
+    savedAt: `${DEMO_TODAY}T08:30:00.000Z`,
+    flight: {
+      date: DEMO_TODAY,
+      typeId: 'mi8mtv1',
+      board: '123',
+      callsign: 'Сокіл-21',
+      exercise: '14',
+      empty: 7300,
+      crew: 270,
+      fuelKg: 2092,
+      groundMin: 10,
+      reserveMin: 30,
+      equipment: {},
+      cargoOther: 0,
+      surcharges: ['evu'],
+      departure: { name: 'аер. Зоря', lat: 50.0, lon: 30.0 },
+      legs: [
+        { kind: 'ppm', name: 'Дубки', mshk: 45, h: 300, v: 200, s: 48, landing: false, lat: 50.2, lon: 30.2 },
+        { kind: 'ppm', name: 'Калина', mshk: 120, h: 300, v: 220, s: 65, landing: false, lat: 50.4, lon: 30.5 },
+        { kind: 'kpm', name: 'аер. Зоря', mshk: 10, h: 300, v: 200, s: 55, landing: false },
+      ],
+      takeoff: '09:00',
+    },
+  });
+
   // Допуски (самовідмітка пілота, без затвердження).
   data.admissions.push(
     { id: 'a1', personId: 'p03', kind: 'circle', dayNight: 'day', exercise: '3', grantedAt: '2025-09-10', orderRef: null, status: 'valid' },

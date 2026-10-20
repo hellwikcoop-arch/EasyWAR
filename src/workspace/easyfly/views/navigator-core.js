@@ -375,6 +375,70 @@ export function draftToFlight(draft, unit = null) {
   return flight;
 }
 
+/** Назва збереженого розрахунку за замовчуванням: «дата · маршрут» (аеродром – пункти). */
+export function defaultNavTitle(draft) {
+  const d = draft || {};
+  const names = [text(d.departure?.name), ...(Array.isArray(d.legs) ? d.legs : []).map(leg => text(leg?.name))].filter(Boolean);
+  const route = names.length ? names.join(' – ') : 'без маршруту';
+  const date = isoDate(d.date);
+  return `${date ? dateUk(date) : 'без дати'} · ${route}`.slice(0, 120);
+}
+
+/** Запис для колекції navFlights: опис польоту без імен осіб (підписанти беруться з налаштувань). */
+export function draftToSavedFlight(draft) {
+  const flight = draftToFlight(draft, null);
+  for (const key of ['commander', 'navigator', 'checker', 'captain']) delete flight[key];
+  return flight;
+}
+
+const str = value => (value === undefined || value === null || (typeof value === 'number' && !Number.isFinite(value)) ? '' : String(value));
+
+/** Збережений опис польоту → чернетка форми (обернене до draftToFlight). Імена осіб не відновлюються. */
+export function flightToDraft(flight, { today = '', unit = null } = {}) {
+  const f = flight || {};
+  const base = defaultDraft({ today, unit });
+  const equipment = { armor: Boolean(f.equipment?.armor) };
+  for (const key of EQUIPMENT_KEYS) if (key !== 'armor' && f.equipment?.[key] !== undefined) equipment[key] = str(f.equipment[key]);
+  const surcharges = Array.isArray(f.surcharges) ? f.surcharges : [];
+  const typeId = aircraftType(f.typeId) ? f.typeId : base.typeId;
+  const fuelKg = parseNum(f.fuelKg);
+  const preset = fuelPresetsFor(typeId).find(p => p.kg !== null && p.kg === fuelKg);
+  const wind = (pairValue, fallback) => (pairValue && typeof pairValue === 'object'
+    ? { from: str(pairValue.from), speedMs: str(pairValue.speedMs) } : fallback);
+  const dep = f.departure && typeof f.departure === 'object' ? f.departure : { name: text(f.departure) };
+  return {
+    ...base,
+    date: isoDate(f.date) || base.date,
+    exercise: str(f.exercise),
+    callsign: str(f.callsign),
+    typeId,
+    board: str(f.board),
+    empty: str(f.empty),
+    crew: str(f.crew),
+    fuelKg: str(f.fuelKg),
+    fuelPreset: preset ? preset.id : 'manual',
+    toggles: { evu: surcharges.includes('evu'), posNvRv: surcharges.includes('posNvRv'), posDvPzu: surcharges.includes('posDvPzu') },
+    equipment,
+    cargoOther: f.cargoOther ? str(f.cargoOther) : '',
+    departure: { name: str(dep.name), lat: str(dep.lat), lon: str(dep.lon) },
+    legs: (Array.isArray(f.legs) && f.legs.length ? f.legs : base.legs).map(leg => ({
+      ...blankLeg(leg?.kind || 'ppm'),
+      name: str(leg?.name), mshk: str(leg?.mshk), h: str(leg?.h), v: str(leg?.v), s: str(leg?.s),
+      landing: leg?.landing === true, tTarget: str(leg?.tTarget), lat: str(leg?.lat), lon: str(leg?.lon),
+    })),
+    wind: wind(f.wind, base.wind),
+    windActual: wind(f.windActual, base.windActual),
+    qfe: str(f.qfe),
+    qnh: str(f.qnh),
+    t0: str(f.t0),
+    takeoff: str(f.takeoff),
+    hMin: str(f.hMin),
+    returnLine: str(f.returnLine),
+    groundMin: f.groundMin === undefined ? base.groundMin : str(f.groundMin),
+    reserveMin: f.reserveMin === undefined ? base.reserveMin : str(f.reserveMin),
+  };
+}
+
 /** Паливо з варіанта заправки типу ПС: кг або null (нема даних / «власна вага»). */
 export function fuelForPreset(typeId, presetId) {
   const type = aircraftType(typeId);
@@ -800,8 +864,10 @@ export function sunMoonModel({ date, points, index = 0, threshold = ONB_DEFAULT_
 // ───────────────────────────── Стан між екранами ─────────────────────────────
 
 /**
- * Стан розрахунку на час життя сторінки застосунку. У схемі даних EasyFLY (fly-store.js) колекції
- * для розрахунків штурмана немає, тому чернетка живе тут (модульний стан), а не в `data`.
+ * Стан форми на час життя сторінки застосунку: чернетка, вкладка, масштаб, вибір для «Сонця і Місяця».
+ * Чернетка сама у файл не потрапляє. Збережені розрахунки лежать у колекції `navFlights` файлу
+ * .easyfly (fly-store.js): кнопка «Зберегти розрахунок» додає туди опис польоту (draftToFlight без
+ * імен осіб), а «Відкрити» повертає його у форму через flightToDraft.
  * Екрани «Штурман» і «Сонце і Місяць» ділять цей об'єкт.
  */
 export const navSession = {

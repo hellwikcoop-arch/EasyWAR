@@ -9,7 +9,7 @@ import {
   fingerprint, isDirty, logbookView, lostAdmissions, mappingRows, markAdmissionLost, navFor,
   parseDelimited, parseRoute, pilotOverview, pluralEvents, profileCards, rangeLabel, recordCheck,
   renewAdmissionRecord, shiftReport, suggestedFileName, summaryView, todayIso, toggleReminderDay,
-  updatePerson, updateUnit, worstStatus,
+  updatePerson, updateUnit, worstStatus, addNavFlight, updateNavFlight, removeNavFlight, sanitizeNavFlight,
 } from '../src/workspace/easyfly/fly-state.js';
 import { IMPORT_COLUMN_COUNT } from '../src/workspace/easyfly/fly-core.js';
 import { createDemo, DEMO_TODAY } from '../src/workspace/easyfly/fly-demo.js';
@@ -411,4 +411,54 @@ test('імпорт: дата зміни для рядків без дати, з�
 test('ім’я файла для збереження безпечне', () => {
   assert.equal(suggestedFileName({ unit: { name: '' } }), 'EasyFLY.easyfly');
   assert.equal(suggestedFileName({ unit: { name: 'Ескадрилья «Перша»: 1/2' } }), 'Ескадрилья «Перша» 1 2.easyfly');
+});
+
+// ───────────── збережені розрахунки штурмана ─────────────
+
+test('addNavFlight: додає запис, прибирає імена осіб і NaN, не змінює вхідні дані', () => {
+  const data = createEmpty();
+  const flight = { date: '2026-10-20', typeId: 'mi8mtv1', commander: 'Петренко Іван', legs: [{ name: 'Дубки', s: NaN }] };
+  const out = addNavFlight(data, { title: '  Тест  ', flight, savedAt: '2026-10-20T09:00:00.000Z' });
+  assert.equal(out.ok, true);
+  assert.equal(out.id, 'n1');
+  assert.deepEqual(data.navFlights, []);
+  const saved = out.data.navFlights[0];
+  assert.equal(saved.title, 'Тест');
+  assert.equal(saved.flight.commander, undefined);
+  assert.equal(saved.flight.legs[0].s, null);
+  assert.equal(validate(out.data).ok, true);
+  assert.equal(addNavFlight(out.data, { title: 'Другий', flight }).id, 'n2');
+});
+
+test('addNavFlight: порожня або задовга назва, не об’єкт — відмова', () => {
+  const data = createEmpty();
+  assert.equal(addNavFlight(data, { title: ' ', flight: {} }).ok, false);
+  assert.equal(addNavFlight(data, { title: 'а'.repeat(121), flight: {} }).ok, false);
+  assert.equal(addNavFlight(data, { title: 'Тест', flight: null }).ok, false);
+  assert.equal(addNavFlight(data, { title: 'Тест', flight: [] }).ok, false);
+  assert.equal(addNavFlight({ ...data, navFlights: undefined }, { title: 'Тест', flight: {} }).ok, true); // старі дані без колекції
+});
+
+test('updateNavFlight / removeNavFlight: перейменування, заміна розрахунку, видалення з підтвердженням', () => {
+  const base = addNavFlight(createEmpty(), { title: 'Один', flight: { date: '2026-10-20' } }).data;
+  const renamed = updateNavFlight(base, 'n1', { title: 'Новий' });
+  assert.equal(renamed.data.navFlights[0].title, 'Новий');
+  assert.equal(base.navFlights[0].title, 'Один');
+  assert.equal(updateNavFlight(base, 'n1', { title: '' }).ok, false);
+  assert.equal(updateNavFlight(base, 'n9', { title: 'X' }).ok, false);
+  const replaced = updateNavFlight(base, 'n1', { flight: { date: '2026-11-01' }, savedAt: '2026-11-01T10:00:00Z' });
+  assert.equal(replaced.data.navFlights[0].flight.date, '2026-11-01');
+  assert.equal(removeNavFlight(base, 'n1').ok, false);
+  assert.equal(removeNavFlight(base, 'n9', { confirmed: true }).ok, false);
+  assert.deepEqual(removeNavFlight(base, 'n1', { confirmed: true }).data.navFlights, []);
+});
+
+test('navFlights через applyMutation: зміна позначає файл як незбережений', () => {
+  const data = createEmpty();
+  const savedFp = fingerprint(data);
+  const outcome = applyMutation(data, d => addNavFlight(d, { title: 'Тест', flight: { date: '2026-10-20' } }));
+  assert.equal(outcome.ok, true);
+  assert.equal(isDirty(outcome.data, savedFp), true);
+  assert.equal(sanitizeNavFlight({ captain: 'ПЕТРЕНКО І.П.', iasChief: { name: 'X' }, board: '1' }).board, '1');
+  assert.equal(sanitizeNavFlight({ captain: 'ПЕТРЕНКО І.П.' }).captain, undefined);
 });

@@ -716,7 +716,7 @@ test('«скоро» залежить від налаштованого поро
 test('createEmpty: схема версії 1 з усіма розділами, валідна', () => {
   const empty = store.createEmpty();
   assert.equal(empty.version, 1);
-  assert.deepEqual(Object.keys(empty), ['version', 'unit', 'persons', 'checks', 'admissions', 'flights', 'shifts']);
+  assert.deepEqual(Object.keys(empty), ['version', 'unit', 'persons', 'checks', 'admissions', 'flights', 'shifts', 'navFlights']);
   assert.deepEqual(Object.keys(empty.unit), ['name', 'airfield', 'signers', 'settings']);
   assert.equal(store.validate(empty).ok, true);
 });
@@ -862,4 +862,55 @@ test('файл і ядро не залежать від DOM, Tauri і Date.now()
     const source = await readFile(new URL(`../src/workspace/easyfly/${name}`, import.meta.url), 'utf8');
     assert.ok(!/Date\.now\(|new Date\(\)|document\.|window\.|__TAURI__|localStorage/.test(source), `${name}: заборонені глобали`);
   }
+});
+
+// ───────────── fly-store: збережені розрахунки штурмана (navFlights) ─────────────
+
+const navRecord = (extra = {}) => ({ id: 'n1', title: 'Тест · маршрут', savedAt: '2026-10-20T08:30:00.000Z', flight: { date: '2026-10-20', typeId: 'mi8mtv1', legs: [] }, ...extra });
+
+test('navFlights: старий файл без колекції читається з порожнім масивом, SCHEMA_VERSION лишається 1', () => {
+  const old = store.createEmpty();
+  delete old.navFlights;
+  const parsed = store.parse(JSON.stringify(old));
+  assert.equal(parsed.ok, true);
+  assert.deepEqual(parsed.data.navFlights, []);
+  assert.equal(store.SCHEMA_VERSION, 1);
+  assert.equal(store.validate(old).ok, true); // колекція необов'язкова
+});
+
+test('navFlights: круговий обхід збережених розрахунків і демо-набір', () => {
+  const data = store.createEmpty();
+  data.navFlights.push(navRecord(), navRecord({ id: 'n2', savedAt: undefined }));
+  const parsed = store.parse(store.serialize(data));
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.data.navFlights.length, 2);
+  const demo = createDemo();
+  assert.equal(demo.navFlights.length, 1);
+  assert.equal(store.parse(store.serialize(demo)).ok, true);
+});
+
+test('navFlights: перевірка id, назви, savedAt, flight, розміру й імен осіб', () => {
+  const check = record => {
+    const data = store.createEmpty();
+    data.navFlights.push(...[].concat(record));
+    return store.validate(data);
+  };
+  assert.equal(check(navRecord()).ok, true);
+  assert.equal(check([navRecord(), navRecord()]).ok, false); // id унікальний
+  assert.equal(check(navRecord({ id: '' })).ok, false);
+  assert.equal(check(navRecord({ title: '   ' })).ok, false);
+  assert.equal(check(navRecord({ title: 'а'.repeat(store.MAX_NAV_TITLE_LEN) })).ok, true);
+  assert.equal(check(navRecord({ title: 'а'.repeat(store.MAX_NAV_TITLE_LEN + 1) })).ok, false);
+  assert.equal(check(navRecord({ savedAt: 'вчора' })).ok, false);
+  assert.equal(check(navRecord({ savedAt: '2026-10-20' })).ok, true);
+  assert.equal(check(navRecord({ flight: null })).ok, false);
+  assert.equal(check(navRecord({ flight: [] })).ok, false);
+  assert.equal(check(navRecord({ flight: { note: 'я'.repeat(store.MAX_NAV_FLIGHT_BYTES) } })).ok, false);
+  const named = check(navRecord({ flight: { commander: 'Петренко Іван Петрович' } }));
+  assert.equal(named.ok, false);
+  assert.match(named.errors[0].path, /flight\.commander/);
+  assert.equal(check(navRecord({ flight: { commander: '' } })).ok, true);
+  const notArray = store.createEmpty();
+  notArray.navFlights = {};
+  assert.equal(store.validate(notArray).ok, false);
 });

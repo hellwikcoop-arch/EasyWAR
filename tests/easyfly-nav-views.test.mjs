@@ -317,3 +317,32 @@ test('navSession: скидання', () => {
   assert.equal(navSession.draft, null);
   assert.equal(navSession.tab, 'calc');
 });
+
+// ───────────── збереження розрахунку у файл (navFlights) ─────────────
+
+import { defaultNavTitle, draftToSavedFlight, flightToDraft } from '../src/workspace/easyfly/views/navigator-core.js';
+import { addNavFlight } from '../src/workspace/easyfly/fly-state.js';
+import { createEmpty, parse, serialize } from '../src/workspace/easyfly/fly-store.js';
+
+test('defaultNavTitle: «дата · маршрут»', () => {
+  const title = defaultNavTitle(demoDraft({ today: '2026-10-20' }));
+  assert.equal(title, '20.10.2026 · аер. Зоря – Дубки – Калина – Полігон – Явір – аер. Зоря');
+  assert.match(defaultNavTitle(defaultDraft({ today: '2026-10-20' })), /^20\.10\.2026 · /);
+});
+
+test('draftToSavedFlight: без імен осіб; збереження → файл → відкриття повертає ту саму чернетку-розрахунок', () => {
+  const draft = { ...demoDraft({ today: '2026-10-20' }), commander: 'Петренко Іван', captain: 'ПЕТРЕНКО І.П.' };
+  const flight = draftToSavedFlight(draft);
+  for (const key of ['commander', 'navigator', 'checker', 'captain', 'iasChief', 'seniorNav']) assert.equal(flight[key] === undefined || flight[key] === '', true, key);
+  const added = addNavFlight(createEmpty(), { title: defaultNavTitle(draft), flight, savedAt: '2026-10-20T08:00:00.000Z' });
+  assert.equal(added.ok, true);
+  const reread = parse(serialize(added.data));
+  assert.equal(reread.ok, true);
+  const restored = flightToDraft(reread.data.navFlights[0].flight, { today: '2026-10-20' });
+  assert.equal(restored.commander, '');
+  assert.deepEqual(draftToSavedFlight(restored), flight);
+  assert.equal(restored.fuelPreset, 'main');
+  assert.equal(restored.toggles.evu, true);
+  assert.equal(restored.legs.length, 5);
+  assert.equal(summarize(restored).blocking, false);
+});

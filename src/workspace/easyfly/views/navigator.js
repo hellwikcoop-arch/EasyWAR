@@ -2,7 +2,8 @@
 // (ІШР, Бортжурнал, ШПП) з друком, PDF і Excel (CSV). DOM будується через createElement/textContent;
 // документи — у iframe без скриптів (sandbox="allow-same-origin allow-modals"). Логіка — у navigator-core.js.
 import './navigator.css';
-import { el } from '../ui.js';
+import { confirmDialog, el, openModal, toast as globalToast } from '../ui.js';
+import { addNavFlight, removeNavFlight, updateNavFlight } from '../fly-state.js';
 import { icon } from '../icons.js';
 import { EQUIPMENT_WEIGHTS, normalizeLegs, kgToLiters } from '../nav-core.js';
 import { renderBortjournalHtml, renderIshrHtml, renderShppHtml } from '../nav-docs.js';
@@ -18,8 +19,11 @@ import {
   csvFileName,
   dateUk,
   defaultDraft,
+  defaultNavTitle,
   demoDraft,
   docRows,
+  draftToSavedFlight,
+  flightToDraft,
   fmtDuration,
   fmtInt,
   fuelForPreset,
@@ -374,14 +378,67 @@ export function render(ctx) {
     updaters.push(paintSummary);
     changed();
 
+    // — Збережені розрахунки (колекція navFlights файлу .easyfly) —
+    const saved = Array.isArray(ctx.data?.navFlights) ? ctx.data.navFlights : [];
+    const errorText = result => (result?.result?.errors || result?.errors || ['Не вдалося виконати дію.']).join(' ');
+    const askTitle = (heading, initial, confirmLabel, onSubmit) => {
+      const input = el('input', { class: 'nv-input', type: 'text', value: initial, maxlength: 120, autocomplete: 'off', 'aria-label': 'Назва розрахунку' });
+      openModal({
+        title: heading,
+        content: el('div', { class: 'nv-field' }, el('span', { class: 'nv-label', text: 'Назва' }), input,
+          el('small', { class: 'nv-hint', text: 'Позивні й умовні назви; прізвища не вносьте.' })),
+        actions: [{ label: 'Скасувати' }, { label: confirmLabel, variant: 'primary', onClick: () => onSubmit(input.value) }],
+      });
+    };
+    const saveCurrent = () => {
+      const s = summarize(navSession.draft, unit);
+      if (s.blocking) { toast(`Спершу виправте дані: ${s.issues[0] || 'розрахунок неповний'}`, 'error'); return; }
+      askTitle('Зберегти розрахунок', defaultNavTitle(navSession.draft), 'Зберегти', value => {
+        const result = ctx.mutate(d => addNavFlight(d, { title: value, flight: draftToSavedFlight(navSession.draft), savedAt: new Date().toISOString() }));
+        if (!result.ok) { toast(errorText(result), 'error'); return false; }
+        globalToast('Розрахунок додано до даних. Щоб записати його у файл, натисніть «Зберегти» у верхній смузі.');
+        return true;
+      });
+    };
+    const savedCard = card('Збережені розрахунки', 'у файлі .easyfly',
+      saved.length
+        ? el('ul', { class: 'nv-saved', 'aria-label': 'Збережені розрахунки' }, saved.map(item => el('li', { class: 'nv-saved-item', 'data-id': item.id },
+          el('div', { class: 'nv-saved-title' }, el('strong', { text: item.title }),
+            item.savedAt ? el('small', { class: 'nv-hint', text: `збережено ${dateUk(String(item.savedAt).slice(0, 10))}` }) : null),
+          el('div', { class: 'nv-saved-actions' },
+            btn('Відкрити', { small: true, title: 'Завантажити в форму (поточна чернетка буде замінена)', onClick: () => {
+              navSession.draft = flightToDraft(item.flight, { today: ctx.today, unit });
+              paint();
+              toast(`Відкрито: ${item.title}`);
+            } }),
+            btn('Перейменувати', { small: true, variant: 'ghost', onClick: () => askTitle('Перейменувати розрахунок', item.title, 'Перейменувати', value => {
+              const result = ctx.mutate(d => updateNavFlight(d, item.id, { title: value }));
+              if (!result.ok) { toast(errorText(result), 'error'); return false; }
+              return true;
+            }) }),
+            btn('Оновити', { small: true, variant: 'ghost', title: 'Замінити збережені дані поточною формою', onClick: () => {
+              const s = summarize(navSession.draft, unit);
+              if (s.blocking) { toast(`Спершу виправте дані: ${s.issues[0] || 'розрахунок неповний'}`, 'error'); return; }
+              const result = ctx.mutate(d => updateNavFlight(d, item.id, { flight: draftToSavedFlight(navSession.draft), savedAt: new Date().toISOString() }));
+              (result.ok ? globalToast : toast)(result.ok ? `Оновлено: ${item.title}` : errorText(result), result.ok ? 'ok' : 'error');
+            } }),
+            btn('Видалити', { small: true, variant: 'ghost', onClick: async () => {
+              const yes = await confirmDialog({ title: 'Видалити розрахунок?', message: `«${item.title}» буде видалено з даних файлу.`, confirmLabel: 'Видалити', danger: true });
+              if (!yes) return;
+              const result = ctx.mutate(d => removeNavFlight(d, item.id, { confirmed: true }));
+              if (!result.ok) toast(errorText(result), 'error');
+            } })))))
+        : el('p', { class: 'nv-note', text: 'Збережених розрахунків ще немає. Заповніть форму й натисніть «Зберегти розрахунок».' }));
+
     const actions = [
+      btn('Зберегти розрахунок', { variant: 'primary', iconName: 'zberehty', title: 'Додати розрахунок до даних файлу .easyfly', onClick: saveCurrent }),
       btn('Приклад', { title: 'Заповнити синтетичним прикладом (Мі-8МТВ-1, борт № 123)', onClick: () => { navSession.draft = demoDraft({ today: ctx.today, unit }); paint(); } }),
       btn('Очистити', { onClick: () => { navSession.draft = defaultDraft({ today: ctx.today, unit }); paint(); toast('Розрахунок очищено.'); } }),
     ];
     return el('div', {},
       header({ crumb: 'Новий розрахунок', title: 'Новий розрахунок', subtitle: 'Дані польоту й попередній підсумок', actions }),
       tabsBar('calc'),
-      el('div', { class: 'nv-layout' }, el('div', { class: 'nv-col' }, flightCard, massCard, routeCard, condCard), summaryBox));
+      el('div', { class: 'nv-layout' }, el('div', { class: 'nv-col' }, savedCard, flightCard, massCard, routeCard, condCard), summaryBox));
   }
 
   // ───────────────────────────── Документи ─────────────────────────────

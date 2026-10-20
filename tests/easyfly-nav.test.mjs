@@ -794,7 +794,7 @@ test('ШПП: шапка, схема SVG, таблиця Wр / Wи, познач
     'капітана ПЕТРЕНКО І.П.',
     '<svg',
     '</svg>',
-    'viewBox="0 0 1000',
+    'viewBox="0 0 760 680"',
     'Схема маршруту',
     'ВПМ',
     '<tspan font-weight="700">ППМ 1</tspan>',
@@ -806,8 +806,8 @@ test('ШПП: шапка, схема SVG, таблиця Wр / Wи, познач
     '48 км · 14 хв',
     '∠ 75° вправо',
     '∠ 80° вправо',
-    'Wр (розрахунковий вітер)',
-    'Wи (виправлений вітер)',
+    'Wр (розр. вітер)',
+    'Wи (випр. вітер)',
     '>U<',
     '>Wр<',
     '>Wи<',
@@ -820,7 +820,7 @@ test('ШПП: шапка, схема SVG, таблиця Wр / Wи, познач
     '<b>220</b>',
     '<b>233</b>',
     'Разом',
-    '@page{size:A4 landscape',
+    '@page{size:A4 portrait;margin:8mm}',
     'Times New Roman',
   ]) {
     assert.ok(html.includes(text), `ШПП не містить «${text}»`);
@@ -861,11 +861,74 @@ test('ШПП: посадка на майданчик у схемі й табли
 test('ШПП: довгий маршрут (10 ділянок) лишається в межах схеми', () => {
   const legs = Array.from({ length: 10 }, (_, i) => ({ name: `Пункт ${i + 1}`, mshk: (i * 47) % 360, h: 300, v: 200, s: 30 + i * 4 }));
   const html = renderShppHtml({ typeId: 'mi8mtv1', empty: 7000, fuelKg: 2092, departure: 'Старт', legs });
-  assert.ok(html.includes('viewBox="0 0 1000 270"') || html.includes('viewBox="0 0 1000 24'));
-  const sc = planScheme(calcShpp({ typeId: 'mi8mtv1', empty: 7000, fuelKg: 2092, departure: 'Старт', legs }), { width: 1000, height: 270 });
+  assert.ok(html.includes('viewBox="0 0 760 680"'));
+  const sc = planScheme(calcShpp({ typeId: 'mi8mtv1', empty: 7000, fuelKg: 2092, departure: 'Старт', legs }), { width: 760, height: 680, marginX: 85, marginY: 80 });
   for (const pt of sc.points) {
-    assert.ok(pt.x >= 80 && pt.x <= 920);
-    assert.ok(pt.y >= 60 && pt.y <= 210);
+    assert.ok(pt.x >= 80 && pt.x <= 680);
+    assert.ok(pt.y >= 75 && pt.y <= 605);
+  }
+});
+
+test('ШПП: книжна A4 на одну сторінку; схема 190 × 170 мм, таблиця на всю ширину, 10 рядків', () => {
+  const legs = Array.from({ length: 10 }, (_, i) => ({ name: `Пункт ${i + 1}`, mshk: (i * 47) % 360, h: 300, v: 200, s: 30 + i * 4 }));
+  const html = renderShppHtml({ typeId: 'mi8mtv1', empty: 7000, fuelKg: 2092, departure: 'Старт', legs });
+  assert.match(html, /@page\{size:A4 portrait;margin:8mm\}/);
+  assert.doesNotMatch(html, /landscape/);
+  assert.equal((html.match(/<tr>/g) || []).length, 10 + 1 + 1); // 10 ділянок, другий рядок шапки, «Разом»
+  assert.match(html, /body\{[^}]*width:194mm/);
+  assert.match(html, /table\{[^}]*width:100%/);
+  assert.match(html, /Times New Roman/);
+  // схема має книжне співвідношення ≈ 190 × 170 мм
+  assert.ok(html.includes('viewBox="0 0 760 680"'));
+  assert.ok(Math.abs(760 / 680 - 190 / 170) < 0.01);
+  // колонки таблиці в сумі дають ≈ 100 %
+  const widths = [...html.matchAll(/<col style="width:([\d.]+)%">/g)].map(m => Number(m[1]));
+  assert.equal(widths.length, 17);
+  assert.ok(Math.abs(widths.reduce((a, b) => a + b, 0) - 100) < 0.5);
+  // ІШР і бортжурнал лишаються альбомними
+  assert.match(renderIshrHtml(demoFlight()), /@page\{size:A4 landscape/);
+  assert.match(renderBortjournalHtml(demoFlight()), /@page\{size:A4 landscape/);
+});
+
+test('ШПП: підписи схеми не накладаються одне на одне й не лежать на лініях (5 і 10 ділянок, посадка)', () => {
+  const ten = Array.from({ length: 10 }, (_, i) => ({ name: `Пункт ${i + 1}`, mshk: (i * 47) % 360, h: 300, v: 200, s: 30 + i * 4 }));
+  const cases = [
+    demoFlight(),
+    { typeId: 'mi8mtv1', empty: 7000, fuelKg: 2092, departure: 'Старт', legs: ten },
+    demoFlight({
+      legs: [
+        { name: 'Дубки', mshk: 45, h: 300, v: 200, s: 48 },
+        { name: 'Орієнтир', kind: 'ko', mshk: 120, h: 300, v: 200, s: 40 },
+        { name: 'Майданчик', mshk: 200, h: 200, v: 180, s: 52, landing: true },
+        { name: 'Зоря', mshk: 290, h: 300, v: 220, s: 70 },
+      ],
+    }),
+  ];
+  const hit = (a, b) => a.x0 < b.x1 && a.x1 > b.x0 && a.y0 < b.y1 && a.y1 > b.y0;
+  for (const flight of cases) {
+    const sc = planScheme(calcShpp(flight), { width: 760, height: 680, marginX: 85, marginY: 80 });
+    const rects = [];
+    for (const group of ['heightBoxes', 'pointLabels', 'legLabels', 'turnLabels']) for (const l of sc.labels[group]) rects.push({ group, ...l.rect });
+    for (let i = 0; i < rects.length; i += 1) {
+      for (let k = i + 1; k < rects.length; k += 1) {
+        assert.equal(hit(rects[i], rects[k]), false, `${rects[i].group} перекриває ${rects[k].group}`);
+      }
+    }
+    // підписи пунктів, ділянок і кутів не лежать на лініях маршруту (рамки висот — на своїх ділянках за задумом)
+    for (const group of ['pointLabels', 'legLabels', 'turnLabels']) {
+      for (const l of sc.labels[group]) {
+        for (const seg of sc.segments) {
+          if (group === 'legLabels' && seg.index === l.index) continue; // підпис ділянки стоїть поруч зі своєю лінією
+          let inRect = 0;
+          for (let t = 0; t <= 1; t += 0.02) {
+            const x = seg.x1 + (seg.x2 - seg.x1) * t;
+            const y = seg.y1 + (seg.y2 - seg.y1) * t;
+            if (x > l.rect.x0 + 1 && x < l.rect.x1 - 1 && y > l.rect.y0 + 1 && y < l.rect.y1 - 1) inRect += 1;
+          }
+          assert.ok(inRect <= 2, `${group} лежить на лінії маршруту`);
+        }
+      }
+    }
   }
 });
 
@@ -898,11 +961,11 @@ test('Екранування: усі підставлені значення в 
   assert.equal(escapeHtml(0), '0');
 });
 
-test('Документи: детерміновані, одна сторінка A4 альбомна, без зовнішніх ресурсів', () => {
+test('Документи: детерміновані, одна сторінка A4 (ІШР і журнал — альбомна, ШПП — книжна), без зовнішніх ресурсів', () => {
   for (const render of [renderIshrHtml, renderBortjournalHtml, renderShppHtml]) {
     const a = render(demoFlight());
     assert.equal(a, render(demoFlight()));
-    assert.match(a, /@page\{size:A4 landscape;margin:/);
+    assert.match(a, render === renderShppHtml ? /@page\{size:A4 portrait;margin:/ : /@page\{size:A4 landscape;margin:/);
     assert.doesNotMatch(a, /<script/i);
     assert.doesNotMatch(a, /src="https?:|href="https?:|url\(https?:/);
     assert.equal((a.match(/<style>/g) || []).length, 1);

@@ -14,7 +14,10 @@ import {
   normalizeDate, normalizeFlight, ovpState, parseImportRows, personItems, renewAdmission,
   renewalHint, resolveSettings, shiftSummary, toIso, MEDICAL_KINDS, flightBlockers,
 } from './fly-core.js';
-import { MAX_CALLSIGN_LEN, MAX_NOTE_LEN, nextId, removeById, removePerson, upsertById } from './fly-store.js';
+import {
+  MAX_CALLSIGN_LEN, MAX_NAV_TITLE_LEN, MAX_NOTE_LEN, NAV_FLIGHT_NAME_FIELDS,
+  nextId, removeById, removePerson, upsertById, validate,
+} from './fly-store.js';
 
 // ───────────────────────────── Маршрути ─────────────────────────────
 
@@ -434,6 +437,60 @@ export function deleteFlight(data, id, { confirmed = false } = {}) {
   if (!confirmed) return fail('Видалення потрібно підтвердити.');
   if (!data.flights.some(f => f.id === id)) return fail('Запис польоту не знайдено.');
   return { ok: true, data: { ...data, flights: removeById(data.flights, id) } };
+}
+
+// ───────────────────────────── Розрахунки штурмана ─────────────────────────────
+
+/** Копія опису польоту без імен осіб і без значень, що не переживають JSON (NaN, undefined). */
+export function sanitizeNavFlight(flight) {
+  const copy = JSON.parse(JSON.stringify(flight ?? {}, (key, value) => (typeof value === 'number' && !Number.isFinite(value) ? null : value)));
+  for (const key of NAV_FLIGHT_NAME_FIELDS) delete copy[key];
+  return copy;
+}
+
+function checkNavRecord(record) {
+  const probe = { version: 1, unit: {}, persons: [], checks: [], admissions: [], flights: [], shifts: [], navFlights: [record] };
+  const result = validate(probe);
+  return result.ok ? null : result.errors.map(e => e.message);
+}
+
+/** Додає збережений розрахунок штурмана. input: title, flight, savedAt (ISO, необов'язково). */
+export function addNavFlight(data, input = {}) {
+  const title = text(input.title);
+  if (!title) return fail('Вкажіть назву розрахунку.');
+  if (title.length > MAX_NAV_TITLE_LEN) return fail(`Назва задовга (понад ${MAX_NAV_TITLE_LEN} символів).`);
+  if (!input.flight || typeof input.flight !== 'object' || Array.isArray(input.flight)) return fail('Немає даних розрахунку.');
+  const list = data.navFlights || [];
+  const id = nextId('n', list);
+  const record = { id, title, flight: sanitizeNavFlight(input.flight) };
+  if (text(input.savedAt)) record.savedAt = text(input.savedAt);
+  const errors = checkNavRecord(record);
+  if (errors) return fail(errors);
+  return { ok: true, id, data: { ...data, navFlights: [...list, record] } };
+}
+
+/** Змінює назву й/або розрахунок збереженого запису (patch: title, flight, savedAt). */
+export function updateNavFlight(data, id, patch = {}) {
+  const current = (data.navFlights || []).find(n => n.id === id);
+  if (!current) return fail('Збережений розрахунок не знайдено.');
+  const record = { ...current };
+  if (patch.title !== undefined) {
+    record.title = text(patch.title);
+    if (!record.title) return fail('Вкажіть назву розрахунку.');
+    if (record.title.length > MAX_NAV_TITLE_LEN) return fail(`Назва задовга (понад ${MAX_NAV_TITLE_LEN} символів).`);
+  }
+  if (patch.flight !== undefined) record.flight = sanitizeNavFlight(patch.flight);
+  if (patch.savedAt !== undefined) record.savedAt = text(patch.savedAt);
+  if (!record.savedAt) delete record.savedAt;
+  const errors = checkNavRecord(record);
+  if (errors) return fail(errors);
+  return { ok: true, data: { ...data, navFlights: upsertById(data.navFlights, record) } };
+}
+
+export function removeNavFlight(data, id, { confirmed = false } = {}) {
+  if (!confirmed) return fail('Видалення потрібно підтвердити.');
+  if (!(data.navFlights || []).some(n => n.id === id)) return fail('Збережений розрахунок не знайдено.');
+  return { ok: true, data: { ...data, navFlights: removeById(data.navFlights, id) } };
 }
 
 /** Дати змін для вибору в хронометражі: усі зміни й сьогодні, за спаданням. */
