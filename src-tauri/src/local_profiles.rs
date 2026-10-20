@@ -5,6 +5,8 @@ use argon2::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::{Sqlite, SqlitePool, Transaction};
+
+use crate::office_library::{self, LibraryError, LibraryStore, PreparedRecovery, PreparedRewrap};
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex, MutexGuard},
@@ -172,6 +174,11 @@ pub enum LocalProfileError {
          й увійдіть у цей з екрана входу"
     )]
     PasswordSetNeedsSignOut,
+    /// Захищена бібліотека профілю (видалення, переобгортання ключа, відновлення).
+    #[error(transparent)]
+    Library(#[from] LibraryError),
+    #[error("у профілю є захищена бібліотека: щоб змінити пароль, введіть чинний пароль")]
+    LibraryNeedsCurrentPassword,
 }
 
 /// Скільки поспіль неправильних паролів дозволено, перш ніж вхід на деякий час зупиняється.
@@ -519,10 +526,33 @@ impl LocalProfileStore {
         self.list().await
     }
 
+    /// Видаляє профіль. Профіль із захищеною бібліотекою так не видалити (тригер
+    /// `local_profiles_library_guard`): помилка [`LibraryError::ProfileDeleteBlocked`]
+    /// пропонує окрему дію [`Self::delete_with_library`].
     pub async fn delete(
         &self,
         id: &str,
         now: &str,
+    ) -> Result<LocalProfilesState, LocalProfileError> {
+        self.delete_profile(id, now, false).await
+    }
+
+    /// Видаляє профіль разом із захищеною бібліотекою: криптознищення бібліотеки
+    /// ([`LibraryStore::purge_in_transaction`]) і видалення профілю — в одній транзакції,
+    /// тож або зникає все, або нічого. Профіль без бібліотеки видаляється як [`Self::delete`].
+    pub async fn delete_with_library(
+        &self,
+        id: &str,
+        now: &str,
+    ) -> Result<LocalProfilesState, LocalProfileError> {
+        self.delete_profile(id, now, true).await
+    }
+
+    async fn delete_profile(
+        &self,
+        id: &str,
+        now: &str,
+        purge_library: bool,
     ) -> Result<LocalProfilesState, LocalProfileError> {
         validate_profile_id(id)?;
         let mut transaction = self.pool.begin().await?;
@@ -532,12 +562,26 @@ impl LocalProfileStore {
         )
         .fetch_one(&mut *transaction)
         .await?;
+        if purge_library {
+            match LibraryStore::purge_in_transaction(&mut transaction, id, now).await {
+                // Бібліотеки немає (або її вже знищено): видаляється лише профіль.
+                Ok(_) | Err(LibraryError::NotCreated) => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
         // Каскад прибере метадані модулів дашборда, але не їхні фізичні таблиці.
         crate::dashboard_modules::drop_profile_data_tables(&mut transaction, id).await?;
+        // Помилку тригера бібліотеки розпізнаємо до того, як вона стане «Storage».
         sqlx::query("DELETE FROM local_profiles WHERE id = ?")
             .bind(id)
             .execute(&mut *transaction)
-            .await?;
+            .await
+            .map_err(
+                |error| match office_library::profile_delete_blocked(&error) {
+                    Some(blocked) => LocalProfileError::Library(blocked),
+                    None => LocalProfileError::Storage(error),
+                },
+            )?;
         if active_profile_id.as_deref() == Some(id) {
             let replacement: Option<String> =
                 sqlx::query_scalar("SELECT id FROM local_profiles ORDER BY name_key, id LIMIT 1")
@@ -594,14 +638,28 @@ impl LocalProfileStore {
     /// Якщо пароль уже є, потрібен чинний пароль (перевірка обмежена так само, як вхід).
     /// Хто має право це викликати для якого профілю, вирішує
     /// [`authorize_password_change`]: сховище сесії не знає.
+    ///
+    /// `rewrap` — ключ захищеної бібліотеки, заздалегідь загорнутий новим паролем
+    /// ([`LibraryStore::prepare_password_rewrap`]): він записується в тій самій транзакції,
+    /// що й новий хеш входу, тож пароль і бібліотека не розходяться. Зняти пароль
+    /// профілю з бібліотекою не можна.
     pub async fn set_password(
         &self,
         id: &str,
         current_password: Option<&str>,
         new_password: Option<&str>,
+        rewrap: Option<&PreparedRewrap>,
         now: &str,
     ) -> Result<LocalProfilesState, LocalProfileError> {
         validate_profile_id(id)?;
+        if let Some(rewrap) = rewrap {
+            if rewrap.profile_id() != id {
+                return Err(LocalProfileError::InvalidProfileId);
+            }
+            if new_password.is_none() {
+                return Err(LocalProfileError::PasswordRequired);
+            }
+        }
         if !self
             .verify_password(id, current_password.unwrap_or(""))
             .await?
@@ -623,7 +681,43 @@ impl LocalProfileStore {
         .bind(id)
         .execute(&mut *transaction)
         .await?;
+        if let Some(rewrap) = rewrap {
+            rewrap.apply(&mut transaction, now).await?;
+        }
         transaction.commit().await?;
+        self.list().await
+    }
+
+    /// «Забули пароль»: новий пароль профілю за кодом відновлення бібліотеки. Новий хеш
+    /// входу й обидва слоти бібліотеки ([`LibraryStore::prepare_recovery`]) записуються
+    /// однією транзакцією; лічильник невдалих входів профілю скидається. `new_password` —
+    /// той самий пароль, яким готували `recovery`.
+    pub async fn recover_password(
+        &self,
+        id: &str,
+        new_password: &str,
+        recovery: &PreparedRecovery,
+        now: &str,
+    ) -> Result<LocalProfilesState, LocalProfileError> {
+        validate_profile_id(id)?;
+        if recovery.profile_id() != id {
+            return Err(LocalProfileError::InvalidProfileId);
+        }
+        let hash = hash_password(new_password)?;
+        let mut transaction = self.pool.begin().await?;
+        ensure_profile_exists(&mut transaction, id).await?;
+        ensure_details_row(&mut transaction, id, now).await?;
+        sqlx::query(
+            "UPDATE local_profile_details SET password_hash = ?, updated_at = ? WHERE profile_id = ?",
+        )
+        .bind(hash)
+        .bind(now)
+        .bind(id)
+        .execute(&mut *transaction)
+        .await?;
+        recovery.apply(&mut transaction, now).await?;
+        transaction.commit().await?;
+        self.login_throttle.succeeded(id);
         self.list().await
     }
 
@@ -715,6 +809,17 @@ impl LocalProfileStore {
     }
 
     /// Шляхи всіх таблиць, прив'язаних до будь-якого профілю (EasyGreen їх не перезаписує).
+    /// Таблиці, прив'язані до цього профілю (усі роди військ).
+    pub async fn profile_table_paths(&self, id: &str) -> Result<Vec<String>, LocalProfileError> {
+        validate_profile_id(id)?;
+        Ok(sqlx::query_scalar(
+            "SELECT path FROM local_profile_tables WHERE profile_id = ? ORDER BY path",
+        )
+        .bind(id)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
     pub async fn all_table_paths(&self) -> Result<Vec<String>, LocalProfileError> {
         Ok(
             sqlx::query_scalar("SELECT path FROM local_profile_tables ORDER BY path")
@@ -739,11 +844,17 @@ impl LocalProfileStore {
     }
 }
 
-fn hash_password(password: &str) -> Result<String, LocalProfileError> {
+/// Довжина пароля профілю (6–128 символів). Перевіряється до повільного KDF бібліотеки.
+pub(crate) fn validate_password(password: &str) -> Result<(), LocalProfileError> {
     let count = password.chars().count();
     if !(MIN_PASSWORD_CHARS..=MAX_PASSWORD_CHARS).contains(&count) {
         return Err(LocalProfileError::InvalidPassword);
     }
+    Ok(())
+}
+
+fn hash_password(password: &str) -> Result<String, LocalProfileError> {
+    validate_password(password)?;
     let salt = SaltString::generate(&mut OsRng);
     Argon2::default()
         .hash_password(password.as_bytes(), &salt)
@@ -1182,11 +1293,13 @@ mod tests {
         assert!(store.verify_password(&profile, "").await.unwrap());
 
         assert!(matches!(
-            store.set_password(&profile, None, Some("123"), NOW_2).await,
+            store
+                .set_password(&profile, None, Some("123"), None, NOW_2)
+                .await,
             Err(LocalProfileError::InvalidPassword)
         ));
         let state = store
-            .set_password(&profile, None, Some("секрет"), NOW_2)
+            .set_password(&profile, None, Some("секрет"), None, NOW_2)
             .await
             .unwrap();
         assert!(state.profiles[0].has_password);
@@ -1200,12 +1313,12 @@ mod tests {
 
         assert!(matches!(
             store
-                .set_password(&profile, Some("інший"), None, NOW_2)
+                .set_password(&profile, Some("інший"), None, None, NOW_2)
                 .await,
             Err(LocalProfileError::WrongPassword)
         ));
         let state = store
-            .set_password(&profile, Some("секрет"), None, NOW_2)
+            .set_password(&profile, Some("секрет"), None, None, NOW_2)
             .await
             .unwrap();
         assert!(!state.profiles[0].has_password);
@@ -1292,7 +1405,7 @@ mod tests {
         let profile = id("Вхід");
         store.create(&profile, "Вхід", NOW_1).await.unwrap();
         store
-            .set_password(&profile, None, Some("секрет"), NOW_2)
+            .set_password(&profile, None, Some("секрет"), None, NOW_2)
             .await
             .unwrap();
 
@@ -1335,21 +1448,21 @@ mod tests {
         let profile = id("Зміна");
         store.create(&profile, "Зміна", NOW_1).await.unwrap();
         store
-            .set_password(&profile, None, Some("секрет"), NOW_2)
+            .set_password(&profile, None, Some("секрет"), None, NOW_2)
             .await
             .unwrap();
 
         for _ in 0..5 {
             assert!(matches!(
                 store
-                    .set_password(&profile, Some("хибний"), Some("новий-пароль"), NOW_2)
+                    .set_password(&profile, Some("хибний"), Some("новий-пароль"), None, NOW_2)
                     .await,
                 Err(LocalProfileError::WrongPassword)
             ));
         }
         assert!(matches!(
             store
-                .set_password(&profile, Some("секрет"), Some("новий-пароль"), NOW_2)
+                .set_password(&profile, Some("секрет"), Some("новий-пароль"), None, NOW_2)
                 .await,
             Err(LocalProfileError::TooManyAttempts { .. })
         ));
@@ -1408,7 +1521,7 @@ mod tests {
         assert!(!store.has_password(&profile).await.unwrap());
         authorize_password_change(false, None, &profile).unwrap();
         let state = store
-            .set_password(&profile, None, Some("перший-пароль"), NOW_2)
+            .set_password(&profile, None, Some("перший-пароль"), None, NOW_2)
             .await
             .unwrap();
         assert!(state.profiles[0].has_password);
@@ -2199,5 +2312,207 @@ mod tests {
         .execute(&pool)
         .await
         .is_err());
+    }
+
+    // --- Захищена бібліотека профілю (повна схема з міграціями 0012–0013) ----------
+
+    const OLD_PASSWORD: &str = "синтетичний-пароль-1";
+    const NEW_PASSWORD: &str = "синтетичний-пароль-2";
+
+    /// Профіль з паролем і створеною бібліотекою на повній схемі міграцій.
+    async fn profile_with_library(
+        with_recovery: bool,
+    ) -> (
+        LocalProfileStore,
+        LibraryStore,
+        String,
+        office_library::CreatedLibrary,
+    ) {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        crate::database::embedded_migrator()
+            .run(&pool)
+            .await
+            .unwrap();
+        let store = LocalProfileStore::new(pool.clone());
+        let profile = id("Бібліотека");
+        store.create(&profile, "Бібліотека", NOW_1).await.unwrap();
+        store
+            .set_password(&profile, None, Some(OLD_PASSWORD), None, NOW_1)
+            .await
+            .unwrap();
+        let library = LibraryStore::with_kdf(pool, office_library::KdfParams::FOR_TESTS);
+        let created = library
+            .create(&profile, OLD_PASSWORD, with_recovery, NOW_1)
+            .await
+            .unwrap();
+        (store, library, profile, created)
+    }
+
+    #[tokio::test]
+    async fn a_profile_with_a_library_is_deleted_only_together_with_it() {
+        let (store, library, profile, _) = profile_with_library(false).await;
+        let error = store.delete(&profile, NOW_2).await.unwrap_err();
+        assert!(matches!(
+            error,
+            LocalProfileError::Library(LibraryError::ProfileDeleteBlocked)
+        ));
+        assert_eq!(
+            error.to_string(),
+            "у профілю є захищена бібліотека; видаліть профіль разом з бібліотекою окремою дією"
+        );
+        assert_eq!(store.list().await.unwrap().profiles.len(), 1);
+        assert!(library.has_active_keyring(&profile).await.unwrap());
+
+        let state = store.delete_with_library(&profile, NOW_2).await.unwrap();
+        assert!(state.profiles.is_empty());
+        assert_eq!(state.active_profile_id, None);
+        let keyring: String =
+            sqlx::query_scalar("SELECT state FROM library_keyrings WHERE profile_id = ?")
+                .bind(&profile)
+                .fetch_one(&store.pool)
+                .await
+                .unwrap();
+        assert_eq!(keyring, "shredded");
+        let purges: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM library_purges WHERE profile_id = ?")
+                .bind(&profile)
+                .fetch_one(&store.pool)
+                .await
+                .unwrap();
+        assert_eq!(purges, 1);
+    }
+
+    #[tokio::test]
+    async fn delete_with_library_also_removes_a_profile_without_one() {
+        let (store, _, profile, _) = profile_with_library(false).await;
+        let plain = id("Без бібліотеки");
+        store.create(&plain, "Без бібліотеки", NOW_1).await.unwrap();
+        let state = store.delete_with_library(&plain, NOW_2).await.unwrap();
+        assert_eq!(state.profiles.len(), 1);
+        assert_eq!(state.profiles[0].id, profile);
+        assert!(matches!(
+            store.delete_with_library(&plain, NOW_2).await,
+            Err(LocalProfileError::ProfileNotFound)
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_password_change_rewraps_the_library_in_the_same_transaction() {
+        let (store, library, profile, _) = profile_with_library(false).await;
+        let rewrap = library
+            .prepare_password_rewrap(&profile, OLD_PASSWORD, NEW_PASSWORD)
+            .await
+            .unwrap()
+            .expect("у профілю є бібліотека");
+        let stale = library
+            .prepare_password_rewrap(&profile, OLD_PASSWORD, "синтетичний-пароль-3")
+            .await
+            .unwrap()
+            .unwrap();
+        store
+            .set_password(
+                &profile,
+                Some(OLD_PASSWORD),
+                Some(NEW_PASSWORD),
+                Some(&rewrap),
+                NOW_2,
+            )
+            .await
+            .unwrap();
+        assert!(store.verify_password(&profile, NEW_PASSWORD).await.unwrap());
+        assert!(library.unlock(&profile, NEW_PASSWORD, NOW_2).await.is_ok());
+        assert!(matches!(
+            library.unlock(&profile, OLD_PASSWORD, NOW_2).await,
+            Err(LibraryError::WrongPassword)
+        ));
+
+        // Застаріла обгортка (ключ уже переобгорнуто) скасовує й зміну хеша входу.
+        let error = store
+            .set_password(
+                &profile,
+                Some(NEW_PASSWORD),
+                Some("синтетичний-пароль-3"),
+                Some(&stale),
+                NOW_2,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            LocalProfileError::Library(LibraryError::KeyringChanged)
+        ));
+        assert!(store.verify_password(&profile, NEW_PASSWORD).await.unwrap());
+        assert!(library.unlock(&profile, NEW_PASSWORD, NOW_2).await.is_ok());
+
+        // Обгортка чужого профілю чи зняття пароля з бібліотекою не приймаються.
+        let other = id("Інший");
+        store.create(&other, "Інший", NOW_1).await.unwrap();
+        let next = library
+            .prepare_password_rewrap(&profile, NEW_PASSWORD, OLD_PASSWORD)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            store
+                .set_password(&other, None, Some(OLD_PASSWORD), Some(&next), NOW_2)
+                .await,
+            Err(LocalProfileError::InvalidProfileId)
+        ));
+        assert!(matches!(
+            store
+                .set_password(&profile, Some(NEW_PASSWORD), None, Some(&next), NOW_2)
+                .await,
+            Err(LocalProfileError::PasswordRequired)
+        ));
+        assert!(store.verify_password(&profile, NEW_PASSWORD).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn recovery_sets_a_new_password_and_rotates_the_code() {
+        let (store, library, profile, created) = profile_with_library(true).await;
+        let old_code = created.recovery_code.expect("код відновлення");
+        let prepared = library
+            .prepare_recovery(&profile, old_code.as_str(), NEW_PASSWORD)
+            .await
+            .unwrap();
+        assert!(matches!(
+            store
+                .recover_password(&profile, "123", &prepared, NOW_2)
+                .await,
+            Err(LocalProfileError::InvalidPassword)
+        ));
+        assert!(store.verify_password(&profile, OLD_PASSWORD).await.unwrap());
+        store
+            .recover_password(&profile, NEW_PASSWORD, &prepared, NOW_2)
+            .await
+            .unwrap();
+        assert!(store.verify_password(&profile, NEW_PASSWORD).await.unwrap());
+        assert!(!store.verify_password(&profile, OLD_PASSWORD).await.unwrap());
+        let (keys, new_code) = prepared.into_parts();
+        assert_eq!(keys.profile_id(), profile);
+        assert_ne!(new_code.as_str(), old_code.as_str());
+        assert!(library.unlock(&profile, NEW_PASSWORD, NOW_2).await.is_ok());
+        assert!(library
+            .prepare_recovery(&profile, old_code.as_str(), OLD_PASSWORD)
+            .await
+            .is_err());
+        assert!(library
+            .prepare_recovery(&profile, new_code.as_str(), OLD_PASSWORD)
+            .await
+            .is_ok());
+    }
+
+    #[test]
+    fn password_length_is_checked_before_the_library_kdf() {
+        assert!(matches!(
+            validate_password("12345"),
+            Err(LocalProfileError::InvalidPassword)
+        ));
+        assert!(validate_password("123456").is_ok());
+        assert!(validate_password(&"x".repeat(129)).is_err());
     }
 }

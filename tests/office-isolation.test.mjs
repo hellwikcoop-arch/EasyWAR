@@ -5,7 +5,9 @@
 // 2) вікно редактора має лише дозволи office_* і нічого з core чи плагінів;
 // 3) жодна інша capability не застосовується до вікна редактора (об'єднання дозволів);
 // 4) головне вікно не має файлових команд редактора, але має всі інші власні команди;
-// 5) Rust перевіряє мітку вікна в кожній команді office_*.
+// 5) Rust перевіряє мітку вікна в кожній команді office_*;
+// 6) команди захищеної бібліотеки (library_*, видалення профілю з бібліотекою) дозволені
+//    лише головному вікну: редактор отримує документ бібліотеки тільки через office_open_file.
 // Поведінку справжнього webview цей тест не доводить: див. docs/WORKSPACE.md, «Ізоляція».
 import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
@@ -15,6 +17,13 @@ const root = new URL('../', import.meta.url);
 const read = path => readFile(new URL(path, root), 'utf8');
 const EDITOR_LABEL = 'office-editor';
 const EDITOR_COMMANDS = ['office_open_file', 'office_save_file', 'office_save_file_as', 'office_close_file', 'office_editor_close'];
+const LIBRARY_COMMANDS = [
+  'library_status', 'library_create', 'library_unlock', 'library_lock', 'library_list',
+  'library_versions', 'library_import', 'library_rename', 'library_set_hidden', 'library_set_current',
+  'library_export_copy', 'library_export_archive', 'library_open_in_editor', 'library_read_version',
+  'library_search', 'library_source_data', 'library_save_generated', 'library_link_statuses',
+  'library_unlink', 'library_recover', 'library_reissue_recovery', 'delete_local_profile_with_library',
+];
 const permission = command => `allow-${command.replaceAll('_', '-')}`;
 
 async function handlerCommands() {
@@ -104,5 +113,34 @@ test('оболонка відкриває застосунок в окремом
   assert.match(shell, /invoke\('office_editor_close'\)/);
   const desktop = await read('src-tauri/src/desktop_shell.rs');
   assert.match(desktop, /WebviewUrl::App\("workspace\/index\.html"\.into\(\)\)/);
-  assert.match(desktop, /initialization_script\(editor_init_script\(app_id\)\)/);
+  assert.match(desktop, /initialization_script\(editor_init_script\(app_id, pending\)\)/);
+  const files = await read('src-tauri/src/office_files.rs');
+  // Назва документа бібліотеки — JSON-рядок у властивості лише для читання.
+  assert.match(files, /serde_json::to_string\(&pending\)/);
+  assert.match(files, /'__EW_PENDING_FILE', \{\{ value: \{pending\}, writable: false, configurable: false \}\}/);
+});
+
+test('команди захищеної бібліотеки дозволені лише головному вікну', async () => {
+  const handler = await handlerCommands();
+  const manifest = await manifestCommands();
+  assert.deepEqual(
+    handler.filter(command => command.startsWith('library_') || command.includes('with_library')).sort(),
+    [...LIBRARY_COMMANDS].sort(),
+  );
+  const caps = await capabilities();
+  for (const command of LIBRARY_COMMANDS) {
+    assert.ok(manifest.includes(command), `${command} у build.rs`);
+    const granting = caps.filter(cap => (cap.permissions ?? []).includes(permission(command))).map(cap => cap.name);
+    assert.deepEqual(granting, ['default.json'], command);
+  }
+  const main = caps.find(cap => cap.name === 'default.json');
+  assert.deepEqual(main.windows, ['main']);
+  assert.equal(main.webviews, undefined);
+  const editor = caps.find(cap => cap.name === 'office-editor.json');
+  assert.deepEqual(editor.permissions.filter(item => /library/.test(item)), []);
+  for (const command of LIBRARY_COMMANDS) assert.ok(!EDITOR_COMMANDS.includes(command), command);
+  // Документ бібліотеки відкривається в редакторі лише з головного вікна.
+  const lib = await read('src-tauri/src/lib.rs');
+  const open = lib.slice(lib.indexOf('fn library_open_in_editor(')).split('\n#[tauri::command]')[0];
+  assert.match(open, /window\.label\(\) != desktop_shell::MAIN_WINDOW_LABEL/);
 });

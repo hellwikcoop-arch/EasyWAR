@@ -18,7 +18,7 @@ use tauri::{
     WebviewWindowBuilder, Window, WindowEvent,
 };
 
-use crate::office_files::{editor_init_script, EDITOR_WINDOW_LABEL};
+use crate::office_files::{editor_init_script, OfficeFileHandles, EDITOR_WINDOW_LABEL};
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 
 pub const MAIN_WINDOW_LABEL: &str = "main";
@@ -146,15 +146,37 @@ pub fn create_main_window(app: &App) -> tauri::Result<()> {
 
 /// Opens (or brings forward) the separate window for an «Офіс» editor. It covers the main
 /// window exactly, so the user still sees one application screen; its own capability
-/// (`capabilities/office-editor.json`) allows only the `office_*` commands.
+/// (`capabilities/office-editor.json`) allows only the `office_*` commands. `pending` is the
+/// name of a library document waiting for this editor (`window.__EW_PENDING_FILE`); the
+/// editor app is recorded so `office_open_file` hands the document only to that app.
 pub fn open_office_editor(
     app: &AppHandle,
     main: &WebviewWindow,
     app_id: &'static str,
+    pending: Option<&str>,
 ) -> tauri::Result<()> {
     if let Some(editor) = app.get_webview_window(EDITOR_WINDOW_LABEL) {
         return editor.set_focus();
     }
+    let handles = app.try_state::<OfficeFileHandles>();
+    if let Some(handles) = &handles {
+        handles.set_editor_window_app(Some(app_id));
+    }
+    let built = build_office_editor(app, main, app_id, pending);
+    if built.is_err() && app.get_webview_window(EDITOR_WINDOW_LABEL).is_none() {
+        if let Some(handles) = &handles {
+            handles.set_editor_window_app(None);
+        }
+    }
+    built
+}
+
+fn build_office_editor(
+    app: &AppHandle,
+    main: &WebviewWindow,
+    app_id: &'static str,
+    pending: Option<&str>,
+) -> tauri::Result<()> {
     let scale = main.scale_factor()?;
     let size: LogicalSize<f64> = main.inner_size()?.to_logical(scale);
     let position: LogicalPosition<f64> = main.outer_position()?.to_logical(scale);
@@ -168,7 +190,7 @@ pub fn open_office_editor(
     .min_inner_size(1024.0, 700.0)
     .position(position.x, position.y)
     .maximized(main.is_maximized()?)
-    .initialization_script(editor_init_script(app_id))
+    .initialization_script(editor_init_script(app_id, pending))
     .on_navigation(|url| {
         if is_app_url(url) {
             true
@@ -210,6 +232,13 @@ pub fn on_window_event(window: &Window, event: &WindowEvent) {
             }
         }
         (EDITOR_WINDOW_LABEL, WindowEvent::Destroyed) => {
+            // The pending library document and the editor's file handles die with the
+            // window: the next editor starts from a clean state.
+            if let Some(handles) = window.app_handle().try_state::<OfficeFileHandles>() {
+                handles.clear_pending();
+                handles.set_editor_window_app(None);
+                handles.forget_webview(EDITOR_WINDOW_LABEL);
+            }
             if let Some(main) = window.app_handle().get_webview_window(MAIN_WINDOW_LABEL) {
                 let _ = main.set_focus();
             }
