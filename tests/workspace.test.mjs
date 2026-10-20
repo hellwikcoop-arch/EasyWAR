@@ -7,6 +7,8 @@ import test from 'node:test';
 import {
   CONTRACT_VERSION,
   OFFICE_APPS,
+  PERSONAL_APPS,
+  WORKSPACE_APPS,
   WORKSPACE_SECTIONS,
   acceptAttribute,
   appById,
@@ -31,12 +33,17 @@ import { createHost, findInvoke } from '../src/workspace/workspace-host.js';
 const root = new URL('../', import.meta.url);
 const read = (path) => readFile(new URL(path, root), 'utf8');
 
-test('розділ «Офіс» має три застосунки в порядку EasyGreen, EasyDoc, EasySlide', () => {
+test('розділ «Офіс» має EasyGreen, EasyDoc, EasySlide, розділ «Особисте» — easyPay', () => {
   assert.deepEqual(OFFICE_APPS.map(app => app.id), ['easygreen', 'easydoc', 'easyslide']);
   assert.deepEqual(OFFICE_APPS.map(app => app.title), ['EasyGreen', 'EasyDoc', 'EasySlide']);
-  assert.deepEqual(WORKSPACE_SECTIONS.map(section => section.title), ['Офіс']);
+  assert.deepEqual(WORKSPACE_SECTIONS.map(section => section.title), ['Офіс', 'Особисте']);
   assert.deepEqual(WORKSPACE_SECTIONS[0].apps, ['easygreen', 'easydoc', 'easyslide']);
-  for (const app of OFFICE_APPS) {
+  assert.deepEqual(WORKSPACE_SECTIONS[1].apps, ['easypay']);
+  assert.deepEqual(PERSONAL_APPS.map(app => app.id), ['easypay']);
+  assert.deepEqual(WORKSPACE_APPS.map(app => app.id), ['easygreen', 'easydoc', 'easyslide', 'easypay']);
+  assert.equal(appById('easypay').title, 'easyPay');
+  assert.deepEqual(dialogOptions(appById('easypay')).extensions, ['easypay']);
+  for (const app of WORKSPACE_APPS) {
     assert.ok(Object.isFrozen(app) && Object.isFrozen(app.extensions));
     assert.deepEqual(normalizeExtensions(app.extensions), [...app.extensions], `${app.id}: типові розширення коректні`);
     assert.match(app.hint, /[а-яіїєґ]/i, `${app.id}: підказка українською`);
