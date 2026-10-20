@@ -91,6 +91,28 @@ export function validateProfileStep({ displayName, position, password, confirm }
   return errors;
 }
 
+/**
+ * «Забули пароль?» на екрані входу: код відновлення (непорожній; формат і контрольну суму
+ * перевіряє ядро) і новий пароль двічі. Повертає об'єкт помилок за полями code/password/confirm.
+ */
+export function validateRecoveryStep({ code, password, confirm }) {
+  const errors = {};
+  if (!String(code ?? '').trim()) errors.code = 'Введіть код відновлення.';
+  const badPassword = passwordError(password);
+  if (badPassword) errors.password = badPassword;
+  else if (password !== confirm) errors.confirm = 'Паролі не збігаються.';
+  return errors;
+}
+
+/** Відмова ядра у відновленні кодом → текст під формою. */
+export function recoveryFailure(text) {
+  const raw = String(text ?? '').trim();
+  if (/у профілю немає захищеної бібліотеки/i.test(raw)) {
+    return 'У цього профілю немає бібліотеки «Робочого середовища», тож і коду відновлення немає: пароль не відновити.';
+  }
+  return `Не вдалося відновити доступ: ${raw}`;
+}
+
 /** Другий крок: щонайменше один відомий модуль. */
 export function modulesError(modules) {
   const chosen = normalizeModules(modules);

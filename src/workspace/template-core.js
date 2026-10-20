@@ -62,9 +62,19 @@ export function parseNumberText(text) {
   return Number.isFinite(number) ? number : null;
 }
 
+const SPACES = /[ \u00a0\u202f]/g;
+
+/**
+ * Число для клітинки XLSX: справжнє число або текст саме в тому вигляді, який дає словник полів
+ * (formatNumber: «1 234,5», «12345», «-7»). Текст, що лише схожий на число («12.30», «10.00»,
+ * «20.10», «1,50» — час, дата, номер версії з таблиці), лишається текстом, як у джерелі.
+ */
 function numericValue(value) {
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
-  return parseNumberText(value);
+  const number = parseNumberText(value);
+  if (number === null) return null;
+  const text = value.trim().replace(/^−/, '-').replace(SPACES, '');
+  return text === formatNumber(number, 10).replace(SPACES, '') ? number : null;
 }
 
 // Символи, недопустимі в XML 1.0 (керівні, крім табуляції й переносів, і непарні сурогати).
@@ -470,17 +480,66 @@ async function openZip(bytes, JSZip) {
   }
 }
 
+/**
+ * Розпаковує запис ZIP (JSZip) у UTF-8 текст, рахуючи справжні байти: щойно їх більше за
+ * `maxBytes`, розпакування зупиняється (виняток з `tooLarge: true`). Розміру із заголовка архіву
+ * не довіряємо — його можна підробити, а JSZip перевіряє його лише наприкінці.
+ */
+export function readZipText(file, { maxBytes = MAX_PART_CHARS * 2 } = {}) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let total = 0;
+    let settled = false;
+    const finish = (error, value) => {
+      if (settled) return;
+      settled = true;
+      if (error) reject(error);
+      else resolve(value);
+    };
+    const stream = file.internalStream('uint8array');
+    stream.on('data', chunk => {
+      if (settled) return;
+      total += chunk.length;
+      if (total > maxBytes) {
+        chunks.length = 0;
+        stream.pause();
+        finish(Object.assign(new Error('Частина архіву завелика.'), { tooLarge: true }));
+        return;
+      }
+      chunks.push(chunk);
+    });
+    stream.on('error', error => finish(error));
+    stream.on('end', () => {
+      if (settled) return;
+      const bytes = new Uint8Array(total);
+      let offset = 0;
+      for (const chunk of chunks) {
+        bytes.set(chunk, offset);
+        offset += chunk.length;
+      }
+      try {
+        finish(null, new TextDecoder('utf-8').decode(bytes));
+      } catch (error) {
+        finish(error);
+      }
+    });
+    stream.resume();
+  });
+}
+
 async function readPart(zip, path) {
   const file = zip.file(path);
   if (!file) return null;
   const tooLarge = () => new Error(`Частина шаблону «${path}» завелика: понад 64 МБ тексту.`);
-  // Розмір із заголовка архіву (внутрішнє поле JSZip 3) — до розпакування; текст — ще раз після.
+  // Розмір із заголовка архіву (внутрішнє поле JSZip 3) — швидка відмова до розпакування;
+  // справжні байти рахує readZipText, текст перевіряється ще раз після.
   const declared = file._data?.uncompressedSize;
   if (typeof declared === 'number' && declared > MAX_PART_CHARS * 2) throw tooLarge();
   let text;
   try {
-    text = await file.async('string');
-  } catch {
+    text = await readZipText(file);
+  } catch (error) {
+    if (error?.tooLarge === true) throw tooLarge();
     throw new Error(`Не вдалося прочитати частину «${path}»: файл шаблону пошкоджено.`);
   }
   if (text.length > MAX_PART_CHARS) throw tooLarge();
@@ -595,6 +654,8 @@ const WORD = Object.freeze({
   ]),
   preserveSpace: true,
   removeEmptyTable: true,
+  // Копії блоку отримують нові id малюнків, закладок і елементів керування вмісту (renumberIds).
+  renumberIds: true,
   where: 'в абзацах одного рівня: в основному тексті, в одній клітинці або в рядках однієї таблиці',
 });
 
@@ -610,6 +671,7 @@ const SLIDE = Object.freeze({
   blockers: new Set(['a:fld', 'a:br']),
   preserveSpace: false,
   removeEmptyTable: false,
+  renumberIds: false,
   where: 'в одному текстовому полі або в рядках однієї таблиці',
 });
 
@@ -827,6 +889,55 @@ function tidyHost(host, profile, state) {
   else host.children.push(para);
 }
 
+// Id, які в DOCX мають бути унікальними: малюнки (wp:docPr/@id), закладки (w:bookmarkStart і
+// w:bookmarkEnd, w:id) та елементи керування вмісту (w:sdtPr/w:id/@w:val). Копії блоку без нових
+// id Word відкриває лише після «відновлення» файлу.
+const ID_SCANS = Object.freeze({
+  docPr: /<(?:[\w.-]+:)?docPr\b[^>]*?\sid\s*=\s*"(\d+)"/g,
+  bookmark: /<w:bookmark(?:Start|End)\b[^>]*?\sw:id\s*=\s*"(-?\d+)"/g,
+  sdt: /<w:id\b[^>]*?\sw:val\s*=\s*"(-?\d+)"/g,
+});
+const NOTE_REFERENCES = new Set(['w:footnoteReference', 'w:endnoteReference', 'w:commentReference']);
+
+function docxIds() {
+  return { docPr: new Set(), bookmark: new Set(), sdt: new Set(), next: { docPr: 1, bookmark: 1, sdt: 1 } };
+}
+
+function collectIds(ids, xml) {
+  for (const [kind, pattern] of Object.entries(ID_SCANS)) {
+    for (const match of xml.matchAll(pattern)) ids[kind].add(Number(match[1]));
+  }
+}
+
+function allocateId(ids, kind) {
+  let id = ids.next[kind];
+  while (ids[kind].has(id)) id += 1;
+  ids[kind].add(id);
+  ids.next[kind] = id + 1;
+  return id;
+}
+
+// Нові id у копії елемента блоку; закладка зберігає пару початок–кінець у межах копії.
+function renumberIds(container, state, blockName) {
+  if (!state.ids) return;
+  const bookmarks = new Map();
+  let notes = false;
+  for (const el of descendants(container, () => true)) {
+    if (localName(el.name) === 'docPr' && getAttr(el, 'id') !== null) setAttr(el, 'id', allocateId(state.ids, 'docPr'));
+    else if (el.name === 'w:bookmarkStart' || el.name === 'w:bookmarkEnd') {
+      const old = getAttr(el, 'w:id');
+      if (old === null) continue;
+      if (!bookmarks.has(old)) bookmarks.set(old, allocateId(state.ids, 'bookmark'));
+      setAttr(el, 'w:id', bookmarks.get(old));
+    } else if (el.name === 'w:id' && el.parent?.name === 'w:sdtPr' && getAttr(el, 'w:val') !== null) {
+      setAttr(el, 'w:val', allocateId(state.ids, 'sdt'));
+    } else if (NOTE_REFERENCES.has(el.name)) notes = true;
+  }
+  if (notes) {
+    state.warnings.push(`${state.label}. У блоці «${blockName}» є посилання на виноску чи примітку: кожна копія посилається на ту саму виноску`);
+  }
+}
+
 function expandPair(pair, scopes, state, profile) {
   const range = blockRange(pair.open.para, pair.close.para, profile);
   if (!range) {
@@ -847,10 +958,12 @@ function expandPair(pair, scopes, state, profile) {
   }
   const items = blockItems(pair.name, scopes, state);
   const output = [];
-  for (const item of items) {
+  for (const [index, item] of items.entries()) {
     const map = new Map();
     const temp = { type: 'el', name: parent.name, open: parent.open, close: parent.close, children: [], parent: null, temp: true };
     temp.children = body.map(node => cloneNode(node, temp, map));
+    // Перша копія зберігає id шаблону, наступні отримують нові.
+    if (profile.renumberIds && index > 0) renumberIds(temp, state, pair.name);
     const targets = new Map();
     if (map.has(pair.open.para)) addSkip(targets, map.get(pair.open.para), pair.open.index);
     if (map.has(pair.close.para)) addSkip(targets, map.get(pair.close.para), pair.close.index);
@@ -906,13 +1019,16 @@ async function loadTreeParts(zip, kind) {
   const profile = kind === 'docx' ? WORD : SLIDE;
   const parts = kind === 'docx' ? await documentParts(zip) : await slideParts(zip);
   const loaded = [];
+  // Зайняті id DOCX — з усіх частин, зокрема без полів (нові id не мають з ними збігатися).
+  const ids = profile.renumberIds ? docxIds() : null;
   for (const part of parts) {
     const xml = await readPart(zip, part.path);
+    if (xml && ids) collectIds(ids, xml);
     if (!xml || !xml.includes('{')) continue;
     const tree = parseXml(xml, part.path);
     loaded.push({ ...part, tree, analysis: analyzeTree(tree, profile, part.label) });
   }
-  return { profile, parts: loaded };
+  return { profile, parts: loaded, ids };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1192,6 +1308,23 @@ async function dropCalcChain(zip) {
   }
 }
 
+// Кешовані значення формул після заповнення застаріли: прибираємо їх (Excel перерахує формули
+// під час відкриття, requestRecalc), щоб ніхто не прочитав старе число як актуальне — зокрема
+// EasyWAR, коли згенерована таблиця стає джерелом «Таблиця з бібліотеки».
+function dropFormulaValues(tree) {
+  let dropped = false;
+  for (const cell of descendants(tree, byLocal('c'))) {
+    if (!elements(cell).some(byLocal('f'))) continue;
+    const kept = cell.children.filter(child => !(isElement(child) && localName(child.name) === 'v'));
+    if (kept.length === cell.children.length) continue;
+    cell.children = kept;
+    const type = getAttr(cell, 't');
+    if (type !== null && type !== 'inlineStr') removeAttr(cell, 't');
+    dropped = true;
+  }
+  return dropped;
+}
+
 // Просить Excel перерахувати формули під час відкриття (кешовані значення застаріли).
 function requestRecalc(workbookTree) {
   const workbook = elements(workbookTree).find(byLocal('workbook'));
@@ -1402,8 +1535,10 @@ export async function listTemplateFields(bytes, ext, { JSZip } = {}) {
  * з маркером початку до елемента з маркером кінця (маркери в різних клітинках одного рядка —
  * увесь рядок); крайній абзац чи рядок, де крім маркера нічого немає, у результат не потрапляє.
  * PPTX: слайди, абзаци a:p і рядки a:tr. XLSX: спільні й вбудовані рядки; клітинка з одним
- * полем і числовим значенням стає числом; блок — рядок аркуша з {{#…}} і {{/…}}, нижчі рядки
- * зсуваються. Помилки розташування блоків — виняток зі списком помилок.
+ * полем і числовим значенням (числом або текстом у форматі словника) стає числом; блок — рядок
+ * аркуша з {{#…}} і {{/…}}, нижчі рядки зсуваються; кешовані значення формул прибираються.
+ * DOCX: копії блоку з малюнками, закладками й елементами керування вмісту отримують нові id.
+ * Помилки розташування блоків — виняток зі списком помилок.
  */
 export async function fillTemplate(bytes, ext, context = {}, { JSZip } = {}) {
   const template = await loadTemplate(bytes, ext, JSZip);
@@ -1415,6 +1550,7 @@ export async function fillTemplate(bytes, ext, context = {}, { JSZip } = {}) {
     used: new Set(),
     warnings: analyses.flatMap(analysis => analysis.invalid.map(text => `${text}; маркер залишено як є`)),
     label: '',
+    ids: template.ids ?? null,
   };
   const root = scopeOf(context?.fields, context?.blocks);
   const { zip } = template;
@@ -1430,8 +1566,16 @@ export async function fillTemplate(bytes, ext, context = {}, { JSZip } = {}) {
         shifted = true;
         await shiftTables(zip, sheet, mapper, state);
       }
+      if (sheet.hasFormula) dropFormulaValues(sheet.tree);
       writePart(zip, sheet.path, sheet.tree);
+      sheet.written = true;
       changed = true;
+    }
+    // Формули інших аркушів можуть посилатися на заповнені клітинки — їхні кеші теж застаріли.
+    for (const sheet of changed ? sheets : []) {
+      if (sheet.written || !sheet.hasFormula) continue;
+      const tree = sheet.tree ?? parseXml(await readPart(zip, sheet.path), sheet.path);
+      if (dropFormulaValues(tree)) writePart(zip, sheet.path, tree);
     }
     if (shifted) await dropCalcChain(zip);
     if (changed && sheets.some(sheet => sheet.hasFormula) && requestRecalc(workbookTree)) writePart(zip, 'xl/workbook.xml', workbookTree);

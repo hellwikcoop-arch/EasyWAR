@@ -850,14 +850,21 @@ function initializeLocalProfiles() {
   whenAirDashboard().then(dashboard => {
     if (dashboard) airWindow().document.addEventListener('av:data', applyPendingDashboardSection);
   });
-  // Кнопка «Вийти» в діалозі: блокує захищений профіль і показує екран входу.
+  // Кнопка «Вийти» в діалозі: блокує захищений профіль і показує екран входу. Поки відкрите
+  // вікно редактора «Офісу», Rust відмовляє («спершу закрийте вікно редактора»): профіль лишається
+  // відкритим, а діалог показує причину.
   const signOut = el('button', {
     type: 'button',
     class: 'btn quiet',
     text: 'Вийти з профілю',
     onclick: async () => {
+      try {
+        await lockLocalProfile();
+      } catch (error) {
+        status.textContent = `Не вдалося вийти з профілю: ${String(error)}`;
+        return;
+      }
       assistant.disable();
-      await lockLocalProfile();
       sessionProfileId = null;
       close();
       // Модулі тримають таблиці попереднього користувача в пам’яті, тож вихід перезавантажує

@@ -67,7 +67,7 @@ test('схвалені записи: поля документа, зведенн
     'профіль.посада': 'Аналітик',
     'профіль.роль': '—',
     'період.з': '01.10.2026',
-    'період.по': '—',
+    'період.по': '02.10.2026', // фільтр лише «з»: кінець — найпізніша дата записів
     'зведення.усього': '3',
     'зведення.скасовано': '1',
     'зведення.оцінено': '2',
@@ -138,7 +138,7 @@ test('модуль дашборда: назва, кількість рядків
   });
   assert.deepEqual(blocks, {
     'рядки': [
-      { fields: { 'номер': '1', label: 'Альфа', value: '1234,57', day: '03.10.2026', at: '03.10.2026 14:05', ok: 'так' } },
+      { fields: { 'номер': '1', label: 'Альфа', value: '1234,567', day: '03.10.2026', at: '03.10.2026 14:05', ok: 'так' } },
       { fields: { 'номер': '2', label: '—', value: '12 345', day: '—', at: 'не дата', ok: 'ні' } },
     ],
   });
@@ -146,6 +146,40 @@ test('модуль дашборда: назва, кількість рядків
     ['номер', 'Порядковий номер рядка (1, 2, …)'], ['label', 'Мітка'], ['value', 'Значення'], ['day', 'День'], ['at', 'Час'], ['ok', 'Готово'],
   ]);
   assert.deepEqual(listFields('dashboard_module').filter(entry => entry.block === 'рядки').map(entry => entry.name), ['номер']);
+});
+
+test('модуль дашборда: координати й малі величини не округлюються до сотих', () => {
+  const data = {
+    module: {
+      id: 'module-2', title: 'Карта (синтетика)', templateId: 'events', branch: 'air',
+      fields: [
+        { key: 'latitude', label: 'Широта', dataType: 'real' },
+        { key: 'longitude', label: 'Довгота', dataType: 'real' },
+        { key: 'value', label: 'Значення', dataType: 'real' },
+      ],
+    },
+    rows: [{ rowId: 1, createdAt: '2026-10-01T00:00:00Z', latitude: 48.123456, longitude: 37.987654, value: 0.004 },
+      { rowId: 2, createdAt: '2026-10-01T00:00:00Z', latitude: 0.1 + 0.2, longitude: -12345.678, value: 2 }],
+    truncated: false,
+  };
+  const { blocks } = buildContext({ sourceKind: 'dashboard_module', data, profile: PROFILE, now: NOW });
+  assert.deepEqual(blocks['рядки'].map(item => item.fields), [
+    { 'номер': '1', latitude: '48,123456', longitude: '37,987654', value: '0,004' },
+    { 'номер': '2', latitude: '0,3', longitude: '-12\u00a0345,678', value: '2' },
+  ]);
+});
+
+test('схвалені записи: однобічний період бере відкриту межу з дат записів', () => {
+  const records = [{ date: '2026-10-05' }, { date: null, dateRaw: '20.10' }, { date: '2026-10-12' }, { date: '2026-10-03' }];
+  const fromOnly = buildContext({ sourceKind: 'approved_revisions', data: { period: { from: '2026-10-01', to: null }, records }, profile: PROFILE, now: NOW });
+  assert.deepEqual([fromOnly.fields['період.з'], fromOnly.fields['період.по']], ['01.10.2026', '12.10.2026']);
+  const toOnly = buildContext({ sourceKind: 'approved_revisions', data: { period: { from: null, to: '2026-10-20' }, records }, profile: PROFILE, now: NOW });
+  assert.deepEqual([toOnly.fields['період.з'], toOnly.fields['період.по']], ['03.10.2026', '20.10.2026']);
+  // Записів з датою немає — межа лишається «—»; обидві межі задано — як у фільтрі.
+  const none = buildContext({ sourceKind: 'approved_revisions', data: { period: { from: '2026-10-01', to: null }, records: [] }, profile: PROFILE, now: NOW });
+  assert.equal(none.fields['період.по'], '—');
+  const both = buildContext({ sourceKind: 'approved_revisions', data: { period: { from: '2026-10-01', to: '2026-10-31' }, records }, profile: PROFILE, now: NOW });
+  assert.deepEqual([both.fields['період.з'], both.fields['період.по']], ['01.10.2026', '31.10.2026']);
 });
 
 test('таблиця з бібліотеки: колонки A, B, … за кількістю заголовків', () => {

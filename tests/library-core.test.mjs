@@ -25,7 +25,7 @@ test('підписи видів, походження версій і стату
     source_changed: 'Джерело змінилося',
     edited: 'Ручні правки',
     edited_stale: 'Ручні правки на застарілих даних',
-    detached: 'Поточна версія не з джерела',
+    detached: 'Обрано версію з історії',
     source_error: 'Джерело недоступне',
   });
   assert.ok([KIND_LABELS, ORIGIN_LABELS, STATUS_LABELS].every(Object.isFrozen));
@@ -141,6 +141,9 @@ test('нова згенерована версія стає поточною, л
   assert.equal(shouldMakeCurrent('edited'), false);
   assert.equal(shouldMakeCurrent('saved'), false);
   assert.equal(shouldMakeCurrent('imported'), false);
+  // Стару згенеровану версію обрали поточною вручну (статус detached) — нова лягає в історію.
+  assert.equal(shouldMakeCurrent('generated', 'detached'), false);
+  assert.equal(shouldMakeCurrent('generated', 'source_changed'), true);
 });
 
 test('підсумок масового оновлення', () => {

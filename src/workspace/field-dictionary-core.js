@@ -195,11 +195,27 @@ function breakdownFields(group) {
   };
 }
 
+// Межі дат записів (РРРР-ММ-ДД) — для періоду, обмеженого лише з одного боку.
+function recordDateRange(records) {
+  let from = null;
+  let to = null;
+  for (const record of records) {
+    const date = typeof record?.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(record.date) ? record.date : null;
+    if (!date) continue;
+    if (from === null || date < from) from = date;
+    if (to === null || date > to) to = date;
+  }
+  return { from, to };
+}
+
 function approvedContext(data, fields, blocks) {
   const period = data.period && typeof data.period === 'object' ? data.period : {};
   const overview = data.overview && typeof data.overview === 'object' ? data.overview : {};
-  fields['період.з'] = formatDate(period.from);
-  fields['період.по'] = formatDate(period.to);
+  const records = Array.isArray(data.records) ? data.records : [];
+  // Фільтр лише «з» або лише «по»: відкриту межу беремо з дат самих записів, а не «—».
+  const range = (period.from ?? null) === null || (period.to ?? null) === null ? recordDateRange(records) : null;
+  fields['період.з'] = formatDate(period.from ?? (period.to != null ? range.from : null));
+  fields['період.по'] = formatDate(period.to ?? (period.from != null ? range.to : null));
   fields['зведення.усього'] = countValue(overview.totalRecords);
   fields['зведення.скасовано'] = countValue(overview.abortedRecords);
   fields['зведення.оцінено'] = countValue(overview.evaluatedRecords);
@@ -209,7 +225,7 @@ function approvedContext(data, fields, blocks) {
   fields['зведення.невідомо'] = countValue(overview.unknownRecords);
   fields['зведення.ефективність'] = formatPercent(overview.overallEffectPercent);
   fields['зведення.ефективність_dpi'] = formatPercent(overview.dpiEffectPercent);
-  blocks['записи'] = numbered((Array.isArray(data.records) ? data.records : []).map(recordFields));
+  blocks['записи'] = numbered(records.map(recordFields));
   const breakdowns = Array.isArray(data.breakdowns) ? data.breakdowns : [];
   for (const [name, dimension] of BREAKDOWN_BLOCKS) {
     blocks[name] = numbered(breakdowns.filter(group => group?.dimension === dimension).map(breakdownFields));
@@ -225,7 +241,8 @@ function moduleValue(value, dataType) {
   if (value === null || value === undefined) return EMPTY_VALUE;
   if (typeof value === 'boolean') return yesNo(value);
   if (dataType === 'boolean' && typeof value === 'number') return yesNo(value !== 0);
-  if (typeof value === 'number') return formatNumber(value);
+  // Значення модуля — сирі дані (координати, малі величини): до 10 знаків без округлення до сотих.
+  if (typeof value === 'number') return formatNumber(value, 10);
   if (dataType === 'date') return formatDate(value);
   if (dataType === 'datetime') return dateTimeValue(value);
   return String(value);

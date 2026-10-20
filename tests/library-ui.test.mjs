@@ -8,7 +8,7 @@ import test from 'node:test';
 import vm from 'node:vm';
 import JSZip from 'jszip';
 import {
-  BRANCHES, defaultDocumentName, errorText, fieldReport, generateDocument, itemBadges, kindLine, libraryApi, libraryScreen,
+  BRANCHES, archiveResult, defaultDocumentName, errorText, fieldReport, generateDocument, itemBadges, keyActionResult, kindLine, libraryApi, libraryScreen,
   linkDescription, linkStatusMap, newPasswordProblem, openedInEditorText, passwordProblem, readTemplateFields, recoveryCodeProblem,
   regenerateAll, regenerateItem, searchRows, skipReasonText, sourceParams, staleCount, tableItems, templateExtForItem, templateItems,
   versionLabel,
@@ -36,9 +36,9 @@ const CONTRACT = Object.freeze({
   library_export_archive: [],
   library_open_in_editor: ['versionId'],
   library_read_version: ['versionId'],
-  library_search: ['query'],
+  library_search: ['query', 'includeHidden'],
   library_source_data: ['sourceKind', 'params'],
-  library_save_generated: ['itemId', 'name', 'templateVersionId', 'sourceKind', 'params', 'fingerprint', 'ext', 'bytes', 'makeCurrent'],
+  library_save_generated: ['itemId', 'name', 'templateVersionId', 'sourceKind', 'params', 'fingerprint', 'ext', 'bytes', 'makeCurrent', 'expectedCurrentVersionId'],
   library_link_statuses: [],
   library_unlink: ['itemId'],
   library_recover: ['code', 'newPassword'],
@@ -100,7 +100,13 @@ test('library.js і library-ui-core.js викликають лише коман�
   const core = await read('src/workspace/library-ui-core.js');
   assert.deepEqual(invokeCalls(ui), [], 'library.js не викликає invoke напряму, лише libraryApi');
   assert.match(ui, /import JSZip from 'jszip';/);
-  assert.match(ui, /import \{ findInvoke \} from '\.\/workspace-host\.js';/);
+  assert.match(ui, /import \{ findInvoke, listenTauriEvent \} from '\.\/workspace-host\.js';/);
+  // Події Rust: блокування (зокрема за 30 хвилин без дій) і закриття вікна редактора.
+  assert.match(ui, /subscribe\('library-state', onLibraryState\)/);
+  assert.match(ui, /subscribe\('office-editor-closed', \(\) => refreshList\(\{ force: true \}\)\)/);
+  assert.match(ui, /addEventListener\('visibilitychange', visibility\)/);
+  // «Заблокувати» не йде через run(): працює й під час довгої дії.
+  assert.match(ui, /async function lock\(\) \{\n    try \{\n      state\.status = await api\.lock\(\);/);
   assert.match(ui, /invoke = findInvoke\(window\)/);
   assert.match(ui, /const api = libraryApi\(guarded\);/);
   assert.match(ui, /isLockedError\(error\)\) onLocked\(\)/, 'помилка блокування повертає на екран розблокування');
@@ -143,6 +149,7 @@ test('libraryApi передає в invoke точні назви й аргуме�
   await api.openInEditor('ver-1');
   await api.readVersion('ver-1');
   await api.search('звіт');
+  await api.search('звіт', true);
   await api.sourceData('dashboard_module', { moduleId: 'm-1' });
   await api.saveGenerated({ itemId: null, name: 'Д', templateVersionId: 'ver-t', sourceKind: 'library_table', params: { itemId: 'doc-t' }, fingerprint: 'f', ext: 'xlsx', bytes: [1], makeCurrent: true, extra: 'не йде в Rust' });
   await api.linkStatuses();
@@ -165,9 +172,10 @@ test('libraryApi передає в invoke точні назви й аргуме�
     ['library_export_archive', undefined],
     ['library_open_in_editor', { versionId: 'ver-1' }],
     ['library_read_version', { versionId: 'ver-1' }],
-    ['library_search', { query: 'звіт' }],
+    ['library_search', { query: 'звіт', includeHidden: false }],
+    ['library_search', { query: 'звіт', includeHidden: true }],
     ['library_source_data', { sourceKind: 'dashboard_module', params: { moduleId: 'm-1' } }],
-    ['library_save_generated', { itemId: null, name: 'Д', templateVersionId: 'ver-t', sourceKind: 'library_table', params: { itemId: 'doc-t' }, fingerprint: 'f', ext: 'xlsx', bytes: [1], makeCurrent: true }],
+    ['library_save_generated', { itemId: null, name: 'Д', templateVersionId: 'ver-t', sourceKind: 'library_table', params: { itemId: 'doc-t' }, fingerprint: 'f', ext: 'xlsx', bytes: [1], makeCurrent: true, expectedCurrentVersionId: null }],
     ['library_link_statuses', undefined],
     ['library_unlink', { itemId: 'doc-1' }],
     ['library_recover', { code: 'AAAAA-BBBBB', newPassword: 'новий-пароль' }],
@@ -233,6 +241,10 @@ test('команди контракту в Rust мають ті самі наз�
     // Необов'язковий параметр Rust (Option<…>) поза контрактом допустимий: Tauri підставить None.
     assert.deepEqual(params.filter(param => !param.optional || sent.includes(param.name)).map(param => param.name).sort(), sent, `параметри ${command}`);
   }
+  // «Забули пароль?» на екрані входу (local-profiles-core.js) додає profileId — необов'язковий у Rust.
+  const gate = invokeCalls(await read('src/local-profiles-core.js'), 'invokeCommand').filter(call => call.command === 'library_recover');
+  assert.deepEqual(gate.map(call => call.keys), [['code', 'newPassword', 'profileId']]);
+  assert.deepEqual(commands.get('library_recover').map(param => `${param.name}${param.optional ? '?' : ''}`).sort(), ['code', 'new_password', 'profile_id?']);
 });
 
 test('текст помилки блокування з Rust розпізнається як блокування', async () => {
@@ -328,7 +340,10 @@ test('позначки, підписи версій, опис джерела, п
     'Версія 3 · Ручні правки · DOCX · 2,5 КБ · 20.10.2026 07:15 · поточна');
   assert.equal(versionLabel({ versionNo: 1, origin: 'generated', ext: 'docx', size: 10, createdAt: '2026-10-20T07:15:00Z' }, { offsetMinutes: 180 }),
     'Версія 1 · Згенеровано з шаблону · DOCX · 10 Б · 20.10.2026 10:15');
-  assert.equal(linkDescription(ITEMS[3]), 'Схвалені записи · 01.10.2026 – сьогодні');
+  assert.equal(linkDescription(ITEMS[3]), 'Схвалені записи · з 01.10.2026');
+  // Однобічний період: без «сьогодні» й без зламаного «початку – …».
+  assert.equal(linkDescription({ link: { sourceKind: 'approved_revisions', params: { from: null, to: '2026-10-20' } } }), 'Схвалені записи · по 20.10.2026');
+  assert.equal(linkDescription({ link: { sourceKind: 'approved_revisions', params: { from: '2026-10-01', to: '2026-10-20' } } }), 'Схвалені записи · 01.10.2026 – 20.10.2026');
   assert.equal(linkDescription({ link: { sourceKind: 'approved_revisions', params: { from: null, to: null } } }), 'Схвалені записи · увесь період');
   assert.equal(linkDescription(ITEMS[4], { items: ITEMS }), 'Таблиця з бібліотеки · Синтетична таблиця');
   assert.equal(linkDescription(ITEMS[0]), '');
@@ -340,8 +355,17 @@ test('позначки, підписи версій, опис джерела, п
     { itemId: 'doc-g', name: 'Довідка за жовтень', snippet: null, byName: true },
   ] });
   assert.deepEqual(rows.map(row => [row.item.id, row.snippet]), [['doc-g', '…уражено 3…']]);
+  assert.deepEqual(archiveResult({ path: '/синтетичний/архів.zip', skipped: ['Зламаний звіт', ''] }), { path: '/синтетичний/архів.zip', skipped: ['Зламаний звіт'] });
+  assert.deepEqual(archiveResult(null), { path: null, skipped: [] });
+  assert.deepEqual(archiveResult('/архів.zip'), { path: '/архів.zip', skipped: [] });
   assert.match(openedInEditorText({ name: 'Таблиця', app: 'easygreen' }), /EasyGreen/);
   assert.match(openedInEditorText({ name: 'Довідка', app: 'easydoc' }), /«Відкрити…»/);
+  // Блокування посеред створення чи відновлення: код показано, але бібліотека заблокована.
+  assert.deepEqual(keyActionResult('created', { state: 'unlocked' }), { text: 'Бібліотеку створено й розблоковано.', tone: 'ok' });
+  assert.equal(keyActionResult('created', { state: 'locked' }).tone, 'error');
+  assert.match(keyActionResult('created', { state: 'locked' }).text, /заблоковано.*Розблокуйте її паролем профілю\./);
+  assert.equal(keyActionResult('recovered', { state: 'unlocked' }).text, 'Новий пароль профілю задано, бібліотеку розблоковано.');
+  assert.match(keyActionResult('recovered', null).text, /Розблокуйте її новим паролем профілю\./);
 });
 
 // Синтетичний шаблон DOCX з полями зведення, блоком записів і одним невідомим полем.
@@ -420,6 +444,8 @@ test('«Створити з шаблону»: байти шаблону → да
   assert.equal(saved.fingerprint, 'fp-синтетичний');
   assert.equal(saved.ext, 'docx');
   assert.equal(saved.makeCurrent, true);
+  assert.equal(saved.expectedCurrentVersionId, null, 'новий документ — без очікуваної версії');
+  assert.equal(result.created, true);
   assert.ok(Array.isArray(saved.bytes) && saved.bytes.every(byte => Number.isInteger(byte) && byte >= 0 && byte < 256), 'байти — масив чисел');
   const text = await documentText(saved.bytes);
   assert.match(text, /Довідка Навчальний профіль на 20\.10\.2026/);
@@ -458,12 +484,95 @@ test('«Оновити з джерела»: нова версія поточна
   assert.equal(first.templateVersionId, 'ver-t1');
   assert.deepEqual(first.params, { from: '2026-10-01', to: null });
   assert.equal(first.makeCurrent, true);
+  assert.equal(first.expectedCurrentVersionId, 'ver-g2', 'Rust перевірить, що поточна версія та сама');
   assert.equal(generated.madeCurrent, true);
+  assert.equal(generated.created, true);
 
   const edited = await regenerateItem({ api, JSZip, item: { ...ITEMS[3], currentOrigin: 'edited' }, now: new Date(2026, 9, 20) });
   assert.equal(calls.filter(call => call[0] === 'library_save_generated')[1][1].makeCurrent, false);
   assert.equal(edited.madeCurrent, false, 'версія лягла в історію; вибір за користувачем');
+  // Обрану вручну з історії версію (detached) нова теж не витісняє.
+  const pinned = await regenerateItem({ api, JSZip, item: ITEMS[3], status: 'detached', now: new Date(2026, 9, 20) });
+  assert.equal(calls.filter(call => call[0] === 'library_save_generated')[2][1].makeCurrent, false);
+  assert.equal(pinned.madeCurrent, false);
   await assert.rejects(regenerateItem({ api, JSZip, item: ITEMS[0] }), /не пов’язаний/);
+});
+
+test('«Оновити з джерела»: «зроблено поточною» — лише за відповіддю Rust; повтор без нової версії розпізнається', async () => {
+  const template = await templateDocx();
+  // Rust відмовився робити поточною (або повернув наявну версію): madeCurrent — з version.current.
+  const declined = fakeInvoke({
+    library_read_version: () => template.slice().buffer,
+    library_source_data: SOURCE,
+    library_save_generated: () => ({ item: { id: 'doc-g' }, version: { id: 'ver-g2', versionNo: 2, origin: 'generated', current: false } }),
+  });
+  const result = await regenerateItem({ api: libraryApi(declined.invoke), JSZip, item: ITEMS[3], now: new Date(2026, 9, 20) });
+  assert.equal(result.madeCurrent, false);
+  assert.equal(result.created, false, 'та сама остання згенерована версія — нової не створено');
+  // Якщо Rust сам каже created — віримо йому.
+  const explicit = fakeInvoke({
+    library_read_version: () => template.slice().buffer,
+    library_source_data: SOURCE,
+    library_save_generated: () => ({ item: { id: 'doc-g' }, version: { id: 'ver-g2', versionNo: 2, current: true }, created: true }),
+  });
+  assert.equal((await regenerateItem({ api: libraryApi(explicit.invoke), JSZip, item: ITEMS[3] })).created, true);
+  // Документ змінився між списком і збереженням — помилка Rust іде далі.
+  const changed = fakeInvoke({
+    library_read_version: () => template.slice().buffer,
+    library_source_data: SOURCE,
+    library_save_generated: () => { throw 'документ змінився після оновлення списку; оновіть список і повторіть'; },
+  });
+  await assert.rejects(regenerateItem({ api: libraryApi(changed.invoke), JSZip, item: ITEMS[3] }), /документ змінився/);
+});
+
+test('«Оновити всі»: документ на таблиці з бібліотеки оновлюється після таблиці й у наступному проході', async () => {
+  const template = await templateDocx();
+  const link = { sourceKind: 'approved_revisions', params: { from: null, to: null }, templateVersionId: 'ver-t1', lastGeneratedVersionId: null };
+  const onTable = { sourceKind: 'library_table', params: { itemId: 'doc-t' }, templateVersionId: 'ver-t1', lastGeneratedVersionId: null };
+  const items = [
+    { id: 'doc-b', name: 'А-довідка', kind: 'document', ext: 'docx', currentVersionId: 'ver-b1', currentOrigin: 'generated', link: onTable },
+    { id: 'doc-a', name: 'Б-довідка', kind: 'document', ext: 'docx', currentVersionId: 'ver-a1', currentOrigin: 'generated', link: onTable },
+    // Джерело «Таблиця з бібліотеки» визначає зв'язок, а не вид; DOCX — щоб узяти той самий шаблон.
+    { id: 'doc-t', name: 'В-таблиця', kind: 'document', ext: 'docx', currentVersionId: 'ver-t1', currentOrigin: 'generated', link },
+  ];
+  let round = 0;
+  const statuses = [
+    { itemId: 'doc-b', status: 'source_changed' },
+    { itemId: 'doc-a', status: 'current' },
+    { itemId: 'doc-t', status: 'source_changed' },
+  ];
+  const { invoke, calls } = fakeInvoke({
+    library_read_version: () => template.slice().buffer,
+    library_source_data: SOURCE,
+    library_save_generated: args => ({ item: { id: args.itemId }, version: { id: `ver-${args.itemId}-new`, versionNo: 2, current: true } }),
+    library_list: () => items.map(item => ({ ...item, currentVersionId: `ver-${item.id}-new` })),
+    library_link_statuses: () => {
+      round += 1;
+      // Після оновлення таблиці застарів і документ, що був актуальним.
+      return [{ itemId: 'doc-b', status: 'current' }, { itemId: 'doc-a', status: round === 1 ? 'source_changed' : 'current' }, { itemId: 'doc-t', status: 'current' }];
+    },
+  });
+  const { results, remaining, summary } = await regenerateAll({ api: libraryApi(invoke), JSZip, items, statuses, now: new Date(2026, 9, 20) });
+  const saves = calls.filter(call => call[0] === 'library_save_generated').map(call => [call[1].itemId, call[1].expectedCurrentVersionId]);
+  assert.deepEqual(saves, [['doc-t', 'ver-t1'], ['doc-b', 'ver-b1'], ['doc-a', 'ver-doc-a-new']], 'спершу таблиця, потім залежні; другий прохід — зі свіжого списку');
+  assert.deepEqual(results.map(result => [result.id, result.outcome]), [['doc-t', 'updated'], ['doc-b', 'updated'], ['doc-a', 'updated']]);
+  assert.equal(remaining, 0);
+  assert.equal(summary, 'Оновлено: 3; пропущено: 0; помилки: 0');
+
+  // Залежний документ не оновився — підсумок каже, скільки ще застарілих.
+  const failing = fakeInvoke({
+    library_read_version: () => template.slice().buffer,
+    library_source_data: SOURCE,
+    library_save_generated: args => {
+      if (args.itemId === 'doc-a') throw 'синтетична помилка збереження';
+      return { item: { id: args.itemId }, version: { id: `ver-${args.itemId}-new`, versionNo: 2, current: true } };
+    },
+    library_list: () => items,
+    library_link_statuses: () => [{ itemId: 'doc-b', status: 'current' }, { itemId: 'doc-a', status: 'source_changed' }, { itemId: 'doc-t', status: 'current' }],
+  });
+  const partial = await regenerateAll({ api: libraryApi(failing.invoke), JSZip, items, statuses, now: new Date(2026, 9, 20) });
+  assert.equal(partial.remaining, 1);
+  assert.equal(partial.summary, 'Оновлено: 2; пропущено: 0; помилки: 1; досі застарілих: 1');
 });
 
 test('«Оновити всі» оновлює лише «Джерело змінилося», решту пропускає й підсумовує', async () => {

@@ -6,7 +6,7 @@ import test from 'node:test';
 import JSZip from 'jszip';
 import {
   FIELD_PATTERN, blockErrors, escapeXml, fillTemplate, formatNumber, listTemplateFields, parseNumberText,
-  parseTemplateText, substituteRuns, valueText,
+  parseTemplateText, readZipText, substituteRuns, valueText,
 } from '../src/workspace/template-core.js';
 
 const XML_HEAD = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
@@ -329,7 +329,8 @@ test('XLSX: спільні рядки, числова клітинка, рядо
     '<row r="1"><c r="A1" t="inlineStr"><is><t>Звіт: Таблиця &lt;1&gt;</t></is></c></row>',
     '<row r="2" spans="1:3"><c r="A2" s="1" t="inlineStr"><is><r><t>Альфа</t></r><r><rPr><b/></rPr><t></t></r></is></c><c r="B2"><v>12</v></c><c r="C2" s="2"/></row>',
     '<row r="3" spans="1:3"><c r="A3" s="1" t="inlineStr"><is><r><t>Бета</t></r><r><rPr><b/></rPr><t></t></r></is></c><c r="B3"><v>7.5</v></c><c r="C3" s="2"/></row>',
-    '<row r="4"><c r="A4" t="s"><v>3</v></c><c r="B4"><v>2</v></c><c r="C4"><f>SUM(B2:B2)</f><v>0</v></c></row>',
+    // Кешоване значення формули застаріло й прибране: Excel перерахує її під час відкриття.
+    '<row r="4"><c r="A4" t="s"><v>3</v></c><c r="B4"><v>2</v></c><c r="C4"><f>SUM(B2:B2)</f></c></row>',
     '<row r="5"><c r="A5" t="inlineStr"><is><t>20.10.2026</t></is></c></row>',
     '</sheetData>',
     '<mergeCells count="4"><mergeCell ref="A1:C1"/><mergeCell ref="B2:C2"/><mergeCell ref="B3:C3"/><mergeCell ref="A5:C5"/></mergeCells>',
@@ -351,7 +352,7 @@ test('XLSX: порожній блок прибирає рядок, нижчі р
   const result = await fill(template, 'xlsx', { ...XLSX_CONTEXT, blocks: { рядки: [] } });
   const sheet = await partOf(result.bytes, 'xl/worksheets/sheet1.xml');
   assert.match(sheet, /<dimension ref="A1:C3"\/>/);
-  assert.match(sheet, /<row r="2"><c r="A2" t="s"><v>3<\/v><\/c><c r="B2"><v>2<\/v><\/c><c r="C2"><f>SUM\(B2:B2\)<\/f><v>0<\/v><\/c><\/row><row r="3"><c r="A3" t="inlineStr">/);
+  assert.match(sheet, /<row r="2"><c r="A2" t="s"><v>3<\/v><\/c><c r="B2"><v>2<\/v><\/c><c r="C2"><f>SUM\(B2:B2\)<\/f><\/c><\/row><row r="3"><c r="A3" t="inlineStr">/);
   assert.match(sheet, /<mergeCells count="2"><mergeCell ref="A1:C1"\/><mergeCell ref="A3:C3"\/><\/mergeCells>/);
   assert.doesNotMatch(sheet, /рядки|\{\{/);
 });
@@ -389,7 +390,7 @@ test('XLSX: разом із рядками зсуваються умовне ф�
   const three = await fill(template, 'xlsx', { blocks: { рядки: items } });
   const out = await partOf(three.bytes, 'xl/worksheets/sheet1.xml');
   assert.match(out, /<dimension ref="A1:B5"\/>/);
-  assert.match(out, /<row r="4">.*<c r="B4"><v>3<\/v><\/c><\/row><row r="5"><c r="A5"><f t="shared" ref="A5:B5" si="0">ROW\(\)<\/f><v>3<\/v><\/c><c r="B5">/);
+  assert.match(out, /<row r="4">.*<c r="B4"><v>3<\/v><\/c><\/row><row r="5"><c r="A5"><f t="shared" ref="A5:B5" si="0">ROW\(\)<\/f><\/c><c r="B5"><f t="shared" si="0"\/><\/c>/);
   assert.match(out, /<conditionalFormatting sqref="B2:B4 A5:B5">/);
   assert.match(out, /<dataValidations count="1"><dataValidation type="whole" sqref="B2:B4"\/><\/dataValidations>/);
   assert.match(out, /<hyperlink ref="A5" location="Звіт!A1"\/>/);
@@ -441,4 +442,77 @@ test('файл не ZIP, невідомий формат, немає основ�
   assert.notEqual(result.bytes, plain);
   assert.deepEqual([result.missing, result.used, result.warnings], [[], [], []]);
   assert.deepEqual(await listTemplateFields(Array.from(plain), 'docx', { JSZip }), { fields: [], blocks: [], errors: [] });
+});
+
+test('XLSX: числом стає лише текст у форматі словника; «12.30», «20.10», «10.00» лишаються текстом', async () => {
+  const strings = SST('<si><t>{{#рядки}}{{A}}</t></si>', '<si><t>{{B}}</t></si>', '<si><t>{{C}}</t></si>', '<si><t>{{D}}</t></si>',
+    '<si><t>{{E}}</t></si>', '<si><t>{{F}}</t></si>', '<si><t>{{G}}</t></si>', '<si><t>{{H}}{{/рядки}}</t></si>');
+  const cells = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'].map((letter, i) => `<c r="${letter}1" t="s"><v>${i}</v></c>`).join('');
+  const template = await xlsx(`<sheetData><row r="1">${cells}</row></sheetData>`, strings, { calcChain: false });
+  const values = { A: '12.30', B: '20.10', C: '1.10', D: '10.00', E: '12345', F: '1 234,5', G: '2.5', H: 3 };
+  const result = await fill(template, 'xlsx', { blocks: { рядки: [{ fields: values }] } });
+  const sheet = await partOf(result.bytes, 'xl/worksheets/sheet1.xml');
+  const text = letter => new RegExp(`<c r="${letter}1" t="inlineStr"><is><t>${values[letter]}</t></is></c>`);
+  for (const letter of ['A', 'B', 'C', 'D', 'G']) assert.match(sheet, text(letter), `${letter}: текст як у джерелі`);
+  assert.match(sheet, /<c r="E1"><v>12345<\/v><\/c><c r="F1"><v>1234.5<\/v><\/c>/);
+  assert.match(sheet, /<c r="H1"><v>3<\/v><\/c>/);
+});
+
+test('XLSX: кешовані значення формул прибрано на всіх аркушах, Excel перерахує їх під час відкриття', async () => {
+  const template = await zipOf({
+    '[Content_Types].xml': `${XML_HEAD}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/></Types>`,
+    'xl/workbook.xml': `${XML_HEAD}<workbook ${S_NS}><sheets><sheet name="Дані" sheetId="1" r:id="rId1"/><sheet name="Підсумок" sheetId="2" r:id="rId2"/></sheets></workbook>`,
+    'xl/_rels/workbook.xml.rels': `${XML_HEAD}<Relationships ${REL_NS}><Relationship Id="rId1" Type="${REL}/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="${REL}/worksheet" Target="worksheets/sheet2.xml"/></Relationships>`,
+    'xl/worksheets/sheet1.xml': `${XML_HEAD}<worksheet ${S_NS}><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>{{зведення.усього}}</t></is></c><c r="B1"><f>A1*2</f><v>0</v></c><c r="C1" t="str"><f>"x"&amp;A1</f><v>x0</v></c></row></sheetData></worksheet>`,
+    'xl/worksheets/sheet2.xml': `${XML_HEAD}<worksheet ${S_NS}><sheetData><row r="1"><c r="A1"><f>Дані!A1+1</f><v>1</v></c><c r="B1"><v>5</v></c></row></sheetData></worksheet>`,
+  });
+  const result = await fill(template, 'xlsx', { fields: { 'зведення.усього': '7' } });
+  const first = await partOf(result.bytes, 'xl/worksheets/sheet1.xml');
+  assert.match(first, /<c r="A1"><v>7<\/v><\/c><c r="B1"><f>A1\*2<\/f><\/c><c r="C1"><f>"x"&amp;A1<\/f><\/c>/);
+  const second = await partOf(result.bytes, 'xl/worksheets/sheet2.xml');
+  assert.match(second, /<c r="A1"><f>Дані!A1\+1<\/f><\/c><c r="B1"><v>5<\/v><\/c>/, 'звичайне значення лишається');
+  assert.match(await partOf(result.bytes, 'xl/workbook.xml'), /<calcPr fullCalcOnLoad="1"\/>/);
+});
+
+test('DOCX: копії блоку отримують нові id малюнків, закладок і елементів керування вмісту', async () => {
+  const drawing = '<w:r><w:drawing><wp:inline><wp:docPr id="1" name="Значок"/></wp:inline></w:drawing></w:r>';
+  const bookmark = '<w:bookmarkStart w:id="0" w:name="позначка"/><w:bookmarkEnd w:id="0"/>';
+  const sdt = '<w:sdt><w:sdtPr><w:id w:val="7"/></w:sdtPr><w:sdtContent><w:r><w:t>поле</w:t></w:r></w:sdtContent></w:sdt>';
+  const body = `<w:tbl>${row(cell(para(run('{{#рядки}}{{A}}'))), cell(`<w:p>${drawing}${bookmark}${sdt}${run('{{B}}{{/рядки}}')}</w:p>`))}</w:tbl>`;
+  const header = `${XML_HEAD}<w:hdr ${W_NS}><w:p><w:r><w:drawing><wp:inline><wp:docPr id="2" name="Герб"/></wp:inline></w:drawing></w:r></w:p></w:hdr>`;
+  const template = await docx(body, { 'word/header1.xml': header });
+  const items = [1, 2, 3].map(n => ({ fields: { A: `А${n}`, B: `Б${n}` } }));
+  const result = await fill(template, 'docx', { blocks: { рядки: items } });
+  const out = await docxBody(result.bytes);
+  assert.equal((out.match(/<w:tr>/g) ?? []).length, 3);
+  const ids = pattern => [...out.matchAll(pattern)].map(match => match[1]);
+  assert.deepEqual(ids(/<wp:docPr id="(\d+)"/g), ['1', '3', '4'], 'перша копія — як у шаблоні, далі без «2» з колонтитула');
+  assert.deepEqual(ids(/<w:bookmarkStart w:id="(\d+)"/g), ['0', '1', '2']);
+  assert.deepEqual(ids(/<w:bookmarkEnd w:id="(\d+)"/g), ['0', '1', '2'], 'пари закладок узгоджені');
+  assert.deepEqual(ids(/<w:id w:val="(\d+)"/g), ['7', '1', '2']);
+  assert.deepEqual(result.warnings, []);
+  // Посилання на виноску в блоці не дублюється мовчки.
+  const note = await docx(`${para(run('{{#рядки}}'))}<w:p>${run('{{A}}')}<w:r><w:footnoteReference w:id="1"/></w:r></w:p>${para(run('{{/рядки}}'))}`);
+  const noted = await fill(note, 'docx', { blocks: { рядки: items } });
+  assert.deepEqual(noted.warnings, ['Документ. У блоці «рядки» є посилання на виноску чи примітку: кожна копія посилається на ту саму виноску']);
+});
+
+test('частина архіву з підробленим розміром у заголовку не розпаковується понад межу', async () => {
+  const zip = new JSZip();
+  zip.file('word/document.xml', 'а'.repeat(2_000_000));
+  const bytes = await zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
+  // Заголовки кажуть «100 байтів» замість справжніх 4 МБ (UTF-8 кирилиця — по 2 байти).
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  for (let i = 0; i + 4 <= bytes.length; i += 1) {
+    const signature = view.getUint32(i, true);
+    if (signature === 0x04034b50) view.setUint32(i + 22, 100, true);
+    if (signature === 0x02014b50) view.setUint32(i + 24, 100, true);
+  }
+  const loaded = await JSZip.loadAsync(bytes);
+  const file = loaded.file('word/document.xml');
+  assert.equal(file._data.uncompressedSize, 100, 'JSZip вірить заголовку');
+  await assert.rejects(readZipText(file, { maxBytes: 1_000_000 }), error => error.tooLarge === true);
+  // Звичайна частина читається повністю, кирилиця — як є.
+  const plain = await JSZip.loadAsync(await zipOf({ 'a.xml': '<a>Звіт</a>' }));
+  assert.equal(await readZipText(plain.file('a.xml')), '<a>Звіт</a>');
 });

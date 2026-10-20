@@ -14,6 +14,7 @@ import {
   isLibraryDeleteBlocked,
   LIBRARY_DELETE_BLOCKED_PREFIX,
   purgeConfirmationMatches,
+  recoverProfileWithCode,
   renameLocalProfile,
 } from '../src/local-profiles-core.js';
 
@@ -261,4 +262,21 @@ test('profile dialog offers the purge with the archive hint and the typed name',
   assert.match(source, /'Видалити профіль разом з бібліотекою'/);
   assert.match(source, /purgeConfirmationMatches\(input\.value, profile\.displayName\)/);
   assert.doesNotMatch(source, /deleteLocalProfile\(/, 'delete goes only through the library-aware helper');
+});
+
+test('forgotten password on the sign-in screen goes through library_recover with the chosen profile', async () => {
+  const calls = [];
+  const result = await recoverProfileWithCode('profile-000000000000000000000000', 'СИНТЕТИЧНИЙ-КОД', 'новий-пароль', async (command, payload) => {
+    calls.push([command, payload]);
+    return { recoveryCode: 'AAAAA-BBBBB', status: { state: 'unlocked' } };
+  });
+  assert.deepEqual(calls, [['library_recover', { code: 'СИНТЕТИЧНИЙ-КОД', newPassword: 'новий-пароль', profileId: 'profile-000000000000000000000000' }]]);
+  assert.equal(result.recoveryCode, 'AAAAA-BBBBB');
+});
+
+test('sign-out keeps the profile open and shows why when Rust refuses (editor window open)', async () => {
+  const source = await readFile(new URL('../src/local-profiles.js', import.meta.url), 'utf8');
+  const signOut = source.slice(source.indexOf("text: 'Вийти з профілю'"), source.indexOf('window.location.reload();'));
+  assert.match(signOut, /try \{\s*await lockLocalProfile\(\);\s*\} catch \(error\) \{\s*status\.textContent = `Не вдалося вийти з профілю: \$\{String\(error\)\}`;\s*return;\s*\}/);
+  assert.ok(signOut.indexOf('assistant.disable()') > signOut.indexOf('await lockLocalProfile()'), 'the assistant stays on until the lock succeeded');
 });

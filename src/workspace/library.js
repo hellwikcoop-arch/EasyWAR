@@ -5,20 +5,28 @@
 // зашифровано в базі EasyWAR; відкриваються в окремому вікні редактора (library_open_in_editor).
 // Усі виклики Tauri — через libraryApi (library-ui-core.js, точні назви команд контракту);
 // будь-яка помилка «бібліотека заблокована…» повертає на екран розблокування (30 хвилин без
-// дій, вихід із профілю). DOM лише через createElement і textContent.
+// дій, вихід із профілю). Подія Rust `library-state` (блокування, зокрема за 30 хвилин без дій,
+// вихід чи зміна профілю) одразу прибирає з екрана назви, історію й уривки; `office-editor-closed`,
+// повернення фокусу й видимості вікна перечитують список (його могли змінити в редакторі).
+// DOM лише через createElement і textContent.
 import JSZip from 'jszip';
-import { findInvoke } from './workspace-host.js';
+import { findInvoke, listenTauriEvent } from './workspace-host.js';
 import { MAX_ITEM_NAME_CHARS, formatDateTime, isLockedError, regenerationPlan, sortItems, validateItemName } from './library-core.js';
 import { SOURCE_KINDS } from './field-dictionary-core.js';
 import {
-  BRANCHES, PASSWORD_MAX, defaultDocumentName, errorText, fieldReport, generateDocument, itemBadges, kindLine, libraryApi,
-  libraryScreen, linkDescription, linkStatusMap, newPasswordProblem, openedInEditorText, passwordProblem, readTemplateFields,
+  BRANCHES, PASSWORD_MAX, archiveResult, defaultDocumentName, errorText, fieldReport, generateDocument, itemBadges, kindLine, libraryApi,
+  keyActionResult, libraryScreen, linkDescription, linkStatusMap, newPasswordProblem, openedInEditorText, passwordProblem, readTemplateFields,
   recoveryCodeProblem, regenerateAll, regenerateItem, searchRows, skipReasonText, sourceParams, staleCount, tableItems,
   templateItems, versionLabel,
 } from './library-ui-core.js';
 
 const LOCK_NOTICE = 'Бібліотеку заблоковано: 30 хвилин без дій, вихід із профілю або закриття «Робочого середовища». Розблокуйте її паролем профілю.';
 const SEARCH_DELAY_MS = 250;
+// Поки індекс будується, пошук повторюється, щоб з'явилися збіги за вмістом.
+const INDEX_RETRY_MS = 3000;
+// Повернення фокусу перечитує список не частіше за це.
+const FOCUS_REFRESH_MS = 2000;
+const BUSY_TEXT = 'Зачекайте: попередня дія ще виконується.';
 
 /** Елемент з атрибутами й дітьми; `text` — textContent, `on<подія>` — обробник. */
 function el(tag, props = {}, ...children) {
@@ -45,10 +53,11 @@ const localOffset = () => -new Date().getTimezoneOffset();
 
 /**
  * Монтує вкладку в `root`. `invoke` — Tauri invoke головного вікна; `onBadge(count)` — кількість
- * пов'язаних документів на застарілих даних (позначка на вкладці). → { activate() } — оновити стан,
- * коли вкладку відкрито.
+ * пов'язаних документів на застарілих даних (позначка на вкладці); `listen(event, handler)` —
+ * підписка на події Rust (listenTauriEvent). → { activate() } — оновити стан, коли вкладку
+ * відкрито.
  */
-export function mountLibrary(root, { invoke = findInvoke(window), onBadge = () => {} } = {}) {
+export function mountLibrary(root, { invoke = findInvoke(window), onBadge = () => {}, listen = listenTauriEvent } = {}) {
   let relocking = null;
   const guarded = async (command, args) => {
     try {
@@ -80,6 +89,8 @@ export function mountLibrary(root, { invoke = findInvoke(window), onBadge = () =
     gen: null,
   };
   let busy = false;
+  let refreshQueued = false; // список треба перечитати, щойно завершиться поточна дія
+  let lastRefresh = 0;
   let view = null; // постійні вузли розблокованого екрана (пошук не втрачає фокус)
   let searchTimer = null;
   let searchSeq = 0;
@@ -91,10 +102,82 @@ export function mountLibrary(root, { invoke = findInvoke(window), onBadge = () =
   }
 
   function onLocked() {
-    if (relocking) return;
+    // Уже показано екран без розблокованої бібліотеки (наприклад, після «Заблокувати»).
+    if (relocking || (libraryScreen(state.status) !== 'unlocked' && !view)) return;
     state.lockedNotice = LOCK_NOTICE;
     resetUnlocked();
     relocking = refreshStatus().finally(() => { relocking = null; });
+  }
+
+  const indexSignature = status => JSON.stringify([status?.indexing, status?.indexReady, status?.indexError ?? null, status?.damaged ?? []]);
+
+  /**
+   * Подія `library-state` (той самий LibraryStatus, що й library_status): бібліотеку заблоковано
+   * чи профіль змінився — розшифровані назви, історія, уривки пошуку й форми зникають одразу,
+   * без жодного кліку; змінився стан індексу — оновлюються позначки «Пошкоджено» й підказка пошуку.
+   */
+  function onLibraryState(status) {
+    if (!status || typeof status !== 'object') return;
+    const previous = state.status;
+    const wasUnlocked = libraryScreen(previous) === 'unlocked';
+    const nowUnlocked = libraryScreen(status) === 'unlocked';
+    const sameProfile = status.profileId === previous?.profileId;
+    if (wasUnlocked && !(nowUnlocked && sameProfile)) {
+      resetUnlocked();
+      if (nowUnlocked) {
+        // Розблоковано бібліотеку іншого профілю: спершу порожній екран, потім її список.
+        state.status = undefined;
+        state.lockedNotice = '';
+        render();
+        refreshStatus();
+        return;
+      }
+      state.status = status;
+      state.lockedNotice = LOCK_NOTICE;
+      render();
+      return;
+    }
+    if (!nowUnlocked) {
+      const same = previous?.state === status.state && sameProfile;
+      state.status = status;
+      // Той самий стан — екран не перебудовуємо (не зникає пароль, який саме вводять).
+      if (!same && !busy) render();
+      return;
+    }
+    if (!wasUnlocked) {
+      if (!busy) refreshStatus();
+      return;
+    }
+    const changed = indexSignature(status) !== indexSignature(previous);
+    state.status = status;
+    if (changed && state.panel === 'list' && !state.renaming && !state.confirmUnlink) renderContent();
+  }
+
+  const itemsSignature = (items, statuses) => JSON.stringify([
+    items.map(item => [item.id, item.name, item.currentVersionId, item.versionCount, item.hidden, item.updatedAt]),
+    statuses.map(entry => [entry.itemId, entry.status, entry.detail ?? null]),
+  ]);
+
+  /**
+   * Перечитує список і статуси (документ могли зберегти у вікні редактора): після
+   * `office-editor-closed`, повернення фокусу чи видимості вікна. Екран перебудовується лише тоді,
+   * коли щось змінилося, і не під час дії чи редагування назви.
+   */
+  function refreshList({ force = false } = {}) {
+    if (libraryScreen(state.status) !== 'unlocked' || !view) return;
+    if (!force && Date.now() - lastRefresh < FOCUS_REFRESH_MS) return;
+    if (busy) {
+      refreshQueued = true;
+      return;
+    }
+    lastRefresh = Date.now();
+    const before = itemsSignature(state.items, state.statuses);
+    run(async () => {
+      await loadItems();
+      if (itemsSignature(state.items, state.statuses) === before) return;
+      await reloadVersions();
+      if (state.panel === 'list' && !state.renaming) renderContent();
+    });
   }
 
   function resetUnlocked() {
@@ -116,7 +199,10 @@ export function mountLibrary(root, { invoke = findInvoke(window), onBadge = () =
 
   /** Дія з позначкою зайнятості; помилку показує в рядку стану (крім блокування — там свій екран). */
   async function run(action, pendingText = '') {
-    if (busy) return undefined;
+    if (busy) {
+      say(BUSY_TEXT);
+      return undefined;
+    }
     busy = true;
     root.setAttribute('aria-busy', 'true');
     if (pendingText) say(pendingText);
@@ -128,6 +214,10 @@ export function mountLibrary(root, { invoke = findInvoke(window), onBadge = () =
     } finally {
       busy = false;
       root.removeAttribute('aria-busy');
+      if (refreshQueued) {
+        refreshQueued = false;
+        queueMicrotask(() => refreshList({ force: true }));
+      }
     }
   }
 
@@ -227,7 +317,8 @@ export function mountLibrary(root, { invoke = findInvoke(window), onBadge = () =
         const created = await api.create(value, withRecovery.checked);
         state.status = created?.status ?? null;
         state.lockedNotice = '';
-        say('Бібліотеку створено й розблоковано.', 'ok');
+        const result = keyActionResult('created', state.status);
+        say(result.text, result.tone);
         if (created?.recoveryCode) state.code = { code: created.recoveryCode, kind: 'created' };
         if (libraryScreen(state.status) === 'unlocked') await loadItems();
         render();
@@ -294,7 +385,8 @@ export function mountLibrary(root, { invoke = findInvoke(window), onBadge = () =
         state.status = recovered?.status ?? null;
         state.recovering = false;
         state.lockedNotice = '';
-        say('Новий пароль профілю задано, бібліотеку розблоковано.', 'ok');
+        const result = keyActionResult('recovered', state.status);
+        say(result.text, result.tone);
         if (recovered?.recoveryCode) state.code = { code: recovered.recoveryCode, kind: 'recovered' };
         if (libraryScreen(state.status) === 'unlocked') await loadItems();
         render();
@@ -377,6 +469,12 @@ export function mountLibrary(root, { invoke = findInvoke(window), onBadge = () =
     });
     const hidden = el('input', { type: 'checkbox', checked: state.includeHidden });
     hidden.addEventListener('change', () => {
+      // Під час іншої дії перемикач не змінює стану: інакше список і позначка розійдуться.
+      if (busy) {
+        hidden.checked = state.includeHidden;
+        say(BUSY_TEXT);
+        return;
+      }
       state.includeHidden = hidden.checked;
       run(async () => { await loadItems(); renderContent(); });
     });
@@ -402,9 +500,18 @@ export function mountLibrary(root, { invoke = findInvoke(window), onBadge = () =
       return;
     }
     try {
-      const response = await api.search(query);
+      const response = await api.search(query, state.includeHidden);
       if (seq !== searchSeq) return;
       state.search = response;
+      if (!response?.indexReady) {
+        // Чому пошук лише за назвами: індекс ще будується чи не вдався (indexError у стані).
+        onLibraryState(await api.status());
+        if (seq !== searchSeq || !view) return;
+        if (!state.status?.indexError) {
+          clearTimeout(searchTimer);
+          searchTimer = setTimeout(() => { if (seq === searchSeq) runSearch(); }, INDEX_RETRY_MS);
+        }
+      }
     } catch (error) {
       if (!isLockedError(error)) say(`Пошук не вдався: ${errorText(error)}`, 'error');
       return;
@@ -442,7 +549,7 @@ export function mountLibrary(root, { invoke = findInvoke(window), onBadge = () =
     const searching = Boolean(state.query.trim() && state.search);
     const rows = searching ? searchRows(state.items, state.search) : state.items.map(item => ({ item, snippet: null }));
     const wrap = el('div', { class: 'ws-lib-list' });
-    if (searching && !state.search.indexReady) wrap.append(el('p', { class: 'ws-lib-hint', text: 'Індекс будується — пошук лише за назвами' }));
+    if (searching && !state.search.indexReady) wrap.append(el('p', { class: 'ws-lib-hint', text: indexHint(state.status) }));
     if (!rows.length) {
       wrap.append(el('p', { class: 'ws-lib-empty', text: searching
         ? 'Нічого не знайдено.'
@@ -453,6 +560,12 @@ export function mountLibrary(root, { invoke = findInvoke(window), onBadge = () =
     return wrap;
   }
 
+  function indexHint(status) {
+    const failure = typeof status?.indexError === 'string' ? status.indexError.trim() : '';
+    if (failure) return `Пошук за вмістом недоступний (${failure}) — пошук лише за назвами. EasyWAR спробує ще раз пізніше або після наступного розблокування.`;
+    return 'Індекс будується — поки що пошук лише за назвами';
+  }
+
   function itemNode(item, snippet, damaged) {
     const isDamaged = damaged.includes(item.id);
     const link = state.links.get(item.id) ?? null;
@@ -461,13 +574,13 @@ export function mountLibrary(root, { invoke = findInvoke(window), onBadge = () =
       : el('h3', { class: 'ws-lib-name', text: item.name });
     const badges = itemBadges(item, { damaged, link }).map(badge => el('span', { class: 'ws-lib-badge', 'data-tone': badge.tone, text: badge.text }));
     const actions = el('div', { class: 'ws-lib-actions' },
-      button('Відкрити', () => openVersion(item, item.currentVersionId), { disabled: isDamaged || !item.currentVersionId }),
+      button('Відкрити', () => openCurrent(item), { disabled: isDamaged || !item.currentVersionId }),
       button(state.versions.has(item.id) ? 'Сховати історію' : 'Історія версій', () => toggleVersions(item), {
         'aria-expanded': String(state.versions.has(item.id)),
       }),
       button('Перейменувати', () => { state.renaming = item.id; renderContent(); }),
       button(item.hidden ? 'Показати' : 'Сховати', () => setHidden(item)),
-      button('Зберегти копію…', () => exportCopy(item.currentVersionId), { disabled: isDamaged || !item.currentVersionId }),
+      button('Зберегти копію…', () => exportCurrent(item), { disabled: isDamaged || !item.currentVersionId }),
       item.link ? button('Оновити з джерела', () => regenerate(item)) : null,
       item.link ? button('Відв’язати', () => { state.confirmUnlink = item.id; renderContent(); }) : null);
     return el('article', { class: 'ws-lib-item' },
@@ -568,6 +681,34 @@ export function mountLibrary(root, { invoke = findInvoke(window), onBadge = () =
     }, 'Відкриття у вікні редактора…');
   }
 
+  // Поточна версія за свіжою історією, а не за знімком списку: документ могли щойно зберегти
+  // в редакторі, і тоді «Відкрити» відкрило б стару версію.
+  async function currentVersionId(item) {
+    const versions = await api.versions(item.id);
+    const current = Array.isArray(versions) ? versions.find(version => version.current) : null;
+    if (state.versions.has(item.id)) state.versions.set(item.id, versions);
+    if (current && current.id !== item.currentVersionId) refreshQueued = true;
+    return current?.id ?? null;
+  }
+
+  function openCurrent(item) {
+    run(async () => {
+      const versionId = await currentVersionId(item);
+      if (!versionId) return say(`У «${item.name}» немає поточної версії.`, 'error');
+      await api.openInEditor(versionId);
+      say(openedInEditorText(item), 'ok');
+    }, 'Відкриття у вікні редактора…');
+  }
+
+  function exportCurrent(item) {
+    run(async () => {
+      const versionId = await currentVersionId(item);
+      if (!versionId) return say(`У «${item.name}» немає поточної версії.`, 'error');
+      const path = await api.exportCopy(versionId);
+      say(path ? `Копію збережено: ${path}. Файл на диску не зашифровано.` : 'Збереження скасовано.', path ? 'ok' : '');
+    }, 'Оберіть, куди зберегти копію…');
+  }
+
   function setHidden(item) {
     run(async () => {
       await api.setHidden(item.id, !item.hidden);
@@ -587,10 +728,12 @@ export function mountLibrary(root, { invoke = findInvoke(window), onBadge = () =
 
   function exportArchive() {
     run(async () => {
-      const path = await api.exportArchive();
-      say(path
-        ? `Архів збережено: ${path}. Документи в ньому не зашифровано — зберігайте архів як чутливий файл.`
-        : 'Збереження архіву скасовано.', path ? 'ok' : '');
+      const saved = await api.exportArchive();
+      const { path, skipped } = archiveResult(saved);
+      if (!path) return say('Збереження архіву скасовано.');
+      const notes = [`Архів збережено: ${path}. Документи в ньому не зашифровано — зберігайте архів як чутливий файл.`];
+      if (skipped.length) notes.push(`Пропущено пошкоджені документи: ${skipped.join(', ')}.`);
+      say(notes.join(' '), skipped.length ? 'error' : 'ok');
     }, 'Оберіть, куди зберегти архів…');
   }
 
@@ -605,24 +748,37 @@ export function mountLibrary(root, { invoke = findInvoke(window), onBadge = () =
     });
   }
 
-  function lock() {
-    run(async () => {
+  // «Заблокувати» діє завжди, навіть під час довгої дії (вона зупиниться на помилці блокування).
+  async function lock() {
+    try {
       state.status = await api.lock();
-      state.lockedNotice = 'Бібліотеку заблоковано.';
-      resetUnlocked();
-      say('');
-      render();
-    });
+    } catch (error) {
+      say(`Не вдалося заблокувати: ${errorText(error)}`, 'error');
+      return;
+    }
+    state.lockedNotice = 'Бібліотеку заблоковано.';
+    resetUnlocked();
+    say('');
+    render();
   }
 
-  function regenerate(item) {
+  function regenerate(snapshot) {
     run(async () => {
-      const result = await regenerateItem({ api, JSZip, item, now: new Date() });
+      // Рішення «робити поточною» — за свіжим станом документа (його могли змінити в редакторі).
+      const item = (await api.list(true)).find(entry => entry.id === snapshot.id);
+      if (!item?.link) throw new Error('документ більше не пов’язаний із джерелом; оновіть список');
+      const status = state.links.get(item.id)?.status ?? null;
+      const result = await regenerateItem({ api, JSZip, item, status, now: new Date() });
       const lines = generationLines(result);
       const actions = [];
-      if (!result.madeCurrent && result.version) {
-        lines.unshift(`Нову версію (№ ${result.version.versionNo}) з даних джерела збережено в історії версій. Поточною лишилася версія з ручними правками.`);
+      const kept = status === 'detached' ? 'Поточною лишилася версія, яку ви обрали з історії.' : 'Поточною лишилася версія з ручними правками.';
+      if (!result.madeCurrent && result.version && result.created) {
+        lines.unshift(`Нову версію (№ ${result.version.versionNo}) з даних джерела збережено в історії версій. ${kept}`);
         actions.push({ label: 'Зробити поточною', run: () => makeCurrent(item.id, result.version.id) });
+      } else if (!result.madeCurrent && result.version) {
+        lines.unshift(`Дані джерела й шаблон не змінилися — нової версії не створено (остання з джерела — № ${result.version.versionNo}). ${kept}`);
+      } else if (!result.created) {
+        lines.unshift('Дані джерела й шаблон не змінилися — нової версії не створено.');
       }
       state.report = { title: `«${item.name}»: оновлено з джерела`, lines, tone: 'ok', actions };
       say('');
@@ -896,6 +1052,8 @@ export function mountLibrary(root, { invoke = findInvoke(window), onBadge = () =
   // Застарілі документи -----------------------------------------------------------------------
 
   function openStale() {
+    // Під час іншої дії панель не відкривається: інакше вона застрягла б на «Перевірка…».
+    if (busy) return say(BUSY_TEXT);
     state.panel = 'stale';
     state.stale = null;
     renderContent();
@@ -935,7 +1093,7 @@ export function mountLibrary(root, { invoke = findInvoke(window), onBadge = () =
     const stale = state.stale;
     if (!stale) return;
     run(async () => {
-      const { results, summary } = await regenerateAll({
+      const { results, summary, remaining } = await regenerateAll({
         api,
         JSZip,
         items: stale.items,
@@ -944,6 +1102,7 @@ export function mountLibrary(root, { invoke = findInvoke(window), onBadge = () =
         onProgress: (index, total, item) => say(`Оновлення ${index + 1} з ${total}: «${item.name}»…`),
       });
       const lines = [];
+      if (remaining) lines.push(`Після оновлення ще застарілих: ${remaining} — вони залежать від документів, які не вдалося оновити; спробуйте «Оновити всі» ще раз.`);
       for (const result of results) {
         if (result.outcome === 'error') lines.push(`${result.name}: помилка — ${result.error}`);
         else if (result.outcome === 'skipped') lines.push(`${result.name}: пропущено — ${skipReasonText(result.reason)}`);
@@ -957,6 +1116,31 @@ export function mountLibrary(root, { invoke = findInvoke(window), onBadge = () =
       renderContent();
     }, 'Оновлення застарілих документів…');
   }
+
+  // Події Rust головному вікну й повернення до вікна. Підписки знімаються, коли сторінка
+  // «Робочого середовища» закривається (інакше зворотні виклики лишилися б у верхньому кадрі).
+  const unlisten = [];
+  const subscribe = (event, handler) => {
+    Promise.resolve(listen?.(event, handler))
+      .then(stop => { if (typeof stop === 'function') unlisten.push(stop); })
+      .catch(error => console.error(error));
+  };
+  subscribe('library-state', onLibraryState);
+  subscribe('office-editor-closed', () => refreshList({ force: true }));
+  const onReturn = () => { if (!root.hidden && !root.closest?.('[hidden]')) refreshList(); };
+  const visibility = () => { if (document.visibilityState === 'visible') onReturn(); };
+  const focusTargets = [window];
+  try {
+    if (window.top && window.top !== window) focusTargets.push(window.top);
+  } catch { /* верхній кадр іншого походження */ }
+  for (const target of focusTargets) target.addEventListener('focus', onReturn);
+  document.addEventListener('visibilitychange', visibility);
+  window.addEventListener('pagehide', () => {
+    for (const target of focusTargets) target.removeEventListener('focus', onReturn);
+    document.removeEventListener('visibilitychange', visibility);
+    clearTimeout(searchTimer);
+    for (const stop of unlisten.splice(0)) Promise.resolve(stop()).catch(() => {});
+  });
 
   render();
   return Object.freeze({

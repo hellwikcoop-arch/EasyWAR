@@ -107,6 +107,16 @@ export function signInLocalProfile(profileId, password, invokeCommand = invoke) 
   return invokeCommand('activate_local_profile', { profileId, password });
 }
 
+/**
+ * «Забули пароль?» на екрані входу: код відновлення бібліотеки «Робочого середовища» задає новий
+ * пароль профілю `profileId`, розблоковує бібліотеку й входить у профіль (Rust: library_recover;
+ * профіль без захищеної бібліотеки — «у профілю немає захищеної бібліотеки»).
+ * → { recoveryCode, status }: новий код показується людині один раз.
+ */
+export function recoverProfileWithCode(profileId, code, newPassword, invokeCommand = invoke) {
+  return invokeCommand('library_recover', { code, newPassword, profileId });
+}
+
 export function getProfileSession(invokeCommand = invoke) {
   return invokeCommand('get_profile_session');
 }

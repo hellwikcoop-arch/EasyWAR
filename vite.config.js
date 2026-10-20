@@ -85,11 +85,12 @@ export default defineConfig({
     sourcemap: Boolean(process.env.TAURI_ENV_DEBUG),
     // Launcher plus the branch modules it opens in same-origin iframes; map.html — 3D-карта, яку вкладки «Карта» ПС і РВ вбудовують в iframe.
     rolldownOptions: {
-      // Код застосунків «Робочого середовища» (src/workspace/<id>/app.js) отримує префікс
-      // workspace-, щоб офлайн-кеш телефона (viewerServiceWorker) його не брав.
+      // Код застосунків «Робочого середовища» (src/workspace/<id>/app.js) і вкладки «Бібліотека»
+      // (src/workspace/library.js) отримує префікс workspace-, щоб офлайн-кеш телефона
+      // (viewerServiceWorker) його не брав.
       output: {
         chunkFileNames: (chunk) =>
-          /\/src\/workspace\/[^/]+\/app\.js$/.test((chunk.facadeModuleId || "").replace(/\\/g, "/"))
+          /\/src\/workspace\/(?:[^/]+\/app|library)\.js$/.test((chunk.facadeModuleId || "").replace(/\\/g, "/"))
             ? "assets/workspace-[name]-[hash].js"
             : "assets/[name]-[hash].js",
       },

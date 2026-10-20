@@ -48,8 +48,10 @@ typed text, reason, file name, sheet, row and column). Migration
 `0012_office_library.sql` adds the encrypted «Офіс» document library (key wraps,
 documents, encrypted content, immutable versions, events and purges), and
 migration `0013_document_links.sql` links a generated library document to its
-template version and data source (see «Office library»). Migrations contain no
-operational fixtures and create no external integration.
+template version and data source, and migration `0014_library_blob_repair.sql`
+lets a damaged ciphertext row of `library_blobs` be replaced while the keyring is
+active (see «Office library»). Migrations contain no operational fixtures and
+create no external integration.
 
 ## Provenance layers
 
@@ -169,7 +171,10 @@ does not merge stale client copies.
 
 Registration is one transaction (`register_local_profile`): identity, mandatory
 password (6–128 characters, stored only as an Argon2id hash in
-`local_profile_details`), optional position and avatar, and at least one module
+`local_profile_details`; new hashes use the same cost as the library key
+derivation, 64 MiB, 3 passes, 1 lane, so the sign-in hash is no cheaper to guess
+than the library wrap; a successful sign-in with an older, weaker hash rehashes it
+in place), optional position and avatar, and at least one module
 are written together, the profile becomes active and the session is unlocked. A
 failed registration leaves no partial rows. The old `create_local_profile`
 command is removed, so a profile without a password cannot be created;
@@ -183,11 +188,19 @@ profile as having no password and accepts any input, so signing in to it
 protects nothing until a password is set. This is a known limit that depends on
 an owner decision about migrating old profiles (backlog P2-14).
 
+While the «Офіс» editor window is open, signing out (`lock_local_profile`),
+switching to another profile, registering a profile, recovering another profile
+and deleting a profile are refused with «спершу закрийте вікно редактора»: file
+handles of the editor are bound to the signed-in profile, and the session stays
+as it was. The editor check runs before the password check.
+
 Profiles are not accounts in a service, roles or permissions. The sign-in screen
 gates the UI and the unlock checks of data commands on this device only; it does
 not encrypt table files and is not a boundary against someone who can modify the
-installed application or read the disk. A forgotten password cannot be
-recovered. Profiles contain no plaintext secrets and are not transmitted to a
+installed application or read the disk. A forgotten password can be replaced
+only with the recovery code of the profile's «Офіс» library
+(`library_recover` with `profileId` from the sign-in screen); a profile without
+a library or without a recovery code cannot be recovered. Profiles contain no plaintext secrets and are not transmitted to a
 service. Profile changes
 do not rewrite immutable raw sources, parsed values, corrections, approved
 revisions, reviewer labels or audit events. Role binding and workspace
@@ -300,12 +313,48 @@ password.
   a name is nonce and ciphertext; events carry only the event kind and IDs.
   Ciphertext is decrypted back before it is inserted.
 - Versions are immutable. A save whose content equals the current or the parent
-  version writes nothing; equal content is stored once per profile.
+  version writes nothing; equal content is stored once per profile. A generated
+  save (`library_save_generated`) with the same bytes but a new source
+  fingerprint still adds a generated version row (sharing the blob), so the link
+  status becomes `current`; same bytes and the same fingerprint add nothing
+  (`created: false`). When the document already exists, the caller passes
+  `expectedCurrentVersionId`; inside the write transaction a different current
+  version fails with «документ змінився після оновлення списку; оновіть список і
+  повторіть» (optimistic concurrency against editor saves and other windows).
+- Link status `detached`: the current version is a generated version other than
+  the link's `last_generated_version_id` (an older one picked from history).
+  `«Оновити всі»` skips it like manual edits. The fingerprint of a `library_table`
+  source is the HMAC of the table content only (headers, rows, sheet name), so
+  links made before this change show `source_changed` once.
+- Damaged content. If a stored ciphertext no longer decrypts, importing or
+  saving the same bytes again replaces it (migration 0014; the trigger still
+  forbids changing the row identity, refilling a shredded row or repairing while
+  the keyring is not `active`). The repair writes no audit event.
 - Password change and recovery are two steps: the new wrap is prepared outside
   any transaction (Argon2id is slow), then written in the caller's transaction
   together with the new sign-in hash, `WHERE generation = <old>`, so both change
   or neither does. Using a recovery code also issues a new code; the old one
-  stops working.
+  stops working in this database. From the sign-in screen `library_recover`
+  takes `profileId` (no session yet); on success that profile is signed in and
+  becomes the active one. A profile without a password or without an active
+  library gets «у профілю немає захищеної бібліотеки». The new code is returned
+  even when the status cannot be built, and when a lock or sign-out happened
+  while Argon2id was running, the code is returned but the library stays locked.
+- **Known limit C05: the data key is never rotated.** A password change, a
+  recovery and «Новий код відновлення» rewrap the same LDK. The old password or
+  code no longer opens this database, but together with any copy made earlier
+  (backup, file copy, snapshot) it yields the LDK and so decrypts every later
+  document of a newer copy too. The only remedy is a purge and destroying the
+  old copies.
+- **Known limit C06: no quota.** Versions are append-only and each may be up to
+  256 MiB; nothing caps the number of versions or the total size per profile,
+  and single versions cannot be deleted (only the whole library is purged).
+- `secure_delete`. Every pool that writes `easywar.db` (the main pool, the
+  migration pool and the restore pool) opens with `PRAGMA secure_delete = ON`, so freed cells and
+  pages are zeroed: old key wraps after a password change, reissue or recovery,
+  and content after a purge do not stay in free space of the file. No `VACUUM`
+  runs: free space left by versions before this change is not rewritten (no
+  released database had library keyrings yet).
 - Purge (crypto-shredding) runs in the caller's transaction before the profile is
   deleted: `secure_delete` is switched on, the keyring becomes `shredded` with no
   wraps, content `data` becomes `NULL`, links are removed, and a `purged` event and
@@ -314,13 +363,25 @@ password.
   with an active library fails in the `local_profiles_library_guard` trigger;
   `office_library::profile_delete_blocked` maps that error to «у профілю є
   захищена бібліотека; видаліть профіль разом з бібліотекою окремою дією».
+  **Known limit C07:** SQLite cannot guarantee physical erasure: the deleted
+  rollback journal of the purge transaction, file-system free blocks and SSD
+  remapping may still hold the wrap and ciphertext. Full-disk encryption of the
+  OS covers this.
 - Session and search. At most one library is unlocked in memory and it locks
   after 30 minutes without activity. The full-text index is a separate in-memory
   SQLite database (`sqlite::memory:`, FTS5) built after unlocking: at most 1 MB
   of text per document and 64 MB in total; text extraction stops at 2000 ZIP
   entries, 32 MB of XML per document (counted while inflating) or 10 seconds.
   Locking closes the index, and an index whose build started before a lock is
-  closed instead of installed.
+  closed instead of installed. The index is updated in the background after an
+  import, an editor save, a generated save and «Зробити поточною»; hidden
+  documents are filtered inside the FTS query (the 100-result cap counts only
+  allowed documents), and the apostrophes ' ’ ʼ ‘ ` are treated as one character.
+  A failed build is reported as `indexError` in `LibraryStatus`; a
+  `library_status` call at least 60 s later, or the next unlock, starts a new
+  build. Every lock, unlock, create, recovery, finished or failed index and
+  change of the damaged list is pushed to the main window as the `library-state`
+  event (payload = `LibraryStatus`).
 - **Deviation В-1 from the protection design:** encrypted content lives in
   `easywar.db` (`library_blobs.data`), not in separate files. A local backup
   (`VACUUM INTO`) and a restore therefore carry the library ciphertext together

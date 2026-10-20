@@ -17,8 +17,10 @@ import {
   moduleVisible,
   normalizeModules,
   passwordError,
+  recoveryFailure,
   slotsForModules,
   validateProfileStep,
+  validateRecoveryStep,
 } from '../src/profile-gate-core.js';
 import { consumeSplashSkip, requestSplashSkip, SPLASH_SKIP_KEY } from '../src/startup-splash-core.js';
 
@@ -125,6 +127,25 @@ test('every gate module points to an element that exists on the start screen', a
     assert.ok(html.includes(`${attr[1]}="${attr[2]}"`), `${module.id}: ${module.card} exists in index.html`);
     if (module.tile) assert.ok(html.includes(`id="${module.tile.slice(1)}"`), `${module.id}: ${module.tile} exists`);
   }
+});
+
+test('«Забули пароль?»: code and the new password twice are checked before the core is asked', () => {
+  assert.deepEqual(validateRecoveryStep({ code: ' ', password: 'пароль-1', confirm: 'пароль-1' }), { code: 'Введіть код відновлення.' });
+  assert.deepEqual(validateRecoveryStep({ code: 'КОД', password: '12345', confirm: '12345' }), { password: passwordError('12345') });
+  assert.deepEqual(validateRecoveryStep({ code: 'КОД', password: 'пароль-1', confirm: 'пароль-2' }), { confirm: 'Паролі не збігаються.' });
+  assert.deepEqual(validateRecoveryStep({ code: 'КОД', password: 'пароль-1', confirm: 'пароль-1' }), {});
+  assert.match(recoveryFailure('у профілю немає захищеної бібліотеки'), /^У цього профілю немає бібліотеки «Робочого середовища»/);
+  assert.equal(recoveryFailure('код відновлення не підходить до бібліотеки цього профілю'), 'Не вдалося відновити доступ: код відновлення не підходить до бібліотеки цього профілю');
+});
+
+test('sign-in screen offers «Забули пароль?» for a protected profile and signs in after the new code', async () => {
+  const code = await read('profile-gate.js');
+  assert.match(code, /needsPassword \? null : el\('div', \{ class: 'ew-gate-foot' \},\s*el\('button', \{ type: 'button', class: 'ew-gate-link', text: 'Забули пароль\?'/);
+  assert.match(code, /recovering && selected\.hasPassword \? recoveryForm\(\) : loginForm\(\)/);
+  assert.match(code, /await recoverProfileWithCode\(selected\.id, code\.value\.trim\(\), password\.value\)/);
+  assert.match(code, /showNewRecoveryCode\(recovered, \(\) => resolve\('signed-in'\)\)/);
+  assert.match(code, /'Я записав код — далі'/);
+  assert.match(code, /Код показується лише зараз: EasyWAR його не зберігає й більше не покаже\./);
 });
 
 test('gate code stays local: no network, no storage of passwords', async () => {

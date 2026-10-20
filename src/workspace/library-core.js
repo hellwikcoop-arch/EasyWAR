@@ -29,7 +29,7 @@ export const STATUS_LABELS = Object.freeze({
   source_changed: 'Джерело змінилося',
   edited: 'Ручні правки',
   edited_stale: 'Ручні правки на застарілих даних',
-  detached: 'Поточна версія не з джерела',
+  detached: 'Обрано версію з історії',
   source_error: 'Джерело недоступне',
 });
 
@@ -149,7 +149,8 @@ const SKIPPED_STATUSES = new Set(['edited', 'edited_stale', 'source_error', 'det
 /**
  * План «Оновити всі»: статуси library_link_statuses для документів зі списку →
  * { update: [id «Джерело змінилося»], skipped: [{ id, reason }] (ручні правки, джерело
- * недоступне, поточна версія не з джерела; reason — код статусу), upToDate: [id «Актуальний»] }.
+ * недоступне, поточну версію обрано вручну з історії — `detached`; reason — код статусу),
+ * upToDate: [id «Актуальний»] }.
  */
 export function regenerationPlan(items, statuses) {
   const byId = new Map((Array.isArray(statuses) ? statuses : []).filter(entry => entry && entry.itemId).map(entry => [entry.itemId, entry.status]));
@@ -166,9 +167,11 @@ export function regenerationPlan(items, statuses) {
 
 /**
  * Чи робити нову згенеровану версію поточною без питання: так, коли поточна — теж згенерована
- * (або версії ще немає); ні, коли поточна має ручні правки чи збережена з редактора вручну.
+ * (або версії ще немає); ні, коли поточна має ручні правки чи збережена з редактора вручну, або
+ * коли статус зв'язку `detached` — стару згенеровану версію обрали поточною вручну з історії.
  */
-export function shouldMakeCurrent(currentOrigin) {
+export function shouldMakeCurrent(currentOrigin, linkStatus = null) {
+  if (linkStatus === 'detached') return false;
   return currentOrigin === 'generated' || currentOrigin === null || currentOrigin === undefined;
 }
 

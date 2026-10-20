@@ -31,10 +31,12 @@ export function libraryApi(invoke) {
     exportArchive: () => invoke('library_export_archive'),
     openInEditor: versionId => invoke('library_open_in_editor', { versionId }),
     readVersion: versionId => invoke('library_read_version', { versionId }),
-    search: query => invoke('library_search', { query }),
+    search: (query, includeHidden = false) => invoke('library_search', { query, includeHidden }),
     sourceData: (sourceKind, params) => invoke('library_source_data', { sourceKind, params }),
-    saveGenerated: ({ itemId, name, templateVersionId, sourceKind, params, fingerprint, ext, bytes, makeCurrent }) =>
-      invoke('library_save_generated', { itemId, name, templateVersionId, sourceKind, params, fingerprint, ext, bytes, makeCurrent }),
+    saveGenerated: ({ itemId, name, templateVersionId, sourceKind, params, fingerprint, ext, bytes, makeCurrent, expectedCurrentVersionId = null }) =>
+      invoke('library_save_generated', {
+        itemId, name, templateVersionId, sourceKind, params, fingerprint, ext, bytes, makeCurrent, expectedCurrentVersionId,
+      }),
     linkStatuses: () => invoke('library_link_statuses'),
     unlink: itemId => invoke('library_unlink', { itemId }),
     recover: (code, newPassword) => invoke('library_recover', { code, newPassword }),
@@ -60,6 +62,23 @@ const SCREENS = new Set(['no_profile', 'no_password', 'none', 'locked', 'unlocke
 /** Екран вкладки за відповіддю library_status: стан або 'unknown' (зламана відповідь). */
 export function libraryScreen(status) {
   return SCREENS.has(status?.state) ? status.state : 'unknown';
+}
+
+/**
+ * Підсумок «Створити бібліотеку» (`kind` 'created') чи відновлення кодом ('recovered') за статусом
+ * відповіді → { text, tone }. Якщо посеред дії профіль заблокували чи з нього вийшли, Rust усе одно
+ * віддає код відновлення, але бібліотека лишається заблокованою (статус не `unlocked`).
+ */
+export function keyActionResult(kind, status) {
+  const unlocked = libraryScreen(status) === 'unlocked';
+  if (kind === 'created') {
+    return unlocked
+      ? { text: 'Бібліотеку створено й розблоковано.', tone: 'ok' }
+      : { text: 'Бібліотеку створено, але поки вона створювалася, її заблоковано (блокування чи вихід із профілю). Розблокуйте її паролем профілю.', tone: 'error' };
+  }
+  return unlocked
+    ? { text: 'Новий пароль профілю задано, бібліотеку розблоковано.', tone: 'ok' }
+    : { text: 'Новий пароль профілю задано, але поки йшло відновлення, бібліотеку заблоковано. Розблокуйте її новим паролем профілю.', tone: 'error' };
 }
 
 /** Текст помилки з invoke (рядок Rust) або Error. */
@@ -175,11 +194,14 @@ export async function readTemplateFields({ api, JSZip, item }) {
 /**
  * Створює документ із шаблону: байти шаблону (library_read_version) → дані джерела з відбитком
  * (library_source_data) → контекст полів → заповнений файл → library_save_generated. `itemId`
- * null — новий документ (з назвою `name`), інакше нова версія пов'язаного документа.
- * → { item, version, missing, warnings, used }.
+ * null — новий документ (з назвою `name`), інакше нова версія пов'язаного документа;
+ * `expectedCurrentVersionId` — поточна версія, на яку спиралося рішення (Rust відмовить, якщо
+ * документ тим часом змінився). → { item, version, created, missing, warnings, used }; `created`
+ * — false, коли Rust не створив нової версії (дані й шаблон ті самі, повернуто наявну).
  */
 export async function generateDocument({
   api, JSZip, templateVersionId, ext, sourceKind, params, name = null, itemId = null, makeCurrent = true, now = new Date(),
+  expectedCurrentVersionId = null, lastGeneratedVersionId = null,
 }) {
   const template = toBytes(await api.readVersion(templateVersionId));
   const source = await api.sourceData(sourceKind, params);
@@ -195,16 +217,27 @@ export async function generateDocument({
     ext,
     bytes: bytesForInvoke(filled.bytes),
     makeCurrent,
+    expectedCurrentVersionId,
   });
-  return { item: saved?.item ?? null, version: saved?.version ?? null, missing: filled.missing, warnings: filled.warnings, used: filled.used };
+  const version = saved?.version ?? null;
+  // Rust може повернути наявну версію з тим самим вмістом замість нової (тоді її id — останньої
+  // згенерованої до виклику); поле `created`, якщо воно є у відповіді, точніше.
+  const created = typeof saved?.created === 'boolean'
+    ? saved.created
+    : Boolean(version) && (!lastGeneratedVersionId || version.id !== lastGeneratedVersionId);
+  return { item: saved?.item ?? null, version, created, missing: filled.missing, warnings: filled.warnings, used: filled.used };
 }
 
 /**
  * «Оновити з джерела» для пов'язаного документа: той самий шаблон і параметри зв'язку, свіжі дані.
- * Поточною нова версія стає сама лише тоді, коли поточна не має ручних правок (shouldMakeCurrent);
- * інакше вона лягає в історію (madeCurrent: false), а вибір — за користувачем.
+ * Поточною нова версія стає сама лише тоді, коли поточна не має ручних правок і не обрана вручну
+ * з історії (shouldMakeCurrent, `status` — статус зв'язку); інакше вона лягає в історію
+ * (madeCurrent: false), а вибір — за користувачем. Rust отримує поточну версію, на якій ґрунтується
+ * рішення, і відмовляє, якщо документ тим часом змінився (наприклад, збережено з редактора).
  */
-export async function regenerateItem({ api, JSZip, item, now = new Date(), makeCurrent = shouldMakeCurrent(item?.currentOrigin) }) {
+export async function regenerateItem({
+  api, JSZip, item, now = new Date(), status = null, makeCurrent = shouldMakeCurrent(item?.currentOrigin, status),
+}) {
   if (!item?.link) throw new Error('Документ не пов’язаний із джерелом даних.');
   const ext = templateExtForItem(item);
   if (!ext) throw new Error('Невідомий формат шаблону пов’язаного документа.');
@@ -219,40 +252,89 @@ export async function regenerateItem({ api, JSZip, item, now = new Date(), makeC
     itemId: item.id,
     makeCurrent,
     now,
+    expectedCurrentVersionId: item.currentVersionId ?? null,
+    lastGeneratedVersionId: item.link.lastGeneratedVersionId ?? null,
   });
-  return { ...result, madeCurrent: Boolean(makeCurrent || result.version?.current) };
+  return { ...result, madeCurrent: Boolean(result.version?.current) };
 }
+
+const MAX_UPDATE_ROUNDS = 5;
+
+// Документи, побудовані на таблиці з бібліотеки, оновлюються після самої таблиці: інакше вони
+// беруть її стару версію. Порядок списку зберігається, цикли зв'язків не зациклюють.
+function dependencyOrder(ids, byId) {
+  const pending = new Set(ids);
+  const ordered = [];
+  const visiting = new Set();
+  const visit = id => {
+    if (!pending.has(id) || visiting.has(id)) return;
+    visiting.add(id);
+    const link = byId.get(id)?.link;
+    const source = link?.sourceKind === 'library_table' ? link.params?.itemId : null;
+    if (source) visit(source);
+    visiting.delete(id);
+    if (pending.delete(id)) ordered.push(id);
+  };
+  for (const id of ids) visit(id);
+  return ordered;
+}
+
+const isTableSource = (id, items) =>
+  items.some(item => item?.link?.sourceKind === 'library_table' && item.link.params?.itemId === id);
 
 /**
  * «Оновити всі»: за планом regenerationPlan оновлює по черзі документи «Джерело змінилося»
- * (документи з ручними правками не чіпає ніколи), решту пов'язаних рахує пропущеними.
- * Блокування бібліотеки зупиняє оновлення (помилка йде далі). `onProgress(index, total, item)`.
- * → { plan, results: [{ id, name, outcome, reason?, error?, missing? }], summary }.
+ * (документи з ручними правками й обрані вручну з історії не чіпає ніколи), решту пов'язаних
+ * рахує пропущеними. Документ на таблиці з бібліотеки оновлюється після самої таблиці; коли
+ * оновлена таблиця є джерелом інших документів, статуси читаються знову й черговий прохід
+ * оновлює документи, що застаріли через неї (до 5 проходів). Блокування бібліотеки зупиняє
+ * оновлення (помилка йде далі). `onProgress(index, total, item)`.
+ * → { plan, results: [{ id, name, outcome, reason?, error?, missing? }], remaining, summary };
+ * `remaining` — скільки документів після оновлення досі «Джерело змінилося».
  */
 export async function regenerateAll({ api, JSZip, items, statuses, now = new Date(), onProgress = () => {} }) {
-  const list = Array.isArray(items) ? items : [];
+  let list = Array.isArray(items) ? items : [];
   const plan = regenerationPlan(list, statuses);
-  const byId = new Map(list.map(item => [item.id, item]));
   const results = [];
-  for (const [index, id] of plan.update.entries()) {
-    const item = byId.get(id);
-    if (!item || !shouldMakeCurrent(item.currentOrigin)) {
-      results.push({ id, name: item?.name ?? id, outcome: 'skipped', reason: 'edited' });
-      continue;
+  const attempted = new Set();
+  let queue = plan.update;
+  let stale = null; // застарілі за останнім перечитуванням статусів, ще не оновлені
+  for (let round = 0; queue.length && round < MAX_UPDATE_ROUNDS; round += 1) {
+    const byId = new Map(list.map(item => [item.id, item]));
+    const ordered = dependencyOrder(queue, byId);
+    let feedsOthers = false;
+    for (const [index, id] of ordered.entries()) {
+      attempted.add(id);
+      const item = byId.get(id);
+      if (!item || !shouldMakeCurrent(item.currentOrigin)) {
+        results.push({ id, name: item?.name ?? id, outcome: 'skipped', reason: 'edited' });
+        continue;
+      }
+      onProgress(index, ordered.length, item);
+      try {
+        const result = await regenerateItem({ api, JSZip, item, now, makeCurrent: true });
+        results.push({ id, name: item.name, outcome: 'updated', missing: result.missing, warnings: result.warnings });
+        stale?.delete(id);
+        if (isTableSource(id, list)) feedsOthers = true;
+      } catch (error) {
+        if (isLockedError(error)) throw error;
+        results.push({ id, name: item.name, outcome: 'error', error: errorText(error) });
+      }
     }
-    onProgress(index, plan.update.length, item);
-    try {
-      const result = await regenerateItem({ api, JSZip, item, now, makeCurrent: true });
-      results.push({ id, name: item.name, outcome: 'updated', missing: result.missing, warnings: result.warnings });
-    } catch (error) {
-      if (isLockedError(error)) throw error;
-      results.push({ id, name: item.name, outcome: 'error', error: errorText(error) });
-    }
+    if (!feedsOthers) break;
+    const [freshItems, freshStatuses] = await Promise.all([api.list(true), api.linkStatuses()]);
+    list = Array.isArray(freshItems) ? freshItems : list;
+    const next = regenerationPlan(list, freshStatuses);
+    stale = new Set(next.update);
+    queue = next.update.filter(id => !attempted.has(id));
   }
+  const remaining = stale ? stale.size : null;
+  const byId = new Map(list.map(item => [item.id, item]));
   for (const entry of plan.skipped) {
     results.push({ id: entry.id, name: byId.get(entry.id)?.name ?? entry.id, outcome: 'skipped', reason: entry.reason });
   }
-  return { plan, results, summary: summarizeBulk(results) };
+  const summary = summarizeBulk(results);
+  return { plan, results, remaining, summary: remaining ? `${summary}; досі застарілих: ${remaining}` : summary };
 }
 
 const STALE_STATUSES = new Set(['source_changed', 'edited_stale']);
@@ -274,7 +356,7 @@ export function linkStatusMap(statuses) {
 const SKIP_REASONS = Object.freeze({
   edited: 'поточна версія має ручні правки — оновіть документ окремо («Оновити з джерела») і оберіть версію',
   edited_stale: 'ручні правки на застарілих даних — оновіть документ окремо й перенесіть правки',
-  detached: 'поточна версія не з джерела (обрана вручну з історії)',
+  detached: 'поточну версію обрано вручну з історії — оновіть документ окремо («Оновити з джерела») і оберіть версію',
   source_error: 'джерело недоступне',
 });
 
@@ -326,9 +408,11 @@ export function linkDescription(item, { modules = [], items = [] } = {}) {
   const label = sourceKindLabel(link.sourceKind) || String(link.sourceKind ?? '');
   const params = link.params && typeof link.params === 'object' ? link.params : {};
   if (link.sourceKind === 'approved_revisions') {
-    const from = params.from ? formatDateTime(params.from) : 'початку';
-    const to = params.to ? formatDateTime(params.to) : 'сьогодні';
-    return `${label} · ${params.from || params.to ? `${from} – ${to}` : 'увесь період'}`;
+    // Межа без дати — без обмеження з того боку (записи й «з майбутніми» датами теж беруться).
+    const from = params.from ? formatDateTime(params.from) : null;
+    const to = params.to ? formatDateTime(params.to) : null;
+    const period = from && to ? `${from} – ${to}` : from ? `з ${from}` : to ? `по ${to}` : 'увесь період';
+    return `${label} · ${period}`;
   }
   if (link.sourceKind === 'dashboard_module') {
     const module = modules.find(entry => entry?.id === params.moduleId);
@@ -353,6 +437,17 @@ export function searchRows(items, response) {
     if (item && !rows.some(row => row.item === item)) rows.push({ item, snippet: result.snippet ?? null, byName: Boolean(result.byName) });
   }
   return rows;
+}
+
+/**
+ * Відповідь library_export_archive → { path, skipped }: Rust повертає { path, skipped } (назви
+ * пошкоджених документів, яких немає в архіві) або null, коли збереження скасовано.
+ */
+export function archiveResult(response) {
+  if (typeof response === 'string') return { path: response || null, skipped: [] };
+  const path = typeof response?.path === 'string' && response.path ? response.path : null;
+  const skipped = Array.isArray(response?.skipped) ? response.skipped.filter(name => typeof name === 'string' && name) : [];
+  return { path, skipped };
 }
 
 /** Повідомлення після library_open_in_editor: EasyGreen відкриває файл сам, EasyDoc і EasySlide — з «Відкрити…». */
