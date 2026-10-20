@@ -417,6 +417,11 @@ by hand with narrow anchored patches (see `AGENTS.md`), then run
 без `public/`) стиль не несуть: якщо файлу немає, `ui-kit.js` знімає атрибут і ховає кнопку.
 Тести — `tests/heightwell-theme.test.mjs`.
 
+Поля дат: `ui-kit.js` (розділ 4) кладе поверх кожного `input[type=date]` текстове поле `.ew-date-t`
+з форматом дд.мм.рррр, а сам `input[type=date]` (`.ew-date-n`) лишає для значення ISO, подій
+`input`/`change` і календаря. Обробники модулів не змінюються; присвоєння `input.value` оновлює текст.
+Розбір дати — `window.EWDate` (тест `tests/ui-kit-date.test.mjs`).
+
 `artillery.html` теж підключає `ui-kit.css`/`ui-kit.js` (`data-ew-module="artillery"`), але має власні токени в
 `artillery.css`: блок «Спільний вигляд дашбордів» у кінці файлу перетворює вкладки на бічне меню
 (CSS через `body:has(#tabs:not([hidden]))`, від 900 px; нижче — рядок вкладок із прокруткою), перемальовує
