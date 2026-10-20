@@ -17,6 +17,7 @@ import {
   cloudLayers,
   compassPoint,
   directionText,
+  towardDegrees,
   mmHgFromHpa,
   pressureFromInput,
   pressureText,
@@ -239,7 +240,11 @@ test('румби, тиск у мм рт. ст. і тиск з поля введ�
   assert.equal(compassPoint(359), 'Пн');
   assert.equal(compassPoint(-90), 'Зх');
   assert.equal(compassPoint(null), '');
-  assert.equal(directionText(135.4), '135° ПдСх');
+  assert.equal(directionText(135.4), '315° ПнЗх', 'показується, куди дме');
+  assert.equal(towardDegrees(200), 20);
+  assert.equal(towardDegrees(180), 0);
+  assert.equal(towardDegrees(null), null);
+  assert.equal(directionText(null), '');
   assert.equal(mmHgFromHpa(1013.25), 760);
   assert.equal(pressureText(1002.4), '1002,4 гПа · 752 мм рт. ст.');
   assert.equal(pressureText(null), '—');
@@ -295,21 +300,21 @@ test('онлайн-спостереження: верхня межа, тиск, 
   assert.equal(observation.windsAloft.length, 7);
 
   const view = observationView(observation, NOW);
+  assert.equal(view.hasUpper, true);
   assert.equal(plain(view.upper), '≈ 1 340 м');
   assert.match(plain(view.upperNote), /оцінка за рівнями тиску · вище ще шар до 5 470 м/);
-  assert.equal(view.windGround, '245° ПдЗх · 5,5 м/с');
+  assert.equal(view.windGround, '65° ПнСх · 5,5 м/с');
   assert.equal(view.windNote, 'пориви 12 м/с · на 10 м');
   assert.equal(view.pressure, '996,2 гПа · 747 мм рт. ст.');
   assert.match(view.pressureNote, /до рівня моря 1014,6 гПа/);
-  assert.deepEqual({ ...view.windsAloft[3], height: plain(view.windsAloft[3].height) }, { height: '1 340 м', level: '850 гПа', direction: '260° Зх', speed: '14 м/с' });
+  assert.deepEqual({ ...view.windsAloft[3], height: plain(view.windsAloft[3].height) }, { height: '1 340 м', level: '850 гПа', direction: '80° Сх', speed: '14 м/с' });
 
   const low = observationFromOnline({ ...raw, temperature: 20, dewPoint: 6 }, NOW);
   assert.equal(low.lower, 1750);
   assert.equal(low.upper, 5470, 'перший шар нижчий за нижній край — береться наступний');
 
   const noLevels = observationView(observationFromOnline({ cloudCover: 70, temperature: 5, dewPoint: 3 }, NOW), NOW);
-  assert.equal(noLevels.upper, '—');
-  assert.equal(noLevels.upperNote, 'служба не дала даних по шарах');
+  assert.equal(noLevels.hasUpper, false, 'невідома верхня межа не показується');
   assert.deepEqual(noLevels.windsAloft, []);
 });
 
@@ -317,7 +322,7 @@ test('ручне введення: верхній край, вітер і тис
   const { observation } = manualObservation({ lower: '400', upper: '1900', wind: '7,5', windDirection: '360', pressure: '745' }, NOW);
   assert.equal(observation.upper, 1900);
   assert.equal(observation.wind, 7.5);
-  assert.equal(observation.windDirection, 0);
+  assert.equal(observation.windDirection, 180, 'зберігається «звідки»');
   assert.equal(observation.pressure, 993.3);
   const view = observationView(observation, NOW);
   assert.equal(plain(view.upper), '1 900 м');

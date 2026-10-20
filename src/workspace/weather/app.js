@@ -128,7 +128,7 @@ export async function mount(container, host) {
   const visibility = input('visibility', '6', 'decimal');
   const cover = input('cover', '7', 'numeric');
   const windSpeed = input('wind', '5', 'decimal');
-  const windDirection = input('windDirection', '250', 'numeric');
+  const windDirection = input('windDirection', '70', 'numeric');
   const pressure = input('pressure', '1013 або 760', 'decimal');
   const phenomenon = input('phenomenon', 'дощ, туман…');
   const manualSave = button('Зберегти', 'wx-primary');
@@ -138,7 +138,7 @@ export async function mount(container, host) {
     field('Видимість, км', visibility),
     field('Хмарність, бали з 10', cover),
     field('Вітер біля землі, м/с', windSpeed),
-    field('Напрям вітру, ° (звідки)', windDirection),
+    field('Напрям вітру, ° (куди дме)', windDirection),
     field('Тиск, гПа або мм рт. ст.', pressure),
     field('Явище', phenomenon),
   ];
@@ -205,7 +205,7 @@ export async function mount(container, host) {
     const table = el('table', 'wx-table');
     table.append(el('caption', 'wx-metric-label', 'Вітер на висотах (над землею)'));
     const head = el('tr');
-    for (const name of ['Висота', 'Напрям (звідки)', 'Швидкість']) head.append(el('th', '', name));
+    for (const name of ['Висота', 'Напрям (куди дме)', 'Швидкість']) head.append(el('th', '', name));
     table.append(el('thead'), el('tbody'));
     table.tHead.append(head);
     for (const row of rows) {
@@ -237,12 +237,9 @@ export async function mount(container, host) {
     card.dataset.tone = view.tone;
     heading.append(el('span', `wx-source${view.stale ? ' wx-stale' : ''}`, `${view.source}${view.age ? ` · отримано ${view.age}` : ''}${view.stale ? ' · застаріло' : ''}`));
     const metrics = el('div', 'wx-metrics');
-    metrics.append(
-      metric('Нижній край хмар', view.lower, view.lowerNote),
-      metric('Верхній край хмар', view.upper, view.upperNote),
-      metric('Видимість', view.visibility),
-      metric('Хмарність', view.cover, view.coverNote),
-    );
+    metrics.append(metric('Нижній край хмар', view.lower, view.lowerNote));
+    if (view.hasUpper) metrics.append(metric('Верхній край хмар', view.upper, view.upperNote));
+    metrics.append(metric('Видимість', view.visibility), metric('Хмарність', view.cover, view.coverNote));
     const ground = el('div', 'wx-metrics wx-metrics-wide');
     ground.append(
       metric('Вітер біля землі', view.windGround, view.windNote),

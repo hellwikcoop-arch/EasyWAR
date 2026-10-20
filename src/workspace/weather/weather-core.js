@@ -122,7 +122,7 @@ export function mmHgFromHpa(hpa) {
 
 const COMPASS = ['Пн', 'ПнСх', 'Сх', 'ПдСх', 'Пд', 'ПдЗх', 'Зх', 'ПнЗх'];
 
-/** Румб вітру (звідки дме) з градусів: 8 напрямків. */
+/** Румб з градусів: 8 напрямків. */
 export function compassPoint(degrees) {
   if (!finite(degrees)) return '';
   const normalized = ((degrees % 360) + 360) % 360;
@@ -226,7 +226,7 @@ export function pressureFromInput(input) {
 
 /**
  * Спостереження з ручного введення: нижній і верхній край хмар, м (0–20 000), видимість, км (0–100),
- * хмарність, бали 0–10, вітер біля землі, м/с (0–60) і напрям, ° (0–360), тиск (гПа або мм рт. ст.).
+ * хмарність, бали 0–10, вітер біля землі, м/с (0–60) і напрям, куди дме, ° (0–360), тиск (гПа або мм рт. ст.).
  * Порожнє поле — немає значення, але хоч одне має бути. Повертає `{ observation }` або `{ error }`.
  */
 export function manualObservation(form = {}, enteredAt = new Date()) {
@@ -244,7 +244,7 @@ export function manualObservation(form = {}, enteredAt = new Date()) {
   if (outside(visibility, 0, 100)) return { error: 'Видимість — кілометри від 0 до 100.' };
   if (outside(cover, 0, 10)) return { error: 'Хмарність — бали від 0 до 10.' };
   if (outside(wind, 0, 60)) return { error: 'Вітер — метри за секунду від 0 до 60.' };
-  if (outside(windDirection, 0, 360)) return { error: 'Напрям вітру — градуси від 0 до 360 (звідки дме).' };
+  if (outside(windDirection, 0, 360)) return { error: 'Напрям вітру — градуси від 0 до 360 (куди дме).' };
   if (Number.isNaN(pressure)) return { error: 'Тиск — гПа (850–1100) або мм рт. ст. (500–850).' };
   if (![lower, upper, visibility, cover, wind, windDirection, pressure].some(finite)) return { error: 'Заповніть хоча б одне значення.' };
   const at = new Date(enteredAt);
@@ -265,7 +265,8 @@ export function manualObservation(form = {}, enteredAt = new Date()) {
       lowCover: null,
       temperature: null,
       wind: finite(wind) ? wind : null,
-      windDirection: finite(windDirection) ? windDirection % 360 : null,
+      // Вводять «куди дме», зберігаємо метеорологічний «звідки», як у даних служби.
+      windDirection: finite(windDirection) ? (windDirection + 180) % 360 : null,
       gusts: null,
       pressure: finite(pressure) ? pressure : null,
       pressureMsl: null,
@@ -305,9 +306,18 @@ export function needsRefresh(observation, now = new Date()) {
 
 const decimal = (value, digits = 0) => new Intl.NumberFormat('uk-UA', { maximumFractionDigits: digits, useGrouping: false }).format(value);
 
-/** «250° Зх»; без напрямку — порожньо. */
-export function directionText(degrees) {
-  return finite(degrees) ? `${Math.round(degrees)}° ${compassPoint(degrees)}` : '';
+export function towardDegrees(fromDegrees) {
+  if (!finite(fromDegrees)) return null;
+  return Math.round((((fromDegrees + 180) % 360) + 360) % 360) % 360;
+}
+
+/**
+ * Напрям вітру для екрана — КУДИ дме (так попросив власник), у градусах і румбах: «65° ПнСх».
+ * Зберігається метеорологічний напрям «звідки», як його дає служба; тут лише показ.
+ */
+export function directionText(fromDegrees) {
+  const toward = towardDegrees(fromDegrees);
+  return toward == null ? '' : `${toward}° ${compassPoint(toward)}`;
 }
 
 /** «1002 гПа · 752 мм рт. ст.» */
@@ -323,18 +333,19 @@ export function observationView(observation, now = new Date()) {
   let lowerText = weatherText.height(observation.lower);
   if (observation.clearSky) lowerText = 'хмар немає';
   else if (observation.lowerEstimated && finite(observation.lower)) lowerText = `≈ ${lowerText}`;
+  // Верхню межу показуємо лише тоді, коли вона відома (так попросив власник).
+  const hasUpper = finite(observation.upper);
   let upperText = weatherText.height(observation.upper);
-  if (observation.clearSky) upperText = 'хмар немає';
-  else if (observation.upperEstimated && finite(observation.upper)) upperText = `≈ ${upperText}`;
+  if (hasUpper && observation.upperEstimated) upperText = `≈ ${upperText}`;
   const layers = Array.isArray(observation.layers) ? observation.layers : [];
   const higher = layers.filter(layer => layer.top > (finite(observation.upper) ? observation.upper : Infinity));
   let upperNote = observation.upperEstimated ? 'оцінка за рівнями тиску' : 'введено вручну';
-  if (observation.upperEstimated && !finite(observation.upper) && !observation.clearSky) upperNote = 'служба не дала даних по шарах';
   if (higher.length) upperNote += ` · вище ще шар до ${weatherText.height(higher[higher.length - 1].top)}`;
   const windParts = [directionText(observation.windDirection), finite(observation.wind) ? weatherText.wind(observation.wind) : ''].filter(Boolean);
   return {
     lower: lowerText,
     lowerNote: observation.lowerEstimated ? 'оцінка за точкою роси' : 'введено вручну',
+    hasUpper,
     upper: upperText,
     upperNote,
     windGround: windParts.length ? windParts.join(' · ') : '—',
