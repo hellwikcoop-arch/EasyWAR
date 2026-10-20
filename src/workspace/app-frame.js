@@ -1,46 +1,126 @@
 // Сторінка одного застосунку (app.html?app=<id>): завантажує <id>/app.js і викликає
-// mount(container, host). Якщо застосунок ще не підключено — показує заглушку «у розробці».
-// Зміни заголовка й позначки незбережених змін іде до оболонки через postMessage.
-import { appFromSearch, entryError, frameMessage, normalizeMounted } from './workspace-core.js';
+// mount(container, host). Поки застосунок запускається — екран «Підготовка редактора…» з
+// етапами; якщо запуск не вдався — помилка з «Спробувати ще раз»; якщо застосунок ще не
+// підключено — заглушка «у розробці». Зміни заголовка й позначки незбережених змін ідуть до
+// оболонки через postMessage.
+import { LOADING_STEPS, appFromSearch, branchFromSearch, entryError, frameMessage, normalizeMounted } from './workspace-core.js';
+import { appIcon, element as make } from './workspace-dom.js';
 import { browserFallback, createHost, findInvoke } from './workspace-host.js';
 import { entryLoader } from './workspace-registry.js';
 
-const container = document.getElementById('ws-container');
+document.documentElement.dataset.branch = branchFromSearch(location.search);
 
-function notice(app, heading, text) {
-  const box = document.createElement('section');
-  box.className = 'ws-stub';
-  const kind = document.createElement('span');
-  kind.className = 'ws-kind';
-  kind.textContent = app ? `${app.kind} · ${app.title}` : 'Робоче середовище';
-  const title = document.createElement('h1');
-  title.textContent = heading;
-  const body = document.createElement('p');
-  body.textContent = text;
-  box.append(kind, title, body);
-  container.replaceChildren(box);
+const container = document.getElementById('ws-container');
+const stateArea = document.getElementById('ws-state');
+
+const element = (tag, className, text) => make(document, tag, className, text);
+
+function backToOffice() {
+  try {
+    window.parent?.EW_WORKSPACE?.requestClose?.();
+  } catch (error) {
+    console.error(error);
+  }
 }
+
+function showState(panel) {
+  stateArea.replaceChildren(panel);
+  stateArea.hidden = false;
+}
+
+function hideState() {
+  stateArea.hidden = true;
+  stateArea.replaceChildren();
+}
+
+function loadingPanel() {
+  const panel = element('div', 'ws-state-panel');
+  panel.setAttribute('role', 'status');
+  panel.setAttribute('aria-live', 'polite');
+  const spinner = element('span', 'ws-spinner');
+  spinner.setAttribute('aria-hidden', 'true');
+  const steps = element('ol', 'ws-loading-steps');
+  steps.setAttribute('aria-label', 'Етапи запуску');
+  const items = LOADING_STEPS.map(text => element('li', 'ws-step', text));
+  steps.append(...items);
+  panel.append(
+    spinner,
+    element('p', 'ws-state-eyebrow', 'ВІДКРИТТЯ ЗАСТОСУНКУ'),
+    element('h1', '', 'Підготовка редактора…'),
+    element('p', 'ws-state-description', 'Це може тривати кілька секунд.'),
+    steps,
+  );
+  return {
+    panel,
+    step(index) {
+      items.forEach((item, position) => {
+        item.className = position < index ? 'ws-step done' : position === index ? 'ws-step current' : 'ws-step';
+        if (position === index) item.setAttribute('aria-current', 'step');
+        else item.removeAttribute('aria-current');
+      });
+    },
+  };
+}
+
+function errorPanel(app, text) {
+  const panel = element('div', 'ws-state-panel ws-error-panel');
+  panel.setAttribute('role', 'alert');
+  const symbol = element('span', 'ws-state-symbol ws-error-symbol', '!');
+  symbol.setAttribute('aria-hidden', 'true');
+  const retry = element('button', 'ws-button ws-button-primary ws-state-button', 'Спробувати ще раз');
+  retry.type = 'button';
+  retry.addEventListener('click', () => location.reload());
+  panel.append(
+    symbol,
+    element('p', 'ws-state-eyebrow', 'ПОМИЛКА ЗАПУСКУ'),
+    element('h1', '', app ? `Не вдалося запустити ${app.title}` : 'Не вдалося запустити застосунок'),
+    element('p', 'ws-state-description', text),
+    retry,
+  );
+  return panel;
+}
+
+function stubPanel(app, eyebrow, heading, text) {
+  const panel = element('div', 'ws-state-panel');
+  if (app) {
+    const symbol = element('span', 'ws-state-symbol ws-underdev-symbol');
+    symbol.setAttribute('aria-hidden', 'true');
+    symbol.append(appIcon(document, app.id, 48));
+    panel.append(symbol);
+  }
+  const back = element('button', 'ws-button ws-state-button', '← Розділи');
+  back.type = 'button';
+  back.addEventListener('click', backToOffice);
+  panel.append(element('p', 'ws-state-eyebrow', eyebrow), element('h1', '', heading), element('p', 'ws-state-description', text), back);
+  return panel;
+}
+
+const RETRY_TEXT = 'Редактор не відкрився. Спробуйте ще раз. Якщо помилка повториться, поверніться до Офісу.';
 
 async function start() {
   const app = appFromSearch(location.search);
   if (!app) {
-    notice(null, 'Застосунок не знайдено', 'Поверніться до робочого середовища й оберіть застосунок ще раз.');
+    showState(stubPanel(null, 'НЕ ЗНАЙДЕНО', 'Застосунок не знайдено', 'Поверніться до робочого середовища й оберіть застосунок ще раз.'));
     return;
   }
   document.title = `${app.title} — EasyWAR`;
   const load = entryLoader(app.id);
   if (!load) {
-    notice(app, `${app.title} у розробці`, 'Застосунок ще не підключено до EasyWAR. Щойно його буде готово, він відкриватиметься тут, без інтернету, а файли відкриватимуться й зберігатимуться через EasyWAR.');
+    showState(stubPanel(app, 'У РОЗРОБЦІ', `${app.title} поки недоступний`, 'Редактор ще не підключено. Поверніться до Офісу та оберіть інший застосунок.'));
     return;
   }
+  const loading = loadingPanel();
+  loading.step(0);
+  showState(loading.panel);
   let mounted = null;
   try {
     const entry = await load();
     const problem = entryError(entry);
     if (problem) {
-      notice(app, `${app.title} не запустився`, problem);
+      showState(errorPanel(app, problem));
       return;
     }
+    loading.step(1);
     const host = createHost({
       appEntry: app,
       invoke: findInvoke(window),
@@ -53,9 +133,12 @@ async function start() {
     mounted = normalizeMounted(await entry.mount(container, host));
     // Оболонка питає перед закриттям, чи є незбережені зміни (крім host.setDirty).
     window.EW_WORKSPACE_APP = Object.freeze({ isDirty: () => mounted.isDirty() });
+    loading.step(2);
+    hideState();
   } catch (error) {
     console.error(error);
-    notice(app, `${app.title} не запустився`, 'Під час запуску застосунку сталася помилка. Закрийте його й спробуйте ще раз.');
+    container.replaceChildren();
+    showState(errorPanel(app, RETRY_TEXT));
     return;
   }
   window.addEventListener('pagehide', () => {
