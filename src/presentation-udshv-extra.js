@@ -5,50 +5,34 @@
 import { inRange, sumGroup } from './own-losses-core.js';
 import { isoFromDay, dayNumber, longDate, rollingRange } from './presentation-format.js';
 
-/** Категорії діаграми «Типи уражених цілей»: за назвою стовпця таблиці УДШВ, перший збіг виграє.
-    Що не збіглось і є технікою — «ОВТ»; об'єкти поза переліком у діаграму не потрапляють. Шаблони правляться тут або в options.config.targetTypes. */
-export const DEFAULT_TARGET_TYPES = [
-  { label: 'ПУ БпЛА', pattern: 'пу бпла' },
-  { label: 'КСП', pattern: 'ксп' },
-  { label: 'Артсистеми', pattern: 'арт|гаубиц|сау|(^|[^а-яіїєґ0-9])2с\\d|м777|д-30|гармат|міномет|рсзв|град|ураган|смерч|коксан' },
-  { label: 'ІФС', pattern: 'іфс|фортиф|укритт|бліндаж|опорн' },
-];
-const EQUIPMENT_LABEL = 'ОВТ';
 const normName = name => String(name || '').toLowerCase().replace(/\s+/g, ' ').trim();
 
-/** Категорія стовпця або '' (поза діаграмою). classify — classifyTarget з presentation-core: 'equipment' | 'object'. */
-export function targetTypeOf(name, classify, config) {
-  const text = normName(name);
-  for (const { label, pattern } of config.targetTypes || DEFAULT_TARGET_TYPES) if (new RegExp(pattern, 'iu').test(text)) return label;
-  return classify(name, config) === 'equipment' ? EQUIPMENT_LABEL : '';
-}
+/** Артилерія противника в кругових діаграмах: стовпці групи «Втрати противника за категоріями» (перевіряється власником). */
+export const DEFAULT_ARTILLERY_CATEGORIES = ['Артилерія'];
 
-const metricsOf = (records, group) => {
+const categoryTotals = records => {
   const totals = new Map();
-  for (const r of records) for (const [id, v] of Object.entries(r.values)) if (id.startsWith(`${group}|`)) totals.set(id.slice(group.length + 1), (totals.get(id.slice(group.length + 1)) || 0) + v);
+  for (const r of records) for (const [id, v] of Object.entries(r.values)) if (id.startsWith('categories|')) totals.set(id.slice(11), (totals.get(id.slice(11)) || 0) + v);
   return totals;
 };
 
-/** Діаграма «Типи уражених цілей»: знищено й пошкоджено за категоріями (групи ЗНИЩЕНО, ПОШКОДЖЕНО таблиці УДШВ). Серії «не уражено» в таблиці УДШВ немає. */
-export function targetTypeChart(records, classify, config) {
-  const labels = [EQUIPMENT_LABEL, ...(config.targetTypes || DEFAULT_TARGET_TYPES).map(t => t.label)];
-  const count = group => {
-    const sums = Object.fromEntries(labels.map(l => [l, 0]));
-    for (const [name, total] of metricsOf(records, group)) { const label = targetTypeOf(name, classify, config); if (label) sums[label] += total; }
-    return labels.map(l => sums[l]);
-  };
-  return { id: 'target-types', title: 'Типи уражених цілей', horizontal: true, categories: labels, series: [{ name: 'знищено', values: count('destroyed') }, { name: 'пошкоджено', values: count('damaged') }] };
+/** Діаграма «Типи уражених цілей»: стовпці групи «Втрати противника за категоріями» таблиці УДШВ (артилерія, міномети, РЕБ, ПУ/КП/КСП, ПУ БпЛА,
+    АТ різних типів, танки/ББМ, переправа, склади БК/ПММ, ІФС), за спаданням. Лічильник один на категорію, поділу на знищено/пошкоджено в таблиці немає. */
+export function targetTypeChart(records) {
+  const rows = [...categoryTotals(records)].filter(([, total]) => total > 0).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'uk'));
+  return { id: 'target-types', title: 'Типи уражених цілей', horizontal: true, categories: rows.map(([name]) => name), series: [{ name: 'Уражено', values: rows.map(([, total]) => total) }] };
 }
 
-/** Артилерія противника (знищено + пошкоджено) за записами таблиці УДШВ. */
-export function enemyArtillery(records, classify, config) {
+/** Артилерія противника за записами таблиці УДШВ. */
+export function enemyArtillery(records, config = {}) {
+  const names = new Set((config.artilleryCategories || DEFAULT_ARTILLERY_CATEGORIES).map(normName));
   let total = 0;
-  for (const group of ['destroyed', 'damaged']) for (const [name, n] of metricsOf(records, group)) if (targetTypeOf(name, classify, config) === 'Артсистеми') total += n;
+  for (const [name, n] of categoryTotals(records)) if (names.has(normName(name))) total += n;
   return total;
 }
 
 /** Дві кругові діаграми: попередні 7 діб і останні 7 діб. Наші арт. втрати — знищені + пошкоджені з таблиці НАШІ ВТРАТИ. */
-export function artilleryPies({ workbook, own, anchor, classify, config }) {
+export function artilleryPies({ workbook, own, anchor, config }) {
   const last = rollingRange(anchor, 7);
   const before = { from: isoFromDay(dayNumber(last.from) - 7), to: isoFromDay(dayNumber(last.from) - 1) };
   const ownRecords = own.records.filter(r => !r.suspect);
@@ -56,7 +40,7 @@ export function artilleryPies({ workbook, own, anchor, classify, config }) {
     title: `Втрати артилерії противника в порівнянні з нашими за період ${longDate(range.from)}–${longDate(range.to)}`,
     labels: ['противник', 'наші втрати'],
     values: [
-      enemyArtillery(workbook.records.filter(r => inRange(r, range)), classify, config),
+      enemyArtillery(workbook.records.filter(r => inRange(r, range)), config),
       sumGroup(ownRecords.filter(r => inRange(r, range)), 'destroyed') + sumGroup(ownRecords.filter(r => inRange(r, range)), 'damaged'),
     ],
   }));

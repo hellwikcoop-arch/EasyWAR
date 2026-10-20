@@ -109,11 +109,11 @@ function drawTargetTypes(slide, theme, pptx, chart) {
   const data = chart.series.map(s => ({ name: s.name, labels: chart.categories, values: s.values }));
   slide.addChart(pptx.charts.BAR, data, {
     x: 8.0, y: PANEL_Y + 0.4, w: 4.74, h: 3.35, barDir: 'bar', barGrouping: 'clustered', barGapWidthPct: 45,
-    chartColors: [theme.series[0], theme.series[1]],
+    chartColors: [theme.series[0]],
     catAxisLabelFontFace: theme.font, catAxisLabelFontSize: 9, catAxisLabelColor: theme.muted, catAxisOrientation: 'maxMin',
     valAxisLabelFontFace: theme.font, valAxisLabelFontSize: 8, valAxisLabelColor: theme.muted,
     valGridLine: { color: theme.line, size: 0.5 }, catGridLine: { style: 'none' }, catAxisLineShow: false, valAxisLineShow: false,
-    showLegend: true, legendPos: 'b', legendFontFace: theme.font, legendFontSize: 9, legendColor: theme.muted,
+    showLegend: false,
     showValue: true, dataLabelFontFace: theme.font, dataLabelFontSize: 8, dataLabelColor: theme.text,
   });
 }

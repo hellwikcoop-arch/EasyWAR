@@ -464,7 +464,7 @@ function windowSlide(workbook, period, units, anchor, config, all, prune = false
     notes,
   };
   // Слайди періодів УДШВ: праворуч діаграма «Типи уражених цілей», текст висновків іде в анотації слайда.
-  if (!prune) { slide.targetChart = targetTypeChart(model.records, classifyTarget, config); slide.annotation = annotationOf(slide); }
+  if (!prune) { slide.targetChart = targetTypeChart(model.records); slide.annotation = annotationOf(slide); }
   return slide;
 }
 
@@ -497,7 +497,7 @@ export function buildDeck(sourceWorkbook, options = {}) {
   if (options.ownLosses) {
     const ownSlide = buildOwnLossesSlide(options.ownLosses, { anchor, custom: options.custom, config });
     // Праворуч дві кругові діаграми «Втрати артилерії противника в порівнянні з нашими»; текст висновків іде в анотації.
-    slides.push({ ...ownSlide, artilleryPies: artilleryPies({ workbook, own: options.ownLosses, anchor, classify: classifyTarget, config }), annotation: annotationOf(ownSlide) });
+    slides.push({ ...ownSlide, artilleryPies: artilleryPies({ workbook, own: options.ownLosses, anchor, config }), annotation: annotationOf(ownSlide) });
   } else if (options.reserveOwnLosses) {
     slides.push({
       id: 'own-losses', title: 'Власні втрати', status: 'no_source',
