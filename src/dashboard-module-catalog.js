@@ -32,6 +32,7 @@ import {
   visibleColumnKeys,
 } from './dashboard-module-catalog-core.js';
 import { chartModel } from './dashboard-module-charts-core.js';
+import { MINE_LABEL, MINE_SLOT } from './personal-dashboard.js';
 import { mountChart } from './dashboard-module-charts.js';
 import {
   buildImport,
@@ -99,12 +100,59 @@ function initialize() {
   toolbar.prepend(openButton);
 
   const host = el('section', { class: 'ewmc-host', 'aria-labelledby': 'ewmc-host-title' });
-  // «Мій дашборд» завжди стоїть під основним дашбордом: УДШВ малює свій вміст у той самий контейнер
-  // уже після цього скрипта, і без перенесення модулі опинялися б над ним.
-  const keepHost = () => { if (dashboard.lastElementChild !== host) dashboard.append(host); };
-  const observer = new MutationObserver(keepHost);
-  observer.observe(dashboard, { childList: true });
-  keepHost();
+  // «Мій дашборд» — окрема вкладка лівого меню, а не блок під дашбордом. ПВК і УДШВ самі малюють вкладку
+  // й порожню сторінку з позначкою MINE_SLOT; у ПС і РВ вкладку в бічне меню додає цей скрипт (legacy-сторінку
+  // не змінюємо). Секція живе лише там, де відкрита вкладка, тож дашборди її не бачать.
+  const mineButton = el('button', { type: 'button', class: 'snav-b ewmc-mine-tab', 'aria-pressed': 'false', 'data-action': 'open-my-dashboard' },
+    el('span', { class: 'ewmc-mine-icon', 'aria-hidden': 'true' }), el('span', { text: MINE_LABEL }));
+  let legacyMine = false;
+  const setLegacyMine = open => {
+    legacyMine = open;
+    document.body.classList.toggle('ewmc-mine-open', open);
+    mineButton.setAttribute('aria-pressed', String(open));
+    mineButton.classList.toggle('on', open);
+    placeHost();
+    if (open) {
+      markLegacyNav();
+      window.scrollTo({ top: 0 });
+    }
+  };
+  mineButton.addEventListener('click', () => setLegacyMine(true));
+  // Підсвітка бічного меню: поки відкрито «Мій дашборд», інші пункти не позначені, а повзунок стоїть на ньому.
+  function markLegacyNav() {
+    const nav = mineButton.parentElement;
+    if (!legacyMine || !nav) return;
+    // Лише справжні зміни: кожна зміна класу знову будить спостерігача.
+    for (const other of nav.querySelectorAll('.snav-b.on')) if (other !== mineButton) other.classList.remove('on');
+    if (!mineButton.classList.contains('on')) mineButton.classList.add('on');
+    nav.style.setProperty('--iy', `${mineButton.offsetTop}px`);
+    nav.style.setProperty('--ih', `${mineButton.offsetHeight}px`);
+  }
+  function placeHost() {
+    const slot = dashboard.querySelector(`[${MINE_SLOT}]`);
+    const nav = dashboard.querySelector(':scope > .side .snav');
+    if (nav && !nav.contains(mineButton)) {
+      nav.insertBefore(mineButton, nav.querySelector(':scope > .snav-entry'));
+      // Будь-який інший пункт меню повертає до дашборда.
+      nav.addEventListener('click', event => {
+        const button = event.target.closest('.snav-b');
+        if (legacyMine && button && button !== mineButton) setLegacyMine(false);
+      });
+    }
+    // Таблицю закрили (бічне меню сховане) або відкрили ПВК: особиста вкладка ПС/РВ закривається разом із меню.
+    if (legacyMine && (!nav || nav.closest('.side')?.hidden)) {
+      legacyMine = false;
+      document.body.classList.remove('ewmc-mine-open');
+      mineButton.setAttribute('aria-pressed', 'false');
+      mineButton.classList.remove('on');
+    }
+    const target = slot || (legacyMine ? dashboard.querySelector(':scope > .dmain') : null);
+    if (target) { if (host.parentElement !== target) target.append(host); }
+    else if (host.isConnected) host.remove();
+  }
+  const observer = new MutationObserver(() => { placeHost(); markLegacyNav(); });
+  observer.observe(dashboard, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+  placeHost();
 
   const dialog = el('dialog', { class: 'ewmc-dialog', 'aria-labelledby': 'ewmc-dialog-title' });
   document.body.append(dialog);

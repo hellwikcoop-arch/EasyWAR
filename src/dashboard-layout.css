@@ -60,6 +60,8 @@
 .ud-nav button[data-nav="table"], .pvk-nav button[data-nav="table"] { --nav-icon: var(--ic-grid); }
 .ud-nav button[data-nav="quality"], .pvk-nav button[data-nav="quality"] { --nav-icon: var(--ic-shield); }
 .pvk-nav button[data-nav="journal"] { --nav-icon: var(--ic-doc); }
+/* «Мій дашборд»: особисті модулі (personal-dashboard.js); іконка — з dashboard-module-catalog.css, запасна — документ. */
+.ud-nav button[data-nav="my-dashboard"], .pvk-nav button[data-nav="my-dashboard"] { --nav-icon: var(--ewmc-ic-mine, var(--ic-doc)); }
 .pvk-nav button[data-nav="АА"], .pvk-nav button[data-nav="ПС"] { --nav-icon: var(--ic-plane); }
 .pvk-nav button[data-nav="Об'єкти"] { --nav-icon: var(--ic-target); }
 

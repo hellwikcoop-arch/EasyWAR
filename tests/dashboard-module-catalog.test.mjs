@@ -1119,8 +1119,28 @@ test('a module card can be deleted through the local command after an inline con
   assert.match(css, /\.ewmc-host \[hidden\]\{display:none!important\}/, 'the hidden confirmation must not show through .ewmc-confirm{display:flex}');
 });
 
-test('«Мій дашборд» stays below the dashboard that renders into the same container later', async () => {
+test('«Мій дашборд» lives only on its own tab of the left menu', async () => {
   const source = await readFile(new URL('../src/dashboard-module-catalog.js', import.meta.url), 'utf8');
-  assert.match(source, /dashboard\.lastElementChild !== host\) dashboard\.append\(host\)/);
-  assert.match(source, /observer\.observe\(dashboard, \{ childList: true \}\)/);
+  // ПВК і УДШВ малюють гніздо самі; ПС і РВ отримують пункт бічного меню від каталогу.
+  assert.match(source, /dashboard\.querySelector\(`\[\$\{MINE_SLOT\}\]`\)/);
+  assert.match(source, /nav\.insertBefore\(mineButton, nav\.querySelector\(':scope > \.snav-entry'\)\)/);
+  assert.match(source, /else if \(host\.isConnected\) host\.remove\(\)/, 'outside its tab the section is not on the page');
+  for (const page of ['udshv-dashboard.js', 'pvk-dashboard.js']) {
+    const dash = await readFile(new URL(`../src/${page}`, import.meta.url), 'utf8');
+    assert.match(dash, /personalNavItem\(\)/, page);
+    assert.match(dash, /\[MINE_SLOT\]: ''/, page);
+  }
+  const css = await readFile(new URL('../src/dashboard-module-catalog.css', import.meta.url), 'utf8');
+  assert.match(css, /body\.ewmc-mine-open #view-dash>\.dmain>:not\(\.ewmc-host\)\{display:none!important\}/);
+});
+
+test('the personal tab exists only where the local database does', async () => {
+  const { MINE_LABEL, hasPersonalDashboard, personalNavItem } = await import('../src/personal-dashboard.js');
+  const invoke = async () => null;
+  assert.equal(MINE_LABEL, 'Мій дашборд');
+  assert.equal(hasPersonalDashboard({}), false);
+  assert.equal(personalNavItem({}), null);
+  assert.equal(hasPersonalDashboard({ __TAURI_INTERNALS__: { invoke } }), true);
+  assert.equal(hasPersonalDashboard({ parent: { __TAURI_INTERNALS__: { invoke } } }), true, 'a module page inside the launcher frame');
+  assert.deepEqual(personalNavItem({ __TAURI_INTERNALS__: { invoke } }), ['my-dashboard', 'Мій дашборд']);
 });
