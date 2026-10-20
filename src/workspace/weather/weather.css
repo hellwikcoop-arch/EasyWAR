@@ -1,0 +1,95 @@
+/* «Погода» у «Робочому середовищі» → «Обстановка». Токени — з workspace.css (темний вигляд);
+   розкладка й стани — за пакетом референсів власника (екрани S01–S11, B-components). Акцент — роду
+   військ з оболонки; кольори небезпеки свої й від роду не залежать (жовтий «обережно», зелений «без обмежень»). */
+.wx-root{--fg:var(--text);--dim:var(--muted);--faint:var(--weak);--wx-warn:#d8c48e;--wx-ok:#5a9e6f;--wx-tile:var(--raised);max-width:1180px;margin:0 auto;padding:16px;display:grid;align-content:start;gap:14px;font:400 14px/1.5 var(--sans);color:var(--fg)}
+.wx-head{display:flex;flex-wrap:wrap;align-items:flex-end;gap:8px 16px;padding-bottom:4px}
+.wx-brand{flex:none;width:48px;height:48px}
+.wx-brand svg{width:100%;height:100%;display:block}
+.wx-titles{flex:1 1 280px;display:grid;gap:2px}
+.wx-kicker{margin:0;font:600 11px/1.4 var(--mono);letter-spacing:.1em;color:var(--accent);text-transform:uppercase}
+.wx-head h1{margin:0;font:600 34px/1.15 var(--sans)}
+.wx-lead{margin:0;color:var(--dim);font-size:13px}
+.wx-mode{margin:0 0 4px;font:400 11px/1.4 var(--mono);letter-spacing:.08em;color:var(--faint);text-transform:uppercase}
+.wx-icon{display:inline-flex;flex:none;width:16px;height:16px;vertical-align:-3px}
+.wx-icon svg{width:100%;height:100%}
+.wx-icon-big{width:30px;height:30px;color:var(--fg)}
+.wx-controls{display:flex;flex-wrap:wrap;gap:14px 20px;padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+.wx-place{flex:1 1 300px;display:grid;gap:6px;align-content:start}
+.wx-place .wx-select{flex:1 1 200px;max-width:none}
+.wx-label,.wx-metric-label,.wx-sub{font:400 11px/1.4 var(--mono);letter-spacing:.1em;color:var(--faint);text-transform:uppercase}
+.wx-select,.wx-field input{font:inherit;color:var(--fg);background:var(--panel);border:1px solid var(--line-2);border-radius:8px;padding:6px 10px;min-height:34px}
+.wx-select{flex:1 1 220px;max-width:420px;font-weight:500}
+.wx-select:focus,.wx-field input:focus{border-color:var(--accent);outline:none}
+.wx-btn{font:500 13px/1.3 var(--sans);color:var(--fg);background:transparent;border:1px solid var(--line-2);border-radius:8px;padding:6px 14px;min-height:34px;cursor:pointer}
+.wx-btn:hover:not(:disabled),.wx-btn:focus-visible{border-color:var(--accent);outline:none}
+.wx-btn:disabled{opacity:.45;cursor:not-allowed}
+.wx-primary{border-color:var(--accent);background:var(--accent);color:var(--bg);font-weight:600}
+.wx-primary:hover:not(:disabled),.wx-primary:focus-visible{box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--accent)}
+.wx-btn:focus-visible{box-shadow:0 0 0 1px var(--accent)}
+.wx-quiet{border-color:var(--line);color:var(--dim)}
+.wx-net{flex:2 1 420px;display:grid;gap:8px;align-content:start;padding-left:20px;border-left:1px solid var(--line)}
+.wx-net-row{align-items:center}
+.wx-row{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px}
+.wx-toggle{display:inline-flex;align-items:center;gap:10px;cursor:pointer;font-weight:600}
+.wx-toggle input{appearance:none;flex:none;position:relative;width:34px;height:20px;margin:0;border-radius:999px;background:var(--line-2);cursor:pointer;transition:background .15s}
+.wx-toggle input::after{content:"";position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;background:var(--muted);transition:transform .15s,background .15s}
+.wx-toggle input:checked{background:var(--accent)}
+.wx-toggle input:checked::after{transform:translateX(14px);background:var(--bg)}
+.wx-toggle input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.wx-toggle input:disabled{opacity:.5;cursor:not-allowed}
+.wx-toggle-state{flex:1 1 auto;font:400 11px/1.4 var(--mono);color:var(--faint)}
+.wx-toggle-state[data-on="1"]{color:var(--accent)}
+.wx-disclosure,.wx-hint,.wx-source{margin:0;font:400 12px/1.5 var(--mono);color:var(--dim)}
+.wx-stale{color:var(--danger)}
+.wx-card{display:grid;gap:12px;padding:20px 22px;border:1px solid var(--line);border-left:4px solid var(--wx-ok);border-radius:14px;background:var(--panel)}
+.wx-card[data-tone="warn"]{border-left-color:var(--wx-warn)}
+.wx-card[data-tone="bad"]{border-left-color:var(--danger)}
+.wx-card-photo{position:relative;isolation:isolate;overflow:clip}
+.wx-card-photo::before{content:"";position:absolute;inset:-24px;z-index:-2;background:var(--wx-photo) center/cover no-repeat;filter:blur(6px) saturate(1.1)}
+.wx-card-photo::after{content:"";position:absolute;inset:0;z-index:-1;background:linear-gradient(180deg,color-mix(in srgb,var(--panel) 35%,transparent) 0,color-mix(in srgb,var(--panel) 72%,transparent) 180px,color-mix(in srgb,var(--panel) 90%,transparent) 100%)}
+.wx-card-photo .wx-metric{background:color-mix(in srgb,var(--wx-tile) 80%,transparent);border-color:rgba(255,255,255,.08)}
+.wx-card-photo .wx-card-head h2,.wx-card-photo .wx-card-phenomenon{text-shadow:0 1px 3px rgba(0,0,0,.6)}
+.wx-card-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:4px 12px}
+.wx-card-title{display:flex;align-items:center;gap:10px}
+.wx-card-name{display:grid;gap:2px}
+.wx-card-phenomenon{font-size:13px;color:var(--dim)}
+.wx-card-head h2{margin:0;font:600 22px/1.25 var(--sans)}
+.wx-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
+.wx-metrics-wide{grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+.wx-metrics-wide .wx-metric-value{font-size:20px}
+.wx-aloft{overflow-x:auto}
+.wx-table{width:100%;border-collapse:collapse;font-size:13px}
+.wx-table th,.wx-table td{padding:6px 10px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+.wx-table th{font:400 11px/1.4 var(--mono);color:var(--faint);letter-spacing:.06em;border-bottom-color:var(--line-2)}
+.wx-aloft-title{margin:4px 0 6px;font:400 11px/1.4 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--dim)}
+.wx-dir{display:inline-flex;align-items:center;gap:8px}
+.wx-arrow{width:14px;height:14px;color:var(--accent);transform-origin:50% 50%}
+.wx-table td:last-child,.wx-table th:last-child{text-align:right}
+.wx-metric{position:relative;display:grid;gap:6px;align-content:start;padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--wx-tile)}
+.wx-metric-value{font:600 28px/1.1 var(--sans)}
+.wx-metric-label{display:flex;align-items:center;gap:6px}
+.wx-metric-label .wx-icon{width:15px;height:15px;color:var(--dim)}
+.wx-metric-note{font:400 11px/1.4 var(--mono);color:var(--faint)}
+.wx-metric:has(.wx-windsock){padding-right:112px}
+.wx-windsock{position:absolute;top:8px;right:10px;width:96px;height:57px}
+.wx-cover-dial{position:absolute;top:12px;right:12px;width:30px;height:30px;color:var(--fg)}
+.wx-hazard{margin:0;font-weight:500}
+.wx-card[data-tone="warn"] .wx-hazard{color:var(--wx-warn)}
+.wx-card[data-tone="bad"] .wx-hazard{color:var(--danger)}
+.wx-empty{padding:24px;border:1px dashed var(--line-2);border-radius:14px;color:var(--dim);text-align:center}
+.wx-panel{border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+.wx-panel>summary{cursor:pointer;padding:12px 16px;font-weight:600}
+.wx-panel>summary:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:12px}
+.wx-panel>:not(summary){margin:0 14px 12px}
+.wx-panel>:last-child{margin-bottom:14px}
+.wx-field{display:grid;gap:4px;flex:1 1 140px}
+.wx-results{display:grid;gap:6px;list-style:none;padding:0}
+.wx-results:empty{display:none}
+.wx-result{text-align:left}
+.wx-status{margin:0;padding:8px 12px;border:1px solid var(--line);border-left:3px solid var(--line-2);border-radius:8px;background:var(--panel);font:400 12px/1.5 var(--sans);color:var(--dim)}
+.wx-status:empty{display:none}
+.wx-status[data-tone=""]{border-left-color:var(--wx-ok)}
+.wx-status[data-tone="warn"]{border-left-color:var(--wx-warn);color:var(--wx-warn)}
+.wx-status[data-tone="bad"]{border-left-color:var(--danger);color:var(--danger)}
+@media (max-width:720px){.wx-net{padding-left:0;border-left:0;border-top:1px solid var(--line);padding-top:12px}}
+@media (max-width:560px){.wx-root{padding:12px}.wx-head h1{font-size:28px}.wx-brand{width:36px;height:36px}.wx-metrics{grid-template-columns:1fr 1fr}.wx-metrics-wide{grid-template-columns:1fr}.wx-metric-value{font-size:24px}}
