@@ -1,0 +1,287 @@
+/* easyPay: калькулятор і журнал виплат за макетами набору 1. Палітра — workspace.css
+   (фон #111214, картки #151619, лінії #26282d, акцент #d8c48e) і три кольори станів. */
+.ep{--ok:#7fb88a;--warn:#e6b86a;--bad:#e0786a;--card:var(--panel);--field:#101113;--gold-ink:#1a1710;
+  max-width:1316px;margin:0 auto;padding:28px 32px 20px;display:grid;gap:14px;font:400 14px/1.5 var(--sans);color:var(--fg);position:relative}
+.ep [hidden]{display:none !important}
+.ep-ico{width:16px;height:16px;flex:none;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+
+/* Заголовок і вкладки */
+.ep-head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px 20px}
+.ep-eyebrow{margin:0;font:500 11px/1.4 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--accent)}
+.ep-eyebrow.ep-bad{color:var(--bad)}
+.ep-eyebrow.ep-warn{color:var(--warn)}
+.ep-eyebrow.ep-muted{color:var(--dim)}
+.ep-title{margin:4px 0 0;font:600 32px/1.15 var(--sans);letter-spacing:-.01em}
+.ep-actions{display:flex;flex-wrap:wrap;gap:8px}
+.ep-tabs{display:flex;flex-wrap:wrap;gap:4px 28px;border-bottom:1px solid var(--line-2)}
+.ep-tab{display:inline-flex;align-items:center;gap:8px;font:500 14px/1.3 var(--sans);color:var(--dim);background:none;border:0;border-bottom:2px solid transparent;margin-bottom:-1px;padding:10px 0 12px;cursor:pointer}
+.ep-tab:hover{color:var(--fg)}
+.ep-tab[aria-selected="true"]{color:var(--fg);border-bottom-color:var(--accent)}
+.ep-tab:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.ep-badge{min-width:18px;padding:0 5px;border-radius:5px;background:#3a3222;color:var(--accent);font:600 11px/18px var(--mono);text-align:center}
+
+/* Кнопки */
+.ep-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;font:500 13px/1.2 var(--sans);color:var(--fg);background:transparent;border:1px solid var(--line-2);border-radius:8px;padding:8px 13px;min-height:34px;cursor:pointer;white-space:nowrap}
+.ep-btn:hover,.ep-btn:focus-visible{border-color:var(--accent);outline:none}
+.ep-btn:disabled{opacity:.45;cursor:not-allowed}
+.ep-btn-strong{background:#1b1c20;font-weight:600}
+.ep-btn-gold{background:var(--accent);border-color:var(--accent);color:var(--gold-ink);font-weight:600}
+.ep-btn-gold:hover,.ep-btn-gold:focus-visible{background:#e3d2a2;border-color:#e3d2a2}
+.ep-btn-danger{color:var(--bad);border-color:#6a3a33}
+.ep-btn-danger:hover,.ep-btn-danger:focus-visible{border-color:var(--bad)}
+.ep-wide{width:100%;min-height:40px}
+.ep-link{display:inline-flex;align-items:center;gap:6px;font:inherit;font-size:13px;color:var(--fg);background:none;border:0;padding:0;cursor:pointer}
+.ep-link:hover,.ep-link:focus-visible{text-decoration:underline;outline:none}
+.ep-icon-btn{display:inline-grid;place-items:center;width:30px;height:30px;color:var(--dim);background:none;border:0;border-radius:7px;cursor:pointer}
+.ep-icon-btn:hover,.ep-icon-btn:focus-visible{color:var(--fg);background:#1f2025;outline:none}
+.ep-boxed{border:1px solid var(--line-2)}
+.ep-row-buttons{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.ep-end{justify-content:flex-end}
+
+/* Текст і стани */
+.ep-dim{color:var(--dim)}
+.ep-gold{color:var(--accent)}
+.ep-ok{color:var(--ok)}
+.ep-bad{color:var(--bad)}
+.ep-grow{flex:1 1 auto}
+.ep-right{text-align:right}
+.ep-sub{margin:0;color:var(--dim);font-size:13px}
+.ep-hint{margin:0;color:var(--faint);font-size:12px}
+.ep-label{font:500 11px/1.4 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
+.ep-status{margin:0;min-height:1.3em;color:var(--dim);font-size:12.5px}
+.ep-status:empty{min-height:0;margin-top:-14px}
+.ep-error{color:var(--bad)}
+.ep-chip{display:inline-flex;align-items:center;gap:6px;padding:3px 8px;border:1px solid;border-radius:6px;font:500 12px/1.3 var(--sans);white-space:nowrap}
+.ep-chip::before{content:"";width:5px;height:5px;border-radius:50%;background:currentColor}
+.ep-chip-ok{color:var(--ok);border-color:#3c5a43;background:#141c16}
+.ep-chip-warn{color:var(--warn);border-color:#5f4d2c;background:#1d1912}
+.ep-chip-bad{color:var(--bad);border-color:#6a3a33;background:#1f1514}
+.ep-chip-muted{color:var(--dim);border-color:var(--line-2)}
+.ep-foot{margin-top:24px;color:var(--faint);font-size:12px}
+.ep-sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* Банер прострочених */
+.ep-banner{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:10px 16px;border:1px solid #5a3430;border-left:3px solid var(--bad);border-radius:8px;background:#1d1514;color:var(--bad);font-size:13px}
+.ep-banner .ep-dim{color:var(--dim)}
+
+/* Картки й сітки */
+.ep-card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px}
+.ep-card h2{margin:0;font:600 17px/1.3 var(--sans)}
+.ep-h2{font:600 24px/1.25 var(--sans) !important;margin:4px 0 6px !important}
+.ep-card-head{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:10px 16px}
+.ep-card-head>.ep-chip,.ep-detail-head>.ep-chip{flex:none;align-self:flex-start}
+.ep-card-tools{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.ep-stack{display:grid;gap:14px;align-content:start}
+.ep-two{display:grid;grid-template-columns:minmax(0,1.13fr) minmax(0,.87fr);gap:16px;align-items:start}
+.ep-two-even{grid-template-columns:minmax(0,1.17fr) minmax(0,1fr)}
+.ep-two-wide{grid-template-columns:minmax(0,2.3fr) minmax(0,1.1fr)}
+.ep-grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 12px}
+.ep-crumbs{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;font-size:13px}
+
+/* Поля */
+.ep-field{display:grid;gap:5px;align-content:start;min-width:0}
+.ep-field>span:first-child{font-size:12px;color:var(--dim)}
+.ep-field small{font-size:11.5px;color:var(--faint)}
+.ep input:not([type="checkbox"]):not([type="radio"]),.ep select,.ep-input{font:inherit;font-size:13px;color:var(--fg);background:var(--field);border:1px solid var(--line-2);border-radius:7px;padding:7px 11px;min-height:36px;width:100%}
+.ep input:focus-visible,.ep select:focus-visible,.ep-input:focus-visible{outline:none;border-color:var(--accent)}
+.ep select:disabled{color:var(--dim)}
+.ep input[type="checkbox"],.ep input[type="radio"]{accent-color:var(--accent)}
+.ep input[type="number"]{-moz-appearance:textfield;appearance:textfield}
+.ep input[type="number"]::-webkit-inner-spin-button,.ep input[type="number"]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+.ep-affix{position:relative;display:block}
+.ep-affix input{padding-right:64px !important}
+.ep-suffix{position:absolute;right:11px;top:50%;transform:translateY(-50%);color:var(--dim);font-size:12.5px;pointer-events:none}
+.ep-post{display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left;cursor:pointer}
+.ep-post span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ep-checks{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:6px 22px}
+.ep-check{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--dim)}
+
+/* Мої виплати: плитки й таблиця */
+.ep-tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.ep-tile{display:grid;gap:10px;padding:18px;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+.ep-tile strong{font:600 24px/1.1 var(--sans);letter-spacing:-.01em}
+.ep-tile-bad{border-color:#4e302c}
+.ep-tile-bad strong{color:var(--bad)}
+.ep-items{padding:0;overflow:hidden}
+.ep-items>.ep-card-head{padding:14px 16px 10px}
+.ep-scroll{overflow-x:auto}
+.ep-segment{display:inline-flex;padding:3px;gap:2px;border:1px solid var(--line-2);border-radius:8px}
+.ep-segment button{font:500 12.5px/1 var(--sans);color:var(--dim);background:none;border:0;border-radius:6px;padding:8px 12px;cursor:pointer}
+.ep-segment button[aria-pressed="true"]{color:var(--fg);background:#2a2720}
+.ep-segment button:focus-visible{outline:2px solid var(--accent)}
+.ep-ledger{width:100%;border-collapse:collapse;font-size:13px;min-width:760px}
+.ep-ledger th,.ep-ledger td{padding:8px 16px;border-top:1px solid var(--line);text-align:left;white-space:nowrap}
+.ep-ledger thead th{font:500 10.5px/1.4 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--dim);padding-top:6px;padding-bottom:6px}
+.ep-ledger .ep-num{text-align:right;font-variant-numeric:tabular-nums}
+.ep-ledger .ep-right{text-align:right}
+.ep-group th{font:600 13.5px/1.3 var(--sans);color:var(--fg);background:#131417}
+.ep-group td{background:#131417;font-size:11.5px}
+.ep-row{cursor:pointer}
+.ep-row td:first-child{box-shadow:inset 3px 0 0 var(--row-tone)}
+.ep-row-ok{--row-tone:var(--ok)}
+.ep-row-warn{--row-tone:var(--warn)}
+.ep-row-bad{--row-tone:var(--bad)}
+.ep-row:hover td,.ep-row:focus-visible td{background:#1a1b1f}
+.ep-row:focus-visible{outline:none}
+.ep-name{font-weight:500}
+.ep-empty-line{margin:0;padding:18px 16px;color:var(--dim)}
+
+/* Картка пункту */
+.ep-detail{padding:0}
+.ep-detail-head{display:flex;justify-content:space-between;gap:12px;padding:22px 24px 18px}
+.ep-figures{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;padding:22px 24px;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.ep-figures>div{display:grid;gap:8px}
+.ep-big{font:500 27px/1.1 var(--sans);letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+.ep-huge{font-size:30px}
+.ep-unit{font-size:.5em;margin-left:5px;font-weight:600}
+.ep-progress-box{padding:20px 24px 4px;display:grid;gap:12px}
+.ep-progress-head{display:flex;justify-content:space-between;gap:10px;font-size:13px}
+.ep-progress{height:7px;border-radius:4px;background:#2a2620;overflow:hidden}
+.ep-progress span{display:block;height:100%;background:var(--accent);border-radius:4px}
+.ep-parts{padding:18px 24px 22px}
+.ep-parts h3{margin:0 0 6px;font:600 14px/1.3 var(--sans)}
+.ep-part{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line);font-size:13px}
+.ep-part:last-child{border-bottom:0}
+.ep-part div{display:grid;gap:2px}
+.ep-part small,.ep-sum-line small{font-size:11px;color:var(--faint)}
+.ep-part .ep-num{font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
+.ep-part-total{font-weight:600}
+.ep-minus,.ep-minus strong{color:var(--bad)}
+.ep-pay{display:grid;gap:12px}
+.ep-pay .ep-btn-gold{justify-self:start}
+.ep-journal{display:grid;gap:12px}
+.ep-payment{display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid var(--line-2);border-radius:8px}
+.ep-payment div{display:grid;gap:3px;flex:1}
+.ep-payment small{color:var(--dim);font-size:12px}
+.ep-payment-sum{font:600 17px/1 var(--sans);font-variant-numeric:tabular-nums}
+.ep-manage{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px}
+
+/* Порожній журнал */
+.ep-empty{display:grid;justify-items:center;text-align:center;gap:8px;padding:72px 24px}
+.ep-empty-icon{display:grid;place-items:center;width:88px;height:88px;margin-bottom:14px;border:1px solid #4a4130;border-radius:18px;background:#1c1a15;color:var(--accent)}
+.ep-empty-icon .ep-ico{width:40px;height:40px;stroke-width:1.3}
+.ep-empty .ep-sub{max-width:420px;margin-bottom:16px}
+.ep-empty .ep-hint{margin-top:12px}
+.ep-steps{display:grid;gap:10px}
+.ep-numbered{margin:6px 0;padding:0;list-style:none;counter-reset:step;display:grid;gap:4px}
+.ep-numbered li{counter-increment:step;display:grid;grid-template-columns:34px 1fr;gap:2px 12px;padding:12px 0;border-top:1px solid var(--line)}
+.ep-numbered li::before{content:"0" counter(step);grid-row:span 2;display:grid;place-items:center;width:30px;height:26px;border:1px solid var(--line-2);border-radius:6px;font:500 11.5px/1 var(--mono);color:var(--accent)}
+.ep-numbered span{color:var(--dim);font-size:12.5px}
+
+/* Розрахунок */
+.ep-profile{display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px 16px;color:var(--dim);font-size:13px;margin:-2px 0 12px}
+.ep-sections{gap:10px}
+.ep-section{padding:0}
+.ep-section-head{display:flex;align-items:center;gap:10px;width:100%;padding:13px 16px;font:inherit;color:var(--fg);background:none;border:0;border-radius:12px;cursor:pointer;text-align:left}
+.ep-section-head:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.ep-section-head .ep-dim{font-size:12px}
+.ep-section-num{font:500 14px/1 var(--mono);color:var(--dim)}
+.ep-section-title{font:600 15px/1.3 var(--sans)}
+.ep-chevron{display:inline-flex;color:var(--dim)}
+.ep-section-body{display:grid;gap:10px;padding:12px 16px 14px;border-top:1px solid var(--line)}
+.ep-section-error{border-color:#6a3a33}
+.ep-field-error{display:flex;gap:8px;align-items:flex-start;margin:0;padding:10px 16px 12px;color:var(--bad);font-size:12.5px;border-top:1px solid #3d2623}
+.ep-more-links{display:flex;flex-wrap:wrap;gap:4px 18px}
+.ep-more-links .ep-link{font-size:12px}
+.ep-live{position:sticky;top:12px;display:grid;gap:4px}
+.ep-sum-lines{display:grid;margin-top:12px}
+.ep-sum-line{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:11px 0;border-bottom:1px solid var(--line);font-size:13px}
+.ep-sum-line div{display:grid;gap:3px}
+.ep-sum-line strong{white-space:nowrap;font-variant-numeric:tabular-nums}
+.ep-total{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px;padding:26px 0 12px;border-top:1px solid var(--line-2);margin-top:12px;font-weight:600}
+.ep-live .ep-hint{margin-bottom:12px}
+.ep-live .ep-wide{margin-top:8px}
+
+/* Примітки */
+.ep-note{display:flex;gap:10px;align-items:flex-start;padding:11px 14px;border:1px solid #4a4130;border-radius:8px;background:#1b1912;color:var(--accent);font-size:12.5px}
+.ep-note .ep-ico{margin-top:1px}
+.ep-note ul{margin:0;padding-left:16px}
+.ep-note-warn{border-color:#5f4d2c;background:#1d1912;color:var(--warn)}
+.ep-note-bad{border-color:#6a3a33;background:#1f1514;color:var(--bad)}
+
+/* Накладки: бічна панель і модальне вікно */
+.ep-overlay{position:fixed;inset:0;z-index:20;background:rgba(6,6,8,.66);display:flex}
+.ep-overlay-right{justify-content:flex-end}
+.ep-overlay-center{align-items:center;justify-content:center;padding:16px}
+.ep-drawer{width:min(636px,100%);height:100%;overflow:auto;display:grid;align-content:start;gap:18px;padding:30px 34px;background:var(--bg);border-left:1px solid var(--line-2)}
+.ep-modal{width:min(650px,100%);max-height:calc(100% - 32px);overflow:auto;display:grid;gap:14px;padding:28px 30px;background:#17181b;border:1px solid var(--line-2);border-radius:14px}
+.ep-modal-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.ep-search{display:flex;align-items:center;gap:10px;padding:0 12px;border:1px solid var(--accent);border-radius:8px;background:var(--field)}
+.ep-search .ep-link{white-space:nowrap}
+.ep-search .ep-search-input{border:0 !important;background:none !important;padding-left:0 !important;min-height:44px !important}
+.ep-results{display:grid;gap:8px;max-height:280px;overflow:auto}
+.ep-result{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:16px 20px;text-align:left;font:inherit;color:var(--fg);background:var(--card);border:1px solid var(--line);border-radius:10px;cursor:pointer}
+.ep-result div{display:grid;gap:4px}
+.ep-result strong{font:600 17px/1.25 var(--sans)}
+.ep-result small{color:var(--dim);font-size:12.5px}
+.ep-result[aria-selected="true"],.ep-result:hover,.ep-result:focus-visible{border-color:var(--accent);outline:none}
+.ep-options{display:grid;gap:12px}
+.ep-option{display:grid;grid-template-columns:auto 1fr auto;gap:14px;align-items:start;padding:16px 18px;border:1px solid var(--line-2);border-radius:10px;cursor:pointer}
+.ep-option:has(input:checked){border-color:var(--accent);background:#1b1912}
+.ep-option input{margin-top:3px;width:16px;height:16px}
+.ep-option div{display:grid;gap:5px}
+.ep-option small{color:var(--dim);font-size:12.5px}
+.ep-pair{font:600 14px/1.3 var(--sans)}
+.ep-presets{display:grid;border:1px solid #4a4130;border-radius:8px;overflow:hidden}
+.ep-presets button{display:grid;grid-template-columns:1fr auto auto;gap:16px;align-items:center;padding:11px 14px;font:inherit;font-size:13px;color:var(--fg);text-align:left;background:none;border:0;border-top:1px solid var(--line);cursor:pointer}
+.ep-presets button:first-child{border-top:0}
+.ep-presets button:hover,.ep-presets button:focus-visible,.ep-presets button[aria-pressed="true"]{background:#1d1b15;outline:none}
+
+/* Нагадування */
+.ep-reminder{display:grid;gap:10px;width:100%;text-align:left;font:inherit;color:var(--fg);border-left:3px solid var(--tone,var(--line-2));cursor:pointer}
+div.ep-reminder{cursor:default}
+.ep-reminder-bad{--tone:var(--bad)}
+.ep-reminder-warn{--tone:var(--warn)}
+button.ep-reminder:hover,button.ep-reminder:focus-visible{border-color:var(--tone);outline:none;background:#18191c}
+.ep-reminder-text{margin:0;font-size:14px;line-height:1.55}
+.ep-kinds{display:grid;gap:4px}
+.ep-kinds h2{margin-bottom:10px}
+.ep-kind{display:flex;gap:12px;padding:14px 0;border-top:1px solid var(--line)}
+.ep-kind div{display:grid;gap:4px}
+.ep-kind small{color:var(--dim);font-size:12px}
+.ep-kind-icon{display:grid;place-items:center;width:26px;height:26px;flex:none;border:1px solid var(--line-2);border-radius:6px;color:var(--accent)}
+.ep-kind-icon .ep-ico{width:14px;height:14px}
+.ep-local{display:grid;gap:8px}
+.ep-local .ep-card-head>.ep-ico{width:20px;height:20px;color:var(--dim)}
+
+/* Рік у графіку */
+.ep-year-card{display:grid;gap:10px}
+.ep-legend{display:inline-flex;align-items:center;gap:7px;color:var(--dim);font-size:12.5px}
+.ep-legend i{width:11px;height:11px;border-radius:3px}
+.ep-sw-exp{background:var(--accent)}
+.ep-sw-rec{background:var(--ok)}
+.ep-year{width:auto !important;min-height:30px !important;padding:4px 10px !important}
+.ep-chart{width:100%;height:auto;margin-top:8px}
+.ep-grid-line{stroke:#2e3036;stroke-dasharray:3 4}
+.ep-axis-line{stroke:#3a3d44}
+.ep-axis{fill:var(--dim);font:11px var(--sans)}
+.ep-bar-exp{fill:var(--accent)}
+.ep-bar-rec{fill:var(--ok)}
+.ep-nodata{stroke:#4a4d55;stroke-width:2}
+.ep-sum-card{display:grid;gap:8px}
+.ep-sum-card h2{margin-bottom:6px}
+.ep-sum-row{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-top:1px solid var(--line);font-size:13px}
+.ep-sum-row strong{font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* Довідка */
+.ep-help{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:16px;align-items:start}
+.ep-help-card{display:grid;gap:10px}
+.ep-help-card h2{margin-bottom:4px}
+.ep-help-rows{display:grid;margin-top:4px}
+.ep-help-rows .ep-sum-row span{text-align:right}
+.ep-assume{display:flex;gap:12px;padding:12px 0;border-top:1px solid var(--line)}
+.ep-assume div{display:grid;gap:4px}
+.ep-assume small{color:var(--dim);font-size:12px}
+.ep-assume-num{display:grid;place-items:center;width:28px;height:26px;flex:none;border:1px solid var(--line-2);border-radius:6px;font:500 11.5px/1 var(--mono);color:var(--accent)}
+
+@media (max-width:980px){
+  .ep{padding:18px 16px}
+  .ep-two,.ep-two-even,.ep-two-wide,.ep-help{grid-template-columns:minmax(0,1fr)}
+  .ep-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .ep-live{position:static}
+}
+@media (max-width:560px){
+  .ep-title{font-size:26px}
+  .ep-grid2,.ep-figures{grid-template-columns:minmax(0,1fr)}
+  .ep-tile strong{font-size:20px}
+}

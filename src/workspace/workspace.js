@@ -1,10 +1,10 @@
-// Оболонка модуля «Робоче середовище»: розділ «Офіс» з картками застосунків і перегляд одного
+// Оболонка модуля «Робоче середовище»: розділи «Офіс» і «Особисте» з картками застосунків і перегляд одного
 // застосунку в iframe (app.html?app=<id>). Незбережені зміни застосунок повідомляє через
 // postMessage; перед закриттям оболонка просить підтвердження у власній смузі, без системних
 // діалогів. Лаунчер (workspace-launcher.js) питає дозволу закритися через EW_WORKSPACE.requestClose().
 // У настільному застосунку застосунок працює не в головному вікні, а в окремому вікні
 // редактора з дозволом лише на команди office_* (shellMode, docs/WORKSPACE.md, «Ізоляція»).
-import { OFFICE_APPS, WORKSPACE_SECTIONS, appById, appPageUrl, frameTitle, parseFrameMessage, shellMode } from './workspace-core.js';
+import { WORKSPACE_APPS, WORKSPACE_SECTIONS, appById, appPageUrl, frameTitle, parseFrameMessage, shellMode } from './workspace-core.js';
 import { findInvoke } from './workspace-host.js';
 import { isConnected } from './workspace-registry.js';
 
@@ -147,7 +147,7 @@ window.addEventListener('message', event => {
   titleNode.textContent = frameTitle(current.app, state.title, state.dirty);
 });
 
-window.EW_WORKSPACE = Object.freeze({ requestClose: requestCloseApp, apps: OFFICE_APPS.map(app => app.id) });
+window.EW_WORKSPACE = Object.freeze({ requestClose: requestCloseApp, apps: WORKSPACE_APPS.map(app => app.id) });
 if (shell.mode === 'editor') {
   home.hidden = true;
   if (shell.app) openApp(shell.app.id, null);

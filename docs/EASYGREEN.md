@@ -29,7 +29,7 @@ EasyDoc і EasySlide. Це прототип: він відкривається �
 Оболонка знаходить `src/workspace/easygreen/app.js` і викликає `mount(container, host)` на сторінці
 `workspace/app.html?app=easygreen`. Панель вкладає ще один `<iframe>` зі сторінкою таблиці
 (`host.resolve('workspace/easygreen/app/index.html')` + `?host=parent&lang=uk`), того самого походження.
-Закриття («← Офіс», «Закрити», `Esc`) і питання про незбережені зміни робить оболонка: панель
+Закриття («← Розділи», «Закрити», `Esc`) і питання про незбережені зміни робить оболонка: панель
 передає їй `host.setDirty()` і назву файла `host.setTitle()`.
 
 ## Як працюють файли
