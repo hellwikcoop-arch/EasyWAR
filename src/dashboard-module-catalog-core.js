@@ -411,7 +411,25 @@ export function parseFieldInput(field, rawValue) {
   }
   const value = String(raw);
   if (value.length > 4096) throw fail(`Поле «${label}» перевищує 4096 символів.`);
+  // Ті самі правила, що й у Rust (`validate_value`): дата без часу не стає північчю.
+  if (field?.dataType === 'date' && !isCalendarDate(value)) throw fail(`Поле «${label}» має містити дату, наприклад 2026-01-31.`);
+  if (field?.dataType === 'datetime' && !isLocalDateTime(value)) throw fail(`Поле «${label}» має містити дату й час, наприклад 2026-01-31 14:25.`);
   return value;
+}
+
+/** Календарна дата `РРРР-ММ-ДД` (увесь текст). */
+export function isCalendarDate(text) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(String(text ?? ''));
+  if (!match) return false;
+  const [year, month, day] = match.slice(1).map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}
+
+/** Місцеві дата й час `РРРР-ММ-ДДTГГ:ХХ[:СС]`, як у полі `datetime-local`; без часового поясу. */
+export function isLocalDateTime(text) {
+  const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/u.exec(String(text ?? ''));
+  return Boolean(match) && isCalendarDate(match[1]) && Number(match[2]) <= 23 && Number(match[3]) <= 59 && Number(match[4] ?? 0) <= 59;
 }
 
 /**
@@ -773,6 +791,8 @@ export const dashboardModuleCore = {
   crewSummary,
   FieldValueError,
   parseFieldInput,
+  isCalendarDate,
+  isLocalDateTime,
   rowRuleProblem,
   rowForWrite,
   rowForStorage,

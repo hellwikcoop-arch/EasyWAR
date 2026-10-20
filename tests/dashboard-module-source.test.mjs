@@ -336,9 +336,40 @@ test('dates are ISO, datetimes are the value a datetime-local input shows', () =
   assert.deepEqual(convertCell(calendar, '1/2/2026'), { value: '2026-02-01' });
   for (const cell of ['2026-02-30', '31.13.2026', 'вчора', 46000]) assert.match(convertCell(calendar, cell).problem, /дата/u, String(cell));
   assert.deepEqual(convertCell(activity, '2026-01-31 14:25'), { value: '2026-01-31T14:25' });
-  assert.deepEqual(convertCell(activity, '2026-01-31'), { value: '2026-01-31T00:00' });
+  assert.deepEqual(convertCell(activity, '2026-01-31T14:25:30'), { value: '2026-01-31T14:25' });
   assert.deepEqual(convertCell(activity, '31.01.2026 9:05'), { value: '2026-01-31T09:05' });
   assert.match(convertCell(activity, 'сьогодні').problem, /дату й час|дата й час/u);
+  // Дата без часу не стає північчю: це неповне значення для екрана «Перевірка».
+  assert.match(convertCell(activity, '2026-01-31').problem, /лише дата, без часу/u);
+  assert.match(convertCell(activity, '31.01.2026').problem, /лише дата, без часу/u);
+  // Увесь текст, межі годин і хвилин, календарна дата.
+  for (const cell of ['2026-01-31abc', '2026-01-31 14:25abc', '2026-01-31 24:00', '2026-01-31 99:99', '2026-01-31 14:60',
+    '2026-01-31 14:25:61', '2026-02-30 10:00', '31.01.2026 25:00']) {
+    assert.ok(convertCell(activity, cell).problem, cell);
+  }
+  for (const cell of ['2026-01-31abc', '2026-01-31 99:99', '2026-01-31 24:00']) assert.match(convertCell(calendar, cell).problem, /дата/u, cell);
+});
+
+test('a date without time goes to review, and a confirmed midnight keeps the raw cell apart', () => {
+  const fields = catalog.find(item => item.id === 'activity').fields;
+  const plan = planImport(fields, sheetOf([
+    ['Час', 'Подія'],
+    ['2026-01-31 14:25', 'Перша'],
+    ['2026-01-31', 'Друга'],
+  ]));
+  assert.deepEqual(plan.rows.map(row => row.occurred_at), ['2026-01-31T14:25'], 'nothing is imported as midnight silently');
+  assert.equal(plan.skippedCount, 1);
+  const issue = plan.issues.find(item => item.key === 'occurred_at');
+  assert.equal(issue.number, 3);
+  assert.equal(issue.raw, '2026-01-31');
+  assert.match(issue.reason, /без часу/u);
+  // Північ підтверджено вручну: запис підтягується, а сирий текст і правка зберігаються окремо.
+  const built = buildImport(fields, plan, new Map([[issue.id, '2026-01-31 00:00']]));
+  assert.deepEqual(built.rows.map(row => row.occurred_at), ['2026-01-31T14:25', '2026-01-31T00:00']);
+  const [record] = correctionRecords(plan, built, 'synthetic.xlsx');
+  assert.equal(record.rawText, '2026-01-31');
+  assert.equal(record.correctedText, '2026-01-31 00:00');
+  assert.equal(plan.timeline.find(entry => entry.number === 3).cells[0], '2026-01-31', 'the plan keeps the raw cell');
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -578,7 +609,9 @@ test('every record the plan produces is a value the Rust store accepts', () => {
   const accepted = (field, value) => {
     if (value == null) return !field.required;
     switch (field.dataType) {
-      case 'text': case 'date': case 'datetime': return typeof value === 'string' && value.length <= 4096 && (!field.required || value.trim() !== '');
+      case 'text': return typeof value === 'string' && value.length <= 4096 && (!field.required || value.trim() !== '');
+      case 'date': return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/u.test(value);
+      case 'datetime': return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/u.test(value);
       case 'integer': return Number.isSafeInteger(value);
       case 'real': return Number.isFinite(value);
       case 'boolean': return typeof value === 'boolean';
