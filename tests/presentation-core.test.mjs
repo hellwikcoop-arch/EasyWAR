@@ -52,7 +52,7 @@ test('standard deck has title, week, month and whole period in order', () => {
   assert.equal(title.dataRange.text, '01.07.2026 – 30.09.2026');
   assert.equal(title.generatedOn, '2026-10-01');
   assert.equal(week.period.days, 7);
-  assert.equal(week.tiles.length, 6);
+  assert.equal(week.tiles.length, 8);
   assert.deepEqual(week.charts.map(c => c.id), ['personnel', 'targets']);
   for (const chart of week.charts) { assert.equal(chart.categories.length, 7); for (const series of chart.series) assert.equal(series.values.length, 7); }
 });
@@ -270,7 +270,7 @@ test('focus chooses the tile set and puts its changes first', () => {
   const tiles = focus => buildDeck(wb, { focus }).slides.find(s => s.id === 'week').tiles.map(t => t.key);
   assert.deepEqual(tiles('result'), ['kia', 'wia', 'ovtDestroyed', 'ovtDamaged', 'objDestroyed', 'objDamaged']);
   assert.deepEqual(tiles('efficiency'), ['ammoPerTarget', 'ammo', 'affected', 'vgz', 'kbb']);
-  assert.deepEqual(tiles('all'), ['ammoPerTarget', 'kia', 'wia', 'ovtDestroyed', 'objDestroyed', 'ammo']);
+  assert.deepEqual(tiles('all'), ['ammoPerTarget', 'kia', 'wia', 'ovtDestroyed', 'ovtDamaged', 'objDestroyed', 'objDamaged', 'ammo']);
   assert.deepEqual(tiles(undefined), tiles('all'));
   const first = focus => buildDeck(wb, { focus }).slides.find(s => s.id === 'week').changes[0].text;
   assert.ok(first('result').startsWith('Противник: знищено о/с (200)'));
