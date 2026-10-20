@@ -343,3 +343,13 @@ td.unit-cell span, td.unit-cell b { vertical-align: middle; }
   background-position: right 12px center, right 44px center, right 88px center; }
 :root[data-theme="light"] .kpi[data-art]::after { opacity: .3; }
 @media (max-width: 640px) { .kpi[data-art]::after { opacity: .4; } }
+
+/* Активна вкладка бічного меню — градієнтний «капсул» зі світінням у кольорі роду військ (як у УДШВ, ПВК, ПС і РВ). Лише темна тема. */
+@media (min-width: 900px) {
+  :root:not([data-theme="light"]) .tab[aria-selected="true"] {
+    color: #1b1204; border-color: transparent;
+    background: linear-gradient(135deg, #f3c46a, var(--accent) 55%, #8a5a0b);
+    box-shadow: 0 6px 20px rgba(224, 165, 58, .35), inset 0 1px 0 rgba(255, 255, 255, .22);
+  }
+  :root:not([data-theme="light"]) .tab[aria-selected="true"]::before { background: #1b1204; }
+}

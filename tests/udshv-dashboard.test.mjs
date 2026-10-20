@@ -164,17 +164,11 @@ test('the РВ module opens UDSHV tables read-only in its own dashboard', async 
   assert.match(html, /const ud = await openUdshv\(u8, name\);\s*if \(!ud\) throw standardError;/);
 });
 
-test('фон дашборда УДШВ: темна підкладка background.webp, світла тема без картинки', async () => {
+test('фон дашборда УДШВ: один суцільний колір у темній і світлій темі, без картинки й градієнта', async () => {
   const css = await readFile(new URL('../src/udshv-dashboard.css', import.meta.url), 'utf8');
-  const dark = css.match(/html:has\(body\.udshv-open\) \{([^}]*)\}/);
-  assert.ok(dark, 'правило фону для html:has(body.udshv-open)');
-  assert.match(dark[1], /url\('\.\/udshv-art\/background\.webp'\) center \/ cover no-repeat fixed/);
-  assert.match(dark[1], /linear-gradient\(115deg, #0a1730/, 'запасний градієнт під картинкою');
+  assert.match(css, /html:has\(body\.udshv-open\) \{ background: #1b0a10 !important; \}/);
   // Правило світлої теми має відповідати самому <html>: «:root[…] html» не збігається ніколи.
-  assert.match(css, /:root\[data-theme="light"\]:has\(body\.udshv-open\) \{\s*background: linear-gradient\(115deg, #e9eef8/);
+  assert.match(css, /:root\[data-theme="light"\]:has\(body\.udshv-open\) \{ background: #f1eaee !important; \}/);
   assert.doesNotMatch(css, /:root\[data-theme="light"\] html:has\(body\.udshv-open\)/);
-  const image = await readFile(new URL('../src/udshv-art/background.webp', import.meta.url));
-  assert.equal(image.subarray(0, 4).toString('latin1'), 'RIFF');
-  assert.equal(image.subarray(8, 12).toString('latin1'), 'WEBP');
-  assert.ok(image.length < 200 * 1024, 'фон лишається легким (він потрапляє й у файл для телефона)');
+  assert.doesNotMatch(css, /background\.webp/);
 });

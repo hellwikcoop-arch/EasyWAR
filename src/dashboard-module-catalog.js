@@ -115,7 +115,8 @@ function initialize() {
     if (open) {
       markLegacyNav();
       window.scrollTo({ top: 0 });
-    }
+    // Дашборд сам вирішує, який пункт меню підсвітити, коли прокручується; після повернення просимо його це зробити.
+    } else window.dispatchEvent(new Event('scroll'));
   };
   mineButton.addEventListener('click', () => setLegacyMine(true));
   // Підсвітка бічного меню: поки відкрито «Мій дашборд», інші пункти не позначені, а повзунок стоїть на ньому.
