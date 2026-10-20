@@ -15,6 +15,9 @@ import {
   appById,
   appFromSearch,
   appPageUrl,
+  branchFromSearch,
+  DEFAULT_BRANCH,
+  normalizeBranch,
   bytesForInvoke,
   dialogOptions,
   entryError,
@@ -49,7 +52,9 @@ test('розділ «Офіс» має три застосунки в поряд
 });
 
 test('адреса сторінки застосунку й розбір ?app=', () => {
-  assert.equal(appPageUrl('easydoc'), 'app.html?app=easydoc');
+  assert.equal(appPageUrl('easydoc'), 'app.html?app=easydoc&branch=air');
+  assert.equal(appPageUrl('easydoc', 'rocket'), 'app.html?app=easydoc&branch=rocket');
+  assert.equal(appPageUrl('easydoc', 'x"><'), 'app.html?app=easydoc&branch=air');
   assert.throws(() => appPageUrl('word'), /Невідомий застосунок/);
   assert.equal(appFromSearch('?app=easyslide'), appById('easyslide'));
   assert.equal(appFromSearch('?app=../../index'), null);
@@ -272,5 +277,21 @@ test('оболонка: «← На стартову», «Закрити», см�
   assert.match(launcher, /event\.source !== frame\.contentWindow/);
   assert.doesNotMatch(launcher, /ew-workspace-bar/, 'верхню смугу малює модуль');
   const css = await read('src/workspace/workspace.css');
-  for (const token of ['--interactive-line:#686d77', '--weak:#959aa4', '--danger-ground:#241a1b', 'prefers-reduced-motion']) assert.ok(css.includes(token), token);
+  for (const token of ['--bg:#07111c', '--interactive-line:#5d7690', '--weak:#9fb1c4', '--danger-ground:#2a1a20', 'prefers-reduced-motion']) assert.ok(css.includes(token), token);
+});
+
+test('акцент роду військ: відомі ключі проходять, решта — ПС', async () => {
+  assert.equal(DEFAULT_BRANCH, 'air');
+  for (const id of ['air', 'rocket', 'artillery', 'pvk', 'dshv']) {
+    assert.equal(normalizeBranch(id), id);
+    assert.equal(branchFromSearch(`?branch=${id}`), id);
+  }
+  assert.equal(branchFromSearch(''), 'air');
+  assert.equal(branchFromSearch('?branch=navy'), 'air');
+  assert.equal(normalizeBranch(undefined), 'air');
+  const css = await readFile(new URL('../src/workspace/workspace.css', import.meta.url), 'utf8');
+  for (const id of ['pvk', 'rocket', 'artillery', 'dshv']) assert.match(css, new RegExp(`:root\\[data-branch="${id}"\\]\\{--accent:`));
+  const launcher = await readFile(new URL('../src/workspace-launcher.js', import.meta.url), 'utf8');
+  assert.match(launcher, /\?branch=\$\{lastBranch\}/);
+  assert.match(launcher, /data-active-branch/);
 });

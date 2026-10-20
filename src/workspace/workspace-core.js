@@ -59,10 +59,27 @@ export function appById(id) {
   return OFFICE_APPS.find(entry => entry.id === id) || null;
 }
 
+/**
+ * Рід військ, чий акцент бере «Офіс» (рішення власника 20.10.2026: темно-синя схема
+ * лаунчера з акцентом роду військ). Ключі — ті самі, що data-branch у лаунчері; кольори
+ * задає workspace.css через html[data-branch]. Без роду — Повітряні Сили, перша картка.
+ */
+export const BRANCHES = Object.freeze(['air', 'rocket', 'artillery', 'pvk', 'dshv']);
+export const DEFAULT_BRANCH = 'air';
+
+export function normalizeBranch(value) {
+  return BRANCHES.includes(value) ? value : DEFAULT_BRANCH;
+}
+
+/** Рід військ з рядка адреси `?branch=<id>`; невідомий або відсутній — типовий. */
+export function branchFromSearch(search) {
+  return normalizeBranch(new URLSearchParams(String(search || '')).get('branch'));
+}
+
 /** Адреса сторінки застосунку відносно `workspace/index.html`. */
-export function appPageUrl(id) {
+export function appPageUrl(id, branch = DEFAULT_BRANCH) {
   if (!appById(id)) throw new Error(`Невідомий застосунок: ${id}`);
-  return `app.html?app=${encodeURIComponent(id)}`;
+  return `app.html?app=${encodeURIComponent(id)}&branch=${normalizeBranch(branch)}`;
 }
 
 /** Застосунок з рядка адреси `?app=<id>` або null. */

@@ -1,5 +1,5 @@
 // Кнопка «Робоче середовище» на головному екрані: відкриває модуль (workspace/index.html) з
-// розділом «Офіс» у накладці поверх лаунчера. Верхню смугу з «← На стартову» малює сам модуль.
+// розділом «Офіс» у накладці поверх лаунчера. Акцент — останнього відкритого роду військ. Верхню смугу з «← На стартову» малює сам модуль.
 // Усе працює без мережі. Перед закриттям накладка питає модуль (EW_WORKSPACE.requestClose), чи
 // немає незбережених змін; закриття вивантажує сторінку разом із застосунком.
 import './workspace-launcher.css';
@@ -7,6 +7,8 @@ import './workspace-launcher.css';
 const WORKSPACE_URL = 'workspace/index.html';
 // Те саме значення, що CLOSE_MESSAGE у src/workspace/workspace-core.js.
 const CLOSE_MESSAGE = 'easywar-workspace-close';
+// Ті самі ключі, що BRANCHES у workspace-core.js: модуль бере акцент цього роду військ.
+const BRANCHES = ['air', 'rocket', 'artillery', 'pvk', 'dshv'];
 
 function initializeWorkspaceLauncher() {
   const toolbar = document.querySelector('.appbar-right');
@@ -30,6 +32,15 @@ function initializeWorkspaceLauncher() {
   overlay.append(frame);
   document.body.append(overlay);
 
+  // Останній відкритий рід військ (лаунчер ставить body[data-active-branch]); до першого — ПС.
+  let lastBranch = 'air';
+  const rememberBranch = () => {
+    const branch = document.body.dataset.activeBranch;
+    if (BRANCHES.includes(branch)) lastBranch = branch;
+  };
+  rememberBranch();
+  new MutationObserver(rememberBranch).observe(document.body, { attributes: true, attributeFilter: ['data-active-branch'] });
+
   const close = async () => {
     let allowed = true;
     try {
@@ -44,7 +55,7 @@ function initializeWorkspaceLauncher() {
     openButton.focus();
   };
   openButton.addEventListener('click', () => {
-    frame.src = WORKSPACE_URL;
+    frame.src = `${WORKSPACE_URL}?branch=${lastBranch}`;
     overlay.hidden = false;
     frame.focus();
   });

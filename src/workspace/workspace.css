@@ -1,20 +1,26 @@
 /* Модуль «Робоче середовище»: розділ «Офіс» з картками застосунків і сторінка застосунку.
-   Перенесено з макета docs/design/workspace-office (SPEC.md): темна палітра EasyWAR,
-   функціональні рамки --interactive-line (3,21:1), слабкий текст --weak (6,41:1 на панелі).
+   Макет — docs/design/workspace-office (SPEC.md). Кольори — темно-синя схема лаунчера з
+   акцентом роду військ (рішення власника 20.10.2026): рамки --interactive-line 3,73:1,
+   слабкий текст --weak 8,0:1, акценти від 5,5:1 на панелі.
    Шрифт — UAF Sans (рішення власника 20.10.2026), той самий файл, що в map.css і artillery.css. */
 @font-face{font-family:"UAF Sans";src:url("../fonts/UAFSans.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:swap}
 :root{
-  --bg:#111214; --panel:#151619; --raised:#1c1e22; --editor:#26282d;
-  --line:#26282d; --line-2:#3a3d44; --interactive-line:#686d77;
-  --text:#d9dbdf; --muted:#8a8f98; --weak:#959aa4;
-  --accent:#d8c48e; --accent-hover:#ecd9a4; --accent-pressed:#bca878;
-  --danger:#e0786a; --danger-hover:#f09488; --danger-pressed:#c96759; --danger-ground:#241a1b;
+  --bg:#07111c; --panel:#0d1a28; --raised:#132437; --editor:#1a2e45; --pressed:#20354d; --card-pressed:#10202f;
+  --line:#1a2e45; --line-2:#26384c; --interactive-line:#5d7690;
+  --text:#e6edf5; --muted:#8fa2b7; --weak:#9fb1c4;
+  --accent:#3d9bff; --accent-hover:#6bb3ff; --accent-pressed:#2a83e0;
+  --danger:#e0786a; --danger-hover:#f09488; --danger-pressed:#c96759; --danger-ground:#2a1a20;
   --radius-card:16px; --radius-icon:12px; --radius-button:8px;
   --shadow-hover:0 16px 40px rgba(0,0,0,.18); --duration-fast:160ms;
   --sans:"UAF Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
   --mono:var(--sans); /* дрібні підписи великими літерами — тим самим шрифтом */
   color-scheme:dark;
 }
+/* Акцент роду військ (html[data-branch], ставлять workspace.js і app-frame.js). ПС — типовий. */
+:root[data-branch="pvk"]{--accent:#3d9bff; --accent-hover:#6bb3ff; --accent-pressed:#2a83e0}
+:root[data-branch="rocket"]{--accent:#d9b650; --accent-hover:#ebcb6a; --accent-pressed:#bf9d3c}
+:root[data-branch="artillery"]{--accent:#e0a53a; --accent-hover:#f0bb5a; --accent-pressed:#c48d28}
+:root[data-branch="dshv"]{--accent:#e07b93; --accent-hover:#ec97ab; --accent-pressed:#c6627a}
 *,*::before,*::after{box-sizing:border-box}
 html{min-height:100%;background:var(--bg)}
 html,body{margin:0;height:100%}
@@ -32,7 +38,7 @@ button:disabled{cursor:not-allowed}
 /* Кнопки */
 .ws-button{min-height:40px;display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:8px 15px;border:1px solid var(--interactive-line);border-radius:var(--radius-button);background:var(--raised);color:var(--text);font-size:14px;font-weight:600;line-height:20px;white-space:nowrap;transition:background var(--duration-fast) ease,border-color var(--duration-fast) ease,color var(--duration-fast) ease}
 .ws-button:hover{background:var(--editor);border-color:var(--accent)}
-.ws-button:active{background:#34363b;transition:none}
+.ws-button:active{background:var(--pressed);transition:none}
 .ws-button:focus-visible,.ws-card:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 .ws-button:disabled{background:var(--editor);color:var(--weak);border-color:var(--line-2)}
 .ws-button-quiet{background:transparent}
@@ -56,7 +62,7 @@ button:disabled{cursor:not-allowed}
 /* Картка застосунку */
 .ws-card{position:relative;display:flex;flex-direction:column;min-width:0;min-height:354px;width:100%;padding:28px 30px 26px;text-align:left;border:1px solid var(--interactive-line);border-radius:var(--radius-card);background:var(--panel);transition:background var(--duration-fast) ease,border-color var(--duration-fast) ease,box-shadow var(--duration-fast) ease}
 .ws-card:hover{background:var(--raised);border-color:var(--accent);box-shadow:var(--shadow-hover)}
-.ws-card:active{background:#24262b;box-shadow:none;transition:none}
+.ws-card:active{background:var(--card-pressed);box-shadow:none;transition:none}
 .ws-card:focus-visible{border-color:var(--accent);background:var(--raised)}
 .ws-card-spine{position:absolute;left:0;top:117px;width:3px;height:54px;background:var(--accent);border-radius:0 3px 3px 0}
 .ws-card-top{display:flex;align-items:center;justify-content:space-between;gap:12px}

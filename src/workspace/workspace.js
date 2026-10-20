@@ -9,6 +9,7 @@ import {
   WORKSPACE_SECTIONS,
   appById,
   appPageUrl,
+  branchFromSearch,
   formatsLabel,
   frameTitle,
   parseFrameMessage,
@@ -16,6 +17,10 @@ import {
 } from './workspace-core.js';
 import { appIcon, arrowIcon, element as make } from './workspace-dom.js';
 import { isConnected } from './workspace-registry.js';
+
+// Акцент роду військ, з якого відкрили модуль (?branch=<id>, див. workspace-core.js).
+const branch = branchFromSearch(location.search);
+document.documentElement.dataset.branch = branch;
 
 const home = document.getElementById('ws-home');
 const sections = document.getElementById('ws-sections');
@@ -104,7 +109,7 @@ function openApp(id, card) {
   current = { app, dirty: false, card };
   iconNode.replaceChildren(appIcon(document, app.id, 24));
   showTitle(app, '', false);
-  frame.src = appPageUrl(id);
+  frame.src = appPageUrl(id, branch);
   home.hidden = true;
   view.hidden = false;
   back.focus();

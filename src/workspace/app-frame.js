@@ -3,10 +3,12 @@
 // етапами; якщо запуск не вдався — помилка з «Спробувати ще раз»; якщо застосунок ще не
 // підключено — заглушка «у розробці». Зміни заголовка й позначки незбережених змін ідуть до
 // оболонки через postMessage.
-import { LOADING_STEPS, appFromSearch, entryError, frameMessage, normalizeMounted } from './workspace-core.js';
+import { LOADING_STEPS, appFromSearch, branchFromSearch, entryError, frameMessage, normalizeMounted } from './workspace-core.js';
 import { appIcon, element as make } from './workspace-dom.js';
 import { browserFallback, createHost, findInvoke } from './workspace-host.js';
 import { entryLoader } from './workspace-registry.js';
+
+document.documentElement.dataset.branch = branchFromSearch(location.search);
 
 const container = document.getElementById('ws-container');
 const stateArea = document.getElementById('ws-state');
