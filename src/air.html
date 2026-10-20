@@ -1090,6 +1090,7 @@ html[data-motion="off"] .k-spark rect { animation: none; }
 .dmain-in[data-view="map"] > .lrow:has(#p-map) > .lcol:not(:has(#p-map)), .dmain-in[data-view="quality"] > .lrow:has(#p-quality) > .lcol:not(:has(#p-quality)) { display: none; }
 .dmain-in[data-view="map"] .lcol:has(#p-map) > :not(#p-map), .dmain-in[data-view="quality"] .lcol:has(#p-quality) > :not(#p-quality) { display: none !important; }
 .dmain-in[data-view="map"] #p-map, .dmain-in[data-view="quality"] #p-quality { display: flex !important; height: auto !important; }
+.dmain-in[data-view="quality"] #p-quality { flex-direction: column; }
 .snav-lay[aria-pressed="true"] { color: var(--ink); background: var(--accent-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent); }
 .lay-info { padding: 6px 10px 2px 12px; }
 @media (max-width: 1279px) { .lay-info { display: none !important; } }
@@ -5065,35 +5066,41 @@ function renderAll() {
   const len = dayNum(D.to) - dayNum(D.from) + 1, pf = isoOf(dayNum(D.from) - len), pt = isoOf(dayNum(D.from) - 1);
   const prevRows = dayNum(pt) >= dayNum(DMIN) ? ROWS.filter(r => r.date && r.date >= pf && r.date <= pt) : [];
   const P = prevRows.length ? agg(prevRows) : null;
-  const share = x => !A.n ? '' : (x > 0 && Math.round(x / A.n * 100) === 0 ? '<1' : Math.round(x / A.n * 100)) + '% вильотів';
   const e = eff(A);
-  const munTop = sorted(A.byMun, 0).slice(0, 2).map(x => x[0] + ' ' + N0(x[1])).join(' · ');
+  el.kpiEff.textContent = e == null ? '—' : Math.round(e) + '%';
   el.kpiGrid.textContent = '';
   // якщо попереднього періоду немає (весь період) — друга половина проти першої
   let H2 = null; if (!P) { const f0 = dayNum(D.from), l0 = dayNum(D.to) - f0 + 1; if (l0 >= 14) { const mid = f0 + Math.floor(l0 / 2), r1 = [], r2 = []; for (const r of cur) { const d = dayNum(r.date); if (isFinite(d)) (d < mid ? r1 : r2).push(r); } if (r1.length >= 5 && r2.length >= 5) H2 = [agg(r1), agg(r2)]; } }
-  const SR = kpiSeries(cur), eP = P ? eff(P) : H2 ? eff(H2[0]) : null, eC = P ? e : H2 ? eff(H2[1]) : null, dl = (k, x) => P ? delta(x, P[k]) : H2 ? delta(H2[1][k], H2[0][k]) : null, dlLabel = P ? 'до попер. періоду' : 'друга пол. до першої';
+  const SR = kpiSeries(cur);
   const lenD = Math.max(1, dayNum(D.to) - dayNum(D.from) + 1), axis = axisLabels(SR.n.length, dayNum(D.from), lenD);
-  const DSt = new Map(); for (const r of cur) { if (!r.date) continue; let o = DSt.get(r.date); if (!o) DSt.set(r.date, o = { n: 0, mun: 0, hit: 0, part: 0, miss: 0, unk: 0 }); o.n++; o.mun += r.count; o[r.kind]++; }
-  const maxDay = k => { let m = 0; for (const o of DSt.values()) if (o[k] > m) m = o[k]; return m; };
-  const MSt = new Map(); for (const r of cur) { if (!r.date) continue; const mk = r.date.slice(0, 7); let o = MSt.get(mk); if (!o) MSt.set(mk, o = { miss: 0 }); if (r.kind === 'miss') o.miss++; }
-  const minMonthMiss = MSt.size ? Math.min(...[...MSt.values()].map(o => o.miss)) : 0;
-  const pd = (c, p) => (p == null || !(p > 0)) ? null : Math.round((c - p) / p * 100);
-  const dn = k => P ? pd(A[k], P[k]) : H2 ? pd(H2[1][k], H2[0][k]) : null;
-  const shr = x => A.n ? Math.round(x / A.n * 100) : 0;
   const CC = { blue: '#4aa8ff', amber: '#f2b544', green: '#33d17a', orange: '#f59a3b', red: '#f05a5a', grey: '#a3aec2' };
-  const MB = new Map(); for (const r of cur) { if (!r.date) continue; const mk = r.date.slice(0, 7); let o = MB.get(mk); if (!o) MB.set(mk, o = { n: 0, mun: 0 }); o.n++; o.mun += r.count; }
-  const months = k => [...MB.keys()].sort().slice(-6).map(mk => ({ t: MON3[+mk.slice(5, 7) - 1], v: MB.get(mk)[k] }));
-  const perDay = N1(A.n / lenD), perSortie = A.n ? N1(A.mun / A.n) : '—';
-  const card = (tone, ic, label, sub, val, k, mode, go, x, info) => kpiCard(Object.assign({ tone, ic, label, sub, val, go, delta: mkDelta(dn(k), mode), dlLabel: P ? 'до попереднього періоду' : H2 ? 'друга половина до першої' : 'немає бази для порівняння', series: SR[k], color: CC[tone], labels: axis, info }, x));
-  const res = (tone, ic, label, sub, k, mode, cap, info) => card(tone, ic, label, sub, N0(A[k]), k, mode, 'ops', { ring: shr(A[k]), ringL: 'Частка ' + { hit: 'уражених', part: 'пошкоджених', miss: 'неуражених', unk: 'невідомих' }[k] + ' від усіх вильотів', cap }, info);
-  el.kpiEff.textContent = e == null ? '—' : Math.round(e) + '%';
-  el.kpiGrid.append(
-    card('blue', 'plane', 'Вильоти', 'Всього бойових вильотів', N0(A.n), 'n', 'up', 'ops', { bars: months('n'), wide: { ic: 'avg', l: 'Середній темп', v: perDay + ' ' + (A.n % lenD ? 'вильоту' : plural(A.n / lenD, ['виліт', 'вильоти', 'вильотів'])) + '/день' } }, 'Один запис у таблиці — один виліт (паспорт цілі). Із застосуванням БП: ' + N0(A.applied) + '. З відбоєм: ' + A.abort + '. Макс. за добу: ' + N0(maxDay('n'))),
-    card('amber', 'bomb', 'Використано БП', 'Усі типи боєприпасів', N0(A.mun), 'mun', 'up', 'mun', { bars: months('mun'), wide: { ic: 'bomb', l: 'Середня витрата', v: perSortie + ' БП на виліт' } }, (munTop ? munTop + '. ' : '') + 'Макс. за добу: ' + N0(maxDay('mun'))),
-    res('green', 'tgtg', 'Уражено', 'Підтверджені результати', 'hit', 'up', 'Ціль знищено / виведено з ладу', 'Макс. за добу: ' + N0(maxDay('hit'))),
-    res('orange', 'wrench', 'Пошкоджено', 'Часткове ураження', 'part', 'warn', 'Часткове ураження, потребує дорозвідки', 'У таблиці — «ЧАСТКОВО УРАЖЕНО». Макс. за добу: ' + N0(maxDay('part'))),
-    res('red', 'miss', 'Не уражено', 'Без підтвердженого ефекту', 'miss', 'down', 'Погодні умови, РЕБ, відмова АЗУ та ін.', 'Ціль не уражено. Мін. за місяць: ' + N0(minMonthMiss)),
-    ...(A.unk ? [res('grey', 'unk', 'Не відомо', 'Очікує перевірки', 'unk', 'neutral', 'Результат не підтверджено або не розпізнано', 'Чекає перевірки: ' + N0(A.unk))] : []));
+  // Картки «Основних показників» складає вбудований каталог (src/catalogs/ps-builtin.js) через ps-kpi.js;
+  // числа рахує src/tiles-core.js. Запасний шлях нижче лишається на випадок, якщо модуль ще не завантажено.
+  const kpiInput = { rows: cur, from: D.from, to: D.to, prevRows, halves: H2 ? [H2[0].rows, H2[1].rows] : null, series: SR, axis };
+  if (window.PSKpi) {
+    el.kpiGrid.append(...window.PSKpi.buildCards(kpiInput, { mkDelta, colors: CC, monthNames: MON3 }).map(kpiCard));
+  } else {
+    const munTop = sorted(A.byMun, 0).slice(0, 2).map(x => x[0] + ' ' + N0(x[1])).join(' · ');
+    const DSt = new Map(); for (const r of cur) { if (!r.date) continue; let o = DSt.get(r.date); if (!o) DSt.set(r.date, o = { n: 0, mun: 0, hit: 0, part: 0, miss: 0, unk: 0 }); o.n++; o.mun += r.count; o[r.kind]++; }
+    const maxDay = k => { let m = 0; for (const o of DSt.values()) if (o[k] > m) m = o[k]; return m; };
+    const MSt = new Map(); for (const r of cur) { if (!r.date) continue; const mk = r.date.slice(0, 7); let o = MSt.get(mk); if (!o) MSt.set(mk, o = { miss: 0 }); if (r.kind === 'miss') o.miss++; }
+    const minMonthMiss = MSt.size ? Math.min(...[...MSt.values()].map(o => o.miss)) : 0;
+    const pd = (c, p) => (p == null || !(p > 0)) ? null : Math.round((c - p) / p * 100);
+    const dn = k => P ? pd(A[k], P[k]) : H2 ? pd(H2[1][k], H2[0][k]) : null;
+    const shr = x => A.n ? Math.round(x / A.n * 100) : 0;
+    const MB = new Map(); for (const r of cur) { if (!r.date) continue; const mk = r.date.slice(0, 7); let o = MB.get(mk); if (!o) MB.set(mk, o = { n: 0, mun: 0 }); o.n++; o.mun += r.count; }
+    const months = k => [...MB.keys()].sort().slice(-6).map(mk => ({ t: MON3[+mk.slice(5, 7) - 1], v: MB.get(mk)[k] }));
+    const perDay = N1(A.n / lenD), perSortie = A.n ? N1(A.mun / A.n) : '—';
+    const card = (tone, ic, label, sub, val, k, mode, go, x, info) => kpiCard(Object.assign({ tone, ic, label, sub, val, go, delta: mkDelta(dn(k), mode), dlLabel: P ? 'до попереднього періоду' : H2 ? 'друга половина до першої' : 'немає бази для порівняння', series: SR[k], color: CC[tone], labels: axis, info }, x));
+    const res = (tone, ic, label, sub, k, mode, cap, info) => card(tone, ic, label, sub, N0(A[k]), k, mode, 'ops', { ring: shr(A[k]), ringL: 'Частка ' + { hit: 'уражених', part: 'пошкоджених', miss: 'неуражених', unk: 'невідомих' }[k] + ' від усіх вильотів', cap }, info);
+    el.kpiGrid.append(
+      card('blue', 'plane', 'Вильоти', 'Всього бойових вильотів', N0(A.n), 'n', 'up', 'ops', { bars: months('n'), wide: { ic: 'avg', l: 'Середній темп', v: perDay + ' ' + (A.n % lenD ? 'вильоту' : plural(A.n / lenD, ['виліт', 'вильоти', 'вильотів'])) + '/день' } }, 'Один запис у таблиці — один виліт (паспорт цілі). Із застосуванням БП: ' + N0(A.applied) + '. З відбоєм: ' + A.abort + '. Макс. за добу: ' + N0(maxDay('n'))),
+      card('amber', 'bomb', 'Використано БП', 'Усі типи боєприпасів', N0(A.mun), 'mun', 'up', 'mun', { bars: months('mun'), wide: { ic: 'bomb', l: 'Середня витрата', v: perSortie + ' БП на виліт' } }, (munTop ? munTop + '. ' : '') + 'Макс. за добу: ' + N0(maxDay('mun'))),
+      res('green', 'tgtg', 'Уражено', 'Підтверджені результати', 'hit', 'up', 'Ціль знищено / виведено з ладу', 'Макс. за добу: ' + N0(maxDay('hit'))),
+      res('orange', 'wrench', 'Пошкоджено', 'Часткове ураження', 'part', 'warn', 'Часткове ураження, потребує дорозвідки', 'У таблиці — «ЧАСТКОВО УРАЖЕНО». Макс. за добу: ' + N0(maxDay('part'))),
+      res('red', 'miss', 'Не уражено', 'Без підтвердженого ефекту', 'miss', 'down', 'Погодні умови, РЕБ, відмова АЗУ та ін.', 'Ціль не уражено. Мін. за місяць: ' + N0(minMonthMiss)),
+      ...(A.unk ? [res('grey', 'unk', 'Не відомо', 'Очікує перевірки', 'unk', 'neutral', 'Результат не підтверджено або не розпізнано', 'Чекає перевірки: ' + N0(A.unk))] : []));
+  }
 
   // карта
   M.pts = []; for (const r of cur) if (D.filter === 'all' || r.kind === D.filter) for (const p of r.pts) M.pts.push({ x: p.x, y: p.y, row: r });
@@ -6133,6 +6140,7 @@ document.addEventListener('DOMContentLoaded', init);
 <script type="module" src="./pvk-dashboard.js"></script>
 <script type="module" src="./group-presentation.js"></script>
 <script type="module" src="./xlsx-inspection.js"></script>
+<script type="module" src="./ps-kpi.js"></script>
 <script type="module" src="./sqlite-dashboard-source.js"></script>
 <script type="module" src="./dashboard-module-catalog.js"></script>
 <script type="module" src="./munition-3d-loader.js"></script>

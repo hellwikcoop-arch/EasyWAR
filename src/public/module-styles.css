@@ -1,0 +1,40 @@
+/* Стилі оформлення модулів дашборда (каталог модулів → вікно створення → «Стиль оформлення»).
+   Файл лежить у public/ і підключається з dashboard-module-catalog.js лише в застосунку (з Tauri):
+   у файлах для телефона каталогу модулів немає, тож ці правила їм не потрібні (ліміт 5 МБ). */
+/* Стиль оформлення модуля (вікно створення → «Стиль оформлення»): колір — рід військ дашборда (data-branch), стиль — data-style.
+   «branch» — кольори роду військ у звичайній картці; «heightwell» — нічна картка «Пункт керування» (шрифти з public/heightwell-theme.css). */
+:is(.ewmc-module,.ewmc-style-preview,.ewmc-style-option,.ewmc-dialog)[data-branch=air]{--ewmc-branch:#2f8cff;--ewmc-branch-night:#2ee6ff}
+:is(.ewmc-module,.ewmc-style-preview,.ewmc-style-option,.ewmc-dialog)[data-branch=pvk]{--ewmc-branch:#4b7bec;--ewmc-branch-night:#7aa7ff}
+:is(.ewmc-module,.ewmc-style-preview,.ewmc-style-option,.ewmc-dialog)[data-branch=rocket]{--ewmc-branch:#c9971a;--ewmc-branch-night:#ffc83d}
+:is(.ewmc-module,.ewmc-style-preview,.ewmc-style-option,.ewmc-dialog)[data-branch=dshv]{--ewmc-branch:#a3263b;--ewmc-branch-night:#ff5c7a}
+.ewmc-style-preview{display:block;border-radius:14px;transition:background-color .2s,border-color .2s,padding .2s}
+.ewmc-style-preview:is([data-style=branch],[data-style=heightwell]){padding:8px}
+:is(.ewmc-module,.ewmc-style-preview)[data-style=branch]{border:1px solid color-mix(in srgb,var(--ewmc-branch) 55%,var(--line,#26364a));border-top:3px solid var(--ewmc-branch);background:color-mix(in srgb,var(--surface-2,#142238) 88%,var(--ewmc-branch) 12%)}
+:is(.ewmc-module,.ewmc-style-preview)[data-style=branch] .ewmc-visual{--ewmc-s1:var(--ewmc-branch)}
+.ewmc-module[data-style=branch] .ewmc-live{border-color:color-mix(in srgb,var(--ewmc-branch) 60%,transparent);color:var(--ewmc-branch);background:color-mix(in srgb,var(--ewmc-branch) 10%,transparent)}
+.ewmc-module[data-style=branch] .ewmc-schema code{color:var(--ewmc-branch)}
+:is(.ewmc-module,.ewmc-style-preview)[data-style=heightwell]{--ewmc-hw:var(--ewmc-branch-night);border:1px solid #1f2a46;border-radius:6px;background:#070a14;color:#eaf1ff;box-shadow:inset 0 1px color-mix(in srgb,var(--ewmc-hw) 45%,transparent),0 0 24px color-mix(in srgb,var(--ewmc-hw) 10%,transparent);font-family:"HW Grotesk",var(--sans,system-ui),sans-serif}
+:is(.ewmc-module,.ewmc-style-preview)[data-style=heightwell] .ewmc-visual{--ewmc-s1:var(--ewmc-hw);--ewmc-surface:#0d1324;--ewmc-ink:#eaf1ff;--ewmc-muted:#8e9bbb;--ewmc-grid:rgba(142,155,187,.16);--ewmc-track:rgba(142,155,187,.14);border-color:#1f2a46;border-radius:4px;background:#0d1324}
+.ewmc-module[data-style=heightwell] .ewmc-module-head h3{font-family:"HW Grotesk",var(--sans,system-ui),sans-serif;font-weight:500;letter-spacing:-.01em;color:#eaf1ff}
+.ewmc-module[data-style=heightwell] :is(.ewmc-module-head p,.ewmc-live,.ewmc-schema){font-family:"HW Mono",ui-monospace,monospace;letter-spacing:.06em;text-transform:uppercase;color:#8e9bbb}
+.ewmc-module[data-style=heightwell] .ewmc-live{border-color:color-mix(in srgb,var(--ewmc-hw) 50%,transparent);color:var(--ewmc-hw);background:color-mix(in srgb,var(--ewmc-hw) 8%,transparent)}
+.ewmc-module[data-style=heightwell] .ewmc-schema code{color:var(--ewmc-hw);text-transform:none}
+.ewmc-dialog[data-view=table][data-style=branch] .ewmc-page-head{border-bottom:3px solid var(--ewmc-branch)}
+.ewmc-dialog[data-view=table][data-style=heightwell] .ewmc-page-head{border-bottom:2px solid var(--ewmc-branch-night);background:#070a14;color:#eaf1ff}
+.ewmc-dialog[data-view=table][data-style=heightwell] .ewmc-page-title h2{font-family:"HW Grotesk",var(--sans,system-ui),sans-serif;font-weight:500}
+.ewmc-style-picker{display:grid;gap:7px;min-width:0;margin:0;padding:0;border:0}.ewmc-style-picker legend{margin-bottom:7px;padding:0;font-size:12px;font-weight:700}
+.ewmc-style-option{display:grid;grid-template-columns:auto 22px minmax(0,1fr);gap:9px;align-items:center;padding:9px 11px;border:1px solid var(--line,#26364a);border-radius:11px;background:var(--surface-2,#142238);cursor:pointer}
+.ewmc-style-option:has(input:checked){border-color:var(--ewmc-branch,var(--accent,#28b8ff));box-shadow:0 0 0 1px var(--ewmc-branch,var(--accent,#28b8ff))}
+.ewmc-style-option:has(input:focus-visible){outline:2px solid var(--accent,#28b8ff);outline-offset:2px}
+.ewmc-style-option input{margin:0;accent-color:var(--ewmc-branch,var(--accent,#28b8ff))}
+.ewmc-style-option span{display:grid;gap:2px;min-width:0}.ewmc-style-option b{font-size:12px}.ewmc-style-option small{color:var(--muted,#9fb0c4);font-size:10.5px;line-height:1.35}
+.ewmc-style-swatch{width:22px;height:22px;border-radius:50%;border:1px solid var(--line-strong,#334155);background:linear-gradient(135deg,var(--surface,#101a2a),var(--accent,#28b8ff))}
+.ewmc-style-option[data-style=branch] .ewmc-style-swatch{background:var(--ewmc-branch);border-color:color-mix(in srgb,var(--ewmc-branch) 60%,#000)}
+.ewmc-style-option[data-style=heightwell] .ewmc-style-swatch{border-color:#1f2a46;border-radius:5px;background:radial-gradient(circle at 50% 50%,var(--ewmc-branch-night) 0 3px,transparent 4px),#070a14;box-shadow:0 0 8px color-mix(in srgb,var(--ewmc-branch-night) 45%,transparent)}
+@media(prefers-reduced-motion:reduce){.ewmc-style-preview{transition:none}}
+html[data-motion=off] .ewmc-style-preview{transition:none}
+.ewmc-style-switch{display:inline-flex;align-items:center;gap:7px;color:var(--muted,#9fb0c4);font-size:11px;font-weight:700;white-space:nowrap}
+.ewmc-style-switch select{min-height:34px;padding:0 10px;border:1px solid var(--line-strong,#334155);border-radius:9px;background:var(--surface-2,#142238);color:var(--ink,#eef6ff);font:inherit;font-size:12px}
+.ewmc-style-switch select:focus-visible{outline:2px solid var(--ewmc-branch,var(--accent,#28b8ff));outline-offset:2px}
+.ewmc-dialog[data-style=heightwell] .ewmc-style-switch select{border-color:#2e3d62;background:#0d1324;color:#eaf1ff}
+@media(max-width:640px){.ewmc-style-switch{order:2}}
