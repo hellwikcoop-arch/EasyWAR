@@ -1,0 +1,217 @@
+/* EasyFLY, екран «Штурман» (і спільна основа для «Сонце і Місяць»): префікс nv-.
+   Кольори беруться зі змінних теми оболонки (--ef-*) із запасними значеннями. */
+
+.nv-root {
+  --nv-bg: var(--ef-bg, #0a0f1c);
+  --nv-panel: var(--ef-panel, #0e1a2e);
+  --nv-line: var(--ef-line, #1b2c47);
+  --nv-text: var(--ef-text, #e6edf7);
+  --nv-muted: var(--ef-muted, #8fa3bf);
+  --nv-accent: var(--ef-accent, #3d9bff);
+  --nv-good: var(--ef-good, #37c77a);
+  --nv-soon: var(--ef-soon, #f4b04a);
+  --nv-bad: var(--ef-bad, #f2645a);
+  --nv-field: color-mix(in srgb, var(--nv-bg) 70%, #000);
+  color: var(--nv-text);
+  font-size: 14px;
+  line-height: 1.4;
+  min-width: 0;
+  position: relative;
+}
+.nv-root *, .nv-root *::before, .nv-root *::after { box-sizing: border-box; }
+
+/* ───── заголовок ───── */
+.nv-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px 16px; margin-bottom: 14px; }
+.nv-titles { min-width: 0; }
+.nv-crumbs { font-size: 12px; color: var(--nv-muted); margin-bottom: 6px; }
+.nv-crumbs span + span::before { content: '/'; margin: 0 6px; opacity: .7; }
+.nv-title { margin: 0; font-size: 28px; line-height: 1.15; font-weight: 700; letter-spacing: -.01em; }
+.nv-sub { margin: 6px 0 0; color: var(--nv-muted); font-size: 14px; }
+.nv-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+
+/* ───── кнопки ───── */
+.nv-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 40px; padding: 8px 16px; border-radius: 9px; cursor: pointer;
+  border: 1px solid var(--nv-line); background: var(--nv-panel); color: var(--nv-text);
+  font: inherit; font-weight: 600; white-space: nowrap;
+}
+.nv-btn:hover:not(:disabled) { border-color: var(--nv-accent); }
+.nv-btn:focus-visible, .nv-input:focus-visible, .nv-chip:focus-visible, .nv-tab:focus-visible { outline: 2px solid var(--nv-accent); outline-offset: 2px; }
+.nv-btn:disabled { opacity: .45; cursor: not-allowed; }
+.nv-btn-primary { background: var(--nv-accent); border-color: var(--nv-accent); color: #04101f; }
+.nv-btn-primary:hover:not(:disabled) { filter: brightness(1.08); }
+.nv-btn-ghost { background: transparent; }
+.nv-btn-sm { min-height: 32px; padding: 4px 10px; font-size: 13px; }
+.nv-btn-wide { width: 100%; }
+.nv-icon-btn { min-height: 32px; width: 32px; padding: 0; }
+
+/* ───── вкладки ───── */
+.nv-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 16px; padding: 4px; border: 1px solid var(--nv-line); border-radius: 12px; background: var(--nv-panel); width: fit-content; max-width: 100%; }
+.nv-tab { min-height: 36px; padding: 6px 16px; border: 0; border-radius: 8px; background: transparent; color: var(--nv-muted); font: inherit; font-weight: 600; cursor: pointer; }
+.nv-tab:hover { color: var(--nv-text); }
+.nv-tab[aria-selected='true'] { background: color-mix(in srgb, var(--nv-accent) 22%, transparent); color: var(--nv-text); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--nv-accent) 55%, transparent); }
+
+/* ───── сітка розрахунку ───── */
+.nv-layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 18px; align-items: start; }
+.nv-col { display: grid; gap: 14px; min-width: 0; }
+.nv-card { border: 1px solid var(--nv-line); border-radius: 14px; background: var(--nv-panel); padding: 16px 18px; min-width: 0; }
+.nv-card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.nv-card h2 { margin: 0; font-size: 16px; font-weight: 700; }
+.nv-card-note { color: var(--nv-muted); font-size: 12px; }
+.nv-summary { position: sticky; top: 12px; }
+
+.nv-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.nv-grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.nv-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.nv-span-2 { grid-column: span 2; }
+.nv-field { display: grid; gap: 4px; align-content: start; min-width: 0; }
+.nv-label { font-size: 12px; color: var(--nv-muted); }
+.nv-hint { font-size: 12px; color: var(--nv-muted); }
+.nv-input {
+  width: 100%; min-height: 40px; padding: 8px 10px; border-radius: 8px; font: inherit; color: var(--nv-text);
+  border: 1px solid var(--nv-line); background: var(--nv-field); color-scheme: dark;
+}
+.nv-input::placeholder { color: color-mix(in srgb, var(--nv-muted) 70%, transparent); }
+.nv-input[aria-invalid='true'] { border-color: var(--nv-bad); }
+select.nv-input { appearance: auto; }
+.nv-check { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; cursor: pointer; }
+.nv-check input { width: 18px; height: 18px; accent-color: var(--nv-accent); }
+
+/* ───── чипи й обладнання ───── */
+.nv-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.nv-chip {
+  min-height: 32px; padding: 4px 12px; border-radius: 8px; cursor: pointer; font: inherit; font-size: 13px;
+  border: 1px solid var(--nv-line); background: transparent; color: var(--nv-muted);
+}
+.nv-chip[aria-pressed='true'] { color: var(--nv-accent); border-color: color-mix(in srgb, var(--nv-accent) 70%, transparent); background: color-mix(in srgb, var(--nv-accent) 14%, transparent); }
+.nv-chip-auto { cursor: default; color: var(--nv-accent); border-style: dashed; }
+.nv-equip { margin-top: 12px; display: grid; gap: 6px; }
+.nv-equip-row { display: grid; grid-template-columns: minmax(0, 1fr) 110px 110px 32px; align-items: center; gap: 10px; }
+.nv-equip-name { min-width: 0; overflow-wrap: anywhere; }
+.nv-equip-w { color: var(--nv-muted); font-size: 13px; text-align: right; font-variant-numeric: tabular-nums; }
+.nv-add-row { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; margin-top: 12px; }
+.nv-add-row .nv-field { min-width: 220px; flex: 1 1 220px; }
+
+/* ───── маршрут ───── */
+.nv-route-wrap { overflow-x: auto; }
+.nv-route { width: 100%; border-collapse: collapse; min-width: 820px; }
+.nv-route th { text-align: left; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--nv-muted); font-weight: 600; padding: 6px 6px 8px; border-bottom: 1px solid var(--nv-line); }
+.nv-route td { padding: 6px; border-bottom: 1px solid color-mix(in srgb, var(--nv-line) 60%, transparent); vertical-align: middle; }
+.nv-route .nv-input { min-height: 36px; padding: 6px 8px; }
+.nv-route td.nv-n { width: 30px; color: var(--nv-muted); font-variant-numeric: tabular-nums; }
+.nv-route td.nv-point { min-width: 210px; }
+.nv-point-cell { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 6px; }
+.nv-route td.nv-num { width: 78px; min-width: 70px; }
+.nv-route td.nv-del .nv-btn span { display: none; }
+.nv-route td.nv-del .nv-btn { min-width: 32px; padding: 4px 8px; }
+.nv-route td.nv-land { width: 86px; text-align: center; }
+.nv-route td.nv-del { width: 44px; text-align: right; }
+.nv-route-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; }
+.nv-total { font-weight: 700; font-variant-numeric: tabular-nums; }
+.nv-details { margin-top: 12px; border-top: 1px dashed var(--nv-line); padding-top: 10px; }
+.nv-details summary { cursor: pointer; color: var(--nv-muted); font-size: 13px; }
+.nv-details[open] summary { margin-bottom: 10px; }
+.nv-coords { display: grid; gap: 6px; }
+.nv-coord-row { display: grid; grid-template-columns: minmax(0, 1fr) 120px 120px; gap: 8px; align-items: center; }
+.nv-coord-row .nv-input { min-height: 34px; padding: 4px 8px; }
+.nv-coord-name { overflow-wrap: anywhere; font-size: 13px; }
+
+/* ───── живий підсумок ───── */
+.nv-sum-rows { display: grid; }
+.nv-sum-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid color-mix(in srgb, var(--nv-line) 70%, transparent); font-size: 13px; }
+.nv-sum-row span:first-child { color: var(--nv-muted); }
+.nv-sum-row strong { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.nv-mass { margin: 14px 0 10px; }
+.nv-mass-label { color: var(--nv-muted); font-size: 12px; }
+.nv-mass-value { font-size: 38px; line-height: 1.1; font-weight: 700; font-variant-numeric: tabular-nums; }
+.nv-mass-value small { font-size: 18px; font-weight: 600; margin-left: 4px; }
+.nv-status { margin: 10px 0 12px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--nv-line); font-weight: 600; font-size: 13px; }
+.nv-status-ok { color: var(--nv-good); border-color: color-mix(in srgb, var(--nv-good) 60%, transparent); background: color-mix(in srgb, var(--nv-good) 12%, transparent); }
+.nv-status-bad { color: var(--nv-bad); border-color: color-mix(in srgb, var(--nv-bad) 65%, transparent); background: color-mix(in srgb, var(--nv-bad) 12%, transparent); }
+.nv-status-warn { color: var(--nv-soon); border-color: color-mix(in srgb, var(--nv-soon) 55%, transparent); background: color-mix(in srgb, var(--nv-soon) 10%, transparent); }
+.nv-status-none { color: var(--nv-muted); }
+.nv-list { margin: 10px 0 0; padding-left: 18px; font-size: 13px; display: grid; gap: 4px; }
+.nv-list-bad { color: var(--nv-bad); }
+.nv-list-warn { color: var(--nv-soon); }
+.nv-state { margin: 10px 0 14px; font-size: 12px; color: var(--nv-muted); }
+.nv-state strong { font-weight: 700; }
+.nv-state-ok strong { color: var(--nv-good); }
+.nv-state-over strong, .nv-state-fuel strong { color: var(--nv-bad); }
+.nv-state-incomplete strong { color: var(--nv-soon); }
+.nv-docs { display: grid; gap: 8px; margin-top: 4px; }
+.nv-docs-title { font-size: 12px; color: var(--nv-muted); }
+.nv-docs-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.nv-note { margin-top: 12px; font-size: 12px; color: var(--nv-muted); }
+
+/* ───── перегляд документа ───── */
+.nv-stage-card { padding: 0; overflow: hidden; }
+.nv-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--nv-line); }
+.nv-zoom { display: inline-flex; align-items: center; gap: 8px; color: var(--nv-muted); font-size: 13px; }
+.nv-zoom output { min-width: 48px; text-align: center; color: var(--nv-text); font-variant-numeric: tabular-nums; }
+.nv-stage { overflow: auto; padding: 22px 24px; background: color-mix(in srgb, var(--nv-bg) 60%, var(--nv-panel)); max-height: calc(100vh - 260px); min-height: 280px; }
+.nv-sheet { position: relative; margin: 0 auto; background: #fff; box-shadow: 0 6px 28px rgba(0, 0, 0, .45); overflow: hidden; }
+.nv-frame { position: absolute; top: 0; left: 0; border: 0; background: #fff; transform-origin: top left; }
+.nv-foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; margin-top: 10px; font-size: 12px; color: var(--nv-muted); }
+.nv-hintbar { margin: 0 0 12px; font-size: 13px; color: var(--nv-muted); }
+.nv-alert { border: 1px solid color-mix(in srgb, var(--nv-bad) 60%, transparent); background: color-mix(in srgb, var(--nv-bad) 10%, transparent); border-radius: 12px; padding: 14px 16px; }
+.nv-alert strong { display: block; margin-bottom: 6px; }
+
+.nv-toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 50; max-width: min(92vw, 560px); padding: 10px 16px; border-radius: 10px; font-size: 14px; border: 1px solid var(--nv-line); background: var(--nv-panel); color: var(--nv-text); box-shadow: 0 8px 28px rgba(0, 0, 0, .5); }
+.nv-toast[hidden] { display: none; }
+.nv-toast-error { border-color: var(--nv-bad); }
+.nv-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* ───── адаптив ───── */
+@media (max-width: 1099.98px) {
+  .nv-layout { grid-template-columns: minmax(0, 1fr); }
+  .nv-summary { position: static; order: -1; }
+  .nv-title { font-size: 25px; }
+  .nv-docs-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .nv-stage { max-height: none; }
+}
+@media (max-width: 899.98px) {
+  .nv-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .nv-grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 699.98px) {
+  .nv-summary { order: 0; }
+  .nv-root { font-size: 15px; }
+  .nv-title { font-size: 22px; }
+  .nv-card { padding: 14px; }
+  .nv-grid, .nv-grid-3 { grid-template-columns: minmax(0, 1fr); }
+  .nv-grid.nv-keep2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .nv-span-2 { grid-column: auto; }
+  .nv-actions { width: 100%; }
+  .nv-actions .nv-btn { flex: 1 1 calc(50% - 10px); }
+  .nv-tabs { width: 100%; }
+  .nv-tab { flex: 1 1 auto; padding: 6px 10px; }
+  .nv-equip-row { grid-template-columns: minmax(0, 1fr) 90px 32px; }
+  .nv-equip-row .nv-equip-w { display: none; }
+  .nv-coord-row { grid-template-columns: minmax(0, 1fr) 1fr 1fr; }
+  /* таблиця ділянок → картки */
+  .nv-route-wrap { overflow: visible; }
+  .nv-route { min-width: 0; display: block; }
+  .nv-route thead { display: none; }
+  .nv-route tbody { display: grid; gap: 10px; }
+  .nv-route tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 12px; border: 1px solid var(--nv-line); border-radius: 12px; background: color-mix(in srgb, var(--nv-bg) 40%, var(--nv-panel)); }
+  .nv-route td { display: grid; gap: 3px; padding: 0; border: 0; width: auto !important; min-width: 0 !important; text-align: left !important; }
+  .nv-route td::before { content: attr(data-label); font-size: 11px; color: var(--nv-muted); }
+  .nv-route td.nv-n { grid-column: 1 / -1; font-weight: 700; color: var(--nv-text); }
+  .nv-route td.nv-n::before { content: none; }
+  .nv-route td.nv-point { grid-column: 1 / -1; }
+  .nv-route td.nv-del { grid-column: 1 / -1; }
+  .nv-route td.nv-del::before { content: none; }
+  .nv-route td.nv-del .nv-btn { width: 100%; }
+  .nv-route td.nv-del .nv-btn span { display: inline; }
+  .nv-stage { padding: 12px; }
+  .nv-toolbar { padding: 10px; }
+  .nv-docs-row { grid-template-columns: minmax(0, 1fr); }
+}
+@media print { .nv-root { display: none; } }
+
+/* Збережені розрахунки */
+.nv-saved { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.nv-saved-item { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border: 1px solid var(--nv-line); border-radius: 10px; }
+.nv-saved-title { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.nv-saved-actions { display: flex; flex-wrap: wrap; gap: 6px; }
