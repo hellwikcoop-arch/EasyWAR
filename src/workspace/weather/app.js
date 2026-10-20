@@ -21,6 +21,7 @@ import {
   searchDisclosure,
   serializeState,
 } from './weather-core.js';
+import { CARD_ICON, WEATHER_ICONS } from './weather-icons.js';
 import './weather.css';
 
 export const contract = 1;
@@ -31,6 +32,13 @@ function el(tag, className, text) {
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+/** Значок з WEATHER_ICONS (очищені SVG із пакета референсів). */
+function icon(name, className = 'wx-icon') {
+  const node = el('span', className);
+  node.innerHTML = WEATHER_ICONS[name] || '';
   return node;
 }
 
@@ -81,22 +89,42 @@ export async function mount(container, host) {
   container.classList.add('wx-root');
   host.setTitle?.('');
 
-  // Шапка: вибір пункту й мережа.
+  // Шапка сторінки.
   const head = el('header', 'wx-head');
-  const title = el('h1', '', 'Погода');
+  const brand = el('span', 'wx-brand');
+  brand.innerHTML = CARD_ICON;
+  const titles = el('div', 'wx-titles');
+  titles.append(
+    el('p', 'wx-kicker', 'Робоче середовище / Обстановка'),
+    el('h1', '', 'Погода'),
+    el('p', 'wx-lead', 'Поточні умови в одному вибраному населеному пункті'),
+  );
+  const mode = el('p', 'wx-mode');
+  head.append(brand, titles, mode);
+
+  // Панель керування: пункт і мережа.
+  const controls = el('section', 'wx-controls');
+  const placeBox = el('div', 'wx-place');
   const select = el('select', 'wx-select');
   select.setAttribute('aria-label', 'Населений пункт');
   const remove = button('Прибрати пункт', 'wx-quiet');
-  head.append(title, select, remove);
+  const placeRow = el('div', 'wx-row');
+  placeRow.append(select, remove);
+  placeBox.append(el('span', 'wx-label', 'Населений пункт'), placeRow);
 
-  const net = el('section', 'wx-net');
+  const net = el('div', 'wx-net');
   const toggle = el('input');
   toggle.type = 'checkbox';
+  toggle.setAttribute('role', 'switch');
   const toggleLabel = el('label', 'wx-toggle');
-  toggleLabel.append(toggle, el('span', '', 'Онлайн-оновлення з інтернету'));
+  toggleLabel.append(icon('internet-off'), toggle, el('span', 'wx-toggle-text', 'Онлайн-оновлення з інтернету'));
+  const toggleState = el('span', 'wx-toggle-state');
   const refresh = button('Оновити зараз', 'wx-primary');
+  const netRow = el('div', 'wx-row wx-net-row');
+  netRow.append(toggleLabel, toggleState, refresh);
   const disclosure = el('p', 'wx-disclosure');
-  net.append(toggleLabel, refresh, disclosure);
+  net.append(netRow, disclosure);
+  controls.append(placeBox, net);
 
   // Спостереження.
   const card = el('section', 'wx-card');
@@ -148,7 +176,7 @@ export async function mount(container, host) {
   const status = el('p', 'wx-status');
   status.setAttribute('role', 'status');
 
-  container.replaceChildren(head, net, card, status, add, manual);
+  container.replaceChildren(head, controls, card, status, add, manual);
 
   const current = () => state.places.find(place => place.id === state.selected) || null;
 
@@ -184,6 +212,10 @@ export async function mount(container, host) {
     toggle.checked = state.online && Boolean(invoke);
     toggle.disabled = !invoke;
     refresh.hidden = !toggle.checked;
+    toggleLabel.querySelector('.wx-icon').innerHTML = WEATHER_ICONS[toggle.checked ? 'internet-on' : 'internet-off'];
+    toggleState.textContent = !invoke ? 'Недоступно' : (toggle.checked ? 'Увімкнено користувачем' : 'Вимкнено');
+    toggleState.dataset.on = toggle.checked ? '1' : '';
+    mode.textContent = toggle.checked ? 'Онлайн увімкнено' : 'Офлайн за замовчуванням';
     refresh.disabled = busy || !current();
     searchButton.disabled = busy || !toggle.checked;
     searchInput.disabled = !toggle.checked;
@@ -193,9 +225,12 @@ export async function mount(container, host) {
     searchNote.textContent = toggle.checked ? searchDisclosure(searchInput.value) : 'Пошук за назвою доступний, коли ввімкнено онлайн-оновлення.';
   }
 
-  function metric(label, value, note) {
+  function metric(label, value, note, iconName) {
     const box = el('div', 'wx-metric');
-    box.append(el('span', 'wx-metric-label', label), el('strong', 'wx-metric-value', value));
+    const caption = el('span', 'wx-metric-label');
+    if (iconName) caption.append(icon(iconName));
+    caption.append(label);
+    box.append(caption, el('strong', 'wx-metric-value', value));
     if (note) box.append(el('span', 'wx-metric-note', note));
     return box;
   }
@@ -203,7 +238,7 @@ export async function mount(container, host) {
   function aloftTable(rows) {
     const wrap = el('div', 'wx-aloft');
     const table = el('table', 'wx-table');
-    table.append(el('caption', 'wx-metric-label', 'Вітер на висотах (над землею)'));
+    table.setAttribute('aria-label', 'Вітер на висотах (над землею)');
     const head = el('tr');
     for (const name of ['Висота', 'Напрям (куди дме)', 'Швидкість']) head.append(el('th', '', name));
     table.append(el('thead'), el('tbody'));
@@ -212,10 +247,19 @@ export async function mount(container, host) {
       const line = el('tr');
       const height = el('td', '', row.height);
       if (row.level) height.append(el('span', 'wx-metric-note', ` ${row.level}`));
-      line.append(height, el('td', '', row.direction), el('td', '', row.speed));
+      const direction = el('td');
+      const cell = el('span', 'wx-dir');
+      if (Number.isFinite(row.toward)) {
+        const arrow = icon('wind-direction', 'wx-icon wx-arrow');
+        arrow.style.transform = `rotate(${row.toward}deg)`;
+        cell.append(arrow);
+      }
+      cell.append(row.direction);
+      direction.append(cell);
+      line.append(height, direction, el('td', '', row.speed));
       table.tBodies[0].append(line);
     }
-    wrap.append(table);
+    wrap.append(el('p', 'wx-aloft-title', 'Вітер на висотах (над землею)'), table);
     return wrap;
   }
 
@@ -228,7 +272,9 @@ export async function mount(container, host) {
     }
     const view = observationView(state.observations[place.id]);
     const heading = el('div', 'wx-card-head');
-    heading.append(el('h2', '', placeLabel(place)));
+    const name = el('div', 'wx-card-title');
+    name.append(icon(view?.icon || 'unknown', 'wx-icon wx-icon-big'), el('h2', '', placeLabel(place)));
+    heading.append(name);
     if (!view) {
       card.dataset.tone = '';
       card.replaceChildren(heading, el('p', 'wx-empty', toggle.checked ? 'Ще немає даних. Натисніть «Оновити зараз».' : 'Ще немає даних. Введіть спостереження вручну або ввімкніть онлайн-оновлення.'));
@@ -237,16 +283,19 @@ export async function mount(container, host) {
     card.dataset.tone = view.tone;
     heading.append(el('span', `wx-source${view.stale ? ' wx-stale' : ''}`, `${view.source}${view.age ? ` · отримано ${view.age}` : ''}${view.stale ? ' · застаріло' : ''}`));
     const metrics = el('div', 'wx-metrics');
-    metrics.append(metric('Нижній край хмар', view.lower, view.lowerNote));
-    if (view.hasUpper) metrics.append(metric('Верхній край хмар', view.upper, view.upperNote));
-    metrics.append(metric('Видимість', view.visibility), metric('Хмарність', view.cover, view.coverNote));
+    metrics.append(metric('Нижній край хмар', view.lower, view.lowerNote, 'cloud-base'));
+    if (view.hasUpper) metrics.append(metric('Верхній край хмар', view.upper, view.upperNote, 'cloud-top'));
+    metrics.append(metric('Видимість', view.visibility, 'горизонтальна', 'visibility'));
+    const coverTile = metric('Хмарність', view.cover, view.coverNote, 'cloud-cover');
+    if (view.coverIcon) coverTile.append(icon(view.coverIcon, 'wx-icon wx-cover-dial'));
+    metrics.append(coverTile);
     const ground = el('div', 'wx-metrics wx-metrics-wide');
     ground.append(
-      metric('Вітер біля землі', view.windGround, view.windNote),
-      metric('Атмосферний тиск', view.pressure, view.pressureNote),
+      metric('Вітер біля землі', view.windGround, view.windNote, 'wind'),
+      metric('Атмосферний тиск', view.pressure, view.pressureNote, 'pressure'),
     );
     const extra = el('p', 'wx-extra', [view.temperature, view.phenomenon].filter(Boolean).join(' · '));
-    const hazard = el('p', 'wx-hazard', view.hazardText);
+    const hazard = el('p', 'wx-hazard', view.tone ? `${view.toneLabel} · ${view.hazardText}` : view.hazardText);
     const parts = [heading, hazard, metrics, ground];
     if (view.windsAloft.length) parts.push(aloftTable(view.windsAloft));
     if (extra.textContent) parts.push(extra);

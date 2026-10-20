@@ -17,6 +17,8 @@ import {
   cloudLayers,
   compassPoint,
   directionText,
+  iconKey,
+  phenomenonLabel,
   towardDegrees,
   mmHgFromHpa,
   pressureFromInput,
@@ -40,6 +42,7 @@ import {
   serializeState,
 } from '../src/workspace/weather/weather-core.js';
 import { appById, sectionOfApp } from '../src/workspace/workspace-core.js';
+import { CARD_ICON, WEATHER_ICONS, WMO_LABELS } from '../src/workspace/weather/weather-icons.js';
 
 const root = new URL('../', import.meta.url);
 const read = (path) => readFile(new URL(path, root), 'utf8');
@@ -307,7 +310,7 @@ test('онлайн-спостереження: верхня межа, тиск, 
   assert.equal(view.windNote, 'пориви 12 м/с · на 10 м');
   assert.equal(view.pressure, '996,2 гПа · 747 мм рт. ст.');
   assert.match(view.pressureNote, /до рівня моря 1014,6 гПа/);
-  assert.deepEqual({ ...view.windsAloft[3], height: plain(view.windsAloft[3].height) }, { height: '1 340 м', level: '850 гПа', direction: '80° Сх', speed: '14 м/с' });
+  assert.deepEqual({ ...view.windsAloft[3], height: plain(view.windsAloft[3].height) }, { height: '1 340 м', level: '850 гПа', direction: '80° Сх', toward: 80, speed: '14 м/с' });
 
   const low = observationFromOnline({ ...raw, temperature: 20, dewPoint: 6 }, NOW);
   assert.equal(low.lower, 1750);
@@ -336,4 +339,36 @@ test('ручне введення: верхній край, вітер і тис
   assert.match(manualObservation({ windDirection: '400' }).error, /Напрям/);
   assert.match(manualObservation({ pressure: '300' }).error, /Тиск/);
   assert.ok(manualObservation({ pressure: '1013' }).observation, 'одного тиску досить');
+});
+
+test('значки: очищені SVG без скриптів і посилань, на кожен код WMO є значок', () => {
+  const all = [...Object.values(WEATHER_ICONS), CARD_ICON];
+  for (const svg of all) {
+    assert.match(svg, /^<svg [^>]*aria-hidden="true"/);
+    assert.doesNotMatch(svg, /<script|<style|<foreignObject|href|\son[a-z]+=|url\(/i);
+  }
+  for (const code of Object.keys(WMO_LABELS)) assert.ok(WEATHER_ICONS[`wmo-${code}`], `значок для коду ${code}`);
+  for (let cover = 0; cover <= 10; cover += 1) assert.ok(WEATHER_ICONS[`cover-${cover}`]);
+  for (const name of ['cloud-base', 'cloud-top', 'visibility', 'cloud-cover', 'wind', 'pressure', 'wind-direction', 'internet-on', 'internet-off', 'unknown']) {
+    assert.ok(WEATHER_ICONS[name], name);
+  }
+});
+
+test('значок і назва явища: код WMO, слова, хмарність, немає даних', () => {
+  assert.equal(iconKey(observationFromOnline({ weatherCode: 63, cloudCover: 90 }, NOW)), 'wmo-63');
+  assert.equal(phenomenonLabel({ weatherCode: 63 }), 'Дощ');
+  assert.equal(iconKey(manualObservation({ cover: 5, phenomenon: 'Туман' }, NOW).observation), 'wmo-45');
+  assert.equal(phenomenonLabel({ phenomenon: 'туман' }), 'туман');
+  assert.equal(iconKey({ cover: 0 }), 'wmo-0');
+  assert.equal(iconKey({ cover: 3 }), 'wmo-1');
+  assert.equal(iconKey({ cover: 6 }), 'wmo-2');
+  assert.equal(iconKey({ cover: 9 }), 'wmo-3');
+  assert.equal(iconKey({ weatherCode: 1234 }), 'unknown');
+  assert.equal(iconKey(null), 'unknown');
+
+  const view = observationView(manualObservation({ lower: 150, visibility: 0.8, cover: 9 }, NOW).observation, NOW);
+  assert.equal(view.toneLabel, 'Небезпечно');
+  assert.equal(view.coverIcon, 'cover-9');
+  assert.equal(observationView(manualObservation({ visibility: 10 }, NOW).observation, NOW).toneLabel, 'Без обмежень');
+  assert.equal(observationView(manualObservation({ visibility: 10 }, NOW).observation, NOW).coverIcon, '');
 });

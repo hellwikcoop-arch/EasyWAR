@@ -7,6 +7,7 @@
 // координати пункту, округлені до 0,01°, або назва, яку шукають, — це й показує disclosureText.
 
 import { weatherHazard, weatherText } from '../../dashboard-module-weather-core.js';
+import { WMO_LABELS } from './weather-icons.js';
 
 export const STORAGE_KEY = 'easywar.workspace.weather.v1';
 /** Як часто оновлювати вибраний пункт, поки застосунок відкритий і мережу ввімкнено. */
@@ -208,6 +209,7 @@ export function observationFromOnline(raw = {}, receivedAt = new Date()) {
     pressure: finite(raw.surfacePressure) ? raw.surfacePressure : null,
     pressureMsl: finite(raw.pressureMsl) ? raw.pressureMsl : null,
     windsAloft: windsAloft(raw),
+    weatherCode: Number.isInteger(raw.weatherCode) ? raw.weatherCode : null,
     phenomenon: phenomenonFromCode(raw.weatherCode),
   };
 }
@@ -271,6 +273,7 @@ export function manualObservation(form = {}, enteredAt = new Date()) {
       pressure: finite(pressure) ? pressure : null,
       pressureMsl: null,
       windsAloft: [],
+      weatherCode: null,
       phenomenon: text(form.phenomenon).slice(0, 60),
     },
   };
@@ -325,6 +328,37 @@ export function pressureText(hpa) {
   return finite(hpa) ? `${decimal(hpa, 1)} гПа · ${mmHgFromHpa(hpa)} мм рт. ст.` : '—';
 }
 
+const TONE_LABELS = { '': 'Без обмежень', warn: 'Обережно', bad: 'Небезпечно' };
+/** Явище, введене словами, → код WMO для значка. */
+const PHENOMENON_CODES = [
+  [/гроз/u, 95], [/град/u, 96], [/туман/u, 45], [/мряк/u, 53], [/ожелед|крижан/u, 66],
+  [/снігопад|заряд/u, 85], [/сніг/u, 73], [/злив/u, 81], [/дощ/u, 63],
+];
+
+/**
+ * Ключ значка в WEATHER_ICONS: за кодом WMO, інакше за явищем словами, інакше за хмарністю
+ * (0–1 — ясно, 2–3 — переважно ясно, 4–7 — мінлива, 8–10 — похмуро). Без даних — «unknown».
+ */
+export function iconKey(observation) {
+  if (!observation) return 'unknown';
+  if (Number.isInteger(observation.weatherCode) && WMO_LABELS[observation.weatherCode]) return `wmo-${observation.weatherCode}`;
+  const event = text(observation.phenomenon).toLocaleLowerCase('uk');
+  const found = event && PHENOMENON_CODES.find(([pattern]) => pattern.test(event));
+  if (found) return `wmo-${found[1]}`;
+  const cover = observation.cover;
+  if (!finite(cover)) return 'unknown';
+  if (cover < CLEAR_SKY_COVER) return 'wmo-0';
+  if (cover <= 3) return 'wmo-1';
+  if (cover <= 7) return 'wmo-2';
+  return 'wmo-3';
+}
+
+/** Назва явища для екрана: за кодом WMO (таблиця пакета референсів) або як введено. */
+export function phenomenonLabel(observation) {
+  if (Number.isInteger(observation?.weatherCode) && WMO_LABELS[observation.weatherCode]) return WMO_LABELS[observation.weatherCode];
+  return text(observation?.phenomenon);
+}
+
 /** Підписи для екрана й оцінка небезпеки. */
 export function observationView(observation, now = new Date()) {
   if (!observation) return null;
@@ -356,6 +390,7 @@ export function observationView(observation, now = new Date()) {
       height: weatherText.height(row.height),
       level: finite(row.level) ? `${row.level} гПа` : '',
       direction: directionText(row.direction) || '—',
+      toward: towardDegrees(row.direction),
       speed: weatherText.wind(row.speed),
     })),
     visibility: weatherText.visibility(observation.visibility),
@@ -363,7 +398,10 @@ export function observationView(observation, now = new Date()) {
     coverNote: finite(observation.lowCover) ? `нижня ${weatherText.cover(observation.lowCover)}` : '',
     temperature: finite(observation.temperature) ? `${new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 1 }).format(observation.temperature)} °C` : '',
     wind: finite(observation.wind) ? weatherText.wind(observation.wind) : '',
-    phenomenon: observation.phenomenon || '',
+    phenomenon: phenomenonLabel(observation),
+    icon: iconKey(observation),
+    coverIcon: finite(observation.cover) ? `cover-${Math.round(clamp(observation.cover, 0, 10))}` : '',
+    toneLabel: TONE_LABELS[hazard.tone] ?? TONE_LABELS[''],
     source: observation.source === 'online' ? `Open-Meteo, ${timeLabel(observation.time)}` : `вручну, ${timeLabel(observation.time)}`,
     age: ageText(age),
     stale: age != null && age >= STALE_MINUTES,
