@@ -120,6 +120,16 @@ pub struct DashboardModuleCorrection {
     pub corrected_text: String,
     pub reason: String,
     pub created_at: String,
+    /// Канонічне значення, записане після виправлення (JSON); `None` — виправлення
+    /// створено до того, як його почали зберігати.
+    pub stored_value: Option<String>,
+    /// Коли ручна правка в модулі змінила саме це поле запису.
+    pub superseded_at: Option<String>,
+    /// `current` — виправлення пояснює поточне значення; `superseded` — значення змінено
+    /// після підтягування, виправлення лишилося історією імпорту; `unconfirmed` — давнє
+    /// виправлення без збереженого значення, поточність не підтверджена.
+    #[sqlx(skip)]
+    pub status: String,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -1152,8 +1162,8 @@ impl DashboardModuleStore {
             sqlx::query(
                 "INSERT INTO dashboard_module_corrections
                  (module_id, row_id, field_key, source_file, source_sheet, source_row, source_column,
-                  raw_text, corrected_text, reason, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                  raw_text, corrected_text, reason, created_at, stored_value)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(&id)
             .bind(row_ids[correction.row_index])
@@ -1166,6 +1176,12 @@ impl DashboardModuleStore {
             .bind(correction.corrected_text.trim())
             .bind(&correction.reason)
             .bind(created_at)
+            .bind(stored_value_json(
+                template_fields
+                    .iter()
+                    .find(|field| field.key == correction.field_key),
+                rows[correction.row_index].get(&correction.field_key),
+            )?)
             .execute(&mut *transaction)
             .await?;
         }
@@ -1230,33 +1246,14 @@ impl DashboardModuleStore {
                 Value::String(row.try_get::<String, _>("created_at")?),
             );
             for field in &module.fields {
-                let value = match field.data_type.as_str() {
-                    "text" | "date" | "datetime" => row
-                        .try_get::<Option<String>, _>(field.key.as_str())?
-                        .map(Value::String)
-                        .unwrap_or(Value::Null),
-                    "integer" => row
-                        .try_get::<Option<i64>, _>(field.key.as_str())?
-                        .map(|value| Value::Number(value.into()))
-                        .unwrap_or(Value::Null),
-                    "real" => row
-                        .try_get::<Option<f64>, _>(field.key.as_str())?
-                        .and_then(Number::from_f64)
-                        .map(Value::Number)
-                        .unwrap_or(Value::Null),
-                    "boolean" => row
-                        .try_get::<Option<i64>, _>(field.key.as_str())?
-                        .map(|value| Value::Bool(value != 0))
-                        .unwrap_or(Value::Null),
-                    _ => return Err(DashboardModuleError::InvalidStoredSchema),
-                };
+                let value = read_field_value(&row, field)?;
                 item.insert(field.key.clone(), value);
             }
             rows.push(item);
         }
         let corrections = sqlx::query_as::<_, DashboardModuleCorrection>(
             "SELECT row_id, field_key, source_file, source_sheet, source_row, source_column,
-                    raw_text, corrected_text, reason, created_at
+                    raw_text, corrected_text, reason, created_at, stored_value, superseded_at
              FROM dashboard_module_corrections
              WHERE module_id = ?
              ORDER BY row_id, id",
@@ -1264,6 +1261,21 @@ impl DashboardModuleStore {
         .bind(&module.id)
         .fetch_all(&self.pool)
         .await?;
+        let current = rows
+            .iter()
+            .filter_map(|row| row.get("rowId").and_then(Value::as_i64).map(|id| (id, row)))
+            .collect::<BTreeMap<_, _>>();
+        let corrections = corrections
+            .into_iter()
+            .map(|mut correction| {
+                let now = current
+                    .get(&correction.row_id)
+                    .and_then(|row| row.get(&correction.field_key))
+                    .and_then(|value| serde_json::to_string(value).ok());
+                correction.status = correction_status(&correction, now.as_deref()).to_owned();
+                correction
+            })
+            .collect();
         Ok(DashboardModuleData {
             module,
             rows,
@@ -1415,6 +1427,46 @@ impl DashboardModuleStore {
                         field.data_type.clone(),
                     ));
                 }
+            }
+        }
+        // Ручна правка саме виправленого поля перекриває імпортне виправлення: воно
+        // лишається фактом імпорту, але вже не пояснює поточне значення. Порівнюються
+        // типізовані значення (старе — як воно лежить у SQLite), а не тексти.
+        let active = sqlx::query_as::<_, (i64, i64, String)>(
+            "SELECT id, row_id, field_key FROM dashboard_module_corrections
+             WHERE module_id = ? AND superseded_at IS NULL",
+        )
+        .bind(module_id)
+        .fetch_all(&mut *transaction)
+        .await?;
+        let requested = rows
+            .iter()
+            .zip(&row_ids)
+            .filter_map(|(row, row_id)| row_id.map(|id| (id, row)))
+            .collect::<BTreeMap<_, _>>();
+        for (correction_id, row_id, field_key) in active {
+            let (Some(row), Some(field)) = (
+                requested.get(&row_id),
+                module.fields.iter().find(|field| field.key == field_key),
+            ) else {
+                continue;
+            };
+            let stored = sqlx::query(&format!(
+                "SELECT {} FROM {table} WHERE \"row_id\" = ?",
+                quoted_identifier(&field.key)?
+            ))
+            .bind(row_id)
+            .fetch_one(&mut *transaction)
+            .await?;
+            let before = read_field_value(&stored, field)?;
+            if before != canonical_value(field, row.get(&field.key))? {
+                sqlx::query(
+                    "UPDATE dashboard_module_corrections SET superseded_at = ? WHERE id = ?",
+                )
+                .bind(updated_at)
+                .bind(correction_id)
+                .execute(&mut *transaction)
+                .await?;
             }
         }
         sqlx::query(&format!("DELETE FROM {table}"))
@@ -1753,6 +1805,87 @@ async fn create_data_table(
 type SqliteQuery<'q> = sqlx::query::Query<'q, Sqlite, sqlx::sqlite::SqliteArguments<'q>>;
 
 /// Підставляє значення поля в запит за типом колонки; порожнє значення стає `NULL`.
+/// Значення поля так, як воно лежить у SQLite й повертається з `get_data`.
+fn read_field_value(
+    row: &sqlx::sqlite::SqliteRow,
+    field: &DashboardModuleField,
+) -> Result<Value, DashboardModuleError> {
+    let key = field.key.as_str();
+    Ok(match field.data_type.as_str() {
+        "text" | "date" | "datetime" => row
+            .try_get::<Option<String>, _>(key)?
+            .map(Value::String)
+            .unwrap_or(Value::Null),
+        "integer" => row
+            .try_get::<Option<i64>, _>(key)?
+            .map(|value| Value::Number(value.into()))
+            .unwrap_or(Value::Null),
+        "real" => row
+            .try_get::<Option<f64>, _>(key)?
+            .and_then(Number::from_f64)
+            .map(Value::Number)
+            .unwrap_or(Value::Null),
+        "boolean" => row
+            .try_get::<Option<i64>, _>(key)?
+            .map(|value| Value::Bool(value != 0))
+            .unwrap_or(Value::Null),
+        _ => return Err(DashboardModuleError::InvalidStoredSchema),
+    })
+}
+
+/// Значення запиту в тому вигляді, у якому його запише `bind_field` і прочитає
+/// `read_field_value`: «300» у полі real — число 300.0, порожнє — `null`.
+fn canonical_value(
+    field: &DashboardModuleField,
+    value: Option<&Value>,
+) -> Result<Value, DashboardModuleError> {
+    let value = value.filter(|value| !value.is_null());
+    Ok(match field.data_type.as_str() {
+        "text" | "date" | "datetime" => value
+            .and_then(Value::as_str)
+            .map(|text| Value::String(text.to_owned()))
+            .unwrap_or(Value::Null),
+        "integer" => value
+            .and_then(Value::as_i64)
+            .map(|number| Value::Number(number.into()))
+            .unwrap_or(Value::Null),
+        "real" => value
+            .and_then(Value::as_f64)
+            .and_then(Number::from_f64)
+            .map(Value::Number)
+            .unwrap_or(Value::Null),
+        "boolean" => value
+            .and_then(Value::as_bool)
+            .map(Value::Bool)
+            .unwrap_or(Value::Null),
+        _ => return Err(DashboardModuleError::InvalidStoredSchema),
+    })
+}
+
+/// `stored_value` нового виправлення: канонічне значення поля як JSON.
+fn stored_value_json(
+    field: Option<&DashboardModuleField>,
+    value: Option<&Value>,
+) -> Result<Option<String>, DashboardModuleError> {
+    let Some(field) = field else {
+        return Ok(None);
+    };
+    Ok(serde_json::to_string(&canonical_value(field, value)?).ok())
+}
+
+/// Стан виправлення для показу. `now` — поточне значення поля запису як JSON
+/// (`None`, якщо запис не прочитано, наприклад поза межею читання).
+fn correction_status(correction: &DashboardModuleCorrection, now: Option<&str>) -> &'static str {
+    if correction.superseded_at.is_some() {
+        return "superseded";
+    }
+    match (correction.stored_value.as_deref(), now) {
+        (None, _) => "unconfirmed",
+        (Some(stored), Some(now)) if stored != now => "superseded",
+        _ => "current",
+    }
+}
+
 fn bind_field<'q>(
     query: SqliteQuery<'q>,
     field: &DashboardModuleField,
@@ -1985,9 +2118,9 @@ mod tests {
     use super::*;
     use crate::database::{
         COMMAND_TABLES_SQL, DASHBOARD_MODULES_SQL, DASHBOARD_MODULE_CORRECTIONS_SQL,
-        DASHBOARD_MODULE_STYLE_SQL, INITIAL_SCHEMA_SQL, LOCAL_PROFILES_SQL, OWN_LOSSES_TABLES_SQL,
-        PROFILE_BRANCH_TABLES_SQL, PROFILE_DETAILS_SQL, PROFILE_MODULES_SQL,
-        WORKSPACE_TEMPLATES_SQL, XLSX_DUPLICATE_LINKS_SQL,
+        DASHBOARD_MODULE_CORRECTION_STATUS_SQL, DASHBOARD_MODULE_STYLE_SQL, INITIAL_SCHEMA_SQL,
+        LOCAL_PROFILES_SQL, OWN_LOSSES_TABLES_SQL, PROFILE_BRANCH_TABLES_SQL, PROFILE_DETAILS_SQL,
+        PROFILE_MODULES_SQL, WORKSPACE_TEMPLATES_SQL, XLSX_DUPLICATE_LINKS_SQL,
     };
     use serde_json::json;
     use sqlx::sqlite::SqlitePoolOptions;
@@ -2116,6 +2249,7 @@ mod tests {
             DASHBOARD_MODULES_SQL,
             DASHBOARD_MODULE_CORRECTIONS_SQL,
             DASHBOARD_MODULE_STYLE_SQL,
+            DASHBOARD_MODULE_CORRECTION_STATUS_SQL,
         ] {
             sqlx::raw_sql(migration).execute(&pool).await.unwrap();
         }
@@ -3640,5 +3774,197 @@ mod tests {
         assert_eq!(saved.corrections.len(), 1);
         assert_eq!(saved.corrections[0].row_id, first.as_i64().unwrap());
         assert_eq!(saved.corrections[0].raw_text, "25:00");
+    }
+
+    /// Модуль з двома виправленнями (25:00 → 14:25 і 0,3 → 300 м) і його рядки.
+    async fn corrected_module(store: &DashboardModuleStore) -> DashboardModuleData {
+        let module = store
+            .create_with_import(
+                PROFILE,
+                "air",
+                "flight-hours",
+                None,
+                imported_rows(),
+                vec![
+                    correction(0, "takeoff_time", "25:00", "14:25"),
+                    correction(1, "flight_altitude", "0,3", "300 м"),
+                ],
+                "2026-01-01T00:00:01Z",
+            )
+            .await
+            .unwrap();
+        store.get_data(PROFILE, &module.id).await.unwrap()
+    }
+
+    fn status_of(data: &DashboardModuleData, field_key: &str) -> (String, Option<String>) {
+        let item = data
+            .corrections
+            .iter()
+            .find(|item| item.field_key == field_key)
+            .unwrap();
+        (item.status.clone(), item.superseded_at.clone())
+    }
+
+    /// Рядки таблиці як вони є (з `rowId`), щоб зберегти їх зі зміною одного поля.
+    fn editable(data: &DashboardModuleData) -> Vec<Map<String, Value>> {
+        data.rows
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .filter(|(key, _)| key.as_str() != "createdAt")
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_hand_edit_of_the_corrected_field_turns_the_correction_into_history() {
+        let store = store().await;
+        let data = corrected_module(&store).await;
+        assert_eq!(status_of(&data, "takeoff_time").0, "current");
+        // Канонічне значення збережено: «300 м» записано числом 300.
+        let altitude = data
+            .corrections
+            .iter()
+            .find(|item| item.field_key == "flight_altitude")
+            .unwrap();
+        assert_eq!(altitude.stored_value.as_deref(), Some("300.0"));
+        assert_eq!(altitude.status, "current");
+
+        // Збереження без змін і правка іншого поля статусу не змінюють.
+        let same = store
+            .replace_rows(
+                PROFILE,
+                &data.module.id,
+                editable(&data),
+                &data.module.updated_at,
+                T2,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            status_of(&same, "takeoff_time"),
+            ("current".to_owned(), None)
+        );
+        let mut rows = editable(&same);
+        rows[0].insert("aircraft_type".into(), json!("Тестовий-9"));
+        let other = store
+            .replace_rows(PROFILE, &data.module.id, rows, &same.module.updated_at, T3)
+            .await
+            .unwrap();
+        assert_eq!(
+            status_of(&other, "takeoff_time"),
+            ("current".to_owned(), None)
+        );
+        assert_eq!(status_of(&other, "flight_altitude").0, "current");
+
+        // Правка саме виправленого поля: 14:25 → 15:00.
+        let mut rows = editable(&other);
+        rows[0].insert("takeoff_time".into(), json!("15:00"));
+        let edited = store
+            .replace_rows(PROFILE, &data.module.id, rows, &other.module.updated_at, T4)
+            .await
+            .unwrap();
+        assert_eq!(edited.rows[0]["takeoff_time"], "15:00");
+        assert_eq!(
+            status_of(&edited, "takeoff_time"),
+            ("superseded".to_owned(), Some(T4.to_owned()))
+        );
+        // Первинне виправлення лишається незмінним фактом імпорту.
+        let history = edited
+            .corrections
+            .iter()
+            .find(|item| item.field_key == "takeoff_time")
+            .unwrap();
+        assert_eq!(history.raw_text, "25:00");
+        assert_eq!(history.corrected_text, "14:25");
+        assert_eq!(history.source_row, 8);
+        assert_eq!(status_of(&edited, "flight_altitude").0, "current");
+
+        // Повторне відкриття бачить те саме; повернення 14:25 не робить історію поточною знову.
+        let reopened = store.get_data(PROFILE, &data.module.id).await.unwrap();
+        assert_eq!(status_of(&reopened, "takeoff_time").0, "superseded");
+        let mut rows = editable(&reopened);
+        rows[0].insert("takeoff_time".into(), json!("14:25"));
+        let back = store
+            .replace_rows(
+                PROFILE,
+                &data.module.id,
+                rows,
+                &reopened.module.updated_at,
+                "2026-01-01T00:00:09Z",
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            status_of(&back, "takeoff_time"),
+            ("superseded".to_owned(), Some(T4.to_owned()))
+        );
+    }
+
+    #[tokio::test]
+    async fn a_numeric_correction_is_compared_as_a_number_not_as_text() {
+        let store = store().await;
+        let data = corrected_module(&store).await;
+        // 300 і 300.0 — те саме число: «300 м» у тексті виправлення не заважає.
+        let mut rows = editable(&data);
+        rows[1].insert("flight_altitude".into(), json!(300));
+        let same = store
+            .replace_rows(PROFILE, &data.module.id, rows, &data.module.updated_at, T2)
+            .await
+            .unwrap();
+        assert_eq!(
+            status_of(&same, "flight_altitude"),
+            ("current".to_owned(), None)
+        );
+        let mut rows = editable(&same);
+        rows[1].insert("flight_altitude".into(), json!(450.0));
+        let changed = store
+            .replace_rows(PROFILE, &data.module.id, rows, &same.module.updated_at, T3)
+            .await
+            .unwrap();
+        assert_eq!(
+            status_of(&changed, "flight_altitude"),
+            ("superseded".to_owned(), Some(T3.to_owned()))
+        );
+        // Очищене поле теж перекриває виправлення.
+        let mut rows = editable(&changed);
+        rows[0].remove("takeoff_time");
+        let cleared = store
+            .replace_rows(
+                PROFILE,
+                &data.module.id,
+                rows,
+                &changed.module.updated_at,
+                T4,
+            )
+            .await
+            .unwrap();
+        assert_eq!(status_of(&cleared, "takeoff_time").0, "superseded");
+    }
+
+    #[tokio::test]
+    async fn an_old_correction_without_a_stored_value_is_unconfirmed_until_its_field_changes() {
+        let store = store().await;
+        let data = corrected_module(&store).await;
+        // Так виглядає виправлення, створене до міграції 0016.
+        sqlx::query("UPDATE dashboard_module_corrections SET stored_value = NULL")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let old = store.get_data(PROFILE, &data.module.id).await.unwrap();
+        assert_eq!(status_of(&old, "takeoff_time").0, "unconfirmed");
+        let mut rows = editable(&old);
+        rows[0].insert("takeoff_time".into(), json!("15:00"));
+        let edited = store
+            .replace_rows(PROFILE, &data.module.id, rows, &old.module.updated_at, T2)
+            .await
+            .unwrap();
+        assert_eq!(
+            status_of(&edited, "takeoff_time"),
+            ("superseded".to_owned(), Some(T2.to_owned()))
+        );
+        assert_eq!(status_of(&edited, "flight_altitude").0, "unconfirmed");
     }
 }

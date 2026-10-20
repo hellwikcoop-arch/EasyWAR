@@ -45,6 +45,14 @@ catalog template, not from the migration. Migration
 values corrected on the «Перевірка» screen before rows from the user's XLSX were
 brought into a new module, kept apart from the module records (raw cell text,
 typed text, reason, file name, sheet, row and column). Migration
+`0016_dashboard_module_correction_status.sql` adds two columns to it:
+`stored_value` (the canonical value written to SQLite after the correction, as JSON,
+e.g. `300.0` for «300 м»; NULL for corrections made before 0016) and
+`superseded_at` (when a hand edit in the module changed exactly that field;
+`replace_rows` compares the old typed value with the new one in the same
+transaction). `get_data` returns each correction with `status`: `current`,
+`superseded` (history of the import) or `unconfirmed` (old correction without a
+stored value). The original correction is never rewritten. Migration
 `0012_dashboard_module_style.sql` adds `dashboard_modules.style` — the look chosen
 when the module was created: `standard` (default for existing modules), `branch`
 (colours of the dashboard's service branch) or `heightwell` («Пункт керування»);

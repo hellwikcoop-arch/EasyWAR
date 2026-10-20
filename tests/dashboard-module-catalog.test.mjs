@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {
+  correctionStatus,
+  correctionStatusLabel,
   BRANCH_LABELS,
   FUEL_DENSITY_KG_PER_L,
   MODULE_STYLES,
@@ -1164,6 +1166,20 @@ test('the review screen corrects values before the import and never rewrites the
   assert.doesNotMatch(review, /innerHTML|confirm\(|alert\(/);
   assert.match(css, /\.ewmc-issue\{display:grid;/);
   assert.match(css, /\.ewmc-data-table td\.ewmc-corrected\{/);
+  // ✎ лише для виправлення, яке пояснює поточне значення; решта — історія імпорту (↺).
+  assert.match(source, /if \(fix && correctionStatus\(fix\) === 'current'\) \{/);
+  assert.match(source, /class: 'ewmc-correction-history'/);
+  assert.match(source, /text: '↺'/);
+  assert.ok(source.includes("зараз — «"), 'a superseded correction shows the current value next to the history');
+});
+
+test('a correction marks the cell as current only when Rust confirms it', () => {
+  assert.equal(correctionStatus({ status: 'current' }), 'current');
+  assert.equal(correctionStatus({ status: 'superseded' }), 'superseded');
+  for (const item of [{ status: 'unconfirmed' }, {}, { status: 'щось' }, null]) assert.equal(correctionStatus(item), 'unconfirmed');
+  assert.equal(correctionStatusLabel({ status: 'superseded' }), 'історія імпорту: значення змінено вручну після підтягування');
+  assert.equal(correctionStatusLabel({}), 'історія імпорту, поточність не підтверджена');
+  assert.doesNotMatch(correctionStatusLabel({ status: 'superseded' }), /поточне/u);
 });
 
 test('deleting a module asks first and names what disappears with it', () => {

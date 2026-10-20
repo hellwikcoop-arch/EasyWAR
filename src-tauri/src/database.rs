@@ -103,6 +103,8 @@ pub(crate) const OFFICE_LIBRARY_SQL: &str = include_str!("../migrations/0013_off
 pub(crate) const DOCUMENT_LINKS_SQL: &str = include_str!("../migrations/0014_document_links.sql");
 pub(crate) const LIBRARY_BLOB_REPAIR_SQL: &str =
     include_str!("../migrations/0015_library_blob_repair.sql");
+pub(crate) const DASHBOARD_MODULE_CORRECTION_STATUS_SQL: &str =
+    include_str!("../migrations/0016_dashboard_module_correction_status.sql");
 
 pub fn migrations() -> Vec<Migration> {
     vec![
@@ -196,6 +198,12 @@ pub fn migrations() -> Vec<Migration> {
             sql: LIBRARY_BLOB_REPAIR_SQL,
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 16,
+            description: "add_dashboard_module_correction_status",
+            sql: DASHBOARD_MODULE_CORRECTION_STATUS_SQL,
+            kind: MigrationKind::Up,
+        },
     ]
 }
 
@@ -263,11 +271,11 @@ mod tests {
     use super::{
         create_migrated_database, migrations, DatabaseMigrationState, DatabaseStatusError,
         DatabaseStatusStore, COMMAND_TABLES_SQL, DASHBOARD_MODULES_SQL,
-        DASHBOARD_MODULE_CORRECTIONS_SQL, DASHBOARD_MODULE_STYLE_SQL, DATABASE_URL,
-        DOCUMENT_LINKS_SQL, EMBEDDED_MIGRATOR, INITIAL_SCHEMA_SQL, LIBRARY_BLOB_REPAIR_SQL,
-        LOCAL_PROFILES_SQL, OFFICE_LIBRARY_SQL, OWN_LOSSES_TABLES_SQL, PROFILE_BRANCH_TABLES_SQL,
-        PROFILE_DETAILS_SQL, PROFILE_MODULES_SQL, WORKSPACE_TEMPLATES_SQL,
-        XLSX_DUPLICATE_LINKS_SQL,
+        DASHBOARD_MODULE_CORRECTIONS_SQL, DASHBOARD_MODULE_CORRECTION_STATUS_SQL,
+        DASHBOARD_MODULE_STYLE_SQL, DATABASE_URL, DOCUMENT_LINKS_SQL, EMBEDDED_MIGRATOR,
+        INITIAL_SCHEMA_SQL, LIBRARY_BLOB_REPAIR_SQL, LOCAL_PROFILES_SQL, OFFICE_LIBRARY_SQL,
+        OWN_LOSSES_TABLES_SQL, PROFILE_BRANCH_TABLES_SQL, PROFILE_DETAILS_SQL, PROFILE_MODULES_SQL,
+        WORKSPACE_TEMPLATES_SQL, XLSX_DUPLICATE_LINKS_SQL,
     };
     use super::{live_connect_options, writable_connect_options};
     use sqlx::{sqlite::SqlitePoolOptions, Row};
@@ -278,7 +286,7 @@ mod tests {
         assert_eq!(DATABASE_URL, "sqlite:easywar.db");
         assert!(include_str!("../tauri.conf.json").contains(DATABASE_URL));
         let registered = migrations();
-        assert_eq!(registered.len(), 15);
+        assert_eq!(registered.len(), 16);
         assert_eq!(registered[0].version, 1);
         assert_eq!(registered[0].description, "create_provenance_schema");
         assert_eq!(registered[1].version, 2);
@@ -312,6 +320,11 @@ mod tests {
         assert_eq!(registered[13].description, "add_document_links");
         assert_eq!(registered[14].version, 15);
         assert_eq!(registered[14].description, "allow_library_blob_repair");
+        assert_eq!(registered[15].version, 16);
+        assert_eq!(
+            registered[15].description,
+            "add_dashboard_module_correction_status"
+        );
         assert_eq!(
             EMBEDDED_MIGRATOR
                 .iter()
@@ -332,7 +345,7 @@ mod tests {
                 .map(|migration| migration.sql)
                 .collect::<Vec<_>>()
         );
-        assert_eq!(super::latest_schema_version(), Some(15));
+        assert_eq!(super::latest_schema_version(), Some(16));
     }
 
     #[tokio::test]
@@ -344,9 +357,9 @@ mod tests {
             DatabaseStatusStore::new(pool.clone()).load().await.unwrap(),
             super::DatabaseStatus {
                 app_version: env!("CARGO_PKG_VERSION").to_owned(),
-                schema_version: 15,
-                supported_schema_version: 15,
-                migration_count: 15,
+                schema_version: 16,
+                supported_schema_version: 16,
+                migration_count: 16,
                 migration_state: DatabaseMigrationState::Current,
             }
         );
@@ -430,6 +443,10 @@ mod tests {
             .execute(&pool)
             .await
             .expect("library blob repair migration must apply");
+        sqlx::raw_sql(DASHBOARD_MODULE_CORRECTION_STATUS_SQL)
+            .execute(&pool)
+            .await
+            .expect("dashboard module correction status migration must apply");
 
         pool
     }
@@ -811,6 +828,54 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn correction_status_migration_keeps_old_corrections_and_marks_them_unknown() {
+        // База до міграції 0016 з виправленням: після міграції воно лишається як було,
+        // а канонічного значення й позначки перекриття в нього немає.
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        for sql in [
+            INITIAL_SCHEMA_SQL,
+            XLSX_DUPLICATE_LINKS_SQL,
+            LOCAL_PROFILES_SQL,
+            WORKSPACE_TEMPLATES_SQL,
+            PROFILE_DETAILS_SQL,
+            PROFILE_BRANCH_TABLES_SQL,
+            COMMAND_TABLES_SQL,
+            OWN_LOSSES_TABLES_SQL,
+            PROFILE_MODULES_SQL,
+            DASHBOARD_MODULES_SQL,
+            DASHBOARD_MODULE_CORRECTIONS_SQL,
+            DASHBOARD_MODULE_STYLE_SQL,
+            OFFICE_LIBRARY_SQL,
+            DOCUMENT_LINKS_SQL,
+            LIBRARY_BLOB_REPAIR_SQL,
+        ] {
+            sqlx::raw_sql(sql).execute(&pool).await.unwrap();
+        }
+        module_with_corrections(&pool).await;
+        sqlx::raw_sql(DASHBOARD_MODULE_CORRECTION_STATUS_SQL)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let kept: Vec<(String, String, Option<String>, Option<String>)> = sqlx::query_as(
+            "SELECT raw_text, corrected_text, stored_value, superseded_at
+             FROM dashboard_module_corrections ORDER BY id",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert!(!kept.is_empty());
+        for (raw, corrected, stored, superseded) in kept {
+            assert!(!raw.is_empty() || !corrected.is_empty());
+            assert_eq!(stored, None);
+            assert_eq!(superseded, None);
+        }
+    }
+
+    #[tokio::test]
     async fn dashboard_module_corrections_migration_keeps_raw_and_corrected_text_apart() {
         let pool = migrated_pool().await;
         let columns =
@@ -835,7 +900,9 @@ mod tests {
                 "raw_text",
                 "corrected_text",
                 "reason",
-                "created_at"
+                "created_at",
+                "stored_value",
+                "superseded_at"
             ]
         );
         module_with_corrections(&pool).await;

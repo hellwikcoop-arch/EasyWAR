@@ -15,6 +15,8 @@ import {
   fieldPlaceholder,
   fieldSections,
   formatFieldValue,
+  correctionStatus,
+  correctionStatusLabel,
   inheritedValues,
   isConflictError,
   runModuleDelete,
@@ -1006,13 +1008,24 @@ function initialize() {
     function correctionsList() {
       const position = new Map(rows.map((row, index) => [row.rowId, index + 1]));
       const labelOf = new Map(module.fields.map(field => [field.key, field.label]));
+      const current = corrections.filter(item => correctionStatus(item) === 'current').length;
+      const history = corrections.length - current;
       return el('details', { class: 'ewmc-corrections' },
-        el('summary', { text: `Виправлено під час підтягування з таблиці: ${corrections.length} ${pluralForm(corrections.length, 'значення', 'значення', 'значень')}` }),
-        el('p', { class: 'ewmc-corrections-note', text: 'Файл таблиці не змінювався: сире значення клітинки збережено окремо від запису. У таблиці нижче такі клітинки позначено ✎.' }),
-        el('ul', {}, corrections.map(item => el('li', {},
-          el('b', { text: `Запис ${position.get(item.rowId) ?? '—'} · ${labelOf.get(item.fieldKey) ?? item.fieldKey}: ` }),
-          'у таблиці ', el('b', { text: `«${item.rawText || 'порожньо'}»` }), ' → ', el('b', { text: `«${item.correctedText}»` }),
-          el('small', { text: ` — рядок ${item.sourceRow}${item.sourceColumn ? `, «${item.sourceColumn}»` : ''}, аркуш «${item.sourceSheet}», ${item.sourceFile}. ${item.reason}` })))));
+        el('summary', { text: `Виправлено під час підтягування з таблиці: ${corrections.length} ${pluralForm(corrections.length, 'значення', 'значення', 'значень')}`
+          + (history ? ` (поточних — ${current}, історія імпорту — ${history})` : '') }),
+        el('p', { class: 'ewmc-corrections-note', text: 'Файл таблиці не змінювався: сире значення клітинки збережено окремо від запису. У таблиці нижче клітинки, які пояснює виправлення, позначено ✎; '
+          + 'виправлення, після якого значення змінили вручну або поточність якого не підтверджена, — лише історія імпорту (↺).' }),
+        el('ul', {}, corrections.map(item => {
+          const record = rows.find(row => row.rowId === item.rowId);
+          const field = module.fields.find(entry => entry.key === item.fieldKey);
+          const status = correctionStatus(item);
+          return el('li', { 'data-status': status },
+            el('b', { text: `Запис ${position.get(item.rowId) ?? '—'} · ${labelOf.get(item.fieldKey) ?? item.fieldKey}: ` }),
+            'у таблиці ', el('b', { text: `«${item.rawText || 'порожньо'}»` }), ' → ', el('b', { text: `«${item.correctedText}»` }),
+            status === 'current' ? null : el('span', { class: 'ewmc-history-note', text: ` · ${correctionStatusLabel(item)}`
+              + (record && field ? `; зараз — «${formatFieldValue(field, record[field.key]) || 'порожньо'}»` : '') }),
+            el('small', { text: ` — рядок ${item.sourceRow}${item.sourceColumn ? `, «${item.sourceColumn}»` : ''}, аркуш «${item.sourceSheet}», ${item.sourceFile}. ${item.reason}` }));
+        })));
     }
 
     // Видимі колонки (група) і рядки (пошук). Номер рядка в «№» лишається номером запису в таблиці.
@@ -1047,11 +1060,18 @@ function initialize() {
         module.fields.map(field => {
           const shown = formatFieldValue(field, row?.[field.key]);
           const fix = correctionAt.get(`${row?.rowId}:${field.key}`);
-          if (fix) {
+          // ✎ — лише коли виправлення підтверджено пояснює поточне значення; інакше це історія імпорту.
+          if (fix && correctionStatus(fix) === 'current') {
             return el('td', { class: 'ewmc-corrected', title: correctionText(fix), 'data-key': field.key },
               el('span', { class: 'ewmc-corrected-mark', 'aria-hidden': 'true', text: '✎' }),
               shown,
               el('span', { class: 'ewmc-sr', text: ` (виправлено під час підтягування; у таблиці було «${fix.rawText || 'порожньо'}»)` }));
+          }
+          if (fix) {
+            return el('td', { class: 'ewmc-correction-history', title: correctionText(fix), 'data-key': field.key },
+              el('span', { class: 'ewmc-history-mark', 'aria-hidden': 'true', text: '↺' }),
+              shown,
+              el('span', { class: 'ewmc-sr', text: ` (${correctionStatusLabel(fix)})` }));
           }
           return el('td', { text: shown, title: shown.length > 14 ? shown : false, 'data-key': field.key });
         }),
@@ -1391,7 +1411,10 @@ function initialize() {
 function correctionText(item) {
   const where = [`рядок ${item.sourceRow}`, item.sourceColumn && `«${item.sourceColumn}»`, item.sourceSheet && `аркуш «${item.sourceSheet}»`, item.sourceFile]
     .filter(Boolean).join(', ');
-  return `Виправлено під час підтягування з таблиці: «${item.rawText || 'порожньо'}» → «${item.correctedText}» (${where}). ${item.reason}`;
+  const base = `«${item.rawText || 'порожньо'}» → «${item.correctedText}» (${where}). ${item.reason}`;
+  return correctionStatus(item) === 'current'
+    ? `Виправлено під час підтягування з таблиці: ${base}`
+    : `${correctionStatusLabel(item)[0].toUpperCase()}${correctionStatusLabel(item).slice(1)}. Під час підтягування було виправлено: ${base}`;
 }
 
 // Синтетичні рядки для картки каталогу: вигадані підрозділи, дати 2026 року й числа, щоб прев'ю
