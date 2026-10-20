@@ -1,8 +1,8 @@
-// Оболонка модуля «Робоче середовище»: розділ «Офіс» з картками застосунків і перегляд одного
+// Оболонка модуля «Робоче середовище»: розділи «Офіс» і «Обстановка» з картками застосунків і перегляд одного
 // застосунку в iframe (app.html?app=<id>). Незбережені зміни застосунок повідомляє через
 // postMessage; перед закриттям оболонка просить підтвердження у власній смузі, без системних
 // діалогів. Лаунчер (workspace-launcher.js) питає дозволу закритися через EW_WORKSPACE.requestClose().
-import { OFFICE_APPS, WORKSPACE_SECTIONS, appById, appPageUrl, frameTitle, parseFrameMessage } from './workspace-core.js';
+import { WORKSPACE_APPS, WORKSPACE_SECTIONS, appById, appPageUrl, frameTitle, parseFrameMessage, sectionOfApp } from './workspace-core.js';
 import { isConnected } from './workspace-registry.js';
 
 const home = document.getElementById('ws-home');
@@ -54,6 +54,7 @@ function openApp(id, card) {
   const app = appById(id);
   current = { app, dirty: false, card };
   titleNode.textContent = frameTitle(app, '', false);
+  back.textContent = `← ${sectionOfApp(id)?.title || 'Робоче середовище'}`;
   document.title = `${app.title} — EasyWAR`;
   frame.src = appPageUrl(id);
   home.hidden = true;
@@ -125,5 +126,5 @@ window.addEventListener('message', event => {
   titleNode.textContent = frameTitle(current.app, state.title, state.dirty);
 });
 
-window.EW_WORKSPACE = Object.freeze({ requestClose: requestCloseApp, apps: OFFICE_APPS.map(app => app.id) });
+window.EW_WORKSPACE = Object.freeze({ requestClose: requestCloseApp, apps: WORKSPACE_APPS.map(app => app.id) });
 renderSections();

@@ -1,4 +1,4 @@
-// Чиста логіка модуля «Робоче середовище»: реєстр застосунків розділу «Офіс», контракт
+// Чиста логіка модуля «Робоче середовище»: реєстр застосунків розділів «Офіс» і «Обстановка», контракт
 // підключення застосунку (версія, перевірка того, що повертає mount), параметри вікон
 // відкриття/збереження. Без DOM і Tauri, щоб її можна було перевірити в node --test.
 // Оболонка — workspace.js, сторінка одного застосунку — app-frame.js, файли — workspace-host.js.
@@ -15,7 +15,7 @@ export const MAX_EXTENSIONS = 8;
 const MAX_EXTENSION_LEN = 10;
 export const MAX_FILE_BYTES = 256 * 1024 * 1024;
 
-const app = fields => Object.freeze({ ...fields, extensions: Object.freeze([...fields.extensions]) });
+const app = fields => Object.freeze({ ...fields, extensions: Object.freeze([...(fields.extensions || [])]) });
 
 /**
  * Застосунки розділу «Офіс» у порядку карток. `extensions` і `filterName` — типовий фільтр
@@ -50,13 +50,35 @@ export const OFFICE_APPS = Object.freeze([
   }),
 ]);
 
-/** Розділи модуля. Поки один — «Офіс». */
+/**
+ * Застосунки розділу «Обстановка»: працюють без файлів (порожні `extensions`). «Погода» може
+ * брати дані з інтернету лише після явного ввімкнення користувачем (src/workspace/weather).
+ */
+export const SITUATION_APPS = Object.freeze([
+  app({
+    id: 'weather',
+    title: 'Погода',
+    kind: 'Метеоумови',
+    hint: 'Нижній край хмар, видимість і хмарність у вибраному населеному пункті',
+  }),
+]);
+
+/** Усі застосунки модуля в порядку розділів. */
+export const WORKSPACE_APPS = Object.freeze([...OFFICE_APPS, ...SITUATION_APPS]);
+
+/** Розділи модуля: «Офіс» і «Обстановка». */
 export const WORKSPACE_SECTIONS = Object.freeze([
   Object.freeze({ id: 'office', title: 'Офіс', apps: Object.freeze(OFFICE_APPS.map(entry => entry.id)) }),
+  Object.freeze({ id: 'situation', title: 'Обстановка', apps: Object.freeze(SITUATION_APPS.map(entry => entry.id)) }),
 ]);
 
 export function appById(id) {
-  return OFFICE_APPS.find(entry => entry.id === id) || null;
+  return WORKSPACE_APPS.find(entry => entry.id === id) || null;
+}
+
+/** Розділ, у якому лежить застосунок (для кнопки «← <розділ>»), або null. */
+export function sectionOfApp(id) {
+  return WORKSPACE_SECTIONS.find(section => section.apps.includes(id)) || null;
 }
 
 /** Адреса сторінки застосунку відносно `workspace/index.html`. */

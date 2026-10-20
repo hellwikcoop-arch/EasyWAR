@@ -1,0 +1,44 @@
+/* «Погода» у «Робочому середовищі» → «Обстановка». Токени — з workspace.css (темний вигляд). */
+.wx-root{max-width:880px;margin:0 auto;padding:16px;display:grid;align-content:start;gap:14px;font:400 14px/1.5 var(--sans);color:var(--fg)}
+.wx-head{display:flex;flex-wrap:wrap;align-items:center;gap:10px;border-bottom:1px solid var(--line);padding-bottom:12px}
+.wx-head h1{margin:0;font:600 22px/1.2 var(--sans)}
+.wx-label,.wx-metric-label,.wx-sub{font:400 11px/1.4 var(--mono);letter-spacing:.1em;color:var(--faint);text-transform:uppercase}
+.wx-select,.wx-field input{font:inherit;color:var(--fg);background:var(--panel);border:1px solid var(--line-2);border-radius:8px;padding:6px 10px;min-height:34px}
+.wx-select{flex:1 1 220px;max-width:420px}
+.wx-select:focus,.wx-field input:focus{border-color:var(--accent);outline:none}
+.wx-btn{font:500 13px/1.3 var(--sans);color:var(--fg);background:transparent;border:1px solid var(--line-2);border-radius:8px;padding:6px 14px;min-height:34px;cursor:pointer}
+.wx-btn:hover:not(:disabled),.wx-btn:focus-visible{border-color:var(--accent);outline:none}
+.wx-btn:disabled{opacity:.45;cursor:not-allowed}
+.wx-primary{border-color:var(--accent);color:var(--accent)}
+.wx-quiet{border-color:var(--line);color:var(--dim)}
+.wx-net{display:grid;gap:8px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+.wx-row{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px}
+.wx-toggle{display:inline-flex;align-items:center;gap:8px;cursor:pointer}
+.wx-toggle input{width:18px;height:18px;accent-color:var(--accent)}
+.wx-disclosure,.wx-hint,.wx-source{margin:0;font:400 12px/1.5 var(--mono);color:var(--dim)}
+.wx-stale{color:var(--danger)}
+.wx-card{display:grid;gap:14px;padding:18px;border:1px solid var(--line);border-left:4px solid #5a9e6f;border-radius:14px;background:var(--panel)}
+.wx-card[data-tone="warn"]{border-left-color:var(--accent)}
+.wx-card[data-tone="bad"]{border-left-color:var(--danger)}
+.wx-card-head{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:4px 12px}
+.wx-card-head h2{margin:0;font:600 20px/1.25 var(--sans)}
+.wx-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.wx-metric{display:grid;gap:4px;padding:12px;border:1px solid var(--line);border-radius:10px;background:#18191d}
+.wx-metric-value{font:600 28px/1.1 var(--sans)}
+.wx-metric-note{font:400 11px/1.4 var(--mono);color:var(--faint)}
+.wx-extra{margin:0;display:flex;flex-wrap:wrap;gap:6px 18px;color:var(--dim);font-size:13px}
+.wx-hazard{margin:0;font-weight:500}
+.wx-card[data-tone="warn"] .wx-hazard{color:var(--accent)}
+.wx-card[data-tone="bad"] .wx-hazard{color:var(--danger)}
+.wx-empty{padding:24px;border:1px dashed var(--line-2);border-radius:14px;color:var(--dim);text-align:center}
+.wx-panel{border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+.wx-panel>summary{cursor:pointer;padding:10px 14px;font-weight:500}
+.wx-panel>summary:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:12px}
+.wx-panel>:not(summary){margin:0 14px 12px}
+.wx-panel>:last-child{margin-bottom:14px}
+.wx-field{display:grid;gap:4px;flex:1 1 140px}
+.wx-results{display:grid;gap:6px;list-style:none;padding:0}
+.wx-results:empty{display:none}
+.wx-result{text-align:left}
+.wx-status{min-height:1.5em;margin:0;font:400 12px/1.5 var(--mono);color:var(--dim)}
+@media (max-width:560px){.wx-root{padding:12px}.wx-metrics{grid-template-columns:1fr}.wx-metric-value{font-size:24px}}
