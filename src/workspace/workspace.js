@@ -1,10 +1,11 @@
-// Оболонка модуля «Робоче середовище»: розділи «Офіс» і «Особисте» з картками застосунків і перегляд одного
+// Оболонка модуля «Робоче середовище»: розділи «Офіс», «Обстановка» і «Особисте» з картками застосунків і перегляд одного
 // застосунку в iframe (app.html?app=<id>) під верхньою смугою «← Розділи · назва · Закрити».
 // Незбережені зміни застосунок повідомляє через postMessage; перед закриттям оболонка просить
 // підтвердження у власній смузі, без системних діалогів. Лаунчер (workspace-launcher.js) питає
 // дозволу закритися через EW_WORKSPACE.requestClose(), а «← На стартову» просить його закритися.
 // У настільному застосунку застосунок працює не в головному вікні, а в окремому вікні
 // редактора з дозволом лише на команди office_* (shellMode, docs/WORKSPACE.md, «Ізоляція»).
+// Застосунки «Обстановки» (погода) лишаються в iframe головного вікна (opensInEditorWindow).
 // Вкладка «Бібліотека» (лише в головному вікні застосунку) — library.js, окремий чанк, що
 // вантажиться при першому відкритті вкладки; закриття сторінки блокує бібліотеку (library_lock).
 // У вікні редактора смуга підказує, як відкрити документ, що чекає з бібліотеки (EasyDoc, EasySlide).
@@ -16,6 +17,7 @@ import {
   appPageUrl,
   formatsLabel,
   frameTitle,
+  opensInEditorWindow,
   branchFromSearch,
   parseFrameMessage,
   pendingFileNotice,
@@ -85,12 +87,12 @@ function appCard(app) {
     top,
     element('strong', 'ws-card-name', app.title),
     element('span', 'ws-card-desc', app.hint),
-    element('span', 'ws-card-formats', formatsLabel(app)),
+    element('span', 'ws-card-formats', formatsLabel(app) || 'Без файлів'),
     action,
   );
   if (connected) {
     card.addEventListener('click', () => {
-      if (shell.mode === 'desktop') openEditorWindow(app.id, card);
+      if (shell.mode === 'desktop' && opensInEditorWindow(app.id)) openEditorWindow(app.id, card);
       else openApp(app.id, card);
     });
   }

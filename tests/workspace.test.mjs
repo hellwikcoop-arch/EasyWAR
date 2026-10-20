@@ -12,6 +12,7 @@ import {
   LOADING_STEPS,
   OFFICE_APPS,
   PERSONAL_APPS,
+  SITUATION_APPS,
   WORKSPACE_APPS,
   WORKSPACE_SECTIONS,
   acceptAttribute,
@@ -49,16 +50,19 @@ const read = (path) => readFile(new URL(path, root), 'utf8');
 test('розділ «Офіс» має EasyGreen, EasyDoc, EasySlide, розділ «Особисте» — easyPay', () => {
   assert.deepEqual(OFFICE_APPS.map(app => app.id), ['easygreen', 'easydoc', 'easyslide']);
   assert.deepEqual(OFFICE_APPS.map(app => app.title), ['EasyGreen', 'EasyDoc', 'EasySlide']);
-  assert.deepEqual(WORKSPACE_SECTIONS.map(section => section.title), ['Офіс', 'Особисте']);
+  assert.deepEqual(WORKSPACE_SECTIONS.map(section => section.title), ['Офіс', 'Обстановка', 'Особисте']);
   assert.deepEqual(WORKSPACE_SECTIONS[0].apps, ['easygreen', 'easydoc', 'easyslide']);
-  assert.deepEqual(WORKSPACE_SECTIONS[1].apps, ['easypay']);
+  assert.deepEqual(WORKSPACE_SECTIONS[1].apps, ['weather']);
+  assert.deepEqual(WORKSPACE_SECTIONS[2].apps, ['easypay']);
   assert.deepEqual(PERSONAL_APPS.map(app => app.id), ['easypay']);
-  assert.deepEqual(WORKSPACE_APPS.map(app => app.id), ['easygreen', 'easydoc', 'easyslide', 'easypay']);
+  assert.deepEqual(WORKSPACE_APPS.map(app => app.id), ['easygreen', 'easydoc', 'easyslide', 'weather', 'easypay']);
   assert.equal(appById('easypay').title, 'easyPay');
   assert.deepEqual(dialogOptions(appById('easypay')).extensions, ['easypay']);
   for (const app of WORKSPACE_APPS) {
     assert.ok(Object.isFrozen(app) && Object.isFrozen(app.extensions));
-    assert.deepEqual(normalizeExtensions(app.extensions), [...app.extensions], `${app.id}: типові розширення коректні`);
+    // Застосунки «Обстановки» працюють без файлів: розширень у них немає.
+    if (app.extensions.length) assert.deepEqual(normalizeExtensions(app.extensions), [...app.extensions], `${app.id}: типові розширення коректні`);
+    else assert.ok(SITUATION_APPS.includes(app), `${app.id}: без файлів лише застосунки «Обстановки»`);
     assert.match(app.hint, /[а-яіїєґ]/i, `${app.id}: підказка українською`);
   }
 });
