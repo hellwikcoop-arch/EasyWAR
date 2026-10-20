@@ -26,7 +26,9 @@ async function open(bytes) {
   const slides = Object.keys(zip.files).filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n)).sort((a, b) => parseInt(a.match(/\d+/)[0]) - parseInt(b.match(/\d+/)[0]));
   const texts = await Promise.all(slides.map(async n => [...(await zip.file(n).async('string')).matchAll(/<a:t>([^<]*)<\/a:t>/g)].map(m => m[1]).join(' | ')));
   const charts = Object.keys(zip.files).filter(n => /^ppt\/charts\/chart\d+\.xml$/.test(n));
-  return { zip, slides, texts, charts };
+  // Анотації слайдів (notesSlideN відповідає slideN): текст висновків УДШВ лежить тут.
+  const notes = await Promise.all(slides.map(async (_, i) => { const f = zip.file(`ppt/notesSlides/notesSlide${i + 1}.xml`); return f ? [...(await f.async('string')).matchAll(/<a:t>([^<]*)<\/a:t>/g)].map(m => m[1]).join(' | ') : ''; }));
+  return { zip, slides, texts, charts, notes };
 }
 
 const deckOf = options => buildDeck(workbook(), { owner: 'Тестова група', generatedOn: '30.09.2026', groups: [{ id: 'a', title: 'Група А', units: ['Підрозділ А'] }], ...options });
@@ -37,7 +39,7 @@ for (const theme of Object.keys(THEMES)) {
     const { slides, texts, charts } = await open(await renderDeckToBytes(deck, { theme }));
     assert.equal(slides.length, deck.slides.length);
     assert.equal(slides.length, 5); // титул, 7, 30, весь період, група
-    assert.equal(charts.length, (deck.slides.length - 1) * 2); // дві діаграми на слайд періоду
+    assert.equal(charts.length, 3 * 3 + 2); // слайди періодів УДШВ: дві діаграми й «Типи уражених цілей»; слайд групи: дві
     assert.ok(texts[0].includes('Тестова група'));
     assert.ok(texts[0].includes('Аналітика'));
     assert.ok(!/Підрозділи в аналізі|Джерела даних|Якість даних/.test(texts[0]), 'актуальність і якість на титул не виносяться');
@@ -53,11 +55,12 @@ test('light is the only theme and the default', () => {
 
 test('tile numbers and the three text blocks reach the slide', async () => {
   const deck = deckOf({ focus: 'efficiency' });
-  const { texts } = await open(await renderDeckToBytes(deck));
+  const { texts, notes } = await open(await renderDeckToBytes(deck));
   const week = deck.slides.find(s => s.id === 'week');
   for (const tile of week.tiles) { assert.ok(texts[1].includes(tile.name.replace(/&/g, '&amp;')), tile.name); }
   assert.ok(texts[1].includes(week.tiles[0].totalText.replace(/ /g, ' ')));
-  for (const heading of ['Що змінилось', 'На що звернути увагу', 'Тенденція: тиждень до місяця']) assert.ok(texts[1].includes(heading), heading);
+  for (const heading of ['Що змінилось', 'На що звернути увагу', 'Тенденція: тиждень до місяця']) { assert.ok(notes[1].includes(heading), heading); assert.ok(!texts[1].includes(heading), `${heading}: на слайді тексту висновків немає`); }
+  assert.ok(texts[1].includes('Типи уражених цілей'));
   assert.ok(texts[0].includes('Ефективність'));
 });
 
@@ -65,15 +68,15 @@ test('an empty block gets a plain sentence instead of staying blank', async () =
   const flat = workbook();
   for (const r of flat.records) r.values = { 'personnel|200': 1, 'ammo|122мм': 5, 'ammo|ВСЬОГО': 5 };
   const deck = buildDeck(flat, { owner: 'X' });
-  const { texts } = await open(await renderDeckToBytes(deck));
-  assert.ok(texts[1].includes('Суттєвих змін (від 20 %) не виявлено.'));
+  const { notes } = await open(await renderDeckToBytes(deck));
+  assert.ok(notes[1].includes('Суттєвих змін (від 20 %) не виявлено.'));
 });
 
 test('the reserved own-losses slide renders as a plain placeholder without a chart', async () => {
   const deck = deckOf({ reserveOwnLosses: true });
   const { slides, texts, charts } = await open(await renderDeckToBytes(deck));
   assert.equal(slides.length, 6);
-  assert.equal(charts.length, (slides.length - 2) * 2); // титул і місце без діаграм
+  assert.equal(charts.length, 3 * 3 + 2); // титул і місце без діаграм
   const slot = texts[deck.slides.findIndex(s => s.id === 'own-losses')];
   assert.ok(slot.includes('Власні втрати') && slot.includes('Місце зарезервовано'));
 });

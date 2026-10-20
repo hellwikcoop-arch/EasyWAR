@@ -15,6 +15,7 @@ import {
 } from './udshv-dashboard-core.js';
 
 import { buildStrikesSlide } from './presentation-strikes.js';
+import { annotationOf, artilleryPies, targetTypeChart } from './presentation-udshv-extra.js';
 import { buildOwnLossesSlide, ownLossesInRange } from './presentation-own-losses.js';
 import { periodVerdict, weekTrend, wholePeriodSummary } from './presentation-summary.js';
 import { NBSP, daysAcc, dayNumber, peakOf, tileFor as buildTile, daysWord, formatNumber, formatPercent, isoFromDay, longDate, periodText, rollingRange, chartDay, shortDate, signed } from './presentation-format.js';
@@ -45,8 +46,10 @@ export const FOCUS_LABELS = { result: 'Результат', efficiency: 'Ефе�
 const TILE_SETS = {
   result: ['kia', 'wia', 'ovtDestroyed', 'ovtDamaged', 'objDestroyed', 'objDamaged'],
   efficiency: ['ammoPerTarget', 'ammo', 'affected', 'vgz', 'kbb'],
-  all: ['ammoPerTarget', 'kia', 'wia', 'ovtDestroyed', 'objDestroyed', 'ammo'],
+  all: ['ammoPerTarget', 'kia', 'wia', 'ovtDestroyed', 'ovtDamaged', 'objDestroyed', 'objDamaged', 'ammo'],
 };
+// Слайди груп усередині колоди УДШВ лишаються на шести плитках.
+const GROUP_TILE_SETS = { ...TILE_SETS, all: ['ammoPerTarget', 'kia', 'wia', 'ovtDestroyed', 'objDestroyed', 'ammo'] };
 const TILE_POOL = ['affected', 'objDestroyed', 'objDamaged', 'ovtDestroyed', 'ovtDamaged', 'objSuppressed', 'ovtSuppressed', 'kia', 'wia', 'ammo', 'vgz', 'kbb'];
 const FOCUS_DOMAINS = { result: ['personnel', 'ovt', 'objects'], efficiency: ['efficiency', 'ammo', 'fire'], all: [] };
 const CHANGE_KEYS = ['kia', 'wia', 'ovtDestroyed', 'ovtDamaged', 'ovtSuppressed', 'objDestroyed', 'objDamaged', 'objSuppressed', 'affected', 'ammo', 'vgz', 'kbb'];
@@ -416,8 +419,8 @@ function paceRows(workbook, units, anchor, range, config) {
 
 /** Набір плиток за фокусом. Для груп порожні (нулі в обох періодах) плитки замінюються показниками з даними. */
 function tileKeys(model, config, prune) {
-  const base = TILE_SETS[config.focus] || TILE_SETS.all;
-  if (!prune) return base;
+  if (!prune) return TILE_SETS[config.focus] || TILE_SETS.all;
+  const base = GROUP_TILE_SETS[config.focus] || GROUP_TILE_SETS.all;
   const live = key => { const k = model.kpis.find(item => item.key === key); return k && ((k.total || 0) !== 0 || (k.previous || 0) !== 0); };
   const kept = base.filter(live);
   for (const key of TILE_POOL) { if (kept.length >= base.length) break; if (!kept.includes(key) && live(key)) kept.push(key); }
@@ -441,7 +444,7 @@ function windowSlide(workbook, period, units, anchor, config, all, prune = false
   const rangeCoverage = coverageOf(range, all);
   const notes = [];
   if (!rangeCoverage.complete) notes.push(`Дані охоплюють ${rangeCoverage.covered} із ${rangeCoverage.days} діб обраного періоду.`);
-  return {
+  const slide = {
     id: period.id,
     title: period.title,
     heading: period.heading || period.title,
@@ -460,6 +463,9 @@ function windowSlide(workbook, period, units, anchor, config, all, prune = false
     ...(prune ? { hypotheses: insights.hypotheses } : closingBlock(period, model, { workbook, units, anchor, config, pace })),
     notes,
   };
+  // Слайди періодів УДШВ: праворуч діаграма «Типи уражених цілей», текст висновків іде в анотації слайда.
+  if (!prune) { slide.targetChart = targetTypeChart(model.records, classifyTarget, config); slide.annotation = annotationOf(slide); }
+  return slide;
 }
 
 /** Заключний блок слайда періоду замість «Можливих причин»: тенденція / висновок / узагальнення. */
@@ -489,7 +495,9 @@ export function buildDeck(sourceWorkbook, options = {}) {
   const slides = periods.map(period => windowSlide(workbook, period, units, anchor, config, all, false, options.ownLosses || null));
   // Зарезервоване місце під слайд власних втрат: у таблиці УДШВ їх немає (вона про втрати противника).
   if (options.ownLosses) {
-    slides.push(buildOwnLossesSlide(options.ownLosses, { anchor, custom: options.custom, config }));
+    const ownSlide = buildOwnLossesSlide(options.ownLosses, { anchor, custom: options.custom, config });
+    // Праворуч дві кругові діаграми «Втрати артилерії противника в порівнянні з нашими»; текст висновків іде в анотації.
+    slides.push({ ...ownSlide, artilleryPies: artilleryPies({ workbook, own: options.ownLosses, anchor, classify: classifyTarget, config }), annotation: annotationOf(ownSlide) });
   } else if (options.reserveOwnLosses) {
     slides.push({
       id: 'own-losses', title: 'Власні втрати', status: 'no_source',

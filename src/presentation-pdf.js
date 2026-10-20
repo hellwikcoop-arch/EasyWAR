@@ -20,14 +20,15 @@ class PdfSlide {
   addShape(type, o) { this.ops.push({ kind: 'shape', type, o }); }
   addText(content, o) { this.ops.push({ kind: 'text', content, o }); }
   addImage(o) { this.ops.push({ kind: 'image', o }); }
-  addChart(type, data, o) { this.ops.push({ kind: 'chart', data, o }); }
+  addChart(type, data, o) { this.ops.push({ kind: 'chart', type, data, o }); }
+  addNotes() { /* анотації є лише в PPTX */ }
 }
 
 export class PdfDeck {
   constructor(options = {}) {
     this.fonts = options.fonts || {};
     this.slides = [];
-    this.charts = { BAR: 'bar' };
+    this.charts = { BAR: 'bar', PIE: 'pie' };
     this.title = '';
     this.author = '';
   }
@@ -67,7 +68,7 @@ export class PdfDeck {
         if (op.kind === 'shape') drawShape(ctx, op.type, op.o);
         else if (op.kind === 'text') drawText(ctx, op.content, op.o);
         else if (op.kind === 'image') await drawImage(ctx, op.o);
-        else if (op.kind === 'chart') drawBarChart(ctx, op.data, op.o);
+        else if (op.kind === 'chart') (op.type === 'pie' ? drawPieChart : drawBarChart)(ctx, op.data, op.o);
       }
     }
     return doc.save();
@@ -261,3 +262,47 @@ function drawBarChart({ page, pick }, data, o) {
   });
 }
 
+
+/** Кругова діаграма: один ряд, легенда внизу по центру. Кут відкладається за годинниковою стрілкою від 12 години. */
+function drawPieChart({ page, pick }, data, o) {
+  const b = box(o);
+  const font = pick(false, false);
+  const size = 7.5;
+  const series = data[0] || { labels: [], values: [] };
+  const colors = o.chartColors || [];
+  const total = series.values.reduce((a, v) => a + (v || 0), 0);
+  const legendH = o.showLegend ? 14 : 0;
+  const radius = Math.max(4, Math.min(b.w, b.h - legendH) / 2 - 4);
+  const cx = b.x + b.w / 2, cy = b.top + (b.h - legendH) / 2;
+  const yPage = y => PAGE_H - y;
+  let angle = 0;
+  if (total > 0) series.values.forEach((v, i) => {
+    if (!v) return;
+    const sweep = (v / total) * 2 * Math.PI;
+    const point = a => `${(cx + radius * Math.sin(a)).toFixed(2)} ${(cy - radius * Math.cos(a)).toFixed(2)}`;
+    const d = sweep >= 2 * Math.PI - 1e-6
+      ? `M ${cx} ${cy - radius} A ${radius} ${radius} 0 1 1 ${cx - 0.01} ${cy - radius} Z`
+      : `M ${cx} ${cy} L ${point(angle)} A ${radius} ${radius} 0 ${sweep > Math.PI ? 1 : 0} 1 ${point(angle + sweep)} Z`;
+    page.drawSvgPath(d, { x: 0, y: PAGE_H, color: color(colors[i] || '7A1F2B'), borderColor: color('FFFFFF'), borderWidth: 0.8 });
+    angle += sweep;
+  });
+  if (o.showLegend) {
+    const items = series.labels.map(label => ({ label: String(label), w: font.widthOfTextAtSize(String(label), size) + 14 }));
+    let x = b.x + (b.w - items.reduce((a, i) => a + i.w + 8, -8)) / 2;
+    items.forEach((item, i) => {
+      page.drawRectangle({ x, y: yPage(b.top + b.h - 3), width: 6, height: 6, color: color(colors[i] || '7A1F2B') });
+      page.drawText(item.label, { x: x + 10, y: yPage(b.top + b.h - 1), size, font, color: color('6B7280') });
+      x += item.w + 8;
+    });
+  }
+  if (o.showValue && total > 0) {
+    let a0 = 0;
+    series.values.forEach(v => {
+      if (!v) return;
+      const sweep = (v / total) * 2 * Math.PI, mid = a0 + sweep / 2;
+      const label = String(v).replace('.', ',');
+      page.drawText(label, { x: cx + radius * 0.62 * Math.sin(mid) - font.widthOfTextAtSize(label, 9) / 2, y: yPage(cy - radius * 0.62 * Math.cos(mid) + 3), size: 9, font: pick(true, false), color: color('FFFFFF') });
+      a0 += sweep;
+    });
+  }
+}
