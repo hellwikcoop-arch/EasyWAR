@@ -1,40 +1,142 @@
 /* Модуль «Робоче середовище»: розділ «Офіс» з картками застосунків і сторінка застосунку.
-   Той самий темний вигляд, що й у 3D-довідників. */
+   Макет — docs/design/workspace-office (SPEC.md). Кольори — темно-синя схема лаунчера з
+   акцентом роду військ (рішення власника 20.10.2026): рамки --interactive-line 3,73:1,
+   слабкий текст --weak 8,0:1, акценти від 5,5:1 на панелі.
+   Шрифт — UAF Sans (рішення власника 20.10.2026), той самий файл, що в map.css і artillery.css. */
+@font-face{font-family:"UAF Sans";src:url("../fonts/UAFSans.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:swap}
 :root{
-  --bg:#111214; --panel:#151619; --line:#26282d; --line-2:#3a3d44;
-  --fg:#d9dbdf; --dim:#8a8f98; --faint:#6b707a; --accent:#d8c48e; --danger:#e0786a;
-  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
-  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --bg:#07111c; --panel:#0d1a28; --raised:#132437; --editor:#1a2e45; --pressed:#20354d; --card-pressed:#10202f;
+  --line:#1a2e45; --line-2:#26384c; --interactive-line:#5d7690;
+  --text:#e6edf5; --muted:#8fa2b7; --weak:#9fb1c4;
+  --accent:#3d9bff; --accent-hover:#6bb3ff; --accent-pressed:#2a83e0;
+  --danger:#e0786a; --danger-hover:#f09488; --danger-pressed:#c96759; --danger-ground:#2a1a20;
+  --radius-card:16px; --radius-icon:12px; --radius-button:8px;
+  --shadow-hover:0 16px 40px rgba(0,0,0,.18); --duration-fast:160ms;
+  --sans:"UAF Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:var(--sans); /* дрібні підписи великими літерами — тим самим шрифтом */
   color-scheme:dark;
 }
-*{box-sizing:border-box}
-html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font-family:var(--sans)}
-.ws{max-width:1180px;margin:0 auto;padding:16px;display:grid;gap:18px}
-.ws[hidden],.ws-app[hidden],.ws-confirm[hidden]{display:none}
-.ws-head{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:4px 16px;border-bottom:1px solid var(--line);padding-bottom:12px}
-.ws-head h1{margin:0;font:600 22px/1.2 var(--sans)}
-.ws-head p,.ws-section h2,.ws-card .ws-kind{margin:0;font:400 11px/1.4 var(--mono);letter-spacing:.1em;color:var(--faint);text-transform:uppercase}
-.ws-section{display:grid;gap:10px}
-.ws-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
-.ws-card{appearance:none;font:inherit;text-align:left;display:flex;flex-direction:column;gap:8px;min-height:150px;padding:16px;border:1px solid var(--line);border-radius:14px;background:var(--panel);color:inherit;cursor:pointer;transition:border-color .15s,background .15s}
-.ws-card:hover,.ws-card:focus-visible{border-color:var(--accent);background:#191a1e;outline:none}
-.ws-card:focus-visible{box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--accent)}
-.ws-card h3{margin:0;font:600 18px/1.25 var(--sans)}
-.ws-card .ws-kind{color:var(--accent)}
-.ws-card .ws-hint{margin:0;font:400 13px/1.5 var(--sans);color:var(--dim)}
-.ws-card .ws-status{margin-top:auto;align-self:flex-start;font:400 11px/1.3 var(--mono);color:var(--faint);border:1px solid var(--line);border-radius:999px;padding:2px 8px}
-.ws-app{position:fixed;inset:0;display:flex;flex-direction:column}
-.ws-bar{flex:none;display:flex;align-items:center;gap:12px;padding:8px 16px;border-bottom:1px solid var(--line);font:500 12px/1.4 var(--mono);letter-spacing:.06em;color:var(--dim)}
-.ws-back,.ws-btn{font:inherit;color:var(--fg);background:transparent;border:1px solid var(--line-2);border-radius:8px;padding:6px 14px;min-height:34px;cursor:pointer}
-.ws-back:hover,.ws-back:focus-visible,.ws-btn:hover,.ws-btn:focus-visible{border-color:var(--accent);outline:none}
-.ws-danger:hover,.ws-danger:focus-visible{border-color:var(--danger);color:var(--danger)}
-.ws-confirm{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:8px 16px;border-bottom:1px solid var(--line);background:#1b1a17;font:400 13px/1.4 var(--sans)}
-.ws-confirm span{flex:1 1 240px}
+/* Акцент роду військ (html[data-branch], ставлять workspace.js і app-frame.js). ПС — типовий. */
+:root[data-branch="pvk"]{--accent:#3d9bff; --accent-hover:#6bb3ff; --accent-pressed:#2a83e0}
+:root[data-branch="rocket"]{--accent:#d9b650; --accent-hover:#ebcb6a; --accent-pressed:#bf9d3c}
+:root[data-branch="artillery"]{--accent:#e0a53a; --accent-hover:#f0bb5a; --accent-pressed:#c48d28}
+:root[data-branch="dshv"]{--accent:#e07b93; --accent-hover:#ec97ab; --accent-pressed:#c6627a}
+*,*::before,*::after{box-sizing:border-box}
+html{min-height:100%;background:var(--bg)}
+html,body{margin:0;height:100%}
+body{min-width:320px;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:15px;line-height:23px}
+button{font:inherit;color:inherit;cursor:pointer}
+button:disabled{cursor:not-allowed}
+.ws-screen[hidden],.ws-workspace[hidden],.ws-confirm[hidden],.ws-state-area[hidden],.ws-filename[hidden],.ws-dirty-dot[hidden]{display:none}
+
+/* Верхня смуга */
+.ws-topbar{flex:none;height:72px;min-height:72px;display:flex;align-items:center;gap:16px;padding:0 32px;border-bottom:1px solid var(--line-2);background:var(--panel)}
+.ws-topbar-home{justify-content:space-between;padding-inline:44px}
+.ws-topbar-title,.ws-eyebrow,.ws-card-type,.ws-card-formats,.ws-state-eyebrow,.ws-loading-steps,.ws-card-action{font-family:var(--mono);font-weight:500}
+.ws-topbar-title{font-size:11px;line-height:16px;letter-spacing:.14em;color:var(--muted)}
+
+/* Кнопки */
+.ws-button{min-height:40px;display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:8px 15px;border:1px solid var(--interactive-line);border-radius:var(--radius-button);background:var(--raised);color:var(--text);font-size:14px;font-weight:600;line-height:20px;white-space:nowrap;transition:background var(--duration-fast) ease,border-color var(--duration-fast) ease,color var(--duration-fast) ease}
+.ws-button:hover{background:var(--editor);border-color:var(--accent)}
+.ws-button:active{background:var(--pressed);transition:none}
+.ws-button:focus-visible,.ws-card:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.ws-button:disabled{background:var(--editor);color:var(--weak);border-color:var(--line-2)}
+.ws-button-quiet{background:transparent}
+.ws-button-quiet:hover{background:var(--editor)}
+.ws-button-primary{background:var(--accent);border-color:var(--accent);color:var(--bg)}
+.ws-button-primary:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
+.ws-button-primary:active{background:var(--accent-pressed);border-color:var(--accent-pressed)}
+.ws-button-danger{background:var(--danger);border-color:var(--danger);color:var(--bg)}
+.ws-button-danger:hover{background:var(--danger-hover);border-color:var(--danger-hover)}
+.ws-button-danger:active{background:var(--danger-pressed);border-color:var(--danger-pressed)}
+
+/* Головна «Офіс» */
+.ws-screen{min-height:100%}
+.ws-home-main{max-width:1216px;margin:0 auto;padding:80px 0}
+.ws-home-heading{max-width:760px}
+.ws-eyebrow,.ws-state-eyebrow{margin:0 0 18px;color:var(--accent);font-size:11px;line-height:16px;letter-spacing:.13em}
+.ws-home-heading h1{margin:0;font-size:56px;line-height:64px;letter-spacing:-.035em;font-weight:600}
+.ws-home-subtitle{margin:18px 0 0;color:var(--muted);font-size:17px;line-height:27px}
+.ws-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;margin-top:44px}
+
+/* Картка застосунку */
+.ws-card{position:relative;display:flex;flex-direction:column;min-width:0;min-height:354px;width:100%;padding:28px 30px 26px;text-align:left;border:1px solid var(--interactive-line);border-radius:var(--radius-card);background:var(--panel);transition:background var(--duration-fast) ease,border-color var(--duration-fast) ease,box-shadow var(--duration-fast) ease}
+.ws-card:hover{background:var(--raised);border-color:var(--accent);box-shadow:var(--shadow-hover)}
+.ws-card:active{background:var(--card-pressed);box-shadow:none;transition:none}
+.ws-card:focus-visible{border-color:var(--accent);background:var(--raised)}
+.ws-card-spine{position:absolute;left:0;top:117px;width:3px;height:54px;background:var(--accent);border-radius:0 3px 3px 0}
+.ws-card-top{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.ws-icon-tile{display:grid;place-items:center;width:70px;height:70px;flex:none;color:var(--accent);border:1px solid var(--line-2);border-radius:var(--radius-icon);background:var(--raised)}
+.ws-icon-tile svg,.ws-card-arrow svg,.ws-appbar-icon svg,.ws-state-symbol svg{display:block}
+.ws-card-type{font-size:11px;line-height:16px;letter-spacing:.1em;color:var(--muted);text-align:right}
+.ws-card-name{display:block;margin-top:33px;font-size:29px;line-height:36px;font-weight:600;letter-spacing:-.025em}
+.ws-card-desc{display:block;max-width:29ch;margin-top:8px;font-size:15px;line-height:23px;color:var(--muted)}
+.ws-card-formats{display:block;margin-top:auto;padding-top:25px;font-size:11px;line-height:16px;letter-spacing:.07em;color:var(--weak)}
+.ws-card-action{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:15px;padding-top:15px;border-top:1px solid var(--line-2);font-size:12px;line-height:18px;letter-spacing:.02em;color:var(--accent)}
+.ws-card-arrow{display:grid;place-items:center;min-width:18px;font-family:var(--sans);font-size:23px;line-height:18px}
+.ws-card.is-unavailable,.ws-card.is-unavailable:hover,.ws-card.is-unavailable:active{background:var(--panel);border-color:var(--interactive-line);box-shadow:none;color:var(--text)}
+.is-unavailable .ws-icon-tile{color:var(--weak)}
+.is-unavailable .ws-card-spine{background:var(--interactive-line)}
+.is-unavailable .ws-card-action{color:var(--weak)}
+
+/* Відкритий застосунок */
+.ws-workspace{position:fixed;inset:0;display:flex;flex-direction:column;overflow:hidden}
+.ws-appbar{gap:17px}
+.ws-appbar-separator{height:26px;width:1px;flex:none;background:var(--line-2)}
+.ws-appbar-icon{display:grid;place-items:center;width:32px;height:32px;color:var(--accent);flex:none}
+.ws-appbar-label{display:flex;align-items:baseline;min-width:0;overflow:hidden;white-space:nowrap;font-size:18px;line-height:24px;font-weight:600}
+.ws-appbar-name{flex:none}
+.ws-filename{min-width:0;margin-left:8px;overflow:hidden;text-overflow:ellipsis;font-weight:400;color:var(--muted)}
+.ws-dirty-dot{margin-left:4px;font-weight:600;color:var(--accent);flex:none}
+.ws-close-button{margin-left:auto}
 .ws-frame{flex:1;width:100%;min-height:0;border:0;background:var(--bg)}
+
+/* Смуга підтвердження: у потоці між верхньою смугою й редактором, не модальне вікно */
+.ws-confirm{flex:none;min-height:92px;display:flex;align-items:center;gap:16px;padding:16px 32px;background:var(--danger-ground);border-bottom:1px solid var(--danger);border-left:3px solid var(--danger)}
+.ws-confirm-icon{display:grid;place-items:center;width:28px;height:28px;flex:none;border:1px solid var(--danger);border-radius:50%;color:var(--danger);font-size:17px;font-weight:600}
+.ws-confirm-copy{display:flex;align-items:baseline;flex-wrap:wrap;gap:5px;min-width:0;font-size:15px;line-height:23px}
+.ws-confirm-copy strong{font-weight:600}
+.ws-confirm-actions{display:flex;gap:10px;margin-left:auto;flex:none}
+
+/* Сторінка застосунку: контейнер редактора й стани запуску */
 .ws-app-page{overflow:hidden}
 .ws-container{position:fixed;inset:0;overflow:auto}
-.ws-stub{max-width:560px;margin:12vh auto 0;padding:24px;border:1px solid var(--line);border-radius:14px;background:var(--panel);display:grid;gap:10px}
-.ws-stub h1{margin:0;font:600 20px/1.25 var(--sans)}
-.ws-stub p{margin:0;font:400 14px/1.55 var(--sans);color:var(--dim)}
-.ws-stub .ws-kind{font:400 11px/1.4 var(--mono);letter-spacing:.1em;color:var(--accent);text-transform:uppercase}
-@media (max-width:520px){.ws{padding:12px}.ws-cards{grid-template-columns:1fr}}
+.ws-state-area{position:fixed;inset:0;z-index:1;display:grid;place-items:center;overflow:auto;padding:24px;background:var(--bg)}
+.ws-state-panel{width:min(100%,530px);padding:42px 44px;border:1px solid var(--interactive-line);border-radius:var(--radius-card);background:var(--panel)}
+.ws-state-panel h1{margin:0;font-size:29px;line-height:37px;font-weight:600;letter-spacing:-.025em}
+.ws-state-description{margin:15px 0 0;color:var(--muted);font-size:15px;line-height:24px}
+.ws-state-eyebrow{margin:0 0 12px}
+.ws-spinner{display:block;width:42px;height:42px;margin:0 0 30px;border:3px solid var(--interactive-line);border-top-color:var(--accent);border-radius:50%;animation:ws-spin .85s linear infinite}
+.ws-loading-steps{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:34px 0 0;padding:0;font-size:11px;line-height:18px;color:var(--muted)}
+.ws-loading-steps li:not(:last-child)::after{content:"→";margin-left:8px;color:var(--weak)}
+.ws-loading-steps .done,.ws-loading-steps .current{color:var(--text)}
+.ws-loading-steps .current{border-bottom:2px solid var(--accent)}
+.ws-state-symbol{display:grid;place-items:center;width:52px;height:52px;margin:0 0 28px;border-radius:var(--radius-icon)}
+.ws-error-symbol{border:1px solid var(--danger);color:var(--danger);font-size:30px;font-weight:600}
+.ws-error-panel .ws-state-eyebrow{color:var(--danger)}
+.ws-state-button{margin-top:28px}
+.ws-underdev-symbol{width:70px;height:70px;border:1px solid var(--interactive-line);color:var(--accent);background:var(--raised)}
+@keyframes ws-spin{to{transform:rotate(360deg)}}
+
+@media(max-width:1279px){.ws-home-main{margin-inline:32px}}
+@media(max-height:780px) and (min-width:720px){.ws-home-main{padding-top:48px;padding-bottom:32px}.ws-cards{margin-top:30px}.ws-card{min-height:340px}}
+@media(max-width:1039px){.ws-cards{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:719px){
+  .ws-topbar{height:64px;min-height:64px;padding-inline:20px;gap:10px}.ws-topbar-home{padding-inline:20px}
+  .ws-topbar-title{max-width:210px;font-size:10px}
+  .ws-home-main{margin-inline:20px;padding:48px 0 64px}
+  .ws-home-heading h1{font-size:42px;line-height:50px}.ws-home-subtitle{font-size:15px;line-height:23px}
+  .ws-cards{grid-template-columns:minmax(0,1fr);gap:14px;margin-top:28px}
+  .ws-card{min-height:290px;padding:22px 24px}.ws-card-spine{top:103px;height:45px}.ws-card-name{margin-top:24px}
+  .ws-icon-tile{width:64px;height:64px}.ws-icon-tile svg{width:42px;height:42px}
+  .ws-appbar-label{font-size:15px}
+  .ws-state-area{padding:20px}.ws-state-panel{padding:30px 26px}.ws-state-panel h1{font-size:24px;line-height:31px}
+  .ws-confirm{align-items:flex-start;flex-wrap:wrap;gap:10px;padding:14px 20px}
+  .ws-confirm-actions{width:100%;margin-left:0}.ws-confirm-actions .ws-button{flex:1;white-space:normal}.ws-confirm-copy{align-self:center}
+}
+@media(max-width:400px){
+  .ws-topbar-title{max-width:130px}.ws-topbar-home .ws-button{padding-inline:10px}
+  .ws-appbar-icon,.ws-appbar-separator{display:none}.ws-appbar .ws-button{padding-inline:10px}
+  .ws-confirm-actions{flex-wrap:wrap}.ws-confirm-actions .ws-button{width:100%;flex:auto}
+}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:0ms!important}.ws-spinner{animation:none}}

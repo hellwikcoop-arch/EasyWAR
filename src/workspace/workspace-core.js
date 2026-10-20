@@ -28,7 +28,7 @@ export const OFFICE_APPS = Object.freeze([
     id: 'easygreen',
     title: 'EasyGreen',
     kind: 'Таблиці',
-    hint: 'Електронні таблиці: формули, аркуші, файли XLSX',
+    hint: 'Таблиці для роботи з локальними файлами.',
     extensions: ['xlsx', 'csv'],
     filterName: 'Таблиці',
   }),
@@ -36,7 +36,7 @@ export const OFFICE_APPS = Object.freeze([
     id: 'easydoc',
     title: 'EasyDoc',
     kind: 'Документи',
-    hint: 'Текстові документи: накази, довідки, звіти',
+    hint: 'Тексти й документи в одному робочому просторі.',
     extensions: ['docx', 'txt'],
     filterName: 'Документи',
   }),
@@ -44,7 +44,7 @@ export const OFFICE_APPS = Object.freeze([
     id: 'easyslide',
     title: 'EasySlide',
     kind: 'Презентації',
-    hint: 'Презентації: слайди для доповідей і нарад',
+    hint: 'Слайди для нарад і робочих матеріалів.',
     extensions: ['pptx'],
     filterName: 'Презентації',
   }),
@@ -69,18 +69,35 @@ export const WORKSPACE_APPS = Object.freeze([...OFFICE_APPS, ...PERSONAL_APPS]);
 
 /** Розділи модуля: «Офіс» і «Особисте». */
 export const WORKSPACE_SECTIONS = Object.freeze([
-  Object.freeze({ id: 'office', title: 'Офіс', apps: Object.freeze(OFFICE_APPS.map(entry => entry.id)) }),
-  Object.freeze({ id: 'personal', title: 'Особисте', apps: Object.freeze(PERSONAL_APPS.map(entry => entry.id)) }),
+  Object.freeze({ id: 'office', title: 'Офіс', eyebrow: 'ЛОКАЛЬНІ ЗАСТОСУНКИ', subtitle: 'Оберіть застосунок для роботи з файлами на цьому комп’ютері.', apps: Object.freeze(OFFICE_APPS.map(entry => entry.id)) }),
+  Object.freeze({ id: 'personal', title: 'Особисте', eyebrow: 'ПЕРСОНАЛЬНІ ІНСТРУМЕНТИ', subtitle: 'Розрахунки й журнали лише для вас, у локальному файлі на цьому комп’ютері.', apps: Object.freeze(PERSONAL_APPS.map(entry => entry.id)) }),
 ]);
 
 export function appById(id) {
   return WORKSPACE_APPS.find(entry => entry.id === id) || null;
 }
 
+/**
+ * Рід військ, чий акцент бере «Офіс» (рішення власника 20.10.2026: темно-синя схема
+ * лаунчера з акцентом роду військ). Ключі — ті самі, що data-branch у лаунчері; кольори
+ * задає workspace.css через html[data-branch]. Без роду — Повітряні Сили, перша картка.
+ */
+export const BRANCHES = Object.freeze(['air', 'rocket', 'artillery', 'pvk', 'dshv']);
+export const DEFAULT_BRANCH = 'air';
+
+export function normalizeBranch(value) {
+  return BRANCHES.includes(value) ? value : DEFAULT_BRANCH;
+}
+
+/** Рід військ з рядка адреси `?branch=<id>`; невідомий або відсутній — типовий. */
+export function branchFromSearch(search) {
+  return normalizeBranch(new URLSearchParams(String(search || '')).get('branch'));
+}
+
 /** Адреса сторінки застосунку відносно `workspace/index.html`. */
-export function appPageUrl(id) {
+export function appPageUrl(id, branch = DEFAULT_BRANCH) {
   if (!appById(id)) throw new Error(`Невідомий застосунок: ${id}`);
-  return `app.html?app=${encodeURIComponent(id)}`;
+  return `app.html?app=${encodeURIComponent(id)}&branch=${normalizeBranch(branch)}`;
 }
 
 /**
@@ -210,6 +227,30 @@ export function toBytes(bytes) {
   throw new Error('Очікуються байти файлу (Uint8Array або ArrayBuffer).');
 }
 
+/** Формати на картці: «XLSX · CSV». */
+export function formatsLabel(appEntry) {
+  return appEntry.extensions.map(extension => extension.toUpperCase()).join(' · ');
+}
+
+/**
+ * Власні монохромні іконки застосунків (контури, колір — currentColor), viewBox 0 0 24 24.
+ * Кожна фігура — [тег, атрибути]; оболонка будує SVG через createElementNS.
+ */
+export const APP_ICONS = Object.freeze({
+  easygreen: [['rect', { x: '3', y: '3.5', width: '18', height: '17', rx: '2' }], ['path', { d: 'M3 9.5h18M9 3.5v17M15 9.5v11' }]],
+  easydoc: [['path', { d: 'M6 2.5h8l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-17a1 1 0 0 1 1-1Z' }], ['path', { d: 'M14 2.5v4h4M8 11h7M8 14.5h7M8 18h5' }]],
+  easyslide: [['rect', { x: '2.5', y: '4', width: '19', height: '14', rx: '2' }], ['path', { d: 'm6.5 14 3-3 2.5 2 4-4M12 18v3m-4 0h8' }]],
+  easypay: [['rect', { x: '3', y: '6', width: '18', height: '12', rx: '2' }], ['circle', { cx: '12', cy: '12', r: '2.5' }], ['path', { d: 'M6.5 9.5v.01M17.5 14.5v.01' }]],
+});
+
+/** Етапи запуску застосунку на екрані завантаження. */
+export const LOADING_STEPS = Object.freeze(['Завантаження…', 'Підготовка…', 'Готово']);
+
+/** Частини назви у верхній смузі: застосунок, файл (без тире) і позначка незбережених змін. */
+export function titleParts(appEntry, title, dirty) {
+  return { name: appEntry.title, file: String(title ?? '').trim().slice(0, 120), dirty: Boolean(dirty) };
+}
+
 /** Заголовок сторінки застосунку: «EasyGreen — звіт.xlsx •» (крапка — незбережені зміни). */
 export function frameTitle(appEntry, title, dirty) {
   const text = String(title ?? '').trim().slice(0, 120);
@@ -227,4 +268,11 @@ export function frameMessage(appId, state) {
 export function parseFrameMessage(data, expectedAppId) {
   if (!data || data.type !== FRAME_MESSAGE || data.appId !== expectedAppId) return null;
   return { title: String(data.title ?? '').slice(0, 120), dirty: Boolean(data.dirty) };
+}
+
+/** Прохання оболонки до лаунчера закрити «Робоче середовище» (кнопка «← На стартову»). */
+export const CLOSE_MESSAGE = 'easywar-workspace-close';
+
+export function isCloseMessage(data) {
+  return Boolean(data) && data.type === CLOSE_MESSAGE;
 }
