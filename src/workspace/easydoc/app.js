@@ -2,7 +2,7 @@
 // Редактор — веб-збірка WordCraft (src/public/workspace/easydoc/), вкладена iframe-ом; працює
 // без мережі. Відкриття й збереження документів іде лише через host оболонки (вікна EasyWAR).
 import { createEasydocBridge } from './easydoc-bridge-core.js';
-import { scrubRecentFiles } from './recent-scrub.js';
+import { guardRecentFiles, scrubRecentFiles } from './recent-scrub.js';
 
 export const contract = 1;
 
@@ -16,6 +16,8 @@ export async function mount(container, host) {
   frame.title = 'EasyDoc';
   frame.src = host.resolve('workspace/easydoc/index.html');
   frame.style.cssText = 'display:block;width:100%;height:100%;border:0;';
+  // Перехоплення ставимо щойно сторінка редактора з'явилась, ще до першого відкриття файлу.
+  frame.addEventListener('load', () => { guardRecentFiles(frame.contentWindow); scrubRecentFiles(frame.contentWindow); });
   container.append(frame);
 
   // Вікно редактора закривається без unmount, тож чистимо й під час вивантаження сторінки.
