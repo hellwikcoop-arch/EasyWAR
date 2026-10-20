@@ -152,8 +152,6 @@ pub enum DashboardModuleError {
     TextTooLong(String),
     #[error("таблицю змінено в іншому вікні; відкрийте її знову")]
     Conflict,
-    #[error("немає позначки версії таблиці; закрийте вікно й відкрийте таблицю знову")]
-    VersionRequired,
     #[error("некоректний або повторений ідентифікатор запису")]
     InvalidRowId,
     #[error("виправлення значення не відповідає підтягнутим записам")]
@@ -3352,7 +3350,7 @@ mod tests {
                 PROFILE,
                 &module.id,
                 vec![row(flight("МіГ-29", 3.0, 4.0))],
-                Some(&opened),
+                &opened,
                 T2,
             )
             .await
