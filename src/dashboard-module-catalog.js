@@ -1,5 +1,7 @@
 import {
+  BRANCH_LABELS,
   MAX_CREW,
+  MODULE_STYLES,
   branchFromLocation,
   columnCountLabel,
   crewCount,
@@ -18,6 +20,7 @@ import {
   normalizeCatalog,
   normalizeDensity,
   normalizeModules,
+  normalizeStyle,
   pluralForm,
   replaceRowsRequest,
   rowCountLabel,
@@ -30,7 +33,7 @@ import {
   tableEditState,
   visibleColumnKeys,
 } from './dashboard-module-catalog-core.js';
-import { chartModel } from './dashboard-module-charts-core.js';
+import { chartModel, takeoffHoursModel, tickerItems } from './dashboard-module-charts-core.js';
 import { mountChart } from './dashboard-module-charts.js';
 import {
   buildImport,
@@ -49,8 +52,11 @@ import {
 const withoutRelief = typeof __EW_NO_WEATHER_RELIEF__ !== 'undefined' && __EW_NO_WEATHER_RELIEF__;
 const loadRelief = withoutRelief ? null : () => import('./dashboard-module-weather-3d.js');
 
+// Модулям потрібна локальна SQLite застосунку; в автономному файлі її немає, тож збірка підставляє true
+// і весь каталог із діаграмами з файлу випадає.
+const withoutCatalog = typeof __EW_NO_MODULE_CATALOG__ !== 'undefined' && __EW_NO_MODULE_CATALOG__;
 const invoke = window.__TAURI_INTERNALS__?.invoke || window.parent?.__TAURI_INTERNALS__?.invoke;
-if (typeof invoke === 'function') initialize();
+if (!withoutCatalog && typeof invoke === 'function') initialize();
 
 // Запис редагується прямо в рядку таблиці, а форма з підказками стоїть над нею; поля з'єднано з формою
 // атрибутом `form`. Колонки «№» і «Дія» закріплено по краях; їх ширину задає CSS (`ewmc-col-number`,
@@ -80,11 +86,24 @@ function el(tag, attrs = {}, ...children) {
   return node;
 }
 
+// Стилі оформлення модулів — окремий файл у public/: він потрібен лише тут, у застосунку з Tauri.
+// Шрифти «Пункт керування» лежать у heightwell-theme.css; ui-kit.js підвантажує його на вимогу.
+// Без них картка лишається нічною, лише з системними шрифтами.
+function loadStyleSheet() {
+  if (document.getElementById('ewmc-style-css')) return;
+  document.head.append(el('link', { id: 'ewmc-style-css', rel: 'stylesheet', href: './module-styles.css' }));
+}
+
+function loadStyleFonts(style) {
+  if (style === 'heightwell') window.EWUiSkin?.loadCss?.();
+}
+
 function initialize() {
   const branch = branchFromLocation(location.pathname, location.search);
   const toolbar = document.querySelector('.appbar-right');
   const dashboard = branch === 'dshv' ? document.querySelector('#view-udshv') : document.querySelector('#view-dash');
   if (!toolbar || !dashboard) return;
+  loadStyleSheet();
 
   // `cancelEdit` — скасування рядка, що редагується: Escape скасовує правку, а не закриває вікно разом із набраним рядком.
   // `tableViews` — пошук і група колонок сторінки кожного модуля: після збереження рядка сторінка перебудовується, а вибір лишається.
@@ -186,15 +205,27 @@ function initialize() {
     }
     const grid = el('div', { class: 'ewmc-dashboard-grid' });
     for (const module of state.modules) grid.append(renderModule(module, state.data.get(module.id)?.rows || []));
-    host.append(grid);
+    host.append(grid, ticker(tickerItems(state.modules, state.data)));
+  }
+
+  // Бігучий рядок під картками: стан усіх модулів одним рядком. Друга копія лише для безшовного
+  // кола й прихована від читачів екрана; при «зменшити рух» рядок стоїть і прокручується вручну.
+  function ticker(items) {
+    const node = item => el('li', { class: item.failed ? 'is-failed' : '' }, el('b', { text: item.title }), el('span', { text: item.text }));
+    return el('div', { class: 'ewmc-ticker', role: 'region', 'aria-label': 'Стрічка модулів', style: { '--ewmc-ticker-s': `${Math.max(24, items.length * 9)}s` } },
+      el('div', { class: 'ewmc-ticker-track' },
+        el('ul', {}, items.map(node)),
+        el('ul', { 'aria-hidden': 'true' }, items.map(node))));
   }
 
   function renderModule(module, rows) {
-    const card = el('article', { class: `ewmc-module span-${module.defaultSpan === 2 ? 2 : 1}`, 'data-kind': module.visualKind },
+    loadStyleFonts(module.style);
+    const card = el('article', { class: `ewmc-module span-${module.defaultSpan === 2 ? 2 : 1}`, 'data-kind': module.visualKind, 'data-style': module.style, 'data-branch': module.branch },
       el('header', { class: 'ewmc-module-head' },
         el('div', {}, el('h3', { text: module.title }), el('p', { text: `${rowCountLabel(module.rowCount)} · локальна SQLite` })),
         el('span', { class: 'ewmc-live', text: module.rowCount ? 'Дані' : 'Створено' })),
       visual(module, rows),
+      takeoffVisual(module, rows),
       el('div', { class: 'ewmc-module-actions' },
         el('button', {
           type: 'button',
@@ -279,6 +310,9 @@ function initialize() {
 
   function showCreate(item) {
     const title = el('input', { type: 'text', maxlength: '80', value: item.title, required: true, 'aria-label': 'Назва модуля' });
+    // Зразок картки показує обраний стиль у кольорах роду військ цього дашборда.
+    const preview = el('div', { class: 'ewmc-style-preview', 'data-style': 'standard', 'data-branch': state.branch }, visual(item, sampleRows(item), true));
+    const style = stylePicker(preview);
     const status = el('p', { class: 'ewmc-form-status', 'aria-live': 'polite' });
     const submit = el('button', { type: 'submit', class: 'btn primary', text: 'Створити модуль і таблицю' });
     // Поки таблицю читають, створювати модуль рано: підтягування вже вимкнене за замовчуванням, але не обране.
@@ -290,8 +324,9 @@ function initialize() {
       el('h2', { id: 'ewmc-dialog-title', text: item.title }),
       // Ліва колонка: вигляд, назва й дані з таблиці; праворуч — довгий список колонок нової таблиці.
       el('div', { class: 'ewmc-create-main' },
-        visual(item, sampleRows(item), true),
+        preview,
         el('label', { class: 'ewmc-field' }, el('span', { text: 'Назва на дашборді' }), title),
+        style.node,
         source.node),
       el('section', { class: 'ewmc-table-plan' },
         el('h3', { text: 'Колонки нової таблиці' }),
@@ -320,6 +355,7 @@ function initialize() {
           branch: state.branch,
           templateId: item.id,
           title: name,
+          style: style.value(),
           ...(rows ? { rows } : {}),
           ...(corrections.length ? { corrections } : {}),
         });
@@ -341,6 +377,24 @@ function initialize() {
     title.focus();
     title.select();
     source.start();
+  }
+
+  // Вибір стилю оформлення у вікні створення: три варіанти, колір — рід військ цього дашборда.
+  function stylePicker(preview) {
+    const name = 'ewmc-style';
+    const node = el('fieldset', { class: 'ewmc-style-picker' },
+      el('legend', { text: `Стиль оформлення · кольори ${BRANCH_LABELS[state.branch] || 'роду військ'}` }),
+      MODULE_STYLES.map((option, index) => el('label', { class: 'ewmc-style-option', 'data-style': option.id, 'data-branch': state.branch },
+        el('input', { type: 'radio', name, value: option.id, checked: index === 0, onchange: () => paint() }),
+        el('i', { class: 'ewmc-style-swatch', 'aria-hidden': 'true' }),
+        el('span', {}, el('b', { text: option.label }), el('small', { text: option.hint })))));
+    const value = () => normalizeStyle(node.querySelector(`input[name="${name}"]:checked`)?.value);
+    function paint() {
+      const current = value();
+      loadStyleFonts(current);
+      preview.dataset.style = current;
+    }
+    return { node, value };
   }
 
   // Блок «Дані з вашої таблиці» у вікні створення: знаходить таблицю профілю (або файл, який обрав
@@ -689,6 +743,36 @@ function initialize() {
     if (fresh) showModulePage(fresh, null, view);
     else if (dialog.open) dialog.close();
     if (message) showToast(message, true);
+  }
+
+  // Стиль уже створеного модуля змінюється на його сторінці. Це лише вигляд: рядки не перезаписуються,
+  // тож перемикач працює й тоді, коли таблиця відкрита лише для читання.
+  function styleSelect(module) {
+    const select = el('select', { class: 'ewmc-style-select', 'aria-label': 'Стиль оформлення модуля', title: `Стиль оформлення · кольори ${BRANCH_LABELS[module.branch] || 'роду військ'}` },
+      MODULE_STYLES.map(option => el('option', { value: option.id, selected: option.id === module.style, text: option.label })));
+    select.addEventListener('change', async () => {
+      const style = normalizeStyle(select.value);
+      if (state.busy) { select.value = module.style; return; }
+      state.busy = true;
+      select.disabled = true;
+      try {
+        const saved = normalizeModules([await invoke('set_dashboard_module_style', { moduleId: module.id, style })])[0];
+        const current = saved ? saved.style : style;
+        for (const item of state.modules) if (item.id === module.id) item.style = current;
+        module.style = current;
+        loadStyleFonts(current);
+        dialog.dataset.style = current;
+        renderHost();
+        showToast(`Стиль модуля: ${MODULE_STYLES.find(option => option.id === current)?.label || current}.`);
+      } catch (error) {
+        select.value = module.style;
+        showToast(String(error || 'Не вдалося змінити стиль модуля.'), true);
+      } finally {
+        state.busy = false;
+        select.disabled = false;
+      }
+    });
+    return el('label', { class: 'ewmc-style-switch' }, el('span', { text: 'Стиль' }), select);
   }
 
   // Таблиця модуля відкривається окремою сторінкою на весь екран, а не вікном поверх дашборда.
@@ -1096,6 +1180,7 @@ function initialize() {
           el('p', { class: 'ewmc-sub' },
             `${unreadable ? 'Дані недоступні' : rowCountLabel(rows.length)} · ${columnCountLabel(module.fields.length)} · `,
             el('code', { text: module.storageTable }))),
+        styleSelect(module),
         addButton),
       el('div', { class: 'ewmc-page-body' },
         corrections.length ? correctionsList() : null,
@@ -1114,6 +1199,8 @@ function initialize() {
     applyView();
     dialog.dataset.view = 'table';
     dialog.dataset.module = module.id;
+    dialog.dataset.style = module.style;
+    dialog.dataset.branch = module.branch;
     if (!dialog.open) dialog.showModal();
     if (view) {
       scroll.scrollTop = view.top === 'end' ? scroll.scrollHeight : view.top;
@@ -1225,6 +1312,9 @@ function sampleRows(item) {
     [['Виліт пари', 'Готово', 2], ['Доповідь прийнято', 'Готово', 1], ['Затримка вильоту', 'Увага', 1], ['Повернення на базу', 'Готово', 2]].forEach(([label, status, value], index) => push({ occurred_at: stamp(index), label, status, value }));
   } else if (kind === 'waveform') {
     values.forEach((value, index) => push({ occurred_at: stamp(index), positive_value: value, negative_value: values[(index + 5) % values.length] * 0.6, series: 'Разом' }));
+  } else if (kind === 'ridgeline') {
+    [['Мі-8', [7, 8, 8, 9, 10, 13, 14]], ['Мі-24', [5, 6, 6, 7, 16, 17]], ['Ан-26', [11, 12, 12, 13, 21]]]
+      .forEach(([series, hours]) => hours.forEach((hour, index) => push({ occurred_at: `2026-10-${String(1 + index).padStart(2, '0')}T${String(hour).padStart(2, '0')}:15`, series })));
   } else if (kind === 'weather') {
     // Вигадані спостереження: три моменти, у третьому — гроза й низька НМХ на одному пункті.
     const points = [['Пункт «Північ»', 51.2, 30.9], ['Пункт «Захід»', 49.6, 24.8], ['Пункт «Центр»', 48.9, 32.4], ['Пункт «Південь»', 46.9, 31.2], ['Пункт «Схід»', 49.4, 36.1]];
@@ -1243,6 +1333,15 @@ function sampleRows(item) {
     units.slice(0, 5).forEach((label, index) => push({ label, category: label, value: values[index], status: index % 2 ? 'Виконується' : 'Готово' }));
   }
   return rows;
+}
+
+/** Друга діаграма картки журналу польотів: зльоти за годинами доби по типах ПС («гребені»). */
+function takeoffVisual(module, rows) {
+  if (!module.fields?.some(field => field.key === 'takeoff_time') || !module.fields.some(field => field.key === 'aircraft_type')) return null;
+  const host = el('div', { class: 'ewmc-chart-host' });
+  const box = el('div', { class: 'ewmc-visual ewmc-visual-extra', 'data-visual': 'ridgeline' }, host);
+  mountChart(host, takeoffHoursModel(module, rows), { height: 150 });
+  return box;
 }
 
 /** Картка з діаграмою модуля (або шаблону) з його рядків; перемальовується під ширину картки. */
