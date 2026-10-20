@@ -154,24 +154,28 @@ async fn list_dashboard_modules(
 }
 
 /// `rows` — дані, підтягнуті з таблиці користувача: модуль створюється разом із ними
-/// однією транзакцією. Без `rows` таблиця модуля порожня.
+/// однією транзакцією. Без `rows` таблиця модуля порожня. `style` — стиль оформлення,
+/// обраний у вікні створення (без нього — звичайний).
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn create_dashboard_module(
     modules: tauri::State<'_, DashboardModuleStore>,
     session: tauri::State<'_, ProfileSession>,
     branch: String,
     template_id: String,
     title: Option<String>,
+    style: Option<String>,
     rows: Option<Vec<serde_json::Map<String, Value>>>,
     corrections: Option<Vec<NewImportCorrection>>,
 ) -> Result<DashboardModule, String> {
     let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
     modules
-        .create_with_import(
+        .create_styled(
             &active_profile_id(&session)?,
             &branch,
             &template_id,
             title.as_deref(),
+            style.as_deref(),
             rows.unwrap_or_default(),
             corrections.unwrap_or_default(),
             &now,

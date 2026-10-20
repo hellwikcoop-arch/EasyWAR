@@ -106,5 +106,6 @@
   }
   applySkin(readSkin());
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mountSkinButton); else mountSkinButton();
-  window.EWUiSkin = { key: SKIN_KEY, name: SKIN, apply: applySkin, toggle: toggleSkin };
+  // loadCss — лише шрифти й токени без вмикання стилю: їх бере стиль модуля «Пункт керування» (каталог модулів).
+  window.EWUiSkin = { key: SKIN_KEY, name: SKIN, apply: applySkin, toggle: toggleSkin, loadCss: loadSkinCss };
 })();

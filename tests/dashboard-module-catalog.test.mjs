@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {
+  BRANCH_LABELS,
   FUEL_DENSITY_KG_PER_L,
+  MODULE_STYLES,
   FieldValueError,
   MAX_CREW,
   branchFromLocation,
@@ -27,6 +29,7 @@ import {
   moduleTitle,
   normalizeCatalog,
   normalizeModules,
+  normalizeStyle,
   outsideLimits,
   parseDuration,
   parseFieldInput,
@@ -126,6 +129,40 @@ test('module normalization accepts only local generated storage tables', () => {
   }]);
   assert.equal(module.storageTable, 'dashboard_data_1234567890abcdef12345678');
   assert.equal(module.rowCount, 2);
+});
+
+test('module style survives normalization and unknown styles fall back to standard', () => {
+  const base = {
+    branch: 'rocket', templateId: 'flight-hours', visualKind: 'horizontal-bar',
+    title: 'Наліт', storageTable: 'dashboard_data_1234567890abcdef12345678', fields: flightFields,
+  };
+  const modules = normalizeModules([
+    { ...base, id: 'dashboard-a', style: 'heightwell' },
+    { ...base, id: 'dashboard-b', style: 'branch' },
+    { ...base, id: 'dashboard-c', style: 'neon' },
+    { ...base, id: 'dashboard-d' },
+  ]);
+  assert.deepEqual(modules.map(module => module.style), ['heightwell', 'branch', 'standard', 'standard']);
+  assert.equal(normalizeStyle(undefined), 'standard');
+  assert.equal(normalizeStyle('<script>'), 'standard');
+});
+
+test('module styles are the three names Rust and the migration accept, with a label for every branch', async () => {
+  assert.deepEqual(MODULE_STYLES.map(item => item.id), ['standard', 'branch', 'heightwell']);
+  for (const item of MODULE_STYLES) assert.ok(item.label && item.hint, item.id);
+  assert.deepEqual(Object.keys(BRANCH_LABELS).sort(), ['air', 'dshv', 'pvk', 'rocket']);
+  const migration = await readFile(new URL('../src-tauri/migrations/0012_dashboard_module_style.sql', import.meta.url), 'utf8');
+  assert.match(migration, /CHECK \(style IN \('standard', 'branch', 'heightwell'\)\)/);
+  const rust = await readFile(new URL('../src-tauri/src/dashboard_modules.rs', import.meta.url), 'utf8');
+  assert.match(rust, /matches!\(style, "standard" \| "branch" \| "heightwell"\)/);
+  const ui = await readFile(new URL('../src/dashboard-module-catalog.js', import.meta.url), 'utf8');
+  assert.match(ui, /style: style\.value\(\)/, 'вікно створення передає обраний стиль у create_dashboard_module');
+  assert.match(ui, /'data-style': module\.style, 'data-branch': module\.branch/, 'картка модуля несе стиль і рід військ');
+  assert.match(ui, /href: '\.\/module-styles\.css'/, 'стилі модулів підвантажуються лише в застосунку');
+  const pages = await Promise.all(['air.html', 'rocket.html'].map(page => readFile(new URL(`../src/${page}`, import.meta.url), 'utf8')));
+  for (const page of pages) assert.ok(!page.includes('module-styles.css'), 'сторінки не вбудовують стилі модулів');
+  const css = await readFile(new URL('../src/public/module-styles.css', import.meta.url), 'utf8');
+  for (const branch of Object.keys(BRANCH_LABELS)) assert.match(css, new RegExp(`\\[data-branch=${branch}\\]\\{--ewmc-branch:#[0-9a-f]{6};--ewmc-branch-night:#[0-9a-f]{6}\\}`), branch);
 });
 
 test('preview model aggregates numeric series without inventing missing values', () => {

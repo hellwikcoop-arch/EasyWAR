@@ -130,3 +130,14 @@ test('ui-kit.js: збережений вибір застосовується о
   await runKit(other);
   assert.equal(other.attrs.get('data-skin'), undefined, 'невідоме значення ігнорується');
 });
+
+test('ui-kit.js: loadCss лише підвантажує шрифти для модулів «Пункт керування», не вмикаючи стиль сторінки', async () => {
+  const page = fakePage();
+  const api = await runKit(page);
+  api.loadCss();
+  api.loadCss();
+  assert.equal(page.document.head.children.length, 1, 'файл підключається один раз');
+  assert.equal(page.document.head.children[0].href, './heightwell-theme.css');
+  assert.equal(page.attrs.get('data-skin'), undefined, 'стиль сторінки лишається вимкненим');
+  assert.equal(page.store.has('aviahub.skin'), false, 'вибір стилю сторінки не змінюється');
+});
