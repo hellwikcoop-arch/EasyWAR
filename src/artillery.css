@@ -343,3 +343,35 @@ td.unit-cell span, td.unit-cell b { vertical-align: middle; }
   background-position: right 12px center, right 44px center, right 88px center; }
 :root[data-theme="light"] .kpi[data-art]::after { opacity: .3; }
 @media (max-width: 640px) { .kpi[data-art]::after { opacity: .4; } }
+
+/* Початковий екран без таблиці: три кроки, перетягування і ескіз зведення (як у дашбордах ПС і РВ) */
+.panel.es { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .95fr); gap: 34px; align-items: center; width: min(1100px, 100%); box-sizing: border-box; margin: 6vh auto 0; padding: 34px 36px; position: relative; overflow: hidden;
+  background: radial-gradient(120% 90% at 0 0, color-mix(in srgb, var(--accent) 14%, transparent), transparent 60%), var(--surface); }
+.es .es-kick { display: flex; align-items: center; gap: 10px; font: 650 11px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--accent); }
+.es .es-kick img { height: 26px; width: auto; }
+.panel.es h2 { font: 700 30px/1.12 var(--display); margin: 16px 0 0; letter-spacing: -.01em; }
+.es .es-lead { margin: 10px 0 18px; max-width: 48ch; color: var(--muted); }
+.es-steps { list-style: none; margin: 0 0 22px; padding: 0; display: grid; gap: 10px; }
+.es-steps li { display: flex; gap: 12px; align-items: baseline; color: var(--ink); font-size: 14px; }
+.es-steps b { font: 700 12px/1 var(--mono); color: var(--accent); padding: 5px 7px; border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); border-radius: 6px; }
+.es .row { display: flex; gap: 10px; flex-wrap: wrap; }
+.es-drop { margin-top: 14px; padding: 14px; border: 1.5px dashed color-mix(in srgb, var(--accent) 40%, var(--line)); border-radius: 10px; text-align: center; color: var(--muted); font-size: 13px; }
+.es .es-safe { margin: 14px 0 0; font-size: 12px; color: var(--muted); }
+.es .es-safe::before { content: '●'; color: var(--ok); margin-right: 8px; font-size: 9px; vertical-align: 2px; }
+.es-prev { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--surface-2) 70%, transparent); transform: perspective(1200px) rotateY(-8deg); box-shadow: 0 30px 60px -30px #000; }
+.es-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.es-tile, .es-list i { display: block; height: 52px; border-radius: 8px; background: var(--surface); border: 1px solid var(--line); position: relative; }
+.es-tile em, .es-list em, .es-stock em { position: absolute; left: 10px; bottom: 10px; height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--accent) 70%, transparent); }
+.es-tile::before { content: ''; position: absolute; left: 10px; top: 10px; width: 40%; height: 12px; border-radius: 3px; background: var(--line); }
+.es-row { display: grid; grid-template-columns: 1.3fr 1fr; gap: 8px; }
+.es-stock, .es-bars { height: 150px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); position: relative; overflow: hidden; }
+.es-stock span, .es-bars span { position: absolute; left: 10px; top: 8px; font: 650 10px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.es-stock > div { position: absolute; inset: 30px 10px 8px; display: grid; gap: 8px; }
+.es-stock i { position: relative; display: block; border-radius: 4px; background: var(--bar-bg); }
+.es-stock em { left: 0; top: 0; bottom: 0; height: auto; border-radius: 4px; }
+.es-stock i:nth-child(4) em { background: var(--bad); }
+.es-bars > div { position: absolute; inset: 30px 10px 10px; display: flex; align-items: flex-end; gap: 6px; }
+.es-bars i { flex: 1; border-radius: 3px 3px 0 0; background: linear-gradient(color-mix(in srgb, var(--accent) 80%, transparent), color-mix(in srgb, var(--accent) 20%, transparent)); }
+.es-list { display: grid; gap: 6px; }
+.es-list i { height: 26px; }
+@media (max-width: 900px) { .panel.es { grid-template-columns: minmax(0, 1fr); padding: 24px 20px; } .es-prev { display: none; } .panel.es h2 { font-size: 24px; } }

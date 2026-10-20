@@ -10,6 +10,7 @@ import {fetchBuffer, makeClock} from '../guide-kit.js';
 import {creditHtml} from '../credits.js';
 import {MODEL_URLS, LAND_URL} from './models.js';
 import {RIG, FLY as FLYD} from './rig.js';
+import {calloutLayout, calloutNumber, ttxItems} from './callouts.js';
 
 /* ---------- data ---------- */
 // p: [fx tail→nose 0..1, fy bottom→top 0..1] snapped by a ray from the side; or [fx, 0, fz 0..1 across] snapped by a ray from above
@@ -385,23 +386,40 @@ function buildMarkers(t,M){
   const wrap=$('#marks');wrap.innerHTML='';markers=[];selW=-1;
   M.obj.updateMatrixWorld(true);
   const inv=new THREE.Matrix4().copy(M.obj.matrixWorld).invert();
-  t.weak.forEach((w,i)=>{const el=document.createElement('button');el.className='mk';el.textContent=i+1;el.title=w.t;el.setAttribute('aria-label',`Уразливе місце ${i+1}: ${w.t}`);
-    el.onclick=()=>{pickWeak(i,'force');const b=document.getElementById('wk-'+i);if(b)b.scrollIntoView({behavior:'smooth',block:'nearest'});};
-    wrap.appendChild(el);
+  // Виноски: лінії в одному SVG під номерами, підписи — стовпцями біля країв сцени (callouts.js).
+  const lines=document.createElementNS('http://www.w3.org/2000/svg','svg');lines.setAttribute('class','mk-lines');lines.setAttribute('aria-hidden','true');wrap.appendChild(lines);
+  t.weak.forEach((w,i)=>{const el=document.createElement('button');el.className='mk';el.textContent=calloutNumber(i);el.title=w.t;el.setAttribute('aria-label',`Уразливе місце ${i+1}: ${w.t}`);
+    const open=()=>{pickWeak(i,'force');const b=document.getElementById('wk-'+i);if(b)b.scrollIntoView({behavior:'smooth',block:'nearest'});};
+    el.onclick=open;
+    const lb=document.createElement('button');lb.className='mk-l';lb.tabIndex=-1;lb.setAttribute('aria-hidden','true');lb.innerHTML=`<b>${calloutNumber(i)}</b><span>${esc(w.t)}</span>`;lb.onclick=open;
+    const ln=document.createElementNS('http://www.w3.org/2000/svg','polyline');lines.appendChild(ln);
+    wrap.append(lb,el);
     const r=placeMarker(M.meshes,M.box,w.p);
-    markers.push({el,pos:r.pos.clone(),loc:r.pos.clone().applyMatrix4(inv),nl:r.n.clone().transformDirection(inv)});});
+    markers.push({el,lb,ln,pos:r.pos.clone(),loc:r.pos.clone().applyMatrix4(inv),nl:r.n.clone().transformDirection(inv)});});
   wrap.hidden=!marksOn||FL.on;
 }
 const _mv=new THREE.Vector3(),_mn=new THREE.Vector3(),_md=new THREE.Vector3();
 function updateMarks(){
   if(!markers.length||!cur||!marksOn||FL.on)return;
   const W=stage.clientWidth,H=stage.clientHeight,mw=cur.obj.matrixWorld;
-  markers.forEach(m=>{
+  const pts=markers.map(m=>{
     m.pos.copy(m.loc).applyMatrix4(mw);
     _mv.copy(m.pos).project(cam);
-    m.el.style.transform=`translate(${(_mv.x*.5+.5)*W}px,${(-_mv.y*.5+.5)*H}px)`+(m.el.classList.contains('on')?' scale(1.18)':'');
+    const x=(_mv.x*.5+.5)*W,y=(-_mv.y*.5+.5)*H;
+    m.el.style.transform=`translate(${x}px,${y}px)`+(m.el.classList.contains('on')?' scale(1.18)':'');
     _mn.copy(m.nl).transformDirection(mw);_md.copy(cam.position).sub(m.pos).normalize();
     m.el.classList.toggle('hid',_mn.dot(_md)<.04||_mv.z>1);
+    return _mv.z>1?null:{x,y};
+  });
+  const lay=calloutLayout(pts,{width:W,height:H});
+  markers.forEach((m,i)=>{const L=lay[i],p=pts[i];
+    m.lb.hidden=m.ln.hidden=!L;if(!L)return;
+    const on=m.el.classList.contains('on'),dim=m.el.classList.contains('hid');
+    m.lb.className='mk-l '+L.side+(on?' on':'')+(dim?' hid':'');
+    m.lb.style.maxWidth=L.maxWidth+'px';
+    m.lb.style.transform=L.side==='left'?`translate(calc(${L.labelX}px - 100%),${L.labelY}px) translateY(-50%)`:`translate(${L.labelX}px,${L.labelY}px) translateY(-50%)`;
+    m.ln.setAttribute('points',`${p.x.toFixed(1)},${p.y.toFixed(1)} ${L.elbowX.toFixed(1)},${L.labelY.toFixed(1)} ${L.labelX.toFixed(1)},${L.labelY.toFixed(1)}`);
+    m.ln.setAttribute('class',(on?'on':'')+(dim?' hid':''));
   });
 }
 
@@ -444,6 +462,8 @@ function renderSheet(t){
    <section><h3>Характеристики</h3><table>${rows}</table></section>
    <section><h3>Озброєння</h3><ul class="l">${li(t.arm)}</ul></section>`;
   sh.querySelectorAll('.wk').forEach(b=>b.onclick=()=>pickWeak(+b.dataset.i,true));
+  const ttx=ttxItems(t.specs);$('#ttx').hidden=!ttx.length;
+  $('#ttx').innerHTML=ttx.map(x=>`<div title="${esc(x.label)}: ${esc(x.full)}"><dt>${esc(x.label)}</dt><dd>${esc(x.value)}</dd></div>`).join('');
   $('#credit').innerHTML=creditHtml('aviation/'+t.id);
   $('#ovT').textContent=t.nato!=='—'?t.nato:t.cls.split(' · ')[0];
 }

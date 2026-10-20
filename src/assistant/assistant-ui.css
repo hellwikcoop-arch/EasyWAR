@@ -191,6 +191,8 @@
 .ew-assistant-turn-action { border: 1px solid #71854f; background: #71854f; color: #fff; }
 .ew-assistant-suggestion { border: 1px solid #bac9a2; background: #fff; color: #44563a; }
 .ew-assistant-turn-action:disabled, .ew-assistant-suggestion:disabled { opacity: .55; cursor: default; }
+/* Пісня-пасхалка: поки грає, кнопка світла з рамкою, щоб стан читався без кольору (його несе й текст «Зупинити пісню»). */
+.ew-assistant-song[data-state="playing"] { background: #fff; color: #44563a; border-width: 2px; padding: 7px 11px; }
 .ew-assistant-thinking { display: flex; align-items: center; justify-content: space-between; gap: 12px; white-space: normal; }
 .ew-assistant-thinking-text { color: #495d33; font-weight: 600; animation: ew-assistant-pulse 1.6s ease-in-out infinite; }
 .ew-assistant-stop { font: inherit; font-size: 11px; padding: 6px 12px; border-radius: 8px; border: 1px solid #bac9a2; background: #fff; color: #44563a; cursor: pointer; }

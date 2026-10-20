@@ -353,6 +353,39 @@ html { scroll-padding-top: 70px; }
 /* без таблиці бічну панель приховано: головна колонка займає всю сітку, а картка «Відкрийте таблицю» стоїть по центру нормальної ширини */
 #view-dash.shell > .side[hidden] ~ .dmain { grid-column: 1 / -1; }
 .dmain > .dpanel.empty-state { justify-self: center; width: min(640px, 100%); box-sizing: border-box; }
+/* стартовий екран без таблиці */
+.dmain > .dpanel.empty-state.es { width: min(1100px, 100%); max-width: none; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .95fr); gap: 34px; align-items: center; padding: 34px 36px; position: relative; overflow: hidden; background: radial-gradient(120% 90% at 0 0, color-mix(in srgb, var(--accent) 16%, transparent), transparent 60%), var(--surface); }
+.es .es-kick { display: flex; align-items: center; gap: 10px; font: 650 11px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--accent); }
+.es .es-kick img { height: 30px; width: auto; }
+.dpanel.es h2 { font: 700 30px/1.12 var(--display); margin: 16px 0 0; letter-spacing: -.01em; }
+.es .es-lead { margin: 10px 0 18px; max-width: 46ch; }
+.es-steps { list-style: none; margin: 0 0 22px; padding: 0; display: grid; gap: 10px; }
+.es-steps li { display: flex; gap: 12px; align-items: baseline; color: var(--ink); font-size: 14px; }
+.es-steps b { font: 700 12px/1 var(--mono); color: var(--accent); padding: 5px 7px; border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); border-radius: 6px; }
+.es-act { display: flex; flex-wrap: wrap; gap: 10px; }
+.es-act .btn[hidden] { display: none; }
+.es-drop { margin-top: 14px; padding: 14px; border: 1.5px dashed color-mix(in srgb, var(--accent) 40%, var(--line)); border-radius: 10px; text-align: center; color: var(--muted); font-size: 13px; }
+.es .es-safe { margin: 14px 0 0; font-size: 12px; color: var(--muted); }
+.es .es-safe::before { content: '●'; color: #3ecf8e; margin-right: 8px; font-size: 9px; vertical-align: 2px; }
+.es-prev { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--surface-2) 70%, transparent); opacity: .9; transform: perspective(1200px) rotateY(-8deg); box-shadow: 0 30px 60px -30px #000; }
+.es-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.es-tile, .es-list i { display: block; height: 52px; border-radius: 8px; background: var(--surface); border: 1px solid var(--line); position: relative; }
+.es-tile em, .es-list em { position: absolute; left: 10px; bottom: 10px; height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--accent) 70%, transparent); }
+.es-tile::before { content: ''; position: absolute; left: 10px; top: 10px; width: 40%; height: 12px; border-radius: 3px; background: var(--line); }
+.es-row { display: grid; grid-template-columns: 1.3fr 1fr; gap: 8px; }
+.es-map, .es-bars { height: 150px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); position: relative; overflow: hidden; }
+.es-map { background: radial-gradient(60% 55% at 62% 48%, color-mix(in srgb, var(--accent) 16%, transparent), transparent), var(--surface); }
+.es-map i { position: absolute; width: 6px; height: 6px; margin: -3px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+.es-map i:nth-child(3n) { opacity: .45; } .es-map i:nth-child(4n) { background: #f2a33a; box-shadow: 0 0 8px #f2a33a; }
+.es-map svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.es-map path { fill: none; stroke: color-mix(in srgb, var(--accent) 45%, transparent); stroke-width: 1.5; stroke-dasharray: 4 4; }
+.es-map span, .es-bars span { position: absolute; left: 10px; top: 8px; font: 650 10px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.es-bars div { position: absolute; inset: 30px 10px 10px; display: flex; align-items: flex-end; gap: 6px; }
+.es-bars i { flex: 1; border-radius: 3px 3px 0 0; background: linear-gradient(color-mix(in srgb, var(--accent) 80%, transparent), color-mix(in srgb, var(--accent) 20%, transparent)); }
+.es-list { display: grid; gap: 6px; }
+.es-list i { height: 26px; }
+.es-list em { bottom: 10px; }
+@media (max-width: 900px) { .dmain > .dpanel.empty-state.es { grid-template-columns: minmax(0, 1fr); padding: 24px 20px; } .es-prev { display: none; } .dpanel.es h2 { font-size: 24px; } }
 @media (max-width: 720px) {
   .issues .t { grid-column: 1 / -1; }
   .map-legend { position: static; display: flex; flex-wrap: wrap; gap: 4px 14px; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: var(--map-bg); }
@@ -398,7 +431,8 @@ html { scroll-padding-top: 70px; }
 /* емблеми підрозділів */
 .emb { flex: none; width: 30px; height: 34px; object-fit: contain; display: inline-block; vertical-align: middle; }
 .emb.sm { width: 20px; height: 24px; }
-.emb-none { border: 1.5px dashed var(--line-strong); border-radius: 4px 4px 12px 12px; opacity: .7; box-sizing: border-box; }
+.emb-none { border: 1.5px solid var(--line-strong); border-radius: 4px 4px 12px 12px; box-sizing: border-box; display: inline-grid; place-items: center; padding-bottom: 2px; font: 700 10px/1 var(--display); color: var(--muted); background: color-mix(in srgb, var(--accent) 10%, transparent); letter-spacing: -.02em; overflow: hidden; }
+.ds-ic .emb-none, .dtbl2 .lead .emb-none { font-size: 13px; }
 .bar .nm.unit { display: flex; align-items: center; gap: 9px; }
 .bar .nm.unit .tx { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bars.units { gap: 12px; }
@@ -1028,6 +1062,7 @@ html[data-motion="off"] .k-spark rect { animation: none; }
 .dmain-in[data-view="map"] > .lrow:has(#p-map) > .lcol:not(:has(#p-map)), .dmain-in[data-view="quality"] > .lrow:has(#p-quality) > .lcol:not(:has(#p-quality)) { display: none; }
 .dmain-in[data-view="map"] .lcol:has(#p-map) > :not(#p-map), .dmain-in[data-view="quality"] .lcol:has(#p-quality) > :not(#p-quality) { display: none !important; }
 .dmain-in[data-view="map"] #p-map, .dmain-in[data-view="quality"] #p-quality { display: flex !important; height: auto !important; }
+.dmain-in[data-view="quality"] #p-quality { flex-direction: column; }
 .snav-lay[aria-pressed="true"] { color: var(--ink); background: var(--accent-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent); }
 .lay-info { padding: 6px 10px 2px 12px; }
 @media (max-width: 1279px) { .lay-info { display: none !important; } }
@@ -2973,7 +3008,10 @@ html[data-theme="light"] .kh{background:#151a0f!important}
 @media (max-width:1100px){.mx-bot{grid-template-columns:1fr 1fr}.mx-info{grid-column:1/3}}
 :root[data-theme="light"] .mn2.mx,:root[data-theme="light"] .mx-info,:root[data-theme="light"] .mx-st{background:var(--surface)!important}:root[data-theme="light"] .mx-n,:root[data-theme="light"] .mx-sv,:root[data-theme="light"] .mx-sp b{color:var(--ink)}
 </style>
-<style id="kpi-tiles-equal">.kc-blue .kc-t,.kc-amber .kc-t{min-height:0!important;padding:revert-layer}.kc-blue .kc-mb,.kc-amber .kc-mb{position:absolute;top:10px!important;right:10px!important;bottom:auto!important;width:30%!important;height:22px!important;gap:3px}.kc-blue .kc-tl,.kc-amber .kc-tl{position:relative;z-index:1}</style>
+<style id="kpi-tiles-equal">.kc-blue .kc-t,.kc-amber .kc-t{min-height:0!important;padding:revert-layer}.kc-blue .kc-mb,.kc-amber .kc-mb{position:absolute;top:10px!important;right:10px!important;bottom:auto!important;width:30%!important;height:22px!important;gap:3px}.kc-blue .kc-tl,.kc-amber .kc-tl{position:relative;z-index:1}
+/* Міні-стовпчики — окрема колонка праворуч від числа, щоб не налазили на значення у вузьких плитках. */
+.kc-blue .kc-t,.kc-amber .kc-t{grid-template-columns:18px minmax(0,1fr) minmax(22px,32%)!important}
+.kc-blue .kc-mb,.kc-amber .kc-mb{position:static!important;grid-column:3;grid-row:1;align-self:end;width:auto!important;height:20px!important}</style>
 <style id="kpi-merge">.k-l2{display:flex;flex-direction:column;line-height:1.1}.k-l2 .k-sub{display:block;margin-top:3px;font-size:.72em;font-weight:700;letter-spacing:.08em;opacity:.75}</style>
 <style id="kpi-5col">html.rocket-ref24 body .kpipanel .kpi-grid:not(:has(.kc-grey)){grid-template-columns:repeat(5,minmax(0,1fr))!important}@media (max-width:1100px){html.rocket-ref24 body .kpipanel .kpi-grid:not(:has(.kc-grey)){grid-template-columns:repeat(3,minmax(0,1fr))!important}}@media (max-width:640px){html.rocket-ref24 body .kpipanel .kpi-grid:not(:has(.kc-grey)){grid-template-columns:repeat(2,minmax(0,1fr))!important}}</style>
 <link rel="stylesheet" href="./udshv-dashboard.css">
@@ -4524,7 +4562,7 @@ function init() {
       if (perm === 'granted' && opened !== 'wrong-kind') idbSet(HANDLE_KEY, fh).catch(() => {});
     } else if (e.dataTransfer.files[0]) fromFileObject(e.dataTransfer.files[0]);
   });
-  if (window.showOpenFilePicker && window.indexedDB) idbGet(HANDLE_KEY).then(fh => { if (fh && fh.kind === 'file') { S.storedHandle = fh; if (!S.wb) renderFile(); } }).catch(() => {});
+  if (window.showOpenFilePicker && window.indexedDB) idbGet(HANDLE_KEY).then(fh => { if (fh && fh.kind === 'file') { S.storedHandle = fh; if (!S.wb) renderFile(); document.dispatchEvent(new Event('ew-stored-handle')); } }).catch(() => {});
   renderAll();
 }
 
@@ -4551,7 +4589,7 @@ const autoRefresh = () => { clearTimeout(__refreshT); __refreshT = setTimeout(()
 window.addEventListener('focus', autoRefresh);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) autoRefresh(); });
 
-window.__AV = { S, connect, doParse, addSelected, pickFile, showError, downloadCurrent, toast, refresh: refreshFromDisk }; // для налагодження
+window.__AV = { S, connect, doParse, addSelected, pickFile, showError, downloadCurrent, toast, refresh: refreshFromDisk, resume: resumeStored }; // для налагодження
 document.addEventListener('DOMContentLoaded', init);
 })();
 </script>
@@ -4644,9 +4682,11 @@ Object.assign(EMB, {"11 ОБрАА": "data:image/webp;base64,UklGRtoHAABXRUJQVlA
 const LAT2CYR = { A: 'А', B: 'В', C: 'С', E: 'Е', H: 'Н', I: 'І', K: 'К', M: 'М', O: 'О', P: 'Р', T: 'Т', X: 'Х', Y: 'У' };
 const unitKey = s => String(s || '').toUpperCase().replace(/[ABCEHIKMOPTXY]/g, c => LAT2CYR[c]).replace(/[^0-9А-ЯІЇЄҐ]/g, '');
 const EMBK = {}; for (const k in EMB) EMBK[unitKey(k)] = EMB[k];
+/** Позначка для підрозділу без вбудованої емблеми: номер («11 ОМБр» → «11») або перша літера. */
+const embMark = unit => { const t = String(unit || '').trim(); return (/^\d+/.exec(t) || [t.charAt(0).toUpperCase()])[0].slice(0, 3); };
 function emblem(unit, cls) {
   const src = EMBK[unitKey(unit)];
-  return src ? h('img', { class: 'emb ' + (cls || ''), src, alt: '', draggable: 'false' }) : h('span', { class: 'emb emb-none ' + (cls || ''), 'aria-hidden': 'true' });
+  return src ? h('img', { class: 'emb ' + (cls || ''), src, alt: '', draggable: 'false' }) : h('span', { class: 'emb emb-none ' + (cls || ''), 'aria-hidden': 'true', text: embMark(unit) });
 }
 
 /* ------------------------------ MGRS → широта/довгота ------------------------------ */
@@ -4827,12 +4867,32 @@ function applyPreset() {
 /* ------------------------------ каркас ------------------------------ */
 const root = $('#view-dash');
 const el = {};
+/* Стартовий екран без таблиці: що відкрити, три кроки, перетягування і ескіз майбутнього дашборда. */
+function startScreen() {
+  const mark = $('.brand .branch-service-mark');
+  const branch = { pvk: 'Повітряне командування', dshv: 'Десантно-штурмові війська' }[document.documentElement.dataset.command] || ($('.brand small') || {}).textContent || (mark && mark.alt) || '';
+  const step = (n, t) => h('li', {}, h('b', { text: n }), h('span', { text: t }));
+  el.resume = h('button', { class: 'btn big', type: 'button', hidden: true, onclick: () => AV.resume && AV.resume() });
+  const syncResume = () => { const fh = AV.S.storedHandle; el.resume.hidden = !fh; if (fh) el.resume.textContent = 'Продовжити з «' + fh.name + '»'; };
+  document.addEventListener('ew-stored-handle', syncResume); syncResume();
+  const tile = w => h('i', { class: 'es-tile' }, h('em', { style: 'width:' + w + '%' }));
+  const bars = [38, 56, 44, 72, 60, 84, 66, 92].map(v => h('i', { style: 'height:' + v + '%' }));
+  return h('section', { class: 'dpanel empty-state es', hidden: true },
+    h('div', { class: 'es-main' },
+      h('div', { class: 'es-kick' }, mark ? h('img', { src: mark.src, alt: '' }) : null, h('span', { text: (branch.trim() || 'EasyWAR') + ' · дашборд' })),
+      h('h2', { text: 'Відкрийте таблицю, щоб побачити дашборд' }),
+      h('p', { class: 'es-lead', text: 'Дашборд рахується з аркуша «Зведена» вашого файлу .xlsx — того самого, куди інструмент вносить доповіді.' }),
+      h('ol', { class: 'es-steps' }, step('01', 'Відкрийте таблицю .xlsx'), step('02', 'Показники, карта й підрозділи перераховуються одразу'), step('03', 'Виправили в Excel — натисніть «Оновити»')),
+      h('div', { class: 'es-act' }, h('button', { class: 'btn primary big', type: 'button', onclick: () => AV.pickFile() }, 'Відкрити таблицю…'), el.resume),
+      h('div', { class: 'es-drop', text: 'або перетягніть файл у це вікно' }),
+      h('p', { class: 'es-safe', text: 'Дані обробляються на цьому пристрої й нікуди не надсилаються.' })),
+    h('div', { class: 'es-prev', 'aria-hidden': 'true' },
+      h('div', { class: 'es-kpis' }, tile(62), tile(48), tile(74), tile(36)),
+      h('div', { class: 'es-row' }, h('div', { class: 'es-map' }, h('svg:svg', { viewBox: '0 0 100 100', preserveAspectRatio: 'none' }, h('svg:path', { d: 'M70 4 C60 24 74 38 62 54 S66 84 54 98' })), h('span', { text: 'Карта' }), ...[[58, 26], [66, 36], [50, 40], [76, 46], [60, 54], [82, 60], [42, 62], [70, 70], [56, 78], [80, 30], [34, 48], [64, 86], [76, 80], [28, 70], [46, 30], [86, 72]].map(([x, y]) => h('i', { style: 'left:' + x + '%;top:' + y + '%' }))), h('div', { class: 'es-bars' }, h('span', { text: 'Динаміка' }), h('div', {}, ...bars))),
+      h('div', { class: 'es-list' }, ...[88, 70, 54].map(w => h('i', {}, h('em', { style: 'width:' + w + '%' }))))));
+}
 function skeleton() {
-  el.empty = h('section', { class: 'dpanel empty-state', hidden: true },
-    h('h2', { text: 'Відкрийте таблицю, щоб побачити дашборд' }),
-    h('p', { text: 'Дашборд рахується з аркуша «Зведена» вашого файлу .xlsx — того самого, куди інструмент вносить доповіді. Дані з таблиці обробляються на вашому пристрої й нікуди не надсилаються.' }),
-    h('button', { class: 'btn primary big', type: 'button', onclick: () => AV.pickFile() }, 'Відкрити таблицю…'),
-    h('p', { class: 'small', style: 'margin-top:12px', text: 'Файл можна й просто перетягнути в це вікно.' }));
+  el.empty = startScreen();
   el.from = h('input', { type: 'date', id: 'dFrom', 'aria-label': 'Початок періоду', onchange: e => onRange('from', e.target.value) });
   el.to = h('input', { type: 'date', id: 'dTo', 'aria-label': 'Кінець періоду', onchange: e => onRange('to', e.target.value) });
   el.presets = h('div', { class: 'seg', id: 'presets', role: 'group', 'aria-label': 'Швидкий вибір періоду' },
