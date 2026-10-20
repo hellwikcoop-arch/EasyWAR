@@ -174,6 +174,6 @@ test('group slides render with a stacked native chart and no coordinates in the 
   for (const name of names.filter(n => n.endsWith('.xml'))) all += await zip.file(name).async('string');
   assert.ok(!all.includes('СЕКРЕТН'));
   const chart = names.filter(n => /^ppt\/charts\/chart\d+\.xml$/.test(n));
-  assert.equal(chart.length, (deck.slides.length - 1) * 2);
+  assert.equal(chart.length, 3 * 3 + (deck.slides.length - 4) * 2); // слайди періодів УДШВ мають ще й «Типи уражених цілей»; слайди груп — дві діаграми
   assert.ok((await Promise.all(chart.map(n => zip.file(n).async('string')))).some(x => x.includes('c:grouping val="stacked"')));
 });
