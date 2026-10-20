@@ -128,18 +128,21 @@ test('модуль дашборда: назва, кількість рядків
     rows: [
       { rowId: 1, createdAt: '2026-10-01T00:00:00Z', label: 'Альфа', value: 1234.567, day: '2026-10-03', at: '2026-10-03T14:05:00Z', ok: true },
       { rowId: 2, createdAt: '2026-10-01T00:00:00Z', label: null, value: 12345, day: null, at: 'не дата', ok: 0 },
+      { rowId: 3, createdAt: '2026-10-01T00:00:00Z', label: 'Велике', value: 9876543.21, day: null, at: null, ok: 1 },
     ],
     truncated: false,
   };
   const { fields, blocks } = buildContext({ sourceKind: 'dashboard_module', data, profile: { displayName: 'П', position: '', role: 'Аналітик' }, now: '2026-10-20T10:00:00Z' });
   assert.deepEqual(fields, {
     'дата': '20.10.2026', 'профіль.назва': 'П', 'профіль.посада': '', 'профіль.роль': 'Аналітик',
-    'модуль.назва': 'Модуль-1', 'модуль.рядків': '2',
+    'модуль.назва': 'Модуль-1', 'модуль.рядків': '3',
   });
   assert.deepEqual(blocks, {
     'рядки': [
       { fields: { 'номер': '1', label: 'Альфа', value: '1234,567', day: '03.10.2026', at: '03.10.2026 14:05', ok: 'так' } },
       { fields: { 'номер': '2', label: '—', value: '12 345', day: '—', at: 'не дата', ok: 'ні' } },
+      // 15 значущих цифр: без шуму подвійної точності у великих значеннях з дробом.
+      { fields: { 'номер': '3', label: 'Велике', value: '9 876 543,21', day: '—', at: '—', ok: 'так' } },
     ],
   });
   assert.deepEqual(listFields('dashboard_module', data).filter(entry => entry.block === 'рядки').map(entry => [entry.name, entry.label]), [

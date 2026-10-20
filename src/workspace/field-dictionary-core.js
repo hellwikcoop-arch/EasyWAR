@@ -237,12 +237,21 @@ const moduleFieldsOf = module =>
     field => field && typeof field.key === 'string' && FIELD_NAME.test(field.key) && field.key !== 'номер',
   );
 
+// До 15 значущих цифр (як у Rust `float_text`) і не більше 10 знаків після коми: великі значення
+// з дробом не отримують шуму подвійної точності («9 876 543,21», а не «…,2100000009»).
+function rawNumber(value) {
+  if (!Number.isFinite(value)) return '';
+  const rounded = Number(value.toPrecision(15));
+  const whole = Math.trunc(Math.abs(rounded)).toString().length;
+  return formatNumber(rounded, Math.max(0, Math.min(10, 15 - whole)));
+}
+
 function moduleValue(value, dataType) {
   if (value === null || value === undefined) return EMPTY_VALUE;
   if (typeof value === 'boolean') return yesNo(value);
   if (dataType === 'boolean' && typeof value === 'number') return yesNo(value !== 0);
   // Значення модуля — сирі дані (координати, малі величини): до 10 знаків без округлення до сотих.
-  if (typeof value === 'number') return formatNumber(value, 10);
+  if (typeof value === 'number') return rawNumber(value);
   if (dataType === 'date') return formatDate(value);
   if (dataType === 'datetime') return dateTimeValue(value);
   return String(value);

@@ -1877,6 +1877,10 @@ impl LibraryStore {
         if current_content.as_deref() == Some(sealed.content_id.as_str())
             || parent_content.as_deref() == Some(sealed.content_id.as_str())
         {
+            // Нової версії немає, але пошкоджений шифротекст цього вмісту (міграція 0015) тут
+            // відновлюється свіжозапечатаним; для цілого рядка це нічого не змінює.
+            store_content(&mut transaction, keys, &sealed, now).await?;
+            transaction.commit().await?;
             return Ok(None);
         }
         store_content(&mut transaction, keys, &sealed, now).await?;
@@ -2523,7 +2527,12 @@ impl LibraryStore {
                     _ => None,
                 };
                 let (version_id, created) = match reused {
-                    Some(version_id) => (version_id, false),
+                    Some(version_id) => {
+                        // Той самий вміст за незмінного джерела: нової версії немає, але
+                        // пошкоджений шифротекст останньої згенерованої відновлюється (0015).
+                        store_content(&mut transaction, keys, &sealed, now).await?;
+                        (version_id, false)
+                    }
                     None => {
                         store_content(&mut transaction, keys, &sealed, now).await?;
                         // Батьківська версія згенерованої — попередня згенерована: так
@@ -3751,22 +3760,31 @@ impl SearchIndex {
 
 /// Апострофи, якими пишуть українські слова (`'`, `’`, `ʼ`, `‘`, `` ` ``), — один
 /// знак `ʼ` (U+02BC, літера-модифікатор): «об'єкт», «об’єкт» і «обʼєкт» шукаються
-/// однаково, а FTS5 (`unicode61`) не розриває на ньому слово.
+/// однаково, а FTS5 (`unicode61`) не розриває на ньому слово. Замінюється лише знак між
+/// двома літерами чи цифрами: лапки навколо слова («'терміново'», `код`) лишаються
+/// роздільниками, інакше слово в лапках стало б окремим токеном `ʼтерміновоʼ`.
 pub fn normalize_apostrophes(text: &str) -> Cow<'_, str> {
     const APOSTROPHES: [char; 5] = ['\'', '\u{2019}', '\u{02BC}', '\u{2018}', '`'];
-    if text
-        .chars()
-        .any(|c| APOSTROPHES.contains(&c) && c != '\u{02BC}')
+    let chars: Vec<char> = text.chars().collect();
+    let inside_word = |index: usize| {
+        index > 0
+            && chars
+                .get(index + 1)
+                .is_some_and(|next| next.is_alphanumeric())
+            && chars[index - 1].is_alphanumeric()
+    };
+    let changes =
+        |index: usize, c: char| APOSTROPHES.contains(&c) && c != '\u{02BC}' && inside_word(index);
+    if chars
+        .iter()
+        .enumerate()
+        .any(|(index, c)| changes(index, *c))
     {
         Cow::Owned(
-            text.chars()
-                .map(|c| {
-                    if APOSTROPHES.contains(&c) {
-                        '\u{02BC}'
-                    } else {
-                        c
-                    }
-                })
+            chars
+                .iter()
+                .enumerate()
+                .map(|(index, c)| if changes(index, *c) { '\u{02BC}' } else { *c })
                 .collect(),
         )
     } else {
@@ -6632,6 +6650,59 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn regenerating_unchanged_data_repairs_a_damaged_blob() {
+        let (store, created) = library(false).await;
+        let keys = created.keys;
+        let (_, template) = store
+            .import(
+                &keys,
+                NewDocument {
+                    as_template: true,
+                    ..office_document("Шаблон", "docx", &docx(&["{{period}}"]))
+                },
+                NOW,
+            )
+            .await
+            .unwrap();
+        let params = json!({"from": "2026-10-01"});
+        let fingerprint = source_fingerprint(&keys, &json!({"rows": 1}));
+        let bytes = docx(&["Згенерований текст"]);
+        let first = store
+            .save_generated(
+                &keys,
+                generated(None, &template.id, &params, &fingerprint, &bytes),
+                NOW,
+            )
+            .await
+            .unwrap();
+        corrupt_blob(&store, &first.version.id).await;
+        assert!(matches!(
+            store.read_version(&keys, &first.version.id).await,
+            Err(LibraryError::Damaged)
+        ));
+
+        // Джерело не змінилося: нової версії немає, але шифротекст відновлено.
+        let again = store
+            .save_generated(
+                &keys,
+                generated(
+                    Some(&first.item.id),
+                    &template.id,
+                    &params,
+                    &fingerprint,
+                    &bytes,
+                ),
+                LATER,
+            )
+            .await
+            .unwrap();
+        assert!(!again.created);
+        assert_eq!(again.version.id, first.version.id);
+        let (_, read) = store.read_version(&keys, &first.version.id).await.unwrap();
+        assert_eq!(read.as_slice(), bytes.as_slice());
+    }
+
+    #[tokio::test]
     async fn changed_documents_are_reindexed_and_rechecked() {
         let (store, created) = library(false).await;
         let session = LibrarySession::default();
@@ -6814,6 +6885,15 @@ mod tests {
             assert!(name_matches(name, query), "{name} / {query}");
         }
         assert_eq!(normalize_apostrophes("м'ясо"), "мʼясо");
+        // Лапки навколо слова лишаються роздільниками.
+        assert_eq!(
+            normalize_apostrophes("наказ 'терміново' і `код`"),
+            "наказ 'терміново' і `код`"
+        );
+        assert!(matches!(
+            normalize_apostrophes("‘Альфа’ та об’єкт"),
+            Cow::Owned(text) if text == "‘Альфа’ та обʼєкт"
+        ));
         assert!(matches!(
             normalize_apostrophes("без апострофа"),
             Cow::Borrowed(_)

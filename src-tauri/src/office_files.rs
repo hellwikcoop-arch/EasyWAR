@@ -76,7 +76,7 @@ pub fn open_regular_file(path: &Path) -> Result<std::fs::File, String> {
     if !regular {
         return Err(OfficeFileError::NotRegularFile.to_string());
     }
-    let file = std::fs::File::open(path).map_err(|error| error.to_string())?;
+    let file = open_without_blocking(path).map_err(|error| error.to_string())?;
     if !file
         .metadata()
         .map_err(|error| error.to_string())?
@@ -85,6 +85,26 @@ pub fn open_regular_file(path: &Path) -> Result<std::fs::File, String> {
         return Err(OfficeFileError::NotRegularFile.to_string());
     }
     Ok(file)
+}
+
+/// Відкриття без очікування співрозмовника: FIFO, підсунутий між перевіркою типу й
+/// відкриттям, інакше заблокував би `open` назавжди. Звичайні файли прапорець не зачіпає.
+#[cfg(unix)]
+fn open_without_blocking(path: &Path) -> std::io::Result<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    #[cfg(target_os = "linux")]
+    const O_NONBLOCK: i32 = 0o4000;
+    #[cfg(not(target_os = "linux"))]
+    const O_NONBLOCK: i32 = 0x0004;
+    std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(O_NONBLOCK)
+        .open(path)
+}
+
+#[cfg(not(unix))]
+fn open_without_blocking(path: &Path) -> std::io::Result<std::fs::File> {
+    std::fs::File::open(path)
 }
 
 /// Читає звичайний файл ([`open_regular_file`]), не більше `max` байтів; більший файл —

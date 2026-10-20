@@ -194,6 +194,8 @@ export function mountLibrary(root, { invoke = findInvoke(window), onBadge = () =
     state.stale = null;
     state.gen = null;
     view = null;
+    // Рядок стану може містити назви розшифрованих документів: на екрані блокування його не лишаємо.
+    say('');
     onBadge(0);
   }
 

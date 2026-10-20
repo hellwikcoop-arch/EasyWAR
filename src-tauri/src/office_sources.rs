@@ -37,6 +37,10 @@ pub const MAX_TABLE_ROWS: usize = 10_000;
 /// Стовпців таблиці бібліотеки, які віддаються шаблону.
 pub const MAX_TABLE_COLUMNS: usize = 64;
 const MAX_CELL_CHARS: usize = 4096;
+/// Сумарний текст клітинок таблиці-джерела: мала книга, де один довгий рядок спільних
+/// рядків відтворюється в сотнях тисяч клітинок, не має займати гігабайти пам'яті.
+const MAX_TABLE_BYTES: usize = 8 * 1024 * 1024;
+const TABLE_TOO_BIG: &str = "таблиця завелика для шаблону";
 const MAX_PARAM_CHARS: usize = 128;
 
 #[derive(Debug, thiserror::Error)]
@@ -394,6 +398,7 @@ fn xlsx_rows(bytes: &[u8]) -> Result<(String, Vec<Vec<String>>), SourceError> {
     // Заголовок і порожні рядки над ним — у межах запасу; далі читати немає сенсу.
     let limit = MAX_TABLE_ROWS + 1;
     let mut rows = Vec::new();
+    let mut budget = 0usize;
     let mut current: Option<(u32, Vec<String>)> = None;
     let finish = |row: Vec<String>, rows: &mut Vec<Vec<String>>| {
         if row.iter().any(|cell| !cell.is_empty()) {
@@ -432,6 +437,10 @@ fn xlsx_rows(bytes: &[u8]) -> Result<(String, Vec<Vec<String>>), SourceError> {
             continue;
         }
         let text = cell_text(&Data::from(cell.get_value().clone()));
+        budget += text.len();
+        if budget > MAX_TABLE_BYTES {
+            return Err(SourceError::InvalidTable(TABLE_TOO_BIG.to_owned()));
+        }
         if let Some((_, values)) = current.as_mut() {
             if values.len() <= index {
                 values.resize(index + 1, String::new());
@@ -506,7 +515,21 @@ fn csv_rows(bytes: &[u8]) -> Result<Vec<Vec<String>>, SourceError> {
     let mut row: Vec<String> = Vec::new();
     let mut field = String::new();
     let mut quoted = false;
+    let mut budget = 0usize;
     let mut chars = text.chars().peekable();
+    // Поля після MAX_TABLE_COLUMNS відкидаються одразу (shape_table однаково їх обрізав би),
+    // сумарний текст обмежено: рядок із мільйонів роздільників не розростається в пам'яті.
+    let mut keep = |row: &mut Vec<String>, field: &mut String| -> Result<(), SourceError> {
+        let value = clip(&std::mem::take(field));
+        if row.len() < MAX_TABLE_COLUMNS {
+            budget += value.len();
+            if budget > MAX_TABLE_BYTES {
+                return Err(SourceError::InvalidTable(TABLE_TOO_BIG.to_owned()));
+            }
+            row.push(value);
+        }
+        Ok(())
+    };
     let finish_row = |row: &mut Vec<String>, rows: &mut Vec<Vec<String>>| {
         let done = std::mem::take(row);
         if done.iter().any(|cell| !cell.is_empty()) {
@@ -536,13 +559,13 @@ fn csv_rows(bytes: &[u8]) -> Result<Vec<Vec<String>>, SourceError> {
                 if c == '\r' && chars.peek() == Some(&'\n') {
                     chars.next();
                 }
-                row.push(clip(&std::mem::take(&mut field)));
+                keep(&mut row, &mut field)?;
                 finish_row(&mut row, &mut rows);
                 if rows.len() >= limit {
                     return Ok(rows);
                 }
             }
-            c if c == delimiter => row.push(clip(&std::mem::take(&mut field))),
+            c if c == delimiter => keep(&mut row, &mut field)?,
             c => {
                 if field.len() < MAX_CELL_CHARS * 4 {
                     field.push(c);
@@ -551,7 +574,7 @@ fn csv_rows(bytes: &[u8]) -> Result<Vec<Vec<String>>, SourceError> {
         }
     }
     if !field.is_empty() || !row.is_empty() {
-        row.push(clip(&field));
+        keep(&mut row, &mut field)?;
         finish_row(&mut row, &mut rows);
     }
     Ok(rows)
@@ -1450,6 +1473,43 @@ mod tests {
             status_of(&statuses, &generated_id),
             (LinkState::Detached, None)
         );
+    }
+
+    #[test]
+    fn table_text_is_bounded_in_bytes_and_csv_columns_while_parsing() {
+        // Рядок із мільйона роздільників: зайві поля відкидаються під час розбору.
+        let wide = format!("a{}x\nb", ";".repeat(1_000_000));
+        let table = parse_table("csv", wide.as_bytes()).unwrap();
+        assert_eq!(table.headers, strings(&["a"]));
+        assert_eq!(table.rows, vec![strings(&["b"])]);
+        // Довгі поля в багатьох клітинках перевищують бюджет тексту.
+        let long = "ж".repeat(MAX_CELL_CHARS);
+        let line = vec![long.as_str(); MAX_TABLE_COLUMNS].join(";");
+        let big_csv = vec![line; 40].join("\n");
+        assert!(matches!(
+            parse_table("csv", big_csv.as_bytes()),
+            Err(SourceError::InvalidTable(text)) if text == TABLE_TOO_BIG
+        ));
+        // Те саме в книзі: 40 рядків × 64 клітинки по 4096 символів.
+        let rows: String = (1..=40)
+            .map(|row| {
+                let cells: String = (0..52)
+                    .map(|column| {
+                        let name = if column < 26 {
+                            ((b'A' + column as u8) as char).to_string()
+                        } else {
+                            format!("A{}", (b'A' + (column - 26) as u8) as char)
+                        };
+                        text_cell(&format!("{name}{row}"), &"ж".repeat(MAX_CELL_CHARS))
+                    })
+                    .collect();
+                format!("<row r=\"{row}\">{cells}</row>")
+            })
+            .collect();
+        assert!(matches!(
+            parse_table("xlsx", &xlsx(&[("Аркуш", false, &rows)])),
+            Err(SourceError::InvalidTable(text)) if text == TABLE_TOO_BIG
+        ));
     }
 
     #[test]
