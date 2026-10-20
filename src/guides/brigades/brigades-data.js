@@ -40,7 +40,7 @@ export const BRIGADES = Object.freeze([
   { id: '107-reabr', number: 107, type: 'реабр', branch: 'rvia', art: '107-reabr' },
   { id: '67-ombr', number: 67, type: 'омбр', branch: 'sv', art: '67-ombr' },
   { id: '71-oebr', number: 71, type: 'оєбр', branch: 'sv', art: '71-oebr' },
-  { id: '1-oshp', number: 1, type: 'ошп', branch: null, art: '1-oshp' },
+  { id: '1-oshp', number: 1, type: 'ошп', branch: 'dshv', art: '1-oshp' },
   { id: '225-oshp', number: 225, type: 'ошп', branch: 'sv', art: '225-oshp' },
   { id: '425-oshp', number: 425, type: 'ошп', branch: 'sv', art: '425-oshp' },
   { id: '475-oshp', number: 475, type: 'ошп', branch: 'sv', art: '475-oshp' },
