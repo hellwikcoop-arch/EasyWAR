@@ -110,3 +110,15 @@ test('app.js дотримується контракту «Робочого се
   assert.match(app, /unmount\(\)/);
   assert.match(app, /isDirty:/);
 });
+
+test('scrubRecentFiles прибирає лише поле recent зі стану WordCraft', async () => {
+  const { scrubRecentFiles } = await import('../src/workspace/easydoc/recent-scrub.js');
+  const data = new Map([['wordcraft.ui', JSON.stringify({ tab: 'Home', recent: ['Звіт.docx', 'Інший.docx'], zoom: 120 })]]);
+  const win = { localStorage: { getItem: key => data.get(key) ?? null, setItem: (key, value) => data.set(key, value) } };
+  assert.equal(scrubRecentFiles(win), true);
+  assert.deepEqual(JSON.parse(data.get('wordcraft.ui')), { tab: 'Home', recent: [], zoom: 120 });
+  assert.equal(scrubRecentFiles(win), false, 'порожній список не переписується');
+  assert.equal(scrubRecentFiles({ localStorage: { getItem: () => '{не json', setItem() {} } }), false);
+  assert.equal(scrubRecentFiles(null), false);
+  assert.equal(scrubRecentFiles({ get localStorage() { throw new Error('заблоковано'); } }), false);
+});

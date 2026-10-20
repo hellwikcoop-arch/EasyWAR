@@ -2,6 +2,7 @@
 // Редактор — веб-збірка WordCraft (src/public/workspace/easydoc/), вкладена iframe-ом; працює
 // без мережі. Відкриття й збереження документів іде лише через host оболонки (вікна EasyWAR).
 import { createEasydocBridge } from './easydoc-bridge-core.js';
+import { scrubRecentFiles } from './recent-scrub.js';
 
 export const contract = 1;
 
@@ -17,8 +18,14 @@ export async function mount(container, host) {
   frame.style.cssText = 'display:block;width:100%;height:100%;border:0;';
   container.append(frame);
 
+  // Вікно редактора закривається без unmount, тож чистимо й під час вивантаження сторінки.
+  const scrub = () => scrubRecentFiles(frame.contentWindow);
+  window.addEventListener('pagehide', scrub);
+
   return {
     unmount() {
+      window.removeEventListener('pagehide', scrub);
+      scrub();
       frame.src = 'about:blank';
       frame.remove();
       bridge.dispose();
