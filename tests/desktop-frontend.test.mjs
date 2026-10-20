@@ -227,3 +227,10 @@ test('стартові екрани без таблиці: три кроки, п
   const css = await readFile(new URL('../src/artillery.css', import.meta.url), 'utf8');
   assert.match(css, /\.panel\.es \{ display: grid;/);
 });
+
+test('ПС і РВ: сторінка «Перевірка даних» — заголовок над списком, а не окремим стовпцем ліворуч', async () => {
+  for (const page of ['air.html', 'rocket.html']) {
+    const html = await read(page);
+    assert.match(html, /\.dmain-in\[data-view="quality"\] #p-quality \{ flex-direction: column; \}/, page);
+  }
+});

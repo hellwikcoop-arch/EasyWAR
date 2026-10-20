@@ -97,6 +97,8 @@ pub(crate) const DASHBOARD_MODULES_SQL: &str =
     include_str!("../migrations/0010_dashboard_modules.sql");
 pub(crate) const DASHBOARD_MODULE_CORRECTIONS_SQL: &str =
     include_str!("../migrations/0011_dashboard_module_corrections.sql");
+pub(crate) const DASHBOARD_MODULE_STYLE_SQL: &str =
+    include_str!("../migrations/0012_dashboard_module_style.sql");
 
 pub fn migrations() -> Vec<Migration> {
     vec![
@@ -166,6 +168,12 @@ pub fn migrations() -> Vec<Migration> {
             sql: DASHBOARD_MODULE_CORRECTIONS_SQL,
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 12,
+            description: "add_dashboard_module_style",
+            sql: DASHBOARD_MODULE_STYLE_SQL,
+            kind: MigrationKind::Up,
+        },
     ]
 }
 
@@ -222,9 +230,10 @@ mod tests {
     use super::{
         create_migrated_database, migrations, DatabaseMigrationState, DatabaseStatusError,
         DatabaseStatusStore, COMMAND_TABLES_SQL, DASHBOARD_MODULES_SQL,
-        DASHBOARD_MODULE_CORRECTIONS_SQL, DATABASE_URL, EMBEDDED_MIGRATOR, INITIAL_SCHEMA_SQL,
-        LOCAL_PROFILES_SQL, OWN_LOSSES_TABLES_SQL, PROFILE_BRANCH_TABLES_SQL, PROFILE_DETAILS_SQL,
-        PROFILE_MODULES_SQL, WORKSPACE_TEMPLATES_SQL, XLSX_DUPLICATE_LINKS_SQL,
+        DASHBOARD_MODULE_CORRECTIONS_SQL, DASHBOARD_MODULE_STYLE_SQL, DATABASE_URL,
+        EMBEDDED_MIGRATOR, INITIAL_SCHEMA_SQL, LOCAL_PROFILES_SQL, OWN_LOSSES_TABLES_SQL,
+        PROFILE_BRANCH_TABLES_SQL, PROFILE_DETAILS_SQL, PROFILE_MODULES_SQL,
+        WORKSPACE_TEMPLATES_SQL, XLSX_DUPLICATE_LINKS_SQL,
     };
     use sqlx::{sqlite::SqlitePoolOptions, Row};
 
@@ -233,7 +242,7 @@ mod tests {
         assert_eq!(DATABASE_URL, "sqlite:easywar.db");
         assert!(include_str!("../tauri.conf.json").contains(DATABASE_URL));
         let registered = migrations();
-        assert_eq!(registered.len(), 11);
+        assert_eq!(registered.len(), 12);
         assert_eq!(registered[0].version, 1);
         assert_eq!(registered[0].description, "create_provenance_schema");
         assert_eq!(registered[1].version, 2);
@@ -259,6 +268,8 @@ mod tests {
             registered[10].description,
             "add_dashboard_module_corrections"
         );
+        assert_eq!(registered[11].version, 12);
+        assert_eq!(registered[11].description, "add_dashboard_module_style");
         assert_eq!(
             EMBEDDED_MIGRATOR
                 .iter()
@@ -279,7 +290,7 @@ mod tests {
                 .map(|migration| migration.sql)
                 .collect::<Vec<_>>()
         );
-        assert_eq!(super::latest_schema_version(), Some(11));
+        assert_eq!(super::latest_schema_version(), Some(12));
     }
 
     #[tokio::test]
@@ -291,9 +302,9 @@ mod tests {
             DatabaseStatusStore::new(pool.clone()).load().await.unwrap(),
             super::DatabaseStatus {
                 app_version: env!("CARGO_PKG_VERSION").to_owned(),
-                schema_version: 11,
-                supported_schema_version: 11,
-                migration_count: 11,
+                schema_version: 12,
+                supported_schema_version: 12,
+                migration_count: 12,
                 migration_state: DatabaseMigrationState::Current,
             }
         );
@@ -361,6 +372,10 @@ mod tests {
             .execute(&pool)
             .await
             .expect("dashboard module corrections migration must apply");
+        sqlx::raw_sql(DASHBOARD_MODULE_STYLE_SQL)
+            .execute(&pool)
+            .await
+            .expect("dashboard module style migration must apply");
 
         pool
     }
@@ -818,6 +833,33 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(left, 0);
+    }
+
+    #[tokio::test]
+    async fn dashboard_module_style_migration_defaults_existing_modules_to_standard() {
+        let pool = migrated_pool().await;
+        module_with_corrections(&pool).await;
+        let style: String = sqlx::query_scalar(
+            "SELECT style FROM dashboard_modules WHERE id = 'dashboard-corrections-01'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(style, "standard");
+        for (value, accepted) in [
+            ("branch", true),
+            ("heightwell", true),
+            ("neon", false),
+            ("", false),
+        ] {
+            let result = sqlx::query(
+                "UPDATE dashboard_modules SET style = ? WHERE id = 'dashboard-corrections-01'",
+            )
+            .bind(value)
+            .execute(&pool)
+            .await;
+            assert_eq!(result.is_ok(), accepted, "стиль «{value}»");
+        }
     }
 
     #[tokio::test]

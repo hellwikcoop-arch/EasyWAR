@@ -44,7 +44,7 @@ test('the weather template exists in the Rust catalog and reuses the flight-jour
   }
   assert.ok(CHART_KINDS.includes('weather'));
   const core = await readFile(new URL('../src/dashboard-module-catalog-core.js', import.meta.url), 'utf8');
-  assert.match(core, /'leaderboard', 'weather'/u);
+  assert.match(core, /VISUAL_KINDS = new Set\(\[[^\]]*'weather'/u);
 });
 
 test('weather texts are Ukrainian with units', () => {

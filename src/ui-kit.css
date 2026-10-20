@@ -546,3 +546,8 @@ html[data-theme="light"][data-ew-module="rocket"] .kc.kc-amber .ewr-ksub { color
 /* Легенда кільцевої діаграми: назва може переноситись і не виштовхує підсумки за межі панелі. */
 html[data-ew-module] .dl div { grid-template-columns: 12px minmax(0, 1fr) auto auto; }
 html[data-ew-module] .dl div > * { min-width: 0; overflow-wrap: anywhere; }
+
+/* Кнопка стилю «Пункт керування» (додає ui-kit.js поруч із кнопкою теми): лише значок, щоб рядок не переповнювався. */
+.ew-skin-btn { width: 32px; min-width: 32px; height: 32px; padding: 0; display: inline-grid; place-items: center; font-size: 15px; line-height: 1; border-radius: 999px; }
+.ew-skin-btn[aria-pressed="true"] { opacity: 1; color: var(--accent); border-color: var(--accent); }
+

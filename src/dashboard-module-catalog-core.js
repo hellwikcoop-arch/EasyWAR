@@ -3,7 +3,7 @@ const VISUAL_KINDS = new Set([
   'kpi', 'line', 'area', 'columns', 'horizontal-bar', 'grouped-columns', 'donut',
   'radial-progress', 'multi-ring', 'radar', 'gauge', 'progress-bars', 'calendar',
   'table', 'funnel', 'map', 'cohort', 'activity', 'waveform',
-  'combo', 'stacked-columns', 'diverging-bars', 'leaderboard', 'weather',
+  'combo', 'stacked-columns', 'diverging-bars', 'leaderboard', 'ridgeline', 'weather',
 ]);
 const FIELD_TYPES = new Set(['text', 'integer', 'real', 'date', 'datetime', 'boolean']);
 const FIELD_ROLES = new Set(['dimension', 'metric', 'label', 'series', 'status', 'latitude', 'longitude', 'order', 'note']);
@@ -71,8 +71,23 @@ export function normalizeModules(source) {
     const fields = Array.isArray(item?.fields) ? item.fields.map(normalizeField).filter(Boolean) : [];
     if (!id || seen.has(id) || !branch || !visualKind || !title || !table || !fields.length) return [];
     seen.add(id);
-    return [{ ...item, id, branch, visualKind, title, storageTable: table, fields, rowCount: Math.max(0, Number(item.rowCount) || 0) }];
+    return [{ ...item, id, branch, visualKind, title, style: normalizeStyle(item?.style), storageTable: table, fields, rowCount: Math.max(0, Number(item.rowCount) || 0) }];
   });
+}
+
+// Стиль оформлення модуля обирають у вікні створення; колір картки береться з роду військ дашборда (гілки),
+// тож стиль — лише одна з трьох назв, які приймає й Rust (міграція 0012).
+export const MODULE_STYLES = Object.freeze([
+  Object.freeze({ id: 'standard', label: 'Звичайний', hint: 'Як решта карток дашборда.' }),
+  Object.freeze({ id: 'branch', label: 'Кольори роду військ', hint: 'Рамка, позначка й перший ряд діаграми — у кольорі роду військ.' }),
+  Object.freeze({ id: 'heightwell', label: 'Пункт керування', hint: 'Нічна картка: темне полотно, світло роду військ, шрифти Space Grotesk та IBM Plex Mono.' }),
+]);
+const STYLE_IDS = new Set(MODULE_STYLES.map(item => item.id));
+export const BRANCH_LABELS = Object.freeze({ air: 'ПС', rocket: 'РВ', pvk: 'ПВК', dshv: 'УДШВ' });
+
+/** Невідомий або відсутній стиль (старий модуль, стара відповідь Rust) показується як звичайний. */
+export function normalizeStyle(value) {
+  return STYLE_IDS.has(value) ? value : 'standard';
 }
 
 export function schemaSummary(fields) {
