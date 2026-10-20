@@ -14,8 +14,11 @@ use std::{
 
 use tauri::{
     webview::{DownloadEvent, NewWindowResponse},
-    App, Url, WebviewWindowBuilder,
+    App, AppHandle, LogicalPosition, LogicalSize, Manager, Url, WebviewUrl, WebviewWindow,
+    WebviewWindowBuilder, Window, WindowEvent,
 };
+
+use crate::office_files::{editor_init_script, EDITOR_WINDOW_LABEL};
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 
 pub const MAIN_WINDOW_LABEL: &str = "main";
@@ -139,6 +142,85 @@ pub fn create_main_window(app: &App) -> tauri::Result<()> {
     let _ = window;
 
     Ok(())
+}
+
+/// Opens (or brings forward) the separate window for an «Офіс» editor. It covers the main
+/// window exactly, so the user still sees one application screen; its own capability
+/// (`capabilities/office-editor.json`) allows only the `office_*` commands.
+pub fn open_office_editor(
+    app: &AppHandle,
+    main: &WebviewWindow,
+    app_id: &'static str,
+) -> tauri::Result<()> {
+    if let Some(editor) = app.get_webview_window(EDITOR_WINDOW_LABEL) {
+        return editor.set_focus();
+    }
+    let scale = main.scale_factor()?;
+    let size: LogicalSize<f64> = main.inner_size()?.to_logical(scale);
+    let position: LogicalPosition<f64> = main.outer_position()?.to_logical(scale);
+    let editor = WebviewWindowBuilder::new(
+        app,
+        EDITOR_WINDOW_LABEL,
+        WebviewUrl::App("workspace/index.html".into()),
+    )
+    .title("EasyWAR")
+    .inner_size(size.width, size.height)
+    .min_inner_size(1024.0, 700.0)
+    .position(position.x, position.y)
+    .maximized(main.is_maximized()?)
+    .initialization_script(editor_init_script(app_id))
+    .on_navigation(|url| {
+        if is_app_url(url) {
+            true
+        } else {
+            open_external(url);
+            false
+        }
+    })
+    .on_new_window(|url, _features| {
+        open_external(&url);
+        NewWindowResponse::Deny
+    })
+    .build()?;
+
+    #[cfg(target_os = "macos")]
+    editor.with_webview(|webview| {
+        // SAFETY: as for the main window: the live WKWebView, on the main thread.
+        unsafe { macos_dialogs::install(webview.inner()) };
+    })?;
+    editor.set_focus()
+}
+
+/// The system close button of the editor asks the page first (unsaved changes); the page
+/// closes the window itself through `office_editor_close`. If the page cannot be asked, the
+/// window closes. Closing the main window closes the editor too, as before with the iframe.
+pub fn on_window_event(window: &Window, event: &WindowEvent) {
+    match (window.label(), event) {
+        (EDITOR_WINDOW_LABEL, WindowEvent::CloseRequested { api, .. }) => {
+            let asked = window
+                .app_handle()
+                .get_webview_window(EDITOR_WINDOW_LABEL)
+                .is_some_and(|editor| {
+                    editor
+                        .eval("window.EW_WORKSPACE && window.EW_WORKSPACE.requestClose();")
+                        .is_ok()
+                });
+            if asked {
+                api.prevent_close();
+            }
+        }
+        (EDITOR_WINDOW_LABEL, WindowEvent::Destroyed) => {
+            if let Some(main) = window.app_handle().get_webview_window(MAIN_WINDOW_LABEL) {
+                let _ = main.set_focus();
+            }
+        }
+        (MAIN_WINDOW_LABEL, WindowEvent::Destroyed) => {
+            if let Some(editor) = window.app_handle().get_webview_window(EDITOR_WINDOW_LABEL) {
+                let _ = editor.destroy();
+            }
+        }
+        _ => {}
+    }
 }
 
 #[cfg(target_os = "macos")]

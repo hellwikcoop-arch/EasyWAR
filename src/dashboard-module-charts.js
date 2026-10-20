@@ -417,8 +417,9 @@ function progressBars(model, width, height, { compact }) {
   const items = model.items.length ? model.items : [];
   return figure('progress-bars', model, el('ul', { class: 'ewmc-progress' }, items.map(item => el('li', {},
     el('span', { class: 'ewmc-progress-label', text: item.label, title: item.label }),
-    el('span', { class: 'ewmc-meter', style: { '--ewmc-c': slotColor(item.slot) }, title: `${item.label}: ${item.currentText}${item.targetText ? ` з ${item.targetText}` : ''}` },
-      el('i', { style: { width: `${item.percent}%` } })),
+    // Смуга з «пігулок»: заповнено стільки сегментів, скільки відсотків виконано (до найближчого).
+    el('span', { class: 'ewmc-pills', style: { '--ewmc-c': slotColor(item.slot) }, title: `${item.label}: ${item.currentText}${item.targetText ? ` з ${item.targetText}` : ''}` },
+      Array.from({ length: model.segments || 8 }, (_, index) => el('i', { class: index < item.filled ? 'on' : '' }))),
     compact ? null : el('b', { text: item.targetText ? `${item.currentText} / ${item.targetText}` : item.currentText }),
     el('small', { text: `${Math.round(item.percent)} %` })))), { compact });
 }
@@ -610,6 +611,67 @@ function leaderboard(model, width, height, { compact }) {
     item.deltaText && !compact ? el('span', { class: `ewmc-delta ${item.delta > 0 ? 'good' : item.delta < 0 ? 'bad' : 'neutral'}`, text: item.deltaText }) : null))), { compact });
 }
 
+let ridgeId = 0;
+
+/** Плавна крива через точки (Катмулл — Ром у кубічні Безьє), щоб гребінь не був ламаним. */
+function smoothPath(points) {
+  if (!points.length) return '';
+  let d = `M${fixed(points[0].x)} ${fixed(points[0].y)}`;
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const p0 = points[Math.max(0, index - 1)];
+    const p1 = points[index];
+    const p2 = points[index + 1];
+    const p3 = points[Math.min(points.length - 1, index + 2)];
+    d += ` C${fixed(p1.x + (p2.x - p0.x) / 6)} ${fixed(p1.y + (p2.y - p0.y) / 6)} ${fixed(p2.x - (p3.x - p1.x) / 6)} ${fixed(p2.y - (p3.y - p1.y) / 6)} ${fixed(p2.x)} ${fixed(p2.y)}`;
+  }
+  return d;
+}
+
+/**
+ * Гребені: ряд за рядом зверху вниз, кожен наступний перекриває попередній, як хребти гір.
+ * Заливка — градієнт кольору ряду до прозорого біля основи; на піку — точка й година.
+ */
+function ridgeline(model, width, height, { compact }) {
+  const count = Math.max(1, model.series.length);
+  const labelWidth = compact ? 0 : Math.min(96, Math.max(36, ...model.series.map(item => textWidth(item.name) + 10)));
+  const plot = { x: labelWidth + 4, y: compact ? 6 : 14, w: Math.max(40, width - labelWidth - 16), h: Math.max(30, height - (compact ? 22 : 36)) };
+  // Гребені перекриваються майже на два ряди; верхній отримує запас над собою разом із підписом піку,
+  // інакше найвищий пік зрізався краєм картки.
+  const overlap = count > 1 ? 1.9 : 1;
+  const head = compact ? 0 : 12;
+  const band = (plot.h - head) / (count - 1 + overlap);
+  const ridgeHeight = band * overlap;
+  const xOf = hour => plot.x + hour / 23 * plot.w;
+  const id = `ewmc-ridge-${++ridgeId}`;
+  const defs = svg('defs', {}, model.series.map((item, index) => svg('linearGradient', { id: `${id}-${index}`, x1: 0, y1: 0, x2: 0, y2: 1 },
+    svg('stop', { offset: '0%', 'stop-color': slotColor(item.slot), 'stop-opacity': 0.85 }),
+    svg('stop', { offset: '100%', 'stop-color': slotColor(item.slot), 'stop-opacity': 0.04 }))));
+  const ridges = model.series.map((item, index) => {
+    const base = plot.y + head + ridgeHeight + band * index;
+    const yOf = value => base - value / model.max * ridgeHeight;
+    const points = item.smooth.map((value, hour) => ({ x: xOf(hour), y: yOf(value) }));
+    const curve = smoothPath(points);
+    const peak = { x: xOf(item.peakHour), y: yOf(item.smooth[item.peakHour]) };
+    const tip = `${item.name}: ${model.valueText(item.total)}${model.unit ? ` ${model.unit}` : ''}, пік ${item.peakText}`;
+    return svg('g', { class: 'ewmc-ridge' },
+      svg('path', { d: `${curve} L${fixed(xOf(23))} ${fixed(base)} L${fixed(xOf(0))} ${fixed(base)} Z`, fill: `url(#${id}-${index})`, class: 'ewmc-ridge-fill', title: tip }),
+      svg('path', { d: curve, stroke: slotColor(item.slot), class: 'ewmc-line ewmc-ridge-line' }),
+      svg('line', { x1: plot.x, x2: plot.x + plot.w, y1: fixed(base), y2: fixed(base), class: 'ewmc-grid' }),
+      item.peakValue > 0 ? [
+        svg('line', { x1: fixed(peak.x), x2: fixed(peak.x), y1: fixed(peak.y), y2: fixed(base), class: 'ewmc-ridge-stem', stroke: slotColor(item.slot) }),
+        svg('circle', { cx: fixed(peak.x), cy: fixed(peak.y), r: 3.5, fill: slotColor(item.slot), class: 'ewmc-marker', title: tip }),
+        compact ? null : svg('text', { x: fixed(Math.min(plot.x + plot.w - 4, Math.max(plot.x + 4, peak.x))), y: fixed(peak.y - 6), class: 'ewmc-value', 'text-anchor': peak.x > plot.x + plot.w - 40 ? 'end' : peak.x < plot.x + 40 ? 'start' : 'middle', text: `${String(item.peakHour).padStart(2, '0')}:00` }),
+      ] : null,
+      compact ? null : svg('text', { x: plot.x - 6, y: fixed(base - 3), class: 'ewmc-tick ewmc-ridge-name', 'text-anchor': 'end', text: truncate(item.name, labelWidth - 8) }));
+  });
+  const ticks = [0, 3, 6, 9, 12, 15, 18, 21].filter(hour => !compact || hour % 6 === 0);
+  const axis = svg('g', {}, ticks.map(hour => svg('text', { x: fixed(xOf(hour)), y: plot.y + plot.h + 14, class: 'ewmc-tick', 'text-anchor': hour === 0 ? 'start' : 'middle', text: model.hours[hour] })));
+  const body = svg('svg', { viewBox: `0 0 ${width} ${height}`, width, height, class: 'ewmc-svg' }, defs, ridges, axis);
+  const notes = [model.title && !compact ? model.title : '', model.skipped && !compact ? `Без часу: ${model.skipped}` : ''].filter(Boolean);
+  const footer = notes.length ? el('p', { class: 'ewmc-chart-foot', text: notes.join(' · ') }) : null;
+  return figure('ridgeline', model, model.empty ? el('p', { class: 'ewmc-chart-foot', text: 'Записів з часом ще немає' }) : body, { compact, footer });
+}
+
 // «Метеоумови»: темна карта з ізолініями хмарності, виноски на пунктах, шкала часу з
 // небезпечними моментами й рядок показників (стиль погодних дашбордів). Кадр перемикається
 // кнопками шкали без повторного читання бази: усі кадри вже є в моделі.
@@ -758,6 +820,7 @@ const RENDERERS = {
   activity,
   waveform,
   leaderboard,
+  ridgeline,
   weather: weatherChart,
 };
 

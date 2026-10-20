@@ -361,8 +361,13 @@ function multiRing(module, rows, info) {
   return { kind: 'multi-ring', empty: !rows.length, items: progressItems(module, rows, info, 5) };
 }
 
+/** Скільки сегментів-«пігулок» у смузі виконання: крок 12,5 % ще читається на око. */
+const PROGRESS_SEGMENTS = 8;
+
 function progressBars(module, rows, info) {
-  return { kind: 'progress-bars', empty: !rows.length, items: progressItems(module, rows, info, 8) };
+  const items = progressItems(module, rows, info, 8)
+    .map(item => ({ ...item, filled: Math.round(item.percent / 100 * PROGRESS_SEGMENTS) }));
+  return { kind: 'progress-bars', empty: !rows.length, segments: PROGRESS_SEGMENTS, items };
 }
 
 function gauge(module, rows, info) {
@@ -723,6 +728,101 @@ function leaderboard(module, rows, info) {
   };
 }
 
+// Гребені: розподіл подій за годинами доби, окремий гребінь на ряд (тип ПС, підрозділ).
+const HOURS = 24;
+/** Понад стільки гребенів решта складається в «Інші»: вищі за шість картка не вміщає. */
+export const RIDGE_LIMIT = 6;
+const HH_MM = /^(\d{1,2})[:.](\d{2})$/u;
+
+/** Година доби з «08:10» чи «8.10» або з дати-часу ISO; без часу чи поза 0–23 — null. */
+export function hourOf(value) {
+  const raw = text(value).trim();
+  const short = HH_MM.exec(raw);
+  if (short) {
+    const hour = Number(short[1]);
+    return hour < HOURS && Number(short[2]) < 60 ? hour : null;
+  }
+  const moment = parseMoment(raw);
+  return moment?.hasTime && moment.hour < HOURS ? moment.hour : null;
+}
+
+/** Згладжування по колу доби (ядро 1-2-3-2-1): 23:00 і 00:00 — сусіди. */
+function smoothHours(values) {
+  const kernel = [1, 2, 3, 2, 1];
+  return values.map((_, hour) => kernel.reduce((sum, weight, index) => sum + weight * values[(hour + index - 2 + HOURS) % HOURS], 0) / 9);
+}
+
+/**
+ * Модель гребенів. `hourField` — поле часу, `seriesField` — поле гребеня, `metric` — вага події
+ * (без числа — подія рахується як одна). Ряди йдуть за спаданням суми, понад ліміт — «Інші».
+ */
+function ridgeModel(rows, { hourField, seriesField, metric, unit }) {
+  const buckets = new Map();
+  let skipped = 0;
+  for (const row of rows) {
+    const hour = hourField ? hourOf(row?.[hourField.key]) : null;
+    if (hour == null) { skipped += 1; continue; }
+    const raw = seriesField ? row?.[seriesField.key] : null;
+    const name = raw == null || raw === '' ? 'Без ряду' : formatValue(raw);
+    const weight = metric && finite(row?.[metric.key]) ? row[metric.key] : 1;
+    if (!buckets.has(name)) buckets.set(name, new Array(HOURS).fill(0));
+    buckets.get(name)[hour] += weight;
+  }
+  const total = values => values.reduce((sum, value) => sum + value, 0);
+  let named = [...buckets.entries()].sort((left, right) => total(right[1]) - total(left[1]));
+  if (named.length > RIDGE_LIMIT) {
+    const rest = new Array(HOURS).fill(0);
+    for (const [, values] of named.slice(RIDGE_LIMIT - 1)) values.forEach((value, hour) => { rest[hour] += value; });
+    named = [...named.slice(0, RIDGE_LIMIT - 1), [OTHER_LABEL, rest]];
+  }
+  const slots = assignSlots(named.map(([name]) => name));
+  const valueText = value => (metric ? valueLabel(metric, value) : compactNumber(value));
+  const series = named.map(([name, values]) => {
+    const peakHour = values.reduce((best, value, hour) => (value > values[best] ? hour : best), 0);
+    return {
+      name,
+      slot: slots.get(name),
+      values,
+      smooth: smoothHours(values),
+      total: total(values),
+      peakHour,
+      peakValue: values[peakHour],
+      peakText: `${pad2(peakHour)}:00 · ${valueText(values[peakHour])}${unit ? ` ${unit}` : ''}`,
+    };
+  });
+  return {
+    kind: 'ridgeline',
+    empty: !series.length,
+    hours: Array.from({ length: HOURS }, (_, hour) => `${pad2(hour)}:00`),
+    series,
+    max: Math.max(1e-9, ...series.flatMap(item => item.smooth)),
+    valueText,
+    unit,
+    skipped,
+    legend: false,
+  };
+}
+
+function ridgeline(module, rows, info) {
+  const hourField = info.byKey.get('takeoff_time') || info.byKey.get('occurred_at') || info.timeField;
+  const seriesField = info.seriesField || info.byKey.get('aircraft_type') || info.categoryField;
+  // Без жодного числа у вазі подія рахується як одна, і підпис — у подіях.
+  const valueField = info.byKey.get('value');
+  const metric = valueField && rows.some(row => finite(row?.[valueField.key])) ? valueField : null;
+  return ridgeModel(rows, { hourField, seriesField, metric, unit: metric ? '' : 'под.' });
+}
+
+/**
+ * Зльоти журналу польотів за годинами доби по типах ПС: кожен запис з часом зльоту — один
+ * виліт. Окрема модель, бо картка журналу показує її під смугами нальоту.
+ */
+export function takeoffHoursModel(module, rows) {
+  const safeRows = (Array.isArray(rows) ? rows : []).filter(row => row && typeof row === 'object').slice(0, ROW_LIMIT);
+  const info = fieldsOf(module);
+  const model = ridgeModel(safeRows, { hourField: info.byKey.get('takeoff_time'), seriesField: info.byKey.get('aircraft_type'), metric: null, unit: 'зл.' });
+  return { ...model, title: 'Зльоти за годинами доби', rowCount: safeRows.length };
+}
+
 /** Ініціали для бейджа рейтингу: «Тестенко І. П.» → «ТІ», «2 АЕ» → «2А». */
 export function initialsOf(label) {
   const words = text(label).split(/[^\p{L}\p{N}]+/u).filter(Boolean);
@@ -754,6 +854,7 @@ const BUILDERS = {
   activity,
   waveform,
   leaderboard,
+  ridgeline,
   weather: weatherModel,
 };
 
@@ -786,7 +887,7 @@ export function chartSummary(model) {
     'horizontal-bar': 'Горизонтальні смуги', 'grouped-columns': 'Згруповані стовпчики', 'diverging-bars': 'Приріст і втрати', combo: 'Стовпчики з лінією',
     donut: 'Кільцева діаграма', 'radial-progress': 'Радіальний прогрес', 'multi-ring': 'Кілька радіальних шкал', radar: 'Радар', gauge: 'Шкала',
     'progress-bars': 'Смуги виконання', calendar: 'Календар', table: 'Таблиця', funnel: 'Воронка', map: 'Карта', cohort: 'Когорти',
-    activity: 'Стрічка подій', waveform: 'Двобічна гістограма', leaderboard: 'Рейтинг', weather: 'Метеоумови',
+    activity: 'Стрічка подій', waveform: 'Двобічна гістограма', leaderboard: 'Рейтинг', ridgeline: 'Гребені за годинами доби', weather: 'Метеоумови',
   };
   const name = names[model?.kind] ?? 'Діаграма';
   if (!model || model.empty) return `${name}: даних ще немає`;
@@ -794,6 +895,7 @@ export function chartSummary(model) {
   if (model.series?.length > 1) parts.push(`${model.series.length} ${pluralForm(model.series.length, 'ряд', 'ряди', 'рядів')}`);
   if (model.kind === 'kpi' && model.valueText) parts.push(`${model.label}: ${model.valueText}${model.unit ? ` ${model.unit}` : ''}`);
   if (model.kind === 'gauge') parts.push(`${model.label}: ${model.valueText} з ${model.maxText}`);
+  if (model.kind === 'ridgeline') parts.push(...model.series.slice(0, 3).map(item => `пік ${item.name} о ${item.peakText}`));
   if (model.kind === 'weather') {
     const frame = model.frames?.[model.current];
     if (frame) parts.push(`${frame.label}, ${frame.stations.length} ${pluralForm(frame.stations.length, 'пункт', 'пункти', 'пунктів')}`);
@@ -802,7 +904,24 @@ export function chartSummary(model) {
   return `${name}: ${parts.join(', ')}`;
 }
 
+/**
+ * Пункти бігучого рядка дашборда: назва модуля й словесне резюме його діаграми з тих самих
+ * рядків, що й картка. Модулі без прочитаних даних позначаються, а не пропускаються мовчки.
+ */
+export function tickerItems(modules, dataById) {
+  const list = Array.isArray(modules) ? modules : [];
+  return list.map(module => {
+    const payload = dataById?.get?.(module?.id);
+    if (!payload || payload.failed) return { id: module?.id ?? '', title: text(module?.title), text: 'дані не прочитано', failed: true };
+    const summary = chartSummary(chartModel(module, payload.rows));
+    // «Назва виду: …» → лише те, що після двокрапки: вид і так видно на картці.
+    const detail = summary.includes(': ') ? summary.slice(summary.indexOf(': ') + 2) : summary;
+    return { id: module.id, title: text(module.title), text: detail, failed: false };
+  });
+}
+
 export const dashboardModuleChartsCore = {
   SERIES_LIMIT, CATEGORY_LIMIT, OTHER_LABEL, CHART_KINDS,
   compactNumber, valueLabel, niceTicks, parseMoment, momentLabel, monthTitle, assignSlots, initialsOf, chartModel, chartSummary,
+  RIDGE_LIMIT, hourOf, takeoffHoursModel, tickerItems,
 };

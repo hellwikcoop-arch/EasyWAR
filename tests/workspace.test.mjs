@@ -31,6 +31,7 @@ import {
   normalizeExtensions,
   normalizeMounted,
   parseFrameMessage,
+  shellMode,
   titleParts,
   toBytes,
 } from '../src/workspace/workspace-core.js';
@@ -209,6 +210,15 @@ test('invoke шукається на сторінці та в батьківсь
   const alone = {};
   alone.parent = alone;
   assert.equal(findInvoke(alone), null);
+});
+
+test('режим оболонки: вікно редактора, головне вікно Tauri чи браузер', () => {
+  assert.deepEqual(shellMode(undefined, false), { mode: 'browser', app: null });
+  assert.deepEqual(shellMode(undefined, true), { mode: 'desktop', app: null });
+  assert.equal(shellMode('easydoc', true).mode, 'editor');
+  assert.equal(shellMode('easydoc', true).app.id, 'easydoc');
+  assert.deepEqual(shellMode('невідомий', true), { mode: 'editor', app: null });
+  assert.deepEqual(shellMode(42, true), { mode: 'editor', app: null });
 });
 
 test('модуль підключено в лаунчері, у збірці й без мережі', async () => {

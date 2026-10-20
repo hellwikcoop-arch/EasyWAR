@@ -154,24 +154,28 @@ async fn list_dashboard_modules(
 }
 
 /// `rows` — дані, підтягнуті з таблиці користувача: модуль створюється разом із ними
-/// однією транзакцією. Без `rows` таблиця модуля порожня.
+/// однією транзакцією. Без `rows` таблиця модуля порожня. `style` — стиль оформлення,
+/// обраний у вікні створення (без нього — звичайний).
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn create_dashboard_module(
     modules: tauri::State<'_, DashboardModuleStore>,
     session: tauri::State<'_, ProfileSession>,
     branch: String,
     template_id: String,
     title: Option<String>,
+    style: Option<String>,
     rows: Option<Vec<serde_json::Map<String, Value>>>,
     corrections: Option<Vec<NewImportCorrection>>,
 ) -> Result<DashboardModule, String> {
     let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
     modules
-        .create_with_import(
+        .create_styled(
             &active_profile_id(&session)?,
             &branch,
             &template_id,
             title.as_deref(),
+            style.as_deref(),
             rows.unwrap_or_default(),
             corrections.unwrap_or_default(),
             &now,
@@ -309,6 +313,20 @@ async fn get_dashboard_module_data(
 ) -> Result<DashboardModuleData, String> {
     modules
         .get_data(&active_profile_id(&session)?, &module_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// Стиль оформлення вже створеного модуля (`standard`, `branch`, `heightwell`); дані не змінюються.
+#[tauri::command]
+async fn set_dashboard_module_style(
+    modules: tauri::State<'_, DashboardModuleStore>,
+    session: tauri::State<'_, ProfileSession>,
+    module_id: String,
+    style: String,
+) -> Result<DashboardModule, String> {
+    modules
+        .set_style(&active_profile_id(&session)?, &module_id, &style)
         .await
         .map_err(|error| error.to_string())
 }
@@ -965,10 +983,12 @@ async fn office_bound_tables(profiles: &LocalProfileStore) -> Result<Vec<PathBuf
 #[tauri::command]
 async fn office_open_file(
     app: tauri::AppHandle,
+    webview: tauri::Webview,
     session: tauri::State<'_, ProfileSession>,
     handles: tauri::State<'_, office_files::OfficeFileHandles>,
     options: OfficeFileDialog,
 ) -> Result<Option<OfficeOpenedFile>, String> {
+    office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
     let profile_id = active_profile_id(&session)?;
     let extensions = office_files::normalize_extensions(&options.extensions)
         .map_err(|error| error.to_string())?;
@@ -1003,7 +1023,7 @@ async fn office_open_file(
         .map_err(|error| error.to_string())??
     };
     let name = office_files::file_name(&path);
-    let handle = handles.remember(&profile_id, path);
+    let handle = handles.remember(&profile_id, webview.label(), path);
     Ok(Some(OfficeOpenedFile {
         handle,
         name,
@@ -1015,16 +1035,18 @@ async fn office_open_file(
 /// Таблицю, прив'язану до профілю, так не перезаписати: лише «Зберегти як…» в інший файл.
 #[tauri::command]
 async fn office_save_file(
+    webview: tauri::Webview,
     profiles: tauri::State<'_, LocalProfileStore>,
     session: tauri::State<'_, ProfileSession>,
     handles: tauri::State<'_, office_files::OfficeFileHandles>,
     handle: String,
     bytes: Vec<u8>,
 ) -> Result<OfficeSavedFile, String> {
+    office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
     let profile_id = active_profile_id(&session)?;
     office_files::check_size(&bytes).map_err(|error| error.to_string())?;
     let path = handles
-        .path(&profile_id, &handle)
+        .path(&profile_id, webview.label(), &handle)
         .map_err(|error| error.to_string())?;
     office_files::ensure_not_protected(&path, &office_bound_tables(&profiles).await?)
         .map_err(|error| error.to_string())?;
@@ -1045,12 +1067,14 @@ async fn office_save_file(
 #[tauri::command]
 async fn office_save_file_as(
     app: tauri::AppHandle,
+    webview: tauri::Webview,
     profiles: tauri::State<'_, LocalProfileStore>,
     session: tauri::State<'_, ProfileSession>,
     handles: tauri::State<'_, office_files::OfficeFileHandles>,
     bytes: Vec<u8>,
     options: OfficeFileDialog,
 ) -> Result<Option<OfficeSavedFile>, String> {
+    office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
     let profile_id = active_profile_id(&session)?;
     office_files::check_size(&bytes).map_err(|error| error.to_string())?;
     let extensions = office_files::normalize_extensions(&options.extensions)
@@ -1088,20 +1112,44 @@ async fn office_save_file_as(
         .map_err(|error| error.to_string())?
         .map_err(|error| error.to_string())?;
     let name = office_files::file_name(&path);
-    let handle = handles.remember(&profile_id, path);
+    let handle = handles.remember(&profile_id, webview.label(), path);
     Ok(Some(OfficeSavedFile { handle, name }))
 }
 
 /// Застосунок закрив файл: номер більше не приймається.
 #[tauri::command]
 fn office_close_file(
+    webview: tauri::Webview,
     session: tauri::State<'_, ProfileSession>,
     handles: tauri::State<'_, office_files::OfficeFileHandles>,
     handle: String,
 ) -> Result<(), String> {
+    office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
     let profile_id = active_profile_id(&session)?;
-    handles.forget(&profile_id, &handle);
+    handles.forget(&profile_id, webview.label(), &handle);
     Ok(())
+}
+
+/// Головне вікно відкриває застосунок «Офісу» в окремому вікні редактора (F-01): код
+/// редактора не бачить команд EasyWAR, крім `office_*`. Відкрите вікно лише виводиться наперед.
+#[tauri::command]
+fn workspace_open_editor(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    app_id: String,
+) -> Result<(), String> {
+    if window.label() != desktop_shell::MAIN_WINDOW_LABEL {
+        return Err("редактор відкривається лише з головного вікна".to_owned());
+    }
+    let app_id = office_files::editor_app(&app_id).map_err(|error| error.to_string())?;
+    desktop_shell::open_office_editor(&app, &window, app_id).map_err(|error| error.to_string())
+}
+
+/// Вікно редактора закриває саме себе (після підтвердження незбережених змін в оболонці).
+#[tauri::command]
+fn office_editor_close(window: tauri::WebviewWindow) -> Result<(), String> {
+    office_files::ensure_editor_window(window.label()).map_err(|error| error.to_string())?;
+    window.destroy().map_err(|error| error.to_string())
 }
 
 /// Зберігає порожню базову таблицю в новий файл і прив'язує її до профілю
@@ -2037,6 +2085,7 @@ pub fn run() {
             );
             Ok(())
         })
+        .on_window_event(desktop_shell::on_window_event)
         .invoke_handler(tauri::generate_handler![
             get_database_status,
             get_dashboard_model,
@@ -2048,6 +2097,7 @@ pub fn run() {
             read_module_source_sheet,
             get_dashboard_module_data,
             replace_dashboard_module_rows,
+            set_dashboard_module_style,
             get_local_profiles,
             register_local_profile,
             set_local_profile_modules,
@@ -2077,6 +2127,8 @@ pub fn run() {
             office_save_file,
             office_save_file_as,
             office_close_file,
+            office_editor_close,
+            workspace_open_editor,
             clear_profile_database,
             read_profile_database,
             write_profile_database,

@@ -3,22 +3,27 @@
 // Незбережені зміни застосунок повідомляє через postMessage; перед закриттям оболонка просить
 // підтвердження у власній смузі, без системних діалогів. Лаунчер (workspace-launcher.js) питає
 // дозволу закритися через EW_WORKSPACE.requestClose(), а «← На стартову» просить його закритися.
+// У настільному застосунку застосунок працює не в головному вікні, а в окремому вікні
+// редактора з дозволом лише на команди office_* (shellMode, docs/WORKSPACE.md, «Ізоляція»).
 import {
   CLOSE_MESSAGE,
   OFFICE_APPS,
   WORKSPACE_SECTIONS,
   appById,
   appPageUrl,
-  branchFromSearch,
   formatsLabel,
   frameTitle,
+  branchFromSearch,
   parseFrameMessage,
+  shellMode,
   titleParts,
 } from './workspace-core.js';
+import { findInvoke } from './workspace-host.js';
 import { appIcon, arrowIcon, element as make } from './workspace-dom.js';
 import { isConnected } from './workspace-registry.js';
 
 // Акцент роду військ, з якого відкрили модуль (?branch=<id>, див. workspace-core.js).
+// Окреме вікно редактора (настільний застосунок) відкривається без параметра: там типовий рід.
 const branch = branchFromSearch(location.search);
 document.documentElement.dataset.branch = branch;
 
@@ -34,6 +39,9 @@ const back = document.getElementById('ws-back');
 const closeButton = document.getElementById('ws-close');
 const exitButton = document.getElementById('ws-exit');
 const confirmBar = document.getElementById('ws-confirm');
+
+const invoke = findInvoke(window);
+const shell = shellMode(window.__EW_EDITOR_APP, Boolean(invoke));
 
 let current = null; // { app, dirty, card }
 let pendingConfirm = null; // resolve смуги підтвердження
@@ -71,7 +79,12 @@ function appCard(app) {
     element('span', 'ws-card-formats', formatsLabel(app)),
     action,
   );
-  if (connected) card.addEventListener('click', () => openApp(app.id, card));
+  if (connected) {
+    card.addEventListener('click', () => {
+      if (shell.mode === 'desktop') openEditorWindow(app.id, card);
+      else openApp(app.id, card);
+    });
+  }
   return card;
 }
 
@@ -104,6 +117,14 @@ function showTitle(app, title, dirty) {
   document.title = `${frameTitle(app, title, dirty)} — EasyWAR`;
 }
 
+function openEditorWindow(id, card) {
+  const status = card.querySelector('.ws-card-action span');
+  invoke('workspace_open_editor', { appId: id }).catch(error => {
+    console.error(error);
+    status.textContent = 'Не вдалося відкрити';
+  });
+}
+
 function openApp(id, card) {
   const app = appById(id);
   current = { app, dirty: false, card };
@@ -117,6 +138,11 @@ function openApp(id, card) {
 
 function closeApp() {
   hideConfirm(false);
+  if (shell.mode === 'editor') {
+    // Вікно редактора закриває Rust; стан сторінки зникає разом із вікном.
+    invoke('office_editor_close').catch(error => console.error(error));
+    return;
+  }
   frame.src = 'about:blank';
   view.hidden = true;
   home.hidden = false;
@@ -189,4 +215,10 @@ window.addEventListener('message', event => {
 });
 
 window.EW_WORKSPACE = Object.freeze({ requestClose: requestCloseApp, apps: OFFICE_APPS.map(app => app.id) });
-renderSections();
+if (shell.mode === 'editor') {
+  home.hidden = true;
+  if (shell.app) openApp(shell.app.id, null);
+  else invoke('office_editor_close').catch(error => console.error(error));
+} else {
+  renderSections();
+}
