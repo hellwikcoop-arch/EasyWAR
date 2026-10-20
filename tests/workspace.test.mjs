@@ -5,7 +5,10 @@ import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
 import test from 'node:test';
 import {
+  APP_ICONS,
+  CLOSE_MESSAGE,
   CONTRACT_VERSION,
+  LOADING_STEPS,
   OFFICE_APPS,
   WORKSPACE_SECTIONS,
   acceptAttribute,
@@ -17,12 +20,15 @@ import {
   entryError,
   entryKey,
   findEntry,
+  formatsLabel,
   frameMessage,
   frameTitle,
+  isCloseMessage,
   nameWithExtension,
   normalizeExtensions,
   normalizeMounted,
   parseFrameMessage,
+  titleParts,
   toBytes,
 } from '../src/workspace/workspace-core.js';
 import { createHost, findInvoke } from '../src/workspace/workspace-host.js';
@@ -214,7 +220,8 @@ test('модуль підключено в лаунчері, у збірці й 
 
   const dir = new URL('src/workspace/', root);
   for (const file of (await readdir(dir)).filter(name => /\.(js|html)$/.test(name))) {
-    const text = await read(`src/workspace/${file}`);
+    // Простір імен SVG (createElementNS) — не мережеве посилання.
+    const text = (await read(`src/workspace/${file}`)).replaceAll("'http://www.w3.org/2000/svg'", '');
     assert.doesNotMatch(text, /https?:\/\/|fetch\(|XMLHttpRequest|WebSocket|localStorage|sessionStorage|indexedDB/, `${file}: без мережі й сховищ браузера`);
     assert.doesNotMatch(text, /innerHTML/, `${file}: лише textContent`);
   }
@@ -222,5 +229,48 @@ test('модуль підключено в лаунчері, у збірці й 
   assert.match(index, /<html lang="uk">/);
   assert.match(index, /<script type="module" src="\.\/workspace\.js"><\/script>/);
   assert.match(await read('src/workspace/app.html'), /<script type="module" src="\.\/app-frame\.js"><\/script>/);
-  assert.match(await read('src/workspace/app-frame.js'), /у розробці/);
+  const frame = await read('src/workspace/app-frame.js');
+  for (const text of ['поки недоступний', 'Підготовка редактора…', 'ПОМИЛКА ЗАПУСКУ', 'Спробувати ще раз']) assert.ok(frame.includes(text), text);
+});
+
+test('картки, верхня смуга й стани за макетом: формати, іконки, етапи, назва файлу', () => {
+  assert.deepEqual(OFFICE_APPS.map(formatsLabel), ['XLSX · CSV', 'DOCX · TXT', 'PPTX']);
+  assert.deepEqual(OFFICE_APPS.map(app => app.hint), [
+    'Таблиці для роботи з локальними файлами.',
+    'Тексти й документи в одному робочому просторі.',
+    'Слайди для нарад і робочих матеріалів.',
+  ]);
+  for (const app of OFFICE_APPS) {
+    const shapes = APP_ICONS[app.id];
+    assert.ok(shapes?.length, `${app.id}: є іконка`);
+    for (const [tag, attrs] of shapes) {
+      assert.ok(['rect', 'path'].includes(tag), `${app.id}: лише контури`);
+      assert.ok(Object.keys(attrs).every(name => ['x', 'y', 'width', 'height', 'rx', 'd'].includes(name)), `${app.id}: без стилів і тексту`);
+    }
+  }
+  assert.deepEqual([...LOADING_STEPS], ['Завантаження…', 'Підготовка…', 'Готово']);
+  const app = appById('easygreen');
+  assert.deepEqual(titleParts(app, '  звіт.xlsx ', true), { name: 'EasyGreen', file: 'звіт.xlsx', dirty: true });
+  assert.deepEqual(titleParts(app, '', 0), { name: 'EasyGreen', file: '', dirty: false });
+  assert.equal(isCloseMessage({ type: CLOSE_MESSAGE }), true);
+  assert.equal(isCloseMessage({ type: 'easywar-workspace-app' }), false);
+  assert.equal(isCloseMessage(null), false);
+});
+
+test('оболонка: «← На стартову», «Закрити», смуга підтвердження як region, лаунчер без власної смуги', async () => {
+  const index = await read('src/workspace/index.html');
+  for (const text of ['РОБОЧЕ СЕРЕДОВИЩЕ', '← На стартову', '← Офіс', 'Закрити', 'Є незбережені зміни.', 'Закрити без збереження?', 'Залишитися', 'Закрити без збереження']) {
+    assert.ok(index.includes(text), text);
+  }
+  assert.match(index, /id="ws-confirm" role="region" aria-live="assertive"/);
+  assert.match(index, /aria-label="Є незбережені зміни"/);
+  const shell = await read('src/workspace/workspace.js');
+  assert.match(shell, /card\.disabled = true;/, 'непідключений застосунок — справжній disabled');
+  assert.match(shell, /postMessage\(\{ type: CLOSE_MESSAGE \}, location\.origin\)/);
+  const launcher = await read('src/workspace-launcher.js');
+  assert.ok(launcher.includes(`const CLOSE_MESSAGE = '${CLOSE_MESSAGE}';`), 'лаунчер знає повідомлення закриття');
+  assert.match(launcher, /event\.source !== frame\.contentWindow/);
+  assert.doesNotMatch(launcher, /ew-workspace-bar/, 'верхню смугу малює модуль');
+  const css = await read('src/workspace/workspace.css');
+  for (const token of ['--interactive-line:#686d77', '--weak:#959aa4', '--danger-ground:#241a1b', 'prefers-reduced-motion']) assert.ok(css.includes(token), token);
 });

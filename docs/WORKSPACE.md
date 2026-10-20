@@ -118,13 +118,25 @@ EasyWAR (база профілю, резервні копії, оновленн�
 Для випробувань запропоновано обмежити файл 32 МБ замість 256 МБ, доки не виміряно пік пам'яті. Ізоляцію
 відстежує беклог (`BACKLOG.md`, P2-1); будь-яка зміна capabilities, CSP чи `build.rs` — рішення власника.
 
+## Вигляд
+
+Оболонку перенесено з макета, специфікація й еталонні знімки — у
+[`design/workspace-office/`](design/workspace-office/SPEC.md): токени кольорів (`--interactive-line`,
+`--weak` замість старого `#6b707a` для контрасту 4,5:1), шрифти IBM Plex з
+`src/guides/fonts/`, власні монохромні іконки (`APP_ICONS` у `workspace-core.js`). Екран
+завантаження показує етапи «Завантаження…» (вантажиться `app.js`) → «Підготовка…» (працює
+`mount`) → «Готово» (зникає); що відбувається в редакторі після `mount`, показує сам застосунок.
+Непідключений застосунок має справжній `disabled`; заглушку «у розробці» видно лише за прямою
+адресою `app.html?app=<id>`.
+
 ## Файли оболонки
 
 | Файл | Роль |
 |---|---|
-| `src/workspace-launcher.js`, `.css` | кнопка на стартовому екрані й накладка з `<iframe>` на `workspace/index.html`; перед закриттям питає `EW_WORKSPACE.requestClose()` |
-| `src/workspace/index.html`, `workspace.js`, `workspace.css` | оболонка: розділ «Офіс», картки, смуга застосунку з «← Офіс», підтвердження закриття |
-| `src/workspace/app.html`, `app-frame.js` | сторінка одного застосунку: заглушка «у розробці» або `mount(container, host)` |
+| `src/workspace-launcher.js`, `.css` | кнопка на стартовому екрані й накладка з `<iframe>` на `workspace/index.html` (без власної смуги); закривається на повідомлення `CLOSE_MESSAGE` від модуля («← На стартову», `Esc` на картках) і перед закриттям питає `EW_WORKSPACE.requestClose()` |
+| `src/workspace/index.html`, `workspace.js`, `workspace.css` | оболонка: верхня смуга, розділ «Офіс», картки, смуга застосунку «← Офіс · значок · назва — файл • · Закрити», смуга підтвердження закриття |
+| `src/workspace/app.html`, `app-frame.js` | сторінка одного застосунку: «Підготовка редактора…» з етапами, помилка запуску з «Спробувати ще раз», заглушка «у розробці» або `mount(container, host)` |
+| `src/workspace/workspace-dom.js` | іконки застосунків (SVG з `APP_ICONS` через `createElementNS`) і стрілка дії картки |
 | `src/workspace/workspace-registry.js` | `import.meta.glob('./*/app.js')`: де шукати код застосунків |
 | `src/workspace/workspace-core.js` | чиста логіка: реєстр, контракт, параметри вікон, повідомлення між кадрами (тести — `tests/workspace.test.mjs`) |
 | `src/workspace/workspace-host.js` | об'єкт `host`: Tauri-команди `office_*` або запасний шлях браузера |
