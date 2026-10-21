@@ -1,3 +1,5 @@
+import { computePvkSummary, percentageAffected, pvkSummaryInputs } from './module-adapters/pvk-summary-core.js';
+
 const SHEET_ORDER = ['АА', 'ПС', "Об'єкти"];
 
 const GROUP_DEFINITIONS = {
@@ -52,11 +54,7 @@ export function classifyMetric(sheetName, metric) {
     : { group: 'Інші показники', visualization: 'bars-dynamics', known: false };
 }
 
-export function percentageAffected(affected, notAffected) {
-  const numerator = Number(affected) || 0;
-  const denominator = numerator + (Number(notAffected) || 0);
-  return denominator > 0 ? numerator / denominator * 100 : null;
-}
+export { percentageAffected };
 
 export function allDateRange(workbook) {
   const dates = (workbook?.sheets || [])
@@ -218,25 +216,8 @@ export function createDashboardModel(workbook, range = {}) {
   const aa = sheets.find(sheet => normalize(sheet.name) === normalize('АА'));
   const air = sheets.find(sheet => normalize(sheet.name) === normalize('ПС'));
   const objects = sheets.find(sheet => normalize(sheet.name) === normalize("Об'єкти"));
-  const affected = (aa?.totals['Уражено'] || 0) + (air?.totals['Уражено'] || 0);
-  const notAffected = (aa?.totals['НЕ уражено'] || 0) + (air?.totals['НЕ уражено'] || 0);
-  const reconnaissance = air?.totals['Дорозвідується'] || 0;
-  const aaMunitions = sumGroup(aa, 'Боєприпаси');
-  const airMunitions = sumGroup(air, 'Боєприпаси');
-  const summary = {
-    aaAu: aa?.totals['АУ'] || 0,
-    airAu: air?.totals['АУ'] || 0,
-    totalAu: (aa?.totals['АУ'] || 0) + (air?.totals['АУ'] || 0),
-    aaMunitions,
-    airMunitions,
-    munitions: aaMunitions + airMunitions,
-    affected,
-    notAffected,
-    reconnaissance,
-    affectedPercent: percentageAffected(affected, notAffected),
-    objects: sumGroup(objects, 'Уражені об’єкти'),
-    expenditure: objects?.totals['Витрата'] || 0,
-  };
+  // Підсумкові картки рахує спільне ядро модулів (E2), формули ті самі.
+  const summary = computePvkSummary(pvkSummaryInputs({ aa, air, objects }, sumGroup));
   summary.activity = mergeDaily(sheets, sheet => sheet.name === 'АА' || sheet.name === 'ПС' ? ['АУ'] : []);
   summary.dynamics = {
     au: summary.activity,
