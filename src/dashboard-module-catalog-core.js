@@ -281,7 +281,10 @@ export function fieldPlaceholder(field) {
     case 'duration': return '0:32';
     case 'height': return '300 або 0,3 км';
     case 'fuel': return 'літри';
-    default: return field?.dataType === 'text' ? TEXT_PLACEHOLDERS.get(field.key) ?? '' : '';
+    default:
+      if (field?.dataType === 'text') return TEXT_PLACEHOLDERS.get(field.key) ?? '';
+      // «Зміна, %»: порожнє поле не помилка, модуль сам порівняє із попереднім записом.
+      return field?.dataType === 'real' && field.key === 'delta' ? 'порахується сама' : '';
   }
 }
 

@@ -597,7 +597,7 @@ function kpi(model, width, height, { compact }) {
     el('div', { class: 'ewmc-kpi-row' },
       el('strong', { class: compact ? 'ewmc-kpi-value small' : 'ewmc-kpi-value', text: model.valueText }),
       model.unit ? el('span', { class: 'ewmc-kpi-unit', text: model.unit }) : null,
-      model.deltaText ? el('span', { class: `ewmc-delta ${tone}`, text: model.deltaText }) : null),
+      model.deltaText ? el('span', { class: `ewmc-delta ${tone}`, text: model.deltaText, title: model.deltaNote }) : null),
     spark), { compact });
 }
 
