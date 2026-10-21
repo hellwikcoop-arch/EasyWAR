@@ -188,5 +188,6 @@ script/                         standalone-збірка, випуск, мані�
 | `ROADMAP.md` | Віхи 0.5–1.1 (історичні) |
 | `plans/2026-10-21-easywar-codex-roadmap.md` | Зведений маршрут від 21.10.2026: L0–L8, A1–A8, P0–P4, відкриті вибори O01–O21 |
 | `MODULES_ROADMAP.md` | Бібліотека модулів і конструктор дашборда (чернетка) |
+| `MODULE_DEFINITIONS.md` | Реєстр визначень модулів і граф залежностей (E1) |
 | `releases/vX.Y.Z.md` | Нотатки до випусків (потрапляють у `latest.json`) |
 | `codex/PVK_DASHBOARD.md`, `design/` | Дизайн-матеріали дашборда ПВК |
