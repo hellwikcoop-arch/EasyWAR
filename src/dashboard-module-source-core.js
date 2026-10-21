@@ -698,6 +698,8 @@ function readRow(row, context) {
     }
   }
   if (!Object.keys(values).length && !issues.length) return { skip: 'немає даних у знайдених стовпцях' };
+  // Колонка «кількість записів»: кожен непорожній рядок таблиці дає одиницю, а картка сама підсумовує.
+  for (const [key, value] of matched.constants ?? []) values[key] = value;
   for (const field of context.fields) {
     if (!field.required || values[field.key] != null) continue;
     const failed = issues.find(issue => issue.key === field.key);
@@ -757,6 +759,7 @@ function bump(map, key, entry) {
 
 /** Звідки береться поле: заголовок колонки; повторювані колонки — «Вправа (2-й стовпець)», «Інший екіпаж ×6». */
 function sourceLabel(matched, key) {
+  if (matched.constants?.has(key)) return COUNT_LABEL;
   const own = matched.columns.filter(column => column.key === key);
   if (!own.length) return matched.weather?.header ?? '';
   const labels = [];
@@ -954,13 +957,41 @@ export function correctionRecords(plan, built, fileName = '') {
 
 const NO_HEADER = 'У аркуші не знайдено рядка заголовків, схожого на колонки модуля.';
 
+/** Підпис колонки, яку заповнює кількість записів. */
+export const COUNT_LABEL = 'кількість записів';
+
+/**
+ * Зіставлення, яке користувач зробив мишею: `picks` — ключ колонки модуля → індекс стовпця таблиці або
+ * `'count'` («кількість записів»: одиниця на кожен рядок). Те саме, що дає `matchHeaders`, лише без вгадування
+ * за назвами. Індекси, яких немає в рядку, та кілька колонок на один стовпець відкидаються.
+ */
+export function bindingMatch(fields, headerCells, picks) {
+  const list = Array.isArray(fields) ? fields : [];
+  const cells = Array.isArray(headerCells) ? headerCells : [];
+  const columns = [];
+  const mapped = new Map();
+  const constants = new Map();
+  const used = new Set();
+  for (const field of list) {
+    const pick = picks?.[field.key];
+    if (pick === 'count') { constants.set(field.key, 1); continue; }
+    if (!Number.isInteger(pick) || pick < 0 || used.has(pick)) continue;
+    used.add(pick);
+    const header = String(cells[pick] ?? '').trim() || `Стовпець ${pick + 1}`;
+    mapped.set(field.key, [pick]);
+    columns.push({ index: pick, header, key: field.key });
+  }
+  const matchedKeys = new Set([...mapped.keys(), ...constants.keys()]);
+  return { columns, mapped, weather: null, matchedKeys, extras: [], constants, manual: true };
+}
+
 /**
  * План підтягування записів з аркуша: що знайдено, чого немає, які рядки й клітинки
  * пропущено та самі записи (`rows`) у вигляді, який приймає `create_dashboard_module`.
  * Записи, у яких немає обов'язкового поля, пропускаються — модуль без них створився б з
  * помилкою. Неправильна клітинка необов'язкового поля лише лишає поле порожнім.
  */
-export function planImport(fields, sheetRows) {
+export function planImport(fields, sheetRows, { binding = null } = {}) {
   const list = Array.isArray(fields) ? fields : [];
   const rows = Array.isArray(sheetRows?.rows) ? sheetRows.rows : [];
   const plan = {
@@ -992,13 +1023,23 @@ export function planImport(fields, sheetRows) {
     firstRecord: [],
   };
   const profile = sourceProfile(list);
-  const header = findHeaderRow(profile, rows.slice(0, HEADER_SCAN_ROWS));
+  // Ручне зіставлення: рядок заголовків і стовпці вказав користувач (`binding.headerIndex`, `-1` — заголовків немає).
+  const manual = binding && Number.isInteger(binding.headerIndex) && binding.headerIndex >= -1 && binding.headerIndex < rows.length;
+  const header = manual
+    ? {
+      index: binding.headerIndex,
+      row: rows[binding.headerIndex] ?? { number: null, cells: [] },
+      matched: bindingMatch(list, rows[binding.headerIndex]?.cells, binding.picks),
+    }
+    : findHeaderRow(profile, rows.slice(0, HEADER_SCAN_ROWS));
   if (!header) return { ...plan, blocked: NO_HEADER };
   const { matched } = header;
-  Object.assign(plan, describeColumns(list, matched), { headerNumber: header.row.number, matched: matched.matchedKeys.size });
+  Object.assign(plan, describeColumns(list, matched), { headerNumber: header.row.number ?? null, matched: matched.matchedKeys.size });
   const lacking = list.filter(field => field.required && !matched.matchedKeys.has(field.key));
   if (lacking.length) {
-    plan.blocked = `У таблиці немає обов'язкових стовпців: ${lacking.map(field => field.label).join(', ')}.`;
+    plan.blocked = manual
+      ? `Вкажіть стовпці таблиці для обов'язкових колонок: ${lacking.map(field => field.label).join(', ')}.`
+      : `У таблиці немає обов'язкових стовпців: ${lacking.map(field => field.label).join(', ')}.`;
     return plan;
   }
   const context = {
@@ -1200,6 +1241,8 @@ export function sheetOptionLabel(candidate) {
 
 export const dashboardModuleSourceCore = {
   importGaps,
+  bindingMatch,
+  COUNT_LABEL,
   MAX_IMPORT_ROWS,
   normalizeHeader,
   headerCandidates,

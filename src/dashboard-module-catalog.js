@@ -45,6 +45,7 @@ import {
 import { chartModel, takeoffHoursModel, tickerItems } from './dashboard-module-charts-core.js';
 import { MINE_LABEL, MINE_SLOT } from './personal-dashboard.js';
 import { mountChart } from './dashboard-module-charts.js';
+import { columnPicker } from './dashboard-module-picker.js';
 import {
   buildImport,
   correctionOutcome,
@@ -429,26 +430,47 @@ function initialize() {
     );
   }
 
-  function showCreate(item) {
-    const title = el('input', { type: 'text', maxlength: '80', value: item.title, required: true, 'aria-label': 'Назва модуля' });
-    // Зразок картки показує обраний стиль у кольорах роду військ цього дашборда.
+  // `preset` — вибір, що переходить з іншого шаблону (таблиця, стовпці, назва й стиль), коли користувач обрав
+  // у списку пропозицій інший модуль для тих самих стовпців.
+  function showCreate(item, preset = null) {
+    const title = el('input', { type: 'text', maxlength: '80', value: preset?.title || item.title, required: true, 'aria-label': 'Назва модуля' });
+    // Зразок картки показує обраний стиль у кольорах роду військ цього дашборда. Коли стовпці таблиці вже
+    // обрано, замість вигаданих рядків він малюється з рядків користувача (`paintPreview`).
     const preview = el('div', { class: 'ewmc-style-preview', 'data-style': 'standard', 'data-branch': state.branch }, visual(item, sampleRows(item), true));
-    const style = stylePicker(preview);
+    const previewNote = el('p', { class: 'ewmc-preview-note', 'aria-live': 'polite' });
+    const style = stylePicker(preview, preset?.style);
     const status = el('p', { class: 'ewmc-form-status', 'aria-live': 'polite' });
     const submit = el('button', { type: 'submit', class: 'btn primary', text: 'Створити модуль і таблицю' });
     // Поки таблицю читають, створювати модуль рано: підтягування вже вимкнене за замовчуванням, але не обране.
     const syncSubmit = () => {
       submit.disabled = state.busy || source.pending() || source.unconfirmed();
       submit.title = source.unconfirmed() ? 'Підтвердьте частковий імпорт або вимкніть підтягування' : '';
+      paintPreview();
     };
-    const source = sourceBlock(item, syncSubmit, () => showReview(source, form));
+    let shownRows = null;
+    function paintPreview() {
+      const real = source.previewRows();
+      if (real !== shownRows) {
+        shownRows = real;
+        preview.replaceChildren(visual(item, real ?? sampleRows(item), true));
+      }
+      previewNote.textContent = !real ? ''
+        : source.willImport() ? `Так модуль виглядатиме з вашими даними: ${rowCountLabel(real.length)}.`
+          : `Зразок з вашими даними (${rowCountLabel(real.length)}). У модуль вони потраплять, якщо ввімкнути «Підтягнути…» нижче.`;
+    }
+    const choose = (entry, snapshot) => {
+      const edited = title.value.trim() && title.value.trim() !== item.title ? title.value.trim() : '';
+      showCreate(entry.template, { ...source.handoff(), ...snapshot, title: edited, style: style.value() });
+    };
+    const source = sourceBlock(item, syncSubmit, () => showReview(source, form), preset, choose);
     const form = el('form', { class: 'ewmc-create-form' },
       el('button', { type: 'button', class: 'ewmc-back', text: '← До каталогу', onclick: showCatalog }),
       el('p', { class: 'ewmc-eyebrow', text: item.category }),
       el('h2', { id: 'ewmc-dialog-title', text: item.title }),
       // Ліва колонка: вигляд, назва й дані з таблиці; праворуч — довгий список колонок нової таблиці.
       el('div', { class: 'ewmc-create-main' },
-        preview,
+        // Картка з підписом лишається вгорі вікна, поки гортають таблицю вибору: видно, що змінює кожне клацання.
+        el('div', { class: 'ewmc-create-live' }, preview, previewNote),
         el('label', { class: 'ewmc-field' }, el('span', { text: 'Назва на дашборді' }), title),
         style.node,
         source.node),
@@ -504,12 +526,12 @@ function initialize() {
   }
 
   // Вибір стилю оформлення у вікні створення: три варіанти, колір — рід військ цього дашборда.
-  function stylePicker(preview) {
+  function stylePicker(preview, initial = '') {
     const name = 'ewmc-style';
     const node = el('fieldset', { class: 'ewmc-style-picker' },
       el('legend', { text: `Стиль оформлення · кольори ${BRANCH_LABELS[state.branch] || 'роду військ'}` }),
       MODULE_STYLES.map((option, index) => el('label', { class: 'ewmc-style-option', 'data-style': option.id, 'data-branch': state.branch },
-        el('input', { type: 'radio', name, value: option.id, checked: index === 0, onchange: () => paint() }),
+        el('input', { type: 'radio', name, value: option.id, checked: initial ? option.id === normalizeStyle(initial) : index === 0, onchange: () => paint() }),
         el('i', { class: 'ewmc-style-swatch', 'aria-hidden': 'true' }),
         el('span', {}, el('b', { text: option.label }), el('small', { text: option.hint })))));
     const value = () => normalizeStyle(node.querySelector(`input[name="${name}"]:checked`)?.value);
@@ -518,20 +540,27 @@ function initialize() {
       loadStyleFonts(current);
       preview.dataset.style = current;
     }
+    if (initial) paint();
     return { node, value };
   }
 
   // Блок «Дані з вашої таблиці» у вікні створення: знаходить таблицю профілю (або файл, який обрав
   // користувач), зіставляє її стовпці з колонками модуля й пропонує підтягнути записи. Файл лише
   // читається. Колонки модуля, яких у таблиці немає, лишаються порожніми: дані вносять у самому модулі.
-  function sourceBlock(item, onChange, openReview) {
+  // Режим «вручну»: користувач сам клацає стовпці таблиці (`dashboard-module-picker.js`), а програма
+  // кладе їх у колонки модуля й пропонує інші модулі для тих самих стовпців. Нижче той самий план:
+  // зауваження, перевірка, підтвердження часткового імпорту. `preset` — вибір, що перейшов з іншого шаблону.
+  function sourceBlock(item, onChange, openReview, preset = null, onChoose = null) {
     // `corrections` — виправлення з екрана «Перевірка» (ідентифікатор → введений текст); `build` — записи з ними.
     const model = {
       phase: 'loading', pending: true, message: '', origin: '', selection: '', workbook: null, ranked: [], sheet: '', plan: null,
       use: false, carry: true, confirmed: false, corrections: new Map(), build: null,
+      mode: 'auto', intro: false, sheetRows: null, picker: null, preview: null,
     };
     let request = 0;
     const body = el('div', { class: 'ewmc-source-body', 'aria-live': 'polite' });
+    // План (зауваження, перевірка, галочки) перемальовується окремо від таблиці вибору, щоб клацання не губило фокус.
+    const planHost = el('div', { class: 'ewmc-source-plan' });
     const node = el('section', { class: 'ewmc-source', 'aria-labelledby': 'ewmc-source-title' },
       el('h3', { id: 'ewmc-source-title', text: 'Дані з вашої таблиці' }),
       el('p', { class: 'ewmc-source-hint', text: 'Записи беруться з вашої таблиці, а стовпці, яких у ній немає, стають новими колонками модуля — їх заповнюють у самому модулі. Файл таблиці лише читається й не змінюється.' }),
@@ -554,6 +583,13 @@ function initialize() {
 
     async function start() {
       const id = ++request;
+      if (preset?.workbook) {
+        // Вибір перейшов з іншого шаблону: таблицю вже прочитано, повторно її не відкриваємо.
+        Object.assign(model, { workbook: preset.workbook, origin: preset.origin, selection: preset.selection, ranked: preset.ranked, sheet: preset.sheet, sheetRows: preset.sheetRows });
+        startManual({ headerIndex: preset.headerIndex, selected: preset.selected });
+        setPhase('ready');
+        return;
+      }
       setPhase('loading');
       try {
         const workbook = await invoke('inspect_linked_module_source', { branch: state.branch });
@@ -588,16 +624,23 @@ function initialize() {
       model.selection = workbook.selection;
       model.ranked = rankSheets(item.fields, workbook);
       const best = model.ranked[0];
-      if (!best || best.matched === 0) setPhase('empty');
+      if (!best) setPhase('empty');
+      // Назви стовпців нічого не підказали: таблицю все одно можна використати, якщо стовпці обрати самому.
+      else if (best.matched === 0) await openManual(best.name, id, true);
       else await openSheet(best.name, id);
+    }
+
+    function readSheet(name) {
+      return invoke('read_module_source_sheet', { selection: model.selection, sheet: name });
     }
 
     async function openSheet(name, id = ++request) {
       model.sheet = name;
       setPhase('reading', name);
       try {
-        const sheet = await invoke('read_module_source_sheet', { selection: model.selection, sheet: name });
+        const sheet = await readSheet(name);
         if (id !== request) return;
+        Object.assign(model, { mode: 'auto', intro: false, picker: null, sheetRows: sheet });
         model.plan = planImport(item.fields, sheet);
         // Виправлення належать рядкам конкретного аркуша: інший аркуш починає перевірку з чистого.
         model.corrections = new Map();
@@ -612,6 +655,50 @@ function initialize() {
       } catch (error) {
         if (id === request) setPhase('error', String(error));
       }
+    }
+
+    // Режим «вручну» для аркуша: рядки читаються так само, а зіставлення робить користувач.
+    async function openManual(name, id = ++request, intro = false) {
+      model.sheet = name;
+      setPhase('reading', name);
+      try {
+        const sheet = await readSheet(name);
+        if (id !== request) return;
+        model.sheetRows = sheet;
+        model.intro = intro;
+        startManual({});
+        setPhase('ready');
+      } catch (error) {
+        if (id === request) setPhase('error', String(error));
+      }
+    }
+
+    function startManual(initial) {
+      model.mode = 'manual';
+      model.picker = columnPicker({
+        item,
+        templates: state.catalog,
+        sheet: model.sheetRows,
+        visual,
+        initial,
+        onChange: applyBinding,
+        onChoose: (entry, snapshot) => onChoose?.(entry, snapshot),
+      });
+      applyBinding(model.picker.binding(), true);
+    }
+
+    // План по стовпцях, які обрав користувач. Виправлення й підтвердження належать конкретному зіставленню, тож скидаються.
+    function applyBinding(binding, quiet = false) {
+      model.plan = planImport(item.fields, model.sheetRows, { binding });
+      model.corrections = new Map();
+      model.build = null;
+      model.confirmed = false;
+      model.carry = true;
+      // Увімкнено лише повний і чистий імпорт: частковий користувач вмикає й підтверджує свідомо.
+      model.use = model.plan.rows.length > 0 && importGaps(model.plan).complete;
+      if (quiet) return;
+      renderPlan();
+      onChange();
     }
 
     function fileLine() {
@@ -646,32 +733,74 @@ function initialize() {
           break;
         case 'empty':
           nodes.push(fileLine(),
-            el('p', { text: 'У таблиці немає аркуша зі стовпцями, схожими на колонки цього модуля. Модуль буде створено з порожньою таблицею.' }),
+            el('p', { text: 'У таблиці не знайдено аркушів із даними. Модуль буде створено з порожньою таблицею.' }),
             el('div', { class: 'ewmc-source-actions' }, pickButton('Обрати інший файл…')));
           break;
         default:
-          nodes.push(...readyNodes());
+          nodes.push(...(model.mode === 'manual' ? manualNodes() : readyNodes()));
       }
       body.replaceChildren(...nodes);
     }
 
+    // Вибір аркуша, коли їх кілька: підпис каже, скільки там рядків (для ручного режиму збіги назв ні до чого).
+    function sheetSelect(onPick, label) {
+      if (model.ranked.length <= 1) return null;
+      const select = el('select', { 'aria-label': 'Аркуш таблиці' },
+        model.ranked.map(entry => el('option', { value: entry.name, selected: entry.name === model.sheet, text: label(entry) })));
+      select.addEventListener('change', () => onPick(select.value));
+      return select;
+    }
+
+    function manualNodes() {
+      const nodes = [fileLine()];
+      const select = sheetSelect(name => openManual(name), entry => `${entry.name} · ${entry.rowCount ?? 0} ${pluralForm(entry.rowCount ?? 0, 'рядок', 'рядки', 'рядків')}`);
+      if (select) nodes.push(select);
+      if (model.intro) {
+        nodes.push(el('p', { class: 'ewmc-source-intro' },
+          'У таблиці немає аркуша зі стовпцями, схожими на колонки цього модуля. Оберіть потрібні стовпці самі — клацніть їхні заголовки.'));
+      }
+      nodes.push(model.picker.node, planHost);
+      renderPlan();
+      const actions = [pickButton('Обрати інший файл…')];
+      if (model.ranked.find(entry => entry.name === model.sheet)?.matched > 0) {
+        actions.unshift(el('button', { type: 'button', class: 'btn quiet', 'data-action': 'auto-columns', text: 'Підібрати стовпці за назвами', onclick: () => openSheet(model.sheet) }));
+      }
+      nodes.push(el('div', { class: 'ewmc-source-actions' }, actions));
+      return nodes;
+    }
+
     function readyNodes() {
+      const candidate = model.ranked.find(entry => entry.name === model.sheet);
+      const nodes = [fileLine()];
+      const select = sheetSelect(openSheet, sheetOptionLabel);
+      if (select) nodes.push(select);
+      nodes.push(planHost);
+      renderPlan();
+      nodes.push(el('div', { class: 'ewmc-source-actions' },
+        el('button', { type: 'button', class: 'btn quiet', 'data-action': 'pick-columns', text: 'Обрати стовпці вручну…', onclick: () => openManual(model.sheet) }),
+        pickButton('Обрати інший файл…')));
+      return nodes;
+    }
+
+    function renderPlan() {
+      if (model.phase !== 'ready' || !model.plan) { planHost.replaceChildren(); return; }
+      planHost.replaceChildren(...planNodes());
+    }
+
+    // Підсумок плану, зауваження, перевірка й галочки: однакові для підбору за назвами й для вибору мишею.
+    function planNodes() {
       const { plan } = model;
+      const manual = model.mode === 'manual';
       const notes = describePlan(plan, model.build);
       const importable = (model.build ?? plan).rows.length;
       const candidate = model.ranked.find(entry => entry.name === model.sheet);
-      const nodes = [fileLine()];
-      if (model.ranked.length > 1) {
-        const select = el('select', { 'aria-label': 'Аркуш таблиці' },
-          model.ranked.map(entry => el('option', { value: entry.name, selected: entry.name === model.sheet, text: sheetOptionLabel(entry) })));
-        select.addEventListener('change', () => openSheet(select.value));
-        nodes.push(select);
-      }
-      nodes.push(el('p', { class: 'ewmc-source-summary' }, el('strong', { text: notes.summary }), ` ${notes.columns}`));
+      const nodes = [];
+      const columnsLine = manual ? `Заповнено колонок модуля: ${plan.matched} з ${plan.total}.` : notes.columns;
+      nodes.push(el('p', { class: 'ewmc-source-summary' }, el('strong', { text: notes.summary }), ` ${columnsLine}`));
       const lines = [];
       const add = (text, warn = false) => { if (text) lines.push(el('li', { class: warn ? 'warn' : '', text })); };
       add(notes.blocked, true);
-      if (candidate && !candidate.confident && plan.rows.length) add('Таблиця схожа на модуль лише частково, тому підтягування вимкнено — увімкніть його, якщо записи розібрано правильно.', true);
+      if (!manual && candidate && !candidate.confident && plan.rows.length) add('Таблиця схожа на модуль лише частково, тому підтягування вимкнено — увімкніть його, якщо записи розібрано правильно.', true);
       else if (notes.partial) add('Імпорт неповний, тому підтягування вимкнено: увімкніть його свідомо й підтвердьте частковий імпорт.', true);
       add(notes.missing);
       add(notes.extra);
@@ -714,7 +843,7 @@ function initialize() {
           el('label', { class: 'ewmc-source-use' }, carry, el('span', { text: notes.carryLabel })),
           el('p', { class: 'ewmc-source-hint', text: notes.carry })));
       }
-      if (plan.found.length) {
+      if (plan.found.length && !manual) {
         nodes.push(el('details', {},
           el('summary', { text: 'Які стовпці таблиці куди потраплять' }),
           el('dl', { class: 'ewmc-source-map' }, plan.found.flatMap(entry => [el('dt', { text: entry.label }), el('dd', { text: entry.from })]))));
@@ -724,7 +853,6 @@ function initialize() {
           el('summary', { text: 'Перший запис таким, яким його буде збережено' }),
           el('dl', { class: 'ewmc-source-map' }, plan.firstRecord.flatMap(entry => [el('dt', { text: entry.label }), el('dd', { text: entry.text })]))));
       }
-      nodes.push(el('div', { class: 'ewmc-source-actions' }, pickButton('Обрати інший файл…')));
       return nodes;
     }
 
@@ -740,8 +868,27 @@ function initialize() {
         const rows = importRows(model.plan, { carryWeather: model.carry, build: model.build });
         return rows.length ? rows : null;
       },
+      // Записи для зразка картки: ті самі, що підтягнуться, але й до ввімкнення галочки. Той самий масив, поки нічого не змінилося.
+      previewRows: () => {
+        if (model.phase !== 'ready' || !model.plan || !model.plan.rows.length) return null;
+        const cached = model.preview;
+        if (cached && cached.plan === model.plan && cached.build === model.build && cached.carry === model.carry) return cached.rows;
+        const rows = importRows(model.plan, { carryWeather: model.carry, build: model.build });
+        model.preview = { plan: model.plan, build: model.build, carry: model.carry, rows };
+        return rows;
+      },
+      willImport: () => model.phase === 'ready' && model.use && Boolean(model.plan),
       corrections: () => (model.build ? correctionRecords(model.plan, model.build, model.workbook?.fileName) : []),
       refresh: () => { render(); onChange(); },
+      // Передає таблицю і вибір стовпців іншому шаблону. Огляд таблиці в Rust тепер належить йому: тут його не забуваємо.
+      handoff: () => {
+        const snapshot = model.picker ? model.picker.snapshot() : { headerIndex: undefined, selected: [] };
+        const given = {
+          workbook: model.workbook, origin: model.origin, selection: model.selection, ranked: model.ranked, sheet: model.sheet, sheetRows: model.sheetRows, ...snapshot,
+        };
+        model.selection = '';
+        return given;
+      },
       // Екран «Перевірка» працює з тим самим планом: виправлення лишаються в моделі блоку до створення модуля.
       review: () => ({
         plan: model.plan,
