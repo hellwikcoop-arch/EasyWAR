@@ -643,6 +643,56 @@ export function rowForWrite(fields, rawValues, original = {}) {
   return row;
 }
 
+const sameRowValues = (left, right) => {
+  const keys = new Set([...Object.keys(left ?? {}), ...Object.keys(right ?? {})]);
+  return [...keys].every(key => (left?.[key] ?? null) === (right?.[key] ?? null));
+};
+
+/**
+ * Чернетка запису для живого перегляду модуля. Як `rowForWrite`, але поблажливо: поки користувач друкує,
+ * недописане або хибне поле просто не враховується (картка лишається на попередньому значенні), а не
+ * ламає весь запис. Правила між полями (НМХ ≤ ВМХ, склад екіпажу) тут не перевіряє ніхто: їх перевіряє
+ * збереження. `issues` — лише поля, де щось введено, але розібрати не вдалося.
+ * `baseline` — значення, які користувач ще не чіпав (відкритий запис або погода, підставлена з попереднього);
+ * `active` — чи відрізняється чернетка від них, тобто чи є що показувати на картці.
+ */
+export function draftRow(fields, rawValues, original = {}, baseline = original) {
+  const row = {};
+  const issues = [];
+  for (const field of Array.isArray(fields) ? fields : []) {
+    const raw = rawValues?.[field.key];
+    const before = original?.[field.key];
+    if (before != null && raw === fieldInputText(field, before)) {
+      row[field.key] = before;
+      continue;
+    }
+    try {
+      const value = parseFieldInput(field, raw);
+      if (value !== null) row[field.key] = value;
+    } catch (error) {
+      if (!(error instanceof FieldValueError)) throw error;
+      const empty = raw == null || String(raw).trim() === '';
+      if (!empty) issues.push({ fieldKey: field.key, message: error.message });
+    }
+  }
+  return { row, issues, active: !sameRowValues(row, baseline) };
+}
+
+/**
+ * Рядки для перегляду: збережені рядки з чернеткою. `rowIndex` — запис, що редагується (чернетка
+ * замінює його, `rowId` лишається); не число — новий запис у кінці. Чернетка без змін рядків не торкається.
+ */
+export function rowsWithDraft(rows, rowIndex, draft) {
+  const saved = Array.isArray(rows) ? rows : [];
+  if (!draft?.active) return saved;
+  if (Number.isInteger(rowIndex) && rowIndex >= 0 && rowIndex < saved.length) {
+    const next = saved.slice();
+    next[rowIndex] = saved[rowIndex]?.rowId == null ? draft.row : { ...draft.row, rowId: saved[rowIndex].rowId };
+    return next;
+  }
+  return [...saved, draft.row];
+}
+
 /**
  * Рядок у вигляді, який приймає `replace_dashboard_module_rows`: лише поля
  * каталогу та `rowId` — ідентифікатор запису, за яким Rust зберігає його
@@ -858,6 +908,8 @@ export const dashboardModuleCore = {
   isLocalDateTime,
   rowRuleProblem,
   rowForWrite,
+  draftRow,
+  rowsWithDraft,
   rowForStorage,
   rowsAfterSave,
   rowsAfterDelete,
