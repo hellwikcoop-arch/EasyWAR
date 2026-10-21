@@ -237,6 +237,9 @@
 
 ## Продукт
 
+- [x] Модулі E1 (дорожня карта модулів, розділ 5): реєстр визначень і граф залежностей —
+  `src/module-definition-core.js`, `docs/MODULE_DEFINITIONS.md`, тест звіряє реєстр із
+  Rust-каталогом, каталогом v1 і кодом старих вкладок (2026-10-21). Далі E2 — окремим рішенням власника.
 - [ ] Production-підпис: Apple Developer ID і нотаризація; Windows Authenticode;
   тоді розділи 7–8 `RELEASE_CHECKLIST.md`. (ROADMAP 1.0)
 - [ ] Signal: приймання сеансу й прив'язки з реальним `signal-cli` і телефоном на
