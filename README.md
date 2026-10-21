@@ -159,7 +159,7 @@ On Windows, use `npm run tauri dev` from a supported developer shell.
 
 ## Current state
 
-Version 2.2.0 (the version lives in `package.json` and in four more files that
+Version 2.2.3 (the version lives in `package.json` and in four more files that
 must match; `node script/release_version.mjs` checks them). Technical (unsigned / ad-hoc signed) releases are published to the
 public `easywar-releases` repository and installed copies update themselves
 (see [docs/UPDATES.md](docs/UPDATES.md)). Production distribution remains
