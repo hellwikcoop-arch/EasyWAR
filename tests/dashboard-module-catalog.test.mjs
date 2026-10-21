@@ -1072,8 +1072,11 @@ test('creating a module can bring rows from the table of the profile, and only r
 test('the data-from-table block sits in the left column of the create form, above the long column list', async () => {
   const source = await readFile(new URL('../src/dashboard-module-catalog.js', import.meta.url), 'utf8');
   const css = await readFile(new URL('../src/dashboard-module-catalog.css', import.meta.url), 'utf8');
-  const form = source.slice(source.indexOf('function showCreate(item)'), source.indexOf('function sourceBlock(item, onChange)'));
+  const form = source.slice(source.indexOf('function showCreate(item, preset = null)'), source.indexOf('function sourceBlock(item, onChange'));
+  assert.ok(form.length > 500, 'the create form is found by its signature');
   assert.ok(form.indexOf("class: 'ewmc-create-main'") < form.indexOf('source.node'), 'the block is inside the left column');
+  assert.ok(form.indexOf("class: 'ewmc-create-main'") < form.indexOf("class: 'ewmc-create-live'") && form.indexOf("class: 'ewmc-create-live'") < form.indexOf('source.node'), 'the live preview sits at the top of the left column, above the picker');
+  assert.match(css, /\.ewmc-create-live\{position:sticky;top:0;/, 'and stays in view while the table is scrolled');
   assert.ok(form.indexOf('source.node') < form.indexOf("class: 'ewmc-table-plan'"), 'and comes before the column list');
   assert.match(css, /\.ewmc-create-main\{[^}]*grid-column:1;grid-row:4/);
   assert.match(css, /\.ewmc-table-plan\{grid-column:2;grid-row:4;/);
