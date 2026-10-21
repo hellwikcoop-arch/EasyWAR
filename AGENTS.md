@@ -72,6 +72,14 @@ Minimum expectations:
 - Native Codex tasks remain the execution, messaging, and transcript authority; an explicitly requested goal Coordinator is on demand, with no heartbeat or mandatory pull-request workflow.
 - Reject cross-project notices and never store transcripts, reasoning, prompts, or tool output in Coordinator state.
 
+## Staff bridge (ADM / J4)
+- The staff coordinator role is ADM; J4 Bridge is its software component. It lives in `easywar-staff/bridge/`, not in this repository, and is not part of the EasyWAR application.
+- Messages routed through J4 carry only synthetic task material: never operational data, Signal data, credentials, tokens, tables or personal data from EasyWAR.
+- J5 runs through the OpenAI Responses API via J4; Codex (C5.1) never acts as J5. Paid calls through J4 need a separate owner approval and stay within the owner-set monthly cap.
+- A Codex run started by J4 as an independent reviewer (C5.1-R) uses the read-only sandbox, does not claim a task-boundary board slot for writing, and does not replace C3 without a separate owner decision.
+- J4 does not hand tasks from J5 to Codex executors (C5.1) until the owner approves that route separately; Codex executor runs follow the task-boundary board rules above and write only to their own branch; merges stay with J3 under the staff contract.
+- Do not store bridge prompts, transcripts or raw model replies in this repository.
+
 ## Dashboard module charts
 A new chart kind for the module catalog touches: the builder in `BUILDERS` and the name in `chartSummary` (`src/dashboard-module-charts-core.js`), the renderer in `RENDERERS` (`src/dashboard-module-charts.js`), `VISUAL_KINDS` (`src/dashboard-module-catalog-core.js`), synthetic rows in `sampleRows` (`src/dashboard-module-catalog.js`), the Rust template in `catalog()` plus the template count in its Rust test and in `tests/dashboard-module-source.test.mjs`. `tests/dashboard-module-charts.test.mjs` also holds text contracts on import lines and CSS (no `stroke-dasharray`); update them with the code.
 
