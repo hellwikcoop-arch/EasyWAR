@@ -8,7 +8,7 @@ import { readFile, readdir } from 'node:fs/promises';
 const root = new URL('../', import.meta.url);
 
 /** Ядра C1. Наступні підетапи додають сюди свої файли. */
-export const C1_CORES = ['src/sensitivity-core.js'];
+export const C1_CORES = ['src/sensitivity-core.js', 'src/shared-table-core.js'];
 
 const FORBIDDEN = [
   ['fetch(', /\bfetch\s*\(/u],

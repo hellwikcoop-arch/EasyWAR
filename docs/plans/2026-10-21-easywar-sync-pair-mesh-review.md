@@ -311,6 +311,7 @@ H0 (документи) ──► JE-01 «старт C1»
 - **Бюджет:** 1 сесія, ≤ 300 рядків коду + тести.
 
 #### C1b — `shared-table-core`: операції, конфлікти, надгробки 🟡
+- **Стан (T-0002):** реалізовано в гілці `claude/e8-c1b-shared-table`; ядро не підключене до застосунку.
 - **Файли:** `src/shared-table-core.js`, `tests/shared-table.test.mjs`.
 - **Зміст:** `applyOperation(state, op, policy) → applied|conflict|rejected|quarantined`, повний рядок у UPSERT, `base_version`, `DELETE`/`RESTORE`, конфлікт при зайнятому ключі після restore, ідемпотентність `op_id`+digest, різниця «було → стане».
 - **Тести:** S03–S05, AC06–AC08, AC21.
