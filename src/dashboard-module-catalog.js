@@ -7,6 +7,7 @@ import {
   crewCount,
   crewSummary,
   deleteModulePrompt,
+  draftRow,
   fieldColumnWidth,
   fieldHint,
   fieldInputText,
@@ -35,6 +36,7 @@ import {
   rowMatchesQuery,
   rowsAfterDelete,
   rowsAfterSave,
+  rowsWithDraft,
   schemaSummary,
   tableColumnGroups,
   tableEditState,
@@ -963,6 +965,8 @@ function initialize() {
       hidden: rows.length > 0,
     });
     const noMatch = el('p', { class: 'ewmc-table-empty ewmc-no-match', hidden: true });
+    // Перегляд модуля під таблицею: збережені рядки, а під час введення — ще й чернетка запису.
+    const preview = unreadable ? null : livePreview(module, rows);
     const colgroup = el('colgroup');
     const table = el('table', { class: 'ewmc-data-table' },
       colgroup,
@@ -1111,6 +1115,7 @@ function initialize() {
       search.disabled = active;
       for (const chip of chips) chip.disabled = active;
       scroll.classList.toggle('is-editing', active);
+      if (preview) preview.node.hidden = !active;
     }
 
     function startEdit(rowIndex) {
@@ -1242,8 +1247,10 @@ function initialize() {
       setEditing(true);
       state.cancelEdit = cancel;
 
+      let cancelPreview = () => {};
       function finish() {
         state.cancelEdit = null;
+        cancelPreview();
         editHost.replaceChildren();
         tr.classList.remove('ewmc-editing');
         if (isEdit) {
@@ -1329,6 +1336,25 @@ function initialize() {
         status.classList.remove('error');
       };
       for (const control of controls.values()) control.addEventListener('input', onInput);
+      // Перегляд модуля оновлюється під час введення: не частіше разу на кадр, а чернетка не вимагає повного запису.
+      let previewFrame = 0;
+      const previewBase = isEdit ? existing : (inherited?.values ?? {});
+      const paintPreview = () => {
+        previewFrame = 0;
+        const draft = draftRow(module.fields, currentValues(), previewBase, previewBase);
+        preview?.update(rowsWithDraft(rows, isEdit ? rowIndex : null, draft), draft);
+      };
+      const schedulePreview = () => { if (!previewFrame) previewFrame = requestAnimationFrame(paintPreview); };
+      for (const control of controls.values()) {
+        control.addEventListener('input', schedulePreview);
+        control.addEventListener('change', schedulePreview);
+      }
+      cancelPreview = () => {
+        if (previewFrame) cancelAnimationFrame(previewFrame);
+        previewFrame = 0;
+        preview?.update(rows, null);
+      };
+      paintPreview();
       if (isEdit) {
         removeButton.addEventListener('click', () => askToRemove(true));
         keepButton.addEventListener('click', () => askToRemove(false));
@@ -1361,7 +1387,8 @@ function initialize() {
         editHost,
         scroll,
         emptyNote,
-        noMatch),
+        noMatch,
+        preview?.node),
     );
     paintDensity(readDensity());
     applyView();
@@ -1521,8 +1548,58 @@ function visual(moduleOrTemplate, rows, compact = false) {
   // Діаграма живе у вкладеному вузлі: позначка «даних ще немає» поруч із ним не стирається при перемальовуванні.
   const host = el('div', { class: 'ewmc-chart-host' });
   const box = el('div', { class: `ewmc-visual ${compact ? 'compact' : ''}`, 'data-visual': template.visualKind }, host);
-  // Погодна картка вища: під картою ще шкала часу й рядок показників.
-  const height = template.visualKind === 'weather' ? (compact ? 150 : 360) : (compact ? 120 : 168);
-  mountChart(host, chartModel(template, rows), { height, compact });
+  mountChart(host, chartModel(template, rows), { height: chartHeight(template.visualKind, compact), compact });
   return box;
+}
+
+/** Висота діаграми картки. Погодна вища: під картою ще шкала часу й рядок показників. */
+function chartHeight(kind, compact) {
+  return kind === 'weather' ? (compact ? 150 : 360) : (compact ? 120 : 168);
+}
+
+/**
+ * Живий перегляд модуля на сторінці його таблиці: та сама картка, що на дашборді (розмітка й стиль
+ * `ewmc-module`), з рядками таблиці та чернеткою запису, який зараз вводять. `update(rows, draft)`
+ * перемальовує діаграму в тих самих вузлах, не будуючи сторінку заново, тож перегляд встигає за кожним символом.
+ * Перегляд лише показує дані й нічого не зберігає.
+ */
+function livePreview(module, savedRows) {
+  const template = module.templateId ? module : { ...module, templateId: module.id };
+  const height = chartHeight(template.visualKind, false);
+  const host = el('div', { class: 'ewmc-chart-host' });
+  const noData = el('p', { class: 'ewmc-no-data', text: 'Даних ще немає — введіть перший запис', hidden: true });
+  const box = el('div', { class: 'ewmc-visual', 'data-visual': template.visualKind }, host, noData);
+  const extra = takeoffVisual(module, savedRows);
+  const extraHost = extra?.querySelector('.ewmc-chart-host') ?? null;
+  const count = el('p');
+  const badge = el('span', { class: 'ewmc-live' });
+  const note = el('p', { class: 'ewmc-preview-note', 'aria-live': 'polite' });
+  const card = el('article', { class: `ewmc-module ewmc-live-card span-${module.defaultSpan === 2 ? 2 : 1}`, 'data-kind': module.visualKind, 'data-style': module.style, 'data-branch': module.branch, 'data-draft': 'false' },
+    el('header', { class: 'ewmc-module-head' }, el('div', {}, el('h3', { text: module.title }), count), badge),
+    box,
+    extra,
+    note);
+  const node = el('section', { class: 'ewmc-preview', 'aria-labelledby': 'ewmc-preview-title' },
+    el('div', { class: 'ewmc-preview-head' },
+      el('h3', { id: 'ewmc-preview-title', text: 'Попередній перегляд модуля' }),
+      el('p', { text: 'Так модуль виглядатиме на дашборді. Поки ви вводите дані, картка оновлюється одразу.' })),
+    card);
+  function update(rows, draft = null) {
+    const active = draft?.active === true;
+    mountChart(host, chartModel(template, rows), { height, compact: false });
+    if (extraHost) mountChart(extraHost, takeoffHoursModel(module, rows), { height: 150 });
+    count.textContent = `${rowCountLabel(rows.length)} · локальна SQLite`;
+    badge.textContent = active ? 'Чернетка' : rows.length ? 'Дані' : 'Створено';
+    badge.classList.toggle('is-draft', active);
+    card.dataset.draft = String(active);
+    noData.hidden = rows.length > 0;
+    const issues = draft?.issues ?? [];
+    note.textContent = issues.length
+      ? `Не враховано в перегляді: ${issues.slice(0, 3).map(issue => issue.message).join(' ')}`
+      : active ? 'Чернетку ще не збережено: збережіть запис (Enter), щоб вона потрапила на дашборд.' : '';
+  }
+  update(savedRows, null);
+  // Перегляд з'являється, коли користувач вводить запис: решту часу таблиця займає всю висоту сторінки.
+  node.hidden = true;
+  return { node, update };
 }

@@ -358,8 +358,9 @@ test('the catalog page mounts real charts from table rows instead of sketches', 
   const css = await read('../src/dashboard-module-catalog.css');
   assert.match(source, /import \{ chartModel, takeoffHoursModel, tickerItems \} from '\.\/dashboard-module-charts-core\.js';/u);
   assert.match(source, /import \{ mountChart \} from '\.\/dashboard-module-charts\.js';/u);
-  assert.match(source, /mountChart\(host, chartModel\(template, rows\), \{ height, compact \}\)/u);
-  assert.match(source, /template\.visualKind === 'weather' \? \(compact \? 150 : 360\) : \(compact \? 120 : 168\)/u, 'погодна картка вища за решту');
+  assert.match(source, /mountChart\(host, chartModel\(template, rows\), \{ height: chartHeight\(template\.visualKind, compact\), compact \}\)/u);
+  assert.match(source, /kind === 'weather' \? \(compact \? 150 : 360\) : \(compact \? 120 : 168\)/u, 'погодна картка вища за решту');
+  assert.match(source, /mountChart\(host, chartModel\(template, rows\), \{ height, compact: false \}\)/u, 'живий перегляд малює ту саму діаграму тими ж викликами');
   assert.match(source, /visual\(module, rows\)/u, 'картка модуля малюється з його рядків');
   assert.match(source, /visual\(item, sampleRows\(item\), true\)/u, 'картка каталогу — із синтетичних рядків');
   assert.doesNotMatch(source, /ewmc-columns|ewmc-ring |ewmc-cells|ewmc-mini-table/u, 'старих ескізів немає');
