@@ -4,11 +4,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 
 const root = new URL('../', import.meta.url);
 
-/** Ядра C1. Наступні підетапи додають сюди свої файли. */
-export const C1_CORES = ['src/sensitivity-core.js'];
+/**
+ * Усі заплановані ядра C1 (наказ T-0002). Перелік повний заздалегідь, щоб підетапи C1c і C1d
+ * не правили цей файл (правило одного автора); тест перевіряє ті з них, що вже існують.
+ */
+export const C1_PLANNED_CORES = Object.freeze([
+  'src/sensitivity-core.js', 'src/shared-table-core.js', 'src/collective-core.js',
+  'src/collective-pair-core.js', 'src/sync-policy-core.js', 'src/report-submission-core.js',
+]);
+export const C1_CORES = C1_PLANNED_CORES.filter(f => existsSync(new URL(`../${f}`, import.meta.url)));
 
 const FORBIDDEN = [
   ['fetch(', /\bfetch\s*\(/u],
@@ -48,6 +56,10 @@ const FORBIDDEN_TRANSITIVE = FORBIDDEN.filter(([name]) => [
 
 const relImports = code => [...code.matchAll(/^\s*(?:import|export)\s[^'"]*?from\s*['"](\.[^'"]+)['"]|^\s*import\s*['"](\.[^'"]+)['"]/gmu)]
   .map(m => m[1] || m[2]);
+
+test('наявні ядра C1 знайдено (sensitivity, shared-table)', () => {
+  assert.ok(C1_CORES.includes('src/sensitivity-core.js') && C1_CORES.includes('src/shared-table-core.js'));
+});
 
 test('ядра C1 не мають мережі, сховищ, DOM, годинника, випадковості, Tauri й криптографії', async () => {
   for (const file of C1_CORES) {
