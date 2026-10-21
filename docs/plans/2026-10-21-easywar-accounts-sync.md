@@ -70,6 +70,8 @@ A1–A3 можуть дати корисний результат окремо �
 
 ### A4. C1/C3 — локальна модель колективу, операцій і доповіді
 
+> **Уточнення (рев'ю J3, D02, 21.10.2026):** за `COLLECTIVES_PLAN.md` §8 C3 іде після C2, тому A4 виконується двома задачами: **A4a = C1** (лише JS-ядро й тести, без Rust-сховища й міграцій) і **A4b = C3/C3b** (міграції, `store.rs`, IPC — після C2 або після затвердженого ADR криптопрофілю, якщо власник прийме JE-14). Політики обміну й вступ — ADR [`collective-sync-policies.md`](../adr/collective-sync-policies.md), [`collective-pairing.md`](../adr/collective-pairing.md).
+
 **Файли:** створити `src/collective-core.js`, `src/shared-table-core.js`, `src/sensitivity-core.js`, `src/report-submission-core.js`, однойменні `tests/*.test.mjs`; Rust `src-tauri/src/collective/store.rs` та `mod.rs` (нові), append-only міграцію й супровідні IPC/ACL.  
 **Інтерфейси:** `proposeMembership(policy, event)`; `previewReport(tableRevision, pendingOperations) → ReportPreview`; `commitReport(preview, expectedRevision) → ReportSubmission`; `applyOperation(state, operation, policy) → applied/conflict/rejected`; `routeFor(tableClass, transport) → allowed/denied`. Залежність: локальний source contract L3/L4, O05/O06/O14/O17 у залежних гілках.
 
@@ -83,6 +85,8 @@ A1–A3 можуть дати корисний результат окремо �
 - [ ] Вузькі/повні JS/Rust, міграції → коміт `feat: add local collective operations and explicit report submissions`.
 
 ### A5. C2 — ключі, E2EE, підпис і відкликання
+
+> Криптопрофіль — ADR [`collective-crypto.md`](../adr/collective-crypto.md) (чернетка до C2a; крейти не схвалено).
 
 **Файли:** створити `src-tauri/src/collective/crypto.rs`, `keys.rs`, `protocol.rs`; `docs/adr/collective-crypto.md`; змінити `Cargo.toml`/`Cargo.lock` лише для схвалених нових залежностей, IPC/ACL та `tests/office-isolation.test.mjs`.  
 **Інтерфейси:** `sealOperation(operation, keyEpoch, signer) → SealedEnvelope`; `openVerifiedEnvelope(envelope, membershipState) → verifiedOperation`; `rotateEpoch(revocation) → keyEnvelopes`. Залежність: A4, O04/O09, P0/P1 межі безпеки.
@@ -126,6 +130,8 @@ A1–A3 можуть дати корисний результат окремо �
 - [ ] Тести та дозволені backend-перевірки → коміт `feat: submit sanitized module structures for reviewed publication`.
 
 ### A8. C6/C7 — LAN і підтверджена «Дельта»
+
+> Посередник і тимчасове зберігання в LAN — ADR [`lan-relay-handover.md`](../adr/lan-relay-handover.md), [`collective-store-forward.md`](../adr/collective-store-forward.md). WAN-mesh винесено в окремий етап C8 поза v1 (`COLLECTIVES_PLAN.md` §8).
 
 **Файли:** пропоновані `src-tauri/src/collective/lan.rs`, `relay_state.rs`, `docs/adr/lan-relay-handover.md`; Delta-адаптер визначати окремим планом лише після G10.  
 **Інтерфейси:** той самий `Transport.push/pull` A6; `relayStatus() → authority/lease/cursor`. Залежність: A6, O08, окреме рішення про LAN-host policy.
