@@ -60,7 +60,7 @@
   [`WORKSPACE.md`](WORKSPACE.md)): редактори стороннього WASM в `<iframe>` того самого походження без
   `sandbox` бачать той самий `invoke`; ізоляція — окремий webview з capability лише на `office_*`
   (варіант C+D), потім `sandbox` і CSP.
-  2026-10-19 (T-Office-06, гілка `claude/office-isolation`, не злито): окреме вікно `office-editor`,
+  2026-10-19 (T-Office-06, злито в `main` як PR #87, випуск 2.2.3): окреме вікно `office-editor`,
   усі власні команди в `AppManifest::commands`, capability редактора лише на `office_*`, мітка вікна
   перевіряється в Rust; негативний тест у WebKitGTK пройдено. Лишаються CSP, `sandbox`, macOS/Windows.
 - [ ] **P2-2** Ключ Planet — у Rust (файл 0600 або keychain); плитки через Rust-команду з
@@ -174,9 +174,10 @@
 
 ## P3 — пізніше
 
-- [ ] **P3-1** ACL-маніфест команд Tauri (`tauri_build` → `AppManifest::commands`) з
-  allow-list у `capabilities/default.json`. (H1, етап 2) Першими в allow-list/окремих
-  правах — команди з P2-16.
+- [x] **P3-1** ACL-маніфест команд Tauri (`tauri_build` → `AppManifest::commands`) з
+  allow-list у `capabilities/default.json`. (H1, етап 2) Зроблено в PR #87 (2.2.3): маніфест
+  у `src-tauri/build.rs`, збіг із `generate_handler!` перевіряє `tests/office-isolation.test.mjs`.
+  Головне вікно поки має дозвіл на всі 99 не-office команд; звуження — у P2-16.
 - [ ] **P3-2** Парольна фраза для «файлу для телефона» з таблицею (PBKDF2 + AES-GCM у
   standalone-сторінці), банер із датою знімка. (M7)
 - [ ] **P3-3** Політика зберігання копій `easywar.db.pre-migration-*` і
@@ -242,8 +243,11 @@
   тестовому обліковому записі. (ROADMAP 0.6)
 - [ ] Артилерія: журнал вогневих завдань, заявка й потреба — вихід із beta.
   (releases/v1.0.6)
-- [ ] Презентації 1.1: профілі УДШВ і ПВК, локальне збереження без перезапису,
-  візуальна перевірка через LibreOffice. (ROADMAP 1.1)
+- [x] Презентації 1.1: профілі УДШВ і ПВК, локальне збереження без перезапису,
+  візуальна перевірка через LibreOffice. (ROADMAP 1.1) Звірено 2026-10-21: M1 і M2 виконано
+  (`PRESENTATIONS.md`), кнопка й збереження PPTX/PDF через системний діалог є в УДШВ, ПС і РВ;
+  ПВК виключено рішенням власника; перегляд через LibreOffice — `script/preview_presentation.mjs`
+  (лише dev). Профіль ПВК (M3) не робиться, поки власник не поверне ПВК до цієї цілі.
 - [ ] In-app restore: перевірка на чистій машині; інструкція відновлення відповідає
   UI. (RELEASE_CHECKLIST §3)
 - [ ] Локальний помічник «КОМБАТ», етап 1: підготовлено локальний пошук довідки,
