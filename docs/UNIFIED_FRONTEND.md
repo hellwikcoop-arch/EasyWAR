@@ -181,6 +181,7 @@ ends, and the launcher stays `inert` until sign-in.
 | `src/guides/credits.js` | авторство всіх моделей і ландшафту; від нього залежать підписи, хаб і `src/models/CREDITS.md` |
 | `src/guides/guide-kit.js`, `room-env.js`, `base.css`, `fonts/` | спільне: читання GLB, годинник, заплатка відбиттів three, копія `RoomEnvironment` із three r160 (MIT), базові стилі, локальні шрифти woff2 (SIL OFL, тексти ліцензій у `fonts/licenses`) |
 
+- `base.css` лише задає запасні значення: селектори `html`, `body`, `:root`, `img` у ньому обгорнуті в `:where()` (нульова специфічність), бо збірка Vite може віддати його після стилів сторінки, а фон і колір тексту задає сама сторінка (`hub.css`, `<id>/style.css`, `brigades/style.css`). Новий довідник має сам задати `background` і `color` для `body`; це перевіряє `tests/guides-base-css.test.mjs`.
 - `vite.config.js` має сім входів: `guides` (хаб) і `guides-rvia`, `guides-ppo`, `guides-ground-forces`, `guides-uav`, `guides-aviation`, `guides-enemy-ground`. Новий довідник потребує входу тут, рядка в `GUIDES` у `script/guides-credits.mjs` і в `hub.js`; `tests/guides.test.mjs` бере перелік із `GUIDES` і для кожного довідника перевіряє вхід збірки, хаб, моделі та авторство.
 - Кеш переглядача для телефона (`viewerServiceWorker`) не бере ні сторінок `guides*`, ні `.woff2`: ≈ 105 МБ моделей телефонному файлу не потрібні.
 - Мережі немає: three із npm, шрифти й ландшафт лежать у збірці, на сторінках довідників немає `eval`, `new Function` і вбудованих скриптів (перевіряє `tests/guides.test.mjs`).
