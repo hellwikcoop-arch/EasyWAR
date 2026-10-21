@@ -15,6 +15,8 @@ import {
   fieldPlaceholder,
   fieldSections,
   formatFieldValue,
+  correctionStatus,
+  correctionStatusLabel,
   inheritedValues,
   isConflictError,
   runModuleDelete,
@@ -46,6 +48,7 @@ import {
   correctionOutcome,
   correctionRecords,
   describePlan,
+  importGaps,
   importRows,
   planImport,
   rankSheets,
@@ -432,7 +435,10 @@ function initialize() {
     const status = el('p', { class: 'ewmc-form-status', 'aria-live': 'polite' });
     const submit = el('button', { type: 'submit', class: 'btn primary', text: 'Створити модуль і таблицю' });
     // Поки таблицю читають, створювати модуль рано: підтягування вже вимкнене за замовчуванням, але не обране.
-    const syncSubmit = () => { submit.disabled = state.busy || source.pending(); };
+    const syncSubmit = () => {
+      submit.disabled = state.busy || source.pending() || source.unconfirmed();
+      submit.title = source.unconfirmed() ? 'Підтвердьте частковий імпорт або вимкніть підтягування' : '';
+    };
     const source = sourceBlock(item, syncSubmit, () => showReview(source, form));
     const form = el('form', { class: 'ewmc-create-form' },
       el('button', { type: 'button', class: 'ewmc-back', text: '← До каталогу', onclick: showCatalog }),
@@ -457,7 +463,7 @@ function initialize() {
     );
     form.addEventListener('submit', async event => {
       event.preventDefault();
-      if (state.busy || source.pending()) return;
+      if (state.busy || source.pending() || source.unconfirmed()) return;
       state.busy = true;
       syncSubmit();
       const name = title.value.trim();
@@ -520,7 +526,7 @@ function initialize() {
     // `corrections` — виправлення з екрана «Перевірка» (ідентифікатор → введений текст); `build` — записи з ними.
     const model = {
       phase: 'loading', pending: true, message: '', origin: '', selection: '', workbook: null, ranked: [], sheet: '', plan: null,
-      use: false, carry: true, corrections: new Map(), build: null,
+      use: false, carry: true, confirmed: false, corrections: new Map(), build: null,
     };
     let request = 0;
     const body = el('div', { class: 'ewmc-source-body', 'aria-live': 'polite' });
@@ -594,8 +600,10 @@ function initialize() {
         // Виправлення належать рядкам конкретного аркуша: інший аркуш починає перевірку з чистого.
         model.corrections = new Map();
         model.build = null;
-        // Таблиця, схожа лише частково, не підтягується сама: користувач вмикає це свідомо.
-        model.use = model.ranked.find(entry => entry.name === name)?.confident === true && model.plan.rows.length > 0;
+        // Сама вмикається лише повна й чиста таблиця, схожа на модуль; частково схожу або неповну
+        // (усічення, пропущені рядки, нерозібрані клітинки, правила форми) користувач вмикає свідомо.
+        model.use = model.ranked.find(entry => entry.name === name)?.confident === true && importGaps(model.plan).complete;
+        model.confirmed = false;
         // Метеоумови, яких у записі не вказано, за умовчанням беруться з попереднього запису тієї ж льотної зміни.
         model.carry = true;
         setPhase('ready');
@@ -662,6 +670,7 @@ function initialize() {
       const add = (text, warn = false) => { if (text) lines.push(el('li', { class: warn ? 'warn' : '', text })); };
       add(notes.blocked, true);
       if (candidate && !candidate.confident && plan.rows.length) add('Таблиця схожа на модуль лише частково, тому підтягування вимкнено — увімкніть його, якщо записи розібрано правильно.', true);
+      else if (notes.partial) add('Імпорт неповний, тому підтягування вимкнено: увімкніть його свідомо й підтвердьте частковий імпорт.', true);
       add(notes.missing);
       add(notes.extra);
       add(notes.skipped, true);
@@ -684,13 +693,20 @@ function initialize() {
       // Протягнути метеоумови можна, лише якщо є на які записи й записи взагалі підтягуються.
       const carry = (model.build ?? plan).carry.possible ? el('input', { type: 'checkbox', disabled: !model.use }) : null;
       if (carry) carry.checked = model.carry;
+      // Неповний імпорт створюється лише з окремим підтвердженням, у якому названо фактичні кількості.
+      const confirm = notes.partial ? el('input', { type: 'checkbox', disabled: !model.use, 'data-action': 'confirm-partial' }) : null;
+      if (confirm) confirm.checked = model.confirmed;
       use.addEventListener('change', () => {
         model.use = use.checked;
         if (carry) carry.disabled = !use.checked;
+        if (confirm) confirm.disabled = !use.checked;
+        onChange();
       });
+      confirm?.addEventListener('change', () => { model.confirmed = confirm.checked; onChange(); });
       carry?.addEventListener('change', () => { model.carry = carry.checked; });
       nodes.push(el('label', { class: 'ewmc-source-use' }, use,
         el('span', { text: importable ? `Підтягнути ${rowCountLabel(importable)} у новий модуль` : 'Підтягувати нічого' })));
+      if (confirm) nodes.push(el('label', { class: 'ewmc-source-use ewmc-source-confirm' }, confirm, el('span', { text: notes.confirm })));
       if (carry) {
         nodes.push(el('div', { class: 'ewmc-source-carry' },
           el('label', { class: 'ewmc-source-use' }, carry, el('span', { text: notes.carryLabel })),
@@ -714,13 +730,16 @@ function initialize() {
       node,
       start,
       pending: () => model.pending,
+      // Підтягування неповного набору увімкнено, але не підтверджено: створювати модуль рано.
+      unconfirmed: () => model.phase === 'ready' && model.use && Boolean(model.plan)
+        && !importGaps(model.plan, model.build).complete && !model.confirmed,
       rows: () => {
         if (model.phase !== 'ready' || !model.use || !model.plan) return null;
         const rows = importRows(model.plan, { carryWeather: model.carry, build: model.build });
         return rows.length ? rows : null;
       },
       corrections: () => (model.build ? correctionRecords(model.plan, model.build, model.workbook?.fileName) : []),
-      refresh: render,
+      refresh: () => { render(); onChange(); },
       // Екран «Перевірка» працює з тим самим планом: виправлення лишаються в моделі блоку до створення модуля.
       review: () => ({
         plan: model.plan,
@@ -731,10 +750,12 @@ function initialize() {
         rowsCount: () => (model.build ?? model.plan).rows.length,
         outcome: (key, text) => correctionOutcome(item.fields, model.plan, key, text),
         set: (id, text) => {
+          model.confirmed = false;
           model.corrections.set(id, text);
           model.build = buildImport(item.fields, model.plan, model.corrections);
         },
         clear: id => {
+          model.confirmed = false;
           model.corrections.delete(id);
           model.build = model.corrections.size ? buildImport(item.fields, model.plan, model.corrections) : null;
         },
@@ -1002,13 +1023,24 @@ function initialize() {
     function correctionsList() {
       const position = new Map(rows.map((row, index) => [row.rowId, index + 1]));
       const labelOf = new Map(module.fields.map(field => [field.key, field.label]));
+      const current = corrections.filter(item => correctionStatus(item) === 'current').length;
+      const history = corrections.length - current;
       return el('details', { class: 'ewmc-corrections' },
-        el('summary', { text: `Виправлено під час підтягування з таблиці: ${corrections.length} ${pluralForm(corrections.length, 'значення', 'значення', 'значень')}` }),
-        el('p', { class: 'ewmc-corrections-note', text: 'Файл таблиці не змінювався: сире значення клітинки збережено окремо від запису. У таблиці нижче такі клітинки позначено ✎.' }),
-        el('ul', {}, corrections.map(item => el('li', {},
-          el('b', { text: `Запис ${position.get(item.rowId) ?? '—'} · ${labelOf.get(item.fieldKey) ?? item.fieldKey}: ` }),
-          'у таблиці ', el('b', { text: `«${item.rawText || 'порожньо'}»` }), ' → ', el('b', { text: `«${item.correctedText}»` }),
-          el('small', { text: ` — рядок ${item.sourceRow}${item.sourceColumn ? `, «${item.sourceColumn}»` : ''}, аркуш «${item.sourceSheet}», ${item.sourceFile}. ${item.reason}` })))));
+        el('summary', { text: `Виправлено під час підтягування з таблиці: ${corrections.length} ${pluralForm(corrections.length, 'значення', 'значення', 'значень')}`
+          + (history ? ` (поточних — ${current}, історія імпорту — ${history})` : '') }),
+        el('p', { class: 'ewmc-corrections-note', text: 'Файл таблиці не змінювався: сире значення клітинки збережено окремо від запису. У таблиці нижче клітинки, які пояснює виправлення, позначено ✎; '
+          + 'виправлення, після якого значення змінили вручну або поточність якого не підтверджена, — лише історія імпорту (↺).' }),
+        el('ul', {}, corrections.map(item => {
+          const record = rows.find(row => row.rowId === item.rowId);
+          const field = module.fields.find(entry => entry.key === item.fieldKey);
+          const status = correctionStatus(item);
+          return el('li', { 'data-status': status },
+            el('b', { text: `Запис ${position.get(item.rowId) ?? '—'} · ${labelOf.get(item.fieldKey) ?? item.fieldKey}: ` }),
+            'у таблиці ', el('b', { text: `«${item.rawText || 'порожньо'}»` }), ' → ', el('b', { text: `«${item.correctedText}»` }),
+            status === 'current' ? null : el('span', { class: 'ewmc-history-note', text: ` · ${correctionStatusLabel(item)}`
+              + (record && field ? `; зараз — «${formatFieldValue(field, record[field.key]) || 'порожньо'}»` : '') }),
+            el('small', { text: ` — рядок ${item.sourceRow}${item.sourceColumn ? `, «${item.sourceColumn}»` : ''}, аркуш «${item.sourceSheet}», ${item.sourceFile}. ${item.reason}` }));
+        })));
     }
 
     // Видимі колонки (група) і рядки (пошук). Номер рядка в «№» лишається номером запису в таблиці.
@@ -1043,11 +1075,18 @@ function initialize() {
         module.fields.map(field => {
           const shown = formatFieldValue(field, row?.[field.key]);
           const fix = correctionAt.get(`${row?.rowId}:${field.key}`);
-          if (fix) {
+          // ✎ — лише коли виправлення підтверджено пояснює поточне значення; інакше це історія імпорту.
+          if (fix && correctionStatus(fix) === 'current') {
             return el('td', { class: 'ewmc-corrected', title: correctionText(fix), 'data-key': field.key },
               el('span', { class: 'ewmc-corrected-mark', 'aria-hidden': 'true', text: '✎' }),
               shown,
               el('span', { class: 'ewmc-sr', text: ` (виправлено під час підтягування; у таблиці було «${fix.rawText || 'порожньо'}»)` }));
+          }
+          if (fix) {
+            return el('td', { class: 'ewmc-correction-history', title: correctionText(fix), 'data-key': field.key },
+              el('span', { class: 'ewmc-history-mark', 'aria-hidden': 'true', text: '↺' }),
+              shown,
+              el('span', { class: 'ewmc-sr', text: ` (${correctionStatusLabel(fix)})` }));
           }
           return el('td', { text: shown, title: shown.length > 14 ? shown : false, 'data-key': field.key });
         }),
@@ -1387,7 +1426,10 @@ function initialize() {
 function correctionText(item) {
   const where = [`рядок ${item.sourceRow}`, item.sourceColumn && `«${item.sourceColumn}»`, item.sourceSheet && `аркуш «${item.sourceSheet}»`, item.sourceFile]
     .filter(Boolean).join(', ');
-  return `Виправлено під час підтягування з таблиці: «${item.rawText || 'порожньо'}» → «${item.correctedText}» (${where}). ${item.reason}`;
+  const base = `«${item.rawText || 'порожньо'}» → «${item.correctedText}» (${where}). ${item.reason}`;
+  return correctionStatus(item) === 'current'
+    ? `Виправлено під час підтягування з таблиці: ${base}`
+    : `${correctionStatusLabel(item)[0].toUpperCase()}${correctionStatusLabel(item).slice(1)}. Під час підтягування було виправлено: ${base}`;
 }
 
 // Синтетичні рядки для картки каталогу: вигадані підрозділи, дати 2026 року й числа, щоб прев'ю

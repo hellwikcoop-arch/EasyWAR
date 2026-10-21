@@ -417,6 +417,17 @@ export function parseFieldInput(field, rawValue) {
   return value;
 }
 
+/** Стан виправлення з Rust: `current`, `superseded` або `unconfirmed` (давній запис без стану). */
+export function correctionStatus(item) {
+  return item?.status === 'current' || item?.status === 'superseded' ? item.status : 'unconfirmed';
+}
+
+export function correctionStatusLabel(item) {
+  return correctionStatus(item) === 'superseded'
+    ? 'історія імпорту: значення змінено вручну після підтягування'
+    : 'історія імпорту, поточність не підтверджена';
+}
+
 /** Календарна дата `РРРР-ММ-ДД` (увесь текст). */
 export function isCalendarDate(text) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(String(text ?? ''));
@@ -839,6 +850,8 @@ export const dashboardModuleCore = {
   FieldValueError,
   parseFieldInput,
   isCalendarDate,
+  correctionStatus,
+  correctionStatusLabel,
   isLocalDateTime,
   rowRuleProblem,
   rowForWrite,

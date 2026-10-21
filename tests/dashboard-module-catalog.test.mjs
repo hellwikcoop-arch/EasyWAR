@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {
+  correctionStatus,
+  correctionStatusLabel,
   BRANCH_LABELS,
   FUEL_DENSITY_KG_PER_L,
   MODULE_STYLES,
@@ -841,9 +843,14 @@ test('a table that failed to load, was truncated or is unknown is never editable
 test('the conflict wording and the version argument match the Rust side', async () => {
   const store = await readFile(new URL('../src-tauri/src/dashboard_modules.rs', import.meta.url), 'utf8');
   assert.match(store, /#\[error\("[^"]*змінено в іншому вікні[^"]*"\)\]\s*Conflict/);
-  assert.match(store, /expected_updated_at: Option<&str>/);
+  // Версія обов'язкова на межі збереження: без неї Rust нічого не перезаписує.
+  const replace = store.slice(store.indexOf('pub async fn replace_rows('), store.indexOf('pub async fn replace_rows(') + 600);
+  assert.match(replace, /expected_updated_at: &str,/);
+  assert.match(replace, /if expected_updated_at\.trim\(\)\.is_empty\(\) \{\s*return Err\(DashboardModuleError::VersionRequired\);/);
   const lib = await readFile(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf8');
-  assert.match(lib, /expected_updated_at: Option<String>/);
+  const command = lib.slice(lib.indexOf('async fn replace_dashboard_module_rows('), lib.indexOf('async fn replace_dashboard_module_rows(') + 400);
+  assert.match(command, /expected_updated_at: String,/);
+  assert.doesNotMatch(command, /expected_updated_at: Option</);
 });
 
 test('a record is one table row edited in place, with its form above the table', async () => {
@@ -1017,7 +1024,12 @@ test('creating a module can bring rows from the table of the profile, and only r
   }
   // Записи йдуть у створення лише коли користувач залишив галочку: без неї виклик такий самий, як був.
   assert.match(source, /\.\.\.\(rows \? \{ rows \} : \{\}\)/);
-  assert.match(source, /if \(state\.busy \|\| source\.pending\(\)\) return;/, 'a table that is still being read is never raced');
+  assert.match(source, /if \(state\.busy \|\| source\.pending\(\) \|\| source\.unconfirmed\(\)\) return;/, 'a table that is still being read is never raced');
+  // Неповний імпорт сам не вмикається, а створюється лише з окремим підтвердженням.
+  assert.match(source, /confident === true && importGaps\(model\.plan\)\.complete;/);
+  assert.match(source, /submit\.disabled = state\.busy \|\| source\.pending\(\) \|\| source\.unconfirmed\(\);/);
+  assert.match(source, /notes\.partial \? el\('input', \{ type: 'checkbox', disabled: !model\.use, 'data-action': 'confirm-partial' \}\)/);
+  assert.ok(source.includes('Імпорт неповний, тому підтягування вимкнено: увімкніть його свідомо й підтвердьте частковий імпорт.'));
   assert.match(lib, /rows: Option<Vec<serde_json::Map<String, Value>>>/);
   for (const text of [
     'Дані з вашої таблиці', 'Файл таблиці лише читається й не змінюється.', 'Обрати файл XLSX…', 'Обрати інший файл…',
@@ -1156,6 +1168,20 @@ test('the review screen corrects values before the import and never rewrites the
   assert.doesNotMatch(review, /innerHTML|confirm\(|alert\(/);
   assert.match(css, /\.ewmc-issue\{display:grid;/);
   assert.match(css, /\.ewmc-data-table td\.ewmc-corrected\{/);
+  // ✎ лише для виправлення, яке пояснює поточне значення; решта — історія імпорту (↺).
+  assert.match(source, /if \(fix && correctionStatus\(fix\) === 'current'\) \{/);
+  assert.match(source, /class: 'ewmc-correction-history'/);
+  assert.match(source, /text: '↺'/);
+  assert.ok(source.includes("зараз — «"), 'a superseded correction shows the current value next to the history');
+});
+
+test('a correction marks the cell as current only when Rust confirms it', () => {
+  assert.equal(correctionStatus({ status: 'current' }), 'current');
+  assert.equal(correctionStatus({ status: 'superseded' }), 'superseded');
+  for (const item of [{ status: 'unconfirmed' }, {}, { status: 'щось' }, null]) assert.equal(correctionStatus(item), 'unconfirmed');
+  assert.equal(correctionStatusLabel({ status: 'superseded' }), 'історія імпорту: значення змінено вручну після підтягування');
+  assert.equal(correctionStatusLabel({}), 'історія імпорту, поточність не підтверджена');
+  assert.doesNotMatch(correctionStatusLabel({ status: 'superseded' }), /поточне/u);
 });
 
 test('deleting a module asks first and names what disappears with it', () => {

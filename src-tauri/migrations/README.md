@@ -117,6 +117,12 @@ sealed with the library key. The row identity (rowid, profile, `content_id`,
 `plain_size`, `created_at`) stays immutable, erasing (`data` to `NULL`) is still
 allowed only after the keyring is shredded, and erased content never comes back.
 
+`0016_dashboard_module_correction_status.sql` adds `stored_value` (canonical
+value written after an import correction, JSON) and `superseded_at` (when a hand
+edit changed that field) to `dashboard_module_corrections`. Existing corrections
+keep all their columns and get NULL in both: they are shown as «поточність не
+підтверджена» until their field is edited.
+
 The `dashboard_data_<id>` tables of user-created dashboard modules are not
 migration objects: Rust creates them at runtime from a validated catalog
 template and adds columns that later appear in a template with `ALTER TABLE`,

@@ -1262,7 +1262,7 @@ mod tests {
         ];
         fixture
             .modules
-            .replace_rows(&fixture.profile, &module.id, rows, None, NOW)
+            .replace_rows(&fixture.profile, &module.id, rows, &module.updated_at, NOW)
             .await
             .unwrap();
         let module_request = SourceRequest::DashboardModule {
