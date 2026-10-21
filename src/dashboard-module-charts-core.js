@@ -638,6 +638,24 @@ function waveform(module, rows, info) {
   };
 }
 
+/**
+ * Зміна показника, %. Введена вручну в останньому записі лишається як є; інакше модуль порахує її сам:
+ * останнє значення проти попереднього запису того самого показника (той самий підпис і та сама одиниця).
+ * Від нуля відсоток не має сенсу, тож зміни не буде. Повертає `{ delta, from }` (`from` — попереднє
+ * значення, коли зміну пораховано) або `{ delta: null }`.
+ */
+function kpiChange(valued, last, { valueField, deltaField, labelField, unitField }) {
+  const typed = last?.[deltaField?.key];
+  if (finite(typed)) return { delta: typed };
+  const value = last?.[valueField?.key];
+  if (!finite(value) || valued.at(-1) !== last) return { delta: null };
+  const same = field => row => !field || text(row?.[field.key]) === text(last?.[field.key]);
+  const previous = valued.slice(0, -1).findLast(row => same(labelField)(row) && same(unitField)(row));
+  const before = previous?.[valueField.key];
+  if (!finite(before) || before === 0) return { delta: null };
+  return { delta: (value - before) / Math.abs(before) * 100, from: before };
+}
+
 function kpi(module, rows, info) {
   const valueField = info.byKey.get('value') || info.metrics[0];
   const deltaField = info.byKey.get('delta');
@@ -645,7 +663,9 @@ function kpi(module, rows, info) {
   const valued = rows.filter(row => finite(row?.[valueField?.key]));
   const last = valued.at(-1) ?? rows.at(-1) ?? {};
   const value = finite(last?.[valueField?.key]) ? last[valueField.key] : null;
-  const delta = finite(last?.[deltaField?.key]) ? last[deltaField.key] : null;
+  const change = kpiChange(valued, last, { valueField, deltaField, labelField: info.labelField, unitField });
+  const delta = change.delta;
+  const formatNumber = number => (fieldKind(valueField) === 'duration' ? formatDuration(number) : new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 2 }).format(number));
   const history = valued.slice(-12).map(row => row[valueField.key]);
   return {
     kind: 'kpi',
@@ -656,6 +676,8 @@ function kpi(module, rows, info) {
     unit: unitField && last?.[unitField.key] != null ? formatValue(last[unitField.key]) : '',
     delta,
     deltaText: delta == null ? '' : `${delta > 0 ? '+' : delta < 0 ? '−' : ''}${new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 1 }).format(Math.abs(delta))} %`,
+    // Підказка до зміни: порахована модулем (з чого до чого) або введена вручну.
+    deltaNote: delta == null ? '' : change.from != null ? `Пораховано автоматично: ${formatNumber(change.from)} → ${formatNumber(value)}` : 'Введено вручну',
     history: history.length > 1 ? history : [],
     historyMax: Math.max(1e-9, ...history),
     historyMin: Math.min(0, ...history),

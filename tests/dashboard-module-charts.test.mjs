@@ -292,6 +292,50 @@ test('a KPI shows the latest value with its unit, delta and a short history', ()
   assert.match(plain(chartSummary(single)), /^Ключовий показник: 1 запис, Наліт: 1 234,5$/u);
 });
 
+test('a KPI counts the change itself from the previous record of the same indicator', () => {
+  const rows = [
+    { label: 'Наліт за місяць', value: 245, unit: 'год' },
+    { label: 'Наліт за місяць', value: 285, unit: 'год' },
+  ];
+  const model = modelOf('kpi', rows);
+  assert.equal(model.deltaText, '+16,3 %');
+  assert.ok(Math.abs(model.delta - (40 / 245) * 100) < 1e-9);
+  assert.equal(model.deltaNote, 'Пораховано автоматично: 245 → 285');
+  assert.equal(modelOf('kpi', [{ label: 'Витрата', value: 80 }, { label: 'Витрата', value: 60 }]).deltaText, '−25 %', 'a fall is a minus');
+  assert.equal(modelOf('kpi', [{ label: 'Витрата', value: 100 }, { label: 'Витрата', value: 100 }]).deltaText, '0 %', 'no change is shown as zero, not hidden');
+  // Введене вручну в останньому записі важливіше за розрахунок; нуль, введений вручну, теж значення.
+  const typed = modelOf('kpi', [...rows.slice(0, 1), { ...rows[1], delta: 6.4 }]);
+  assert.deepEqual([typed.deltaText, typed.deltaNote], ['+6,4 %', 'Введено вручну']);
+  assert.equal(modelOf('kpi', [...rows.slice(0, 1), { ...rows[1], delta: 0 }]).deltaText, '0 %');
+});
+
+test('the counted KPI change compares like with like and never divides by zero', () => {
+  // Інший показник чи інша одиниця — не попередній запис цього показника.
+  assert.equal(modelOf('kpi', [{ label: 'Наліт', value: 10 }, { label: 'Паливо', value: 20 }]).deltaText, '');
+  assert.equal(modelOf('kpi', [{ label: 'Наліт', value: 10, unit: 'год' }, { label: 'Наліт', value: 20, unit: 'хв' }]).deltaText, '');
+  const mixed = modelOf('kpi', [
+    { label: 'Наліт', value: 10 }, { label: 'Паливо', value: 500 }, { label: 'Наліт', value: 15 },
+  ]);
+  assert.equal(mixed.deltaText, '+50 %', 'the previous record of the same indicator, not just the previous row');
+  assert.equal(modelOf('kpi', [{ label: 'Наліт', value: 0 }, { label: 'Наліт', value: 5 }]).deltaText, '', 'a percent from zero means nothing');
+  assert.equal(modelOf('kpi', [{ label: 'Наліт', value: 5 }]).deltaText, '', 'one record has nothing to compare with');
+  assert.equal(modelOf('kpi', [{ label: 'Наліт', value: -10 }, { label: 'Наліт', value: -5 }]).deltaText, '+50 %', 'against the size of the previous value');
+  // Запис без значення не стає ні «останнім», ні «попереднім».
+  const gap = modelOf('kpi', [{ label: 'Наліт', value: 10 }, { label: 'Наліт' }, { label: 'Наліт', value: 12 }]);
+  assert.equal(gap.deltaText, '+20 %');
+  assert.equal(modelOf('kpi', []).deltaText, '');
+});
+
+test('the counted KPI change keeps a duration readable in the note', () => {
+  const durationModule = {
+    ...templateOf('kpi'),
+    fields: templateOf('kpi').fields.map(item => (item.key === 'value' ? { ...item, key: 'airborne_hours' } : item)),
+  };
+  const model = chartModel(durationModule, [{ label: 'Наліт', airborne_hours: 1.5 }, { label: 'Наліт', airborne_hours: 3 }]);
+  assert.equal(model.deltaText, '+100 %');
+  assert.equal(model.deltaNote, 'Пораховано автоматично: 1:30 → 3:00');
+});
+
 test('a leaderboard ranks by value with initials, group and delta', () => {
   const model = modelOf('leaderboard', [
     { label: 'Тестенко І. П.', group: '1 АЕ', value: 42, delta: 8 },

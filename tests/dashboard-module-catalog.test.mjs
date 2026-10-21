@@ -1292,6 +1292,15 @@ test('the module card shows the failure and a retry instead of an empty chart', 
   assert.ok(source.includes("readState === 'empty'"), '«даних ще немає» only after a successful empty read');
 });
 
+test('the change column says it is counted by the module when left empty', () => {
+  const delta = field('delta', 'Зміна, %', 'real', 'metric', 'average');
+  assert.equal(fieldPlaceholder(delta), 'порахується сама');
+  assert.equal(fieldPlaceholder(field('value', 'Значення', 'real', 'metric', 'sum', true)), '');
+  assert.equal(fieldPlaceholder(field('delta', 'Зміна', 'text')), '', 'only the real change column gets it');
+  assert.equal(parseFieldInput(delta, ''), null, 'an empty change is not an error');
+  assert.equal(parseFieldInput(delta, '6,4'), 6.4);
+});
+
 const kpiFields = [
   field('label', 'Показник', 'text', 'label', 'none', true),
   field('value', 'Значення', 'real', 'metric', 'sum', true),
