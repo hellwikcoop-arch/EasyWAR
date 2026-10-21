@@ -1225,6 +1225,12 @@ done
             run(&runtime, &package, "ok").0,
             Err(ModelError::Timeout)
         ));
+        // Allow process startup under parallel test load; the next runners fail
+        // because their output is invalid, not because the deadline is short.
+        let runtime = LocalModelRuntime::with_limits(RuntimeLimits {
+            load: Duration::from_secs(2),
+            ..fast()
+        });
         let (_temp, package) = setup("#!/bin/sh\nprintf 'hello\\n'\nread -r hold\n");
         assert!(matches!(
             run(&runtime, &package, "ok").0,
