@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { createDashboardModel } from '../src/pvk-dashboard-core.js';
+import { listDefinitions } from '../src/module-definition-core.js';
 import {
   PVK_SUMMARY_DEFINITIONS,
   computePvkSummary,
@@ -138,7 +139,11 @@ test('E2 ПВК: порожній вхід дає нулі, а частка ур
 
 test('E2 ПВК: блок охоплює картки реєстру, а стара вкладка не рахує підсумок сама', async () => {
   assert.equal(PVK_SUMMARY_DEFINITIONS.length, 7);
-  for (const id of PVK_SUMMARY_DEFINITIONS) assert.match(id, /^legacy:pvk-kpi-/);
+  const registry = new Map(listDefinitions().map(item => [item.definitionId, item]));
+  for (const id of PVK_SUMMARY_DEFINITIONS) {
+    assert.match(id, /^legacy:pvk-kpi-/);
+    assert.ok(registry.get(id)?.usedIn.some(use => use.surface === 'pvk'), `${id} немає в реєстрі модулів`);
+  }
   const core = await readFile(new URL('../src/pvk-dashboard-core.js', import.meta.url), 'utf8');
   assert.match(core, /computePvkSummary\(pvkSummaryInputs\(\{ aa, air, objects \}, sumGroup\)\)/);
   assert.doesNotMatch(core, /totalAu:/, 'формула підсумку лишилась у старому ядрі');
