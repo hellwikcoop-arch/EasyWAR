@@ -13,6 +13,26 @@ test('accepts only explicit HTTPS chat endpoints', () => {
     'https://kombat.example.test/other', 'https://kombat.example.test?token=bad', 'file:///v1/chat']) assert.equal(chatEndpoint(address), null);
 });
 
+test('local loopback exception is exact and opt-in for the native macOS client', () => {
+  assert.equal(chatEndpoint('http://127.0.0.1:8765'), null);
+  assert.equal(chatEndpoint('http://127.0.0.1:8765', { allowLocalLoopback: true }), 'http://127.0.0.1:8765/v1/chat');
+  for (const address of ['http://localhost:8765', 'http://127.0.0.1:8766', 'http://127.0.0.2:8765',
+    'http://127.0.0.1:8765/other', 'http://127.0.0.1:8765?token=bad']) {
+    assert.equal(chatEndpoint(address, { allowLocalLoopback: true }), null);
+  }
+});
+
+test('native client sends an explicit request to the fixed local proxy address', async () => {
+  let requested;
+  await streamOnlineAnswer({ endpoint: 'http://127.0.0.1:8765', token, allowLocalLoopback: true,
+    messages: [{ role: 'user', content: 'Синтетичний запит' }], fetchImpl: async url => {
+      requested = url;
+      return new Response(event('token', { text: 'Тест.' }) + event('done', {}),
+        { headers: { 'content-type': 'text/event-stream' } });
+    } });
+  assert.equal(requested, 'http://127.0.0.1:8765/v1/chat');
+});
+
 test('only typed online turns form bounded history; no application records or files', () => {
   const history = [{ query: 'Перший запит', answer: 'Перша відповідь', hidden: { localTable: 'secret' } }];
   const messages = onlineMessages(history, 'Наступний запит');

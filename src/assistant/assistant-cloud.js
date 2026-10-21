@@ -1,9 +1,11 @@
 // Explicit online chat. Only the user's typed text and earlier online replies leave the app.
 // The caller owns the token in volatile memory and clears it when the profile session ends.
-export function chatEndpoint(value) {
+export function chatEndpoint(value, { allowLocalLoopback = false } = {}) {
   try {
     const url = new URL(String(value || '').trim());
-    if (url.protocol !== 'https:' || !url.hostname || url.username || url.password || url.search || url.hash) return null;
+    const localLoopback = allowLocalLoopback && url.protocol === 'http:'
+      && url.hostname === '127.0.0.1' && url.port === '8765';
+    if ((!localLoopback && url.protocol !== 'https:') || !url.hostname || url.username || url.password || url.search || url.hash) return null;
     if (url.pathname !== '/' && url.pathname !== '/v1/chat') return null;
     url.pathname = '/v1/chat';
     return url.href;
@@ -27,8 +29,8 @@ export class OnlineError extends Error {
 
 const STATUS_CODE = Object.freeze({ 401: 'access-denied', 429: 'busy', 503: 'unavailable' });
 
-export async function streamOnlineAnswer({ endpoint, token, messages, signal, onToken, fetchImpl = fetch }) {
-  const url = chatEndpoint(endpoint);
+export async function streamOnlineAnswer({ endpoint, token, messages, signal, onToken, allowLocalLoopback = false, fetchImpl = fetch }) {
+  const url = chatEndpoint(endpoint, { allowLocalLoopback });
   if (!url || !/^[a-f0-9]{64}$/u.test(token || '')) throw new OnlineError('invalid-configuration');
   let response;
   try {

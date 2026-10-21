@@ -88,6 +88,7 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
   let mode = 'help', history = [], review = null, reviewLabel = '', status = '', navigationStatus = '', busy = false, request = 0, pendingInput = '';
   // Персональний токен живе лише в пам'яті цього входу в профіль: без браузерного сховища, SQLite або файлу.
   let onlineURL = '', onlineToken = '', onlineHistory = [], onlineError = '', onlinePartial = '', onlineController = null;
+  const allowLocalLoopback = window.location.protocol === 'tauri:' && typeof window.__TAURI_INTERNALS__?.invoke === 'function';
   // Локальна модель необов'язкова: «думає» лише поки триває її відповідь; usedModel — чи запускали її в цьому профілі.
   let thinking = false, usedModel = false;
   // Репліка обирається один раз на показ, щоб не мінятися під час перемальовування.
@@ -369,17 +370,19 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
       element('h2', { class: 'ew-assistant-welcome', text: 'Онлайн-розмова' }),
       element('p', { class: 'ew-assistant-note', text: 'Лише введений текст і попередні онлайн-репліки надсилаються на вказаний сервіс. Не вводьте захищені відомості, дані таблиць або файлів.' }));
     if (!onlineToken) {
-      const address = element('input', { type: 'url', required: true, placeholder: 'https://адреса-сервісу', 'aria-label': 'HTTPS-адреса сервісу', autocomplete: 'off' });
+      const address = element('input', { type: 'url', required: true,
+        placeholder: allowLocalLoopback ? 'http://127.0.0.1:8765' : 'https://адреса-сервісу',
+        'aria-label': 'Адреса сервісу Комбата', autocomplete: 'off' });
       const access = element('input', { type: 'password', required: true, 'aria-label': 'Персональний токен доступу', autocomplete: 'off', spellcheck: 'false' });
       const form = element('form', { class: 'ew-assistant-online-connect' },
-        element('label', { text: 'HTTPS-адреса сервісу' }), address,
+        element('label', { text: allowLocalLoopback ? 'Локальна адреса сервісу' : 'HTTPS-адреса сервісу' }), address,
         element('label', { text: 'Персональний токен доступу' }), access,
         element('button', { type: 'submit', text: 'Підключити для цього входу' }));
       form.addEventListener('submit', event => {
         event.preventDefault();
-        const url = chatEndpoint(address.value);
+        const url = chatEndpoint(address.value, { allowLocalLoopback });
         const token = access.value.trim();
-        if (!url || !/^[a-f0-9]{64}$/u.test(token)) { onlineError = 'Вкажіть HTTPS-адресу й виданий вам персональний токен.'; render(); return; }
+        if (!url || !/^[a-f0-9]{64}$/u.test(token)) { onlineError = 'Перевірте адресу сервісу й виданий вам персональний токен.'; render(); return; }
         onlineURL = url; onlineToken = token; onlineHistory = []; onlineError = ''; render();
       });
       body.append(form);
@@ -693,7 +696,7 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
     onlineController = controller;
     try {
       const answer = identity?.text || await streamOnlineAnswer({ endpoint: onlineURL, token: onlineToken,
-        messages: onlineMessages(onlineHistory, query), signal: controller.signal,
+        messages: onlineMessages(onlineHistory, query), signal: controller.signal, allowLocalLoopback,
         onToken: text => { if (current === request && session.accepts(token)) {
           onlinePartial = text; const preview = panel.querySelector('.ew-assistant-online-partial'); if (preview) preview.textContent = text;
         } } });

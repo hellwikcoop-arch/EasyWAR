@@ -180,7 +180,7 @@ async function* sseEvents(body) {
 }
 
 export function createKombatProxy({ ledger, apiKey, adminToken, allowedOrigins = [], allowEnable = false, fetchImpl = fetch, maxConcurrent = 2 }) {
-  if (!ledger?.state || !apiKey || !/^[a-f0-9]{64}$/u.test(adminToken || '')) throw new Error('proxy-not-configured');
+  if (!ledger?.state || (allowEnable && !apiKey) || !/^[a-f0-9]{64}$/u.test(adminToken || '')) throw new Error('proxy-not-configured');
   if (!Array.isArray(allowedOrigins) || allowedOrigins.some(value => typeof value !== 'string' || value === '*' || value === 'null')) throw new Error('invalid-origins');
   const active = new Map();
   let occupied = 0;
