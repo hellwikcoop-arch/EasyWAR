@@ -12,6 +12,17 @@ See also `docs/PROJECT_CONTEXT.md` (project brief, glossary), `docs/WORKFLOW.md`
 - Do not move operational data to cloud services by default.
 - Never commit real operational XLSX/CSV/SQLite files, Signal data, credentials, tokens, secrets, or private attachments.
 - External integrations must be optional and explicit.
+  - Owner exception (2026-10-21): exactly two automatic service transfers are allowed without a
+    per-send prompt, and nothing else is:
+    1. Installation counter (`docs/MODULES_ROADMAP.md`, Q13): random persistent `account_id`,
+       `device_id`, `installation_id` and the time of the last report; no names, units or data.
+    2. Structure of user-built modules (`docs/MODULES_ROADMAP.md`, Q12): column roles, view and
+       settings; no column names, row values or files.
+  - Conditions: never operational data, Signal data, credentials, tokens, tables or personal
+    data; what is sent and where is stated in the user guide and shown in the interface; the
+    destination is chosen by the owner and documented; the code is added only after a separate
+    owner decision and is tested with synthetic data.
+  - Any other automatic transfer needs a new owner decision and an edit here.
 - Ukrainian UI only.
 
 ## Source-of-truth rule
