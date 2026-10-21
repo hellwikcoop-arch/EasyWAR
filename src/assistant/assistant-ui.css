@@ -68,8 +68,8 @@
 .ew-assistant-offline::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: #839b5c; }
 .ew-assistant-close { display: grid; place-items: center; width: 30px; height: 30px; flex: none; background: #f4f6ef; border: 0; border-radius: 50%; color: #879477; font-size: 22px!important; line-height: 1; padding: 0; }
 .ew-assistant-close:hover { background: #e9efdd; color: #465a31; }
-.ew-assistant-tabs { display: flex; gap: 7px; flex-shrink: 0; padding: 13px 20px 0; }
-.ew-assistant-tab { flex: 1; border: 1px solid transparent; border-radius: 9px; color: #687458; background: transparent; padding: 8px; font-size: 11px!important; }
+.ew-assistant-tabs { display: flex; gap: 7px; flex-shrink: 0; padding: 13px 20px 0; overflow-x: auto; }
+.ew-assistant-tab { flex: 1 0 auto; border: 1px solid transparent; border-radius: 9px; color: #687458; background: transparent; padding: 8px; font-size: 11px!important; }
 .ew-assistant-tab[aria-pressed="true"] { background: #eaf0df; border-color: #dde7cf; color: #586d3c; font-weight: 650; }
 .ew-assistant-content { padding: 21px; overflow: auto; flex: 1; min-height: 0; scrollbar-width: thin; scrollbar-color: #c9d3b9 transparent; }
 .ew-assistant-kicker { font-size: 8px; letter-spacing: 1.25px; color: #687458; margin: 0 0 12px; font-weight: 600; }
@@ -132,6 +132,11 @@
 .ew-assistant-finding p { font-size: 11px; color: #677557; margin: 8px 0; line-height: 1.8; overflow-wrap: anywhere; }
 .ew-assistant-location { font-size: 10px; color: #667554; border-top: 1px solid #e9eddf; padding-top: 10px; margin-top: 12px; overflow-wrap: anywhere; }
 .ew-assistant-warning { font-size: 11px; line-height: 1.8; color: #86603a; background: #fbf5e9; border: 1px solid #eee3c8; padding: 12px; border-radius: 10px; margin: 14px 0; }
+.ew-assistant-online-connect { display: grid; gap: 8px; margin: 14px 0; }
+.ew-assistant-online-connect label { font-size: 11px; color: #536345; }
+.ew-assistant-online-connect input { box-sizing: border-box; width: 100%; min-width: 0; padding: 9px 11px; border: 1px solid #dce4cf; border-radius: 9px; color: #435137; background: #fff; font: inherit; font-size: 12px; }
+.ew-assistant-online-connect button, .ew-assistant-online-disconnect { padding: 9px 11px; border: 1px solid #71854f; border-radius: 9px; background: #71854f; color: #fff; font: inherit; font-size: 11px; cursor: pointer; }
+.ew-assistant-online-disconnect { margin-bottom: 16px; background: #fff; color: #536345; }
 .ew-assistant-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); }
 @keyframes ew-assistant-breathe { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
 @media (max-width: 680px) {

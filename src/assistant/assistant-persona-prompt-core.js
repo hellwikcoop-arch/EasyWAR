@@ -14,7 +14,7 @@ export function identityReply(query, provider = 'local') {
   const technology = /(?:модел|провайдер|технолог|anthropic|claude|sonnet|openai|ollama|api|штучн|нейромереж|ші|ai)/u.test(text);
   if (!identity && !technology) return null;
   const suffix = provider === 'anthropic'
-    ? 'Цю відповідь обробляє Anthropic Claude Sonnet 5.5.'
+    ? 'Для онлайн-розмови налаштовано Anthropic Claude Sonnet 5.5; цю відповідь про технологію сформовано локально.'
     : 'Цю відповідь формує локальне ядро EasyWAR; зовнішній провайдер зараз не використовується.';
   return { status: 'found', text: `Я — Комбат, віртуальний AI-помічник EasyWAR, не реальна людина й не учасник бойових дій. ${suffix}`, sources: [], warnings: [], origin: 'persona' };
 }

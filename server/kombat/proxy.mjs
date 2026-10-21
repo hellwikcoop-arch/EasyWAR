@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { readFile, rename, open, unlink } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 import { KOMBAT_PERSONA_PROMPT } from '../../src/assistant/assistant-persona-prompt-core.js';
 
@@ -24,6 +24,10 @@ function authenticate(header, secret) {
   const a = Buffer.from(header.slice(7));
   const b = Buffer.from(secret);
   return a.length === b.length && timingSafeEqual(a, b);
+}
+
+function bearer(header) {
+  return typeof header === 'string' && /^Bearer [a-f0-9]{64}$/u.test(header) ? header.slice(7) : null;
 }
 
 function validateMessages(value) {
@@ -60,13 +64,19 @@ export class BudgetLedger {
       try { this.state = JSON.parse(await readFile(this.path, 'utf8')); }
       catch (error) {
         if (error.code !== 'ENOENT') throw error;
-        this.state = { version: 1, enabled: false, committedCents: 0, actualCents: 0, requests: 0 };
+        this.state = { version: 1, enabled: false, committedCents: 0, actualCents: 0, requests: 0, tokens: [] };
         await this.save();
       }
       if (this.state.version !== 1 || typeof this.state.enabled !== 'boolean'
         || !Number.isSafeInteger(this.state.committedCents) || this.state.committedCents < 0
         || !Number.isSafeInteger(this.state.actualCents) || this.state.actualCents < 0
-        || !Number.isSafeInteger(this.state.requests) || this.state.requests < 0) throw new Error('invalid-ledger');
+        || !Number.isSafeInteger(this.state.requests) || this.state.requests < 0
+        || (this.state.tokens !== undefined && (!Array.isArray(this.state.tokens)
+          || this.state.tokens.some(item => !item || typeof item.id !== 'string' || !/^[a-f0-9]{64}$/u.test(item.hash)
+            || typeof item.label !== 'string' || (item.revokedAt !== null && typeof item.revokedAt !== 'string')
+            || !Number.isSafeInteger(item.requests) || !Number.isSafeInteger(item.reservedCents)
+            || !Number.isSafeInteger(item.actualCents))))) throw new Error('invalid-ledger');
+      if (!this.state.tokens) { this.state.tokens = []; await this.save(); }
     } catch (error) { await this.close(); throw error; }
   }
   async save() {
@@ -83,26 +93,61 @@ export class BudgetLedger {
     this.pending = result.catch(() => {});
     return result;
   }
-  reserve(cents) {
+  reserve(cents, tokenId) {
     return this.serialized(async () => {
       if (!this.state.enabled) return 'disabled';
+      const token = this.state.tokens.find(item => item.id === tokenId && item.revokedAt === null);
+      if (!token) return 'unauthorized';
       if (this.state.committedCents + cents > this.capCents) return 'budget-exhausted';
       this.state.committedCents += cents;
       this.state.requests += 1;
+      token.requests += 1;
+      token.reservedCents += cents;
       await this.save();
       return null;
     });
   }
-  recordUsage(inputTokens, outputTokens) {
+  recordUsage(inputTokens, outputTokens, tokenId) {
     return this.serialized(async () => {
       if (!Number.isSafeInteger(inputTokens) || !Number.isSafeInteger(outputTokens)) return;
       const cents = Math.ceil(100 * ((inputTokens * INPUT_USD_PER_MILLION
         + outputTokens * OUTPUT_USD_PER_MILLION) / 1_000_000));
       this.state.actualCents += cents;
+      const token = this.state.tokens.find(item => item.id === tokenId);
+      if (token) token.actualCents += cents;
       await this.save();
     });
   }
   disable() { return this.serialized(async () => { this.state.enabled = false; await this.save(); }); }
+  enable() { return this.serialized(async () => { this.state.enabled = true; await this.save(); }); }
+  issueToken(label) {
+    return this.serialized(async () => {
+      if (typeof label !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/u.test(label)) throw new Error('invalid-label');
+      const token = randomBytes(32).toString('hex');
+      const id = randomUUID();
+      this.state.tokens.push({ id, label, hash: createHash('sha256').update(token).digest('hex'), revokedAt: null,
+        requests: 0, reservedCents: 0, actualCents: 0 });
+      await this.save();
+      return { id, label, token };
+    });
+  }
+  tokenId(token) {
+    if (typeof token !== 'string' || !/^[a-f0-9]{64}$/u.test(token)) return null;
+    const digest = Buffer.from(createHash('sha256').update(token).digest('hex'), 'hex');
+    for (const item of this.state.tokens) {
+      if (item.revokedAt === null && timingSafeEqual(digest, Buffer.from(item.hash, 'hex'))) return item.id;
+    }
+    return null;
+  }
+  revokeToken(id) {
+    return this.serialized(async () => {
+      const item = this.state.tokens.find(value => value.id === id && value.revokedAt === null);
+      if (!item) return false;
+      item.revokedAt = new Date().toISOString();
+      await this.save();
+      return true;
+    });
+  }
   async close() {
     if (!this.lock) return;
     await this.lock.close(); this.lock = null;
@@ -134,34 +179,72 @@ async function* sseEvents(body) {
   }
 }
 
-export function createKombatProxy({ ledger, apiKey, accessToken, adminToken, fetchImpl = fetch, maxConcurrent = 2 }) {
-  if (!ledger?.state || !apiKey || !accessToken || !adminToken || accessToken === adminToken) throw new Error('proxy-not-configured');
-  const active = new Set();
+export function createKombatProxy({ ledger, apiKey, adminToken, allowedOrigins = [], allowEnable = false, fetchImpl = fetch, maxConcurrent = 2 }) {
+  if (!ledger?.state || !apiKey || !/^[a-f0-9]{64}$/u.test(adminToken || '')) throw new Error('proxy-not-configured');
+  if (!Array.isArray(allowedOrigins) || allowedOrigins.some(value => typeof value !== 'string' || value === '*' || value === 'null')) throw new Error('invalid-origins');
+  const active = new Map();
   let occupied = 0;
   const handler = async (request, response) => {
     try {
-      const admin = request.url === '/admin/disable' || request.url === '/admin/status';
-      if (!authenticate(request.headers.authorization, admin ? adminToken : accessToken)) return fail(response, 401, 'unauthorized');
+      const origin = request.headers.origin;
+      if (origin) {
+        if (!allowedOrigins.includes(origin)) return fail(response, 403, 'origin-denied');
+        response.setHeader('Access-Control-Allow-Origin', origin);
+        response.setHeader('Vary', 'Origin');
+      }
+      if (request.method === 'OPTIONS' && request.url === '/v1/chat' && origin) {
+        response.writeHead(204, { 'Access-Control-Allow-Methods': 'POST', 'Access-Control-Allow-Headers': 'authorization, content-type, accept', 'Access-Control-Max-Age': '600' });
+        return response.end();
+      }
+      const admin = request.url?.startsWith('/admin/');
+      const tokenId = admin ? null : ledger.tokenId(bearer(request.headers.authorization));
+      if (admin ? !authenticate(request.headers.authorization, adminToken) : !tokenId) return fail(response, 401, 'unauthorized');
       if (request.url === '/admin/status' && request.method === 'GET') {
         response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
-        return response.end(JSON.stringify({ ...ledger.state, capCents: ledger.capCents, active: active.size }));
+        const { enabled, committedCents, actualCents, requests, tokens } = ledger.state;
+        return response.end(JSON.stringify({ enabled, committedCents, actualCents, requests,
+          tokens: tokens.map(({ id, label, revokedAt, requests: count, reservedCents, actualCents: cost }) =>
+            ({ id, label, revokedAt, requests: count, reservedCents, actualCents: cost })),
+          capCents: ledger.capCents, active: active.size }));
       }
       if (request.url === '/admin/disable' && request.method === 'POST') {
         await ledger.disable();
-        for (const controller of active) controller.abort();
+        for (const controller of active.keys()) controller.abort();
+        response.writeHead(204); return response.end();
+      }
+      if (request.url === '/admin/enable' && request.method === 'POST') {
+        if (!allowEnable) return fail(response, 403, 'approval-required');
+        await ledger.enable();
+        response.writeHead(204); return response.end();
+      }
+      if (request.url === '/admin/tokens' && request.method === 'POST') {
+        let body;
+        try { body = await readBody(request); } catch { return fail(response, 400, 'invalid-request'); }
+        if (!body || Object.keys(body).join(',') !== 'label') return fail(response, 400, 'invalid-request');
+        let issued;
+        try { issued = await ledger.issueToken(body.label); } catch { return fail(response, 400, 'invalid-request'); }
+        response.writeHead(201, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+        return response.end(JSON.stringify(issued));
+      }
+      const revoke = request.url?.match(/^\/admin\/tokens\/([a-f0-9-]{36})\/revoke$/u);
+      if (revoke && request.method === 'POST') {
+        if (!(await ledger.revokeToken(revoke[1]))) return fail(response, 404, 'not-found');
+        for (const [controller, id] of active) if (id === revoke[1]) controller.abort();
         response.writeHead(204); return response.end();
       }
       if (request.url !== '/v1/chat' || request.method !== 'POST') return fail(response, 404, 'not-found');
       if (request.headers['content-type']?.split(';')[0] !== 'application/json') return fail(response, 415, 'json-required');
+      if (!allowEnable) return fail(response, 503, 'disabled');
       if (occupied >= maxConcurrent) return fail(response, 429, 'busy');
       occupied++;
       try {
         let parsed;
         try { parsed = validateMessages(await readBody(request)); } catch { return fail(response, 400, 'invalid-request'); }
         if (!parsed) return fail(response, 400, 'invalid-request');
-        const reserveError = await ledger.reserve(reservationCents(parsed.inputBytes));
-        if (reserveError) return fail(response, 503, reserveError);
-        const controller = new AbortController(); active.add(controller);
+        if (ledger.tokenId(bearer(request.headers.authorization)) !== tokenId) return fail(response, 401, 'unauthorized');
+        const reserveError = await ledger.reserve(reservationCents(parsed.inputBytes), tokenId);
+        if (reserveError) return fail(response, reserveError === 'unauthorized' ? 401 : 503, reserveError);
+        const controller = new AbortController(); active.set(controller, tokenId);
         response.on('close', () => controller.abort());
         try {
           const upstream = await fetchImpl('https://api.anthropic.com/v1/messages', {
@@ -182,7 +265,7 @@ export function createKombatProxy({ ledger, apiKey, accessToken, adminToken, fet
             if (event.type === 'message_stop') completed = true;
             if (event.type === 'error') throw new Error('upstream-error');
           }
-          await ledger.recordUsage(inputTokens, outputTokens);
+          await ledger.recordUsage(inputTokens, outputTokens, tokenId);
           if (!completed) return fail(response, 502, 'incomplete-stream');
           response.write('event: done\ndata: {}\n\n'); response.end();
         } catch { fail(response, 502, 'upstream-unavailable'); }
