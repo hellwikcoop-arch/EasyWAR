@@ -9,6 +9,8 @@
 // наказ JE T-0002, JE-T3):
 // - клас стовпця пропонує EasyWAR за смисловою роллю, а підтверджує власник таблиці;
 //   запропонований, але не підтверджений клас — це D;
+// - підтверджений клас діє лише в таблиці, яку власник підтвердив як облік після факту:
+//   планова таблиця й таблиця з непідтвердженим призначенням — D (зауваження J5 F-6);
 // - клас таблиці — найвищий серед її стовпців; порожня таблиця й змішана таблиця — D;
 // - D іде лише по LAN («Дельта» в v1 не перевірена, G10); A–C — LAN або Base44 лише з
 //   наскрізним шифруванням; peer_wan (WAN-mesh, етап C8) заборонений для всіх класів.
@@ -103,9 +105,30 @@ export function suggestColumnClass(input) {
 }
 
 /**
+ * Підтверджене призначення таблиці. Тип таблиці підтверджує її власник (COLLECTIVES_PLAN.md,
+ * розділ 12, рядок «Попередні (планові) дані…»; К7): без підтвердження призначення невідоме.
+ * options: { tableOwnerId, tablePurpose?: 'after-fact'|'planned', purposeConfirmedBy?: string }
+ * @returns {'after-fact'|'planned'|null}
+ */
+export function confirmedTablePurpose(options) {
+  const { tableOwnerId, tablePurpose, purposeConfirmedBy } = opts(options);
+  if (typeof tableOwnerId !== 'string' || tableOwnerId === '') return null;
+  if (!TABLE_PURPOSES.includes(tablePurpose)) return null;
+  return purposeConfirmedBy === tableOwnerId ? tablePurpose : null;
+}
+
+/**
  * Чинний клас стовпця. Клас діє, лише якщо його підтвердив власник цієї таблиці (К7): стовпець,
- * доданий адміністратором, чи стовпець із самою пропозицією лишається D. Підтвердження власника
- * остаточне й може бути нижчим за пропозицію: пропозиція — лише підказка (JE-T3), рішення — його.
+ * доданий адміністратором, чи стовпець із самою пропозицією лишається D.
+ *
+ * Підтвердження власника діє лише в межах призначення таблиці (зауваження J5 F-6). Клас нижче за
+ * D можливий тільки в таблиці, яку власник підтвердив як облік після факту: стовпці планових і
+ * попередніх даних отримують клас D за призначенням (COLLECTIVES_PLAN.md, розділ 4, «Запобіжник
+ * від «попередніх» даних»; додаток А, клас D), і підтвердження класу цього не обходить. Таблиця
+ * з непідтвердженим призначенням — теж D (JE-T3: непідтверджене — D).
+ *
+ * Усередині таблиці обліку після факту підтвердження власника остаточне й може бути нижчим за
+ * пропозицію: пропозиція — лише підказка (JE-T3), рішення — його (К7).
  * column: { key, role?, sensitivity?: 'A'|'B'|'C'|'D', confirmedBy?: string }
  */
 export function effectiveColumnClass(column, options) {
@@ -114,6 +137,7 @@ export function effectiveColumnClass(column, options) {
   if (!isSensitivityClass(column.sensitivity)) return 'D';
   if (typeof tableOwnerId !== 'string' || tableOwnerId === '') return 'D';
   if (column.confirmedBy !== tableOwnerId) return 'D';
+  if (confirmedTablePurpose(options) !== 'after-fact') return 'D';
   return column.sensitivity;
 }
 
@@ -150,6 +174,18 @@ export function routeFor(cls, transport, options) {
   }
 }
 
+function whyBlocked(column, options) {
+  if (!column || !isSensitivityClass(column.sensitivity)) return 'клас не призначено';
+  if (column.sensitivity === 'D') return 'клас D';
+  const { tableOwnerId } = opts(options);
+  if (typeof tableOwnerId !== 'string' || tableOwnerId === '' || column.confirmedBy !== tableOwnerId) {
+    return 'клас не підтверджено власником таблиці';
+  }
+  const purpose = confirmedTablePurpose(options);
+  if (purpose === 'planned') return 'таблиця планових або попередніх даних — клас D';
+  return 'призначення таблиці не підтверджено власником';
+}
+
 /**
  * Пояснення для людини, чому таблиця не йде в хмару (К10): перелік стовпців класу D і порада
  * винести особовий склад та планові дані в окрему таблицю. Порожній перелік — таблиця не D.
@@ -160,9 +196,7 @@ export function explainMixedTable(columns, options) {
     .filter(column => effectiveColumnClass(column, options) === 'D')
     .map(column => ({
       key: column && typeof column.key === 'string' ? column.key : '',
-      why: !column || !isSensitivityClass(column.sensitivity)
-        ? 'клас не призначено'
-        : column.sensitivity === 'D' ? 'клас D' : 'клас не підтверджено власником таблиці',
+      why: whyBlocked(column, options),
     }));
   const hasOthers = blocking.length < list.length;
   return Object.freeze({

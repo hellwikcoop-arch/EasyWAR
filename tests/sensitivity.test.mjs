@@ -4,13 +4,14 @@ import assert from 'node:assert/strict';
 
 import { ROLES } from '../src/module-definition-core.js';
 import {
-  CLASSIFIED_ROLES, SENSITIVITY_CLASSES, TRANSPORTS, explainMixedTable, effectiveColumnClass,
+  CLASSIFIED_ROLES, confirmedTablePurpose, SENSITIVITY_CLASSES, TRANSPORTS, explainMixedTable, effectiveColumnClass,
   maxClass, routeFor, suggestColumnClass, tableClass,
 } from '../src/sensitivity-core.js';
 
 const OWNER = 'member-synthetic-owner';
 const ADMIN = 'member-synthetic-admin';
-const opts = { tableOwnerId: OWNER };
+const opts = { tableOwnerId: OWNER, tablePurpose: 'after-fact', purposeConfirmedBy: OWNER };
+const planned = { tableOwnerId: OWNER, tablePurpose: 'planned', purposeConfirmedBy: OWNER };
 const col = (key, sensitivity, confirmedBy = OWNER) => ({ key, sensitivity, confirmedBy });
 
 test('класи й транспорти зафіксовано', () => {
@@ -63,11 +64,42 @@ test('К7: підтвердження власника остаточне, на�
   assert.equal(tableClass([column], opts), 'A');
 });
 
+test('F-6: підтвердження класу не обходить правило планових даних — уся таблиця D', () => {
+  const columns = [col('date', 'A'), col('target', 'B'), col('coords', 'C')];
+  for (const column of columns) assert.equal(effectiveColumnClass(column, planned), 'D', column.key);
+  assert.equal(tableClass(columns, planned), 'D');
+  for (const transport of TRANSPORTS.filter(t => t !== 'lan')) {
+    assert.equal(routeFor(tableClass(columns, planned), transport, { endToEnd: true }).allowed, false, transport);
+  }
+  const e = explainMixedTable(columns, planned);
+  assert.deepEqual(e.blocking.map(b => b.why), Array(3).fill('таблиця планових або попередніх даних — клас D'));
+});
+
+test('F-6: призначення таблиці діє лише після підтвердження її власником', () => {
+  const columns = [col('date', 'C')];
+  const cases = [
+    { tableOwnerId: OWNER },
+    { tableOwnerId: OWNER, tablePurpose: 'after-fact' },
+    { tableOwnerId: OWNER, tablePurpose: 'after-fact', purposeConfirmedBy: ADMIN },
+    { tableOwnerId: OWNER, tablePurpose: 'щось', purposeConfirmedBy: OWNER },
+    { tablePurpose: 'after-fact', purposeConfirmedBy: OWNER },
+  ];
+  for (const options of cases) {
+    assert.equal(tableClass(columns, options), 'D', JSON.stringify(options));
+  }
+  assert.equal(confirmedTablePurpose(opts), 'after-fact');
+  assert.equal(confirmedTablePurpose(planned), 'planned');
+  assert.equal(confirmedTablePurpose(cases[2]), null);
+  assert.equal(confirmedTablePurpose(null), null);
+  assert.equal(explainMixedTable(columns, cases[1]).blocking[0].why, 'призначення таблиці не підтверджено власником');
+});
+
 test('К7: клас діє лише після підтвердження власником таблиці', () => {
   assert.equal(effectiveColumnClass(col('a', 'A'), opts), 'A');
   assert.equal(effectiveColumnClass(col('a', 'A', ADMIN), opts), 'D', 'стовпець від адміністратора');
   assert.equal(effectiveColumnClass({ key: 'a', sensitivity: 'A' }, opts), 'D', 'без підтвердження');
   assert.equal(effectiveColumnClass(col('a', 'A'), {}), 'D', 'власник таблиці невідомий');
+  assert.equal(effectiveColumnClass(col('a', 'A'), { tableOwnerId: OWNER }), 'D', 'призначення не підтверджено');
   assert.equal(effectiveColumnClass(col('a', 'Z'), opts), 'D', 'невідомий клас');
   assert.equal(effectiveColumnClass(null, opts), 'D');
 });
