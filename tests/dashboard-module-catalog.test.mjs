@@ -15,6 +15,7 @@ import {
   crewSummary,
   deleteModulePrompt,
   deleteModuleRequest,
+  draftRow,
   runModuleDelete,
   DELETE_CONFLICT_MESSAGE,
   readModulePayload,
@@ -51,6 +52,7 @@ import {
   rowRuleProblem,
   rowsAfterDelete,
   rowsAfterSave,
+  rowsWithDraft,
   normalizeDensity,
   rowMatchesQuery,
   schemaSummary,
@@ -1288,4 +1290,95 @@ test('the module card shows the failure and a retry instead of an empty chart', 
   assert.match(source, /failed\s*\?\s*el\('div', \{ class: 'ewmc-visual ewmc-read-failed'/);
   assert.ok(source.includes('Прочитати знову'));
   assert.ok(source.includes("readState === 'empty'"), '«даних ще немає» only after a successful empty read');
+});
+
+const kpiFields = [
+  field('label', 'Показник', 'text', 'label', 'none', true),
+  field('value', 'Значення', 'real', 'metric', 'sum', true),
+  field('delta', 'Зміна, %', 'real', 'metric', 'average'),
+  field('unit', 'Одиниця', 'text', 'note'),
+];
+
+test('a draft reads what is typed so far and skips what cannot be read yet', () => {
+  const draft = draftRow(kpiFields, { label: 'Наліт за місяць', value: '285', delta: '6.4', unit: 'год' });
+  assert.deepEqual(draft.row, { label: 'Наліт за місяць', value: 285, delta: 6.4, unit: 'год' });
+  assert.deepEqual(draft.issues, []);
+  assert.equal(draft.active, true);
+  // Недописане число не ламає чернетку й не вважається помилкою, поки поле порожнє…
+  const empty = draftRow(kpiFields, { label: 'Наліт', value: '', delta: '  ', unit: '' });
+  assert.deepEqual(empty.row, { label: 'Наліт' });
+  assert.deepEqual(empty.issues, []);
+  // …а введений, але нечитабельний текст лишається поза карткою й потрапляє в `issues`.
+  const broken = draftRow(kpiFields, { label: 'Наліт', value: '2x8', delta: '6.4', unit: 'год' });
+  assert.equal('value' in broken.row, false, 'the card keeps the value it had');
+  assert.equal(broken.row.delta, 6.4, 'one bad field does not drop the others');
+  assert.equal(broken.issues.length, 1);
+  assert.equal(broken.issues[0].fieldKey, 'value');
+  assert.ok(broken.issues[0].message.length > 0);
+});
+
+test('a draft does not check rules between fields: saving does', () => {
+  const typed = { aircraft_type: 'Мі-8', airborne_hours: '1:00', total_hours: '1:10', cloud_base_upper: '300', cloud_base_lower: '1200' };
+  const draft = draftRow(flightFields, typed);
+  assert.equal(draft.row.cloud_base_lower, 1200, 'the lower cloud base above the upper one still shows while typing');
+  assert.deepEqual(draft.issues, []);
+  assert.throws(() => rowForWrite(flightFields, typed), /Нижня межа хмар/);
+  // Обов'язкове поле, ще не заповнене, теж не заважає перегляду, але зберегти запис без нього не можна.
+  assert.deepEqual(draftRow(flightFields, { aircraft_type: 'Мі-8' }).issues, []);
+  assert.throws(() => rowForWrite(flightFields, { aircraft_type: 'Мі-8' }), /обов'язков/);
+});
+
+test('a draft is active only when it differs from what the user has not touched yet', () => {
+  const original = { label: 'Наліт', value: 285, delta: 6.4, unit: 'год' };
+  const unchanged = {};
+  for (const item of kpiFields) unchanged[item.key] = fieldInputText(item, original[item.key]);
+  const same = draftRow(kpiFields, unchanged, original);
+  assert.equal(same.active, false, 'an opened record with no edits is not a draft');
+  assert.deepEqual(same.row, original);
+  assert.equal(draftRow(kpiFields, { ...unchanged, value: '290' }, original).active, true);
+  const cleared = draftRow(kpiFields, { ...unchanged, delta: '' }, original);
+  assert.equal(cleared.active, true, 'clearing a field is a change');
+  assert.equal('delta' in cleared.row, false);
+  assert.equal(draftRow(kpiFields, {}).active, false, 'a new empty row has nothing to show');
+  // Погода, підставлена з попереднього запису, — не чернетка, поки її не змінили.
+  const weather = { cloud_cover: 6, visibility: 8 };
+  const form = { cloud_cover: fieldInputText(flightField('cloud_cover'), 6), visibility: fieldInputText(flightField('visibility'), 8) };
+  assert.equal(draftRow(flightFields, form, weather, weather).active, false);
+  assert.equal(draftRow(flightFields, { ...form, visibility: '9' }, weather, weather).active, true);
+  assert.equal(draftRow(flightFields, { ...form, aircraft_type: 'Мі-8' }, weather, weather).active, true);
+});
+
+test('preview rows are the saved rows with the draft appended or put in place of the edited record', () => {
+  const rows = [
+    { rowId: 1, label: 'А', value: 1 },
+    { rowId: 2, label: 'Б', value: 2 },
+  ];
+  const draft = { row: { label: 'В', value: 3 }, issues: [], active: true };
+  assert.deepEqual(rowsWithDraft(rows, null, draft), [...rows, { label: 'В', value: 3 }]);
+  assert.deepEqual(rowsWithDraft(rows, 0, draft), [{ rowId: 1, label: 'В', value: 3 }, rows[1]], 'the edited record keeps its rowId');
+  assert.equal(rowsWithDraft(rows, 5, draft).length, 3, 'an index outside the table is a new record');
+  assert.equal(rowsWithDraft(rows, 0, { ...draft, active: false }), rows, 'an inactive draft leaves the rows as they are');
+  assert.equal(rowsWithDraft(rows, 0, null), rows);
+  assert.deepEqual(rowsWithDraft(undefined, null, draft), [{ label: 'В', value: 3 }]);
+  assert.deepEqual(rows, [{ rowId: 1, label: 'А', value: 1 }, { rowId: 2, label: 'Б', value: 2 }], 'the saved rows are never changed');
+  assert.deepEqual(rowsWithDraft([{ label: 'Г' }], 0, draft), [{ label: 'В', value: 3 }], 'a row without rowId gets none invented');
+});
+
+test('the module page shows the module card live while a record is typed, and never stores it', async () => {
+  const source = await readFile(new URL('../src/dashboard-module-catalog.js', import.meta.url), 'utf8');
+  const css = await readFile(new URL('../src/dashboard-module-catalog.css', import.meta.url), 'utf8');
+  assert.match(source, /Попередній перегляд модуля/);
+  assert.match(source, /Чернетка/);
+  assert.match(source, /const preview = unreadable \? null : livePreview\(module, rows\)/);
+  assert.match(source, /preview\.node\.hidden = !active/, 'the card is shown only while a record is being entered');
+  assert.match(source, /requestAnimationFrame\(paintPreview\)/, 'at most one redraw per frame');
+  assert.match(source, /cancelAnimationFrame\(previewFrame\)/);
+  assert.match(source, /draftRow\(module\.fields, currentValues\(\)/);
+  assert.match(source, /rowsWithDraft\(rows, isEdit \? rowIndex : null, draft\)/);
+  // Чернетка йде лише в перегляд: запис, як і раніше, перевіряє rowForWrite і зберігає replace_dashboard_module_rows.
+  assert.equal((source.match(/replace_dashboard_module_rows/g) ?? []).length, 1);
+  assert.match(source, /edited = rowForWrite\(module\.fields, currentValues\(\), existing\)/);
+  assert.match(css, /\.ewmc-preview\[hidden\]\s*\{\s*display:\s*none/);
+  assert.match(css, /\.ewmc-live-card/);
+  assert.doesNotMatch(css, /\.ewmc-data-scroll[^{]*\{[^}]*max-height/, 'the table still takes the page height');
 });

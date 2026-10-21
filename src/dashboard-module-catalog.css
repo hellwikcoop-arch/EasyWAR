@@ -149,3 +149,10 @@ body.ewmc-mine-open #view-dash>.dmain>:not(.ewmc-host){display:none!important}bo
 .ewmc-mine-icon{flex:none;width:18px;height:18px;background:currentColor;-webkit-mask:var(--ewmc-ic-mine) center/contain no-repeat;mask:var(--ewmc-ic-mine) center/contain no-repeat}
 [data-ewmc-slot]>.ewmc-host{margin-top:0}
 :root{--ewmc-ic-mine:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linejoin='round'%3E%3Crect x='3.5' y='3.5' width='7' height='7' rx='1.5'/%3E%3Crect x='13.5' y='3.5' width='7' height='7' rx='1.5'/%3E%3Crect x='3.5' y='13.5' width='7' height='7' rx='1.5'/%3E%3Cpath d='M17 13.5v7M13.5 17h7'/%3E%3C/svg%3E")}
+/* Живий перегляд модуля під таблицею: та сама картка `ewmc-module`, що на дашборді; чернетка позначена бурштиновим. */
+.ewmc-preview{display:grid;gap:8px;min-width:0;margin-top:6px}.ewmc-preview-head h3{margin:0;font-size:13px}.ewmc-preview-head p{margin:3px 0 0;color:var(--muted,#9fb0c4);font-size:12px}
+.ewmc-live-card{width:min(100%,520px)}.ewmc-live-card.span-2{width:min(100%,960px)}
+.ewmc-preview-note{min-height:1.3em;margin:8px 0 0;color:var(--muted,#9fb0c4);font-size:12px}
+.ewmc-module[data-draft=true] .ewmc-live.is-draft{border-color:color-mix(in srgb,#ffb84d 55%,transparent);color:#ffb84d;background:rgba(255,184,77,.1)}
+html[data-theme=light] .ewmc-module[data-draft=true] .ewmc-live.is-draft{border-color:color-mix(in srgb,#9a5b00 50%,transparent);color:#9a5b00;background:rgba(154,91,0,.08)}
+.ewmc-preview[hidden]{display:none}
