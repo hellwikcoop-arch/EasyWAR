@@ -54,7 +54,9 @@ test('К1: upsert і restore несуть повний рядок; зайві й
 
 test('застосування: новий рядок, зміна, версія зростає; вхідний стан не змінюється', () => {
   const s0 = start();
+  const snapshot = JSON.stringify(s0);
   const r1 = applyOperation(s0, op({ op_id: 'op-a1' }), options);
+  assert.equal(JSON.stringify(s0), snapshot, 'вхідний стан цілком незмінний');
   assert.equal(r1.status, 'applied');
   assert.equal(r1.state.rows['row-1'].version, 1);
   assert.equal(r1.state.rows['row-1'].lastAuthor, WRITER_A);
@@ -134,6 +136,93 @@ test('чужа таблиця — відмова; невідома версія 
   assert.deepEqual(q.state.rows, {});
 });
 
+test('F-9: нова версія схеми з новим стовпцем — карантин, а не відмова', () => {
+  const q = applyOperation(start(), op({ schema_version: 2, values: { date: 'd', unit: 'u', count: 1, crew: 'новий стовпець' } }), options);
+  assert.equal(q.status, 'quarantined');
+  assert.equal(q.reason, 'unknown-schema-version');
+  assert.deepEqual(q.state.rows, {});
+  assert.deepEqual(q.state.conflicts, []);
+  assert.deepEqual(q.state.seen, {});
+});
+
+test('F-8: дубль і порушення цілісності — лише для автентифікованої операції автора з правом запису', () => {
+  const first = op({ op_id: 'op-f8' });
+  const s1 = applyOperation(start(), first, options).state;
+  assert.equal(applyOperation(s1, { ...first, signature: 'підроблено' }, options).reason, 'bad-signature');
+  assert.equal(applyOperation(s1, { ...first, author_member_id: READER }, options).reason, 'no-write-right');
+  assert.equal(applyOperation(s1, { ...first, values: { ...first.values, count: 9 }, signature: 'підроблено' }, options).reason, 'bad-signature');
+  assert.equal(applyOperation(s1, { ...first, values: { ...first.values, count: 9 } }, options).status, 'integrity_violation');
+  assert.equal(applyOperation(s1, { ...first }, options).status, 'duplicate');
+});
+
+test('F-10: збережене в стані не змінюється через об\'єкти викликача', () => {
+  const s1 = applyOperation(start(), op({ op_id: 'op-f10-base' }), options).state;
+  const a = op({ op_id: 'op-f10-a', base_version: 1, values: { date: 'd', unit: 'u', count: 5 } });
+  const s2 = applyOperation(s1, a, options).state;
+  const stale = op({ op_id: 'op-f10-b', base_version: 1, author_member_id: WRITER_B, values: { date: 'd', unit: 'u', count: 7 } });
+  const c = applyOperation(s2, stale, options);
+  stale.values.count = 999;
+  stale.kind = 'delete';
+  a.values.count = 111;
+  assert.equal(c.state.conflicts[0].op.values.count, 7);
+  assert.equal(c.state.conflicts[0].op.kind, 'upsert');
+  assert.equal(c.state.rows['row-1'].values.count, 5);
+  assert.ok(Object.isFrozen(c.state.conflicts[0].op.values));
+  assert.equal(applyOperation(c.state, { ...stale, kind: 'upsert', values: { date: 'd', unit: 'u', count: 7 } }, options).status, 'duplicate');
+});
+
+test('F-11: розв\'язання закриває лише названий конфлікт', () => {
+  let s = applyOperation(start(), op({ op_id: 'op-f11-0' }), options).state;
+  s = applyOperation(s, op({ op_id: 'op-f11-1', base_version: 1, values: { date: 'd', unit: 'u', count: 1 } }), options).state;
+  const cA = applyOperation(s, op({ op_id: 'op-f11-a', base_version: 1, values: { date: 'd', unit: 'u', count: 2 } }), options);
+  const cB = applyOperation(cA.state, op({ op_id: 'op-f11-b', base_version: 1, author_member_id: WRITER_B, values: { date: 'd', unit: 'u', count: 3 } }), options);
+  assert.equal(openConflicts(cB.state, 'row-1').length, 2);
+  const r = resolveConflict(cB.state, 'op-f11-a', op({ op_id: 'op-f11-r', base_version: 2, values: { date: 'd', unit: 'u', count: 2 } }), options);
+  assert.equal(r.status, 'applied');
+  assert.deepEqual(openConflicts(r.state, 'row-1').map(c => c.conflictId), ['op-f11-b']);
+});
+
+test('F-12: виняток у перевірці підпису — відмова, а не збій; перевірка отримує копію', () => {
+  const thrower = { ...options, verify: () => { throw new Error('синтетичний збій'); } };
+  assert.equal(applyOperation(start(), op({}), thrower).reason, 'verify-error');
+  const mutator = { ...options, verify: o => { try { o.values.count = 42; } catch { /* копія заморожена */ } return true; } };
+  const input = op({ op_id: 'op-f12' });
+  const r = applyOperation(start(), input, mutator);
+  assert.equal(r.status, 'applied');
+  assert.equal(r.state.rows['row-1'].values.count, 1);
+  assert.equal(input.values.count, 1);
+});
+
+test('F-13: різниця для порожніх і прототипних ключів', () => {
+  assert.equal(diffRows(null, null, ['a']).change, 'unchanged');
+  assert.deepEqual(diffRows(null, null, ['a']).changed, []);
+  const d = diffRows({ a: 1 }, { a: 1 }, ['a', 'constructor', 'toString']);
+  assert.equal(d.change, 'unchanged');
+  assert.deepEqual(d.changed, []);
+});
+
+test('ключі прототипу в row_key і op_id не ламають стан', () => {
+  let s = start();
+  for (const key of ['__proto__', 'constructor', 'toString', 'hasOwnProperty']) {
+    const r = applyOperation(s, op({ op_id: key, row_key: key }), options);
+    assert.equal(r.status, 'applied', key);
+    s = r.state;
+    assert.equal(applyOperation(s, op({ op_id: key, row_key: key }), options).status, 'duplicate', key);
+    assert.equal(applyOperation(s, op({ op_id: `${key}-2`, row_key: key, base_version: 1 }), options).status, 'applied', key);
+  }
+  assert.equal(Object.keys(s.rows).length, 4);
+  assert.equal(Object.getPrototypeOf(s.rows), Object.prototype);
+});
+
+test('restore від застарілої версії — конфлікт', () => {
+  let s = applyOperation(start(), op({ op_id: 'op-rs-0' }), options).state;
+  s = applyOperation(s, op({ op_id: 'op-rs-del', kind: 'delete', values: undefined, base_version: 1 }), options).state;
+  const r = applyOperation(s, op({ op_id: 'op-rs-old', kind: 'restore', base_version: 1 }), options);
+  assert.equal(r.status, 'conflict');
+  assert.equal(r.reason, 'stale-base-version');
+  assert.equal(r.state.rows['row-1'].deleted, true);
+});
+
 test('S04 / AC08 / AC21 / К5: видалення — надгробок; відновлення через довгий час; зайнятий ключ — конфлікт', () => {
   let s = applyOperation(start(), op({ op_id: 'op-r1' }), options).state;
   const del = applyOperation(s, op({ op_id: 'op-del', kind: 'delete', values: undefined, base_version: 1, author_member_id: WRITER_B }), options);
@@ -162,6 +251,8 @@ test('повтори в будь-якому порядку дають той с�
   const one = applyOperations(start(), [a, b, a, b, a], options);
   const two = applyOperations(start(), [b, a, b], options);
   assert.deepEqual(one.state.rows, two.state.rows);
+  assert.deepEqual(Object.keys(one.state.seen).sort(), Object.keys(two.state.seen).sort());
+  assert.deepEqual(one.state.conflicts, two.state.conflicts);
   assert.deepEqual(one.results.map(r => r.status), ['applied', 'applied', 'duplicate', 'duplicate', 'duplicate']);
 });
 

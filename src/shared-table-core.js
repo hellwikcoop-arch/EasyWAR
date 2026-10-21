@@ -64,8 +64,14 @@ export function canonicalOperation(op) {
  * @returns {{ ok: boolean, errors: string[] }} errors — машинні коди
  */
 export function validateOperation(op, schema) {
+  const envelope = validateEnvelope(op);
+  if (!envelope.ok) return envelope;
+  return validateValues(op, schema);
+}
+
+/** Форма операції, що не залежить від схеми таблиці: поля, kind, числа, рядки. */
+export function validateEnvelope(op) {
   const errors = [];
-  const s = opts(schema);
   if (!isPlainObject(op)) return { ok: false, errors: ['op-not-object'] };
   for (const key of Object.keys(op)) if (!OPERATION_FIELDS.includes(key)) errors.push(`unknown-field:${key}`);
   for (const key of REQUIRED_STRINGS) {
@@ -78,6 +84,14 @@ export function validateOperation(op, schema) {
   if (own(op, 'client_time') && op.client_time !== null && typeof op.client_time !== 'string') {
     errors.push('bad-client-time');
   }
+  if (op.kind === 'delete' && own(op, 'values') && op.values !== null) errors.push('delete-has-values');
+  return { ok: errors.length === 0, errors };
+}
+
+/** Значення операції проти стовпців схеми: upsert і restore — рівно повний рядок (К1). */
+export function validateValues(op, schema) {
+  const errors = [];
+  const s = opts(schema);
   const columns = Array.isArray(s.columns) ? s.columns : null;
   if (!columns || columns.length === 0) errors.push('bad-schema');
   if (op.kind === 'upsert' || op.kind === 'restore') {
@@ -90,8 +104,6 @@ export function validateOperation(op, schema) {
         else if (!isCell(op.values[key])) errors.push(`values-bad-cell:${key}`);
       }
     }
-  } else if (op.kind === 'delete' && own(op, 'values') && op.values !== null) {
-    errors.push('delete-has-values');
   }
   return { ok: errors.length === 0, errors };
 }
@@ -104,6 +116,17 @@ export function emptyTableState({ collectiveId, tableId, schemaVersion } = {}) {
     seen: Object.freeze({}),
     conflicts: Object.freeze([]),
   });
+}
+
+/** Глибока заморожена копія: збережене в стані не змінюється через об'єкти викликача. */
+function frozenCopy(value) {
+  if (Array.isArray(value)) return Object.freeze(value.map(frozenCopy));
+  if (value !== null && typeof value === 'object') {
+    const out = {};
+    for (const key of Object.keys(value)) Object.defineProperty(out, key, { value: frozenCopy(value[key]), enumerable: true });
+    return Object.freeze(out);
+  }
+  return value;
 }
 
 const freezeRow = row => Object.freeze({ ...row, values: row.values ? Object.freeze({ ...row.values }) : null });
@@ -127,28 +150,39 @@ const result = (status, state, reason, extra = {}) => Object.freeze({ status, st
  * @returns {{ status, state, reason, conflict? }}
  */
 export function applyOperation(state, op, options) {
+  // Порядок перевірок навмисний (зауваження C3 F-8, F-9): спершу форма, що не залежить від
+  // схеми; потім чужа таблиця й невідома версія схеми (карантин, операція не губиться); потім
+  // значення проти стовпців; потім підпис і право запису; лише автентифікована операція автора з
+  // правом запису може дати «дубль» чи «порушення цілісності».
   const { schema, writers, verify } = opts(options);
   const s = opts(schema);
-  const check = validateOperation(op, s);
-  if (!check.ok) return result('rejected', state, 'invalid-operation', { errors: check.errors });
-
+  const envelope = validateEnvelope(op);
+  if (!envelope.ok) return result('rejected', state, 'invalid-operation', { errors: envelope.errors });
+  if (op.collective_id !== state.collectiveId || op.table_id !== state.tableId
+    || op.collective_id !== s.collectiveId || op.table_id !== s.tableId) {
+    return result('rejected', state, 'wrong-table');
+  }
+  if (op.schema_version !== s.schemaVersion || op.schema_version !== state.schemaVersion) {
+    return result('quarantined', state, 'unknown-schema-version');
+  }
+  const values = validateValues(op, s);
+  if (!values.ok) return result('rejected', state, 'invalid-operation', { errors: values.errors });
+  if (typeof verify !== 'function') return result('rejected', state, 'no-verifier');
+  let verified = false;
+  try {
+    verified = verify(frozenCopy(op)) === true;
+  } catch {
+    return result('rejected', state, 'verify-error');
+  }
+  if (!verified) return result('rejected', state, 'bad-signature');
+  if (!Array.isArray(writers) || !writers.includes(op.author_member_id)) {
+    return result('rejected', state, 'no-write-right');
+  }
   const canonical = canonicalOperation(op);
   if (own(state.seen, op.op_id)) {
     return state.seen[op.op_id] === canonical
       ? result('duplicate', state, 'same-op-id-same-bytes')
       : result('integrity_violation', state, 'same-op-id-different-bytes');
-  }
-  if (op.collective_id !== state.collectiveId || op.table_id !== state.tableId) {
-    return result('rejected', state, 'wrong-table');
-  }
-  if (op.collective_id !== s.collectiveId || op.table_id !== s.tableId || op.schema_version !== s.schemaVersion
-    || op.schema_version !== state.schemaVersion) {
-    return result('quarantined', state, 'unknown-schema-version');
-  }
-  if (typeof verify !== 'function') return result('rejected', state, 'no-verifier');
-  if (verify(op) !== true) return result('rejected', state, 'bad-signature');
-  if (!Array.isArray(writers) || !writers.includes(op.author_member_id)) {
-    return result('rejected', state, 'no-write-right');
   }
 
   const rowKey = op.row_key;
@@ -157,7 +191,7 @@ export function applyOperation(state, op, options) {
   const conflictOf = reason => ({
     conflictId: op.op_id, rowKey, kind: op.kind, reason,
     baseVersion: op.base_version, currentVersion: version,
-    op, resolvedBy: null,
+    op: frozenCopy(op), resolvedBy: null,
   });
   const conflict = reason => {
     const c = conflictOf(reason);
@@ -177,7 +211,8 @@ export function applyOperation(state, op, options) {
     const row = { version: version + 1, deleted: true, values: null, tombstone, ...author };
     return result('applied', withChanges(state, { row, rowKey, op }), 'delete');
   }
-  // restore
+  // restore. Ключ видаленого рядка не можна зайняти новим upsert (він дає row-deleted), тож
+  // «зайнятий ключ» (К5, розділ 5.5) — це restore на живий рядок: конфлікт, а не перезапис.
   if (!current || !current.deleted) return conflict('key-occupied');
   const row = { version: version + 1, deleted: false, values: op.values, tombstone: null, restoredFrom: current.tombstone, ...author };
   return result('applied', withChanges(state, { row, rowKey, op }), 'restore');
@@ -206,7 +241,8 @@ export function openConflicts(state, rowKey) {
 /**
  * Розв'язання конфлікту — нова операція від учасника з правом запису (К6) від поточної версії
  * рядка. Попередні версії лишаються в журналі. Конфлікт позначається розв'язаним лише разом
- * із застосуванням операції.
+ * із застосуванням операції. Закривається лише названий конфлікт: інші конфлікти того самого
+ * рядка лишаються відкритими, доки їх не розглянуть окремо (зауваження C3 F-11, AC07).
  */
 export function resolveConflict(state, conflictId, op, options) {
   const target = state.conflicts.find(c => c.conflictId === conflictId);
@@ -215,7 +251,7 @@ export function resolveConflict(state, conflictId, op, options) {
   if (!isPlainObject(op) || op.row_key !== target.rowKey) return result('rejected', state, 'resolution-other-row');
   const applied = applyOperation(state, op, options);
   if (applied.status !== 'applied') return applied;
-  const conflicts = applied.state.conflicts.map(c => (c.rowKey === target.rowKey && c.resolvedBy === null
+  const conflicts = applied.state.conflicts.map(c => (c.conflictId === conflictId
     ? Object.freeze({ ...c, resolvedBy: op.op_id }) : c));
   return result('applied', Object.freeze({ ...applied.state, conflicts: Object.freeze(conflicts) }), 'conflict-resolved');
 }
@@ -230,9 +266,10 @@ export function diffRows(before, after, columns) {
     : [...new Set([...Object.keys(opts(before)), ...Object.keys(opts(after))])];
   const b = before === null || before === undefined ? null : opts(before);
   const a = after === null || after === undefined ? null : opts(after);
-  const changed = keys.filter(k => (b ? b[k] : undefined) !== (a ? a[k] : undefined));
+  const cell = (row, k) => (row && own(row, k) ? row[k] : undefined);
+  const changed = !b && !a ? [] : keys.filter(k => cell(b, k) !== cell(a, k));
   return Object.freeze({
-    change: !b ? 'added' : !a ? 'deleted' : changed.length ? 'changed' : 'unchanged',
+    change: !b && !a ? 'unchanged' : !b ? 'added' : !a ? 'deleted' : changed.length ? 'changed' : 'unchanged',
     changed: Object.freeze(changed),
     fullRow: true,
     before: b,
