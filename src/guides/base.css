@@ -1,9 +1,12 @@
 /* Спільна основа сторінок 3D-довідників: скидання стилів, відступи безпечної зони й приховані елементи.
-   Далі кожен довідник підключає власний style.css. */
-:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
-html{scroll-padding-top:env(safe-area-inset-top,0px)}
-body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}
-img{max-width:100%}
+   Далі кожен довідник підключає власний style.css.
+   Селектори :root, html, body й img обгорнуті в :where() (нульова специфічність): це лише значення за
+   замовчуванням. Збірка Vite може віддати base.css ПІСЛЯ стилів сторінки; зі звичайним селектором `body`
+   він тоді перебивав би темний фон і колір тексту сторінки (білий фон, чорний текст на темних картках). */
+:where(:root){color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+:where(html){scroll-padding-top:env(safe-area-inset-top,0px)}
+:where(body){margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}
+:where(img){max-width:100%}
 [hidden]:not([hidden=until-found i]){display:none!important}
 
 /* Рядок «назад до списку довідників» над кожним довідником. */
