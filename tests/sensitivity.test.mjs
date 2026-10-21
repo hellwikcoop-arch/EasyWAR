@@ -40,6 +40,29 @@ test('пропозиція класу: C лише для обліку після
   }
 });
 
+test('додаток А: клас C пропонується рівно для цих ролей, решта ROLES — D', () => {
+  const c = Object.keys(ROLES).filter(role => suggestColumnClass({ role, tablePurpose: 'after-fact' }).class === 'C').sort();
+  assert.deepEqual(c, ['abort-flag', 'coordinates', 'event-date', 'event-time', 'firing-unit', 'munition-count',
+    'munition-type', 'platform-type', 'strike-result', 'target-id', 'unit']);
+});
+
+test('null і непридатні параметри не ламають ядро й не дають дозволу', () => {
+  assert.equal(suggestColumnClass(null).class, 'D');
+  assert.equal(suggestColumnClass('coordinates').class, 'D');
+  assert.equal(effectiveColumnClass(col('a', 'A'), null), 'D');
+  assert.equal(tableClass([col('a', 'A')], null), 'D');
+  assert.equal(tableClass([], null), 'D');
+  assert.equal(routeFor('A', 'base44', null).code, 'no-e2e');
+  assert.equal(routeFor('A', 'base44', [true]).code, 'no-e2e');
+  assert.equal(explainMixedTable(null, null).tableClass, 'D');
+});
+
+test('К7: підтвердження власника остаточне, навіть нижче за пропозицію', () => {
+  const column = { key: 'k', role: 'journal-column', sensitivity: 'A', confirmedBy: OWNER };
+  assert.equal(suggestColumnClass({ role: 'journal-column', tablePurpose: 'after-fact' }).class, 'D');
+  assert.equal(tableClass([column], opts), 'A');
+});
+
 test('К7: клас діє лише після підтвердження власником таблиці', () => {
   assert.equal(effectiveColumnClass(col('a', 'A'), opts), 'A');
   assert.equal(effectiveColumnClass(col('a', 'A', ADMIN), opts), 'D', 'стовпець від адміністратора');
@@ -97,17 +120,20 @@ test('невідомий клас чи транспорт — відмова, а
   assert.equal(routeFor(undefined, 'lan').allowed, false);
   assert.equal(routeFor('A', 'ftp').code, 'unknown-transport');
   assert.equal(routeFor('A', 'toString').code, 'unknown-transport');
-  for (const r of [routeFor('E', 'lan'), routeFor('A', 'ftp'), routeFor('D', 'base44')]) {
-    assert.match(r.reason, /[а-яіїєґ]/iu, 'пояснення українською');
-  }
+  const all = [routeFor('E', 'lan'), routeFor('A', 'ftp'), routeFor('D', 'base44', { endToEnd: true }),
+    routeFor('A', 'base44'), routeFor('A', 'delta'), routeFor('A', 'peer_wan'), routeFor('A', 'lan')];
+  assert.deepEqual(all.map(r => r.code),
+    ['unknown-class', 'unknown-transport', 'class-d-cloud', 'no-e2e', 'delta-unverified', 'peer-wan-forbidden', 'allowed']);
+  for (const r of all) assert.match(r.reason, /^[^a-z]*[А-ЯІЇЄҐ«]/u, `${r.code}: пояснення українською`);
 });
 
 test('пояснення змішаної таблиці називає стовпці, що блокують хмару', () => {
-  const columns = [col('date', 'C'), col('crew', 'D'), { key: 'new', sensitivity: 'C', confirmedBy: ADMIN }];
+  const columns = [col('date', 'C'), col('crew', 'D'), { key: 'new', sensitivity: 'C', confirmedBy: ADMIN }, { key: 'raw' }];
   const e = explainMixedTable(columns, opts);
   assert.equal(e.tableClass, 'D');
-  assert.deepEqual(e.blocking.map(b => b.key), ['crew', 'new']);
-  assert.equal(e.blocking[1].why, 'клас не підтверджено власником таблиці');
+  assert.deepEqual(e.blocking.map(b => [b.key, b.why]), [
+    ['crew', 'клас D'], ['new', 'клас не підтверджено власником таблиці'], ['raw', 'клас не призначено'],
+  ]);
   assert.notEqual(e.advice, '');
   assert.equal(explainMixedTable([col('date', 'C')], opts).blocking.length, 0);
   assert.equal(explainMixedTable([col('date', 'C')], opts).advice, '');

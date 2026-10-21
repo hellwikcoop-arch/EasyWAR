@@ -69,6 +69,8 @@ export const CLASSIFIED_ROLES = Object.freeze([
 ].sort());
 
 const own = (obj, key) => typeof key === 'string' && Object.prototype.hasOwnProperty.call(obj, key);
+/** Параметри з недовіреного входу: null, масив чи примітив — як порожній об'єкт. */
+const opts = value => (value && typeof value === 'object' && !Array.isArray(value) ? value : {});
 
 export const isSensitivityClass = value => own(RANK, value);
 
@@ -85,7 +87,8 @@ export function maxClass(a, b) {
  * «облік після факту»; для планової таблиці чи таблиці без призначення — D.
  * @returns {{ class: string, reason: string, confirmed: false }}
  */
-export function suggestColumnClass({ role, tablePurpose } = {}) {
+export function suggestColumnClass(input) {
+  const { role, tablePurpose } = opts(input);
   if (!own(ROLES, role)) {
     return { class: 'D', reason: 'Смислову роль не визначено — за правилом сумніву клас D', confirmed: false };
   }
@@ -101,10 +104,12 @@ export function suggestColumnClass({ role, tablePurpose } = {}) {
 
 /**
  * Чинний клас стовпця. Клас діє, лише якщо його підтвердив власник цієї таблиці (К7): стовпець,
- * доданий адміністратором, чи стовпець із самою пропозицією лишається D.
+ * доданий адміністратором, чи стовпець із самою пропозицією лишається D. Підтвердження власника
+ * остаточне й може бути нижчим за пропозицію: пропозиція — лише підказка (JE-T3), рішення — його.
  * column: { key, role?, sensitivity?: 'A'|'B'|'C'|'D', confirmedBy?: string }
  */
-export function effectiveColumnClass(column, { tableOwnerId } = {}) {
+export function effectiveColumnClass(column, options) {
+  const { tableOwnerId } = opts(options);
   if (!column || typeof column !== 'object') return 'D';
   if (!isSensitivityClass(column.sensitivity)) return 'D';
   if (typeof tableOwnerId !== 'string' || tableOwnerId === '') return 'D';
@@ -113,7 +118,7 @@ export function effectiveColumnClass(column, { tableOwnerId } = {}) {
 }
 
 /** Клас таблиці — найвищий серед стовпців (К10: змішана таблиця — D). Порожня таблиця — D. */
-export function tableClass(columns, options = {}) {
+export function tableClass(columns, options) {
   if (!Array.isArray(columns) || columns.length === 0) return 'D';
   return columns.reduce((acc, column) => maxClass(acc, effectiveColumnClass(column, options)), 'A');
 }
@@ -125,7 +130,8 @@ const allow = Object.freeze({ allowed: true, code: 'allowed', reason: 'Тран�
  * Чи можна передати таблицю цього класу цим транспортом. Нічого не відкриває: лише відповідь.
  * @returns {{ allowed: boolean, code: string, reason: string }}
  */
-export function routeFor(cls, transport, { endToEnd = false } = {}) {
+export function routeFor(cls, transport, options) {
+  const { endToEnd = false } = opts(options);
   if (!isSensitivityClass(cls)) return deny('unknown-class', 'Невідомий клас чутливості — передачу заборонено');
   if (!TRANSPORTS.includes(transport)) return deny('unknown-transport', 'Невідомий транспорт — передачу заборонено');
   switch (transport) {
@@ -148,15 +154,15 @@ export function routeFor(cls, transport, { endToEnd = false } = {}) {
  * Пояснення для людини, чому таблиця не йде в хмару (К10): перелік стовпців класу D і порада
  * винести особовий склад та планові дані в окрему таблицю. Порожній перелік — таблиця не D.
  */
-export function explainMixedTable(columns, options = {}) {
+export function explainMixedTable(columns, options) {
   const list = Array.isArray(columns) ? columns : [];
   const blocking = list
     .filter(column => effectiveColumnClass(column, options) === 'D')
     .map(column => ({
       key: column && typeof column.key === 'string' ? column.key : '',
-      why: column && isSensitivityClass(column.sensitivity) && column.sensitivity !== 'D'
-        ? 'клас не підтверджено власником таблиці'
-        : 'клас D',
+      why: !column || !isSensitivityClass(column.sensitivity)
+        ? 'клас не призначено'
+        : column.sensitivity === 'D' ? 'клас D' : 'клас не підтверджено власником таблиці',
     }));
   const hasOthers = blocking.length < list.length;
   return Object.freeze({

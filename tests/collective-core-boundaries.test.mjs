@@ -28,7 +28,26 @@ const FORBIDDEN = [
   ['crypto', /\bcrypto\b/u],
   ['node: import', /from\s+['"]node:/u],
   ['process.', /\bprocess\./u],
+  ['performance.', /\bperformance\./u],
+  ['setTimeout', /\bsetTimeout\b/u],
+  ['setInterval', /\bsetInterval\b/u],
+  ['Date(', /\bDate\s*\(/u],
+  ['Date.parse', /\bDate\.parse\b/u],
+  ['eval(', /\beval\s*\(/u],
+  ['new Function', /new\s+Function\b/u],
+  ['globalThis', /\bglobalThis\b/u],
+  ['navigator', /\bnavigator\b/u],
+  ['import(', /\bimport\s*\(/u],
 ];
+
+/** Те, що недопустимо й у транзитивних залежностях ядер: мережа, сховища, DOM, Tauri. */
+const FORBIDDEN_TRANSITIVE = FORBIDDEN.filter(([name]) => [
+  'fetch(', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'invoke(', '@tauri-apps', 'localStorage',
+  'sessionStorage', 'indexedDB', 'document.', 'window.', 'navigator', 'import(', 'eval(', 'new Function',
+].includes(name));
+
+const relImports = code => [...code.matchAll(/^\s*(?:import|export)\s[^'"]*?from\s*['"](\.[^'"]+)['"]|^\s*import\s*['"](\.[^'"]+)['"]/gmu)]
+  .map(m => m[1] || m[2]);
 
 test('ядра C1 не мають мережі, сховищ, DOM, годинника, випадковості, Tauri й криптографії', async () => {
   for (const file of C1_CORES) {
@@ -44,6 +63,24 @@ test('ядра C1 імпортують лише відносні модулі sr
       assert.match(m[1], /^\.\/[a-z0-9-]+\.js$/u, `${file}: ${m[1]}`);
     }
   }
+});
+
+test('транзитивні залежності ядер C1 теж без мережі, сховищ, DOM і Tauri', async () => {
+  const seen = new Set();
+  const queue = [...C1_CORES];
+  while (queue.length) {
+    const file = queue.shift();
+    if (seen.has(file)) continue;
+    seen.add(file);
+    const code = await readFile(new URL(file, root), 'utf8');
+    if (!C1_CORES.includes(file)) {
+      for (const [name, re] of FORBIDDEN_TRANSITIVE) assert.doesNotMatch(code, re, `${file} (транзитивно): ${name}`);
+    }
+    const dir = file.slice(0, file.lastIndexOf('/') + 1);
+    for (const spec of relImports(code)) queue.push(new URL(spec, new URL(dir, root)).pathname.slice(new URL(root).pathname.length));
+  }
+  assert.ok(seen.size > C1_CORES.length, `обійдено: ${[...seen].join(", ")}`);
+  assert.ok(seen.has("src/catalog-core.js"), "транзитивний обхід дійшов до catalog-core.js");
 });
 
 test('робочий застосунок не імпортує ядра C1', async () => {
