@@ -21,3 +21,14 @@ test('direct identity and provider questions receive truthful deterministic answ
   assert.match(identityReply('Хто твій провайдер?', 'anthropic').text, /Anthropic Claude Sonnet 5\.5/u);
   assert.equal(identityReply('Як зробити резервну копію?'), null);
 });
+
+test('domain questions that mention models, API or «інші» stay with the help index', () => {
+  for (const query of ['Яка модель літака в ПС?', 'Яка модель ПУ використовується в РВ?', 'Що таке API ключ?',
+    'Що робити, якщо інші поля порожні?', 'Що за 3D-модель у довіднику?', 'Який штучний інтелект у каталозі?']) {
+    assert.equal(identityReply(query), null, query);
+    assert.notEqual(classifyQuery(query).kind, 'identity', query);
+  }
+  for (const query of ['Ти ШІ?', 'Що ти таке?', 'Ви людина?', 'На якій моделі ти працюєш?', 'Ти бот?']) {
+    assert.equal(classifyQuery(query).kind, 'identity', query);
+  }
+});
