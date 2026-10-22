@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtemp, rm, readFile } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BudgetLedger, createKombatProxy, reservationCents } from '../server/kombat/proxy.mjs';
+import { KOMBAT_PERSONA_PROMPT } from '../src/assistant/assistant-persona-prompt-core.js';
+import { fitsProxyLimits } from '../src/assistant/assistant-cloud.js';
 
 const messages = [{ role: 'user', content: 'Привіт, Комбате.' }];
 const ADMIN = 'b'.repeat(64);
@@ -72,6 +74,39 @@ test('rejects unauthenticated and unbounded input before calling upstream', asyn
   });
 });
 
+test('serialized UTF-8 input accepts exactly 6000 bytes and rejects 6001 before upstream', async () => {
+  const size = value => Buffer.byteLength(KOMBAT_PERSONA_PROMPT) + Buffer.byteLength(JSON.stringify(value));
+  const atSize = target => {
+    const value = Array.from({ length: 11 }, (_, index) => ({
+      role: index % 2 ? 'assistant' : 'user', content: 'ж' + 'a'.repeat(511),
+    }));
+    let excess = size(value) - target;
+    for (let index = value.length - 1; index >= 0 && excess > 0; index--) {
+      const cut = Math.min(excess, value[index].content.length - 1);
+      value[index].content = value[index].content.slice(0, -cut);
+      excess -= cut;
+    }
+    assert.equal(excess, 0);
+    assert.equal(size(value), target);
+    return value;
+  };
+  const exact = atSize(6000);
+  const over = atSize(6001);
+  assert.equal(fitsProxyLimits(exact), true);
+  assert.equal(fitsProxyLimits(over), false);
+
+  let calls = 0;
+  await withProxy({ fetchImpl: async () => {
+    calls++;
+    return new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } });
+  } }, async ({ url, issued }) => {
+    assert.equal((await post(url, issued.token, { messages: over })).status, 400);
+    assert.equal(calls, 0);
+    assert.equal((await post(url, issued.token, { messages: exact })).status, 200);
+  });
+  assert.equal(calls, 1);
+});
+
 test('budget reservation is durable and never refunded after upstream failure; promotion disables server side', async () => {
   await withProxy({ capCents: 10, fetchImpl: async () => { throw new Error('offline'); } }, async ({ url, ledger, issued }) => {
     assert.equal((await post(url, issued.token)).status, 502);
@@ -83,6 +118,47 @@ test('budget reservation is durable and never refunded after upstream failure; p
     assert.equal(disabled.status, 204);
     assert.equal(ledger.state.enabled, false);
   });
+});
+
+test('approved budget cap survives restart and ignores a larger environment limit', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'kombat-cap-test-'));
+  const path = join(directory, 'ledger.json');
+  try {
+    const first = new BudgetLedger(path, 200);
+    await first.start();
+    await first.enable();
+    const { id } = await first.issueToken('synthetic-budget-test');
+    assert.equal(await first.reserve(150, id), null);
+    await first.close();
+
+    const restarted = new BudgetLedger(path, 300);
+    await restarted.start();
+    assert.equal(restarted.capCents, 200);
+    assert.equal(restarted.state.capCents, 200);
+    assert.equal(restarted.state.committedCents, 150);
+    assert.equal(await restarted.reserve(100, id), 'budget-exhausted');
+    assert.equal(restarted.state.committedCents, 150);
+    await restarted.close();
+    const saved = JSON.parse(await readFile(path, 'utf8'));
+    assert.equal(saved.capCents, 200);
+    assert.equal(saved.committedCents, 150);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('legacy ledger without an approved cap and corrupt ledger fail closed without rewriting reservations', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'kombat-legacy-cap-test-'));
+  const path = join(directory, 'ledger.json');
+  try {
+    for (const contents of [
+      JSON.stringify({ version: 1, enabled: true, committedCents: 150, actualCents: 0, requests: 1, tokens: [] }),
+      '{broken',
+    ]) {
+      await writeFile(path, contents);
+      const ledger = new BudgetLedger(path, 300);
+      await assert.rejects(ledger.start());
+      assert.equal(await readFile(path, 'utf8'), contents);
+    }
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
 test('disabled promotion cannot call Anthropic', async () => {

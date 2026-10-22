@@ -82,6 +82,19 @@ test('network, cancellation, campaign exhaustion and broken SSE have specific ou
   assert.match(onlineErrorText('network'), /Локальна довідка/u);
 });
 
+test('malformed SSE cancels the underlying reader before returning an error', async () => {
+  let cancelled = false;
+  const body = new ReadableStream({
+    start(controller) { controller.enqueue(new TextEncoder().encode('event: token\ndata: {bad}\n\n')); },
+    cancel() { cancelled = true; },
+  });
+  await assert.rejects(streamOnlineAnswer({ endpoint, token, messages: [{ role: 'user', content: 'Тест' }],
+    fetchImpl: async () => new Response(body, { headers: { 'content-type': 'text/event-stream' } }) }),
+  error => error instanceof OnlineError && error.code === 'invalid-stream');
+  assert.equal(cancelled, true);
+  assert.equal(body.locked, false);
+});
+
 test('long history is trimmed from the oldest turn so the proxy never rejects it', () => {
   const sizeOf = messages => Buffer.byteLength(KOMBAT_PERSONA_PROMPT) + Buffer.byteLength(JSON.stringify(messages));
   const question = 'А як тепер створити модуль?';

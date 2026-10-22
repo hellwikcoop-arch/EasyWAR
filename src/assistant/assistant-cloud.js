@@ -67,7 +67,10 @@ export async function streamOnlineAnswer({ endpoint, token, messages, signal, on
     } catch { /* status code is enough */ }
     throw new OnlineError(code);
   }
-  if (!response.body || !response.headers.get('content-type')?.startsWith('text/event-stream')) throw new OnlineError('invalid-stream');
+  if (!response.body || !response.headers.get('content-type')?.startsWith('text/event-stream')) {
+    try { await response.body?.cancel(); } catch { /* the stream is already unusable */ }
+    throw new OnlineError('invalid-stream');
+  }
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '', answer = '', complete = false;
@@ -94,6 +97,7 @@ export async function streamOnlineAnswer({ endpoint, token, messages, signal, on
       }
     }
   } catch (error) {
+    try { await reader.cancel(); } catch { /* preserve the original stream error */ }
     if (signal?.aborted || error?.name === 'AbortError') throw new OnlineError('cancelled');
     if (error instanceof OnlineError) throw error;
     throw new OnlineError('network');

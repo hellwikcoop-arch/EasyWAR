@@ -65,10 +65,15 @@ export class BudgetLedger {
       try { this.state = JSON.parse(await readFile(this.path, 'utf8')); }
       catch (error) {
         if (error.code !== 'ENOENT') throw error;
-        this.state = { version: 1, enabled: false, committedCents: 0, actualCents: 0, requests: 0, tokens: [] };
+        this.state = { version: 2, capCents: this.capCents, enabled: false, committedCents: 0, actualCents: 0, requests: 0, tokens: [] };
         await this.save();
       }
-      if (this.state.version !== 1 || typeof this.state.enabled !== 'boolean'
+      // Version 1 did not record its approved cap. Guessing from the current environment
+      // could silently raise it, so preserve that ledger and refuse to start.
+      if (this.state.version === 1) throw new Error('ledger-cap-not-persisted');
+      if (this.state.version !== 2 || !Number.isSafeInteger(this.state.capCents)
+        || this.state.capCents < 1 || this.state.capCents > 10000
+        || typeof this.state.enabled !== 'boolean'
         || !Number.isSafeInteger(this.state.committedCents) || this.state.committedCents < 0
         || !Number.isSafeInteger(this.state.actualCents) || this.state.actualCents < 0
         || !Number.isSafeInteger(this.state.requests) || this.state.requests < 0
@@ -77,6 +82,10 @@ export class BudgetLedger {
             || typeof item.label !== 'string' || (item.revokedAt !== null && typeof item.revokedAt !== 'string')
             || !Number.isSafeInteger(item.requests) || !Number.isSafeInteger(item.reservedCents)
             || !Number.isSafeInteger(item.actualCents))))) throw new Error('invalid-ledger');
+      if (this.capCents < this.state.capCents) {
+        this.state.capCents = this.capCents;
+        await this.save();
+      } else this.capCents = this.state.capCents;
       if (!this.state.tokens) { this.state.tokens = []; await this.save(); }
     } catch (error) { await this.close(); throw error; }
   }
