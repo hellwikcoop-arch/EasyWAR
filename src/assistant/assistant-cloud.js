@@ -1,5 +1,7 @@
 // Explicit online chat. Only the user's typed text and earlier online replies leave the app.
 // The caller owns the token in volatile memory and clears it when the profile session ends.
+import { KOMBAT_PAYLOAD_LIMITS, KOMBAT_PERSONA_PROMPT } from './assistant-persona-prompt-core.js';
+
 export function chatEndpoint(value, { allowLocalLoopback = false } = {}) {
   try {
     const url = new URL(String(value || '').trim());
@@ -12,14 +14,31 @@ export function chatEndpoint(value, { allowLocalLoopback = false } = {}) {
   } catch { return null; }
 }
 
+const encoder = new TextEncoder();
+const byteLength = value => encoder.encode(value).length;
+const PROMPT_BYTES = byteLength(KOMBAT_PERSONA_PROMPT);
+// Те саме очищення, що й перевірка проксі: без керівних символів, не довше межі репліки.
+const clean = value => String(value ?? '').replace(/[\u0000-\u001f\u007f]+/gu, ' ').replace(/\s+/gu, ' ').trim()
+  .slice(0, KOMBAT_PAYLOAD_LIMITS.messageChars).trim();
+
+// Чи пройде запит межі проксі: тіло запиту та системна інструкція разом із репліками, у байтах UTF-8.
+export function fitsProxyLimits(messages) {
+  const json = JSON.stringify(messages);
+  return PROMPT_BYTES + byteLength(json) <= KOMBAT_PAYLOAD_LIMITS.inputBytes
+    && byteLength(JSON.stringify({ messages })) <= KOMBAT_PAYLOAD_LIMITS.bodyBytes;
+}
+
+// Найсвіжіші пари «запит — відповідь», що вміщуються в межі проксі; найстаріші відкидаються цілими парами.
 export function onlineMessages(history, query) {
   const messages = [];
-  for (const turn of (history || []).slice(-5)) {
+  const turns = (history || []).slice(-(KOMBAT_PAYLOAD_LIMITS.historyMessages / 2));
+  for (const turn of turns) {
     if (!turn || typeof turn.query !== 'string' || typeof turn.answer !== 'string') continue;
-    messages.push({ role: 'user', content: turn.query.replace(/\s+/gu, ' ').trim().slice(0, 512) });
-    messages.push({ role: 'assistant', content: turn.answer.replace(/\s+/gu, ' ').trim().slice(0, 512) });
+    const user = clean(turn.query), assistant = clean(turn.answer);
+    if (user && assistant) messages.push({ role: 'user', content: user }, { role: 'assistant', content: assistant });
   }
-  messages.push({ role: 'user', content: String(query || '').replace(/\s+/gu, ' ').trim().slice(0, 512) });
+  messages.push({ role: 'user', content: clean(query) });
+  while (messages.length > 1 && !fitsProxyLimits(messages)) messages.splice(0, 2);
   return messages;
 }
 

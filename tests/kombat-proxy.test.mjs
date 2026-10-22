@@ -170,3 +170,36 @@ test('a previously enabled ledger cannot call Anthropic after restart without th
       assert.equal(called, false);
     });
 });
+
+// F1: довга онлайн-розмова не повинна впиратися в межі проксі. Клієнт обрізає історію за тими ж числами.
+test('long Cyrillic online history is trimmed by the client and accepted by the proxy', async () => {
+  const { onlineMessages, fitsProxyLimits } = await import('../src/assistant/assistant-cloud.js');
+  const { KOMBAT_PAYLOAD_LIMITS } = await import('../src/assistant/assistant-persona-prompt-core.js');
+  const long = 'Синтетична репліка для перевірки розміру запиту. '.repeat(12);
+  const history = Array.from({ length: 20 }, (_, at) => ({ query: `${at} ${long}`, answer: `${at} ${long}` }));
+  const trimmed = onlineMessages(history, 'Далі?');
+  assert.ok(fitsProxyLimits(trimmed));
+  assert.ok(trimmed.length >= 3 && trimmed.length % 2 === 1, 'whole pairs plus the new question');
+  assert.equal(trimmed.at(-1).content, 'Далі?');
+  assert.match(trimmed.at(-2).content, /^19 /u, 'the newest pair is kept');
+  // Без обрізання той самий хвіст розмови перевищує межу проксі.
+  const untrimmed = history.slice(-5).flatMap(turn => [{ role: 'user', content: turn.query.trim().slice(0, 512) },
+    { role: 'assistant', content: turn.answer.trim().slice(0, 512) }]).concat({ role: 'user', content: 'Далі?' });
+  assert.equal(fitsProxyLimits(untrimmed), false);
+
+  let calls = 0;
+  await withProxy({ fetchImpl: async () => { calls++; return new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } }); } },
+    async ({ url, issued }) => {
+      assert.equal((await post(url, issued.token, { messages: untrimmed })).status, 400, 'the proxy still rejects oversized payloads');
+      const response = await post(url, issued.token, { messages: trimmed });
+      assert.equal(response.status, 200);
+      assert.match(await response.text(), /event: done/u);
+    });
+  assert.equal(calls, 1, 'the rejected payload never reached the upstream stub');
+
+  // Одне максимальне запитання завжди вміщується; керівні символи прибрано, як і вимагає проксі.
+  const single = onlineMessages([], `\u0001${'Я'.repeat(600)}`);
+  assert.equal(single.length, 1);
+  assert.equal(single[0].content.length, KOMBAT_PAYLOAD_LIMITS.messageChars);
+  assert.ok(fitsProxyLimits(single));
+});

@@ -5,6 +5,10 @@ export const KOMBAT_ROLE = persona.role;
 export const KOMBAT_PERSONA_PROMPT = Object.freeze([...persona.system]).join('\n');
 export const KOMBAT_GROUNDED_PROMPT = [KOMBAT_PERSONA_PROMPT, ...persona.grounding].join('\n');
 
+// Межі онлайн-запиту, спільні для клієнта (assistant-cloud.js) і проксі (server/kombat/proxy.mjs):
+// клієнт обрізає історію саме за цими числами, тож проксі не відхиляє запит через довгу розмову.
+export const KOMBAT_PAYLOAD_LIMITS = Object.freeze({ bodyBytes: 8192, inputBytes: 6000, historyMessages: 10, messageChars: 512 });
+
 // Direct identity answers are deterministic so a model cannot obscure the active technology.
 export function identityReply(query, provider = 'local') {
   if (typeof query !== 'string') return null;

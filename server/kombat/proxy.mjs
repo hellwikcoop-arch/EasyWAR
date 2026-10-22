@@ -3,15 +3,16 @@ import { readFile, rename, open, unlink } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { Buffer } from 'node:buffer';
-import { KOMBAT_PERSONA_PROMPT } from '../../src/assistant/assistant-persona-prompt-core.js';
+import { KOMBAT_PAYLOAD_LIMITS, KOMBAT_PERSONA_PROMPT } from '../../src/assistant/assistant-persona-prompt-core.js';
 
 const MODEL = 'claude-sonnet-5-5';
 const MAX_OUTPUT_TOKENS = 512;
 const INPUT_USD_PER_MILLION = 2;
 const OUTPUT_USD_PER_MILLION = 10;
-const MAX_BODY_BYTES = 8192;
-const MAX_INPUT_BYTES = 6000;
-const MAX_HISTORY = 10;
+const MAX_BODY_BYTES = KOMBAT_PAYLOAD_LIMITS.bodyBytes;
+const MAX_INPUT_BYTES = KOMBAT_PAYLOAD_LIMITS.inputBytes;
+const MAX_HISTORY = KOMBAT_PAYLOAD_LIMITS.historyMessages;
+const MAX_MESSAGE_CHARS = KOMBAT_PAYLOAD_LIMITS.messageChars;
 
 function fail(response, status, code) {
   if (response.headersSent) return response.end(`event: error\ndata: ${JSON.stringify({ code })}\n\n`);
@@ -36,7 +37,7 @@ function validateMessages(value) {
   if (!messages.length || messages.length > MAX_HISTORY + 1 || messages.at(-1)?.role !== 'user') return null;
   if (!messages.every((m, i) => m && typeof m === 'object' && Object.keys(m).sort().join(',') === 'content,role'
     && m.role === (i % 2 === 0 ? 'user' : 'assistant') && typeof m.content === 'string'
-    && m.content.trim() && m.content.length <= 512 && !/[\u0000-\u001f]/u.test(m.content))) return null;
+    && m.content.trim() && m.content.length <= MAX_MESSAGE_CHARS && !/[\u0000-\u001f]/u.test(m.content))) return null;
   const inputBytes = Buffer.byteLength(KOMBAT_PERSONA_PROMPT) + Buffer.byteLength(JSON.stringify(messages));
   return inputBytes <= MAX_INPUT_BYTES ? { messages, inputBytes } : null;
 }
