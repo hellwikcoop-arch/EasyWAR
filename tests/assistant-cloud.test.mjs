@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { KOMBAT_PERSONA_PROMPT } from '../src/assistant/assistant-persona-prompt-core.js';
 import { chatEndpoint, onlineMessages, onlineErrorText, OnlineError, streamOnlineAnswer } from '../src/assistant/assistant-cloud.js';
 
 const token = 'a'.repeat(64);
@@ -79,4 +80,38 @@ test('network, cancellation, campaign exhaustion and broken SSE have specific ou
     { headers: { 'content-type': 'text/event-stream' } }) }, 'invalid-stream');
   assert.match(onlineErrorText('budget-exhausted'), /Ліміт акції вичерпано/u);
   assert.match(onlineErrorText('network'), /Локальна довідка/u);
+});
+
+test('long history is trimmed from the oldest turn so the proxy never rejects it', () => {
+  const sizeOf = messages => Buffer.byteLength(KOMBAT_PERSONA_PROMPT) + Buffer.byteLength(JSON.stringify(messages));
+  const question = 'А як тепер створити модуль?';
+  const cases = {
+    'Ukrainian': 'Це довга українська відповідь помічника про техніку й облік. '.repeat(20),
+    'quotes and backslashes': 'Фраза з "лапками" і \\ слешем та «ялинками». '.repeat(20),
+    'emoji and CJK': '😀 模块 '.repeat(120),
+  };
+  for (const [name, answer] of Object.entries(cases)) {
+    const history = Array.from({ length: 5 }, (_, index) => ({ query: `Питання номер ${index + 1} про налаштування модуля`, answer }));
+    const messages = onlineMessages(history, question);
+    assert.ok(sizeOf(messages) <= 6000, `${name}: request is ${sizeOf(messages)} bytes, above the proxy limit`);
+    assert.ok(Buffer.byteLength(JSON.stringify({ messages })) <= 8192, `${name}: body above the proxy limit`);
+    assert.equal(messages.at(-1).content, question);
+    assert.equal(messages.length % 2, 1, `${name}: turns are dropped in whole pairs`);
+    assert.ok(messages.length >= 3, `${name}: recent context is kept`);
+    assert.equal(messages[0].role, 'user');
+    messages.forEach((m, i) => assert.equal(m.role, i % 2 === 0 ? 'user' : 'assistant'));
+  }
+  const short = onlineMessages([{ query: 'Привіт', answer: 'Вітаю' }], 'Далі');
+  assert.equal(short.length, 3, 'short history is untouched');
+});
+
+test('the current question is never cut below the existing 512-character limit, even with no room for history', () => {
+  const full = 'ж'.repeat(512);
+  const history = Array.from({ length: 5 }, () => ({ query: 'я'.repeat(512), answer: 'ї'.repeat(512) }));
+  const messages = onlineMessages(history, full + ' зайве');
+  assert.equal(messages.at(-1).content, full);
+  assert.ok(Buffer.byteLength(KOMBAT_PERSONA_PROMPT) + Buffer.byteLength(JSON.stringify(messages)) <= 6000);
+  const alone = onlineMessages([], '😀'.repeat(256));
+  assert.equal(alone.length, 1);
+  assert.equal(alone[0].content, '😀'.repeat(256));
 });
