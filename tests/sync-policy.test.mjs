@@ -6,14 +6,14 @@ import {
   ACTIVE_POLICIES, DEFAULT_TABLE_POLICY, INBOUND_POLICIES, OUTBOUND_POLICIES, STATUS_LABELS,
   changeTablePolicy, checkPolicyValue, evaluateInbound, evaluateOutbound,
 } from '../src/sync-policy-core.js';
-import { C1_CORES } from './collective-core-boundaries.test.mjs';
 
 const W = 'member-synthetic-writer';
 const ok = { policy: 'REVIEW_EACH_REPORT', tableClass: 'C', transport: 'base44', endToEnd: true, authorId: W, writers: [W], reviewedByHuman: true };
 
-test('межі C1 покривають ядро політик (C3 F-15)', () => {
-  assert.ok(C1_CORES.includes('src/sync-policy-core.js'));
-  assert.ok(C1_CORES.includes('src/report-submission-core.js'));
+test('межі C1 покривають ядра C1d (C3 F-15) — без імпорту тест-файла (F-23)', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const boundaries = await readFile(new URL('./collective-core-boundaries.test.mjs', import.meta.url), 'utf8');
+  for (const f of ['src/sync-policy-core.js', 'src/report-submission-core.js']) assert.ok(boundaries.includes(`'${f}'`), f);
 });
 
 test('цільова архітектура повна, активні лише чинні режими', () => {
@@ -54,9 +54,31 @@ test('порядок перевірки: маршрут і право запис
   assert.equal(evaluateOutbound(null).allowed, false);
 });
 
-test('S10: зміна політики між чергою й відправкою зупиняє відправку', () => {
-  assert.equal(evaluateOutbound(ok).allowed, true, 'у черзі');
-  assert.equal(evaluateOutbound({ ...ok, policy: 'DISABLED' }).allowed, false, 'перед відправкою — нова політика');
+test('S10: перевірка перед відправкою бере чинну політику, а не ту, що була при постановці в чергу', () => {
+  const queuedWith = DEFAULT_TABLE_POLICY;
+  assert.equal(evaluateOutbound({ ...ok, policy: queuedWith.outbound }).allowed, true, 'у черзі');
+  const current = { ...queuedWith, outbound: 'DISABLED', version: queuedWith.version + 1 };
+  assert.equal(evaluateOutbound({ ...ok, policy: current.outbound }).code, 'OwnerDecisionRequired', 'перед відправкою');
+});
+
+test('F-18: пріоритет відмов за ADR — маршрут → політика → право запису → перегляд', () => {
+  assert.equal(evaluateOutbound({ ...ok, tableClass: 'D', policy: 'AUTO_AFTER_LOCAL_APPROVAL' }).code, 'class-d-cloud');
+  assert.equal(evaluateOutbound({ ...ok, policy: 'DISABLED', authorId: 'x' }).code, 'OwnerDecisionRequired');
+  assert.equal(evaluateOutbound({ ...ok, authorId: 'x', reviewedByHuman: false }).code, 'no-write-right');
+});
+
+test('F-19: неактивні значення не проходять через зміну політики в жодному напрямі; зміна атомарна', () => {
+  const admin = { memberId: 'member-synthetic-adm', role: 'admin' };
+  for (const change of [{ inbound: 'REVIEW_BEFORE_APPLY' }, { inbound: 'DISABLED' }, { outbound: 'DISABLED' }]) {
+    const r = changeTablePolicy(DEFAULT_TABLE_POLICY, change, admin);
+    assert.equal(r.code, 'OwnerDecisionRequired', JSON.stringify(change));
+    assert.equal(r.policy, DEFAULT_TABLE_POLICY);
+  }
+  const mixed = changeTablePolicy(DEFAULT_TABLE_POLICY, { outbound: 'REVIEW_EACH_REPORT', inbound: 'DISABLED' }, admin);
+  assert.equal(mixed.ok, false);
+  assert.equal(mixed.policy, DEFAULT_TABLE_POLICY, 'жодної часткової зміни');
+  assert.equal(changeTablePolicy(DEFAULT_TABLE_POLICY, { outbound: 'REVIEW_EACH_REPORT' }, { role: 'owner' }).ok, true, 'власник колективу');
+  assert.equal(changeTablePolicy(DEFAULT_TABLE_POLICY, { outbound: 'REVIEW_EACH_REPORT' }, {}).code, 'not-allowed');
 });
 
 test('застосування вхідних: перевірене — так, конфлікт і карантин — людині, решта — відмова', () => {
@@ -65,7 +87,9 @@ test('застосування вхідних: перевірене — так, 
   assert.equal(evaluateInbound({ policy: p, applyStatus: 'applied', kind: 'delete' }).notify, true, 'видалення — зі сповіщенням');
   assert.equal(evaluateInbound({ policy: p, applyStatus: 'duplicate' }).action, 'skip');
   assert.equal(evaluateInbound({ policy: p, applyStatus: 'conflict' }).action, 'conflict');
+  assert.equal(evaluateInbound({ policy: p, applyStatus: 'conflict' }).allowed, false);
   assert.equal(evaluateInbound({ policy: p, applyStatus: 'quarantined' }).action, 'quarantine');
+  assert.equal(evaluateInbound({ policy: p, applyStatus: 'quarantined' }).allowed, false);
   assert.equal(evaluateInbound({ policy: p, applyStatus: 'integrity_violation' }).action, 'reject');
   assert.equal(evaluateInbound({ policy: p, applyStatus: 'rejected' }).action, 'reject');
   assert.equal(evaluateInbound({ policy: p, applyStatus: 'щось' }).allowed, false);

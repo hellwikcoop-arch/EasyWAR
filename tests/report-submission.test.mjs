@@ -51,11 +51,42 @@ test('дублікати й конфлікти показуються й бло�
   const same = op({ op_id: 'op-x' });
   const dup = previewReport({ pendingOps: [same, { ...same }], currentRows: rows, schema, revision: 1 });
   assert.deepEqual(dup.duplicates, [{ opId: 'op-x', sameBytes: true }]);
+  const tampered = previewReport({ pendingOps: [same, { ...same, values: { ...same.values, count: 7 } }], currentRows: rows, schema, revision: 1 });
+  assert.deepEqual(tampered.duplicates, [{ opId: 'op-x', sameBytes: false }], 'той самий op_id з іншими байтами');
   assert.equal(commitReport(dup, { currentRevision: 1 }).code, 'duplicates');
   const two = previewReport({ pendingOps: [op({ op_id: 'op-a' }), op({ op_id: 'op-b', values: { date: 'd', unit: 'u', count: 9 } })], currentRows: rows, schema, revision: 1 });
   assert.equal(two.conflicts.length, 1);
   assert.equal(two.conflicts[0].rowKey, 'row-1');
   assert.equal(commitReport(two, { currentRevision: 1 }).code, 'unresolved-conflicts');
+});
+
+test('F-16: показане «було → стане» не змінюється через об\'єкти викликача й збігається з пакетом', () => {
+  const pending = [op({ op_id: 'op-f16' })];
+  const current = { 'row-1': { date: '2026-09-01', unit: 'Підрозділ-1', count: 1 } };
+  const p = previewReport({ pendingOps: pending, currentRows: current, schema, revision: 2 });
+  pending[0].values.count = 999;
+  current['row-1'].count = -5;
+  assert.equal(p.items[0].diff.after.count, 2);
+  assert.equal(p.items[0].diff.before.count, 1);
+  assert.ok(Object.isFrozen(p.items[0].diff.after) && Object.isFrozen(p.items[0].diff.before));
+  assert.deepEqual(p.items[0].diff.after, commitReport(p, { currentRevision: 2 }).ops[0].values);
+});
+
+test('F-17: чужа таблиця, чужий колектив і інша версія схеми — хибні операції', () => {
+  const p = previewReport({ pendingOps: [
+    op({ op_id: 'op-t', table_id: 'table-other' }),
+    op({ op_id: 'op-c', row_key: 'row-2', collective_id: 'collective-other' }),
+    op({ op_id: 'op-s', row_key: 'row-3', schema_version: 9 }),
+  ], currentRows: rows, schema, revision: 1 });
+  assert.equal(p.items.length, 0);
+  assert.deepEqual(p.invalid.map(i => i.errors[0]), ['wrong-table', 'wrong-table', 'unknown-schema-version']);
+  assert.equal(commitReport(p, { currentRevision: 1 }).code, 'invalid-operations');
+});
+
+test('F-21: підроблений перегляд і ревізія null не фіксуються', () => {
+  assert.equal(commitReport({ revision: 1, items: [{ op: { bogus: 1 } }], deletions: [] }, { currentRevision: 1 }).code, 'invalid-preview');
+  const p = previewReport({ pendingOps: [op({ op_id: 'op-n' })], currentRows: rows, schema });
+  assert.equal(commitReport(p, { currentRevision: null }).code, 'stale-revision');
 });
 
 test('змінена ревізія, хибна операція, порожній перегляд — відмова', () => {

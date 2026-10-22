@@ -11,8 +11,8 @@
 //   відправкою (REVIEW_EACH_REPORT) і застосування перевіреного (AUTO_APPLY_VERIFIED);
 // - решта значень (автовідправка, ручне приймання, вимкнення) не активні до окремих рішень
 //   власника (JE-03, JE-04, JE-06) і повертають відмову OwnerDecisionRequired;
-// - порядок перевірки відправки: політика → маршрут (routeFor) → право запису автора →
-//   підтвердження людиною в «Доповісти»; перевірка повторюється безпосередньо перед відправкою;
+// - порядок перевірки відправки за ADR (п. 3): маршрут (routeFor) → політика → право запису
+//   автора → підтвердження людиною в «Доповісти»; перевірка повторюється перед відправкою;
 // - політику таблиці змінюють лише власник таблиці й адміністратори (К6); політика не дає
 //   права запису.
 
@@ -77,10 +77,10 @@ export function checkPolicyValue(direction, policy) {
  */
 export function evaluateOutbound(ctx) {
   const c = opts(ctx);
-  const p = checkPolicyValue('outbound', c.policy);
-  if (!p.allowed) return p;
   const route = routeFor(c.tableClass, c.transport, { endToEnd: c.endToEnd === true });
   if (!route.allowed) return decision(false, route.code, route.reason);
+  const p = checkPolicyValue('outbound', c.policy);
+  if (!p.allowed) return p;
   if (!Array.isArray(c.writers) || !c.writers.includes(c.authorId)) {
     return decision(false, 'no-write-right', 'Немає права вносити дані в цю таблицю');
   }

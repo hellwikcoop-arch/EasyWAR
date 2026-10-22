@@ -48,18 +48,32 @@ export function previewReport(input) {
   for (const op of ops) {
     const check = validateOperation(op, schema);
     if (!check.ok) { invalid.push(Object.freeze({ opId: op && op.op_id, errors: Object.freeze(check.errors) })); continue; }
+    // Перегляд показує лише те, що застосовне до цієї таблиці (зауваження C3 F-17): чужа таблиця
+    // чи інша версія схеми — хибна операція, а не рядок «що піде».
+    const s = opts(schema);
+    if (op.collective_id !== s.collectiveId || op.table_id !== s.tableId) {
+      invalid.push(Object.freeze({ opId: op.op_id, errors: Object.freeze(['wrong-table']) })); continue;
+    }
+    if (op.schema_version !== s.schemaVersion) {
+      invalid.push(Object.freeze({ opId: op.op_id, errors: Object.freeze(['unknown-schema-version']) })); continue;
+    }
     if (seenIds.has(op.op_id)) {
       duplicates.push(Object.freeze({ opId: op.op_id, sameBytes: seenIds.get(op.op_id) === canonicalOperation(op) }));
       continue;
     }
     seenIds.set(op.op_id, canonicalOperation(op));
+    // Контракт черги: одна операція на рядок за одне «Доповісти» (черга стискається до
+    // останнього стану рядка до перегляду). Дві операції над одним рядком — показ і блокування,
+    // а не мовчазне злиття (зауваження C3 F-20).
     if (byRow.has(op.row_key)) {
       conflicts.push(Object.freeze({ rowKey: op.row_key, opIds: Object.freeze([byRow.get(op.row_key), op.op_id]), reason: 'two-pending-ops-same-row' }));
       continue;
     }
     byRow.set(op.row_key, op.op_id);
-    const before = own(rows, op.row_key) ? rows[op.row_key] : null;
-    const after = op.kind === 'delete' ? null : op.values;
+    // Знімки «було» й «стане» — глибокі заморожені копії: показане людині не зміниться через
+    // об'єкти викликача й збігається з пакетом (зауваження C3 F-16, AC05).
+    const before = own(rows, op.row_key) ? frozenCopy(rows[op.row_key]) : null;
+    const after = op.kind === 'delete' ? null : frozenCopy(op.values);
     const item = Object.freeze({ rowKey: op.row_key, kind: op.kind, opId: op.op_id, diff: diffRows(before, after, columns), fullRow: true, op: frozenCopy(op) });
     (op.kind === 'delete' ? deletions : items).push(item);
   }
@@ -83,13 +97,17 @@ export function commitReport(preview, options) {
   const p = opts(preview);
   const { currentRevision, confirmedDeletions } = opts(options);
   const fail = (code, reason) => Object.freeze({ ok: false, code, reason });
-  if (!Array.isArray(p.items) || !Array.isArray(p.deletions)) return fail('invalid-preview', 'Немає перегляду — відправку не зафіксовано');
+  const lists = ['items', 'deletions', 'duplicates', 'conflicts', 'invalid'];
+  if (lists.some(k => !Array.isArray(p[k])) || !Object.isFrozen(p)) return fail('invalid-preview', 'Немає перегляду — відправку не зафіксовано');
+  if ([...p.items, ...p.deletions].some(i => !isPlainObject(i) || !isPlainObject(i.op) || typeof i.op.op_id !== 'string')) {
+    return fail('invalid-preview', 'Перегляд пошкоджено — відправку не зафіксовано');
+  }
   if (!Number.isSafeInteger(p.revision) || p.revision !== currentRevision) {
     return fail('stale-revision', 'Таблиця змінилася після перегляду: перегляньте зміни ще раз');
   }
-  if ((p.invalid || []).length) return fail('invalid-operations', 'У переліку є хибні операції — відправку не зафіксовано');
-  if ((p.duplicates || []).length) return fail('duplicates', 'У переліку є дублікати — перегляньте їх');
-  if ((p.conflicts || []).length) return fail('unresolved-conflicts', 'Є нерозв\'язані конфлікти — розв\'яжіть їх перед відправкою');
+  if (p.invalid.length) return fail('invalid-operations', 'У переліку є хибні операції — відправку не зафіксовано');
+  if (p.duplicates.length) return fail('duplicates', 'У переліку є дублікати — перегляньте їх');
+  if (p.conflicts.length) return fail('unresolved-conflicts', 'Є нерозв\'язані конфлікти — розв\'яжіть їх перед відправкою');
   const confirmed = new Set(Array.isArray(confirmedDeletions) ? confirmedDeletions : []);
   if (p.deletions.some(d => !confirmed.has(d.rowKey))) {
     return fail('deletions-not-confirmed', 'Підтвердіть кожне видалення окремо');
