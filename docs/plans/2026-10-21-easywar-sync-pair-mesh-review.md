@@ -325,6 +325,7 @@ H0 (документи) ──► JE-01 «старт C1»
 - **Бюджет:** 1–2 сесії, ≤ 600 рядків.
 
 #### C1d — `sync-policy-core` і `report-submission-core` 🟡
+- **Стан (T-0002):** реалізовано в гілці `claude/e8-c1d-sync-policy` (раніше C1c за рішенням JE через ліміт Codex); не підключене.
 - **Файли:** `src/sync-policy-core.js`, `src/report-submission-core.js`, однойменні тести.
 - **Зміст:** матриця ADR-C02 (AUTO-відправка → `OwnerDecisionRequired`; вхідні режими — лише ті, що дозволить JE-04); `previewReport` і `commitReport` з A4 («надсилається весь рядок»).
 - **Тести:** S01 (негативний), S02, S09–S10, AC05.
