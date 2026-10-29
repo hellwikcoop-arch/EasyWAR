@@ -777,4 +777,199 @@ mod tests {
             BackupInspection { schema_version: 3 }
         );
     }
+
+    /// База стану випуску 2.2.4: застосовано рівно перші `version` вбудованих міграцій.
+    async fn create_database_at_version(path: &Path, version: usize) -> sqlx::SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(path)
+                    .create_if_missing(true)
+                    .foreign_keys(true),
+            )
+            .await
+            .unwrap();
+        sqlx::query(
+            "CREATE TABLE _sqlx_migrations (
+                version BIGINT PRIMARY KEY,
+                description TEXT NOT NULL,
+                installed_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                success BOOLEAN NOT NULL,
+                checksum BLOB NOT NULL,
+                execution_time BIGINT NOT NULL
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        for migration in database::migrations().into_iter().take(version) {
+            sqlx::raw_sql(migration.sql).execute(&pool).await.unwrap();
+            sqlx::query(
+                "INSERT INTO _sqlx_migrations
+                 (version, description, success, checksum, execution_time)
+                 VALUES (?, ?, 1, ?, 0)",
+            )
+            .bind(migration.version)
+            .bind(migration.description)
+            .bind(Sha384::digest(migration.sql.as_bytes()).to_vec())
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        pool
+    }
+
+    /// Синтетичний профіль із модулем дашборда, його полями, рядками й ручними
+    /// виправленнями (міграції 0003, 0009–0012, 0016) — те, що користувач 2.2.4 мав на диску.
+    async fn insert_v16_profile_module_data(pool: &sqlx::SqlitePool) {
+        let now = "2026-01-02T00:00:00Z";
+        let profile = "profile-00000000000000000000000a";
+        for statement in [
+            format!(
+                "INSERT INTO local_profiles (id, display_name, name_key, created_at, updated_at)
+                 VALUES ('{profile}', 'Синтетичний профіль', 'синтетичний профіль', '{now}', '{now}')"
+            ),
+            format!(
+                "INSERT INTO dashboard_modules
+                 (id, profile_id, branch, template_id, visual_kind, title, storage_table,
+                  created_at, updated_at, style)
+                 VALUES ('module-rv2-synthetic-01', '{profile}', 'air', 'synthetic-template',
+                         'table', 'Синтетичний модуль', 'dashboard_data_00000000000000aa',
+                         '{now}', '{now}', 'branch')"
+            ),
+            "INSERT INTO dashboard_module_fields
+             (module_id, field_key, label, data_type, field_role, aggregation, required, position)
+             VALUES ('module-rv2-synthetic-01', 'event_date', 'Дата', 'date', 'dimension', 'none', 1, 0),
+                    ('module-rv2-synthetic-01', 'amount', 'Кількість', 'integer', 'metric', 'sum', 0, 1)"
+                .to_owned(),
+            "CREATE TABLE dashboard_data_00000000000000aa (
+                 row_id INTEGER PRIMARY KEY, event_date TEXT, amount INTEGER)"
+                .to_owned(),
+            "INSERT INTO dashboard_data_00000000000000aa (row_id, event_date, amount)
+             VALUES (1, '2026-01-01', 3), (2, '2026-01-02', 5), (3, '2026-01-03', 8)"
+                .to_owned(),
+            format!(
+                "INSERT INTO dashboard_module_corrections
+                 (module_id, row_id, field_key, source_file, source_sheet, source_row,
+                  source_column, raw_text, corrected_text, reason, created_at,
+                  stored_value, superseded_at)
+                 VALUES ('module-rv2-synthetic-01', 2, 'amount', 'synthetic.xlsx', 'Аркуш1', 3,
+                         'B', '50', '5', 'синтетичне виправлення', '{now}', '5', NULL)"
+            ),
+        ] {
+            sqlx::query(&statement).execute(pool).await.unwrap();
+        }
+    }
+
+    /// Для кожної таблиці користувача: (назва, кількість рядків, SHA-384 усіх рядків
+    /// у порядку rowid, значення через `quote()`, тобто з типом і точними байтами).
+    async fn table_fingerprints(path: &Path) -> Vec<(String, i64, Vec<u8>)> {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(path)
+                    .read_only(true)
+                    .immutable(true),
+            )
+            .await
+            .unwrap();
+        let tables: Vec<String> = sqlx::query_scalar(
+            "SELECT name FROM sqlite_master
+             WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name <> '_sqlx_migrations'
+             ORDER BY name",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        let mut result = Vec::new();
+        for table in tables {
+            let columns: Vec<String> =
+                sqlx::query_scalar(&format!("SELECT name FROM pragma_table_info('{table}')"))
+                    .fetch_all(&pool)
+                    .await
+                    .unwrap();
+            let row_expr = columns
+                .iter()
+                .map(|column| format!("quote(\"{column}\")"))
+                .collect::<Vec<_>>()
+                .join(" || char(31) || ");
+            let rows: Vec<String> = sqlx::query_scalar(&format!(
+                "SELECT {row_expr} FROM \"{table}\" ORDER BY rowid"
+            ))
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+            let mut hasher = Sha384::new();
+            for row in &rows {
+                hasher.update(row.as_bytes());
+                hasher.update([30_u8]);
+            }
+            result.push((table, rows.len() as i64, hasher.finalize().to_vec()));
+        }
+        pool.close().await;
+        result
+    }
+
+    /// RV-2 (наказ W1, T-0021): база стану 2.2.4 (міграції 0001–0016) з провенансом,
+    /// профілем, модулем, його рядками й виправленнями оновлюється до поточної схеми
+    /// без жодної зміни наявних рядків; повторний запуск нічого не змінює.
+    #[tokio::test]
+    async fn upgrades_release_2_2_4_database_keeping_every_row_and_hash() {
+        const RELEASE_2_2_4_SCHEMA: usize = 16;
+        let directory = tempfile::tempdir().unwrap();
+        let live = directory.path().join("easywar.db");
+        let pool = create_database_at_version(&live, RELEASE_2_2_4_SCHEMA).await;
+        insert_complete_provenance_chain(&pool).await;
+        insert_v16_profile_module_data(&pool).await;
+        pool.close().await;
+        let original = fs::read(&live).unwrap();
+        let before = table_fingerprints(&live).await;
+        assert!(before
+            .iter()
+            .any(|(name, count, _)| name == "raw_sources" && *count == 1));
+        assert!(before
+            .iter()
+            .any(|(name, count, _)| name == "dashboard_data_00000000000000aa" && *count == 3));
+        assert!(before
+            .iter()
+            .any(|(name, count, _)| name == "dashboard_module_corrections" && *count == 1));
+        let latest = database::migrations().len() as i64;
+        let backup = pre_migration_backup_path(&live, RELEASE_2_2_4_SCHEMA as i64, latest).unwrap();
+
+        prepare_database(&live).await.unwrap();
+
+        assert_eq!(fs::read(&backup).unwrap(), original);
+        assert_eq!(
+            restore::inspect_backup(&backup).await.unwrap(),
+            BackupInspection {
+                schema_version: RELEASE_2_2_4_SCHEMA as i64
+            }
+        );
+        assert_eq!(
+            restore::inspect_backup(&live).await.unwrap(),
+            BackupInspection {
+                schema_version: latest
+            }
+        );
+        let after = table_fingerprints(&live).await;
+        for (name, count, hash) in &before {
+            let migrated = after
+                .iter()
+                .find(|(other, _, _)| other == name)
+                .unwrap_or_else(|| panic!("таблиця {name} зникла після оновлення"));
+            assert_eq!(&migrated.1, count, "кількість рядків змінилась у {name}");
+            assert_eq!(&migrated.2, hash, "хеш рядків змінився у {name}");
+        }
+        for (name, count, _) in &after {
+            if !before.iter().any(|(other, _, _)| other == name) {
+                assert_eq!(*count, 0, "нова таблиця {name} не порожня після оновлення");
+            }
+        }
+
+        let migrated_once = fs::read(&live).unwrap();
+        prepare_database(&live).await.unwrap();
+        assert_eq!(fs::read(&live).unwrap(), migrated_once);
+    }
 }
