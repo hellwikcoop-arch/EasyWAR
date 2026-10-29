@@ -584,3 +584,25 @@ by hand with narrow anchored patches (see `AGENTS.md`), then run
 (`profile-schema-panel.js` + `profile-schema-view-core.js`) — розділ над таблицею на сторінці модуля;
 читання дашбордів за підтвердженими ролями ще не підключено (залишок E3). Тести — `tests/profile-schema.test.mjs`,
 `tests/profile-schema-client.test.mjs`.
+
+## Екземпляри модулів і розкладка (E4)
+
+`src/module-instance-core.js` — чисте ядро розкладки «Мій дашборд» профілю без DOM, сховищ і
+годинника (поки ніде не підключене до екрана):
+
+- `emptyLayout(profileId)`, `addInstance`, `duplicateInstance`, `removeInstance`, `updateInstance`,
+  `rebindInstance`, `placeInstance`, `setSharedPeriod`: усі повертають нову заморожену розкладку або
+  `{ ok: false, code }`. Один модуль на одній таблиці — до `MAX_COPIES` (4) разів (різні таблиці одного шаблону лічаться окремо); кожен екземпляр має власні назву,
+  період (`shared` / `all` / `last-days` / `range`) і стиль, а також розміщення `{ x, y, w, h }` на сітці
+  12 колонок.
+- `src/module-instance-modules-core.js`: кожен модуль користувача має принаймні одну картку
+  (`ensureModuleInstances`, `forgetModuleInstances`; визначення — `rust-template:<шаблон>`), період діє
+  за підтвердженою роллю «Дата події» (`periodColumn`, `rowsInPeriod`): без підтвердженого стовпця
+  період не застосовується й не приховує рядків, рядки без дати за обмеженого періоду рахуються окремо.
+- `effectivePeriod(layout, id, today)`: межі `{ from, to }`; «останні N днів» рахуються від дати, яку
+  передає виклик.
+- `instanceState(layout, schema, id, definitions)` і `sourceConsistency`: стан картки за схемою
+  профілю (`available` / `missing` / `source-missing` / `unknown-definition`), версія джерела й ролі;
+  всі картки одного джерела бачать те саме.
+- `serializeLayout` / `parseLayout` перевіряють формат, версію, ліміти й посилання розміщень; розкладку
+  новішої версії не читають. Зберігання (міграція 0018, команди) — наступний блок E4.
