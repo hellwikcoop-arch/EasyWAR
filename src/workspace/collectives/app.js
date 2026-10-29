@@ -3,6 +3,9 @@ import {
   addParticipant, changeParticipantRole, createCollective, decodeCollective,
   encodeCollective, removeParticipant, renameCollective,
 } from './collectives-core.js';
+import {
+  canCreateCollective, canCreateIdentity, checkPassword, collectiveLine, keyStoreText,
+} from './secure-core.js';
 import './collectives.css';
 
 export const contract = 1;
@@ -50,9 +53,111 @@ export async function mount(container, host) {
   const status = $('p', 'ec-status', 'Створіть колектив або відкрийте локальний файл.');
   status.setAttribute('role', 'status');
   status.setAttribute('aria-live', 'polite');
+  const secure = $('section', 'ec-card ec-secure');
   const panel = $('div', 'ec-panel');
-  root.append(header, warning, toolbar, status, panel);
+  root.append(header, secure, warning, toolbar, status, panel);
   container.append(root);
+
+  // Захищені колективи: ключ учасника профілю і колективи, створені цим профілем (Rust,
+  // міграція 0019). Пароль профілю йде лише в Rust; тут показуються відбитки й лічильники.
+  let secureState = null;
+  let secureError = '';
+  let recoveryKey = '';
+  let secureBusy = false;
+  function passwordInput() {
+    const e = $('input', 'ec-input');
+    e.type = 'password';
+    e.autocomplete = 'current-password';
+    e.maxLength = 1024;
+    e.placeholder = 'Пароль профілю';
+    return e;
+  }
+  async function secureAction(fn) {
+    if (secureBusy) return;
+    secureBusy = true; secureError = ''; renderSecure();
+    try { await fn(); secureState = await host.collectives.status(); }
+    catch (error) { secureError = String(error?.message || error || 'Не вдалося виконати дію.'); }
+    finally { secureBusy = false; renderSecure(); }
+  }
+  function renderSecure() {
+    secure.replaceChildren($('p', 'ec-label', 'ЗАХИЩЕНИЙ КОЛЕКТИВ'), $('h2', '', 'Ключ учасника і захищені колективи'));
+    if (!host.collectives) {
+      secure.append($('p', 'ec-caption', 'Доступно лише в настільному застосунку EasyWAR: ключ зберігається на цьому комп’ютері під паролем профілю.'));
+      return;
+    }
+    if (!secureState) {
+      secure.append($('p', 'ec-caption', secureError || 'Читаю стан…'));
+      return;
+    }
+    secure.append($('p', 'ec-caption', keyStoreText(secureState)));
+    if (secureState.identity) {
+      const id = $('p', 'ec-fingerprint');
+      id.append($('span', 'ec-label', 'Ваш відбиток: '), $('code', '', secureState.identity.fingerprint),
+        $('span', 'ec-label', '  Пристрій: '), $('code', '', secureState.identity.deviceFingerprint));
+      secure.append(id);
+    }
+    if (recoveryKey) {
+      const box = $('div', 'ec-recovery');
+      box.append($('p', 'ec-label', 'КЛЮЧ ВІДНОВЛЕННЯ — ПОКАЗУЄТЬСЯ ОДИН РАЗ'),
+        $('code', 'ec-recovery-key', recoveryKey),
+        $('p', 'ec-caption', 'Запишіть його окремо від комп’ютера. Без пароля профілю і без цього ключа секрети не відновити.'));
+      const hide = button('Я записав(ла), сховати');
+      hide.addEventListener('click', () => { recoveryKey = ''; renderSecure(); });
+      box.append(hide);
+      secure.append(box);
+    }
+    if (canCreateIdentity(secureState)) {
+      const form = $('form', 'ec-inline');
+      const pass = passwordInput();
+      const submit = button('Створити ключ учасника');
+      submit.type = 'submit';
+      submit.disabled = secureBusy;
+      form.append(field('Пароль профілю', pass), submit);
+      form.addEventListener('submit', event => {
+        event.preventDefault();
+        secureAction(async () => {
+          checkPassword(pass.value);
+          const created = await host.collectives.createIdentity(pass.value);
+          pass.value = '';
+          recoveryKey = created.recoveryKey;
+        });
+      });
+      secure.append(form);
+    }
+    const list = $('div', 'ec-list');
+    for (const item of secureState.collectives) {
+      const row = $('div', 'ec-row');
+      row.append($('span', 'ec-person', item.name), $('code', '', item.fingerprint), $('span', 'ec-caption', collectiveLine(item)));
+      list.append(row);
+    }
+    if (secureState.collectives.length) secure.append($('h3', '', `Ваші колективи (${secureState.collectives.length}/20)`), list);
+    if (canCreateCollective(secureState)) {
+      const form = $('form', 'ec-inline');
+      const name = input('Назва колективу');
+      const pass = passwordInput();
+      const submit = button('Створити захищений колектив');
+      submit.type = 'submit';
+      submit.disabled = secureBusy;
+      form.append(field('Назва', name), field('Пароль профілю', pass), submit);
+      form.addEventListener('submit', event => {
+        event.preventDefault();
+        secureAction(async () => {
+          checkPassword(pass.value);
+          await host.collectives.create(pass.value, name.value);
+          pass.value = ''; name.value = '';
+        });
+      });
+      secure.append(form);
+    }
+    if (secureError) {
+      const err = $('p', 'ec-status', secureError);
+      err.dataset.error = 'true';
+      secure.append(err);
+    }
+    secure.append($('p', 'ec-caption', 'Запрошення, вступ інших учасників і обмін даними з’являться на наступних етапах; зараз колектив існує лише на цьому комп’ютері.'));
+  }
+  renderSecure();
+  if (host.collectives) secureAction(async () => {});
 
   function notice(message, error = false) {
     status.textContent = message;
