@@ -12,7 +12,7 @@
 import assert from 'node:assert/strict';
 import { access, readFile, readdir } from 'node:fs/promises';
 import test from 'node:test';
-import { SITUATION_APPS, WORKSPACE_APPS } from '../src/workspace/workspace-core.js';
+import { WORKSPACE_APPS, opensInEditorWindow } from '../src/workspace/workspace-core.js';
 
 const root = new URL('../', import.meta.url);
 const read = path => readFile(new URL(path, root), 'utf8');
@@ -153,8 +153,9 @@ test('вікно редактора відкриває всі підключен
   const allowed = [...list[2].matchAll(/"([a-z0-9]+)"/g)].map(match => match[1]);
   assert.equal(Number(list[1]), allowed.length, 'довжина масиву збігається зі списком');
   const connected = [];
-  // Застосунки «Обстановки» (погода) лишаються в головному вікні й у вікно редактора не потрапляють.
-  for (const app of WORKSPACE_APPS.filter(entry => !SITUATION_APPS.includes(entry))) {
+  // Застосунки без файлів («Обстановка», «Колектив (демо)») лишаються в головному вікні й у вікно
+  // редактора не потрапляють — те саме правило, що й в оболонці (opensInEditorWindow).
+  for (const app of WORKSPACE_APPS.filter(entry => opensInEditorWindow(entry.id))) {
     const present = await access(new URL(`src/workspace/${app.id}/app.js`, root)).then(() => true, () => false);
     if (present) connected.push(app.id);
   }

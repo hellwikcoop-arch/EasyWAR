@@ -91,15 +91,30 @@ export const AVIATION_APPS = Object.freeze([
   }),
 ]);
 
-/** Усі застосунки модуля в порядку розділів. */
-export const WORKSPACE_APPS = Object.freeze([...OFFICE_APPS, ...SITUATION_APPS, ...PERSONAL_APPS, ...AVIATION_APPS]);
+/**
+ * Застосунки розділу «Колектив»: спільні таблиці учасників колективу. Зараз — лише демонстрація
+ * S1 у пам'яті вікна (без мережі, команд Tauri, профілів і збереження; src/workspace/collective-demo).
+ */
+export const COLLECTIVE_APPS = Object.freeze([
+  app({
+    id: 'collective-demo',
+    title: 'Колектив (демо)',
+    kind: 'Спільна таблиця',
+    hint: 'Демонстрація «Доповісти» → «Звірити» між двома учасниками — без мережі та збереження',
+    extensions: [],
+  }),
+]);
 
-/** Розділи модуля: «Офіс», «Обстановка», «Особисте» і «Авіація». */
+/** Усі застосунки модуля в порядку розділів. */
+export const WORKSPACE_APPS = Object.freeze([...OFFICE_APPS, ...SITUATION_APPS, ...PERSONAL_APPS, ...AVIATION_APPS, ...COLLECTIVE_APPS]);
+
+/** Розділи модуля: «Офіс», «Обстановка», «Особисте», «Авіація» і «Колектив». */
 export const WORKSPACE_SECTIONS = Object.freeze([
   Object.freeze({ id: 'office', title: 'Офіс', eyebrow: 'ЛОКАЛЬНІ ЗАСТОСУНКИ', subtitle: 'Оберіть застосунок для роботи з файлами на цьому комп’ютері.', apps: Object.freeze(OFFICE_APPS.map(entry => entry.id)) }),
   Object.freeze({ id: 'situation', title: 'Обстановка', eyebrow: 'ПОТОЧНА ОБСТАНОВКА', subtitle: 'Погода у вибраному населеному пункті: вручну або з інтернету, якщо ви його ввімкнете.', apps: Object.freeze(SITUATION_APPS.map(entry => entry.id)) }),
   Object.freeze({ id: 'personal', title: 'Особисте', eyebrow: 'ПЕРСОНАЛЬНІ ІНСТРУМЕНТИ', subtitle: 'Розрахунки й журнали лише для вас, у локальному файлі на цьому комп’ютері.', apps: Object.freeze(PERSONAL_APPS.map(entry => entry.id)) }),
   Object.freeze({ id: 'aviation', title: 'Авіація', eyebrow: 'ЛЬОТНА РОБОТА', subtitle: 'Льотні перевірки, допуски й штурманські документи у вашому локальному файлі.', apps: Object.freeze(AVIATION_APPS.map(entry => entry.id)) }),
+  Object.freeze({ id: 'collective', title: 'Колектив', eyebrow: 'СПІЛЬНА РОБОТА', subtitle: 'Спільні таблиці учасників колективу. Зараз — демонстрація без мережі та збереження.', apps: Object.freeze(COLLECTIVE_APPS.map(entry => entry.id)) }),
 ]);
 
 export function appById(id) {
@@ -113,10 +128,11 @@ export function sectionOfApp(id) {
 
 /**
  * Чи відкривати застосунок в окремому вікні редактора (лише office_*). Застосунки «Обстановки» —
- * наш код без файлів і чужого WASM, їм потрібні власні команди головного вікна (погода).
+ * наш код без файлів і чужого WASM, їм потрібні власні команди головного вікна (погода). «Колектив (демо)»
+ * теж без файлів і без команд Tauri — лишається в iframe головного вікна, як погода.
  */
 export function opensInEditorWindow(id) {
-  return Boolean(appById(id)) && !SITUATION_APPS.some(entry => entry.id === id);
+  return Boolean(appById(id)) && ![...SITUATION_APPS, ...COLLECTIVE_APPS].some(entry => entry.id === id);
 }
 
 /**
@@ -339,6 +355,7 @@ export const APP_ICONS = Object.freeze({
   easydoc: [['path', { d: 'M6 2.5h8l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-17a1 1 0 0 1 1-1Z' }], ['path', { d: 'M14 2.5v4h4M8 11h7M8 14.5h7M8 18h5' }]],
   easyslide: [['rect', { x: '2.5', y: '4', width: '19', height: '14', rx: '2' }], ['path', { d: 'm6.5 14 3-3 2.5 2 4-4M12 18v3m-4 0h8' }]],
   weather: [['path', { d: 'M7 17.5h10a3.75 3.75 0 0 0 .55-7.46A5.25 5.25 0 0 0 7.4 9.1 4.2 4.2 0 0 0 7 17.5Z' }], ['path', { d: 'M8.5 21h7' }]],
+  'collective-demo': [['circle', { cx: '8', cy: '8', r: '3' }], ['circle', { cx: '16', cy: '8', r: '3' }], ['path', { d: 'M3 20c0-3 2.2-5 5-5s5 2 5 5M11 20c0-3 2.2-5 5-5s5 2 5 5' }]],
   easypay: [['rect', { x: '3', y: '6', width: '18', height: '12', rx: '2' }], ['circle', { cx: '12', cy: '12', r: '2.5' }], ['path', { d: 'M6.5 9.5v.01M17.5 14.5v.01' }]],
 });
 

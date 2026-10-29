@@ -1,0 +1,54 @@
+.cd-root{max-width:1320px;margin:0 auto;padding:16px;display:grid;gap:14px;font:400 14px/1.5 var(--sans);color:var(--text)}
+.cd-header{display:grid;grid-template-columns:1fr auto;gap:6px 16px;align-items:start}
+.cd-title h1{margin:0;font:600 30px/1.15 var(--sans)}
+.cd-subtitle{margin:2px 0 0;color:var(--muted);font-size:13px}
+.cd-header .cd-button{grid-column:2;grid-row:1}
+.cd-notice{grid-column:1 / -1;margin:0;padding:8px 12px;border:1px solid #c8a24a;border-radius:8px;background:rgba(200,162,74,.14);font-weight:600}
+.cd-detail{grid-column:1 / -1;margin:0;color:var(--muted);font-size:12px}
+.cd-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(520px,1fr));gap:14px}
+.cd-card{display:grid;gap:10px;align-content:start;padding:14px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+.cd-card--a{border-top:3px solid var(--accent)}
+.cd-card--b{border-top:3px solid #5a9e6f}
+.cd-card-head{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.cd-card-head h2{margin:0;font:600 18px/1.2 var(--sans)}
+.cd-muted{margin:0;color:var(--muted);font-size:12px}
+.cd-badge{font:500 11px/1.4 var(--mono);padding:2px 8px;border:1px solid var(--line-2);border-radius:999px;color:var(--muted)}
+.cd-toggle{display:flex;gap:6px;align-items:center;font-size:13px;cursor:pointer}
+.cd-message{margin:0;padding:6px 10px;border-radius:8px;border:1px solid var(--line-2);font-size:13px}
+.cd-message--warn{border-color:#c8a24a;background:rgba(200,162,74,.12)}
+.cd-table-wrap{overflow-x:auto}
+.cd-table{width:100%;border-collapse:collapse;font-size:13px}
+.cd-table caption{text-align:left;color:var(--muted);font-size:12px;padding-bottom:4px}
+.cd-table th{text-align:left;font:500 11px/1.4 var(--mono);color:var(--muted);text-transform:uppercase;padding:4px}
+.cd-table td{padding:2px 4px;border-top:1px solid var(--line)}
+.cd-cell{width:100%;min-width:70px;box-sizing:border-box;font:inherit;color:var(--text);background:transparent;border:1px solid transparent;border-radius:6px;padding:4px 6px}
+.cd-cell:focus{border-color:var(--accent);outline:none;background:var(--raised)}
+.cd-cell--changed{border-color:#c8a24a;background:rgba(200,162,74,.16)}
+.cd-row--draft td{background:rgba(200,162,74,.06)}
+.cd-version{font:400 11px/1.4 var(--mono);color:var(--muted)}
+.cd-actions{display:flex;flex-wrap:wrap;gap:8px}
+.cd-button{font:500 13px/1.3 var(--sans);color:var(--text);background:transparent;border:1px solid var(--line-2);border-radius:8px;padding:6px 14px;min-height:34px;cursor:pointer}
+.cd-button--primary{border-color:var(--accent);background:var(--accent);color:var(--panel)}
+.cd-button:hover:not(:disabled),.cd-button:focus-visible{border-color:var(--accent);outline:2px solid transparent}
+.cd-button:disabled{opacity:.45;cursor:default}
+.cd-preview,.cd-conflicts{display:grid;gap:8px;padding:10px 12px;border:1px solid var(--accent);border-radius:10px;background:var(--raised)}
+.cd-conflicts{border-color:#c8a24a}
+.cd-preview h3,.cd-conflicts h3{margin:0;font:600 15px/1.3 var(--sans)}
+.cd-diff dl{display:grid;grid-template-columns:max-content 1fr;gap:2px 12px;margin:4px 0 0}
+.cd-diff dt{color:var(--muted)}
+.cd-diff dd{margin:0}
+.cd-changed{font-weight:600}
+.cd-changed .cd-before{text-decoration:line-through;color:var(--muted)}
+.cd-arrow{color:var(--muted)}
+.cd-conflict{display:grid;gap:4px;padding-top:6px;border-top:1px solid var(--line)}
+.cd-conflict p{margin:0}
+.cd-dashboard{margin:0;padding:10px 12px;border:1px solid var(--line);border-radius:10px}
+.cd-dashboard figcaption{color:var(--muted);font-size:12px;margin-bottom:6px}
+.cd-dashboard svg{width:100%;max-width:520px;height:auto}
+.cd-bar{fill:var(--accent)}
+.cd-bar-label,.cd-bar-value{fill:var(--text);font:400 12px var(--sans)}
+.cd-log summary{cursor:pointer;color:var(--muted);font-size:12px}
+.cd-log ol{margin:6px 0 0;padding-left:18px;font-size:12px;display:grid;gap:2px}
+.cd-log--conflict,.cd-log--rejected{color:#c8a24a}
+@media (prefers-reduced-motion:reduce){.cd-root *{transition:none!important}}
+@media (max-width:640px){.cd-grid{grid-template-columns:1fr}.cd-header{grid-template-columns:1fr}.cd-header .cd-button{grid-column:1;grid-row:auto}}
