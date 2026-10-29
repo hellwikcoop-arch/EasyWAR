@@ -46,6 +46,7 @@ import { chartModel, takeoffHoursModel, tickerItems } from './dashboard-module-c
 import { MINE_LABEL, MINE_SLOT } from './personal-dashboard.js';
 import { mountChart } from './dashboard-module-charts.js';
 import { columnPicker } from './dashboard-module-picker.js';
+import { forgetProfileSchemaModule, syncProfileSchemaModules } from './profile-schema-client.js';
 import {
   buildImport,
   correctionOutcome,
@@ -237,12 +238,20 @@ function initialize() {
       // Порожній набір після збою не можна редагувати: збереження стерло б наявні рядки.
       const loaded = await Promise.all(state.modules.map(async module => [module.id, await readModulePayload(invoke, module)]));
       state.data = new Map(loaded);
+      keepProfileSchema(syncProfileSchemaModules(invoke, state.modules));
     } catch (error) {
       state.modules = [];
       state.data.clear();
       state.profileMissing = /профіл/i.test(String(error));
     }
     renderHost();
+  }
+
+  // Схема профілю (E3) допоміжна: збій її запису не повинен заважати модулям, тож лише попередження в консолі.
+  function keepProfileSchema(pending) {
+    pending.then(result => {
+      if (!result.ok && result.code !== 'profile_required') console.warn('Схема профілю не оновлена:', result.message);
+    }).catch(error => console.warn('Схема профілю не оновлена:', error));
   }
 
   function renderHost() {
@@ -362,6 +371,7 @@ function initialize() {
       const result = await runModuleDelete(invoke, module);
       if (result.status === 'deleted') {
         state.tableViews.delete(module.id);
+        keepProfileSchema(forgetProfileSchemaModule(invoke, module.id));
         showToast(`Модуль «${module.title}» видалено.`);
         await loadModules();
         host.querySelector('.ewmc-add')?.focus();

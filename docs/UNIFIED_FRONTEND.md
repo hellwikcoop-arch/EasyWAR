@@ -578,6 +578,8 @@ by hand with narrow anchored patches (see `AGENTS.md`), then run
 видаленням стовпця (`columnDependents`). Збереження — `src/profile-schema-client.js` над командами
 `get_profile_schema`, `save_profile_schema`, `reset_profile_schema` (Rust: `profile_schema.rs`, таблиця
 `profile_schemas`, міграція 0017): профіль береться з сеансу, запис вимагає ревізії, яку клієнт
-прочитав, а при конфлікті зміна один раз повторюється на свіжій схемі. У дашборди й екран
-підтвердження схему ще не підключено (залишок E3). Тести — `tests/profile-schema.test.mjs`,
+прочитав, а при конфлікті зміна один раз повторюється на свіжій схемі. Модулі дашборда
+користувача вже є джерелами схеми (`profile-schema-modules-core.js`; синхронізація після кожного
+читання модулів у `dashboard-module-catalog.js`, прибирання джерела після видалення модуля). Екран
+підтвердження і читання дашбордів за схемою ще не підключено (залишок E3). Тести — `tests/profile-schema.test.mjs`,
 `tests/profile-schema-client.test.mjs`.
