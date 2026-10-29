@@ -39,7 +39,10 @@ impl CandidateProof {
     }
 
     pub fn member_id(&self) -> Result<MemberId, Reason> {
-        Ok(self.binding.verify(&self.binding.collective_id)?.member_id())
+        Ok(self
+            .binding
+            .verify(&self.binding.collective_id)?
+            .member_id())
     }
 
     /// Strict signed-key consistency, bound to the *expected* collective.
