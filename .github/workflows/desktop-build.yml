@@ -31,9 +31,13 @@ permissions:
 # Actions are pinned to full commit SHAs (the resolved tag commits from CI logs);
 # the trailing comment names the release line the SHA belongs to.
 
+# A newer run cancels the older one only for pull requests and other branches.
+# Pushes to main and release tags are never cancelled: each commit gets its own
+# group, so a burst of merges still leaves a finished result for every commit
+# (on 2026-10-29 seven main runs in a row were cancelled and no result was left).
 concurrency:
-  group: desktop-build-${{ github.ref }}
-  cancel-in-progress: true
+  group: desktop-build-${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
 
 env:
   RELEASE_BUILD: ${{ startsWith(github.ref, 'refs/tags/v') }}

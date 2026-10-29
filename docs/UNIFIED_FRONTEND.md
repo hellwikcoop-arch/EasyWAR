@@ -578,6 +578,70 @@ by hand with narrow anchored patches (see `AGENTS.md`), then run
 видаленням стовпця (`columnDependents`). Збереження — `src/profile-schema-client.js` над командами
 `get_profile_schema`, `save_profile_schema`, `reset_profile_schema` (Rust: `profile_schema.rs`, таблиця
 `profile_schemas`, міграція 0017): профіль береться з сеансу, запис вимагає ревізії, яку клієнт
-прочитав, а при конфлікті зміна один раз повторюється на свіжій схемі. У дашборди й екран
-підтвердження схему ще не підключено (залишок E3). Тести — `tests/profile-schema.test.mjs`,
+прочитав, а при конфлікті зміна один раз повторюється на свіжій схемі. Модулі дашборда
+користувача вже є джерелами схеми (`profile-schema-modules-core.js`; синхронізація після кожного
+читання модулів у `dashboard-module-catalog.js`, прибирання джерела після видалення модуля). Екран «Ролі стовпців»
+(`profile-schema-panel.js` + `profile-schema-view-core.js`) — розділ над таблицею на сторінці модуля;
+читання дашбордів за підтвердженими ролями ще не підключено (залишок E3). Тести — `tests/profile-schema.test.mjs`,
 `tests/profile-schema-client.test.mjs`.
+
+## Екземпляри модулів і розкладка (E4)
+
+`src/module-instance-core.js` — чисте ядро розкладки «Мій дашборд» профілю без DOM, сховищ і
+годинника (поки ніде не підключене до екрана):
+
+- `emptyLayout(profileId)`, `addInstance`, `duplicateInstance`, `removeInstance`, `updateInstance`,
+  `rebindInstance`, `placeInstance`, `setSharedPeriod`: усі повертають нову заморожену розкладку або
+  `{ ok: false, code }`. Один модуль на одній таблиці — до `MAX_COPIES` (4) разів (різні таблиці одного шаблону лічаться окремо); кожен екземпляр має власні назву,
+  період (`shared` / `all` / `last-days` / `range`) і стиль, а також розміщення `{ x, y, w, h }` на сітці
+  12 колонок.
+- `src/module-instance-modules-core.js`: кожен модуль користувача має принаймні одну картку
+  (`ensureModuleInstances`, `forgetModuleInstances`; визначення — `rust-template:<шаблон>`), період діє
+  за підтвердженою роллю «Дата події» (`periodColumn`, `rowsInPeriod`): без підтвердженого стовпця
+  період не застосовується й не приховує рядків, рядки без дати за обмеженого періоду рахуються окремо.
+- `effectivePeriod(layout, id, today)`: межі `{ from, to }`; «останні N днів» рахуються від дати, яку
+  передає виклик.
+- `instanceState(layout, schema, id, definitions)` і `sourceConsistency`: стан картки за схемою
+  профілю (`available` / `missing` / `source-missing` / `unknown-definition`), версія джерела й ролі;
+  всі картки одного джерела бачать те саме.
+- `serializeLayout` / `parseLayout` перевіряють формат, версію, ліміти й посилання розміщень; розкладку
+  новішої версії не читають. Збереження — `src/dashboard-layout-client.js`
+  (`loadDashboardLayout`, `saveDashboardLayout`, `resetDashboardLayout`, `updateDashboardLayout`
+  з одним повтором на свіжій розкладці при конфлікті ревізій) і команди `get_dashboard_layout`,
+  `save_dashboard_layout`, `reset_dashboard_layout` (профіль із сеансу); екрана конструктора ще нема.
+
+Екран (перший крок конструктора) — `src/dashboard-layout-panel.js` (показ: `sharedPeriodBar`,
+`instanceBar`) і `src/dashboard-layout-view-core.js` (модель: `cardModel`, `orderedCards`, вибір
+періоду). У `dashboard-module-catalog.js` `loadModules` після читання модулів кличе `syncLayout`
+(кожному модулю картка, свіжа схема профілю), `renderHost` малює картки за розкладкою (збій розкладки
+повертає малювання «по одному на модуль»), `renderModule(module, payload, placed)` показує рядки
+періоду картки. Зміни розкладки — через `changeLayout` (`updateDashboardLayout`, один повтор при
+конфлікті ревізій). Картки стоять у порядку розміщень; перетягування, розмір, колір і фон — наступні
+кроки E4.
+
+## Повторний імпорт з переглядом змін (E3в, ядро)
+
+`src/table-update-core.js` — чисте ядро без DOM, Tauri, годинника й мережі (поки не підключене до екрана):
+`fileFingerprint(headers)` і `recognizeSource(sources, headers)` упізнають відому таблицю за заголовками;
+`suggestKeyColumns(fields, oldRows, newRows)` пропонує ключ рядка; `diffRows({ fields, oldRows, newRows,
+keyColumns, correctedCells })` дає додані, змінені, зниклі й неоднозначні рядки та лічильники (`counts`);
+`previewDiff` обрізає списки для показу; `applyDiff(oldRows, diff, { removed })` збирає нові рядки модуля
+(змінені значення беруться з нової версії, крім виправлених вручну; зниклі лишаються, якщо користувач
+не обрав `remove`). Без ключа порівняння не виконується (`no_key`), рядки не зіставляються за порядком.
+
+Екран: `src/dashboard-module-update.js` (`updatePanel({ el, invoke, module, payload, onApplied, onConflict })`,
+`<details>` на сторінці модуля після «Ролей стовпців», не монтується для таблиці лише для читання) і
+`src/table-update-view-core.js` (`summaryLines`, `hasChanges`, `changeText`, `rowLabel`, `readiness`,
+`keyOptions`). Єдиний запис — `replace_dashboard_module_rows` з `replaceRowsRequest`, тобто з перевіркою
+позначки версії; огляд файла забувається (`release: true`) після застосування й при згортанні панелі.
+
+Розмір і порядок карток (E4): `module-instance-core.js` — `SIZE_CHOICES`, `orderedIds`, `moveInstance(layout, id, targetId)`,
+`resizeInstance(layout, id, width)`; `dashboard-layout-view-core.js` — `sizeChoices(width)`, `orderedCards` повертає й
+`at` (розміщення). `instanceBar` має список розміру, кнопки `move-earlier`/`move-later` і ручку `drag-card`;
+`renderModule` ставить `grid-column: span w`, сітка `.ewmc-dashboard-grid[data-layout]` — 12 колонок, а картка
+приймає `drop` від ручки іншої. Висоту `h` розкладка зберігає, але екран її поки не застосовує.
+Стиль картки: `dashboard-layout-view-core.js` — `STYLE_CHOICES` (три стилі каталогу), `cardStyle(moduleStyle, instance)`;
+вибір лежить у `instance.style.background` (`standard`/`branch`/`heightwell`; старе `plain` = `standard`). Без вибору звичайний
+стиль модуля стає `branch`, власний стиль модуля не перебивається. CSS — наявний `module-styles.css`, нових правил немає;
+список у смужці картки — `data-action=card-style`.
+
