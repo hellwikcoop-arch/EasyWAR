@@ -196,7 +196,7 @@ export function removeSource(schema, sourceId) {
   const next = fresh(schema);
   next.sources = next.sources.filter(source => source.id !== sourceId);
   next.bindings = next.bindings.filter(binding => binding.sourceId !== sourceId);
-  // Зв'язки джерела зникають разом із ним; група, що без нього розпалась чи спорожніла, розпускається (її можна скласти знову).
+  // Зв'язки джерела зникають разом із ним; група, що без нього розпалась чи лишилась з однієї таблиці, розпускається (її можна скласти знову).
   const removedRelations = (next.relations || []).filter(relation => relation.left.sourceId === sourceId || relation.right.sourceId === sourceId).map(relation => relation.id);
   const dissolvedGroups = [];
   if (Array.isArray(next.relations)) next.relations = next.relations.filter(relation => !removedRelations.includes(relation.id));
@@ -204,7 +204,7 @@ export function removeSource(schema, sourceId) {
     next.groups = next.groups.flatMap(group => {
       const rest = group.sourceIds.filter(id => id !== sourceId);
       if (rest.length === group.sourceIds.length) return [group];
-      if (rest.length && groupConnected(rest, next.relations || [])) return [{ ...group, sourceIds: rest }];
+      if (rest.length >= 2 && groupConnected(rest, next.relations || [])) return [{ ...group, sourceIds: rest }];
       dissolvedGroups.push(group.id);
       return [];
     });

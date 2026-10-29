@@ -58,7 +58,7 @@ import { CATALOG as PS_CATALOG, KPI_TILES, VIEW_BY_BLOCK } from './ps-kpi.js';
 import { addRequest, buildRegistry } from './module-registry-view-core.js';
 import { registryPanel } from './module-registry-panel.js';
 import { linkPanel } from './table-link-panel.js';
-import { relatedLine } from './table-link-view-core.js';
+import { deleteLinksNote, relatedLine } from './table-link-view-core.js';
 import { updatePanel } from './dashboard-module-update.js';
 import {
   buildImport,
@@ -293,6 +293,11 @@ function initialize() {
       node.textContent = text;
       node.hidden = !text;
     }
+    for (const node of host.querySelectorAll('[data-delete-links-for]')) {
+      const text = state.schema ? deleteLinksNote(state.schema, `module:${node.dataset.deleteLinksFor}`) : '';
+      node.textContent = text;
+      node.hidden = !text;
+    }
   }
 
   const localDay = () => {
@@ -376,6 +381,11 @@ function initialize() {
     renderHost();
   }
 
+  function deleteNote(module) {
+    const text = state.schema ? deleteLinksNote(state.schema, `module:${module.id}`) : '';
+    return el('p', { class: 'ewmc-delete-links', 'data-delete-links-for': module.id, text, hidden: !text });
+  }
+
   function relatedNote(module) {
     const text = state.schema ? relatedLine(state.schema, `module:${module.id}`) : '';
     return el('p', { class: 'ewmc-related', 'data-related-for': module.id, text, hidden: !text });
@@ -399,6 +409,7 @@ function initialize() {
     const confirmButton = el('button', { type: 'button', class: 'btn ewmc-danger solid', text: 'Так, видалити', 'data-action': 'confirm-delete-module' });
     const confirmBox = el('div', { class: 'ewmc-confirm ewmc-module-confirm', role: 'group', 'aria-label': `Видалення модуля ${module.title}`, hidden: true },
       el('p', { text: deleteModulePrompt(module) }),
+      deleteNote(module),
       el('div', { class: 'ewmc-confirm-actions' }, keepButton, confirmButton));
     const ask = asking => {
       confirmBox.hidden = !asking;

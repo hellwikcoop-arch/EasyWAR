@@ -3,9 +3,9 @@
 // людські тексти й стан рішень (B3). Нічого не зберігає: рішення людини ухвалює і записує викликач через
 // `confirmRelation`/`rejectRelation`/`clearRelation` ядра схеми.
 
-import { CARDINALITY_LABELS, LINK_LIMITS, describeCandidate, tableFromSchema } from './table-link-core.js';
+import { CARDINALITY_LABELS, LINK_LIMITS, connectedGroups, describeCandidate, tableFromSchema } from './table-link-core.js';
 import { moduleSourceId } from './profile-schema-modules-core.js';
-import { relationId, relationsOf, staleRelations } from './profile-schema-core.js';
+import { LIMITS, groupsOf, relationId, relationsOf, staleRelations } from './profile-schema-core.js';
 
 export const REASON_TEXT = Object.freeze({
   'columns-limited': `Розглянуто не всі стовпці (понад ${LINK_LIMITS.maxColumns}).`,
@@ -181,4 +181,44 @@ export function relatedLine(schema, sourceId) {
       return `${titleOf(schema, other.sourceId)} (за «${headerOf(schema, mine)}»)${stale.has(relation.id) ? ' — перевірте' : ''}`;
     });
   return parts.length ? `Зв’язано з: ${parts.join('; ')}` : '';
+}
+
+// ─── Групи таблиць і попередження (B4) ─────────────────────────────────────────────────────────────────
+
+const clip = (value, max) => (value.length > max ? `${value.slice(0, max - 1)}…` : value);
+
+/**
+ * «Розділити по ключах»: групи з двох і більше таблиць, з'єднаних підтвердженими зв'язками. Таблиці без
+ * зв'язків у групи не потрапляють. Порядок і ідентифікатори (`g1`, `g2`…) стабільні для тих самих зв'язків.
+ */
+export function suggestedGroups(schema) {
+  const confirmed = relationsOf(schema).filter(relation => relation.status === 'confirmed');
+  const involved = [...new Set(confirmed.flatMap(relation => [relation.left.sourceId, relation.right.sourceId]))];
+  const links = confirmed.map(relation => ({ leftId: relation.left.sourceId, rightId: relation.right.sourceId }));
+  return connectedGroups(involved, links)
+    .filter(ids => ids.length >= 2)
+    .map(ids => ids.slice().sort())
+    .sort((a, b) => b.length - a.length || a[0].localeCompare(b[0]))
+    .map((ids, index) => ({ id: `g${index + 1}`, title: clip(ids.map(id => titleOf(schema, id)).join(' + '), LIMITS.textLength), sourceIds: ids }));
+}
+
+/** Чи пропоновані групи відрізняються від збережених (за складом, не за назвою). */
+export function groupsNeedSaving(schema) {
+  const mark = groups => JSON.stringify(groups.map(group => group.sourceIds.slice().sort()).sort());
+  return mark(suggestedGroups(schema)) !== mark(groupsOf(schema));
+}
+
+/** Збережені групи для показу: назва й таблиці. */
+export function savedGroupViews(schema) {
+  return groupsOf(schema).map(group => ({ id: group.id, title: group.title, tables: group.sourceIds.map(id => titleOf(schema, id)) }));
+}
+
+/** Попередження перед видаленням модуля: які зв'язки зникнуть разом із ним; порожній рядок, якщо зв'язків немає. */
+export function deleteLinksNote(schema, sourceId) {
+  const others = relationsOf(schema)
+    .filter(relation => relation.status === 'confirmed' && (relation.left.sourceId === sourceId || relation.right.sourceId === sourceId))
+    .map(relation => titleOf(schema, relation.left.sourceId === sourceId ? relation.right.sourceId : relation.left.sourceId));
+  if (!others.length) return '';
+  const names = [...new Set(others)].map(name => `«${name}»`).join(', ');
+  return `Зникне й підтверджений зв’язок із ${names}; решта модулів лишиться без змін.`;
 }

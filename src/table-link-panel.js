@@ -4,10 +4,11 @@
 // викликача, яка записує схему профілю. Таблиці модулів не змінюються і з пристрою нічого не відправляється; пошук
 // іде порціями (між парами віддає керування) і переривається, якщо панель зникла зі сторінки чи людина натиснула «Скасувати».
 
-import { clearRelation, confirmRelation, rejectRelation } from './profile-schema-core.js';
+import { clearRelation, clearRelations, confirmRelation, rejectRelation, setGroups } from './profile-schema-core.js';
 import { linkIssues, suggestRelations } from './table-link-core.js';
 import {
-  confirmArgs, confirmBlock, decisionOf, linkInputs, pairView, rejectArgs, rejectedRelationViews, savedRelationViews, summaryLine,
+  confirmArgs, confirmBlock, decisionOf, groupsNeedSaving, linkInputs, pairView, rejectArgs, rejectedRelationViews, savedGroupViews,
+  savedRelationViews, suggestedGroups, summaryLine,
 } from './table-link-view-core.js';
 
 const yieldToPage = () => new Promise(resolve => setTimeout(resolve, 0));
@@ -65,7 +66,35 @@ export function linkPanel({ el, schema, modules, data, apply = null, onChange = 
           el('span', { text: view.text }),
           apply ? el('button', { type: 'button', class: 'btn quiet', text: 'Знову пропонувати', 'data-action': 'restore-relation', onclick: () => decide(value => clearRelation(value, view.id), 'Пару знову пропонуватимуть.') }) : null)))));
     }
+    const groups = current ? savedGroupViews(current) : [];
+    const proposed = current && confirmed.length ? suggestedGroups(current) : [];
+    if (apply && proposed.length && groupsNeedSaving(current)) {
+      nodes.push(el('div', { class: 'ewmc-links-groups' },
+        el('p', { class: 'ewmc-links-hint', text: `Таблиці, з’єднані зв’язками, можна об’єднати в групи: ${proposed.map(group => group.title).join('; ')}. Решта таблиць лишається окремо.` }),
+        el('button', { type: 'button', class: 'btn quiet', text: 'Розділити по ключах', 'data-action': 'split-groups', onclick: () => decide(value => setGroups(value, proposed), 'Групи збережено в профілі.') })));
+    }
+    if (groups.length) {
+      nodes.push(el('h4', { class: 'ewmc-links-h', text: `Групи таблиць: ${groups.length}` }),
+        el('ul', { class: 'ewmc-links-list', 'data-links-groups': '' }, groups.map(view => el('li', {}, el('span', { text: view.title })))),
+        apply ? el('button', { type: 'button', class: 'btn quiet', text: 'Прибрати групи', 'data-action': 'clear-groups', onclick: () => decide(value => setGroups(value, []), 'Групи прибрано; зв’язки лишились.') }) : null);
+    }
+    if (apply && (confirmed.length || groups.length)) nodes.push(resetBox());
     saved.replaceChildren(...nodes);
+  }
+
+  // «Скинути зв'язки»: прибирає лише зв'язки, відхилення й групи; таблиці модулів і ролі стовпців лишаються.
+  function resetBox() {
+    const ask = el('button', { type: 'button', class: 'btn quiet ewmc-danger', text: 'Скинути зв’язки', 'data-action': 'reset-links' });
+    const keep = el('button', { type: 'button', class: 'btn quiet', text: 'Залишити' });
+    const sure = el('button', { type: 'button', class: 'btn ewmc-danger solid', text: 'Так, скинути', 'data-action': 'confirm-reset-links' });
+    const box = el('div', { class: 'ewmc-confirm', role: 'group', 'aria-label': 'Скинути зв’язки', hidden: true },
+      el('p', { text: 'Усі підтверджені й відхилені зв’язки та групи буде прибрано з профілю. Таблиці модулів і ролі стовпців не зміняться.' }),
+      el('div', { class: 'ewmc-confirm-actions' }, keep, sure));
+    const toggle = open => { box.hidden = !open; ask.hidden = open; };
+    ask.addEventListener('click', () => toggle(true));
+    keep.addEventListener('click', () => toggle(false));
+    sure.addEventListener('click', () => decide(value => clearRelations(value), 'Зв’язки скинуто.'));
+    return el('div', { class: 'ewmc-links-reset' }, ask, box);
   }
   renderSaved();
 
