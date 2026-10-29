@@ -30,7 +30,14 @@ pub const EDITOR_WINDOW_LABEL: &str = "office-editor";
 /// редактора. easyPay теж тут: його файл `.easypay` ходить лише через команди `office_*`, а вони
 /// приймають тільки це вікно. Збіг зі списком підключених застосунків перевіряє
 /// `tests/office-isolation.test.mjs`.
-pub const EDITOR_APPS: [&str; 6] = ["easygreen", "easydoc", "easyslide", "easypay", "easyfly", "collectives"];
+pub const EDITOR_APPS: [&str; 6] = [
+    "easygreen",
+    "easydoc",
+    "easyslide",
+    "easypay",
+    "easyfly",
+    "collectives",
+];
 
 /// Найбільший файл, який застосунок може відкрити або зберегти.
 pub const MAX_FILE_BYTES: usize = 256 * 1024 * 1024;
