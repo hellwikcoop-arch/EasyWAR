@@ -1,12 +1,20 @@
 # ADR: криптопрофіль і ідентичність колективу
 
-**Статус:** **Рішення власника 29.10.2026 (JE, контроль J5; журнал `easywar-staff/tasks/T-0016/je-decision-R3.md`):
-JE-15 — варіант Б, умовно** (`ed25519-dalek 2.2`, `x25519-dalek 2.0`, `spake2 0.4` для C2p; без
-переходу на покоління 0.11 у R3; обов'язкова незалежна перевірка протоколу обгортки ключів і
-векторів перед production — розділ 5); **JE-16 — варіант а** (`expiry` лише всередині payload,
-TTL сховища — його локальна політика); JE-18 — варіант Ф (ADR P1). Реалізація — лише за окремим
-наказом C2 (R4); у цьому PR `Cargo.toml`/`Cargo.lock` не змінено, крипто-коду немає. Підпитання
-про операції відкликаного (розділ 2.4, (а)/(б)) JE ще не вирішив.  
+**Статус:** **Реалізовано в C2 (варіант Б), gate G12 — відкрито.** Рішення власника 29.10.2026
+(JE, контроль J5; журнал `easywar-staff/tasks/T-0016/je-decision-R3.md`): JE-15 — варіант Б, умовно
+(`ed25519-dalek 2.2`, `x25519-dalek 2.0`; `spake2 0.4` — лише з C2p; без переходу на покоління 0.11;
+обов'язкова незалежна перевірка протоколу обгортки ключів і векторів перед production —
+розділ 5, G12); JE-16 — варіант а (`expiry` лише всередині payload); JE-18 — варіант Ф (файл +
+Argon2id, ADR P1). Код C2 (наказ T-0017, R4): модуль `src-tauri/src/collective/` (`identity`,
+`epoch`, `envelope`, `codec`, `replay`, `secret_store`) без команд Tauri, без мережі й міграцій;
+фікстура `tests/fixtures/collective-crypto-vectors.json` читається і `cargo test collective::`,
+і `tests/collective-crypto-vectors.test.mjs` (незалежна перевірка `node:crypto`). Фактична зміна
+`Cargo.lock`: +7 крейтів (`curve25519-dalek`, `curve25519-dalek-derive`, `ed25519`, `ed25519-dalek`,
+`fiat-crypto`, `x25519-dalek`, `zeroize_derive`), версії наявних не змінено; `chacha20poly1305 0.11`
+уже був у `main` (Dependabot #169) і використовується як є; `spake2` і `ciborium` не введено.
+Підпитання JE-16 про операції відкликаного: у коді обидва правила (`RevokedPolicy::Reject` —
+робоче припущення (б), `RevokedPolicy::Quarantine` — (а)); яке ввімкнути в C3b, вирішує JE.
+Production-використання — лише після G12 ([`evidence/collectives/2026-10-29-c2-g12-checklist.md`](../evidence/collectives/2026-10-29-c2-g12-checklist.md)).  
 **Етапи:** C2a (цей ADR + перелік крейтів), C2, C2p.  
 **Пов'язане:** [`COLLECTIVES_PLAN.md`](../COLLECTIVES_PLAN.md) §6, К4, К9, Q10б;
 [`network-and-secret-boundaries.md`](network-and-secret-boundaries.md) (P1, сховище секретів);
@@ -109,7 +117,7 @@ HKDF-SHA256 + XChaCha20-Poly1305 + Argon2id (для сховища). Інший 
 
 - **AAD = канонічне кодування всіх відкритих полів** у сталому порядку (розділ 3): підміна
   будь-якого відкритого поля ламає тег.
-- **Payload** (усередині): `{op (C1b, повний рядок), author_member_id, device_id, client_time,
+- **Payload** (усередині): `{op (C1b, повний рядок), author_member_id, device_pub, client_time,
   class, table_id, op_id, membership_seq, expiry?}` + підпис Ed25519 пристрою над канонічним
   кодуванням payload з префіксом `"easywar/collective/v1/op"`. `membership_seq` — номер останнього
   запису підписаного журналу складу (C1c), який автор бачив під час створення операції;
@@ -163,8 +171,9 @@ HKDF-SHA256 + XChaCha20-Poly1305 + Argon2id (для сховища). Інший 
 
 Рекомендація J3: фіксована бінарна схема з версією (big-endian, довжини перед змінними
 полями, порядок полів як у розділі 2.4), реалізована в `src-tauri/src/collective/codec.rs`
-без нового крейта; та сама схема описана в `src/collective-envelope-core.js` лише для розбору
-відкритих полів у тестах (JS не шифрує). Якщо JE обере CBOR: `ciborium 0.2` + детермінований
+без нового крейта; другу, незалежну реалізацію тієї самої схеми (розбір і перевірка конвертів,
+обгорток і записів пристрою на `node:crypto`) містить лише тест `tests/collective-crypto-vectors.test.mjs`
+з фікстурою `tests/fixtures/collective-crypto-vectors.json`; окремого JS-модуля в застосунку немає. Якщо JE обере CBOR: `ciborium 0.2` + детермінований
 профіль RFC 8949 §4.2.1 (сортування ключів, найкоротші цілі) з власним тестом детермінованості.
 
 ## 4. Test vectors (G06)
@@ -215,6 +224,9 @@ draft-irtf-cfrg-xchacha (XChaCha20-Poly1305), RFC 9180 A.2 (лише для ва
 `rand_core`, `zeroize`), `x25519-dalek 2.0` (`static_secrets`, `zeroize`), `spake2 0.4` (C2p;
 може бути відкладений до C2p окремим `cargo add`). `ciborium` **не вводиться**, якщо JE прийме
 рекомендацію про власний codec (розділ 3); тоді зміна lock — 8 нових крейтів замість 13.
+**Факт C2 (T-0017):** +7 крейтів (`spake2` відкладено до C2p, `ciborium` не введено, `zeroize`
+вже був); `cargo audit --file src-tauri/Cargo.lock` з кореня (з `.cargo/audit.toml`) — 0 вразливостей,
+3 дозволені попередження про непідтримувані крейти Tauri/Linux.
 
 ## Наслідки
 
@@ -225,8 +237,9 @@ draft-irtf-cfrg-xchacha (XChaCha20-Poly1305), RFC 9180 A.2 (лише для ва
 
 ## Відкрите для власника
 
-Вирішено 29.10.2026: JE-15 (Б, умовно — gate G12), JE-16 (а), JE-18 (Ф). **Відкрите:** правило для
-операцій відкликаного (а)/(б), розділ 2.4; дозвіл на старт C2 — окремий наказ. Пакет рішень — `easywar-staff/reports/T-0016/je-decision-request.md`.
+Вирішено 29.10.2026: JE-15 (Б, умовно — gate G12), JE-16 (а), JE-18 (Ф); старт C2 — наказ T-0017.
+**Відкрите:** правило для операцій відкликаного (а)/(б), розділ 2.4 — у коді робоче припущення (б)
+`RevokedPolicy::Reject`, перемикач на (а) є; призначення рецензента G12 (C3 чи зовнішній). Пакет рішень — `easywar-staff/reports/T-0016/je-decision-request.md`.
 
 ## Перевірки (лише синтетичні)
 
