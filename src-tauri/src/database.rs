@@ -524,6 +524,15 @@ mod tests {
         assert!(sqlx::query("DELETE FROM collective_membership_events WHERE profile_id = ?")
             .bind(p).execute(&pool).await.is_err(), "membership history cannot be deleted");
         assert!(insert_event(2, 2).execute(&pool).await.is_err(), "replacing an old sequence is forbidden");
+        let replace_event = sqlx::query(
+            "INSERT OR REPLACE INTO collective_membership_events (profile_id, collective_id, event_seq, event_id, event_cipher, stored_at) VALUES (?, ?, 3, ?, ?, '2026-01-02')",
+        ).bind(p).bind(&collective).bind(vec![1u8; 16]).bind(vec![0u8; 80])
+            .execute(&pool).await;
+        assert!(replace_event.is_err(), "REPLACE cannot silently erase an older event via event_id");
+        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM collective_membership_events")
+            .fetch_one(&pool).await.unwrap();
+        assert_eq!(count, 2, "membership history remains unchanged");
+
 
         let table = vec![3u8; 16];
         sqlx::query("INSERT INTO collective_shared_tables (profile_id, collective_id, table_id, schema_version, schema_cipher, updated_at) VALUES (?, ?, ?, 1, ?, '2026-01-01')")
@@ -541,6 +550,14 @@ mod tests {
             .bind(p).bind(&collective).bind(vec![1u8; 16]).bind(&envelope).execute(&pool).await.unwrap();
         assert!(sqlx::query("INSERT INTO collective_envelopes (profile_id, collective_id, envelope_id, direction, epoch, envelope_cipher, stored_at) VALUES (?, ?, ?, 'outbound', 0, ?, '2026-01-01')")
             .bind(p).bind(&collective).bind(vec![1u8; 16]).bind(&envelope).execute(&pool).await.is_err(), "duplicate envelope cannot replace");
+        assert!(sqlx::query("INSERT OR REPLACE INTO collective_envelopes (profile_id, collective_id, envelope_id, direction, epoch, envelope_cipher, stored_at) VALUES (?, ?, ?, 'outbound', 0, ?, '2026-01-02')")
+            .bind(p).bind(&collective).bind(vec![1u8; 16]).bind(vec![9u8; 120]).execute(&pool).await.is_err(),
+            "REPLACE cannot silently replace authenticated envelope bytes");
+        assert!(sqlx::query("UPDATE collective_envelopes SET envelope_cipher = ? WHERE profile_id = ?")
+            .bind(vec![9u8; 120]).bind(p).execute(&pool).await.is_err(), "envelope immutable");
+        assert!(sqlx::query("DELETE FROM collective_envelopes WHERE profile_id = ?")
+            .bind(p).execute(&pool).await.is_err(), "envelope cannot be deleted");
+
         sqlx::query("INSERT INTO collective_envelope_receipts (profile_id, collective_id, envelope_id, status, changed_at) VALUES (?, ?, ?, 'pending', '2026-01-01')")
             .bind(p).bind(&collective).bind(vec![1u8; 16]).execute(&pool).await.unwrap();
 
