@@ -85,6 +85,7 @@ impl OfflineMailbox {
             .read(true)
             .write(true)
             .create(true)
+            .truncate(false)
             .open(PathBuf::from(lock_name))?;
         match FileExt::try_lock_exclusive(&lock_file) {
             Ok(()) => {}
