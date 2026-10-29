@@ -3464,6 +3464,111 @@ async fn profile_data_list(
         .map_err(|error| error.to_string())
 }
 
+/// Результат створення копії даних профілю (контракт для інтерфейсу).
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProfileDataBackupCreated {
+    path: String,
+    records: usize,
+}
+
+/// Копія даних профілю в файл `.ewpdb` (вибір місця — системне вікно, наявний файл не
+/// перезаписується). Файл містить лише вже зашифровані байти; лише головне вікно.
+#[tauri::command]
+async fn profile_data_backup_create(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    session: tauri::State<'_, ProfileSession>,
+    data: tauri::State<'_, ProfileDataSession>,
+    store: tauri::State<'_, ProfileDataStore>,
+) -> Result<Option<ProfileDataBackupCreated>, String> {
+    if window.label() != desktop_shell::MAIN_WINDOW_LABEL {
+        return Err(profile_data::ProfileDataError::Forbidden.to_string());
+    }
+    let profile_id = session
+        .get()
+        .ok_or_else(|| profile_data::ProfileDataError::Locked.to_string())?;
+    let keys = data
+        .keys(&profile_id)
+        .map_err(|error| data.error().unwrap_or_else(|| error.to_string()))?;
+    let dialog_app = app.clone();
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        dialog_app
+            .dialog()
+            .file()
+            .set_title("Зберегти копію даних профілю EasyWAR")
+            .set_file_name(format!(
+                "EasyWAR-profile-data.{}",
+                profile_data::ARCHIVE_EXT
+            ))
+            .add_filter("Дані профілю EasyWAR", &[profile_data::ARCHIVE_EXT])
+            .blocking_save_file()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let destination = selected.into_path().map_err(|error| error.to_string())?;
+    let store = store.inner().clone();
+    let created = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
+    let target = destination.clone();
+    let records = tauri::async_runtime::spawn_blocking(move || {
+        store.export_archive(&keys, &target, &created)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string())?;
+    Ok(Some(ProfileDataBackupCreated {
+        path: destination.to_string_lossy().into_owned(),
+        records,
+    }))
+}
+
+/// Відновлення даних профілю з файлу `.ewpdb`. `password` — пароль профілю на момент
+/// створення копії. Новіші записи профілю не затираються; лише головне вікно.
+#[tauri::command]
+async fn profile_data_backup_restore(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    session: tauri::State<'_, ProfileSession>,
+    data: tauri::State<'_, ProfileDataSession>,
+    store: tauri::State<'_, ProfileDataStore>,
+    password: String,
+) -> Result<Option<profile_data::ArchiveReport>, String> {
+    let password = zeroize::Zeroizing::new(password);
+    if window.label() != desktop_shell::MAIN_WINDOW_LABEL {
+        return Err(profile_data::ProfileDataError::Forbidden.to_string());
+    }
+    let profile_id = session
+        .get()
+        .ok_or_else(|| profile_data::ProfileDataError::Locked.to_string())?;
+    let keys = data
+        .keys(&profile_id)
+        .map_err(|error| data.error().unwrap_or_else(|| error.to_string()))?;
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title("Відновити дані профілю EasyWAR з копії")
+            .add_filter("Дані профілю EasyWAR", &[profile_data::ARCHIVE_EXT])
+            .blocking_pick_file()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let archive = selected.into_path().map_err(|error| error.to_string())?;
+    let store = store.inner().clone();
+    let report = tauri::async_runtime::spawn_blocking(move || {
+        store.import_archive(&archive, password.as_bytes(), &keys)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string())?;
+    Ok(Some(report))
+}
+
 // --- Сховище файлів «Робочого середовища» (зашифровані блоби в теці, workspace_files.rs) ---
 
 /// Тека сховища активного профілю: `<app_local_data>/workspace-files/<profile_id>`.
@@ -5064,6 +5169,8 @@ pub fn run() {
             profile_data_set,
             profile_data_remove,
             profile_data_list,
+            profile_data_backup_create,
+            profile_data_backup_restore,
             workspace_files_add,
             workspace_files_delete,
             workspace_files_export,

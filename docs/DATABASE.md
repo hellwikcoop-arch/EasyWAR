@@ -391,9 +391,11 @@ optional library slot (the same data key wrapped by `LibraryKeys::profile_data_w
 `<first 32 hex of HMAC(name key, key)>.ewd` = `EWPD` + version + 24-byte nonce + XChaCha20-Poly1305
 ciphertext, with the profile id and file name as associated data; writes are atomic. Limits: key ≤ 80
 characters, value ≤ 32 MB, ≤ 512 records per profile. Deleting a profile (also
-`delete_local_profile_with_library`) removes its directory. The backup (`backup.rs`) copies SQLite only,
-so this directory is **not** backed up; a forgotten password without a library slot makes the data
-unrecoverable. Details and the key/window rules: [`WORKSPACE.md`](WORKSPACE.md), «Дані профілю».
+`delete_local_profile_with_library`) removes its directory. The SQLite backup (`backup.rs`) does not include this directory: it has
+its own archive `.ewpdb` (`profile_data/archive.rs`: an uncompressed zip with `manifest.json`, `keyring.json`
+and the already-encrypted `records/*.ewd`, so export decrypts nothing and the file is protected by the
+profile password at the moment of the copy; restore decrypts with that password, re-encrypts for the target
+profile, merges and never overwrites a newer record). A forgotten password without a library slot makes the data unrecoverable. Details and the key/window rules: [`WORKSPACE.md`](WORKSPACE.md), «Дані профілю».
 
 ## Office library
 

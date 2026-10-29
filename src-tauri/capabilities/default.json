@@ -127,6 +127,8 @@
     "allow-profile-data-get",
     "allow-profile-data-set",
     "allow-profile-data-remove",
-    "allow-profile-data-list"
+    "allow-profile-data-list",
+    "allow-profile-data-backup-create",
+    "allow-profile-data-backup-restore"
   ]
 }
