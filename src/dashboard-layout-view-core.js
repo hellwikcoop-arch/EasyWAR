@@ -1,6 +1,6 @@
 // Модель конструктора «Мій дашборд» (E4): чиста логіка без DOM і Tauri. Показ — dashboard-layout-panel.js.
 
-import { MAX_COPIES, copiesOf, effectivePeriod } from './module-instance-core.js';
+import { MAX_COPIES, SIZE_CHOICES, copiesOf, effectivePeriod } from './module-instance-core.js';
 import { moduleSourceId } from './profile-schema-modules-core.js';
 import { periodColumn, rowsInPeriod } from './module-instance-modules-core.js';
 
@@ -43,7 +43,7 @@ export function orderedCards(layout, modules) {
     .filter(instance => byId.has(instance.sourceId))
     .map(instance => ({ instance, module: byId.get(instance.sourceId), at: place.get(instance.id) || { x: 0, y: 0 } }))
     .sort((a, b) => a.at.y - b.at.y || a.at.x - b.at.x)
-    .map(({ instance, module }) => ({ instance, module }));
+    .map(({ instance, module, at }) => ({ instance, module, at }));
 }
 
 /**
@@ -69,4 +69,10 @@ export function cardModel({ layout, schema, instance, rows, today }) {
     canDuplicate: copies < MAX_COPIES,
     removable: layout.instances.filter(item => item.sourceId === instance.sourceId).length > 1,
   };
+}
+
+/** Вибір розміру в списку: готові ширини; нестандартну (з розкладки) показуємо як окремий варіант. */
+export function sizeChoices(width) {
+  const known = SIZE_CHOICES.map(item => ({ w: item.w, label: item.label }));
+  return known.some(item => item.w === width) ? known : [...known, { w: width, label: `${width} з 12` }].sort((a, b) => a.w - b.w);
 }

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {
   LAYOUT_FORMAT, MAX_COPIES, emptyLayout, addInstance, duplicateInstance, removeInstance, updateInstance, rebindInstance,
   placeInstance, setSharedPeriod, effectivePeriod, normalizePeriod, instanceState, sourceConsistency, copiesOf,
-  serializeLayout, parseLayout,
+  serializeLayout, parseLayout, SIZE_CHOICES, orderedIds, moveInstance, resizeInstance,
 } from '../src/module-instance-core.js';
 import { emptySchema, addSource, confirmBinding } from '../src/profile-schema-core.js';
 
@@ -175,4 +175,53 @@ test('серіалізація й читання: повний круг, чуж�
   assert.equal(mutate(l => { l.placements[0].w = 99; }).errors[0].code, 'bad_placement');
   const crowded = mutate(l => { for (let n = 0; n < 4; n += 1) { l.instances.push({ ...l.instances[0], id: `x${n}` }); l.placements.push({ instanceId: `x${n}`, x: 0, y: 0, w: 1, h: 1 }); } });
   assert.equal(crowded.errors[0].code, 'too_many_copies');
+});
+
+const four = () => layoutWith(...['a', 'b', 'c', 'd'].map(id => ({ definitionId: 'by-day', sourceId: `src-${id}`, id, size: { w: 6, h: 3 } })));
+
+test('картки лягають рядками: дві половини в ряд, наступна — нижче', () => {
+  const layout = four();
+  const packedLayout = resizeInstance(layout, 'a', 6).layout;
+  assert.deepEqual(orderedIds(packedLayout), ['a', 'b', 'c', 'd']);
+  assert.deepEqual(SIZE_CHOICES.map(item => item.w), [4, 6, 8, 12]);
+});
+
+test('переставлення: вперед — після цілі, назад — перед нею, решта зсувається й кладеться рядками', () => {
+  const layout = four();
+  const forward = moveInstance(layout, 'a', 'c');
+  assert.ok(forward.ok);
+  assert.deepEqual(orderedIds(forward.layout), ['b', 'c', 'a', 'd']);
+  const back = moveInstance(forward.layout, 'd', 'b');
+  assert.deepEqual(orderedIds(back.layout), ['d', 'b', 'c', 'a']);
+  const place = Object.fromEntries(back.layout.placements.map(p => [p.instanceId, [p.x, p.y]]));
+  assert.deepEqual(place, { d: [0, 0], b: [6, 0], c: [0, 3], a: [6, 3] });
+  assert.equal(back.layout.revision, layout.revision + 2);
+});
+
+test('переставлення на себе нічого не змінює, чужі й відсутні картки відхиляються', () => {
+  const layout = four();
+  const same = moveInstance(layout, 'a', 'a');
+  assert.ok(same.ok);
+  assert.equal(same.layout.revision, layout.revision);
+  assert.equal(moveInstance(layout, 'x', 'a').code, 'unknown_instance');
+  assert.equal(moveInstance(layout, 'a', 'x').code, 'unknown_instance');
+});
+
+test('розмір: ширина змінюється, порядок зберігається, ряд перекладається', () => {
+  const layout = four();
+  const wide = resizeInstance(layout, 'a', 12);
+  assert.ok(wide.ok);
+  assert.deepEqual(orderedIds(wide.layout), ['a', 'b', 'c', 'd']);
+  const place = Object.fromEntries(wide.layout.placements.map(p => [p.instanceId, [p.x, p.y, p.w]]));
+  assert.deepEqual(place, { a: [0, 0, 12], b: [0, 3, 6], c: [6, 3, 6], d: [0, 6, 6] });
+  const same = resizeInstance(layout, 'a', 6);
+  assert.equal(same.layout.revision, layout.revision);
+  for (const bad of [0, 13, 2.5, '6', null]) assert.equal(resizeInstance(layout, 'a', bad).code, 'bad_size');
+  assert.equal(resizeInstance(layout, 'нема', 6).code, 'unknown_instance');
+});
+
+test('перекладена розкладка проходить перевірку читання', () => {
+  let layout = moveInstance(four(), 'a', 'd').layout;
+  layout = resizeInstance(layout, 'b', 8).layout;
+  assert.ok(parseLayout(serializeLayout(layout)).ok);
 });

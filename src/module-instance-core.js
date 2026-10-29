@@ -202,6 +202,80 @@ export function placeInstance(layout, instanceId, box) {
   return done(bump(next));
 }
 
+/** Ширина картки на сітці з 12 колонок: готові розміри для вибору (повна ширина — 12). */
+export const SIZE_CHOICES = Object.freeze([
+  Object.freeze({ id: 'third', w: 4, label: 'Третина' }),
+  Object.freeze({ id: 'half', w: 6, label: 'Половина' }),
+  Object.freeze({ id: 'two-thirds', w: 8, label: 'Дві третини' }),
+  Object.freeze({ id: 'full', w: 12, label: 'Вся ширина' }),
+]);
+
+/** Ідентифікатори карток у порядку показу: рядок, потім колонка. */
+export function orderedIds(layout) {
+  const place = new Map(layout.placements.map(item => [item.instanceId, item]));
+  return layout.instances
+    .map((instance, index) => ({ id: instance.id, index, at: place.get(instance.id) || { x: 0, y: 0 } }))
+    .sort((a, b) => a.at.y - b.at.y || a.at.x - b.at.x || a.index - b.index)
+    .map(item => item.id);
+}
+
+// Розкладає картки в заданому порядку рядками зліва направо: ширина збережена, висота рядка — найбільша в ньому.
+function pack(layout, ids) {
+  const place = new Map(layout.placements.map(item => [item.instanceId, item]));
+  const out = [];
+  let x = 0;
+  let y = 0;
+  let rowHeight = 0;
+  for (const id of ids) {
+    const box = place.get(id) || { w: 4, h: 3 };
+    if (x + box.w > LIMITS.gridColumns) { y += rowHeight; x = 0; rowHeight = 0; }
+    out.push({ instanceId: id, x, y, w: box.w, h: box.h });
+    x += box.w;
+    rowHeight = Math.max(rowHeight, box.h);
+  }
+  return out;
+}
+
+const packed = (layout, ids) => {
+  const placements = pack(layout, ids);
+  const last = placements.at(-1);
+  return last && last.y + last.h > LIMITS.maxRows ? null : placements;
+};
+
+/**
+ * Ставить картку на місце іншої (як переставлення елемента масиву: вперед — після неї, назад — перед нею);
+ * решту зсуває, а всі картки перекладає рядками. Перетягування й кнопки «раніше/пізніше» ходять сюди.
+ */
+export function moveInstance(layout, instanceId, targetId) {
+  if (!findInstance(layout, instanceId)) return fail('unknown_instance', `Картки «${instanceId}» немає.`);
+  if (!findInstance(layout, targetId)) return fail('unknown_instance', `Картки «${targetId}» немає.`);
+  const ids = orderedIds(layout);
+  const from = ids.indexOf(instanceId);
+  const to = ids.indexOf(targetId);
+  if (from === to) return done(fresh(layout));
+  ids.splice(to, 0, ids.splice(from, 1)[0]);
+  const placements = packed(layout, ids);
+  if (!placements) return fail('bad_placement', 'Картки не вміщуються на сітці.');
+  const next = fresh(layout);
+  next.placements = placements;
+  return done(bump(next));
+}
+
+/** Змінює ширину картки (1–12 колонок) і перекладає картки рядками, зберігаючи порядок. */
+export function resizeInstance(layout, instanceId, width) {
+  if (!findInstance(layout, instanceId)) return fail('unknown_instance', `Картки «${instanceId}» немає.`);
+  if (!Number.isInteger(width) || width < 1 || width > LIMITS.gridColumns) return fail('bad_size', 'Розмір картки некоректний.');
+  const next = fresh(layout);
+  const target = next.placements.find(item => item.instanceId === instanceId);
+  if (!target) return fail('bad_placement', 'У картки немає позиції.');
+  if (target.w === width) return done(next);
+  target.w = width;
+  const placements = packed(next, orderedIds(layout));
+  if (!placements) return fail('bad_placement', 'Картки не вміщуються на сітці.');
+  next.placements = placements;
+  return done(bump(next));
+}
+
 /** Спільна панель періоду («А»): діє на всі картки з режимом `shared`. */
 export function setSharedPeriod(layout, period) {
   const normalized = normalizePeriod(period);

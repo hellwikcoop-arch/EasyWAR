@@ -2,7 +2,7 @@
 // виклики: логіка — dashboard-layout-view-core.js та module-instance-core.js, обмін із Rust —
 // dashboard-layout-client.js. Нічого не змінюється, доки людина не вибере період чи не натисне кнопку.
 
-import { PERIOD_CHOICES, choiceOf, periodFromChoice } from './dashboard-layout-view-core.js';
+import { PERIOD_CHOICES, choiceOf, periodFromChoice, sizeChoices } from './dashboard-layout-view-core.js';
 
 /** Список і поля дат для періоду. `onChange(period)` викликається, лише коли період повний і коректний. */
 function periodControl({ el, label, period, allowShared, onChange }) {
@@ -37,7 +37,7 @@ export function sharedPeriodBar({ el, layout, onChange }) {
  * Смужка картки: власний період, «Копія» і «Прибрати картку». `model` — результат `cardModel`;
  * кнопки, що неможливі, вимкнені з поясненням у підказці.
  */
-export function instanceBar({ el, instance, model, onPeriod, onDuplicate, onRemove }) {
+export function instanceBar({ el, instance, model, width = 6, canEarlier = false, canLater = false, onPeriod, onDuplicate, onRemove, onSize, onMove }) {
   const duplicate = el('button', {
     type: 'button',
     class: 'btn quiet',
@@ -58,8 +58,40 @@ export function instanceBar({ el, instance, model, onPeriod, onDuplicate, onRemo
     title: model.removable ? 'Прибрати цю картку; таблиця й дані модуля лишаються' : 'Це остання картка модуля. Щоб прибрати модуль, видаліть його',
     onclick: event => { event.currentTarget.disabled = true; onRemove(); },
   });
+  const size = el('select', { 'aria-label': `Розмір картки ${instance.title}`, 'data-action': 'card-size', title: 'Ширина картки на сітці' },
+    sizeChoices(width).map(item => el('option', { value: item.w, text: item.label, selected: item.w === width })));
+  size.addEventListener('change', () => onSize(Number(size.value)));
+  const arrow = (action, text, label, enabled, direction) => el('button', {
+    type: 'button',
+    class: 'btn quiet ewmc-move',
+    text,
+    'data-action': action,
+    'data-instance-id': instance.id,
+    'aria-label': label,
+    title: label,
+    disabled: !enabled,
+    onclick: () => onMove(direction),
+  });
+  // Ручка для перетягування: картка кладеться на місце тієї, на яку її кинули (є й кнопки «раніше/пізніше»).
+  const handle = el('span', {
+    class: 'ewmc-drag-handle',
+    draggable: 'true',
+    'data-action': 'drag-card',
+    'data-instance-id': instance.id,
+    title: 'Перетягніть картку на місце іншої',
+    'aria-hidden': 'true',
+    text: '⠿',
+  });
+  handle.addEventListener('dragstart', event => {
+    event.dataTransfer?.setData('text/plain', instance.id);
+    if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+  });
   return el('div', { class: 'ewmc-instance-bar', 'data-instance-id': instance.id },
+    handle,
     periodControl({ el, label: `Період картки ${instance.title}`, period: instance.period, allowShared: true, onChange: onPeriod }),
+    size,
+    arrow('move-earlier', '←', 'Раніше', canEarlier, -1),
+    arrow('move-later', '→', 'Пізніше', canLater, 1),
     duplicate, remove,
     model.note ? el('p', { class: 'ewmc-instance-note', role: 'status', text: model.note }) : null);
 }

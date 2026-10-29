@@ -23,7 +23,7 @@ export function ensureModuleInstances(layout, modules) {
       definitionId: moduleDefinitionId(module.templateId || 'custom'),
       sourceId,
       title: module.title,
-      size: { w: module.defaultSpan === 2 ? 8 : 4, h: 4 },
+      size: { w: module.defaultSpan === 2 ? 12 : 6, h: 4 },
     });
     if (!step.ok) return step;
     current = step.layout;
