@@ -108,6 +108,16 @@ network_policy(&NetworkContext, Purpose) -> Verdict::Allowed | Verdict::Denied(r
 
 ## 5. Додаток: перелік ресурсів для CSP (вхід для JE-21; CSP у R3 не змінюється)
 
+**Статус 29.10.2026 (T-0018, JE-21 варіант а):** CSP увімкнено в `src-tauri/tauri.conf.json` за
+таблицею нижче з уточненнями, які виявила перевірка сценаріїв (`docs/evidence/csp/2026-10-29-csp-t0018.md`):
+`frame-src 'self' https://dimap.live` (модулі лаунчера, Офіс, довідники — iframe власних сторінок),
+`font-src 'self' data:` (шрифти legacy), `media-src 'self' blob:` (заставка через blob),
+`connect-src 'self' blob: data: ipc: http://ipc.localhost` (GLTFLoader читає текстури .glb через
+`fetch(blob:)`), `form-action 'self'`; `devCsp` = те саме + `ws://localhost:5173 http://localhost:5173`;
+`dangerousDisableAssetCspModification: ["style-src"]` (Tauri додає хеші inline-скриптів — для
+`script-src` `'unsafe-inline'` у webview не діє; для стилів потрібен). Контракт —
+`tests/network-boundary.test.mjs`. Залишок P2-1 — у `docs/BACKLOG.md`.
+
 Що завантажує webview сьогодні (інвентар для майбутньої політики замість `null`; «надто вузька
 політика без перевірки не вважається виправленням», план P1):
 

@@ -234,3 +234,14 @@ test('ПС і РВ: сторінка «Перевірка даних» — за�
     assert.match(html, /\.dmain-in\[data-view="quality"\] #p-quality \{ flex-direction: column; \}/, page);
   }
 });
+
+
+test('tauri.conf.json: CSP головного вікна не null і без unsafe-eval (контракт T-0018)', async () => {
+  const conf = JSON.parse(await readFile(new URL('../src-tauri/tauri.conf.json', import.meta.url), 'utf8'));
+  const csp = conf.app.security.csp;
+  assert.equal(typeof csp, 'string');
+  assert.match(csp, /default-src 'self'/);
+  assert.match(csp, /object-src 'none'/);
+  assert.match(csp, /frame-src 'self' https:\/\/dimap\.live/);
+  assert.doesNotMatch(csp, /(^|\s)'unsafe-eval'/, "'unsafe-eval' заборонено; дозволений лише 'wasm-unsafe-eval'");
+});

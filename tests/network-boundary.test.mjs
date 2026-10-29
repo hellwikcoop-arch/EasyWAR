@@ -8,10 +8,10 @@
 //    не робить мережевих викликів і не має команди Tauri (R3 без IPC);
 // 4) перелік призначень Purpose у Rust збігається з розділом 1 ADR;
 // 5) вікно редактора «Офісу» не має мережевих дозволів, а webview не має HTTP/shell-плагінів;
-// 6) CSP головного вікна = null лишається відомим ризиком P2-1 (JE-21): друкується, не падає.
+// 6) CSP головного вікна = рядок за ADR §5 (T-0018, JE-21 а): директиви, хости й dev-варіант — контракт.
 // Це регресійний тест меж на рівні файлів, не доказ відсутності мережевих шляхів (ADR, розділ 6):
 // динамічні адреси, вендорні бандли в src/public/** і поведінку webview він не бачить; поведінкові
-// тести — C3b (run-easywar, Windows/macOS). CSP з 'unsafe-inline' не закриває P2-1.
+// тести — C3b (run-easywar, Windows/macOS). CSP з 'unsafe-inline' для скриптів закриває P2-1 лише частково.
 import assert from 'node:assert/strict';
 import { readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
@@ -158,15 +158,53 @@ test('вікно редактора без мережі, webview без HTTP/she
   }
 });
 
-test('CSP головного вікна: null — відомий ризик P2-1 (JE-21), не мовчазне «готово»', async () => {
-  const conf = JSON.parse(await read('src-tauri/tauri.conf.json'));
-  const csp = conf.app?.security?.csp;
-  assert.ok(csp === null || typeof csp === 'string' || (csp && typeof csp === 'object'), 'csp задано явно');
-  if (csp === null) {
-    console.log('network-boundary: CSP = null (беклог P2-1, рішення JE-21 відкрите; перелік ресурсів — ADR network-and-secret-boundaries.md, розділ 5)');
-  } else {
-    // Коли CSP з'явиться, вона має містити щонайменше хости плиток з переліку ADR.
-    const text = typeof csp === 'string' ? csp : JSON.stringify(csp);
-    for (const host of ['tile.openstreetmap.org', 'dimap.live']) assert.ok(text.includes(host), host);
+// Хости, яким CSP дозволяє віддавати зображення (плитки карт) і фрейми — рівно перелік ADR, розділ 5.
+const CSP_IMG_HOSTS = ['https://tile.openstreetmap.org', 'https://server.arcgisonline.com', 'https://clarity.maptiles.arcgis.com', 'https://tiles.planet.com'];
+const CSP_FRAME_HOSTS = ['https://dimap.live'];
+
+function cspDirectives(text) {
+  const out = new Map();
+  for (const part of text.split(';')) {
+    const [name, ...values] = part.trim().split(/\s+/);
+    if (name) out.set(name, values);
   }
+  return out;
+}
+
+test('CSP головного вікна задано за ADR §5 (T-0018, JE-21 а): без зовнішніх хостів поза переліком', async () => {
+  const conf = JSON.parse(await read('src-tauri/tauri.conf.json'));
+  const security = conf.app?.security ?? {};
+  assert.equal(typeof security.csp, 'string', 'csp — рядок, не null (P2-1)');
+  const csp = cspDirectives(security.csp);
+  assert.deepEqual(csp.get('default-src'), ["'self'"]);
+  assert.deepEqual(csp.get('object-src'), ["'none'"]);
+  assert.deepEqual(csp.get('base-uri'), ["'self'"]);
+  assert.deepEqual(csp.get('form-action'), ["'self'"]);
+  assert.deepEqual(csp.get('frame-src'), ["'self'", ...CSP_FRAME_HOSTS], 'iframe лише власні сторінки й dimap');
+  assert.deepEqual(csp.get('img-src'), ["'self'", 'data:', 'blob:', ...CSP_IMG_HOSTS], 'плитки лише з переліку ADR');
+  assert.deepEqual(csp.get('connect-src'), ["'self'", 'blob:', 'data:', 'ipc:', 'http://ipc.localhost'], 'fetch лише власні ресурси, blob (текстури .glb), IPC Tauri');
+  assert.deepEqual(csp.get('worker-src'), ["'self'", 'blob:'], 'worker карти з Blob');
+  assert.deepEqual(csp.get('media-src'), ["'self'", 'blob:'], 'відео заставки через blob');
+  assert.deepEqual(csp.get('font-src'), ["'self'", 'data:'], 'шрифти legacy у data:');
+  assert.deepEqual(csp.get('script-src'), ["'self'", "'unsafe-inline'", "'wasm-unsafe-eval'"], 'без unsafe-eval; WASM Офісу');
+  assert.deepEqual(csp.get('style-src'), ["'self'", "'unsafe-inline'"]);
+  // Жодного зовнішнього хоста поза переліком у будь-якій директиві.
+  const allowed = new Set([...CSP_IMG_HOSTS, ...CSP_FRAME_HOSTS, 'http://ipc.localhost']);
+  for (const [name, values] of csp) {
+    for (const v of values) if (/^https?:\/\//.test(v)) assert.ok(allowed.has(v), `${name}: ${v}`);
+  }
+  assert.ok(!security.csp.includes("'unsafe-eval'"));
+  // Tauri додає хеші/nonce до script-src (ігнорує 'unsafe-inline' для скриптів), а style-src лишає як є:
+  // динамічні <style> і style="…" у JS потребують 'unsafe-inline' для стилів.
+  assert.deepEqual(security.dangerousDisableAssetCspModification, ['style-src']);
+  // devCsp = csp + Vite dev server (HMR), і більше нічого.
+  assert.equal(typeof security.devCsp, 'string');
+  const dev = cspDirectives(security.devCsp);
+  for (const [name, values] of csp) {
+    if (name === 'connect-src') {
+      assert.deepEqual(dev.get(name), [...values, 'ws://localhost:5173', 'http://localhost:5173']);
+    } else assert.deepEqual(dev.get(name), values, name);
+  }
+  // 'unsafe-inline' для скриптів лишається до переходу legacy HTML на хеші: P2-1 закрито частково.
+  console.log("network-boundary: CSP увімкнено (T-0018); 'unsafe-inline' для legacy-скриптів — залишковий ризик P2-1");
 });
