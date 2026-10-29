@@ -485,6 +485,33 @@ impl InMemoryMembership {
         self.append(MembershipRecord::Join(*binding))
     }
 
+    /// Вступ разом із першим пристроєм — як одна операція: обидва записи або жоден
+    /// (E8-SEC-002). Запис пристрою перевіряється до будь-якої зміни журналу; якщо він усе ж
+    /// не пройде після `Join`, вступ відкочується.
+    pub fn join_with_device(
+        &mut self,
+        binding: &ExchangeBinding,
+        device: &DeviceRecord,
+    ) -> Result<(u64, u64), Reason> {
+        let bound = binding.verify(&self.collective_id)?;
+        if self.members.contains_key(&bound.member_id()) {
+            return Err(Reason::BindingNotNewer);
+        }
+        if device.member_id != bound.member_id() {
+            return Err(Reason::DeviceNotValid);
+        }
+        device.verify(bound.public())?;
+        let join_seq = self.join(binding)?;
+        match self.add_device(device) {
+            Ok(device_seq) => Ok((join_seq, device_seq)),
+            Err(reason) => {
+                self.members.remove(&bound.member_id());
+                self.log.pop();
+                Err(reason)
+            }
+        }
+    }
+
     /// Ротація ключа обміну — окремий запис журналу з новішим підписаним зв'язуванням того
     /// самого учасника; відкликаний учасник ключ не змінює.
     pub fn rotate_exchange(&mut self, binding: &ExchangeBinding) -> Result<u64, Reason> {
@@ -1215,5 +1242,45 @@ mod tests {
             MembershipRecord::from_bytes(&extra).unwrap_err(),
             Reason::Malformed
         );
+    }
+
+    #[test]
+    fn join_with_device_leaves_no_partial_join() {
+        let mut world = World::new();
+        let before = world.membership.latest_seq();
+        let bob = MemberIdentity::generate();
+        let mallory = MemberIdentity::generate();
+        let device = DeviceIdentity::generate();
+        let binding = bob.bind_exchange(world.collective, 1_761_000_100);
+        // Пристрій підписано чужим ключем, але подано від імені bob.
+        let mut forged = mallory.issue_device(&device.public(), 1_761_000_100);
+        forged.member_id = bob.member_id();
+        assert!(world
+            .membership
+            .join_with_device(&binding, &forged)
+            .is_err());
+        // Пристрій іншого учасника.
+        let foreign = mallory.issue_device(&device.public(), 1_761_000_100);
+        assert_eq!(
+            world.membership.join_with_device(&binding, &foreign),
+            Err(Reason::DeviceNotValid)
+        );
+        assert_eq!(world.membership.latest_seq(), before);
+        assert!(world.membership.bound_member(&bob.member_id()).is_none());
+        // Та сама пара після відмов проходить цілою.
+        let good = bob.issue_device(&device.public(), 1_761_000_100);
+        assert_eq!(
+            world.membership.join_with_device(&binding, &good),
+            Ok((before + 1, before + 2))
+        );
+        let latest = world.membership.latest_seq();
+        assert!(world
+            .membership
+            .device_valid_at(latest, &bob.member_id(), &device.public().0));
+        assert_eq!(
+            world.membership.join_with_device(&binding, &good),
+            Err(Reason::BindingNotNewer)
+        );
+        assert_eq!(world.membership.latest_seq(), latest);
     }
 }
