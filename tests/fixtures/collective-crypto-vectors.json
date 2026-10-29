@@ -168,11 +168,31 @@
     },
     {
       "name": "membership_seq from the future",
+      "membership": "synthetic journal without revocation, known seq 3",
+      "payload": {
+        "membership_seq": 12
+      },
+      "known_seq": 3,
+      "expect": "deferred"
+    },
+    {
+      "name": "membership_seq from the future, revoked author",
+      "membership": "synthetic journal, revocation at seq 7, known seq 9",
       "payload": {
         "membership_seq": 12
       },
       "known_seq": 9,
-      "expect": "deferred"
+      "expect": "rejected:MemberRevoked"
+    },
+    {
+      "name": "membership_seq beyond the deferral horizon",
+      "membership": "synthetic journal without revocation, known seq 3",
+      "payload": {
+        "membership_seq": 1028
+      },
+      "known_seq": 3,
+      "horizon": 1024,
+      "expect": "rejected:DeferLimit"
     }
   ]
 }
