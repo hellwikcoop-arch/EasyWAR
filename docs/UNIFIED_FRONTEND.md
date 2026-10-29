@@ -679,3 +679,33 @@ keyColumns, correctedCells })` дає додані, змінені, зниклі
 може тримати потік понад секунду (≈1,5 с у найгіршому виміряному випадку, 12 нерозпізнаних ролей), а 28 пар
 у такому випадку — десятки секунд: у майстрі B3 пошук має йти порціями.
 Збереження зв'язків у схемі профілю, майстер у «Моєму дашборді» й групи — наступні блоки, тільки за рішенням власника.
+
+## Екран «Усі визначення модулів» (реєстр E1 на екрані)
+
+`src/module-registry-view-core.js` (чисте): `buildRegistry` (шаблони Rust з `get_dashboard_module_catalog`, каталог ПС
+v1 і блоки вкладок через `listDefinitions` + `validateRegistry`), `filterDefinitions` (слова через пробіл за назвою,
+обчисленням, назвами ролей і місцями; тип, вигляд, рід військ), `facets`, `definitionView` (людські тексти, однакові
+вимоги зведені з кількістю, `addable` лише для шаблонів «Мого дашборда», що є в каталозі збірки; для решти `reason` —
+де блок уже стоїть), `addRequest` (`{ branch, templateId, title, style: 'standard' }` або `null`), `VISUAL_LABELS`
+(тест вимагає підпис для кожного виду в реєстрі). `src/module-registry-panel.js` — DOM: пошук, три списки, картки,
+кнопка `add-definition`; лише `textContent`. У `dashboard-module-catalog.js`: кнопка `show-registry` поруч із пошуком
+каталогу, `showRegistry()` (`dialog.dataset.view = 'registry'`, перелік кешується в `state.registry`), додавання —
+`create_dashboard_module` із `addRequest`, далі `loadModules()` (розкладка E4 ставить картку). Нових команд Tauri,
+записів у схему профілю, міграцій, capabilities і CSP немає. CSS — `.ewmc-reg*`, `.ewmc-catalog-tools`. Тести —
+`tests/module-registry-view.test.mjs`.
+Збереження зв'язків у схемі профілю (B2), майстер «залишити зв'язок» (B3) і групи (B4) — наступні блоки, тільки за рішенням власника.
+
+### Підказки зв'язків на екрані (E3б, показ ядра B1)
+
+`src/table-link-view-core.js` (чисте): `linkInputs(schema, modules, data)` добирає таблиці з модулів гілки
+(`tableFromSchema`; лише ті, що є в схемі й прочитані; решта в `skipped` з причиною; до `maxTables` = 8, понад
+10 000 рядків або `truncated` — усічене читання), `pairView` (кандидати з `describeCandidate`, повнота, причини й
+виключення людською мовою, питання з `linkIssues` через `issueText`; значень клітинок немає), `summaryLine`.
+`src/table-link-panel.js` — DOM: `<details class="ewmc-links">` «Зв'язки між таблицями» з кнопками
+`find-links` / `cancel-links`; пошук через `suggestRelations` із `tick` (віддає керування між парами) і
+`cancelled` (кнопка або зникла з сторінки панель, `!panel.isConnected`); лише `textContent`, без `innerHTML`.
+Панель бере `state.schema` і `state.data` каталогу й **не викликає Tauri** (нічого не пише): у
+`dashboard-module-catalog.js` її додає `renderHost` перед сіткою карток, коли модулів ≥ 2 і схему прочитано.
+CSS — `.ewmc-links*` у `dashboard-module-catalog.css`. Тести — `tests/table-link-view.test.mjs`
+(логіка й текстові контракти: імпорт, відсутність `invoke`, `innerHTML`, запису схеми).
+
