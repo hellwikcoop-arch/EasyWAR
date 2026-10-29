@@ -326,6 +326,7 @@ impl CollectiveStore {
         now_unix: i64,
     ) -> Result<CollectiveSummary, CollectiveStoreError> {
         check_password(&password)?;
+        let retry = password.clone();
         let name = collective_name(name)?;
         let row = sqlx::query(
             "SELECT sign_pub, exchange_pub, device_pub FROM collective_identities WHERE profile_id = ?",
@@ -373,31 +374,41 @@ impl CollectiveStore {
         .await
         .map_err(|error| CollectiveStoreError::Io(error.to_string()))??;
         let (collective_id, records) = records;
-        let mut tx = self.pool.begin().await?;
-        sqlx::query(
-            "INSERT INTO collectives (profile_id, collective_id, name, created_at) VALUES (?, ?, ?, ?)",
-        )
-        .bind(profile_id)
-        .bind(collective_id.as_slice())
-        .bind(&name)
-        .bind(now)
-        .execute(&mut *tx)
-        .await?;
-        for (index, record) in records.iter().enumerate() {
+        // Ключ епохи 0 уже в сховищі; якщо SQL не вдався, він прибирається (E8-SEC-001).
+        let stored = async {
+            let mut tx = self.pool.begin().await?;
             sqlx::query(
-                "INSERT INTO collective_membership_log
-                     (profile_id, collective_id, seq, record, recorded_at)
-                 VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO collectives (profile_id, collective_id, name, created_at) VALUES (?, ?, ?, ?)",
             )
             .bind(profile_id)
             .bind(collective_id.as_slice())
-            .bind(index as i64 + 1)
-            .bind(record.to_bytes())
+            .bind(&name)
             .bind(now)
             .execute(&mut *tx)
             .await?;
+            for (index, record) in records.iter().enumerate() {
+                sqlx::query(
+                    "INSERT INTO collective_membership_log
+                         (profile_id, collective_id, seq, record, recorded_at)
+                     VALUES (?, ?, ?, ?, ?)",
+                )
+                .bind(profile_id)
+                .bind(collective_id.as_slice())
+                .bind(index as i64 + 1)
+                .bind(record.to_bytes())
+                .bind(now)
+                .execute(&mut *tx)
+                .await?;
+            }
+            tx.commit().await?;
+            Ok::<_, CollectiveStoreError>(())
         }
-        tx.commit().await?;
+        .await;
+        if let Err(error) = stored {
+            self.forget_secrets(profile_id, retry, vec![epoch_purpose(&collective_id, 0)])
+                .await;
+            return Err(error);
+        }
         Ok(CollectiveSummary {
             fingerprint: fingerprint(&collective_id),
             name,

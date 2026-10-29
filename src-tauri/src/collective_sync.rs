@@ -246,6 +246,24 @@ impl CollectiveStore {
         .map_err(|error| CollectiveStoreError::Io(error.to_string()))?
     }
 
+    /// Компенсація після невдалого SQL: прибрати щойно записані секрети. Помилку прибирання
+    /// не підміняє первинну помилку; залишок після збою процесу між записом ключів і `commit`
+    /// недосяжний (ключі читаються лише для колективів, що є в базі) і перезаписується при
+    /// повторній спробі.
+    pub(crate) async fn forget_secrets(
+        &self,
+        profile_id: &str,
+        password: Zeroizing<String>,
+        purposes: Vec<String>,
+    ) {
+        let _ = self
+            .with_secrets(profile_id, password, move |unlocked, _, _| {
+                unlocked.delete_many(&purposes)?;
+                Ok(())
+            })
+            .await;
+    }
+
     fn outbox_path(&self, profile_id: &str, collective_id: &CollectiveId) -> PathBuf {
         let digest = sha256(&[OUTBOX_FILE_LABEL, profile_id.as_bytes(), collective_id]);
         let name: String = digest[..16].iter().map(|b| format!("{b:02x}")).collect();
@@ -611,35 +629,52 @@ impl CollectiveStore {
                 _ => None,
             })
             .collect();
+        // Ключі — до SQL: запис колективу в базі завжди означає, що його ключі вже в сховищі
+        // секретів. Якщо SQL не вдався, записані ключі прибираються (E8-SEC-001).
+        let purposes: Vec<String> = (0..wraps.len())
+            .map(|epoch| epoch_purpose(&collective_id, epoch as u32))
+            .collect();
+        let retry = password.clone();
+        let to_write = purposes.clone();
         self.with_secrets(profile_id, password, move |unlocked, member, _| {
             let keys = invite::accept(member, &wraps).map_err(rejected)?;
-            for (epoch, key) in keys.iter().enumerate() {
-                unlocked.write(&epoch_purpose(&collective_id, epoch as u32), key.as_bytes())?;
-            }
+            let entries: Vec<(String, &[u8])> = to_write
+                .into_iter()
+                .zip(keys.iter().map(|key| key.as_bytes().as_slice()))
+                .collect();
+            unlocked.write_many(&entries)?;
             Ok(())
         })
         .await?;
-        let mut tx = self.pool.begin().await?;
-        sqlx::query(
-            "INSERT INTO collectives (profile_id, collective_id, name, created_at) VALUES (?, ?, ?, ?)",
-        )
-        .bind(profile_id)
-        .bind(collective_id.as_slice())
-        .bind(&name)
-        .bind(now)
-        .execute(&mut *tx)
-        .await?;
-        append_records(
-            &mut tx,
-            profile_id,
-            &collective_id,
-            &membership,
-            1,
-            latest,
-            now,
-        )
-        .await?;
-        tx.commit().await?;
+        let stored = async {
+            let mut tx = self.pool.begin().await?;
+            sqlx::query(
+                "INSERT INTO collectives (profile_id, collective_id, name, created_at) VALUES (?, ?, ?, ?)",
+            )
+            .bind(profile_id)
+            .bind(collective_id.as_slice())
+            .bind(&name)
+            .bind(now)
+            .execute(&mut *tx)
+            .await?;
+            append_records(
+                &mut tx,
+                profile_id,
+                &collective_id,
+                &membership,
+                1,
+                latest,
+                now,
+            )
+            .await?;
+            tx.commit().await?;
+            Ok::<_, CollectiveStoreError>(())
+        }
+        .await;
+        if let Err(error) = stored {
+            self.forget_secrets(profile_id, retry, purposes).await;
+            return Err(error);
+        }
         Ok(JoinedCollective {
             collective: CollectiveSummary {
                 fingerprint: fingerprint(&collective_id),
@@ -1367,5 +1402,90 @@ mod tests {
             store.detail(OWNER, "ZZZZZ-ZZZZZ", UNIX).await,
             Err(CollectiveStoreError::CollectiveNotFound)
         ));
+    }
+
+    fn epoch_secrets(store: &CollectiveStore, profile: &str) -> Vec<String> {
+        store
+            .secret_store(profile)
+            .unlock(PASSWORD.as_bytes())
+            .unwrap()
+            .purposes()
+            .filter(|purpose| purpose.starts_with("collective/epoch/"))
+            .map(str::to_owned)
+            .collect()
+    }
+
+    async fn fail_inserts(store: &CollectiveStore, table: &str) {
+        sqlx::raw_sql(&format!(
+            "CREATE TRIGGER fail_{table} BEFORE INSERT ON {table}
+             BEGIN SELECT RAISE(ABORT, 'синтетична відмова'); END;"
+        ))
+        .execute(&store.pool)
+        .await
+        .unwrap();
+    }
+
+    async fn heal_inserts(store: &CollectiveStore, table: &str) {
+        sqlx::raw_sql(&format!("DROP TRIGGER fail_{table};"))
+            .execute(&store.pool)
+            .await
+            .unwrap();
+    }
+
+    /// E8-SEC-001: відмова SQL після запису ключів не лишає ключів без колективу.
+    #[tokio::test]
+    async fn create_collective_sql_failure_leaves_no_epoch_key() {
+        let (store, _dir) = node(OWNER).await;
+        // Відмова на другій вставці тієї самої транзакції: рядок колективу відкочується.
+        fail_inserts(&store, "collective_membership_log").await;
+        assert!(store
+            .create_collective(OWNER, password(), "Навчальна група", T1, UNIX)
+            .await
+            .is_err());
+        assert!(epoch_secrets(&store, OWNER).is_empty());
+        assert!(store.status(OWNER).await.unwrap().collectives.is_empty());
+        heal_inserts(&store, "collective_membership_log").await;
+        let created = store
+            .create_collective(OWNER, password(), "Навчальна група", T1, UNIX)
+            .await
+            .unwrap();
+        assert_eq!(epoch_secrets(&store, OWNER).len(), 1);
+        assert_eq!(store.status(OWNER).await.unwrap().collectives.len(), 1);
+        assert_eq!(created.latest_seq, 2);
+    }
+
+    /// E8-SEC-001: join_accept з відмовою SQL прибирає ключі епох; повтор проходить.
+    #[tokio::test]
+    async fn join_accept_sql_failure_leaves_no_epoch_keys() {
+        let (owner, _a, collective) = owner_with_collective().await;
+        let (guest, _b) = node(GUEST).await;
+        let invitation = owner
+            .create_invitation(OWNER, password(), &collective, 24, UNIX)
+            .await
+            .unwrap();
+        let request = guest
+            .join_request(GUEST, password(), &invitation.text, UNIX + 10)
+            .await
+            .unwrap();
+        let admission = owner
+            .admit(OWNER, password(), &collective, &request.text, T1, UNIX + 20)
+            .await
+            .unwrap();
+        for table in ["collectives", "collective_membership_log"] {
+            fail_inserts(&guest, table).await;
+            assert!(guest
+                .join_accept(GUEST, password(), &admission.text, T1)
+                .await
+                .is_err());
+            assert!(epoch_secrets(&guest, GUEST).is_empty(), "{table}");
+            assert!(guest.status(GUEST).await.unwrap().collectives.is_empty());
+            heal_inserts(&guest, table).await;
+        }
+        let joined = guest
+            .join_accept(GUEST, password(), &admission.text, T1)
+            .await
+            .unwrap();
+        assert_eq!(joined.collective.fingerprint, collective);
+        assert_eq!(epoch_secrets(&guest, GUEST).len(), 1);
     }
 }
