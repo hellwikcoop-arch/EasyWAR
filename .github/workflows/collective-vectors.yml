@@ -1,0 +1,41 @@
+# G06 (T-0017): одноразова перевірка `collective::` на Windows для точного SHA PR #180.
+# Запускається лише push-ем у цю бічну гілку (рішення JE 29.10.2026, варіант В1); у main не зливається.
+name: collective-vectors (G06 Windows)
+on:
+  push:
+    branches: [claude/g06-windows]
+permissions:
+  contents: read
+env:
+  SUBJECT_SHA: 70bade5e06ab781fc2906529ce415b92d2fd28b4
+jobs:
+  vectors-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 70bade5e06ab781fc2906529ce415b92d2fd28b4
+      - name: Exact SHA
+        shell: bash
+        run: |
+          git rev-parse HEAD
+          test "$(git rev-parse HEAD)" = "$SUBJECT_SHA"
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: stable
+      - name: Toolchain
+        shell: bash
+        run: |
+          rustc --version
+          cargo --version
+          uname -a
+      # Tauri вбудовує ../dist під час компіляції; для тестів досить заглушки (як у checks).
+      - name: Placeholder frontend
+        shell: bash
+        run: |
+          mkdir -p dist
+          echo '<!doctype html><title>EasyWAR</title>' > dist/index.html
+      - name: collective vectors
+        shell: bash
+        run: |
+          cargo test --locked --manifest-path src-tauri/Cargo.toml collective::
