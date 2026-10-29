@@ -46,6 +46,19 @@ import { chartModel, takeoffHoursModel, tickerItems } from './dashboard-module-c
 import { MINE_LABEL, MINE_SLOT } from './personal-dashboard.js';
 import { mountChart } from './dashboard-module-charts.js';
 import { columnPicker } from './dashboard-module-picker.js';
+import { forgetProfileSchemaModule, loadProfileSchema, syncProfileSchemaModules } from './profile-schema-client.js';
+import { loadDashboardLayout, updateDashboardLayout } from './dashboard-layout-client.js';
+import { duplicateInstance, moveInstance, removeInstance, resizeInstance, setSharedPeriod, updateInstance } from './module-instance-core.js';
+import { ensureModuleInstances, forgetModuleInstances } from './module-instance-modules-core.js';
+import { cardModel, cardStyle, orderedCards } from './dashboard-layout-view-core.js';
+import { instanceBar, sharedPeriodBar } from './dashboard-layout-panel.js';
+import { rolesPanel } from './profile-schema-panel.js';
+import { psCatalogUsage } from './module-definition-core.js';
+import { CATALOG as PS_CATALOG, KPI_TILES, VIEW_BY_BLOCK } from './ps-kpi.js';
+import { addRequest, buildRegistry } from './module-registry-view-core.js';
+import { registryPanel } from './module-registry-panel.js';
+import { linkPanel } from './table-link-panel.js';
+import { updatePanel } from './dashboard-module-update.js';
 import {
   buildImport,
   correctionOutcome,
@@ -119,7 +132,7 @@ function initialize() {
 
   // `cancelEdit` — скасування рядка, що редагується: Escape скасовує правку, а не закриває вікно разом із набраним рядком.
   // `tableViews` — пошук і група колонок сторінки кожного модуля: після збереження рядка сторінка перебудовується, а вибір лишається.
-  const state = { branch, catalog: [], modules: [], data: new Map(), busy: false, profileMissing: false, cancelEdit: null, tableViews: new Map(), leaveReview: null };
+  const state = { branch, catalog: [], modules: [], data: new Map(), busy: false, profileMissing: false, cancelEdit: null, tableViews: new Map(), leaveReview: null, layout: null, schema: null, registry: null };
   const openButton = el('button', {
     type: 'button',
     class: 'btn quiet ewmc-open',
@@ -203,7 +216,10 @@ function initialize() {
   });
   dialog.addEventListener('close', () => {
     state.cancelEdit = null;
-    if (dialog.dataset.view === 'table') focusModuleButton(dialog.dataset.module);
+    if (dialog.dataset.view === 'table') {
+      // Роль «Дата події» могли підтвердити на сторінці модуля: період карток читає свіжу схему.
+      refreshSchema().then(() => { if (state.layout) renderHost(); focusModuleButton(dialog.dataset.module); });
+    }
   });
 
   // Картки дашборда перемальовуються після кожного збереження, тож фокус іде на нову кнопку цього модуля.
@@ -237,12 +253,54 @@ function initialize() {
       // Порожній набір після збою не можна редагувати: збереження стерло б наявні рядки.
       const loaded = await Promise.all(state.modules.map(async module => [module.id, await readModulePayload(invoke, module)]));
       state.data = new Map(loaded);
+      keepProfileSchema(syncProfileSchemaModules(invoke, state.modules));
+      await syncLayout().catch(error => { state.layout = null; console.warn('Розкладку дашборда не прочитано:', error); });
     } catch (error) {
       state.modules = [];
       state.data.clear();
+      state.layout = null;
       state.profileMissing = /профіл/i.test(String(error));
     }
     renderHost();
+  }
+
+  // Розкладка (E4): кожен модуль має картку; збій розкладки не ховає модулі — дашборд тоді малює їх по одній, як раніше.
+  async function syncLayout() {
+    const result = await updateDashboardLayout(invoke, layout => ensureModuleInstances(layout, state.modules));
+    state.layout = result.ok ? result.layout : null;
+    if (!result.ok && result.code !== 'profile_required') console.warn('Розкладку дашборда не прочитано:', result.message);
+    await refreshSchema();
+  }
+
+  async function refreshSchema() {
+    const schema = await loadProfileSchema(invoke);
+    state.schema = schema.ok ? schema.schema : null;
+  }
+
+  const localDay = () => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  };
+
+  // Зміна розкладки: прочитати → змінити → зберегти; картки перемальовуються з результату.
+  async function changeLayout(change, message = '') {
+    const result = await updateDashboardLayout(invoke, change);
+    if (!result.ok) {
+      showToast(result.code === 'stale' ? 'Розкладку змінено в іншому місці. Спробуйте ще раз.' : `Не збережено: ${result.message}`, true);
+      const fresh = await loadDashboardLayout(invoke);
+      if (fresh.ok) state.layout = fresh.layout;
+    } else {
+      state.layout = result.layout;
+      if (message) showToast(message);
+    }
+    renderHost();
+  }
+
+  // Схема профілю (E3) допоміжна: збій її запису не повинен заважати модулям, тож лише попередження в консолі.
+  function keepProfileSchema(pending) {
+    pending.then(result => {
+      if (!result.ok && result.code !== 'profile_required') console.warn('Схема профілю не оновлена:', result.message);
+    }).catch(error => console.warn('Схема профілю не оновлена:', error));
   }
 
   function renderHost() {
@@ -263,7 +321,21 @@ function initialize() {
       return;
     }
     const grid = el('div', { class: 'ewmc-dashboard-grid' });
-    for (const module of state.modules) grid.append(renderModule(module, state.data.get(module.id)));
+    if (state.layout) {
+      host.append(sharedPeriodBar({ el, layout: state.layout, onChange: period => changeLayout(layout => setSharedPeriod(layout, period)) }));
+      const today = localDay();
+      const cards = orderedCards(state.layout, state.modules);
+      grid.dataset.layout = 'cards';
+      cards.forEach(({ instance, module, at }, index) => {
+        const payload = state.data.get(module.id);
+        const model = cardModel({ layout: state.layout, schema: state.schema, instance, rows: cardReadState(payload).rows, today });
+        grid.append(renderModule(module, payload, { instance, model, width: at.w, before: cards[index - 1]?.instance.id || '', after: cards[index + 1]?.instance.id || '' }));
+      });
+    } else {
+      for (const module of state.modules) grid.append(renderModule(module, state.data.get(module.id)));
+    }
+    // Підказки зв'язків між таблицями (E3б, B1): лише показ, нічого не зберігається; потрібні щонайменше дві таблиці.
+    if (state.modules.length >= 2 && state.schema) host.append(linkPanel({ el, schema: () => state.schema, modules: () => state.modules, data: () => state.data }));
     host.append(grid, ticker(tickerItems(state.modules, state.data)));
   }
 
@@ -286,8 +358,10 @@ function initialize() {
     renderHost();
   }
 
-  function renderModule(module, payload) {
-    const { state: readState, rows } = cardReadState(payload);
+  function renderModule(module, payload, placed = null) {
+    const { state: readState, rows: allRows } = cardReadState(payload);
+    // Картка розкладки показує рядки свого періоду; без розкладки — усі, як раніше.
+    const rows = placed?.model.ok ? placed.model.rows : allRows;
     const failed = readState === 'failed';
     // Видалення питає підтвердження прямо в картці: модуль зникає разом зі своєю таблицею SQLite.
     const removeButton = el('button', {
@@ -311,11 +385,34 @@ function initialize() {
     removeButton.addEventListener('click', () => ask(true));
     keepButton.addEventListener('click', () => ask(false));
     confirmButton.addEventListener('click', () => deleteModule(module, [keepButton, confirmButton]));
-    loadStyleFonts(module.style);
-    const card = el('article', { class: `ewmc-module span-${module.defaultSpan === 2 ? 2 : 1}`, 'data-kind': module.visualKind, 'data-style': module.style, 'data-branch': module.branch },
+    const shownStyle = placed ? cardStyle(module.style, placed.instance) : module.style;
+    loadStyleFonts(shownStyle);
+    const card = el('article', {
+      class: placed ? 'ewmc-module' : `ewmc-module span-${module.defaultSpan === 2 ? 2 : 1}`,
+      style: placed ? { gridColumn: `span ${placed.width}` } : null,
+      'data-kind': module.visualKind,
+      'data-style': shownStyle,
+      'data-branch': module.branch,
+      'data-instance-id': placed?.instance.id,
+    },
       el('header', { class: 'ewmc-module-head' },
-        el('div', {}, el('h3', { text: module.title }), el('p', { text: `${rowCountLabel(module.rowCount)} · локальна SQLite` })),
+        el('div', {}, el('h3', { text: placed?.instance.title || module.title }), el('p', { text: `${rowCountLabel(module.rowCount)} · локальна SQLite${placed?.model.ok ? ` · ${placed.model.periodLabel}` : ''}` })),
         el('span', { class: `ewmc-live${failed ? ' is-failed' : ''}`, text: failed ? 'Не прочитано' : module.rowCount ? 'Дані' : 'Створено' })),
+      placed?.model.ok ? instanceBar({
+        el,
+        instance: placed.instance,
+        model: placed.model,
+        onPeriod: period => changeLayout(layout => updateInstance(layout, placed.instance.id, { period })),
+        onDuplicate: () => changeLayout(layout => duplicateInstance(layout, placed.instance.id), 'Картку скопійовано: змініть їй період.'),
+        onRemove: () => changeLayout(layout => removeInstance(layout, placed.instance.id), 'Картку прибрано; таблиця й дані модуля лишились.'),
+        width: placed.width,
+        canEarlier: Boolean(placed.before),
+        canLater: Boolean(placed.after),
+        onSize: width => changeLayout(layout => resizeInstance(layout, placed.instance.id, width)),
+        style: cardStyle(module.style, placed.instance),
+        onStyle: background => changeLayout(layout => updateInstance(layout, placed.instance.id, { style: { background } })),
+        onMove: direction => changeLayout(layout => moveInstance(layout, placed.instance.id, direction < 0 ? placed.before : placed.after)),
+      }) : null,
       failed
         ? el('div', { class: 'ewmc-visual ewmc-read-failed', role: 'alert' },
           el('p', { text: `${CARD_FAILED_TEXT}. Показник не можна вважати нульовим: записи в таблиці збережені.` }),
@@ -351,6 +448,15 @@ function initialize() {
         el('p', { text: schemaSummary(module.fields) })),
     );
     if (readState === 'empty') card.querySelector('.ewmc-visual')?.append(el('p', { class: 'ewmc-no-data', text: 'Таблиця готова · даних ще немає' }));
+    if (placed) {
+      // Картку можна кинути на іншу: вона стає на її місце (ручка перетягування — в смужці картки).
+      card.addEventListener('dragover', event => event.preventDefault());
+      card.addEventListener('drop', event => {
+        event.preventDefault();
+        const draggedId = event.dataTransfer?.getData('text/plain');
+        if (draggedId && draggedId !== placed.instance.id) changeLayout(layout => moveInstance(layout, draggedId, placed.instance.id));
+      });
+    }
     return card;
   }
 
@@ -362,6 +468,8 @@ function initialize() {
       const result = await runModuleDelete(invoke, module);
       if (result.status === 'deleted') {
         state.tableViews.delete(module.id);
+        keepProfileSchema(forgetProfileSchemaModule(invoke, module.id));
+        await updateDashboardLayout(invoke, layout => forgetModuleInstances(layout, module.id)).catch(() => null);
         showToast(`Модуль «${module.title}» видалено.`);
         await loadModules();
         host.querySelector('.ewmc-add')?.focus();
@@ -406,13 +514,52 @@ function initialize() {
       el('form', { method: 'dialog', class: 'ewmc-dialog-head' },
         el('div', {}, el('p', { class: 'ewmc-eyebrow', text: 'Аналітика' }), el('h2', { id: 'ewmc-dialog-title', text: 'Каталог модулів' }), el('p', { text: 'Оберіть вигляд. EasyWAR створить картку та окрему таблицю з відповідними колонками.' })),
         el('button', { value: 'cancel', class: 'ewmc-close', 'aria-label': 'Закрити', text: '×' })),
-      search,
+      el('div', { class: 'ewmc-catalog-tools' }, search,
+        el('button', { type: 'button', class: 'btn quiet', text: 'Усі визначення', 'data-action': 'show-registry', title: 'Усі блоки дашбордів і шаблони з описом потрібних даних', onclick: showRegistry })),
       list,
     );
     paint();
     dialog.dataset.view = 'catalog';
     if (!dialog.open) dialog.showModal();
     search.focus();
+  }
+
+  // Екран «Усі визначення» (реєстр E1): шаблони «Мого дашборда», картки ПС і блоки вкладок з описом потрібних даних.
+  // Додати одним натисканням можна лише шаблон «Мого дашборда»: це той самий `create_dashboard_module`, що й у формі
+  // створення (назва шаблону, стиль «Звичайний», без підтягування з таблиці); картку на дашборді ставить розкладка E4.
+  function showRegistry() {
+    if (!state.registry) {
+      state.registry = buildRegistry({ rustTemplates: state.catalog, catalogs: [PS_CATALOG], catalogUsage: psCatalogUsage(KPI_TILES, VIEW_BY_BLOCK) });
+      if (state.registry.problems.length) console.warn('Реєстр визначень модулів:', state.registry.problems.join('; '));
+    }
+    const available = new Set(state.catalog.map(item => item.id));
+    const panel = registryPanel({
+      el, definitions: state.registry.definitions, available, branch: state.branch, branchLabel: BRANCH_LABELS[state.branch] || '',
+      onBack: showCatalog,
+      onAdd: async definition => {
+        const request = addRequest(definition, state.branch, { available });
+        if (!request || state.busy) return;
+        state.busy = true;
+        try {
+          await invoke('create_dashboard_module', request);
+          await loadModules();
+          showToast(`Модуль «${request.title}» додано на «Мій дашборд».`);
+        } catch (error) {
+          showToast(String(error || 'Не вдалося додати модуль.'), true);
+        } finally {
+          state.busy = false;
+        }
+      },
+    });
+    dialog.replaceChildren(
+      el('form', { method: 'dialog', class: 'ewmc-dialog-head' },
+        el('div', {}, el('p', { class: 'ewmc-eyebrow', text: 'Аналітика' }), el('h2', { id: 'ewmc-dialog-title', text: 'Усі визначення модулів' }),
+          el('p', { text: 'Кожен блок дашбордів і шаблон «Мого дашборда» з описом даних, яких він потребує. Додати на «Мій дашборд» можна шаблони; решта вже стоїть на своїх дашбордах.' })),
+        el('button', { value: 'cancel', class: 'ewmc-close', 'aria-label': 'Закрити', text: '×' })),
+      panel.node);
+    dialog.dataset.view = 'registry';
+    if (!dialog.open) dialog.showModal();
+    panel.focus();
   }
 
   function catalogCard(item) {
@@ -1525,6 +1672,24 @@ function initialize() {
         addButton),
       el('div', { class: 'ewmc-page-body' },
         corrections.length ? correctionsList() : null,
+        rolesPanel({ el, invoke, module, modules: () => state.modules }),
+        readOnly ? null : updatePanel({
+          el, invoke, module, payload,
+          onApplied: result => {
+            const updated = normalizeModules([result?.module])[0] || module;
+            state.modules = state.modules.map(item => item.id === module.id ? updated : item);
+            state.data.set(module.id, {
+              module: updated,
+              rows: Array.isArray(result?.rows) ? result.rows : [],
+              truncated: result?.truncated === true,
+              corrections: Array.isArray(result?.corrections) ? result.corrections : [],
+            });
+            renderHost();
+            showModulePage(updated);
+            showToast('Таблицю оновлено з нового файла.');
+          },
+          onConflict: () => reopenFresh(module.id, 'Таблицю змінено в іншому вікні. Показано актуальні дані — повторіть дію.'),
+        }),
         ...(readOnly ? [el('div', { class: 'ewmc-readonly' },
           el('p', { class: 'ewmc-form-status error', text: access.reason }),
           payload.failed === true

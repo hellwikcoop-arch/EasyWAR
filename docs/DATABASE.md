@@ -64,6 +64,15 @@ core (`src/profile-schema-core.js`) composes and validates the content. The tabl
 holds no module rows and no raw XLSX values; deleting the profile removes it
 (`ON DELETE CASCADE`). A document of a newer format version is never overwritten
 by an older application. Migration
+`0018_dashboard_layouts.sql` adds `dashboard_layouts`: one row per profile and
+dashboard (the primary key is `(profile_id, dashboard_id)`; today only `my`, «Мій
+дашборд») with the E4 layout as a JSON document of format `easywar.dashboard-layout` —
+module cards (`instances`: definition, source of the profile schema, own title, period
+and style) and grid placements. As for the profile schema, Rust checks only the envelope
+(format, supported version, owning profile, dashboard id, size limits) and a monotonic
+`revision` used as a compare-and-swap mark; the JS core (`src/module-instance-core.js`)
+composes and validates the content. No module rows or raw XLSX values are stored; deleting
+the profile removes the layouts (`ON DELETE CASCADE`). Migration
 `0012_dashboard_module_style.sql` adds `dashboard_modules.style` — the look chosen
 when the module was created: `standard` (default for existing modules), `branch`
 (colours of the dashboard's service branch) or `heightwell` («Пункт керування»);
