@@ -4795,15 +4795,61 @@ function cleanFireCrews(list) {
   }
   return out;
 }
+/* Перелік підрозділів належить профілю: у десктопі він лежить зашифрований у прихованій теці застосунку
+   (команди profile_data_*, ключ rocket.firecrews, див. docs/WORKSPACE.md «Дані профілю»), тож після входу в профіль
+   він уже на місці. Без Tauri (браузер для розробки) лишається localStorage. Старе значення з localStorage один раз
+   переноситься в профіль і прибирається тільки після перевірки читанням. */
+const FIRE_CREWS_PROFILE_KEY = 'rocket.firecrews';
+function profileInvoke() {
+  if (typeof window === 'undefined') return null;
+  for (let w = window, i = 0; w && i < 4; i++) {
+    try { const t = w.__TAURI_INTERNALS__; if (t && typeof t.invoke === 'function') return t.invoke.bind(t); } catch (e) { return null; }
+    if (w.parent === w) break;
+    w = w.parent;
+  }
+  return null;
+}
 function loadFireCrews() {
   try { const l = cleanFireCrews(JSON.parse(store(FIRE_CREWS_KEY) || 'null')); if (l.length) return l; } catch (e) {}
   return FIRE_CREWS_DEFAULT.slice();
 }
 let FIRE_CREWS = loadFireCrews();
+function fireCrewsFailed(e, what) {
+  const why = e && e.message ? e.message : String(e || 'невідома помилка');
+  if (typeof AV !== 'undefined' && AV.toast) AV.toast('Перелік підрозділів ' + (what || 'не збережено в профілі') + ': ' + why, '');
+}
 function saveFireCrews(list) {
   FIRE_CREWS = cleanFireCrews(list); if (!FIRE_CREWS.length) FIRE_CREWS = FIRE_CREWS_DEFAULT.slice();
-  store(FIRE_CREWS_KEY, JSON.stringify(FIRE_CREWS));
+  const invoke = profileInvoke();
+  if (invoke) invoke('profile_data_set', { key: FIRE_CREWS_PROFILE_KEY, value: JSON.stringify(FIRE_CREWS) }).catch(fireCrewsFailed);
+  else store(FIRE_CREWS_KEY, JSON.stringify(FIRE_CREWS));
   return FIRE_CREWS;
+}
+async function loadFireCrewsFromProfile() {
+  const invoke = profileInvoke();
+  if (!invoke) return false;
+  try {
+    const rec = await invoke('profile_data_get', { key: FIRE_CREWS_PROFILE_KEY });
+    let list = null;
+    try { list = cleanFireCrews(JSON.parse(rec && rec.value)); } catch (e) {}
+    const legacy = store(FIRE_CREWS_KEY);
+    if (list && list.length) {
+      if (legacy != null) { try { localStorage.removeItem(FIRE_CREWS_KEY); } catch (e) {} }
+    } else if (legacy) {
+      let old = []; try { old = cleanFireCrews(JSON.parse(legacy)); } catch (e) {}
+      if (old.length) {
+        const value = JSON.stringify(old);
+        await invoke('profile_data_set', { key: FIRE_CREWS_PROFILE_KEY, value });
+        const back = await invoke('profile_data_get', { key: FIRE_CREWS_PROFILE_KEY });
+        if (back && back.value === value) { list = old; try { localStorage.removeItem(FIRE_CREWS_KEY); } catch (e) {} }
+      }
+    }
+    if (list && list.length) {
+      FIRE_CREWS = list;
+      if (typeof document !== 'undefined') document.dispatchEvent(new Event('ew:fire-crews'));
+    }
+    return true;
+  } catch (e) { fireCrewsFailed(e, 'не прочитано з профілю'); return false; }
 }
 /* Скільки БП випустила кожна вогнева бригада і скільки з цього на кожен підрозділ зі списку (by[i] — за порядком списку; решта — в «other»). */
 function fireByBrigade(rows, crews) {
@@ -6449,6 +6495,8 @@ function renderMunPanel(A) {
 }
 /* --- «Вогневі бригади»: скільки БП випустила кожна бригада і скільки з цього на кожен підрозділ зі списку (за замовчуванням РУК, ГРВ, 7, 8, 9 реабатр; список редагується тут же) --- */
 const FIRE_UI = { edit: false, draft: [] };
+document.addEventListener('ew:fire-crews', () => renderAll());
+loadFireCrewsFromProfile();
 function fireCrewTools(A) {
   const again = () => renderFirePanel(A);
   if (!FIRE_UI.edit) return h('p', { class: 'fb-tools small muted' },

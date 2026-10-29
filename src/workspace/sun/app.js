@@ -1,8 +1,10 @@
 // «Сонце і Місяць» у «Робочому середовищі» → «Обстановка» (контракт docs/WORKSPACE.md): схід, захід,
 // цивільні й навігаційні сутінки, тривалість дня та Місяць для вибраного пункту на вибрану дату.
 // Усе обчислюється офлайн (модулі EasyFLY), мережі немає. Пункти — з «Погоди» (лише читання) і власні;
-// власні пункти й вибір зберігаються лише в цьому браузері (localStorage).
+// власні пункти й вибір — дані профілю (host.profile, profile-store.js): зберігаються самі,
+// зашифровані, у прихованій теці застосунку.
 import {
+  SUN_PROFILE_KEY,
   SUN_STORAGE_KEY,
   addOwnPlace,
   allPlaces,
@@ -16,7 +18,8 @@ import {
   todayIso,
   weatherPlaces,
 } from './sun-view-core.js';
-import { STORAGE_KEY as WEATHER_STORAGE_KEY, placeLabel } from '../weather/weather-core.js';
+import { loadText, safeLocalStorage } from '../profile-store.js';
+import { PROFILE_KEY as WEATHER_PROFILE_KEY, STORAGE_KEY as WEATHER_STORAGE_KEY, placeLabel } from '../weather/weather-core.js';
 import './sun.css';
 
 export const contract = 1;
@@ -49,22 +52,6 @@ function field(label, control) {
   return wrap;
 }
 
-function readStorage(key) {
-  try {
-    return window.localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-function writeStorage(key, value) {
-  try {
-    window.localStorage.setItem(key, value);
-  } catch {
-    /* сховище недоступне: стан живе до закриття */
-  }
-}
-
 /** Плитка «підпис — значення — пояснення». */
 function tile(label, value, note, className = '') {
   const box = el('div', `sn-tile ${className}`.trim());
@@ -74,7 +61,10 @@ function tile(label, value, note, className = '') {
 }
 
 export async function mount(container, host) {
-  let state = parseSunState(readStorage(SUN_STORAGE_KEY));
+  const ownData = await loadText(host.profile, { key: SUN_PROFILE_KEY, legacyStorage: safeLocalStorage(window), legacyKey: SUN_STORAGE_KEY });
+  // Пункти «Погоди» лише читаються; зміни в «Погоді» підхоплюються, коли повертаєшся на цю вкладку.
+  let weatherText = (await loadText(host.profile, { key: WEATHER_PROFILE_KEY, legacyStorage: safeLocalStorage(window), legacyKey: WEATHER_STORAGE_KEY })).text;
+  let state = parseSunState(ownData.text);
   let date = todayIso();
 
   container.classList.add('sn-root');
@@ -134,7 +124,7 @@ export async function mount(container, host) {
 
   container.replaceChildren(head, controls, board, status, add);
 
-  const weather = () => weatherPlaces(readStorage(WEATHER_STORAGE_KEY));
+  const weather = () => weatherPlaces(weatherText);
   const places = () => allPlaces(weather(), state.places);
   const current = () => pickPlace(places(), state.selected);
 
@@ -145,7 +135,9 @@ export async function mount(container, host) {
 
   function save(nextState) {
     state = nextState;
-    writeStorage(SUN_STORAGE_KEY, serializeSunState(state));
+    host.profile.write(SUN_PROFILE_KEY, serializeSunState(state)).catch(error => {
+      say(`Зміни не збережено в профілі: ${error?.message || error}`, 'bad');
+    });
     render();
   }
 
@@ -231,5 +223,23 @@ export async function mount(container, host) {
   });
 
   render();
-  return { unmount() {} };
+  if (ownData.error) say(`Дані профілю недоступні, пункти не збережуться: ${ownData.error}`, 'bad');
+
+  async function refreshWeather() {
+    const fresh = (await loadText(host.profile, { key: WEATHER_PROFILE_KEY })).text;
+    if (fresh !== weatherText) {
+      weatherText = fresh;
+      render();
+    }
+  }
+  const onVisible = () => { if (document.visibilityState === 'visible') refreshWeather(); };
+  document.addEventListener('visibilitychange', onVisible);
+  window.addEventListener('focus', refreshWeather);
+
+  return {
+    unmount() {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', refreshWeather);
+    },
+  };
 }

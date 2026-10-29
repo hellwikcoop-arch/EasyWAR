@@ -173,3 +173,92 @@ test('розташування блоків: без p-kpis новий рядок
   const bare = { rows: [{ cols: [{ w: 1, cards: ['p-ops'] }] }] };
   assert.deepEqual(J(api.layUpgrade(bare)).rows.map(r => r.cols[0].cards[0]), ['p-ops', 'p-fire']);
 });
+
+// ---- Перелік підрозділів належить профілю: команди profile_data_*, перенесення зі старого localStorage ----
+function profileContext({ invoke, legacy = {} }) {
+  const local = { ...legacy };
+  const events = [];
+  const toasts = [];
+  const win = { __TAURI_INTERNALS__: invoke ? { invoke } : undefined };
+  win.parent = win;
+  const ctx = vm.createContext({
+    window: win,
+    document: { dispatchEvent: e => events.push(e.type) },
+    Event: class { constructor(type) { this.type = type; } },
+    AV: { toast: text => toasts.push(text) },
+    localStorage: {
+      getItem: k => (k in local ? local[k] : null),
+      setItem: (k, v) => { local[k] = String(v); },
+      removeItem: k => { delete local[k]; },
+    },
+  });
+  const profileCode = code.replace(/const mem = \{\};[^\n]*\n/, 'function store(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) {} return null; }\n');
+  const exposed = vm.runInContext(`${profileCode}; ({ saveFireCrews, loadFireCrews, loadFireCrewsFromProfile, FIRE_CREWS_KEY, get crews() { return FIRE_CREWS; } })`, ctx);
+  return { api: exposed, local, events, toasts };
+}
+function fakeProfile() {
+  const records = new Map();
+  const calls = [];
+  const invoke = async (cmd, args) => {
+    calls.push([cmd, args.key]);
+    if (cmd === 'profile_data_get') return records.has(args.key) ? { key: args.key, value: records.get(args.key), modified: 'm' } : null;
+    if (cmd === 'profile_data_set') { records.set(args.key, args.value); return 'm'; }
+    throw new Error(`невідома команда ${cmd}`);
+  };
+  return { invoke, records, calls };
+}
+
+test('профіль: збереження переліку йде в profile_data_set, а не в localStorage', async () => {
+  const p = fakeProfile();
+  const ctx = profileContext({ invoke: p.invoke });
+  ctx.api.saveFireCrews(['РУК', 'Тестовий підрозділ']);
+  await new Promise(r => setImmediate(r));
+  assert.deepEqual(JSON.parse(p.records.get('rocket.firecrews')), ['РУК', 'Тестовий підрозділ']);
+  assert.equal(ctx.local[ctx.api.FIRE_CREWS_KEY], undefined, 'у localStorage нічого не пишеться');
+});
+
+test('профіль: перелік із профілю підміняє типовий і викликає перемальовування', async () => {
+  const p = fakeProfile();
+  p.records.set('rocket.firecrews', JSON.stringify(['РУК', 'ГРВ', '10 реабатр']));
+  const ctx = profileContext({ invoke: p.invoke });
+  assert.equal(await ctx.api.loadFireCrewsFromProfile(), true);
+  assert.deepEqual(J(ctx.api.crews), ['РУК', 'ГРВ', '10 реабатр']);
+  assert.deepEqual(ctx.events, ['ew:fire-crews']);
+});
+
+test('профіль: старий перелік із localStorage переноситься один раз і прибирається після перевірки читанням', async () => {
+  const p = fakeProfile();
+  const key = 'easywar.rocket.fireCrews';
+  const ctx = profileContext({ invoke: p.invoke, legacy: { [key]: JSON.stringify(['РУК', 'Старий підрозділ']) } });
+  assert.equal(await ctx.api.loadFireCrewsFromProfile(), true);
+  assert.deepEqual(JSON.parse(p.records.get('rocket.firecrews')), ['РУК', 'Старий підрозділ']);
+  assert.equal(ctx.local[key], undefined);
+  assert.deepEqual(J(ctx.api.crews), ['РУК', 'Старий підрозділ']);
+});
+
+test('профіль: якщо в профілі вже є перелік, старий залишок у localStorage лише прибирається', async () => {
+  const p = fakeProfile();
+  p.records.set('rocket.firecrews', JSON.stringify(['Новий']));
+  const key = 'easywar.rocket.fireCrews';
+  const ctx = profileContext({ invoke: p.invoke, legacy: { [key]: JSON.stringify(['Старий']) } });
+  await ctx.api.loadFireCrewsFromProfile();
+  assert.deepEqual(J(ctx.api.crews), ['Новий']);
+  assert.equal(ctx.local[key], undefined);
+  assert.equal(p.calls.filter(c => c[0] === 'profile_data_set').length, 0, 'профіль не перезаписується');
+});
+
+test('профіль: недоступний профіль не ламає картку — лишається типовий перелік, є повідомлення, старе не видаляється', async () => {
+  const key = 'easywar.rocket.fireCrews';
+  const ctx = profileContext({ invoke: async () => { throw 'профіль заблоковано'; }, legacy: { [key]: JSON.stringify(['РУК']) } });
+  assert.equal(await ctx.api.loadFireCrewsFromProfile(), false);
+  assert.equal(ctx.local[key], JSON.stringify(['РУК']));
+  assert.match(ctx.toasts.join(' '), /не прочитано з профілю: профіль заблоковано/);
+  assert.deepEqual(ctx.events, []);
+});
+
+test('без Tauri (браузер) перелік лишається в localStorage, як і було', async () => {
+  const ctx = profileContext({ invoke: null });
+  assert.equal(await ctx.api.loadFireCrewsFromProfile(), false);
+  ctx.api.saveFireCrews(['РУК', 'ГРВ']);
+  assert.equal(ctx.local[ctx.api.FIRE_CREWS_KEY], JSON.stringify(['РУК', 'ГРВ']));
+});
