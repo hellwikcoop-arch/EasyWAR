@@ -17,6 +17,8 @@ const MAX_SCHEMA_BYTES: usize = 1_048_576;
 const MAX_SOURCES: usize = 256;
 const MAX_COLUMNS_PER_SOURCE: usize = 200;
 const MAX_BINDINGS: usize = 2000;
+const MAX_RELATIONS: usize = 256;
+const MAX_GROUPS: usize = 64;
 
 #[derive(Clone, Debug)]
 pub struct ProfileSchemaStore {
@@ -231,6 +233,15 @@ fn validate_envelope(schema: &Value, profile_id: &str) -> Result<i64, ProfileSch
         .ok_or(ProfileSchemaError::Invalid("очікується перелік зіставлень"))?;
     if sources.len() > MAX_SOURCES || bindings.len() > MAX_BINDINGS {
         return Err(ProfileSchemaError::TooLarge);
+    }
+    // Зв'язки між таблицями й групи — необов'язкові поля: схеми без них лишаються чинними.
+    for (key, limit) in [("relations", MAX_RELATIONS), ("groups", MAX_GROUPS)] {
+        match object.get(key) {
+            None => {}
+            Some(Value::Array(items)) if items.len() <= limit => {}
+            Some(Value::Array(_)) => return Err(ProfileSchemaError::TooLarge),
+            Some(_) => return Err(ProfileSchemaError::Invalid("очікується перелік")),
+        }
     }
     for source in sources {
         let columns = source
@@ -454,6 +465,24 @@ mod tests {
         assert!(matches!(
             store.save(PROFILE, &many, 0, T1).await,
             Err(ProfileSchemaError::TooLarge)
+        ));
+        for (key, limit) in [("relations", MAX_RELATIONS), ("groups", MAX_GROUPS)] {
+            let mut over = schema(PROFILE, 1);
+            over[key] = json!(vec![json!({}); limit + 1]);
+            assert!(matches!(
+                store.save(PROFILE, &over, 0, T1).await,
+                Err(ProfileSchemaError::TooLarge)
+            ));
+        }
+        let mut within = schema(PROFILE, 1);
+        within["relations"] = json!(vec![json!({}); MAX_RELATIONS]);
+        within["groups"] = json!(vec![json!({}); MAX_GROUPS]);
+        store.save(PROFILE, &within, 0, T1).await.unwrap();
+        let mut broken = schema(PROFILE, 2);
+        broken["relations"] = json!({"a": 1});
+        assert!(matches!(
+            store.save(PROFILE, &broken, 1, T2).await,
+            Err(ProfileSchemaError::Invalid(_))
         ));
         let mut huge = schema(PROFILE, 1);
         huge["sources"][0]["title"] = json!("я".repeat(MAX_SCHEMA_BYTES));

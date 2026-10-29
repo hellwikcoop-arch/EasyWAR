@@ -63,7 +63,13 @@ size limits) and a monotonic `revision` used as a compare-and-swap mark; the JS
 core (`src/profile-schema-core.js`) composes and validates the content. The table
 holds no module rows and no raw XLSX values; deleting the profile removes it
 (`ON DELETE CASCADE`). A document of a newer format version is never overwritten
-by an older application. Migration
+by an older application. The same document may carry optional `relations` (confirmed or
+rejected key pairs between two user tables: column keys only, cardinality, basis, the column
+types at the moment of the decision; no cell values) and `groups` (sets of tables joined by
+confirmed relations). They are part of format version 1 (no new migration and no new Tauri
+command; the old `save_profile_schema` stores them); Rust only checks that both fields, when
+present, are arrays within the limits (256 relations, 64 groups) and the JS core validates the
+content. A schema without them stays valid and is not rewritten. Migration
 `0018_dashboard_layouts.sql` adds `dashboard_layouts`: one row per profile and
 dashboard (the primary key is `(profile_id, dashboard_id)`; today only `my`, «Мій
 дашборд») with the E4 layout as a JSON document of format `easywar.dashboard-layout` —
