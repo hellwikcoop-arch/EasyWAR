@@ -245,6 +245,8 @@ export async function mount(container, host) {
   відкривається у вікні редактора: оболонка відкриває там усі застосунки, крім «Обстановки» (`opensInEditorWindow` у
   `workspace-core.js`), а «Погода» лишається в iframe головного вікна. CSP не змінювалася (`null`, та сама, що й для карт).
 
+«Сонце і Місяць» (`sun`) стоїть у тому ж розділі поряд із «Погодою»: без файлів, без мережі й без Rust-команд, у вікно редактора не потрапляє (`opensInEditorWindow`). Свій стан тримає під ключем `easywar.workspace.sun.v1`, пункти «Погоди» лише читає.
+
 Тести: `tests/workspace-weather.test.mjs` (логіка, розкриття, стан за замовчуванням, перелік команд) і Rust-тести
 в `weather_online.rs` (адреси, округлення, розбір відповідей). Живу відповідь Open-Meteo в хмарному контейнері
 не перевірено: зовнішня мережа там закрита.
@@ -458,6 +460,7 @@ Rust (`app.dialog()`, `std::fs`), плагіни `fs`/`dialog` для JS не в
 | `src/workspace/library-core.js`, `template-core.js`, `field-dictionary-core.js` | підписи, план «Оновити всі»; заповнення шаблонів DOCX/PPTX/XLSX; словник полів джерел |
 | `src/workspace/files.js`, `files-core.js` | вкладка «Файли» (окремий чанк): зашифроване сховище файлів профілю в теці на диску; чиста логіка — виклики `workspace_files_*`, екран за станом бібліотеки, підписи, сортування, пошук (тести — `tests/workspace-files.test.mjs`) |
 | `src/workspace/weather/app.js`, `weather-core.js`, `weather.css` | застосунок «Погода» (тести — `tests/workspace-weather.test.mjs`) |
+| `src/workspace/sun/app.js`, `sun-view-core.js`, `sun.css` | застосунок «Сонце і Місяць» у «Обстановці»: схід, захід, сутінки, Місяць для пункту й дати; обчислення — `easyfly/sun-core.js` і `moon-core.js`, пункти — з «Погоди» (лише читання) і власні (тести — `tests/workspace-sun.test.mjs`) |
 | `src/workspace/weather/photos/` | фото явищ з аркуша власника (WebP 240×160) |
 | `src/workspace/weather/weather-icons.js` | значки «Погоди» (SVG з пакета референсів, очищені) і українські назви кодів WMO |
 | `src-tauri/src/weather_online.rs` | запит поточної погоди й пошук пункту в Open-Meteo (лише HTTPS, фіксовані адреси) |
