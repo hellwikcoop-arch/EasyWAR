@@ -1,6 +1,8 @@
 /* Дашборд УДШВ: «Втрати о/с та ОВТ противника за угруповання ДШВ».
    Чисте ядро без DOM: розбір аркушів-місяців, періоди, агрегати, перевірка. */
 
+import { KPI, computeUdshvKpis, inGroup, sumBy } from './module-adapters/udshv-kpi-core.js';
+
 const norm = value => String(value == null ? '' : value)
   .replace(/[’ʼ]/g, "'")
   .replace(/\s+/g, ' ')
@@ -285,33 +287,7 @@ export function daysOf(range) {
 
 /* ------------------------------ агрегати ------------------------------ */
 
-const sumBy = (records, predicate) => {
-  let total = 0;
-  for (const r of records) for (const [id, v] of Object.entries(r.values)) if (predicate(id)) total += v;
-  return total;
-};
-const inGroup = (group, withTotal = false) => id => id.startsWith(`${group}|`) && (withTotal || id !== 'ammo|ВСЬОГО');
-const ammoTotal = records => {
-  // ВСЬОГО у таблиці — формула; якщо її немає, рахуємо самі.
-  let total = 0;
-  for (const r of records) {
-    const own = r.values['ammo|ВСЬОГО'];
-    total += own != null ? own : Object.entries(r.values).filter(([id]) => inGroup('ammo')(id)).reduce((s, [, v]) => s + v, 0);
-  }
-  return total;
-};
-
-export const KPI = [
-  { key: 'kia', label: '200', hint: 'Знищено о/с', tone: 'red', value: rs => sumBy(rs, id => id === 'personnel|200') },
-  { key: 'wia', label: '300', hint: 'Поранено о/с', tone: 'amber', value: rs => sumBy(rs, id => id === 'personnel|300') },
-  { key: 'personnel', label: 'Втрати о/с разом', hint: '200 + 300', tone: 'violet', value: rs => sumBy(rs, inGroup('personnel')) },
-  { key: 'destroyed', label: 'ОВТ знищено', hint: 'одиниць', tone: 'red', value: rs => sumBy(rs, inGroup('destroyed')) },
-  { key: 'damaged', label: 'ОВТ пошкоджено', hint: 'одиниць', tone: 'amber', value: rs => sumBy(rs, inGroup('damaged')) },
-  { key: 'suppressed', label: 'ОВТ подавлено', hint: 'одиниць', tone: 'blue', value: rs => sumBy(rs, inGroup('suppressed')) },
-  { key: 'ammo', label: 'Витрата БК', hint: 'ВСЬОГО', tone: 'green', value: ammoTotal },
-  { key: 'vgz', label: 'ВгЗ', hint: 'вогневі завдання', tone: 'blue', value: rs => sumBy(rs, id => id === 'fire|ВгЗ') },
-  { key: 'kbb', label: 'КББ', hint: 'контрбатарейна боротьба', tone: 'violet', value: rs => sumBy(rs, id => id === 'fire|КББ') },
-];
+export { KPI };
 
 export function metricTotals(records, group) {
   const totals = new Map();
@@ -388,16 +364,8 @@ export function createDashboardModel(workbook, options = {}) {
   const previous = prevRange.from ? scoped.filter(r => inRange(r, prevRange)) : [];
   const hasPrevious = previous.length > 0;
   const bucket = bucketFor(range);
-  const kpis = KPI.map(k => {
-    const total = k.value(current);
-    const before = hasPrevious ? k.value(previous) : null;
-    return {
-      key: k.key, label: k.label, hint: k.hint, tone: k.tone, total, previous: before,
-      delta: before == null ? null : total - before,
-      deltaPercent: before ? (total - before) / before * 100 : null,
-      series: seriesFor(current, range, k.value, bucket),
-    };
-  });
+  // Картки показників рахує спільне ядро модулів (E2), формули ті самі.
+  const kpis = computeUdshvKpis({ current, previous, range, bucket }, seriesFor);
   const units = selected.length ? workbook.units.filter(u => selected.includes(u)) : workbook.units;
   return {
     range, previousRange: prevRange, hasPrevious, bucket, unit, selectedUnits: selected,
