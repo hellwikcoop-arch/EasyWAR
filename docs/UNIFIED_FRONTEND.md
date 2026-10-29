@@ -578,6 +578,119 @@ by hand with narrow anchored patches (see `AGENTS.md`), then run
 видаленням стовпця (`columnDependents`). Збереження — `src/profile-schema-client.js` над командами
 `get_profile_schema`, `save_profile_schema`, `reset_profile_schema` (Rust: `profile_schema.rs`, таблиця
 `profile_schemas`, міграція 0017): профіль береться з сеансу, запис вимагає ревізії, яку клієнт
-прочитав, а при конфлікті зміна один раз повторюється на свіжій схемі. У дашборди й екран
-підтвердження схему ще не підключено (залишок E3). Тести — `tests/profile-schema.test.mjs`,
+прочитав, а при конфлікті зміна один раз повторюється на свіжій схемі. Модулі дашборда
+користувача вже є джерелами схеми (`profile-schema-modules-core.js`; синхронізація після кожного
+читання модулів у `dashboard-module-catalog.js`, прибирання джерела після видалення модуля). Екран «Ролі стовпців»
+(`profile-schema-panel.js` + `profile-schema-view-core.js`) — розділ над таблицею на сторінці модуля;
+читання дашбордів за підтвердженими ролями ще не підключено (залишок E3). Тести — `tests/profile-schema.test.mjs`,
 `tests/profile-schema-client.test.mjs`.
+
+## Екземпляри модулів і розкладка (E4)
+
+`src/module-instance-core.js` — чисте ядро розкладки «Мій дашборд» профілю без DOM, сховищ і
+годинника (поки ніде не підключене до екрана):
+
+- `emptyLayout(profileId)`, `addInstance`, `duplicateInstance`, `removeInstance`, `updateInstance`,
+  `rebindInstance`, `placeInstance`, `setSharedPeriod`: усі повертають нову заморожену розкладку або
+  `{ ok: false, code }`. Один модуль на одній таблиці — до `MAX_COPIES` (4) разів (різні таблиці одного шаблону лічаться окремо); кожен екземпляр має власні назву,
+  період (`shared` / `all` / `last-days` / `range`) і стиль, а також розміщення `{ x, y, w, h }` на сітці
+  12 колонок.
+- `src/module-instance-modules-core.js`: кожен модуль користувача має принаймні одну картку
+  (`ensureModuleInstances`, `forgetModuleInstances`; визначення — `rust-template:<шаблон>`), період діє
+  за підтвердженою роллю «Дата події» (`periodColumn`, `rowsInPeriod`): без підтвердженого стовпця
+  період не застосовується й не приховує рядків, рядки без дати за обмеженого періоду рахуються окремо.
+- `effectivePeriod(layout, id, today)`: межі `{ from, to }`; «останні N днів» рахуються від дати, яку
+  передає виклик.
+- `instanceState(layout, schema, id, definitions)` і `sourceConsistency`: стан картки за схемою
+  профілю (`available` / `missing` / `source-missing` / `unknown-definition`), версія джерела й ролі;
+  всі картки одного джерела бачать те саме.
+- `serializeLayout` / `parseLayout` перевіряють формат, версію, ліміти й посилання розміщень; розкладку
+  новішої версії не читають. Збереження — `src/dashboard-layout-client.js`
+  (`loadDashboardLayout`, `saveDashboardLayout`, `resetDashboardLayout`, `updateDashboardLayout`
+  з одним повтором на свіжій розкладці при конфлікті ревізій) і команди `get_dashboard_layout`,
+  `save_dashboard_layout`, `reset_dashboard_layout` (профіль із сеансу); екрана конструктора ще нема.
+
+Екран (перший крок конструктора) — `src/dashboard-layout-panel.js` (показ: `sharedPeriodBar`,
+`instanceBar`) і `src/dashboard-layout-view-core.js` (модель: `cardModel`, `orderedCards`, вибір
+періоду). У `dashboard-module-catalog.js` `loadModules` після читання модулів кличе `syncLayout`
+(кожному модулю картка, свіжа схема профілю), `renderHost` малює картки за розкладкою (збій розкладки
+повертає малювання «по одному на модуль»), `renderModule(module, payload, placed)` показує рядки
+періоду картки. Зміни розкладки — через `changeLayout` (`updateDashboardLayout`, один повтор при
+конфлікті ревізій). Картки стоять у порядку розміщень; перетягування, розмір, колір і фон — наступні
+кроки E4.
+
+## Повторний імпорт з переглядом змін (E3в, ядро)
+
+`src/table-update-core.js` — чисте ядро без DOM, Tauri, годинника й мережі (поки не підключене до екрана):
+`fileFingerprint(headers)` і `recognizeSource(sources, headers)` упізнають відому таблицю за заголовками;
+`suggestKeyColumns(fields, oldRows, newRows)` пропонує ключ рядка; `diffRows({ fields, oldRows, newRows,
+keyColumns, correctedCells })` дає додані, змінені, зниклі й неоднозначні рядки та лічильники (`counts`);
+`previewDiff` обрізає списки для показу; `applyDiff(oldRows, diff, { removed })` збирає нові рядки модуля
+(змінені значення беруться з нової версії, крім виправлених вручну; зниклі лишаються, якщо користувач
+не обрав `remove`). Без ключа порівняння не виконується (`no_key`), рядки не зіставляються за порядком.
+
+Екран: `src/dashboard-module-update.js` (`updatePanel({ el, invoke, module, payload, onApplied, onConflict })`,
+`<details>` на сторінці модуля після «Ролей стовпців», не монтується для таблиці лише для читання) і
+`src/table-update-view-core.js` (`summaryLines`, `hasChanges`, `changeText`, `rowLabel`, `readiness`,
+`keyOptions`). Єдиний запис — `replace_dashboard_module_rows` з `replaceRowsRequest`, тобто з перевіркою
+позначки версії; огляд файла забувається (`release: true`) після застосування й при згортанні панелі.
+
+Розмір і порядок карток (E4): `module-instance-core.js` — `SIZE_CHOICES`, `orderedIds`, `moveInstance(layout, id, targetId)`,
+`resizeInstance(layout, id, width)`; `dashboard-layout-view-core.js` — `sizeChoices(width)`, `orderedCards` повертає й
+`at` (розміщення). `instanceBar` має список розміру, кнопки `move-earlier`/`move-later` і ручку `drag-card`;
+`renderModule` ставить `grid-column: span w`, сітка `.ewmc-dashboard-grid[data-layout]` — 12 колонок, а картка
+приймає `drop` від ручки іншої. Висоту `h` розкладка зберігає, але екран її поки не застосовує.
+Стиль картки: `dashboard-layout-view-core.js` — `STYLE_CHOICES` (три стилі каталогу), `cardStyle(moduleStyle, instance)`;
+вибір лежить у `instance.style.background` (`standard`/`branch`/`heightwell`; старе `plain` = `standard`). Без вибору звичайний
+стиль модуля стає `branch`, власний стиль модуля не перебивається. CSS — наявний `module-styles.css`, нових правил немає;
+список у смужці картки — `data-action=card-style`.
+
+## Зв'язування таблиць (E3б, блок B1 — ядро)
+
+`src/table-link-core.js` — чисте ядро без DOM, Tauri, сховищ, годинника й мережі; не підключене до екрана,
+нічого не записує. Таблиця на вході: `{ sourceId, title, columns, roles, rows, truncated }`, її складає
+`tableFromSchema(schema, sourceId, rows, { truncated })` зі схеми профілю. Далі:
+`candidateKeys(left, right)` — кандидати ключа (до 5) з 1–3 стовпців: спершу пари з однаковою підтвердженою
+роллю (`basis: 'roles'`), потім за збігом значень (`'values'`); ключ унікальний хоча б з одного боку
+(1:1, 1:N, N:1, N:M ядро саме не пропонує), частка збігу ≥ 0,8 на меншому боці; порядкові номери 1..N і
+кількість боєприпасів ключем не вважаються. Повноту пошуку ядро не гарантує, а явно звітує: результат
+`candidateKeys` має `exhaustive` (true, лише коли жодне обмеження не спрацювало) і `reasons` ⊆
+`columns-limited`, `pairs-limited`, `candidates-limited`, `truncated`, `type-mismatch` (дата проти тексту з датами
+не порівнювалась), `role-skipped` (підтверджена роль не дала пари: стовпець непридатний або види різні),
+`component-prefilter`, `sample-prefilter` (відсів складених ключів за часткою збігу компонентів або за вибіркою 200 рядків);
+`exclusions` — стовпці, виключені з ключів без показу значень (`measure`, `sequential`, `few-values`,
+`blank`, `flag`). Слеш- і дефіс-дати «дд/мм» з обома частинами ≤ 12 неоднозначні: порядок лише
+припускається (день/місяць); доказ «день першим» (частина > 12) рахується окремо для кожного формату стовпця, кандидат має `caution: date-order-assumed`, `linkIssues` дає питання
+`date-order-assumed`, `describeCandidate` це зазначає; автоматично ядро зв'язок не підтверджує —
+підтвердження за користувачем (майстер, B3). `caution: incomplete-read` — усічене читання. `evaluateKey` оцінює ключ, який вказала людина (будь-яка кардинальність); `suggestRelations(tables,
+{ tick, cancelled })` — усі пари до 8 таблиць, асинхронно (інтерфейс може віддавати керування й
+скасовувати); `linkIssues` — питання до закриття (невпізнаний заголовок, неоднозначний стовпець, формати
+дат у стовпці й між таблицями, усічене читання, ключі без пари); `keyConflicts` — різні значення для одного
+ключа (лічильники й приклади, значення лише в результаті виклику, у схему не кладуться); `describeCandidate`,
+`connectedGroups`, `canonicalDate`. Рядки читаються до `LINK_LIMITS.maxRows` (10 000, як
+`get_dashboard_module_data`); усічене читання робить кандидата неповним (`complete: false`).
+Відомі межі B1 (не помилки, а те, чого ядро не обіцяє): пошук — лише ключі до трьох стовпців, унікальні хоча б з
+одного боку (1:1, 1:N, N:1); чотири й більше стовпців і N:M окремої причини не мають, порожній результат
+з `exhaustive: true` означає «немає в цих межах»; відсів за вибіркою зважений за рядками, тож ключ із вкрай
+нерівномірними частотами може бути відсіяний (звітується через `sample-prefilter`); числа читаються як `Number`,
+тому ідентифікатори від 17 цифр, подані числом, зливаються (задавайте їм текстовий тип), а `007` і `7` не збігаються;
+`keyConflicts` показує нормалізовані значення й не повідомляє про припущений порядок дат; ISO-час із зсувом
+відкидається разом зі зсувом; `tick` викликається лише між парами таблиць, тож на 10 000 рядків одна пара
+може тримати потік понад секунду (≈1,5 с у найгіршому виміряному випадку, 12 нерозпізнаних ролей), а 28 пар
+у такому випадку — десятки секунд: у майстрі B3 пошук має йти порціями.
+Збереження зв'язків у схемі профілю (B2), майстер «залишити зв'язок» (B3) і групи (B4) — наступні блоки, тільки за рішенням власника.
+
+### Підказки зв'язків на екрані (E3б, показ ядра B1)
+
+`src/table-link-view-core.js` (чисте): `linkInputs(schema, modules, data)` добирає таблиці з модулів гілки
+(`tableFromSchema`; лише ті, що є в схемі й прочитані; решта в `skipped` з причиною; до `maxTables` = 8, понад
+10 000 рядків або `truncated` — усічене читання), `pairView` (кандидати з `describeCandidate`, повнота, причини й
+виключення людською мовою, питання з `linkIssues` через `issueText`; значень клітинок немає), `summaryLine`.
+`src/table-link-panel.js` — DOM: `<details class="ewmc-links">` «Зв'язки між таблицями» з кнопками
+`find-links` / `cancel-links`; пошук через `suggestRelations` із `tick` (віддає керування між парами) і
+`cancelled` (кнопка або зникла з сторінки панель, `!panel.isConnected`); лише `textContent`, без `innerHTML`.
+Панель бере `state.schema` і `state.data` каталогу й **не викликає Tauri** (нічого не пише): у
+`dashboard-module-catalog.js` її додає `renderHost` перед сіткою карток, коли модулів ≥ 2 і схему прочитано.
+CSS — `.ewmc-links*` у `dashboard-module-catalog.css`. Тести — `tests/table-link-view.test.mjs`
+(логіка й текстові контракти: імпорт, відсутність `invoke`, `innerHTML`, запису схеми).
+

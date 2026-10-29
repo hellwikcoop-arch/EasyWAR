@@ -130,6 +130,15 @@ columns of their tables play which semantic roles — as one JSON document plus
 `updated_at`. It stores no module rows and no raw XLSX values and is independent
 of `dashboard_module_fields`, which is rewritten from the template on every read.
 
+`0018_dashboard_layouts.sql` adds `dashboard_layouts` (one row per profile and
+dashboard, deleted with the profile): the E4 layout of «Мій дашборд» — module
+cards, their own period and style, and grid placement — as one JSON document of
+format `easywar.dashboard-layout` plus `format_version`, `revision` (the same
+compare-and-swap mark) and `updated_at`. It holds no module rows and no raw XLSX
+values; cards only refer to sources of the profile schema. The number 0018 was
+free on main when taken (the collectives plan reserved it provisionally: the first
+merged migration takes the number, E8 uses the next free one).
+
 The `dashboard_data_<id>` tables of user-created dashboard modules are not
 migration objects: Rust creates them at runtime from a validated catalog
 template and adds columns that later appear in a template with `ALTER TABLE`,
