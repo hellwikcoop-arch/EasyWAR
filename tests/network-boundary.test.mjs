@@ -1,6 +1,6 @@
 // Мережеві межі (P1, R3 / T-0016): файловий контракт за ADR docs/adr/network-and-secret-boundaries.md.
 // Перевіряє на рівні файлів, що
-// 1) у src/*.js прямі мережеві виклики (fetch, XMLHttpRequest, WebSocket, EventSource, sendBeacon)
+// 1) у src/*.js прямі мережеві виклики (fetch, fetchImpl, XMLHttpRequest, WebSocket, EventSource, sendBeacon)
 //    є лише у відомих файлах, і всі вони — до власних ресурсів застосунку; штучно доданий fetch
 //    у будь-якому іншому файлі (наприклад, src/sensitivity-core.js) ламає тест;
 // 2) зовнішні хости в legacy HTML — лише з переліку ADR (плитки карт, dimap, signal.me);
@@ -20,7 +20,7 @@ import test from 'node:test';
 const root = new URL('../', import.meta.url);
 const read = file => readFile(new URL(file, root), 'utf8');
 
-// Файли src/*.js, яким дозволено викликати fetch/XHR, і лише до власних ресурсів застосунку.
+// Дозволені мережеві виклики src/*.js: ресурси застосунку та явний онлайн-канал КОМБАТА.
 const JS_NETWORK_ALLOWLIST = new Set([
   'src/dashboard-module-weather-3d.js', // висоти для 3D-погоди: HEIGHTS_URL відносно document.baseURI
   'src/guides/guide-kit.js',            // .glb довідників (fetchBuffer)
@@ -28,8 +28,9 @@ const JS_NETWORK_ALLOWLIST = new Set([
   'src/phone-export.js',                // шаблони телефону (phoneAssetUrl)
   'src/presentation-art.js',            // зображення презентації з власних ресурсів
   'src/startup-splash.js',              // відео заставки (VIDEO_URL)
+  'src/assistant/assistant-cloud.js', // явний онлайн-канал через fetchImpl, перевірка chatEndpoint
 ]);
-const NETWORK_CALL = /\bfetch\s*\(|\bnew\s+XMLHttpRequest\b|\bnew\s+WebSocket\s*\(|\bnew\s+EventSource\s*\(|\bsendBeacon\s*\(/;
+const NETWORK_CALL = /\b(?:fetch|fetchImpl)\s*\(|\bnew\s+XMLHttpRequest\b|\bnew\s+WebSocket\s*\(|\bnew\s+EventSource\s*\(|\bsendBeacon\s*\(/;
 const SKIP_DIRS = new Set(['src/public', 'src/models', 'src/map-assets', 'src/assistant/knowledge', 'src/splash']);
 
 async function listJs(dir) {
@@ -55,8 +56,30 @@ test('прямі мережеві виклики в src/*.js лише у фай�
   for (const file of JS_NETWORK_ALLOWLIST) {
     const text = await read(file);
     assert.match(text, NETWORK_CALL, `${file} у переліку, але мережевих викликів не має — прибери з переліку`);
-    assert.doesNotMatch(text, /\b(fetch|open)\s*\(\s*['"`]https?:\/\//, `${file}: виклик на зовнішню адресу`);
+    if (file !== 'src/assistant/assistant-cloud.js') {
+      assert.doesNotMatch(text, /\b(fetch|open)\s*\(\s*['"`]https?:\/\//, `${file}: виклик на зовнішню адресу`);
+    }
   }
+});
+
+test('КОМБАТ: ін'єктований fetch обліковується в мережевих межах', async () => {
+  // T-0021: раніше сканер ловив fetch(...), але пропускав fetchImpl(...).
+  assert.ok(NETWORK_CALL.test('await fetchImpl(url, options)'), 'fetchImpl має виявлятися');
+  const client = await read('src/assistant/assistant-cloud.js');
+  assert.match(client, /fetchImpl\s*=\s*fetch\b/u, 'онлайн-транспорт клієнта явний');
+  assert.match(client, /const url = chatEndpoint\(endpoint,\s*\{\s*allowLocalLoopback\s*\}\)/u,
+    'адреса проходить перевірку chatEndpoint');
+  assert.deepEqual([...client.matchAll(new RegExp(NETWORK_CALL.source, 'gu'))].map(match => match[0]),
+    ['fetchImpl('], 'новий клієнтський мережевий виклик потребує огляду');
+  assert.match(client, /await fetchImpl\(url,\s*\{/u, 'у мережевий виклик іде перевірена URL');
+
+  // Node-проксі знаходиться поза src/**, тому його вихідний запит фіксується окремо.
+  const proxy = await read('server/kombat/proxy.mjs');
+  assert.match(proxy, /fetchImpl\s*=\s*fetch\b/u);
+  assert.deepEqual([...proxy.matchAll(/\bfetchImpl\s*\(/gu)].map(match => match[0]),
+    ['fetchImpl('], 'новий зовнішній виклик проксі потребує огляду');
+  assert.match(proxy, /await fetchImpl\('https:\/\/api\.anthropic\.com\/v1\/messages',\s*\{/u,
+    'проксі має лише зафіксований API endpoint');
 });
 
 // Зовнішні хости, які legacy-сторінки завантажують у webview (ADR, розділ 5).
