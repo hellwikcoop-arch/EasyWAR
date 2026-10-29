@@ -6,6 +6,8 @@ import { readVisibleAssistantContext, referenceOpen } from './assistant-context.
 import { answerApplicationState } from './assistant-state-core.js';
 import { DIALOGUE_ACTIONS, runDialogueTurn } from './assistant-dialogue-core.js';
 import { createLocalModelClient } from './assistant-llm.js';
+import { chatEndpoint, onlineMessages, onlineErrorText, streamOnlineAnswer } from './assistant-cloud.js';
+import { identityReply } from './assistant-persona-prompt-core.js';
 import { createAssistantMotion } from './assistant-motion.js';
 import { createSongPlayer, songButtonText } from './assistant-song.js';
 import { languageReply, answerLead, reviewLead, welcomeRemark, reviewRemark, explainLead, WELCOME_TEXT } from './assistant-persona-core.js';
@@ -84,6 +86,9 @@ function actionIcon(kind) {
 export function createAssistantUI({ getSession, getApplicationState, readContext = readVisibleAssistantContext, llm = createLocalModelClient() } = {}) {
   const session = createAssistantSession();
   let mode = 'help', history = [], review = null, reviewLabel = '', status = '', navigationStatus = '', busy = false, request = 0, pendingInput = '';
+  // Персональний токен живе лише в пам'яті цього входу в профіль: без браузерного сховища, SQLite або файлу.
+  let onlineURL = '', onlineToken = '', onlineHistory = [], onlineError = '', onlinePartial = '', onlineController = null;
+  const allowLocalLoopback = window.location.protocol === 'tauri:' && typeof window.__TAURI_INTERNALS__?.invoke === 'function';
   // Локальна модель необов'язкова: «думає» лише поки триває її відповідь; usedModel — чи запускали її в цьому профілі.
   let thinking = false, usedModel = false;
   // Репліка обирається один раз на показ, щоб не мінятися під час перемальовування.
@@ -101,8 +106,8 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
   const avatarImage = element('img', { src: portraitURL, alt: '', draggable: 'false' });
   const launcher = element('button', { type: 'button', class: 'ew-assistant-launcher', hidden: true, 'aria-label': 'Відкрити помічника КОМБАТ', 'aria-controls': 'ew-assistant-panel', 'aria-expanded': 'false' },
     element('span', { class: 'ew-assistant-avatar', 'aria-hidden': 'true' }, avatarImage),
-    element('span', {}, element('strong', { text: 'КОМБАТ' }), element('small', { text: 'Запитати помічника' })));
-  const panel = element('aside', { id: 'ew-assistant-panel', class: 'ew-assistant-panel', hidden: true, 'aria-label': 'КОМБАТ — локальний помічник' });
+    element('span', {}, element('strong', { text: 'Комбат' }), element('small', { text: 'AI-помічник EasyWAR' })));
+  const panel = element('aside', { id: 'ew-assistant-panel', class: 'ew-assistant-panel', hidden: true, 'aria-label': 'Комбат — AI-помічник EasyWAR' });
   const characterImage = element('img', { src: portraitURL, alt: '', draggable: 'false', decoding: 'async' });
   const motion = createAssistantMotion({ image: characterImage, staticURL: portraitURL, clips: gestureClips });
   // Пасхалка: відповідь на питання про улюблену пісню вмикає локальний звук без відео (assistant-song.js).
@@ -275,7 +280,7 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
   });
 
   function resetProposal() { if (proposal.previewUrl) URL.revokeObjectURL(proposal.previewUrl); proposal = freshProposal(); refreshProposalPreview = null; }
-  function clear() { song.stop(); draft = freshDraft(); explain.stop(); explainResult = null; explainBranch = ''; explainNote = ''; resetProposal(); motion.stop(); request++; history = []; pendingInput = ''; review = null; status = ''; navigationStatus = ''; busy = false; thinking = false; if (usedModel) { usedModel = false; void llm.stop(); } if (install.phase === 'running') void llm.cancelInstall(); installRun++; install = { info: null, phase: 'idle', progress: null, message: '', confirming: false }; installBar = installText = null; checkbox.checked = false; modelBox.hidden = true; modelBox.replaceChildren(); panel.hidden = true; launcher.hidden = true; launcher.setAttribute('aria-expanded', 'false'); panel.replaceChildren(); announcer.textContent = ''; }
+  function clear() { onlineController?.abort(); onlineController = null; onlineURL = onlineToken = onlineError = onlinePartial = ''; onlineHistory = []; song.stop(); draft = freshDraft(); explain.stop(); explainResult = null; explainBranch = ''; explainNote = ''; resetProposal(); motion.stop(); request++; history = []; pendingInput = ''; review = null; status = ''; navigationStatus = ''; busy = false; thinking = false; if (usedModel) { usedModel = false; void llm.stop(); } if (install.phase === 'running') void llm.cancelInstall(); installRun++; install = { info: null, phase: 'idle', progress: null, message: '', confirming: false }; installBar = installText = null; checkbox.checked = false; modelBox.hidden = true; modelBox.replaceChildren(); panel.hidden = true; launcher.hidden = true; launcher.setAttribute('aria-expanded', 'false'); panel.replaceChildren(); announcer.textContent = ''; }
   function updateSession(id) {
     const previous = session.state();
     const next = session.setProfile(id);
@@ -290,7 +295,7 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
     launcher.querySelector('small').textContent = appUpdateState.getSnapshot().status === 'available' ? 'Є оновлення' : 'Запитати помічника';
   }
   function gesture(id, fallback) { if (!panel.hidden && session.state().enabled && !motion.play(id) && fallback) motion.play(fallback); }
-  function close() { song.stop(); explain.stop(); motion.stop(); panel.hidden = true; launcher.setAttribute('aria-expanded', 'false'); if (!launcher.hidden) launcher.focus(); }
+  function close() { onlineController?.abort(); song.stop(); explain.stop(); motion.stop(); panel.hidden = true; launcher.setAttribute('aria-expanded', 'false'); if (!launcher.hidden) launcher.focus(); }
   // Натискання на планку «Зв'язок з розробником»: КОМБАТ показує на скроню. Посилання діє як завжди.
   document.addEventListener('click', event => { if (event.target instanceof Element && event.target.closest('.dev-banner')) gesture('attention'); });
   function open() { if (!session.state().enabled) return; panel.hidden = false; launcher.setAttribute('aria-expanded', 'true'); render(); panel.querySelector('.ew-assistant-input input')?.focus(); gesture('wave'); }
@@ -358,6 +363,41 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
     if (busy && thinking) body.append(element('div', { class: 'ew-assistant-message ew-assistant-thinking', role: 'status' },
       element('span', { class: 'ew-assistant-thinking-text', text: 'КОМБАТ думає…' }),
       element('button', { type: 'button', class: 'ew-assistant-stop', text: 'Зупинити', 'aria-label': 'Зупинити модель і показати точну відповідь з довідки', onclick: stopThinking })));
+    return body;
+  }
+  function onlineContent() {
+    const body = element('div', { class: 'ew-assistant-online' },
+      element('h2', { class: 'ew-assistant-welcome', text: 'Онлайн-розмова' }),
+      element('p', { class: 'ew-assistant-note', text: 'Лише введений текст і попередні онлайн-репліки надсилаються на вказаний сервіс. Не вводьте захищені відомості, дані таблиць або файлів.' }));
+    if (!onlineToken) {
+      const address = element('input', { type: 'url', required: true,
+        placeholder: allowLocalLoopback ? 'http://127.0.0.1:8765' : 'https://адреса-сервісу',
+        'aria-label': 'Адреса сервісу Комбата', autocomplete: 'off' });
+      const access = element('input', { type: 'password', required: true, 'aria-label': 'Персональний токен доступу', autocomplete: 'off', spellcheck: 'false' });
+      const form = element('form', { class: 'ew-assistant-online-connect' },
+        element('label', { text: allowLocalLoopback ? 'Локальна адреса сервісу' : 'HTTPS-адреса сервісу' }), address,
+        element('label', { text: 'Персональний токен доступу' }), access,
+        element('button', { type: 'submit', text: 'Підключити для цього входу' }));
+      form.addEventListener('submit', event => {
+        event.preventDefault();
+        const url = chatEndpoint(address.value, { allowLocalLoopback });
+        const token = access.value.trim();
+        if (!url || !/^[a-f0-9]{64}$/u.test(token)) { onlineError = 'Перевірте адресу сервісу й виданий вам персональний токен.'; render(); return; }
+        onlineURL = url; onlineToken = token; onlineHistory = []; onlineError = ''; render();
+      });
+      body.append(form);
+    } else {
+      body.append(element('button', { type: 'button', class: 'ew-assistant-online-disconnect', text: 'Видалити доступ із цього входу', onclick: () => {
+        onlineController?.abort(); onlineController = null; onlineURL = onlineToken = onlinePartial = ''; onlineHistory = []; onlineError = ''; busy = false; thinking = false; request++; announcer.textContent = ''; render();
+      } }));
+      for (const turn of onlineHistory) body.append(
+        element('div', { class: 'ew-assistant-message ew-assistant-question', text: turn.query }),
+        element('div', { class: 'ew-assistant-message ew-assistant-answer-text', text: turn.answer }));
+      if (busy && thinking) body.append(element('div', { class: 'ew-assistant-message ew-assistant-thinking', role: 'status' },
+        element('span', { class: 'ew-assistant-online-partial', text: onlinePartial || 'Комбат відповідає…' }),
+        element('button', { type: 'button', class: 'ew-assistant-stop', text: 'Зупинити', onclick: stopThinking })));
+    }
+    if (onlineError) body.append(element('p', { class: 'ew-assistant-warning', role: 'status', text: onlineError }));
     return body;
   }
   function reviewContent() {
@@ -622,20 +662,50 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
     const oldInput = panel.querySelector('.ew-assistant-input input');
     if (oldInput) pendingInput = oldInput.value;
     const bubble = element('section', { class: 'ew-assistant-bubble' }, element('header', { class: 'ew-assistant-head' },
-      element('div', { class: 'ew-assistant-identity' }, element('small', { text: 'ПОМІЧНИК' }), element('strong', { text: 'КОМБАТ' })),
-      element('span', { class: 'ew-assistant-offline', text: 'Офлайн' }),
+      element('div', { class: 'ew-assistant-identity' }, element('small', { text: 'AI-помічник EasyWAR' }), element('strong', { text: 'Комбат' })),
+      element('span', { class: 'ew-assistant-offline', text: mode === 'online' ? 'Онлайн' : 'Офлайн' }),
       element('button', { type: 'button', class: 'ew-assistant-close', text: '×', 'aria-label': 'Згорнути помічника', onclick: close })),
-      element('nav', { class: 'ew-assistant-tabs', 'aria-label': 'Режим помічника' }, ...[['help', 'Запитати'], ['navigate', 'Навігація'], ['review', 'Перевірити дані'], ['explain', 'Пояснити']].map(([id, label]) => element('button', { type: 'button', class: 'ew-assistant-tab', 'data-mode': id, 'aria-pressed': String(mode === id), text: label, onclick: () => { mode = id; render(); gesture(id === 'review' ? 'point' : 'explain'); panel.querySelector(`[data-mode="${id}"]`)?.focus(); } }))),
-      element('div', { class: 'ew-assistant-content' }, mode === 'help' ? helpContent() : mode === 'navigate' ? navigationContent() : mode === 'explain' ? explainContent() : reviewContent()));
+      element('nav', { class: 'ew-assistant-tabs', 'aria-label': 'Режим помічника' }, ...[['help', 'Запитати'], ['online', 'Онлайн'], ['navigate', 'Навігація'], ['review', 'Перевірити дані'], ['explain', 'Пояснити']].map(([id, label]) => element('button', { type: 'button', class: 'ew-assistant-tab', 'data-mode': id, 'aria-pressed': String(mode === id), disabled: busy, text: label, onclick: () => {
+        if (mode !== id && (mode === 'online' || id === 'online')) {
+          pendingInput = '';
+          const currentInput = panel.querySelector('.ew-assistant-input input');
+          if (currentInput) currentInput.value = '';
+        }
+        mode = id; render(); gesture(id === 'review' ? 'point' : 'explain'); panel.querySelector(`[data-mode="${id}"]`)?.focus();
+      } }))),
+      element('div', { class: 'ew-assistant-content' }, mode === 'help' ? helpContent() : mode === 'online' ? onlineContent() : mode === 'navigate' ? navigationContent() : mode === 'explain' ? explainContent() : reviewContent()));
     panel.replaceChildren(character, bubble);
     const input = element('input', { 'aria-label': 'Запитання до КОМБАТА', placeholder: 'Запитайте українською…', maxlength: '512', autocomplete: 'off' }); input.value = pendingInput;
-    const form = element('form', { class: 'ew-assistant-compose' }, element('div', { class: 'ew-assistant-input' }, input, element('button', { type: 'submit', text: '→', disabled: busy, 'aria-label': 'Надіслати запитання' })), element('small', { text: `${modelReady() ? 'Довідка та локальна модель' : 'Локальна довідка'} · історія лише до виходу з профілю` }));
-    form.addEventListener('submit', event => { event.preventDefault(); const query = input.value; input.value = ''; pendingInput = ''; ask(query); }); bubble.append(form);
-    const content = panel.querySelector('.ew-assistant-content'); content.scrollTop = mode === 'help' && history.length ? content.scrollHeight : 0;
+    if (mode !== 'online' || onlineToken) {
+      const footnote = mode === 'online' ? 'Надіслати лише введене запитання · токен і розмова зникнуть після виходу' : `${modelReady() ? 'Довідка та локальна модель' : 'Локальна довідка'} · історія лише до виходу з профілю`;
+      const form = element('form', { class: 'ew-assistant-compose' }, element('div', { class: 'ew-assistant-input' }, input, element('button', { type: 'submit', text: '→', disabled: busy, 'aria-label': 'Надіслати запитання' })), element('small', { text: footnote }));
+      form.addEventListener('submit', event => { event.preventDefault(); const query = input.value; input.value = ''; pendingInput = ''; ask(query); }); bubble.append(form);
+    }
+    const content = panel.querySelector('.ew-assistant-content'); content.scrollTop = (mode === 'help' && history.length) || (mode === 'online' && onlineHistory.length) ? content.scrollHeight : 0;
   }
   function modelReady() { const state = llm.status(); return state.enabled && state.ready; }
   // Зупинка моделі не скасовує питання: КОМБАТ одразу показує точну відповідь з довідки.
-  function stopThinking() { void llm.cancel(); }
+  function stopThinking() { if (mode === 'online') onlineController?.abort(); else void llm.cancel(); }
+  async function askOnline(query) {
+    if (!onlineToken || !onlineURL) return;
+    const token = session.token(), current = ++request;
+    busy = true; thinking = true; onlineError = onlinePartial = ''; render();
+    if (!(await allowed(token)) || current !== request) return;
+    const identity = identityReply(query, 'anthropic');
+    const controller = identity ? null : new AbortController();
+    onlineController = controller;
+    try {
+      const answer = identity?.text || await streamOnlineAnswer({ endpoint: onlineURL, token: onlineToken,
+        messages: onlineMessages(onlineHistory, query), signal: controller.signal, allowLocalLoopback,
+        onToken: text => { if (current === request && session.accepts(token)) {
+          onlinePartial = text; const preview = panel.querySelector('.ew-assistant-online-partial'); if (preview) preview.textContent = text;
+        } } });
+      if (current !== request || !(await allowed(token))) return;
+      onlineHistory.push({ query, answer }); onlineHistory = onlineHistory.slice(-20);
+      announcer.textContent = answer;
+    } catch (error) { if (current === request && session.accepts(token)) onlineError = onlineErrorText(error?.code); }
+    finally { if (current === request && session.accepts(token)) { onlineController = null; busy = thinking = false; onlinePartial = ''; render(); panel.querySelector('.ew-assistant-input input')?.focus(); } }
+  }
   function unavailableTurn(query) {
     const text = 'Довідку не вдалося завантажити. Спробуйте ще раз.';
     return { query, effectiveQuery: query, followUp: false, topic: 'unknown', area: null, factIds: [], answer: text, actions: [], suggestions: [],
@@ -643,6 +713,7 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
   }
   async function ask(value) {
     const query = String(value || '').trim().slice(0, 512); if (!query || busy || !session.state().enabled) return;
+    if (mode === 'online') return askOnline(query);
     const token = session.token(), current = ++request; busy = true; thinking = false; render();
     if (!(await allowed(token)) || current !== request) return;
     let index = null;
@@ -693,8 +764,8 @@ export function createAssistantUI({ getSession, getApplicationState, readContext
   const unsubscribeUpdate = appUpdateState.subscribe(() => { syncUpdateBadge(); if (!panel.hidden && mode === 'navigate') render(); });
   const observer = new MutationObserver(() => { if (document.documentElement.classList.contains('ew-locked')) updateSession(null); });
   observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
-  window.addEventListener('ew:branch-open', () => { applyOutfit(); explain.stop('closed'); motion.stop(); session.invalidate(); request++; busy = false; review = null; status = ''; if (!panel.hidden) render(); });
-  const branchObserver = new MutationObserver(() => { applyOutfit(); explain.stop('closed'); motion.stop(); session.invalidate(); request++; busy = false; review = null; status = ''; if (!panel.hidden) render(); });
+  window.addEventListener('ew:branch-open', () => { onlineController?.abort(); onlineController = null; applyOutfit(); explain.stop('closed'); motion.stop(); session.invalidate(); request++; busy = thinking = false; review = null; status = ''; if (!panel.hidden) render(); });
+  const branchObserver = new MutationObserver(() => { onlineController?.abort(); onlineController = null; applyOutfit(); explain.stop('closed'); motion.stop(); session.invalidate(); request++; busy = thinking = false; review = null; status = ''; if (!panel.hidden) render(); });
   branchObserver.observe(document.body, { attributes: true, attributeFilter: ['data-active-branch'] });
   applyOutfit();
   // Вкладка довідника змінюється всередині модуля, тож стан перевіряємо раз на секунду (дешевий запит до DOM).
