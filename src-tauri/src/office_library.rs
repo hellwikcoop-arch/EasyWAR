@@ -550,6 +550,10 @@ impl LibraryKeys {
 pub struct StoreFileMeta {
     pub name: String,
     pub size: u64,
+    /// Рід військ таблиці дашборда (`Branch::as_str`), якщо блоб — таблиця зі сховища таблиць
+    /// дашбордів (`workspace_files::tables`); у звичайних файлів сховища відсутній.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
 }
 
 fn store_aad(profile_id: &str, file_id: &str, part: &str) -> Vec<u8> {
