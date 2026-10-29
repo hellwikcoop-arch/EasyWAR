@@ -17,6 +17,7 @@ const utf8 = s => Buffer.from(s, 'utf8');
 const LABELS = {
   memberId: utf8('easywar/collective/v1/member-id'),
   device: utf8('easywar/collective/v1/device'),
+  exchangeBinding: utf8('easywar/collective/v1/exchange-binding'),
   epochWrap: utf8('easywar/collective/v1/epoch-wrap'),
   op: utf8('easywar/collective/v1/op'),
 };
@@ -93,7 +94,7 @@ test('фікстура описує протокол v1 / suite 1 і має вс
   for (const section of ['aead', 'sign', 'x25519', 'hkdf', 'envelope', 'reencrypt', 'negative']) {
     assert.ok(Array.isArray(fixture[section]) && fixture[section].length > 0, section);
   }
-  for (const section of ['member', 'device', 'epoch_wrap']) assert.ok(Object.keys(fixture[section]).length > 0, section);
+  for (const section of ['member', 'device', 'exchange_binding', 'epoch_wrap']) assert.ok(Object.keys(fixture[section]).length > 0, section);
   assert.deepEqual(fixture.negative.map(n => n.name), [
     'flipped ciphertext byte',
     'same op_id, different payload',
@@ -159,23 +160,54 @@ test('запис пристрою підписаний учасником над
   assert.ok(!verify(null, signed, edPublic(hex(d.public)), record.subarray(72)), 'не підпис самого пристрою');
 });
 
-test('обгортка епохи: X25519 → HKDF(salt = collective_id ‖ epoch) → XChaCha з AAD = заголовок', () => {
+test('зв\'язування ключа обміну: member_id ‖ exchange_pub ‖ collective_id ‖ issued_at під підписом учасника (G12, U1)', () => {
+  const b = fixture.exchange_binding;
+  const m = fixture.member;
+  const bytes = hex(b.bytes);
+  assert.equal(bytes.length, 32 + 32 + 16 + 8 + 64);
+  const signPub = bytes.subarray(0, 32);
+  const exchangePub = bytes.subarray(32, 64);
+  const collectiveId = bytes.subarray(64, 80);
+  assert.equal(signPub.toString('hex'), m.sign_public);
+  assert.equal(exchangePub.toString('hex'), m.exchange_public);
+  assert.equal(collectiveId.toString('hex'), b.collective_id);
+  assert.equal(bytes.readBigInt64BE(80), BigInt(b.issued_at));
+  const memberId = sha256(LABELS.memberId, signPub);
+  assert.equal(memberId.toString('hex'), m.member_id);
+  const signed = Buffer.concat([LABELS.exchangeBinding, memberId, exchangePub, collectiveId, bytes.subarray(80, 88)]);
+  const signature = bytes.subarray(88);
+  assert.ok(verify(null, signed, edPublic(signPub), signature), 'підпис учасника');
+  const otherCollective = Buffer.concat([LABELS.exchangeBinding, memberId, exchangePub, Buffer.alloc(16, 0x11), bytes.subarray(80, 88)]);
+  assert.ok(!verify(null, otherCollective, edPublic(signPub), signature), 'інший колектив');
+  const asDevice = Buffer.concat([LABELS.device, memberId, exchangePub, collectiveId, bytes.subarray(80, 88)]);
+  assert.ok(!verify(null, asDevice, edPublic(signPub), signature), 'мітка запису пристрою не підходить');
+});
+
+test('обгортка епохи: v ‖ suite у заголовку, X25519 → HKDF(salt = collective_id ‖ epoch, info = мітка ‖ eph_pub ‖ member_pub) → XChaCha (G12, U3)', () => {
   const w = fixture.epoch_wrap;
   const m = fixture.member;
   const bytes = hex(w.bytes);
-  const header = bytes.subarray(0, 16 + 4 + 32 + 32 + 24);
-  const collectiveId = header.subarray(0, 16);
-  const epoch = header.readUInt32BE(16);
-  assert.equal(header.subarray(20, 52).toString('hex'), m.member_id, 'одержувач');
-  const ephPub = header.subarray(52, 84);
+  const headerLen = 2 + 2 + 16 + 4 + 32 + 32 + 24;
+  const header = bytes.subarray(0, headerLen);
+  assert.equal(header.readUInt16BE(0), fixture.protocol_version, 'v');
+  assert.equal(header.readUInt16BE(2), fixture.suite, 'suite');
+  const collectiveId = header.subarray(4, 20);
+  assert.equal(collectiveId.toString('hex'), fixture.exchange_binding.collective_id);
+  const epoch = header.readUInt32BE(20);
+  assert.equal(header.subarray(24, 56).toString('hex'), m.member_id, 'одержувач');
+  const ephPub = header.subarray(56, 88);
   assert.equal(rawPublic(createPublicKey(xPrivate(hex(w.eph_secret)))).toString('hex'), ephPub.toString('hex'));
-  const nonce = header.subarray(84, 108);
+  const nonce = header.subarray(88, 112);
   const shared = diffieHellman({ privateKey: xPrivate(hex(m.exchange_secret)), publicKey: xPublic(ephPub) });
   const salt = Buffer.concat([collectiveId, be.u32(epoch)]);
-  const kek = Buffer.from(hkdfSync('sha256', shared, salt, LABELS.epochWrap, 32));
-  const key = xchachaOpen(kek, nonce, header, bytes.subarray(108));
+  const info = Buffer.concat([LABELS.epochWrap, ephPub, hex(m.exchange_public)]);
+  const kek = Buffer.from(hkdfSync('sha256', shared, salt, info, 32));
+  const key = xchachaOpen(kek, nonce, header, bytes.subarray(headerLen));
   assert.equal(key.toString('hex'), w.epoch_key);
-  assert.throws(() => xchachaOpen(kek, nonce, Buffer.concat([header.subarray(0, 107), Buffer.from([header[107] ^ 1])]), bytes.subarray(108)));
+  assert.throws(() => xchachaOpen(kek, nonce, Buffer.concat([header.subarray(0, headerLen - 1), Buffer.from([header[headerLen - 1] ^ 1])]), bytes.subarray(headerLen)));
+  // Старий KEK без прив'язки до відкритих ключів (до U3) обгортку не відкриває.
+  const legacy = Buffer.from(hkdfSync('sha256', shared, salt, LABELS.epochWrap, 32));
+  assert.throws(() => xchachaOpen(legacy, nonce, header, bytes.subarray(headerLen)));
 });
 
 test('конверт: AAD = 80 відкритих байтів, payload канонічний, підпис пристрою, op_digest незалежний від nonce', () => {
