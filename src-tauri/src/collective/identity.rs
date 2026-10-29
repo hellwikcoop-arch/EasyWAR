@@ -81,6 +81,11 @@ impl MemberIdentity {
         &self.exchange
     }
 
+    /// Підпис учасника над довільним повідомленням модуля (запрошення, відповідь на вступ).
+    pub(crate) fn sign(&self, message: &[u8]) -> [u8; SIGNATURE_LEN] {
+        self.signing.sign(message).to_bytes()
+    }
+
     /// Учасник підписує зв'язування свого ключа обміну з колективом (G12, U1):
     /// `member_id ‖ exchange_pub ‖ collective_id ‖ issued_at` під міткою
     /// `easywar/collective/v1/exchange-binding`. Новіший запис (більший `issued_at`) — ротація.
