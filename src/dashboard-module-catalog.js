@@ -47,6 +47,7 @@ import { MINE_LABEL, MINE_SLOT } from './personal-dashboard.js';
 import { mountChart } from './dashboard-module-charts.js';
 import { columnPicker } from './dashboard-module-picker.js';
 import { forgetProfileSchemaModule, syncProfileSchemaModules } from './profile-schema-client.js';
+import { rolesPanel } from './profile-schema-panel.js';
 import {
   buildImport,
   correctionOutcome,
@@ -1535,6 +1536,7 @@ function initialize() {
         addButton),
       el('div', { class: 'ewmc-page-body' },
         corrections.length ? correctionsList() : null,
+        rolesPanel({ el, invoke, module, modules: () => state.modules }),
         ...(readOnly ? [el('div', { class: 'ewmc-readonly' },
           el('p', { class: 'ewmc-form-status error', text: access.reason }),
           payload.failed === true
