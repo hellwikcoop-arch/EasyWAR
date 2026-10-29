@@ -145,7 +145,7 @@ test('клієнт: видалення модуля прибирає джере�
 
 test('сторінка модулів синхронізує схему після читання модулів і чистить її при видаленні, не блокуючи роботу', async () => {
   const source = await readFile(new URL('../src/dashboard-module-catalog.js', import.meta.url), 'utf8');
-  assert.match(source, /import \{ forgetProfileSchemaModule, loadProfileSchema, syncProfileSchemaModules \} from '\.\/profile-schema-client\.js';/u);
+  assert.match(source, /import \{ forgetProfileSchemaModule, loadProfileSchema, syncProfileSchemaModules, updateProfileSchema \} from '\.\/profile-schema-client\.js';/u);
   assert.match(source, /keepProfileSchema\(syncProfileSchemaModules\(invoke, state\.modules\)\)/u);
   assert.match(source, /keepProfileSchema\(forgetProfileSchemaModule\(invoke, module\.id\)\)/u);
   assert.doesNotMatch(source, /await (syncProfileSchemaModules|forgetProfileSchemaModule)/u);
