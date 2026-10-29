@@ -2,6 +2,7 @@ pub mod analytics;
 mod app_update;
 pub mod backup;
 pub mod base_tables;
+pub mod collective;
 pub mod dashboard_modules;
 mod database;
 mod desktop_shell;
