@@ -618,3 +618,13 @@ by hand with narrow anchored patches (see `AGENTS.md`), then run
 періоду картки. Зміни розкладки — через `changeLayout` (`updateDashboardLayout`, один повтор при
 конфлікті ревізій). Картки стоять у порядку розміщень; перетягування, розмір, колір і фон — наступні
 кроки E4.
+
+## Повторний імпорт з переглядом змін (E3в, ядро)
+
+`src/table-update-core.js` — чисте ядро без DOM, Tauri, годинника й мережі (поки не підключене до екрана):
+`fileFingerprint(headers)` і `recognizeSource(sources, headers)` упізнають відому таблицю за заголовками;
+`suggestKeyColumns(fields, oldRows, newRows)` пропонує ключ рядка; `diffRows({ fields, oldRows, newRows,
+keyColumns, correctedCells })` дає додані, змінені, зниклі й неоднозначні рядки та лічильники (`counts`);
+`previewDiff` обрізає списки для показу; `applyDiff(oldRows, diff, { removed })` збирає нові рядки модуля
+(змінені значення беруться з нової версії, крім виправлених вручну; зниклі лишаються, якщо користувач
+не обрав `remove`). Без ключа порівняння не виконується (`no_key`), рядки не зіставляються за порядком.
