@@ -16,7 +16,9 @@ Argon2id, ADR P1). Код C2 (наказ T-0017, R4): модуль `src-tauri/sr
 Підпитання JE-16 про операції відкликаного: у коді обидва правила (`RevokedPolicy::Reject` —
 робоче припущення (б), `RevokedPolicy::Quarantine` — (а)); яке ввімкнути в C3b, вирішує JE.
 G12 закрито лише для ізольованої бібліотеки: мережа, production і команди Tauri не дозволені. До C2p/C3b
-обов'язкові U1–U3, C3b блокують A3, A6, N1, п. 15 відкритий ([`evidence/collectives/2026-10-29-c2-g12-checklist.md`](../evidence/collectives/2026-10-29-c2-g12-checklist.md)).  
+обов'язкові U1–U3, C3b блокують A3, A6, N1, п. 15 відкритий ([`evidence/collectives/2026-10-29-c2-g12-checklist.md`](../evidence/collectives/2026-10-29-c2-g12-checklist.md)).
+**U1–U3 реалізовано в коді бібліотеки 29.10.2026** (розділи 2.2 і 2.3 нижче; формат `EpochWrap` змінено до
+першого збереженого чи переданого запису); приймання — незалежна перевірка C3 і J5, до неї п. 15 лишається відкритим.  
 **Етапи:** C2a (цей ADR + перелік крейтів), C2, C2p.  
 **Пов'язане:** [`COLLECTIVES_PLAN.md`](../COLLECTIVES_PLAN.md) §6, К4, К9, Q10б;
 [`network-and-secret-boundaries.md`](network-and-secret-boundaries.md) (P1, сховище секретів);
@@ -92,6 +94,13 @@ HKDF-SHA256 + XChaCha20-Poly1305 + Argon2id (для сховища). Інший 
   (окрема пара, не виведена з Ed25519). ID учасника = SHA-256(`"easywar/collective/v1/member-id"`
   ‖ публічний ключ підпису), 32 байти; у інтерфейсі — перші 10 символів base32. Не виводиться
   з MAC/IMEI/серійних номерів і **не використовується** як ідентифікатор лічильника К11.
+- **Зв'язування ключа обміну з колективом** (G12, U1): запис `{sign_pub, exchange_pub, collective_id,
+  issued_at}` під підписом Ed25519 учасника над `"easywar/collective/v1/exchange-binding" ‖ member_id ‖
+  exchange_pub ‖ collective_id ‖ issued_at` (окрема мітка, не збігається з міткою запису пристрою).
+  Перевірений запис — єдиний шлях до учасника, якому можна видати обгортку (`BoundMember`, U2): журнал
+  складу приймає вступ лише з ним, повторний вступ ключ обміну не перезаписує, ротація — окремий запис
+  журналу з новішим (`issued_at` строго більший) записом того самого учасника; відкликаний учасник ні
+  обгорток, ні ротації не отримує.
 - **Ключ пристрою**: Ed25519, запис `{device_pub, member_id, issued_at}` підписаний ключем
   учасника; операції підписує пристрій; одержувач перевіряє ланцюжок пристрій → учасник →
   підписаний журнал складу (C1c).
@@ -102,10 +111,13 @@ HKDF-SHA256 + XChaCha20-Poly1305 + Argon2id (для сховища). Інший 
 
 - Ключ епохи: 32 випадкові байти з OS CSPRNG; `epoch` — u32, зростає на 1 при кожному
   відкликанні; епоха 0 — створення колективу.
-- **Обгортка епохи для учасника** (варіант Б): `shared = X25519(eph_priv, member_x25519_pub)`;
-  `kek = HKDF-SHA256(ikm = shared, salt = collective_id ‖ epoch, info = "easywar/collective/v1/epoch-wrap")`;
-  `wrapped = XChaCha20-Poly1305(kek, nonce₂₄, epoch_key, aad = header)`; відкриті поля обгортки:
-  `eph_pub`, `epoch`, `collective_id`, `member_id`, `nonce`. Ефемерний ключ одноразовий, затирається.
+- **Обгортка епохи для учасника** (варіант Б, формат після U3): `shared = X25519(eph_priv, member_x25519_pub)`;
+  `kek = HKDF-SHA256(ikm = shared, salt = collective_id ‖ epoch, info = "easywar/collective/v1/epoch-wrap" ‖
+  eph_pub ‖ member_x25519_pub)`; `wrapped = XChaCha20-Poly1305(kek, nonce₂₄, epoch_key, aad = header)`;
+  відкритий заголовок обгортки (у такому порядку, увесь в AAD): `v` (u16, =1), `suite` (u16, =1),
+  `collective_id`, `epoch`, `member_id`, `eph_pub`, `nonce` — 112 байтів; інші `v`/`suite` відхиляються
+  до розгортання. Обгортка створюється лише для учасника з перевіреним зв'язуванням (2.2), неконтрибутивний
+  спільний секрет — відмова (`WeakExchangeKey`). Ефемерний ключ одноразовий, затирається.
   Варіант А: HPKE base mode `DHKEM(X25519, HKDF-SHA256), HKDF-SHA256, ChaCha20Poly1305`
   (RFC 9180) з тією самою `info` і AAD.
 - Новий учасник (К3) отримує обгортки всіх епох; відкликаний не отримує нової епохи.

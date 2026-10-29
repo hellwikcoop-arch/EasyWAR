@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::envelope::{self, Envelope, SignedPayload};
 use super::epoch::{CollectiveId, EpochKey};
-use super::identity::{DeviceRecord, MemberId, MemberPublic};
+use super::identity::{BoundMember, DeviceRecord, ExchangeBinding, MemberId};
 use super::{Reason, ID_LEN, KEY_LEN};
 
 /// Правило для операцій, створених до відкликання й доставлених після (підпитання JE-16):
@@ -146,17 +146,17 @@ fn receive_inner(
 }
 
 /// Еталонна реалізація журналу складу в пам'яті (синтетична; для тестів і як зразок для
-/// C1c/C3b). Запис пристрою приймається лише з дійсним підписом учасника.
-#[derive(Default)]
+/// C1c/C3b). Вступ і ротація ключа обміну — лише з підписаним зв'язуванням для цього
+/// колективу (G12, U2); запис пристрою — лише з дійсним підписом учасника.
 pub struct InMemoryMembership {
+    collective_id: CollectiveId,
     latest: u64,
     members: HashMap<MemberId, MemberState>,
     epochs: Vec<u64>,
 }
 
-#[derive(Default)]
 struct MemberState {
-    public: Option<MemberPublic>,
+    bound: BoundMember,
     joined_at: u64,
     revoked_at: Option<u64>,
     tables: Vec<([u8; ID_LEN], u64)>,
@@ -165,8 +165,9 @@ struct MemberState {
 
 impl InMemoryMembership {
     /// Колектив створено: епоха 0 з запису 0.
-    pub fn new() -> Self {
+    pub fn new(collective_id: CollectiveId) -> Self {
         Self {
+            collective_id,
             latest: 0,
             members: HashMap::new(),
             epochs: vec![0],
@@ -178,12 +179,55 @@ impl InMemoryMembership {
         self.latest
     }
 
-    pub fn join(&mut self, member: &MemberPublic) -> u64 {
+    /// Вступ лише з перевіреним зв'язуванням ключа обміну для цього колективу. Наявного
+    /// учасника `join` не перезаписує: новий ключ обміну — тільки [`Self::rotate_exchange`].
+    pub fn join(&mut self, binding: &ExchangeBinding) -> Result<u64, Reason> {
+        let bound = binding.verify(&self.collective_id)?;
+        if self.members.contains_key(&bound.member_id()) {
+            return Err(Reason::BindingNotNewer);
+        }
         let seq = self.next();
-        let state = self.members.entry(member.member_id()).or_default();
-        state.public = Some(*member);
-        state.joined_at = seq;
-        seq
+        self.members.insert(
+            bound.member_id(),
+            MemberState {
+                bound,
+                joined_at: seq,
+                revoked_at: None,
+                tables: Vec::new(),
+                devices: Vec::new(),
+            },
+        );
+        Ok(seq)
+    }
+
+    /// Ротація ключа обміну — окремий запис журналу з новішим підписаним зв'язуванням того
+    /// самого учасника; відкликаний учасник ключ не змінює.
+    pub fn rotate_exchange(&mut self, binding: &ExchangeBinding) -> Result<u64, Reason> {
+        let bound = binding.verify(&self.collective_id)?;
+        let state = self
+            .members
+            .get(&bound.member_id())
+            .ok_or(Reason::ExchangeNotBound)?;
+        if state.revoked_at.is_some() {
+            return Err(Reason::MemberRevoked);
+        }
+        if bound.issued_at() <= state.bound.issued_at() {
+            return Err(Reason::BindingNotNewer);
+        }
+        let seq = self.next();
+        if let Some(state) = self.members.get_mut(&bound.member_id()) {
+            state.bound = bound;
+        }
+        Ok(seq)
+    }
+
+    /// Чинне перевірене зв'язування учасника — вхід для [`super::epoch::wrap_epoch_key`].
+    /// Відкликаний учасник обгорток не отримує (ADR, 2.3).
+    pub fn bound_member(&self, member: &MemberId) -> Option<BoundMember> {
+        self.members
+            .get(member)
+            .filter(|state| state.revoked_at.is_none())
+            .map(|state| state.bound)
     }
 
     pub fn grant_table(&mut self, member: &MemberId, table_id: [u8; ID_LEN]) -> u64 {
@@ -200,8 +244,7 @@ impl InMemoryMembership {
             .members
             .get(&record.member_id)
             .ok_or(Reason::DeviceNotValid)?;
-        let public = state.public.ok_or(Reason::DeviceNotValid)?;
-        record.verify(&public)?;
+        record.verify(state.bound.public())?;
         let seq = self.next();
         if let Some(state) = self.members.get_mut(&record.member_id) {
             state.devices.push((record.device_pub, seq));
@@ -288,15 +331,18 @@ mod tests {
         fn new() -> Self {
             let alice = MemberIdentity::generate();
             let device = DeviceIdentity::generate();
-            let mut membership = InMemoryMembership::new();
-            membership.join(&alice.public()); // seq 1
+            let collective = [1; ID_LEN];
+            let mut membership = InMemoryMembership::new(collective);
+            membership
+                .join(&alice.bind_exchange(collective, 1_761_000_000))
+                .unwrap(); // seq 1
             let table = [7; ID_LEN];
             membership.grant_table(&alice.member_id(), table); // seq 2
             membership
                 .add_device(&alice.issue_device(&device.public(), 1_761_000_000))
                 .unwrap(); // seq 3
             Self {
-                collective: [1; ID_LEN],
+                collective,
                 membership,
                 keys: vec![*EpochKey::generate().as_bytes()],
                 alice,
@@ -502,10 +548,13 @@ mod tests {
 
     #[test]
     fn device_record_without_valid_member_signature_is_not_journaled() {
-        let mut membership = InMemoryMembership::new();
+        let collective = [5; ID_LEN];
+        let mut membership = InMemoryMembership::new(collective);
         let alice = MemberIdentity::generate();
         let mallory = MemberIdentity::generate();
-        membership.join(&alice.public());
+        membership
+            .join(&alice.bind_exchange(collective, 1))
+            .unwrap();
         let device = DeviceIdentity::generate();
         let forged = mallory.issue_device(&device.public(), 1);
         assert_eq!(
@@ -515,5 +564,113 @@ mod tests {
         let mut record = alice.issue_device(&device.public(), 1);
         record.member_id = alice.member_id();
         membership.add_device(&record).unwrap();
+    }
+
+    /// G12, U2: вступ лише з підписаним зв'язуванням для цього колективу; `join` не
+    /// перезаписує ключ обміну; ротація — лише новішим записом того самого учасника.
+    #[test]
+    fn join_requires_binding_and_never_overwrites_exchange() {
+        let collective = [6; ID_LEN];
+        let mut membership = InMemoryMembership::new(collective);
+        let alice = MemberIdentity::generate();
+        let mallory = MemberIdentity::generate();
+
+        // Чужий колектив і підмінений ключ обміну — у журнал не потрапляють.
+        assert_eq!(
+            membership
+                .join(&alice.bind_exchange([9; ID_LEN], 1))
+                .unwrap_err(),
+            Reason::ExchangeNotBound
+        );
+        let mut swapped = alice.bind_exchange(collective, 1);
+        swapped.exchange_pub = mallory.public().exchange;
+        assert_eq!(
+            membership.join(&swapped).unwrap_err(),
+            Reason::ExchangeNotBound
+        );
+        assert_eq!(membership.latest_seq(), 0, "відхилене не займає seq");
+
+        assert_eq!(membership.join(&alice.bind_exchange(collective, 10)), Ok(1));
+        let bound = membership.bound_member(&alice.member_id()).unwrap();
+        assert_eq!(bound.public(), &alice.public());
+
+        // Повторний join навіть з новішим записом не змінює ключ обміну.
+        let rotated = MemberIdentity::from_secrets(
+            &alice.secrets().0,
+            &MemberIdentity::generate().secrets().1,
+        );
+        assert_eq!(
+            membership
+                .join(&rotated.bind_exchange(collective, 20))
+                .unwrap_err(),
+            Reason::BindingNotNewer
+        );
+        assert_eq!(
+            membership
+                .bound_member(&alice.member_id())
+                .unwrap()
+                .public(),
+            &alice.public()
+        );
+
+        // Ротація: не новіший запис відхиляється, новіший — окремий запис журналу.
+        assert_eq!(
+            membership
+                .rotate_exchange(&rotated.bind_exchange(collective, 10))
+                .unwrap_err(),
+            Reason::BindingNotNewer
+        );
+        assert_eq!(
+            membership.rotate_exchange(&rotated.bind_exchange(collective, 20)),
+            Ok(2)
+        );
+        assert_eq!(
+            membership
+                .bound_member(&alice.member_id())
+                .unwrap()
+                .public(),
+            &rotated.public()
+        );
+        assert_eq!(
+            membership
+                .rotate_exchange(&mallory.bind_exchange(collective, 30))
+                .unwrap_err(),
+            Reason::ExchangeNotBound,
+            "ротація лише для наявного учасника"
+        );
+
+        // Відкликаний учасник не отримує обгорток і не змінює ключ.
+        membership.revoke(&alice.member_id());
+        assert!(membership.bound_member(&alice.member_id()).is_none());
+        assert_eq!(
+            membership
+                .rotate_exchange(&rotated.bind_exchange(collective, 40))
+                .unwrap_err(),
+            Reason::MemberRevoked
+        );
+    }
+
+    /// G12, U2: обгортка епохи створюється лише для учасника з журналу складу — через
+    /// перевірене зв'язування, і розгортається саме його ключем обміну.
+    #[test]
+    fn epoch_wraps_go_only_to_bound_members() {
+        use crate::collective::epoch::{unwrap_epoch_key, wrap_epoch_key};
+        let collective = [8; ID_LEN];
+        let mut membership = InMemoryMembership::new(collective);
+        let alice = MemberIdentity::generate();
+        membership
+            .join(&alice.bind_exchange(collective, 1))
+            .unwrap();
+        let key = EpochKey::generate();
+        let recipient = membership.bound_member(&alice.member_id()).unwrap();
+        let wrap = wrap_epoch_key(&key, membership.current_epoch(), &recipient).unwrap();
+        assert_eq!(wrap.collective_id, collective);
+        assert_eq!(
+            unwrap_epoch_key(&wrap, &alice).unwrap().as_bytes(),
+            key.as_bytes()
+        );
+        assert!(membership
+            .bound_member(&MemberIdentity::generate().member_id())
+            .is_none());
     }
 }
