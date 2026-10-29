@@ -53,6 +53,17 @@ e.g. `300.0` for «300 м»; NULL for corrections made before 0016) and
 transaction). `get_data` returns each correction with `status`: `current`,
 `superseded` (history of the import) or `unconfirmed` (old correction without a
 stored value). The original correction is never rewritten. Migration
+`0017_profile_schemas.sql` adds `profile_schemas`: one row per profile with the
+versioned «схема профілю» (E3 of the modules roadmap) as a JSON document of format
+`easywar.profile-schema` — which columns of the user's table play which semantic
+role, in which units, in which order and under which labels. It is kept apart from
+`dashboard_module_fields`, which is rebuilt from the built-in template on every
+read. Rust checks only the envelope (format, supported version, owning profile,
+size limits) and a monotonic `revision` used as a compare-and-swap mark; the JS
+core (`src/profile-schema-core.js`) composes and validates the content. The table
+holds no module rows and no raw XLSX values; deleting the profile removes it
+(`ON DELETE CASCADE`). A document of a newer format version is never overwritten
+by an older application. Migration
 `0012_dashboard_module_style.sql` adds `dashboard_modules.style` — the look chosen
 when the module was created: `standard` (default for existing modules), `branch`
 (colours of the dashboard's service branch) or `heightwell` («Пункт керування»);

@@ -17,6 +17,7 @@ pub mod office_library;
 pub mod office_sources;
 pub mod phone_export;
 pub mod position_templates;
+pub mod profile_schema;
 pub mod profile_table;
 pub mod repository;
 pub mod restore;
@@ -56,6 +57,7 @@ use office_library::{
 use office_sources::{SourceRequest, Sources};
 use phone_export::PhoneDashboard;
 use position_templates::PositionDatabaseTemplate;
+use profile_schema::{ProfileSchemaRecord, ProfileSchemaStore};
 use repository::{
     Repository, ReviewDecision, SettingsStore, SignalInboxItem, SignalParsePersistence,
     SignalReviewPersistence, SignalReviewSnapshot, XlsxStageResult,
@@ -429,6 +431,53 @@ async fn delete_dashboard_module(
             &module_id,
             expected_updated_at.as_deref(),
         )
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// Схема профілю активного профілю: рішення про стовпці його таблиць (етап E3). Профіль
+/// береться з сеансу, а не від клієнта. Без збереженої схеми повертає `schema: null`, ревізію 0.
+#[tauri::command]
+async fn get_profile_schema(
+    schemas: tauri::State<'_, ProfileSchemaStore>,
+    session: tauri::State<'_, ProfileSession>,
+) -> Result<ProfileSchemaRecord, String> {
+    schemas
+        .get(&active_profile_id(&session)?)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// Зберігає схему активного профілю. `expected_revision` — ревізія, яку клієнт прочитав
+/// (0, якщо схеми ще не було); якщо збережена вже інша, нічого не змінюється.
+#[tauri::command]
+async fn save_profile_schema(
+    schemas: tauri::State<'_, ProfileSchemaStore>,
+    session: tauri::State<'_, ProfileSession>,
+    schema: Value,
+    expected_revision: i64,
+) -> Result<ProfileSchemaRecord, String> {
+    let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
+    schemas
+        .save(
+            &active_profile_id(&session)?,
+            &schema,
+            expected_revision,
+            &now,
+        )
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// Стирає схему активного профілю (рішення про стовпці). Таблиці модулів і їхні дані не чіпає.
+#[tauri::command]
+async fn reset_profile_schema(
+    schemas: tauri::State<'_, ProfileSchemaStore>,
+    session: tauri::State<'_, ProfileSession>,
+    expected_revision: i64,
+) -> Result<(), String> {
+    schemas
+        .reset(&active_profile_id(&session)?, expected_revision)
         .await
         .map_err(|error| error.to_string())
 }
@@ -3405,6 +3454,7 @@ pub fn run() {
             app.manage(SignalReceiveController::default());
             app.manage(DatabaseStatusStore::new(pool.clone()));
             app.manage(DashboardModuleStore::new(pool.clone()));
+            app.manage(ProfileSchemaStore::new(pool.clone()));
             app.manage(module_source_selection::SourceSelections::default());
             app.manage(office_files::OfficeFileHandles::default());
             app.manage(LibraryStore::new(pool.clone()));
@@ -3464,6 +3514,9 @@ pub fn run() {
             replace_dashboard_module_rows,
             delete_dashboard_module,
             set_dashboard_module_style,
+            get_profile_schema,
+            save_profile_schema,
+            reset_profile_schema,
             get_local_profiles,
             register_local_profile,
             set_local_profile_modules,

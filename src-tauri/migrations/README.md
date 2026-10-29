@@ -123,6 +123,13 @@ edit changed that field) to `dashboard_module_corrections`. Existing corrections
 keep all their columns and get NULL in both: they are shown as «поточність не
 підтверджена» until their field is edited.
 
+`0017_profile_schemas.sql` adds `profile_schemas` (one row per profile, deleted
+with it): the versioned profile schema of E3 — the user's decisions about which
+columns of their tables play which semantic roles — as one JSON document plus
+`format_version`, `revision` (compare-and-swap mark, grows with every change) and
+`updated_at`. It stores no module rows and no raw XLSX values and is independent
+of `dashboard_module_fields`, which is rewritten from the template on every read.
+
 The `dashboard_data_<id>` tables of user-created dashboard modules are not
 migration objects: Rust creates them at runtime from a validated catalog
 template and adds columns that later appear in a template with `ALTER TABLE`,
