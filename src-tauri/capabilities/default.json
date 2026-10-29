@@ -55,6 +55,7 @@
     "allow-weather-online-search",
     "allow-clear-profile-database",
     "allow-read-profile-database",
+    "allow-export-profile-database",
     "allow-write-profile-database",
     "allow-get-workspace-templates",
     "allow-set-profile-workspace-template",

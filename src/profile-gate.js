@@ -456,8 +456,8 @@ export function createProfileGate({ el, avatar, readAvatar }) {
         const slots = slotsForModules(data.modules);
         const error = el('p', { class: 'ew-gate-message', role: 'alert' });
         const rows = slots.map(slot => {
-          const status = el('span', { class: 'ew-gate-slot-file', text: 'не прив’язано' });
-          const button = el('button', { type: 'button', class: 'ew-gate-button ew-gate-button-quiet', text: 'Прив’язати таблицю…' });
+          const status = el('span', { class: 'ew-gate-slot-file', text: 'не додано' });
+          const button = el('button', { type: 'button', class: 'ew-gate-button ew-gate-button-quiet', text: 'Додати таблицю…' });
           button.addEventListener('click', async () => {
             error.textContent = '';
             button.disabled = true;
@@ -467,12 +467,12 @@ export function createProfileGate({ el, avatar, readAvatar }) {
                 const profile = next.profiles.find(candidate => candidate.id === created.id);
                 const path = profile?.tables?.[slot.branch];
                 bound[slot.branch] = path;
-                status.textContent = databaseFileName(path) || 'не прив’язано';
+                status.textContent = databaseFileName(path) || 'не додано';
                 status.classList.toggle('is-bound', Boolean(path));
-                button.textContent = 'Змінити…';
+                button.textContent = 'Оновити (додати знову)…';
               }
             } catch (failure) {
-              error.textContent = `Таблицю не прив’язано: ${String(failure?.message || failure)}`;
+              error.textContent = `Таблицю не додано: ${String(failure?.message || failure)}`;
             } finally {
               button.disabled = false;
             }
@@ -486,7 +486,7 @@ export function createProfileGate({ el, avatar, readAvatar }) {
         show(
           el('h1', { id: 'ew-gate-title', text: 'Таблиці' }),
           el('p', { class: 'ew-gate-lead', text: slots.length
-            ? 'Профіль створено. Можна одразу прив’язати свої таблиці .xlsx або пропустити цей крок: зробити це можна пізніше на стартовому екрані.'
+            ? 'Профіль створено. Можна одразу додати свої таблиці .xlsx: кожна копіюється в зашифровані дані профілю один раз, а щоб оновити таблицю, її додають знову. Крок можна пропустити й зробити пізніше на стартовому екрані.'
             : 'Профіль створено. Для обраних модулів прив’язувати таблиці до профілю не потрібно.' }),
           stepper(2),
           slots.length ? el('div', { class: 'ew-gate-slots' }, rows) : null,

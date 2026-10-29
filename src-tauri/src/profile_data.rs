@@ -54,6 +54,19 @@ const RECORD_HEADER_LEN: usize = RECORD_MAGIC.len() + 1 + NONCE_LEN;
 pub const MAX_KEY_CHARS: usize = 80;
 /// Найбільше значення одного запису (EasyFLY обмежує свій файл 5 МБ).
 pub const MAX_VALUE_BYTES: usize = 32 * 1024 * 1024;
+/// Простір імен копій таблиць профілю (`tables.<слот>`): книга XLSX до 64 МБ у base64.
+pub const TABLE_NAMESPACE: &str = "tables";
+/// Найбільше значення запису в просторі `tables`: 64 МБ книги у base64 з запасом на JSON.
+pub const MAX_TABLE_VALUE_BYTES: usize = 96 * 1024 * 1024;
+
+/// Найбільше значення для ключа: копії таблиць більші за звичайні записи застосунків.
+pub fn max_value_bytes(key: &str) -> usize {
+    if namespace_of(key) == TABLE_NAMESPACE {
+        MAX_TABLE_VALUE_BYTES
+    } else {
+        MAX_VALUE_BYTES
+    }
+}
 /// Скільки записів тека приймає (захист від безмежного росту).
 pub const MAX_RECORDS: usize = 512;
 
@@ -344,7 +357,7 @@ impl ProfileDataStore {
     }
 
     #[cfg(test)]
-    fn with_kdf(root: PathBuf, kdf: KdfParams) -> Self {
+    pub(crate) fn with_kdf(root: PathBuf, kdf: KdfParams) -> Self {
         Self { root, kdf }
     }
 
@@ -559,7 +572,7 @@ impl ProfileDataStore {
     /// Записує значення (атомарно). → час запису (RFC 3339, UTC).
     pub fn set(&self, keys: &DataKeys, key: &str, value: &str) -> Result<String, ProfileDataError> {
         validate_key(key)?;
-        if value.is_empty() || value.len() > MAX_VALUE_BYTES {
+        if value.is_empty() || value.len() > max_value_bytes(key) {
             return Err(ProfileDataError::InvalidValue);
         }
         let dir = self.profile_dir(&keys.profile_id)?;
@@ -582,7 +595,7 @@ impl ProfileDataStore {
         modified: &str,
     ) -> Result<(), ProfileDataError> {
         validate_key(key)?;
-        if value.is_empty() || value.len() > MAX_VALUE_BYTES {
+        if value.is_empty() || value.len() > max_value_bytes(key) {
             return Err(ProfileDataError::InvalidValue);
         }
         let dir = self.profile_dir(&keys.profile_id)?;

@@ -87,7 +87,7 @@ list in РВ) is **not** in SQLite. It lives encrypted in the hidden application
 key wrapped by the profile password (Argon2id + XChaCha20-Poly1305) and, optionally, by the
 library key; one authenticated file per record. The data key is unwrapped at login and held only in
 memory until the profile is locked. The SQLite backup (`backup.rs`) does not include these files;
-the profile data has its own archive, `.ewpdb` (`src-tauri/src/profile_data/archive.rs`, commands
+the profile data (including the encrypted copies of the tables added to the profile, `tables.*`, `profile_table_copy.rs`) has its own archive, `.ewpdb` (`src-tauri/src/profile_data/archive.rs`, commands
 `profile_data_backup_create` / `profile_data_backup_restore`, main window only). Contract and window isolation: [`WORKSPACE.md`](WORKSPACE.md), «Дані профілю».
 
 The implemented schema and its invariants are documented in

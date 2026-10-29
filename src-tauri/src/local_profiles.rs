@@ -111,6 +111,21 @@ pub struct ProfileTables {
 }
 
 impl ProfileTables {
+    /// Прив'язані таблиці: рід військ і значення (шлях або позначка копії в профілі).
+    pub fn entries(&self) -> Vec<(Branch, &str)> {
+        [
+            (Branch::Air, &self.air),
+            (Branch::Rocket, &self.rocket),
+            (Branch::Pvk, &self.pvk),
+            (Branch::Dshv, &self.dshv),
+            (Branch::PvkLosses, &self.pvk_losses),
+            (Branch::DshvLosses, &self.dshv_losses),
+        ]
+        .into_iter()
+        .filter_map(|(branch, path)| path.as_deref().map(|path| (branch, path)))
+        .collect()
+    }
+
     fn slot(&mut self, branch: Branch) -> &mut Option<String> {
         match branch {
             Branch::Air => &mut self.air,

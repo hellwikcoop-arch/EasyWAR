@@ -181,6 +181,10 @@ export function profileTablePath(profile, branch) {
   return profile?.tables?.[branch] || null;
 }
 
+/**
+ * Додає таблицю до профілю: обраний файл .xlsx копіюється в зашифровані дані профілю (оригінал не
+ * змінюється й далі не потрібен). Щоб оновити таблицю, її додають знову.
+ */
 export function chooseProfileDatabase(profileId, branch, invokeCommand = invoke) {
   return invokeCommand('choose_profile_database', { profileId, branch });
 }
@@ -189,7 +193,12 @@ export function clearProfileDatabase(profileId, branch, invokeCommand = invoke) 
   return invokeCommand('clear_profile_database', { profileId, branch });
 }
 
-/** Зберігає порожню базову таблицю в новий файл і прив'язує її; null — якщо скасовано. */
+/** Зберігає копію таблиці профілю у файл .xlsx, який обирає користувач; null — якщо скасовано. */
+export function exportProfileDatabase(profileId, branch, invokeCommand = invoke) {
+  return invokeCommand('export_profile_database', { profileId, branch });
+}
+
+/** Додає до профілю порожню базову таблицю (без вікна збереження й файла на диску). */
 export function createProfileBaseTable(profileId, table, invokeCommand = invoke) {
   return invokeCommand('create_profile_base_table', { profileId, table });
 }

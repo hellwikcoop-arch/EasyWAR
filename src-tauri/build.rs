@@ -60,6 +60,7 @@ const COMMANDS: &[&str] = &[
     "collective_create",
     "clear_profile_database",
     "read_profile_database",
+    "export_profile_database",
     "write_profile_database",
     "get_workspace_templates",
     "set_profile_workspace_template",

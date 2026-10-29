@@ -24,6 +24,7 @@ pub mod position_templates;
 pub mod profile_data;
 pub mod profile_schema;
 pub mod profile_table;
+pub mod profile_table_copy;
 pub mod repository;
 pub mod restore;
 pub mod signal_commands;
@@ -240,12 +241,28 @@ async fn inspect_and_register(
     origin: module_source_selection::SelectionOrigin,
     owner: module_source_selection::SelectionOwner,
 ) -> Result<module_source::SourceWorkbook, String> {
+    let read_path = path.clone();
+    let (bytes, name) = tauri::async_runtime::spawn_blocking(move || read_source_file(&read_path))
+        .await
+        .map_err(|error| error.to_string())??;
+    register_inspected(selections, path, name, bytes, origin, owner).await
+}
+
+/// Те саме для вже прочитаних байтів. `path` лише ідентифікує джерело: для копії таблиці в
+/// профілі це позначка `profile-data:…`, а не файл на диску.
+async fn register_inspected(
+    selections: &module_source_selection::SourceSelections,
+    path: PathBuf,
+    name: String,
+    bytes: Vec<u8>,
+    origin: module_source_selection::SelectionOrigin,
+    owner: module_source_selection::SelectionOwner,
+) -> Result<module_source::SourceWorkbook, String> {
     let label = origin.as_str();
-    let (inspected, digest, path) = tauri::async_runtime::spawn_blocking(move || {
-        let (bytes, name) = read_source_file(&path)?;
+    let (inspected, digest) = tauri::async_runtime::spawn_blocking(move || {
         let inspected = module_source::inspect_bytes(&bytes, &name, label)
             .map_err(|error| error.to_string())?;
-        Ok::<_, String>((inspected, module_source_selection::digest(&bytes), path))
+        Ok::<_, String>((inspected, module_source_selection::digest(&bytes)))
     })
     .await
     .map_err(|error| error.to_string())??;
@@ -256,6 +273,128 @@ async fn inspect_and_register(
         selection,
         ..inspected
     })
+}
+
+/// Ключі даних профілю для роботи з копіями таблиць.
+fn table_copy_keys(
+    data: &ProfileDataSession,
+    profile_id: &str,
+) -> Result<std::sync::Arc<profile_data::DataKeys>, String> {
+    data.keys(profile_id).map_err(|error| error.to_string())
+}
+
+/// Копія таблиці профілю: байти й назва, під якою таблицю додали.
+async fn load_table_copy(
+    store: &ProfileDataStore,
+    data: &ProfileDataSession,
+    profile_id: &str,
+    branch: Branch,
+) -> Result<(Vec<u8>, String), String> {
+    let keys = table_copy_keys(data, profile_id)?;
+    let store = store.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        profile_table_copy::load(&store, &keys, branch)
+            .map(|table| (table.bytes, table.name))
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// Байти й назва таблиці профілю. Таблиця, додана до профілю, лежить зашифрованою копією в
+/// даних профілю; стара прив'язка за шляхом читається з диска, доки її не перенесуть у копію.
+async fn read_bound_table(
+    profiles: &LocalProfileStore,
+    session: &ProfileSession,
+    store: &ProfileDataStore,
+    data: &ProfileDataSession,
+    profile_id: &str,
+    branch: Branch,
+) -> Result<(Vec<u8>, String), String> {
+    ensure_profile_unlocked(profiles, session, profile_id).await?;
+    let path = profiles
+        .table_path(profile_id, branch)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("До профілю не додано таблицю {}", branch.genitive()))?;
+    if profile_table_copy::is_marker(&path) {
+        return load_table_copy(store, data, profile_id, branch).await;
+    }
+    let path = PathBuf::from(path);
+    tauri::async_runtime::spawn_blocking(move || read_source_file(&path))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+/// Переносить старі прив'язки за шляхом у зашифровані копії в профілі (після входу, коли
+/// ключ даних уже в пам'яті). Оригінальні файли не змінюються й не видаляються. Файл, який не
+/// вдалося прочитати, лишається прив'язаним за шляхом: його перенесуть, коли він з'явиться.
+/// → `true`, якщо якусь прив'язку перенесено.
+async fn migrate_table_bindings(
+    profiles: &LocalProfileStore,
+    store: &ProfileDataStore,
+    data: &ProfileDataSession,
+    profile_id: &str,
+) -> bool {
+    let Ok(keys) = data.keys(profile_id) else {
+        return false;
+    };
+    let Ok(state) = profiles.list().await else {
+        return false;
+    };
+    let Some(profile) = state
+        .profiles
+        .iter()
+        .find(|profile| profile.id == profile_id)
+    else {
+        return false;
+    };
+    let pending: Vec<(Branch, String)> = profile
+        .tables
+        .entries()
+        .into_iter()
+        .filter(|(_, path)| !profile_table_copy::is_marker(path))
+        .map(|(branch, path)| (branch, path.to_owned()))
+        .collect();
+    let mut migrated = false;
+    for (branch, path) in pending {
+        let copy_store = store.clone();
+        let copy_keys = keys.clone();
+        let file = PathBuf::from(&path);
+        let result = tauri::async_runtime::spawn_blocking(move || {
+            let bytes = read_selected_xlsx(&file)?;
+            profile_table_copy::add(
+                &copy_store,
+                &copy_keys,
+                branch,
+                &office_files::file_name(&file),
+                &bytes,
+            )
+            .map_err(|error| error.to_string())
+        })
+        .await;
+        match result {
+            Ok(Ok(marker)) => {
+                let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
+                match profiles
+                    .set_table_path(profile_id, branch, Some(&marker), &now)
+                    .await
+                {
+                    Ok(_) => migrated = true,
+                    Err(error) => eprintln!(
+                        "EasyWAR: прив'язку таблиці {} не перенесено в профіль: {error}",
+                        branch.as_str()
+                    ),
+                }
+            }
+            Ok(Err(error)) => eprintln!(
+                "EasyWAR: таблицю {} не перенесено в профіль: {error}",
+                branch.as_str()
+            ),
+            Err(error) => eprintln!("EasyWAR: перенесення таблиці перервано: {error}"),
+        }
+    }
+    migrated
 }
 
 /// Хто звертається: вікно, активний профіль і номер сеансу входу.
@@ -280,6 +419,8 @@ async fn inspect_linked_module_source(
     window: tauri::Window,
     profiles: tauri::State<'_, LocalProfileStore>,
     session: tauri::State<'_, ProfileSession>,
+    data_store: tauri::State<'_, ProfileDataStore>,
+    data: tauri::State<'_, ProfileDataSession>,
     selections: tauri::State<'_, module_source_selection::SourceSelections>,
     branch: String,
 ) -> Result<Option<module_source::SourceWorkbook>, String> {
@@ -289,12 +430,17 @@ async fn inspect_linked_module_source(
         .table_path(&owner.profile_id, parsed)
         .await
         .map_err(|error| error.to_string())?
-        .map(PathBuf::from)
     else {
         return Ok(None);
     };
     let origin = module_source_selection::SelectionOrigin::Linked { branch };
-    inspect_and_register(&selections, path, origin, owner)
+    if profile_table_copy::is_marker(&path) {
+        let (bytes, name) = load_table_copy(&data_store, &data, &owner.profile_id, parsed).await?;
+        return register_inspected(&selections, PathBuf::from(path), name, bytes, origin, owner)
+            .await
+            .map(Some);
+    }
+    inspect_and_register(&selections, PathBuf::from(path), origin, owner)
         .await
         .map(Some)
 }
@@ -336,10 +482,13 @@ async fn pick_module_source(
 /// лише якщо вміст файла (а для таблиці профілю — і прив'язка) не змінився після огляду.
 /// `release: true` без аркуша забуває огляд після закриття форми й повертає `None`.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn read_module_source_sheet(
     window: tauri::Window,
     profiles: tauri::State<'_, LocalProfileStore>,
     session: tauri::State<'_, ProfileSession>,
+    data_store: tauri::State<'_, ProfileDataStore>,
+    data: tauri::State<'_, ProfileDataSession>,
     selections: tauri::State<'_, module_source_selection::SourceSelections>,
     selection: String,
     sheet: Option<String>,
@@ -364,8 +513,34 @@ async fn read_module_source_sheet(
             return Err(module_source_selection::SelectionError::Rebound.to_string());
         }
     }
+    // Таблиця профілю, додана копією, читається з даних профілю, а не з диска.
+    let copy_branch = match &chosen.origin {
+        module_source_selection::SelectionOrigin::Linked { branch }
+            if chosen
+                .path
+                .to_str()
+                .is_some_and(profile_table_copy::is_marker) =>
+        {
+            Some(dashboard_branch(branch)?)
+        }
+        _ => None,
+    };
+    let (bytes_source, copy_keys) = match copy_branch {
+        Some(_) => (
+            Some(ProfileDataStore::clone(&data_store)),
+            Some(table_copy_keys(&data, &owner.profile_id)?),
+        ),
+        None => (None, None),
+    };
     tauri::async_runtime::spawn_blocking(move || {
-        let (bytes, _) = read_source_file(&chosen.path)?;
+        let bytes = match (copy_branch, bytes_source, copy_keys) {
+            (Some(branch), Some(store), Some(keys)) => {
+                profile_table_copy::load(&store, &keys, branch)
+                    .map(|table| table.bytes)
+                    .map_err(|error| error.to_string())?
+            }
+            _ => read_source_file(&chosen.path)?.0,
+        };
         if module_source_selection::digest(&bytes) != chosen.digest {
             return Err(module_source_selection::SelectionError::Changed.to_string());
         }
@@ -682,6 +857,12 @@ async fn activate_local_profile(
     }
     install_profile_data(&data, data_keys);
     session.set(Some(profile_id.clone()));
+    // Таблиці, прив'язані до профілю за шляхом у старих версіях, переходять у копії в профілі.
+    let state = if migrate_table_bindings(&profiles, &data_store, &data, &profile_id).await {
+        profiles.list().await.map_err(|error| error.to_string())?
+    } else {
+        state
+    };
     notify_library_state(&app);
     // Бібліотека має той самий пароль, що й профіль: розблоковуємо її у фоні тут, під час входу,
     // щоб документи (EasyDoc, EasySlide, EasyGreen) були доступні без окремого введення пароля.
@@ -1259,6 +1440,8 @@ async fn choose_profile_database(
     app: tauri::AppHandle,
     profiles: tauri::State<'_, LocalProfileStore>,
     session: tauri::State<'_, ProfileSession>,
+    data_store: tauri::State<'_, ProfileDataStore>,
+    data: tauri::State<'_, ProfileDataSession>,
     profile_id: String,
     branch: Branch,
 ) -> Result<Option<LocalProfilesState>, String> {
@@ -1279,10 +1462,26 @@ async fn choose_profile_database(
         return Ok(None);
     };
     let path = selected.into_path().map_err(|error| error.to_string())?;
-    read_selected_xlsx(&path)?;
+    // Таблиця додається в профіль копією: далі застосунок працює лише з нею, а файл-оригінал
+    // не потрібен і не змінюється. Щоб оновити таблицю, її додають знову.
+    let keys = table_copy_keys(&data, &profile_id)?;
+    let store = ProfileDataStore::clone(&data_store);
+    let marker = tauri::async_runtime::spawn_blocking(move || {
+        let bytes = read_selected_xlsx(&path)?;
+        profile_table_copy::add(
+            &store,
+            &keys,
+            branch,
+            &office_files::file_name(&path),
+            &bytes,
+        )
+        .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())??;
     let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
     profiles
-        .set_table_path(&profile_id, branch, Some(&path.to_string_lossy()), &now)
+        .set_table_path(&profile_id, branch, Some(&marker), &now)
         .await
         .map(Some)
         .map_err(|error| error.to_string())
@@ -1292,10 +1491,26 @@ async fn choose_profile_database(
 async fn clear_profile_database(
     profiles: tauri::State<'_, LocalProfileStore>,
     session: tauri::State<'_, ProfileSession>,
+    data_store: tauri::State<'_, ProfileDataStore>,
+    data: tauri::State<'_, ProfileDataSession>,
     profile_id: String,
     branch: Branch,
 ) -> Result<LocalProfilesState, String> {
     ensure_profile_unlocked(&profiles, &session, &profile_id).await?;
+    let bound = profiles
+        .table_path(&profile_id, branch)
+        .await
+        .map_err(|error| error.to_string())?;
+    if bound.as_deref().is_some_and(profile_table_copy::is_marker) {
+        // Копію прибираємо до відв'язування: якщо не вдалося, таблиця лишається на місці.
+        let keys = table_copy_keys(&data, &profile_id)?;
+        let store = ProfileDataStore::clone(&data_store);
+        tauri::async_runtime::spawn_blocking(move || {
+            profile_table_copy::remove(&store, &keys, branch).map_err(|error| error.to_string())
+        })
+        .await
+        .map_err(|error| error.to_string())??;
+    }
     let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
     profiles
         .set_table_path(&profile_id, branch, None, &now)
@@ -1394,6 +1609,8 @@ async fn office_bound_tables(profiles: &LocalProfileStore) -> Result<Vec<PathBuf
         .await
         .map_err(|error| error.to_string())?
         .into_iter()
+        // Копії в профілі не є файлами на диску: захищати від перезапису нічого.
+        .filter(|path| !profile_table_copy::is_marker(path))
         .map(PathBuf::from)
         .collect())
 }
@@ -2305,6 +2522,7 @@ async fn library_import(
         .await
         .map_err(|error| error.to_string())?
         .into_iter()
+        .filter(|path| !profile_table_copy::is_marker(path))
         .map(PathBuf::from)
         .collect();
     let (bytes, profile_table_copy) = tauri::async_runtime::spawn_blocking(move || {
@@ -3093,6 +3311,7 @@ async fn profile_data_backup_create(
 async fn profile_data_backup_restore(
     app: tauri::AppHandle,
     window: tauri::WebviewWindow,
+    profiles: tauri::State<'_, LocalProfileStore>,
     session: tauri::State<'_, ProfileSession>,
     data: tauri::State<'_, ProfileDataSession>,
     store: tauri::State<'_, ProfileDataStore>,
@@ -3122,13 +3341,61 @@ async fn profile_data_backup_restore(
     };
     let archive = selected.into_path().map_err(|error| error.to_string())?;
     let store = store.inner().clone();
+    let import_store = store.clone();
+    let import_keys = keys.clone();
     let report = tauri::async_runtime::spawn_blocking(move || {
-        store.import_archive(&archive, password.as_bytes(), &keys)
+        import_store.import_archive(&archive, password.as_bytes(), &import_keys)
     })
     .await
     .map_err(|error| error.to_string())?
     .map_err(|error| error.to_string())?;
+    // Копії таблиць повернулися записами профілю; слоти в базі треба показати знову.
+    rebind_restored_tables(&profiles, &store, &keys, &profile_id).await;
     Ok(Some(report))
+}
+
+/// Після відновлення даних профілю з копії показує таблиці, чиї зашифровані копії є в профілі, але
+/// слот у базі порожній (інший профіль, видалена таблиця) або вказує на копію з іншою назвою.
+/// Прив'язку за шляхом до файла не чіпає.
+async fn rebind_restored_tables(
+    profiles: &LocalProfileStore,
+    store: &ProfileDataStore,
+    keys: &std::sync::Arc<profile_data::DataKeys>,
+    profile_id: &str,
+) {
+    for branch in profile_table_copy::BRANCHES {
+        let bound = profiles.table_path(profile_id, branch).await.ok().flatten();
+        if bound
+            .as_deref()
+            .is_some_and(|path| !profile_table_copy::is_marker(path))
+        {
+            continue;
+        }
+        let (copy_store, copy_keys) = (store.clone(), keys.clone());
+        let name = tauri::async_runtime::spawn_blocking(move || {
+            profile_table_copy::load(&copy_store, &copy_keys, branch)
+                .ok()
+                .map(|table| table.name)
+        })
+        .await
+        .ok()
+        .flatten();
+        let Some(name) = name else { continue };
+        let marker = profile_table_copy::marker(branch, &name);
+        if bound.as_deref() == Some(marker.as_str()) {
+            continue;
+        }
+        let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
+        if let Err(error) = profiles
+            .set_table_path(profile_id, branch, Some(&marker), &now)
+            .await
+        {
+            eprintln!(
+                "EasyWAR: таблицю {} не показано після відновлення: {error}",
+                branch.as_str()
+            );
+        }
+    }
 }
 
 // --- Сховище файлів «Робочого середовища» (зашифровані блоби в теці, workspace_files.rs) ---
@@ -3328,49 +3595,36 @@ async fn workspace_files_open(
     })
 }
 
-/// Зберігає порожню базову таблицю в новий файл і прив'язує її до профілю
-/// для того роду військ, чий модуль її відкриває.
+/// Додає до профілю порожню базову таблицю для роду військ, чий модуль її відкриває. Таблиця
+/// одразу лежить зашифрованою копією в профілі: вікна збереження й файла на диску немає.
 #[tauri::command]
 async fn create_profile_base_table(
-    app: tauri::AppHandle,
     profiles: tauri::State<'_, LocalProfileStore>,
     session: tauri::State<'_, ProfileSession>,
+    data_store: tauri::State<'_, ProfileDataStore>,
+    data: tauri::State<'_, ProfileDataSession>,
     profile_id: String,
     table: BaseTable,
 ) -> Result<Option<CreatedBaseTable>, String> {
     ensure_profile_unlocked(&profiles, &session, &profile_id).await?;
-    let selected = tauri::async_runtime::spawn_blocking(move || {
-        app.dialog()
-            .file()
-            .set_title(format!("Зберегти порожню базову таблицю {}", table.title()))
-            .set_file_name(table.file_name())
-            .add_filter("Таблиця XLSX", &["xlsx"])
-            .blocking_save_file()
+    let keys = table_copy_keys(&data, &profile_id)?;
+    let store = ProfileDataStore::clone(&data_store);
+    let branch = table.branch();
+    let marker = tauri::async_runtime::spawn_blocking(move || {
+        profile_table_copy::add(&store, &keys, branch, table.file_name(), table.bytes())
+            .map_err(|error| error.to_string())
     })
     .await
-    .map_err(|error| error.to_string())?;
-    let Some(selected) = selected else {
-        return Ok(None);
-    };
-    let mut path = selected.into_path().map_err(|error| error.to_string())?;
-    if !path
-        .extension()
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("xlsx"))
-    {
-        path.as_mut_os_string().push(".xlsx");
-    }
-    let target = path.clone();
-    tauri::async_runtime::spawn_blocking(move || base_tables::write_new(&target, table))
-        .await
-        .map_err(|error| error.to_string())?
-        .map_err(|error| error.to_string())?;
-    let path = path.to_string_lossy().into_owned();
+    .map_err(|error| error.to_string())??;
     let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
     let state = profiles
-        .set_table_path(&profile_id, table.branch(), Some(&path), &now)
+        .set_table_path(&profile_id, branch, Some(&marker), &now)
         .await
         .map_err(|error| error.to_string())?;
-    Ok(Some(CreatedBaseTable { state, path }))
+    Ok(Some(CreatedBaseTable {
+        state,
+        path: marker,
+    }))
 }
 
 /// Результат збереження файлу для телефона.
@@ -3395,6 +3649,8 @@ async fn export_phone_file(
     app: tauri::AppHandle,
     profiles: tauri::State<'_, LocalProfileStore>,
     session: tauri::State<'_, ProfileSession>,
+    data_store: tauri::State<'_, ProfileDataStore>,
+    data: tauri::State<'_, ProfileDataSession>,
     dashboard: PhoneDashboard,
     with_table: Option<bool>,
 ) -> Result<Option<PhoneExportResult>, String> {
@@ -3419,15 +3675,20 @@ async fn export_phone_file(
             .map_err(|error| error.to_string())?
             .active_profile_id
             .ok_or_else(|| "Оберіть профіль, до якого прив'язано таблицю.".to_string())?;
-        let path =
-            bound_database_path(&profiles, &session, &profile_id, dashboard.branch()).await?;
-        let name = path
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "table.xlsx".to_string());
-        let xlsx = tauri::async_runtime::spawn_blocking(move || read_selected_xlsx(&path))
-            .await
-            .map_err(|error| error.to_string())??;
+        let (xlsx, name) = read_bound_table(
+            &profiles,
+            &session,
+            &data_store,
+            &data,
+            &profile_id,
+            dashboard.branch(),
+        )
+        .await?;
+        let name = if name.is_empty() {
+            "table.xlsx".to_string()
+        } else {
+            name
+        };
         bytes = phone_export::embed_table(
             &bytes,
             &name,
@@ -3463,45 +3724,82 @@ async fn export_phone_file(
     }))
 }
 
-async fn bound_database_path(
-    profiles: &LocalProfileStore,
-    session: &ProfileSession,
-    profile_id: &str,
-    branch: Branch,
-) -> Result<PathBuf, String> {
-    ensure_profile_unlocked(profiles, session, profile_id).await?;
-    profiles
-        .table_path(profile_id, branch)
-        .await
-        .map_err(|error| error.to_string())?
-        .map(PathBuf::from)
-        .ok_or_else(|| format!("До профілю не прив'язано таблицю {}", branch.genitive()))
-}
-
-/// Сирі байти прив'язаної таблиці (без JSON, щоб не роздувати великі файли).
+/// Сирі байти таблиці профілю (без JSON, щоб не роздувати великі файли).
 #[tauri::command]
 async fn read_profile_database(
     profiles: tauri::State<'_, LocalProfileStore>,
     session: tauri::State<'_, ProfileSession>,
+    data_store: tauri::State<'_, ProfileDataStore>,
+    data: tauri::State<'_, ProfileDataSession>,
     profile_id: String,
     branch: Branch,
 ) -> Result<tauri::ipc::Response, String> {
-    let path = bound_database_path(&profiles, &session, &profile_id, branch).await?;
-    let bytes = tauri::async_runtime::spawn_blocking(move || read_selected_xlsx(&path))
-        .await
-        .map_err(|error| error.to_string())??;
+    let (bytes, _) =
+        read_bound_table(&profiles, &session, &data_store, &data, &profile_id, branch).await?;
     Ok(tauri::ipc::Response::new(bytes))
 }
 
-/// Записує таблицю назад у прив'язаний файл. Тіло запиту — сирі байти XLSX,
-/// профіль і рід військ — у заголовках `x-easywar-profile` і `x-easywar-branch`.
-/// Байти перевіряються як книга, а попередній стан зберігається поруч у
-/// `<назва>.easywar-prev.xlsx` (див. `profile_table`).
+/// Зберігає копію таблиці профілю у файл .xlsx, який обирає користувач (щоб відкрити її в Excel
+/// або передати далі). Таблиця в профілі не змінюється. → шлях файла або `None`, якщо вікно
+/// збереження закрито.
+#[tauri::command]
+async fn export_profile_database(
+    app: tauri::AppHandle,
+    profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
+    data_store: tauri::State<'_, ProfileDataStore>,
+    data: tauri::State<'_, ProfileDataSession>,
+    profile_id: String,
+    branch: Branch,
+) -> Result<Option<String>, String> {
+    let (bytes, name) =
+        read_bound_table(&profiles, &session, &data_store, &data, &profile_id, branch).await?;
+    let suggested = if name.is_empty() {
+        "table.xlsx".to_owned()
+    } else {
+        name
+    };
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title(format!(
+                "Зберегти копію таблиці {} у файл",
+                branch.genitive()
+            ))
+            .set_file_name(suggested)
+            .add_filter("Таблиця XLSX", &["xlsx"])
+            .blocking_save_file()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let target = phone_export::save_target(
+        selected.into_path().map_err(|error| error.to_string())?,
+        &["xlsx"],
+        "xlsx",
+    );
+    let path = target.path.clone();
+    tauri::async_runtime::spawn_blocking(move || phone_export::save_file(&target, &bytes))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())?;
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+/// Записує зміни таблиці назад у профіль. Тіло запиту — сирі байти XLSX, профіль і рід
+/// військ — у заголовках `x-easywar-profile` і `x-easywar-branch`. Байти перевіряються як
+/// книга, а попередній стан зберігається в профілі окремим записом (див. `profile_table_copy`).
+/// Стара прив'язка за шляхом, яку ще не перенесли в копію, пишеться у свій файл
+/// (`profile_table`).
 #[tauri::command]
 async fn write_profile_database(
     request: tauri::ipc::Request<'_>,
     profiles: tauri::State<'_, LocalProfileStore>,
     session: tauri::State<'_, ProfileSession>,
+    data_store: tauri::State<'_, ProfileDataStore>,
+    data: tauri::State<'_, ProfileDataSession>,
 ) -> Result<(), String> {
     let header = |name: &str| {
         request
@@ -3521,7 +3819,23 @@ async fn write_profile_database(
         return Err("Некоректний файл XLSX".to_owned());
     }
     let bytes = bytes.clone();
-    let path = bound_database_path(&profiles, &session, &profile_id, branch).await?;
+    ensure_profile_unlocked(&profiles, &session, &profile_id).await?;
+    let bound = profiles
+        .table_path(&profile_id, branch)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("До профілю не додано таблицю {}", branch.genitive()))?;
+    if profile_table_copy::is_marker(&bound) {
+        let keys = table_copy_keys(&data, &profile_id)?;
+        let store = ProfileDataStore::clone(&data_store);
+        return tauri::async_runtime::spawn_blocking(move || {
+            profile_table_copy::save(&store, &keys, branch, &bytes)
+                .map_err(|error| error.to_string())
+        })
+        .await
+        .map_err(|error| error.to_string())?;
+    }
+    let path = PathBuf::from(bound);
     tauri::async_runtime::spawn_blocking(move || {
         profile_table::save(&path, branch, &bytes)
             .map(|_| ())
@@ -4431,6 +4745,7 @@ pub fn run() {
             collective_create,
             clear_profile_database,
             read_profile_database,
+            export_profile_database,
             write_profile_database,
             get_workspace_templates,
             set_profile_workspace_template,
@@ -4516,6 +4831,224 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    async fn migrated_profiles() -> LocalProfileStore {
+        use crate::database::{
+            COMMAND_TABLES_SQL, DASHBOARD_MODULES_SQL, INITIAL_SCHEMA_SQL, LOCAL_PROFILES_SQL,
+            OWN_LOSSES_TABLES_SQL, PROFILE_BRANCH_TABLES_SQL, PROFILE_DETAILS_SQL,
+            PROFILE_MODULES_SQL, XLSX_DUPLICATE_LINKS_SQL,
+        };
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        for sql in [
+            INITIAL_SCHEMA_SQL,
+            XLSX_DUPLICATE_LINKS_SQL,
+            LOCAL_PROFILES_SQL,
+            PROFILE_DETAILS_SQL,
+            PROFILE_BRANCH_TABLES_SQL,
+            COMMAND_TABLES_SQL,
+            OWN_LOSSES_TABLES_SQL,
+            PROFILE_MODULES_SQL,
+            DASHBOARD_MODULES_SQL,
+        ] {
+            sqlx::raw_sql(sql).execute(&pool).await.unwrap();
+        }
+        LocalProfileStore::new(pool)
+    }
+
+    #[tokio::test]
+    async fn old_path_bindings_become_profile_copies_and_the_original_stays() {
+        let now = "2026-10-30T00:00:00Z";
+        let dir = tempfile::tempdir().unwrap();
+        let profiles = migrated_profiles().await;
+        let profile_id = local_profiles::generate_profile_id("Синтетичний", now);
+        profiles
+            .create(&profile_id, "Синтетичний", now)
+            .await
+            .unwrap();
+        let original = dir.path().join("Журнал ПС.xlsx");
+        std::fs::write(&original, base_tables::BaseTable::Air.bytes()).unwrap();
+        let missing = dir.path().join("немає.xlsx");
+        profiles
+            .set_table_path(
+                &profile_id,
+                Branch::Air,
+                Some(&original.to_string_lossy()),
+                now,
+            )
+            .await
+            .unwrap();
+        profiles
+            .set_table_path(
+                &profile_id,
+                Branch::Rocket,
+                Some(&missing.to_string_lossy()),
+                now,
+            )
+            .await
+            .unwrap();
+        let store = ProfileDataStore::with_kdf(
+            dir.path().join("profile-data"),
+            office_library::KdfParams {
+                m_kib: 8,
+                t: 1,
+                p: 1,
+            },
+        );
+        let data = ProfileDataSession::default();
+        data.set(
+            store
+                .unlock(&profile_id, "синтетичний-пароль")
+                .await
+                .unwrap(),
+        );
+
+        assert!(migrate_table_bindings(&profiles, &store, &data, &profile_id).await);
+
+        let air = profiles
+            .table_path(&profile_id, Branch::Air)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(profile_table_copy::is_marker(&air));
+        assert_eq!(
+            profile_table_copy::marker_name(&air),
+            Some("Журнал ПС.xlsx")
+        );
+        let (bytes, name) = load_table_copy(&store, &data, &profile_id, Branch::Air)
+            .await
+            .unwrap();
+        assert_eq!(bytes, base_tables::BaseTable::Air.bytes());
+        assert_eq!(name, "Журнал ПС.xlsx");
+        // Оригінал не змінено й не видалено.
+        assert_eq!(
+            std::fs::read(&original).unwrap(),
+            base_tables::BaseTable::Air.bytes()
+        );
+        // Файл, якого немає, лишається прив'язаним за шляхом: його перенесуть, коли він з'явиться.
+        let rocket = profiles
+            .table_path(&profile_id, Branch::Rocket)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!profile_table_copy::is_marker(&rocket));
+        // Повторний вхід нічого не переносить удруге.
+        assert!(!migrate_table_bindings(&profiles, &store, &data, &profile_id).await);
+        std::fs::write(&missing, base_tables::BaseTable::Rvia.bytes()).unwrap();
+        assert!(migrate_table_bindings(&profiles, &store, &data, &profile_id).await);
+    }
+
+    #[tokio::test]
+    async fn table_copies_travel_in_the_profile_data_archive_and_reappear_in_the_slots() {
+        let now = "2026-10-30T00:00:00Z";
+        let dir = tempfile::tempdir().unwrap();
+        let profiles = migrated_profiles().await;
+        let source_id = local_profiles::generate_profile_id("Джерело", now);
+        let target_id = local_profiles::generate_profile_id("Приймач", now);
+        profiles.create(&source_id, "Джерело", now).await.unwrap();
+        profiles.create(&target_id, "Приймач", now).await.unwrap();
+        let store = ProfileDataStore::with_kdf(
+            dir.path().join("profile-data"),
+            office_library::KdfParams {
+                m_kib: 8,
+                t: 1,
+                p: 1,
+            },
+        );
+        let source = store.unlock(&source_id, "пароль-копії").await.unwrap();
+        let marker = profile_table_copy::add(
+            &store,
+            &source,
+            Branch::Air,
+            "Журнал.xlsx",
+            base_tables::BaseTable::Air.bytes(),
+        )
+        .unwrap();
+        profiles
+            .set_table_path(&source_id, Branch::Air, Some(&marker), now)
+            .await
+            .unwrap();
+        let file = dir.path().join("копія.ewpdb");
+        store.export_archive(&source, &file, now).unwrap();
+
+        let target = std::sync::Arc::new(store.unlock(&target_id, "інший-пароль").await.unwrap());
+        let report = store
+            .import_archive(&file, "пароль-копії".as_bytes(), &target)
+            .unwrap();
+        assert_eq!(report.skipped, 0);
+        // Записи повернулися, а слот у базі приймача ще порожній.
+        assert!(profiles
+            .table_path(&target_id, Branch::Air)
+            .await
+            .unwrap()
+            .is_none());
+        rebind_restored_tables(&profiles, &store, &target, &target_id).await;
+        let bound = profiles
+            .table_path(&target_id, Branch::Air)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(profile_table_copy::marker_name(&bound), Some("Журнал.xlsx"));
+        let restored = profile_table_copy::load(&store, &target, Branch::Air).unwrap();
+        assert_eq!(restored.bytes, base_tables::BaseTable::Air.bytes());
+        // Інші слоти не з'явилися, а повторний виклик нічого не змінює.
+        assert!(profiles
+            .table_path(&target_id, Branch::Rocket)
+            .await
+            .unwrap()
+            .is_none());
+        rebind_restored_tables(&profiles, &store, &target, &target_id).await;
+        assert_eq!(
+            profiles
+                .table_path(&target_id, Branch::Air)
+                .await
+                .unwrap()
+                .unwrap(),
+            bound
+        );
+    }
+
+    #[tokio::test]
+    async fn migration_does_nothing_while_profile_data_is_locked() {
+        let now = "2026-10-30T00:00:00Z";
+        let dir = tempfile::tempdir().unwrap();
+        let profiles = migrated_profiles().await;
+        let profile_id = local_profiles::generate_profile_id("Синтетичний", now);
+        profiles
+            .create(&profile_id, "Синтетичний", now)
+            .await
+            .unwrap();
+        let original = dir.path().join("a.xlsx");
+        std::fs::write(&original, base_tables::BaseTable::Air.bytes()).unwrap();
+        profiles
+            .set_table_path(
+                &profile_id,
+                Branch::Air,
+                Some(&original.to_string_lossy()),
+                now,
+            )
+            .await
+            .unwrap();
+        let store = ProfileDataStore::with_kdf(
+            dir.path().join("profile-data"),
+            office_library::KdfParams {
+                m_kib: 8,
+                t: 1,
+                p: 1,
+            },
+        );
+        let data = ProfileDataSession::default();
+        assert!(!migrate_table_bindings(&profiles, &store, &data, &profile_id).await);
+        let air = profiles
+            .table_path(&profile_id, Branch::Air)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!profile_table_copy::is_marker(&air));
+    }
 
     #[test]
     fn profile_data_windows_see_only_what_they_are_allowed() {

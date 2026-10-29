@@ -82,7 +82,7 @@ test('profile details, password and database helpers use dedicated commands', as
   const {
     signInLocalProfile, updateLocalProfileDetails, setLocalProfilePassword,
     chooseProfileDatabase, clearProfileDatabase, readProfileDatabase, writeProfileDatabase,
-    createProfileBaseTable,
+    createProfileBaseTable, exportProfileDatabase,
   } = await import('../src/local-profiles-core.js');
 
   await signInLocalProfile(id, 'секрет', invoke);
@@ -93,6 +93,7 @@ test('profile details, password and database helpers use dedicated commands', as
   assert.deepEqual(await readProfileDatabase(id, 'rocket', invoke), new Uint8Array([80, 75]));
   await writeProfileDatabase(id, 'rocket', new Uint8Array([1]), invoke);
   await createProfileBaseTable(id, 'rvia', invoke);
+  await exportProfileDatabase(id, 'air', invoke);
 
   assert.deepEqual(calls, [
     ['activate_local_profile', { profileId: id, password: 'секрет' }, undefined],
@@ -103,7 +104,31 @@ test('profile details, password and database helpers use dedicated commands', as
     ['read_profile_database', { profileId: id, branch: 'rocket' }, undefined],
     ['write_profile_database', new Uint8Array([1]), { headers: { 'x-easywar-profile': id, 'x-easywar-branch': 'rocket' } }],
     ['create_profile_base_table', { profileId: id, table: 'rvia' }, undefined],
+    ['export_profile_database', { profileId: id, branch: 'air' }, undefined],
   ]);
+});
+
+test('a table is added to the profile once and updated by adding it again', async () => {
+  const source = await readFile(new URL('../src/local-profiles.js', import.meta.url), 'utf8');
+  // Кнопки описують модель «додати копію / додати знову», а не посилання на файл.
+  assert.match(source, /'Додати таблицю…'/);
+  assert.match(source, /'Оновити \(додати знову\)…'/);
+  assert.match(source, /'Зберегти копію у файл…'/);
+  assert.match(source, /'Видалити з профілю'/);
+  assert.doesNotMatch(source, /'Прив’язати таблицю…'|text: dbName \? 'Змінити…'/);
+  // Після повторного додавання відкрита таблиця перечитується з профілю.
+  const bind = source.slice(source.indexOf('async function bindDatabase'), source.indexOf('async function unbindDatabase'));
+  assert.match(bind, /loadedDatabaseFor\[branch\] = null/);
+  assert.match(bind, /Щоб оновити таблицю, додайте її знову/);
+  // Базова таблиця створюється в профілі без вікна збереження.
+  const create = source.slice(source.indexOf('async function createBaseTable'), source.indexOf('async function createPositionDatabase'));
+  assert.doesNotMatch(create, /куди зберегти нову таблицю/);
+});
+
+test('the table copy is shown by its file name in every place that used to show the path', async () => {
+  const { databaseFileName, profileTablePath } = await import('../src/local-profiles-core.js');
+  const profile = { tables: { air: 'profile-data:tables.air/Журнал ПС.xlsx' } };
+  assert.equal(databaseFileName(profileTablePath(profile, 'air')), 'Журнал ПС.xlsx');
 });
 
 test('each branch has its own table slot and base tables open in their module', async () => {

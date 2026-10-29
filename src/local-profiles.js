@@ -7,6 +7,7 @@ import {
   clearProfileDatabase,
   createPositionDatabaseTemplate,
   createProfileBaseTable,
+  exportProfileDatabase,
   databaseFileName,
   deleteProfileWithLibraryFallback,
   getLocalProfiles,
@@ -277,25 +278,25 @@ function initializeLocalProfiles() {
     for (const tile of document.querySelectorAll('.command-tile[data-command]')) {
       const path = visible ? profileTablePath(profile, tile.dataset.command) : null;
       const line = tile.querySelector('[data-role="table"]');
-      line.textContent = path ? databaseFileName(path) : (profile ? 'Таблицю не прив’язано' : 'Профіль не обрано');
-      line.title = path || '';
+      line.textContent = path ? databaseFileName(path) : (profile ? 'Таблицю не додано' : 'Профіль не обрано');
+      line.title = path ? 'Копія таблиці в профілі' : '';
       line.classList.toggle('is-bound', Boolean(path));
       const bind = tile.querySelector('[data-act="bind"]');
       bind.hidden = false;
-      bind.textContent = path ? 'Змінити таблицю…' : 'Прив’язати таблицю…';
+      bind.textContent = path ? 'Оновити таблицю…' : 'Додати таблицю…';
       // «Наші втрати» плитки: окрема таблиця зі своїм слотом, відкривається на вкладці дашборда.
       const ownPath = visible ? profileTablePath(profile, ownLossesBranch(tile.dataset.command)) : null;
       const ownLine = tile.querySelector('[data-role="own-table"]');
       if (ownLine) {
-        ownLine.textContent = `«Наші втрати»: ${ownPath ? databaseFileName(ownPath) : 'не прив’язано'}`;
-        ownLine.title = ownPath || '';
+        ownLine.textContent = `«Наші втрати»: ${ownPath ? databaseFileName(ownPath) : 'не додано'}`;
+        ownLine.title = ownPath ? 'Копія таблиці в профілі' : '';
         ownLine.classList.toggle('is-bound', Boolean(ownPath));
       }
       const bindOwn = tile.querySelector('[data-act="bind-own"]');
       if (bindOwn) {
         bindOwn.hidden = false;
         // Стан видно в рядку над кнопками, тож підпис короткий і лишається однаковим.
-        bindOwn.title = `${ownPath ? 'Змінити' : 'Прив’язати'} окрему таблицю «НАШІ ВТРАТИ»: вона відкривається на вкладці «Наші втрати» дашборда`;
+        bindOwn.title = `${ownPath ? 'Оновити (додати знову)' : 'Додати'} окрему таблицю «НАШІ ВТРАТИ»: вона відкривається на вкладці «Наші втрати» дашборда`;
       }
       // «Файл для телефона» може взяти цю таблицю з собою лише коли вона прив'язана й профіль відкрито.
       const embed = tile.querySelector('[data-role="embed"]');
@@ -398,10 +399,11 @@ function initializeLocalProfiles() {
         const dbName = databaseFileName(path);
         return el('div', { class: 'ew-profile-db-line', 'data-branch': branch },
           el('span', { class: 'ew-profile-db-branch', text: title }),
-          el('span', { class: `ew-profile-db-name${dbName ? '' : ' is-empty'}`, title: path || '', text: dbName || 'не прив’язано' }),
-          el('button', { type: 'button', class: 'btn', text: dbName ? 'Змінити…' : 'Прив’язати таблицю…', onclick: () => bindDatabase(profile, branch) }),
+          el('span', { class: `ew-profile-db-name${dbName ? '' : ' is-empty'}`, title: dbName ? 'Копія в профілі' : '', text: dbName || 'не додано' }),
+          el('button', { type: 'button', class: 'btn', text: dbName ? 'Оновити (додати знову)…' : 'Додати таблицю…', title: dbName ? 'Додайте новий файл .xlsx: він замінить копію в профілі' : '', onclick: () => bindDatabase(profile, branch) }),
           dbName ? el('button', { type: 'button', class: 'btn quiet', text: 'Відкрити зараз', disabled: !isActive, title: isActive ? '' : 'Спершу оберіть цей профіль', onclick: () => loadProfileDatabase(profile, branch, true) }) : null,
-          dbName ? el('button', { type: 'button', class: 'btn quiet', text: 'Відв’язати', onclick: () => unbindDatabase(profile, branch) }) : null);
+          dbName ? el('button', { type: 'button', class: 'btn quiet', text: 'Зберегти копію у файл…', onclick: () => exportDatabase(profile, branch) }) : null,
+          dbName ? el('button', { type: 'button', class: 'btn quiet', text: 'Видалити з профілю', onclick: () => unbindDatabase(profile, branch) }) : null);
       }),
       renderBaseTableCreate(profile));
 
@@ -613,7 +615,7 @@ function initializeLocalProfiles() {
       const next = await chooseProfileDatabase(profile.id, branch);
       if (next === null) throw new Error('вибір скасовано');
       return next;
-    }, `${table} прив’язана до профілю.`, 'Таблицю не прив’язано');
+    }, `${table} додано до профілю: у ньому лежить зашифрована копія, файл-оригінал не змінено. Щоб оновити таблицю, додайте її знову.`, 'Таблицю не додано');
     if (ok && profile.id === state.activeProfileId) {
       loadedDatabaseFor[branch] = null;
       // «Наші втрати» — вкладка всередині дашборда: прив'язка не перемикає екран, таблиця відкриється там.
@@ -624,7 +626,7 @@ function initializeLocalProfiles() {
   async function unbindDatabase(profile, branch) {
     const ok = await run(
       () => clearProfileDatabase(profile.id, branch),
-      `${branchInfo(branch).table} відв’язана. Файл на диску не змінено.`,
+      `${branchInfo(branch).table}: копію видалено з профілю. Файл-оригінал не змінено.`,
     );
     const slot = branchInfo(branch);
     if (ok && slot.ownLosses && profile.id === state.activeProfileId) {
@@ -634,21 +636,34 @@ function initializeLocalProfiles() {
     return ok;
   }
 
+  async function exportDatabase(profile, branch) {
+    if (busy) return;
+    const { table } = branchInfo(branch);
+    let saved = null;
+    const ok = await run(async () => {
+      status.textContent = `Оберіть, куди зберегти копію: ${table.toLowerCase()}…`;
+      saved = await exportProfileDatabase(profile.id, branch);
+      if (saved === null) throw new Error('збереження скасовано');
+      return state;
+    }, '', 'Копію не збережено');
+    if (ok && saved) status.textContent = `Копію збережено: ${saved}. Таблиця в профілі не змінилась.`;
+  }
+
   async function createBaseTable(profile, key) {
     const base = BASE_TABLES.find(entry => entry.key === key);
     if (!base || busy) return;
     const { table } = branchInfo(base.branch);
     const current = profileTablePath(profile, base.branch);
-    if (current && !window.confirm(`${table} уже прив’язана: «${databaseFileName(current)}». Прив’язати натомість нову порожню таблицю? Наявний файл залишиться на диску без змін.`)) return;
+    if (current && !window.confirm(`${table} уже додана: «${databaseFileName(current)}». Замінити її новою порожньою таблицею? Замінена копія лишиться в профілі як попередня версія.`)) return;
     let created = null;
     const ok = await run(async () => {
-      status.textContent = `Оберіть, куди зберегти нову таблицю «${base.label}»…`;
+      status.textContent = `Створюю «${base.label}» у профілі…`;
       created = await createProfileBaseTable(profile.id, key);
       if (created === null) throw new Error('створення скасовано');
       return created.state;
     }, '', 'Таблицю не створено');
     if (!ok) return;
-    status.textContent = `Створено «${base.label}»: ${created.path}. ${table} прив’язана до профілю.`
+    status.textContent = `Створено «${base.label}»: ${databaseFileName(created.path)}. ${table} додано до профілю.`
       + (base.note ? ` ${base.note[0].toUpperCase()}${base.note.slice(1)}: поки що вносьте дані в Excel.` : '');
     if (profile.id === state.activeProfileId && !base.note) {
       loadedDatabaseFor[base.branch] = null;
