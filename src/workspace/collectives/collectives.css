@@ -24,4 +24,9 @@
 .ec-row .ec-btn{min-height:38px}
 .ec-person{flex:1;min-width:0;overflow-wrap:anywhere}
 .ec-tag{font-size:12px;color:var(--accent);font-weight:600}
+.ec-secure h3{margin:0;font-size:16px}
+.ec-fingerprint{margin:0;font-size:14px}
+.ec-fingerprint code,.ec-row code{font-family:var(--mono,ui-monospace,monospace);letter-spacing:.06em}
+.ec-recovery{display:grid;gap:10px;padding:14px 16px;border:1px solid var(--accent);border-radius:8px;background:var(--raised)}
+.ec-recovery-key{font-family:var(--mono,ui-monospace,monospace);font-size:15px;overflow-wrap:anywhere;user-select:all}
 @media(max-width:580px){.ec-root{padding:22px 12px}.ec-row{flex-wrap:wrap}.ec-row .ec-input{margin-left:0}.ec-toolbar .ec-btn{flex:1}}

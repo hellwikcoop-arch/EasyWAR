@@ -17,7 +17,8 @@ import { SITUATION_APPS, WORKSPACE_APPS } from '../src/workspace/workspace-core.
 const root = new URL('../', import.meta.url);
 const read = path => readFile(new URL(path, root), 'utf8');
 const EDITOR_LABEL = 'office-editor';
-const EDITOR_COMMANDS = ['office_open_file', 'office_save_file', 'office_save_file_as', 'office_close_file', 'office_editor_close'];
+const EDITOR_COMMANDS = ['office_open_file', 'office_save_file', 'office_save_file_as', 'office_close_file', 'office_editor_close',
+  'collective_status', 'collective_create_identity', 'collective_create'];
 const LIBRARY_COMMANDS = [
   'library_status', 'library_create', 'library_unlock', 'library_lock', 'library_list',
   'library_versions', 'library_import', 'library_rename', 'library_set_hidden', 'library_set_current',
