@@ -1,4 +1,5 @@
 import { computePvkSummary, percentageAffected, pvkSummaryInputs } from './module-adapters/pvk-summary-core.js';
+import { computePvkDynamics } from './module-adapters/pvk-dynamics-core.js';
 
 const SHEET_ORDER = ['АА', 'ПС', "Об'єкти"];
 
@@ -195,18 +196,6 @@ function sumGroup(sheetModel, groupName) {
   return group ? group.widgets.reduce((sum, widget) => sum + widget.total, 0) : 0;
 }
 
-function mergeDaily(models, selector) {
-  const values = new Map();
-  for (const sheet of models) {
-    const metrics = selector(sheet);
-    for (const metric of metrics) {
-      const widget = sheet.widgets.find(item => item.metric === metric);
-      for (const item of widget?.series || []) values.set(item.date, (values.get(item.date) || 0) + item.value);
-    }
-  }
-  return [...values.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([date, value]) => ({ date, value }));
-}
-
 export function createDashboardModel(workbook, range = {}) {
   const resolvedRange = resolveRange(workbook, range);
   const previous = previousRange(resolvedRange);
@@ -218,16 +207,8 @@ export function createDashboardModel(workbook, range = {}) {
   const objects = sheets.find(sheet => normalize(sheet.name) === normalize("Об'єкти"));
   // Підсумкові картки рахує спільне ядро модулів (E2), формули ті самі.
   const summary = computePvkSummary(pvkSummaryInputs({ aa, air, objects }, sumGroup));
-  summary.activity = mergeDaily(sheets, sheet => sheet.name === 'АА' || sheet.name === 'ПС' ? ['АУ'] : []);
-  summary.dynamics = {
-    au: summary.activity,
-    munitions: mergeDaily(sheets, sheet => sheet.groups.find(group => group.name === 'Боєприпаси')?.metrics || []),
-    objects: mergeDaily(sheets, sheet => sheet.name === "Об'єкти" ? (sheet.groups.find(group => group.name === 'Уражені об’єкти')?.metrics || []) : []),
-    expenditure: mergeDaily(sheets, sheet => sheet.name === "Об'єкти" ? ['Витрата'] : []),
-    // Ряди для міні-графіків карток «Уражено» і «Дорозвідується» (лише з даних вибраного періоду).
-    affected: mergeDaily(sheets, sheet => sheet.name === 'АА' || sheet.name === 'ПС' ? ['Уражено'] : []),
-    reconnaissance: mergeDaily(sheets, sheet => sheet.name === 'ПС' ? ['Дорозвідується'] : []),
-  };
+  // Ряди за днями (календар, динаміка, міні-графіки) — теж спільне ядро модулів (E2).
+  Object.assign(summary, computePvkDynamics(sheets));
   const journal = createJournalModel(workbook?.journal, resolvedRange);
   summary.journalRecords = journal ? journal.total : null;
   return {

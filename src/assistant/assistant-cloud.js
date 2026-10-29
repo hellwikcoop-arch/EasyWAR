@@ -1,0 +1,124 @@
+// Explicit online chat. Only the user's typed text and earlier online replies leave the app.
+// The caller owns the token in volatile memory and clears it when the profile session ends.
+import { KOMBAT_PAYLOAD_LIMITS, KOMBAT_PERSONA_PROMPT } from './assistant-persona-prompt-core.js';
+
+export function chatEndpoint(value, { allowLocalLoopback = false } = {}) {
+  try {
+    const url = new URL(String(value || '').trim());
+    const localLoopback = allowLocalLoopback && url.protocol === 'http:'
+      && url.hostname === '127.0.0.1' && url.port === '8765';
+    if ((!localLoopback && url.protocol !== 'https:') || !url.hostname || url.username || url.password || url.search || url.hash) return null;
+    if (url.pathname !== '/' && url.pathname !== '/v1/chat') return null;
+    url.pathname = '/v1/chat';
+    return url.href;
+  } catch { return null; }
+}
+
+const encoder = new TextEncoder();
+const byteLength = value => encoder.encode(value).length;
+const PROMPT_BYTES = byteLength(KOMBAT_PERSONA_PROMPT);
+// Те саме очищення, що й перевірка проксі: без керівних символів, не довше межі репліки.
+const clean = value => String(value ?? '').replace(/[\u0000-\u001f\u007f]+/gu, ' ').replace(/\s+/gu, ' ').trim()
+  .slice(0, KOMBAT_PAYLOAD_LIMITS.messageChars).trim();
+
+// Чи пройде запит межі проксі: тіло запиту та системна інструкція разом із репліками, у байтах UTF-8.
+export function fitsProxyLimits(messages) {
+  const json = JSON.stringify(messages);
+  return PROMPT_BYTES + byteLength(json) <= KOMBAT_PAYLOAD_LIMITS.inputBytes
+    && byteLength(JSON.stringify({ messages })) <= KOMBAT_PAYLOAD_LIMITS.bodyBytes;
+}
+
+// Найсвіжіші пари «запит — відповідь», що вміщуються в межі проксі; найстаріші відкидаються цілими парами.
+export function onlineMessages(history, query) {
+  const messages = [];
+  const turns = (history || []).slice(-(KOMBAT_PAYLOAD_LIMITS.historyMessages / 2));
+  for (const turn of turns) {
+    if (!turn || typeof turn.query !== 'string' || typeof turn.answer !== 'string') continue;
+    const user = clean(turn.query), assistant = clean(turn.answer);
+    if (user && assistant) messages.push({ role: 'user', content: user }, { role: 'assistant', content: assistant });
+  }
+  messages.push({ role: 'user', content: clean(query) });
+  while (messages.length > 1 && !fitsProxyLimits(messages)) messages.splice(0, 2);
+  return messages;
+}
+
+export class OnlineError extends Error {
+  constructor(code) { super(code); this.code = code; }
+}
+
+const STATUS_CODE = Object.freeze({ 401: 'access-denied', 429: 'busy', 503: 'unavailable' });
+
+export async function streamOnlineAnswer({ endpoint, token, messages, signal, onToken, allowLocalLoopback = false, fetchImpl = fetch }) {
+  const url = chatEndpoint(endpoint, { allowLocalLoopback });
+  if (!url || !/^[a-f0-9]{64}$/u.test(token || '')) throw new OnlineError('invalid-configuration');
+  let response;
+  try {
+    response = await fetchImpl(url, {
+      method: 'POST', redirect: 'error', cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer', signal,
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', accept: 'text/event-stream' },
+      body: JSON.stringify({ messages }),
+    });
+  } catch (error) { throw new OnlineError(signal?.aborted || error?.name === 'AbortError' ? 'cancelled' : 'network'); }
+  if (!response.ok) {
+    let code = STATUS_CODE[response.status] || 'server-error';
+    try {
+      const body = await response.json();
+      if (['disabled', 'budget-exhausted', 'busy', 'unauthorized'].includes(body?.error)) code = body.error;
+    } catch { /* status code is enough */ }
+    throw new OnlineError(code);
+  }
+  if (!response.body || !response.headers.get('content-type')?.startsWith('text/event-stream')) {
+    try { await response.body?.cancel(); } catch { /* the stream is already unusable */ }
+    throw new OnlineError('invalid-stream');
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '', answer = '', complete = false;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer = (buffer + decoder.decode(value, { stream: true })).replace(/\r\n/gu, '\n');
+      if (buffer.length > 16384) throw new OnlineError('invalid-stream');
+      let end;
+      while ((end = buffer.indexOf('\n\n')) >= 0) {
+        const frame = buffer.slice(0, end); buffer = buffer.slice(end + 2);
+        const event = frame.match(/^event:\s*(\S+)/mu)?.[1];
+        const data = frame.split('\n').filter(line => line.startsWith('data:')).map(line => line.slice(5).trimStart()).join('\n');
+        let parsed;
+        try { parsed = JSON.parse(data); } catch { throw new OnlineError('invalid-stream'); }
+        if (event === 'token') {
+          if (typeof parsed.text !== 'string' || answer.length + parsed.text.length > 2000) throw new OnlineError('invalid-stream');
+          answer += parsed.text;
+          onToken?.(answer);
+        } else if (event === 'done') complete = true;
+        else if (event === 'error') throw new OnlineError(typeof parsed.code === 'string' ? parsed.code : 'server-error');
+        else throw new OnlineError('invalid-stream');
+      }
+    }
+  } catch (error) {
+    try { await reader.cancel(); } catch { /* preserve the original stream error */ }
+    if (signal?.aborted || error?.name === 'AbortError') throw new OnlineError('cancelled');
+    if (error instanceof OnlineError) throw error;
+    throw new OnlineError('network');
+  } finally { reader.releaseLock(); }
+  if (signal?.aborted) throw new OnlineError('cancelled');
+  if (!complete || !answer.trim()) throw new OnlineError('incomplete-stream');
+  return answer.trim();
+}
+
+export function onlineErrorText(code) {
+  return {
+    'invalid-configuration': 'Перевірте HTTPS-адресу та персональний токен доступу.',
+    'access-denied': 'Доступ відхилено. Перевірте персональний токен.',
+    unauthorized: 'Доступ відкликано або токен неправильний.',
+    busy: 'Зараз забагато запитів. Спробуйте пізніше.',
+    disabled: 'Онлайн-акцію вимкнено на сервері.',
+    'budget-exhausted': 'Ліміт акції вичерпано.',
+    unavailable: 'Онлайн-режим зараз недоступний.',
+    network: 'Немає зв’язку із сервісом. Локальна довідка працює без мережі.',
+    cancelled: 'Запит скасовано.',
+    'invalid-stream': 'Отримано некоректну потокову відповідь.',
+    'incomplete-stream': 'Потокова відповідь обірвалася. Спробуйте ще раз.',
+  }[code] || 'Онлайн-відповідь недоступна. Спробуйте пізніше.';
+}
