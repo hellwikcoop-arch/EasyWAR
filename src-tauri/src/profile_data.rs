@@ -39,6 +39,9 @@ use crate::office_library::{
 };
 use crate::phone_export::{save_file, SaveTarget};
 
+mod archive;
+pub use archive::{ArchiveReport, ARCHIVE_EXT};
+
 /// Назва теки всередині даних застосунку.
 pub const ROOT_DIR_NAME: &str = "profile-data";
 /// Розширення файлу запису.
@@ -79,6 +82,10 @@ pub enum ProfileDataError {
     InvalidKeyring,
     #[error("не вдалося прочитати або записати дані профілю: {0}")]
     Io(String),
+    #[error("файл не є копією даних профілю EasyWAR або пошкоджений")]
+    InvalidArchive,
+    #[error("файл уже існує; оберіть нове ім'я, щоб не перезаписати дані")]
+    AlreadyExists,
 }
 
 impl From<std::io::Error> for ProfileDataError {
@@ -562,13 +569,45 @@ impl ProfileDataStore {
             return Err(ProfileDataError::TooManyRecords);
         }
         let modified = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
-        let data = keys.seal_record(key, value, &modified)?;
+        self.write_record(keys, key, value, &modified)?;
+        Ok(modified)
+    }
+
+    /// Те саме, що [`set`](Self::set), але з готовим часом запису (відновлення з копії).
+    fn set_at(
+        &self,
+        keys: &DataKeys,
+        key: &str,
+        value: &str,
+        modified: &str,
+    ) -> Result<(), ProfileDataError> {
+        validate_key(key)?;
+        if value.is_empty() || value.len() > MAX_VALUE_BYTES {
+            return Err(ProfileDataError::InvalidValue);
+        }
+        let dir = self.profile_dir(&keys.profile_id)?;
+        fs::create_dir_all(&dir)?;
+        let path = self.record_path(keys, key)?;
+        if !path.exists() && self.count(&dir)? >= MAX_RECORDS {
+            return Err(ProfileDataError::TooManyRecords);
+        }
+        self.write_record(keys, key, value, modified)
+    }
+
+    fn write_record(
+        &self,
+        keys: &DataKeys,
+        key: &str,
+        value: &str,
+        modified: &str,
+    ) -> Result<(), ProfileDataError> {
+        let path = self.record_path(keys, key)?;
+        let data = keys.seal_record(key, value, modified)?;
         let target = SaveTarget {
             path,
             replace_confirmed: true,
         };
-        save_file(&target, &data).map_err(|error| ProfileDataError::Io(error.to_string()))?;
-        Ok(modified)
+        save_file(&target, &data).map_err(|error| ProfileDataError::Io(error.to_string()))
     }
 
     /// Видаляє запис. → `true`, якщо він був.

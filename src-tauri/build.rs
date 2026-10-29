@@ -127,6 +127,8 @@ const COMMANDS: &[&str] = &[
     "profile_data_set",
     "profile_data_remove",
     "profile_data_list",
+    "profile_data_backup_create",
+    "profile_data_backup_restore",
 ];
 
 fn main() {
