@@ -585,6 +585,15 @@ by hand with narrow anchored patches (see `AGENTS.md`), then run
 читання дашбордів за підтвердженими ролями ще не підключено (залишок E3). Тести — `tests/profile-schema.test.mjs`,
 `tests/profile-schema-client.test.mjs`.
 
+Зв'язки між таблицями (E3б, B2) зберігаються в тому самому документі v1 необов'язковими полями `relations` і
+`groups` (без нової міграції, команди чи capability): `confirmRelation` / `rejectRelation` / `clearRelation` /
+`clearRelations` («Скинути зв'язки»), `setGroups`, читання `relatedSources`, `staleRelations` («перевірте», якщо
+стовпець ключа зник чи змінив тип). Одна пара таблиць має не більш як один підтверджений ключ; «багато до багатьох» —
+лише вручну із застереженням; схема зберігає імена стовпців, кардинальність і основу, але не значення клітинок.
+`removeSource` прибирає зв'язки таблиці й розпускає групи, що розпались; `updateSourceColumns` не губить стовпці
+ключа (лишає їх як `orphan`); `columnDependents` додатково називає зв'язки, що користуються стовпцем. Екрана для
+рішень ще немає (майстер — B3). Тести — `tests/profile-schema-relations.test.mjs`; Rust-ліміти (256 зв'язків, 64 групи) — `profile_schema.rs`.
+
 ## Екземпляри модулів і розкладка (E4)
 
 `src/module-instance-core.js` — чисте ядро розкладки «Мій дашборд» профілю без DOM, сховищ і
