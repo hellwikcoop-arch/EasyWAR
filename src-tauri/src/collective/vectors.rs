@@ -184,7 +184,8 @@ fn synthetic_json() -> Value {
         &public.exchange,
         [0x05; KEY_LEN],
         [0x13; NONCE_LEN],
-    );
+    )
+    .expect("синтетичний ключ обміну контрибутивний");
     json!({
         "member": {
             "sign_seed": hex::encode(&[0x01; KEY_LEN]), "exchange_secret": hex::encode(&[0x02; KEY_LEN]),

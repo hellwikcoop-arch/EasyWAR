@@ -66,6 +66,9 @@ pub enum Reason {
     IntegrityViolation,
     /// Ключ обгортки не відповідає ключу учасника.
     WrongRecipient,
+    /// Спільний секрет X25519 неконтрибутивний (ключ обміну з малої підгрупи або нульовий,
+    /// RFC 7748, розділ 6.1): обгортка не створюється й не розгортається (G12, зауваження 1).
+    WeakExchangeKey,
 }
 
 impl Reason {
@@ -83,6 +86,7 @@ impl Reason {
             Reason::MemberRevoked => "учасника відкликано",
             Reason::IntegrityViolation => "той самий ідентифікатор операції з іншим змістом",
             Reason::WrongRecipient => "обгортка адресована іншому учаснику",
+            Reason::WeakExchangeKey => "ключ обміну недійсний (мала підгрупа або нуль)",
         }
     }
 }

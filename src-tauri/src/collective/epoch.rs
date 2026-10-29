@@ -6,7 +6,7 @@
 use argon2::password_hash::rand_core::OsRng;
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{Key, XChaCha20Poly1305, XNonce};
-use x25519_dalek::{EphemeralSecret, PublicKey, StaticSecret};
+use x25519_dalek::{EphemeralSecret, PublicKey, SharedSecret, StaticSecret};
 use zeroize::Zeroizing;
 
 use super::codec::{Reader, Writer};
@@ -97,17 +97,20 @@ fn kek(
 }
 
 /// Обгортає ключ епохи для учасника з ефемерним ключем X25519 (одноразовий, затирається).
+/// Ключ обміну учасника з малої підгрупи або нульовий дає неконтрибутивний спільний секрет
+/// (RFC 7748, розділ 6.1) — тоді KEK відтворив би будь-хто з відкритого заголовка; така
+/// обгортка не створюється: [`Reason::WeakExchangeKey`].
 pub fn wrap_epoch_key(
     key: &EpochKey,
     collective_id: CollectiveId,
     epoch: u32,
     member_id: MemberId,
     member_exchange_pub: &[u8; KEY_LEN],
-) -> EpochWrap {
+) -> Result<EpochWrap, Reason> {
     let eph = EphemeralSecret::random_from_rng(OsRng);
     let eph_pub = PublicKey::from(&eph).to_bytes();
-    let shared = eph.diffie_hellman(&PublicKey::from(*member_exchange_pub));
-    wrap_with(
+    let shared = contributory(eph.diffie_hellman(&PublicKey::from(*member_exchange_pub)))?;
+    Ok(wrap_with(
         key,
         collective_id,
         epoch,
@@ -115,7 +118,16 @@ pub fn wrap_epoch_key(
         eph_pub,
         shared.as_bytes(),
         random_array(),
-    )
+    ))
+}
+
+/// Fail-closed перевірка контрибутивності спільного секрету (`SharedSecret::was_contributory`).
+fn contributory(shared: SharedSecret) -> Result<SharedSecret, Reason> {
+    if shared.was_contributory() {
+        Ok(shared)
+    } else {
+        Err(Reason::WeakExchangeKey)
+    }
 }
 
 fn wrap_with(
@@ -157,7 +169,7 @@ pub fn unwrap_epoch_key(wrap: &EpochWrap, member: &MemberIdentity) -> Result<Epo
 }
 
 fn unwrap_with(wrap: &EpochWrap, secret: &StaticSecret) -> Result<EpochKey, Reason> {
-    let shared = secret.diffie_hellman(&PublicKey::from(wrap.eph_pub));
+    let shared = contributory(secret.diffie_hellman(&PublicKey::from(wrap.eph_pub)))?;
     let kek = kek(shared.as_bytes(), &wrap.collective_id, wrap.epoch);
     let plain = XChaCha20Poly1305::new(&Key::from(*kek))
         .decrypt(
@@ -183,11 +195,11 @@ pub(crate) fn wrap_deterministic(
     member_exchange_pub: &[u8; KEY_LEN],
     eph_secret: [u8; KEY_LEN],
     nonce: [u8; NONCE_LEN],
-) -> EpochWrap {
+) -> Result<EpochWrap, Reason> {
     let eph = StaticSecret::from(eph_secret);
     let eph_pub = PublicKey::from(&eph).to_bytes();
-    let shared = eph.diffie_hellman(&PublicKey::from(*member_exchange_pub));
-    wrap_with(
+    let shared = contributory(eph.diffie_hellman(&PublicKey::from(*member_exchange_pub)))?;
+    Ok(wrap_with(
         key,
         collective_id,
         epoch,
@@ -195,12 +207,13 @@ pub(crate) fn wrap_deterministic(
         eph_pub,
         shared.as_bytes(),
         nonce,
-    )
+    ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::collective::hex;
 
     #[test]
     fn member_unwraps_own_wrap_only() {
@@ -214,7 +227,8 @@ mod tests {
             3,
             alice.member_id(),
             &alice.public().exchange,
-        );
+        )
+        .unwrap();
         assert_eq!(
             unwrap_epoch_key(&wrap, &alice).unwrap().as_bytes(),
             key.as_bytes()
@@ -241,7 +255,8 @@ mod tests {
             0,
             alice.member_id(),
             &alice.public().exchange,
-        );
+        )
+        .unwrap();
         let mut epoch = wrap.clone();
         epoch.epoch = 1;
         assert_eq!(
@@ -278,16 +293,72 @@ mod tests {
             0,
             alice.member_id(),
             &alice.public().exchange,
-        );
+        )
+        .unwrap();
         let b = wrap_epoch_key(
             &key,
             [2; ID_LEN],
             0,
             alice.member_id(),
             &alice.public().exchange,
-        );
+        )
+        .unwrap();
         assert_ne!(a.eph_pub, b.eph_pub);
         assert_ne!(a.nonce, b.nonce);
         assert_ne!(a.wrapped, b.wrapped);
+    }
+
+    /// G12, зауваження 1: ключ обміну з малої підгрупи (точка порядку 8, RFC 7748, 6.1) або
+    /// нульовий дає неконтрибутивний спільний секрет — обгортка не створюється й не розгортається.
+    #[test]
+    fn low_order_or_zero_exchange_key_is_rejected_fail_closed() {
+        let alice = MemberIdentity::generate();
+        let key = EpochKey::generate();
+        let low_order = hex::array::<KEY_LEN>(
+            "e0eb7a7c3b41b8ae1656e3faf19fc46ada098deb9c32b1fd866205165f49b800",
+        );
+        for weak in [[0u8; KEY_LEN], low_order] {
+            assert_eq!(
+                wrap_epoch_key(&key, [2; ID_LEN], 0, alice.member_id(), &weak).unwrap_err(),
+                Reason::WeakExchangeKey
+            );
+            assert_eq!(
+                wrap_deterministic(
+                    &key,
+                    [2; ID_LEN],
+                    0,
+                    alice.member_id(),
+                    &weak,
+                    [7; KEY_LEN],
+                    [8; NONCE_LEN],
+                )
+                .unwrap_err(),
+                Reason::WeakExchangeKey
+            );
+            // Обгортка з підробленим ефемерним ключем з малої підгрупи не розгортається
+            // (перевірка контрибутивності — до розшифрування).
+            let mut forged = wrap_epoch_key(
+                &key,
+                [2; ID_LEN],
+                0,
+                alice.member_id(),
+                &alice.public().exchange,
+            )
+            .unwrap();
+            forged.eph_pub = weak;
+            assert_eq!(
+                unwrap_epoch_key(&forged, &alice).unwrap_err(),
+                Reason::WeakExchangeKey
+            );
+        }
+        // Звичайний ключ обміну — контрибутивний.
+        assert!(wrap_epoch_key(
+            &key,
+            [2; ID_LEN],
+            0,
+            alice.member_id(),
+            &alice.public().exchange
+        )
+        .is_ok());
     }
 }

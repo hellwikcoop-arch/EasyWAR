@@ -99,14 +99,18 @@ fn receive_inner(
     }
     let key = epoch_key(header.epoch).ok_or(Reason::UnknownEpoch)?;
     let signed = envelope::open(&key, &envelope)?;
-    // Конверт автентифіковано — лише тепер його ідентифікатор потрапляє в журнал, щоб
-    // неавтентифіковане сміття не могло «зайняти» чужий envelope_id.
-    journals.envelopes.insert(envelope_key);
     let payload = &signed.payload;
     let seq = payload.membership_seq;
+    // Журнал складу ще не дійшов до membership_seq операції: рішення не остаточне, тому
+    // envelope_id у журнал НЕ потрапляє — повторна доставка тих самих байтів після
+    // надолуження журналу пройде повну перевірку й застосується рівно один раз
+    // (G12, зауваження 2; у C3b відкладені конверти зберігаються й доставляються повторно).
     if seq > membership.latest_seq() {
         return Ok(Decision::Deferred(signed));
     }
+    // Конверт автентифіковано й рішення буде остаточним — лише тепер його ідентифікатор
+    // потрапляє в журнал, щоб неавтентифіковане сміття не могло «зайняти» чужий envelope_id.
+    journals.envelopes.insert(envelope_key);
     let member = &payload.author_member_id;
     if let Some(revoked_at) = membership.revoked_at(member) {
         if seq >= revoked_at {
@@ -390,6 +394,37 @@ mod tests {
             Decision::Deferred(_)
         ));
         assert!(j.known_op(&w.collective, &[3; ID_LEN]).is_none());
+        // Відкладений конверт не «зайняв» envelope_id: повтор до надолуження — знову Deferred.
+        assert!(matches!(
+            w.receive(&mut j, RevokedPolicy::Reject, &bytes),
+            Decision::Deferred(_)
+        ));
+    }
+
+    /// G12, зауваження 2: після надолуження журналу складу той самий конверт застосовується
+    /// рівно один раз, а наступний повтор — уже дублікат.
+    #[test]
+    fn deferred_envelope_applies_exactly_once_after_membership_catch_up() {
+        let mut w = World::new();
+        let mut j = Journals::new();
+        let bytes = w.envelope(0, 12, 3, 1);
+        assert!(matches!(
+            w.receive(&mut j, RevokedPolicy::Reject, &bytes),
+            Decision::Deferred(_)
+        ));
+        // Журнал складу доходить до seq 12 (ще 9 подій без змін прав).
+        while w.membership.latest_seq() < 12 {
+            w.membership.grant_table(&w.alice.member_id(), w.table);
+        }
+        assert!(matches!(
+            w.receive(&mut j, RevokedPolicy::Reject, &bytes),
+            Decision::Apply(_)
+        ));
+        assert!(j.known_op(&w.collective, &[3; ID_LEN]).is_some());
+        assert_eq!(
+            w.receive(&mut j, RevokedPolicy::Reject, &bytes),
+            Decision::SkipDuplicateEnvelope
+        );
     }
 
     #[test]
