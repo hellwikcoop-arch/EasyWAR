@@ -601,4 +601,7 @@ by hand with narrow anchored patches (see `AGENTS.md`), then run
   профілю (`available` / `missing` / `source-missing` / `unknown-definition`), версія джерела й ролі;
   всі картки одного джерела бачать те саме.
 - `serializeLayout` / `parseLayout` перевіряють формат, версію, ліміти й посилання розміщень; розкладку
-  новішої версії не читають. Зберігання (міграція 0018, команди) — наступний блок E4.
+  новішої версії не читають. Збереження — `src/dashboard-layout-client.js`
+  (`loadDashboardLayout`, `saveDashboardLayout`, `resetDashboardLayout`, `updateDashboardLayout`
+  з одним повтором на свіжій розкладці при конфлікті ревізій) і команди `get_dashboard_layout`,
+  `save_dashboard_layout`, `reset_dashboard_layout` (профіль із сеансу); екрана конструктора ще нема.
