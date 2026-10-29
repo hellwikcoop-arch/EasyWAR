@@ -87,6 +87,15 @@ const LABEL_META: &[u8] = b"easywar/library/v1/meta";
 const LABEL_CONTENT_ID: &[u8] = b"easywar/library/v1/content-id";
 const LABEL_FINGERPRINT: &[u8] = b"easywar/library/v1/fingerprint";
 const LABEL_RECOVERY_KEK: &[u8] = b"easywar/library/v1/recovery-kek";
+/// Підключ сховища файлів «Робочого середовища» (тека на диску, `workspace_files.rs`).
+const LABEL_STORE: &[u8] = b"easywar/library/v1/store";
+/// Файл сховища: `EWFS` · формат · u32 BE довжина метаданих · nonce ‖ шифротекст метаданих
+/// (JSON `{ name, size }`) · nonce ‖ шифротекст вмісту. AAD обох частин прив'язує їх до профілю
+/// й до ідентифікатора файлу (назви на диску), тож блоб не перенести в інший профіль чи під
+/// інший ідентифікатор, а метадані не підмінити вмістом іншого файлу.
+const STORE_MAGIC: &[u8; 4] = b"EWFS";
+const STORE_HEADER_LEN: usize = STORE_MAGIC.len() + 1 + 4;
+const STORE_META_MAX: usize = 4096;
 
 #[derive(Debug, thiserror::Error)]
 pub enum LibraryError {
@@ -405,6 +414,7 @@ pub struct LibraryKeys {
     meta: Zeroizing<[u8; KEY_LEN]>,
     content_id: Zeroizing<[u8; KEY_LEN]>,
     fingerprint: Zeroizing<[u8; KEY_LEN]>,
+    store: Zeroizing<[u8; KEY_LEN]>,
 }
 
 impl fmt::Debug for LibraryKeys {
@@ -424,7 +434,14 @@ impl LibraryKeys {
             meta: hkdf_key(ldk, None, LABEL_META),
             content_id: hkdf_key(ldk, None, LABEL_CONTENT_ID),
             fingerprint: hkdf_key(ldk, None, LABEL_FINGERPRINT),
+            store: hkdf_key(ldk, None, LABEL_STORE),
         }
+    }
+
+    /// Ключі для тестів інших модулів: з довільного LDK.
+    #[cfg(test)]
+    pub(crate) fn for_tests(profile_id: &str, ldk: &[u8; KEY_LEN]) -> Self {
+        Self::derive(profile_id, ldk)
     }
 
     pub fn profile_id(&self) -> &str {
@@ -525,6 +542,123 @@ impl LibraryKeys {
         .ok_or(LibraryError::Damaged)?;
         let text = std::str::from_utf8(&plain).map_err(|_| LibraryError::Damaged)?;
         Ok(Zeroizing::new(text.to_owned()))
+    }
+}
+
+/// Метадані файлу сховища (відкрита частина лише після розшифрування).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
+pub struct StoreFileMeta {
+    pub name: String,
+    pub size: u64,
+    /// Рід військ таблиці дашборда (`Branch::as_str`), якщо блоб — таблиця зі сховища таблиць
+    /// дашбордів (`workspace_files::tables`); у звичайних файлів сховища відсутній.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+}
+
+fn store_aad(profile_id: &str, file_id: &str, part: &str) -> Vec<u8> {
+    let mut aad =
+        format!("easywar/library/v1/store-{part}\0{profile_id}\0{file_id}\0").into_bytes();
+    aad.push(FORMAT);
+    aad
+}
+
+impl LibraryKeys {
+    /// Запечатує файл сховища під ідентифікатором `file_id` (назва блоба на диску без
+    /// розширення): метадані й вміст — окремими шифротекстами одного ключа.
+    pub fn seal_store_file(
+        &self,
+        file_id: &str,
+        meta: &StoreFileMeta,
+        bytes: &[u8],
+    ) -> Result<Vec<u8>, LibraryError> {
+        let meta_json = serde_json::to_vec(meta).map_err(|_| LibraryError::Crypto)?;
+        if meta_json.len() > STORE_META_MAX {
+            return Err(LibraryError::InvalidName);
+        }
+        let meta_nonce = random_array::<NONCE_LEN>();
+        let meta_cipher = seal(
+            &self.store,
+            &meta_nonce,
+            &meta_json,
+            &store_aad(&self.profile_id, file_id, "meta"),
+        )?;
+        let content_nonce = random_array::<NONCE_LEN>();
+        let content_cipher = seal(
+            &self.store,
+            &content_nonce,
+            bytes,
+            &store_aad(&self.profile_id, file_id, "content"),
+        )?;
+        let meta_len = NONCE_LEN + meta_cipher.len();
+        let mut data =
+            Vec::with_capacity(STORE_HEADER_LEN + meta_len + NONCE_LEN + content_cipher.len());
+        data.extend_from_slice(STORE_MAGIC);
+        data.push(FORMAT);
+        data.extend_from_slice(&(meta_len as u32).to_be_bytes());
+        data.extend_from_slice(&meta_nonce);
+        data.extend_from_slice(&meta_cipher);
+        data.extend_from_slice(&content_nonce);
+        data.extend_from_slice(&content_cipher);
+        Ok(data)
+    }
+
+    /// Межі частин файлу сховища: (початок nonce метаданих, початок nonce вмісту).
+    fn store_layout(data: &[u8]) -> Result<(usize, usize), LibraryError> {
+        if data.len() < STORE_HEADER_LEN
+            || &data[..STORE_MAGIC.len()] != STORE_MAGIC
+            || data[STORE_MAGIC.len()] != FORMAT
+        {
+            return Err(LibraryError::Damaged);
+        }
+        let mut len = [0u8; 4];
+        len.copy_from_slice(&data[STORE_MAGIC.len() + 1..STORE_HEADER_LEN]);
+        let meta_len = u32::from_be_bytes(len) as usize;
+        let content_start = STORE_HEADER_LEN + meta_len;
+        if !(NONCE_LEN + TAG_LEN..=STORE_META_MAX + NONCE_LEN + TAG_LEN).contains(&meta_len)
+            || data.len() < content_start + NONCE_LEN + TAG_LEN
+        {
+            return Err(LibraryError::Damaged);
+        }
+        Ok((STORE_HEADER_LEN, content_start))
+    }
+
+    /// Лише метадані файлу сховища (без розшифрування вмісту): для списку.
+    pub fn open_store_meta(
+        &self,
+        file_id: &str,
+        data: &[u8],
+    ) -> Result<StoreFileMeta, LibraryError> {
+        let (meta_start, content_start) = Self::store_layout(data)?;
+        let plain = open(
+            &self.store,
+            &data[meta_start..meta_start + NONCE_LEN],
+            &data[meta_start + NONCE_LEN..content_start],
+            &store_aad(&self.profile_id, file_id, "meta"),
+        )
+        .ok_or(LibraryError::Damaged)?;
+        serde_json::from_slice(&plain).map_err(|_| LibraryError::Damaged)
+    }
+
+    /// Метадані й вміст файлу сховища.
+    pub fn open_store_file(
+        &self,
+        file_id: &str,
+        data: &[u8],
+    ) -> Result<(StoreFileMeta, Zeroizing<Vec<u8>>), LibraryError> {
+        let meta = self.open_store_meta(file_id, data)?;
+        let (_, content_start) = Self::store_layout(data)?;
+        let plain = open(
+            &self.store,
+            &data[content_start..content_start + NONCE_LEN],
+            &data[content_start + NONCE_LEN..],
+            &store_aad(&self.profile_id, file_id, "content"),
+        )
+        .ok_or(LibraryError::Damaged)?;
+        if plain.len() as u64 != meta.size {
+            return Err(LibraryError::Damaged);
+        }
+        Ok((meta, plain))
     }
 }
 

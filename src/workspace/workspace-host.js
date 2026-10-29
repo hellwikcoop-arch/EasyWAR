@@ -186,6 +186,17 @@ export function createHost({
     browserFiles.delete(handle);
   }
 
+  // Захищені колективи (E8, C3b): лише для застосунку «Колективи» й лише в настільному
+  // застосунку — команди collective_* дозволені вікну редактора. Пароль профілю йде в Rust
+  // і ніде в JS не зберігається; назад приходять відбитки, назви й лічильники.
+  const collectives = invoke && appEntry.id === 'collectives'
+    ? Object.freeze({
+      status: () => invoke('collective_status'),
+      createIdentity: password => invoke('collective_create_identity', { password: String(password ?? '') }),
+      create: (password, name) => invoke('collective_create', { password: String(password ?? ''), name: String(name ?? '') }),
+    })
+    : null;
+
   return Object.freeze({
     contract: CONTRACT_VERSION,
     appId: appEntry.id,
@@ -199,6 +210,7 @@ export function createHost({
     saveFile,
     saveFileAs,
     closeFile,
+    collectives,
     setTitle(title) {
       state.title = String(title ?? '');
       publish();

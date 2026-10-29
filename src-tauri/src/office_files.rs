@@ -304,20 +304,42 @@ pub fn ensure_library_format(ext: &str, bytes: &[u8]) -> Result<(), OfficeFileEr
     }
 }
 
-/// Куди пише номер файлу: у файл на диску або новою версією документа бібліотеки.
+/// Куди пише номер файлу: у файл на диску, новою версією документа бібліотеки або в
+/// зашифрований блоб сховища «Робочого середовища».
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HandleTarget {
     Disk(PathBuf),
     Library(LibraryTarget),
+    Store(StoreTarget),
 }
 
-/// Документ бібліотеки, який головне вікно передало редактору: його забирає перший
-/// `office_open_file` того самого профілю й застосунку з відповідним розширенням.
+/// Файл сховища «Робочого середовища» (`workspace_files`), відкритий у редакторі: тека
+/// профілю, ідентифікатор блоба, назва для редактора і мітка бібліотеки, ключем якої
+/// блоб запечатано (як [`LibraryTarget::library_tag`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoreTarget {
+    pub dir: PathBuf,
+    pub id: String,
+    pub name: String,
+    pub library_tag: String,
+}
+
+/// Звідки взяти очікуваний файл: версія документа бібліотеки або зашифрований блоб
+/// сховища «Робочого середовища» (`workspace_files`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PendingSource {
+    Library { version_id: String },
+    Store { dir: PathBuf, id: String },
+}
+
+/// Документ бібліотеки чи файл сховища, який головне вікно передало редактору: його
+/// забирає перший `office_open_file` того самого профілю й застосунку з відповідним
+/// розширенням.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingFile {
     pub profile_id: String,
     pub app: &'static str,
-    pub version_id: String,
+    pub source: PendingSource,
     pub ext: String,
     pub name: String,
 }
@@ -376,6 +398,11 @@ impl OfficeFileHandles {
         self.insert(profile_id, webview, HandleTarget::Disk(path))
     }
 
+    /// Запам'ятовує файл сховища «Робочого середовища» для профілю й webview.
+    pub fn remember_store(&self, profile_id: &str, webview: &str, target: StoreTarget) -> String {
+        self.insert(profile_id, webview, HandleTarget::Store(target))
+    }
+
     /// Запам'ятовує документ бібліотеки для профілю й webview і повертає новий номер.
     pub fn remember_library(
         &self,
@@ -409,7 +436,9 @@ impl OfficeFileHandles {
     ) -> Result<PathBuf, OfficeFileError> {
         match self.target(profile_id, webview, handle)? {
             HandleTarget::Disk(path) => Ok(path),
-            HandleTarget::Library(_) => Err(OfficeFileError::UnknownHandle),
+            HandleTarget::Library(_) | HandleTarget::Store(_) => {
+                Err(OfficeFileError::UnknownHandle)
+            }
         }
     }
 
@@ -663,7 +692,9 @@ mod tests {
         PendingFile {
             profile_id: profile.to_owned(),
             app,
-            version_id: "ver-1".to_owned(),
+            source: PendingSource::Library {
+                version_id: "ver-1".to_owned(),
+            },
             ext: ext.to_owned(),
             name: format!("Довідка.{ext}"),
         }
@@ -693,7 +724,12 @@ mod tests {
             None
         );
         let taken = handles.take_pending("p1", "easydoc", &docx).unwrap();
-        assert_eq!(taken.version_id, "ver-1");
+        assert_eq!(
+            taken.source,
+            PendingSource::Library {
+                version_id: "ver-1".to_owned()
+            }
+        );
         assert_eq!(handles.take_pending("p1", "easydoc", &docx), None);
         assert!(!handles.has_pending());
 
