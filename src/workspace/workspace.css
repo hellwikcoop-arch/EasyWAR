@@ -189,6 +189,8 @@ p.ws-lib-hint{margin:0}
 .ws-lib-row .ws-lib-field{flex:0 1 220px}
 .ws-lib-help{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;border-top:1px solid var(--line);padding-top:10px}
 .ws-lib-fields{display:grid;gap:6px;align-content:start}
+.ws-files-path{user-select:all}
+.ws-files-item .ws-lib-name{font-size:15px}
 .ws-lib-fields ul{margin:0;padding-left:18px;display:grid;gap:2px;font:400 12px/1.5 var(--sans);color:var(--muted)}
 .ws-lib-fields code,.ws-lib-block code{font:400 12px/1.5 var(--mono);color:var(--text)}
 .ws-lib-fields li[data-known="false"] code{color:var(--danger)}
