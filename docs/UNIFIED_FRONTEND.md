@@ -640,4 +640,7 @@ keyColumns, correctedCells })` дає додані, змінені, зниклі
 `at` (розміщення). `instanceBar` має список розміру, кнопки `move-earlier`/`move-later` і ручку `drag-card`;
 `renderModule` ставить `grid-column: span w`, сітка `.ewmc-dashboard-grid[data-layout]` — 12 колонок, а картка
 приймає `drop` від ручки іншої. Висоту `h` розкладка зберігає, але екран її поки не застосовує.
+Фон картки: `dashboard-layout-view-core.js` — `BACKGROUND_CHOICES`, `backgroundOf(instance)`, `cardStyle(moduleStyle, instance)`;
+значення зберігається в `instance.style.background` (`branch` за замовчуванням і для порожнього, `plain`). Звичайний стиль
+модуля на картці стає `branch` (CSS `module-styles.css`, без нових правил); `heightwell` не перебивається.
 

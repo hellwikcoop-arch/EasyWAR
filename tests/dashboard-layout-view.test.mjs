@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-import { PERIOD_CHOICES, choiceOf, periodFromChoice, periodLabel, orderedCards, cardModel, sizeChoices } from '../src/dashboard-layout-view-core.js';
+import { PERIOD_CHOICES, choiceOf, periodFromChoice, periodLabel, orderedCards, cardModel, sizeChoices, BACKGROUND_CHOICES, backgroundOf, cardStyle } from '../src/dashboard-layout-view-core.js';
 import { emptyLayout, duplicateInstance, updateInstance, placeInstance, setSharedPeriod, MAX_COPIES } from '../src/module-instance-core.js';
 import { ensureModuleInstances } from '../src/module-instance-modules-core.js';
 import { emptySchema, addSource, confirmBinding } from '../src/profile-schema-core.js';
@@ -119,4 +119,27 @@ test('вибір розміру: готові ширини, нестандарт
   const layout = placeInstance(base, id, { x: 0, y: 0, w: 8, h: 3 }).layout;
   assert.equal(orderedCards(layout, [module('m1')])[0].at.w, 8);
   assert.equal(ensureModuleInstances(emptyLayout('p'), [module('m2', { defaultSpan: 2 })]).layout.placements[0].w, 12);
+});
+
+test('фон картки: за замовчуванням за родом військ, «звичайний» повертає стиль модуля, власний стиль не перебивається', () => {
+  assert.deepEqual(BACKGROUND_CHOICES.map(item => item.id), ['branch', 'plain']);
+  const fresh = { style: { accent: '', background: '', view: '' } };
+  assert.equal(backgroundOf(fresh), 'branch');
+  assert.equal(backgroundOf({ style: { background: 'щось' } }), 'branch');
+  assert.equal(backgroundOf(undefined), 'branch');
+  assert.equal(backgroundOf({ style: { background: 'plain' } }), 'plain');
+  assert.equal(cardStyle('standard', fresh), 'branch');
+  assert.equal(cardStyle(undefined, fresh), 'branch');
+  assert.equal(cardStyle('standard', { style: { background: 'plain' } }), 'standard');
+  assert.equal(cardStyle('heightwell', fresh), 'heightwell');
+  assert.equal(cardStyle('branch', { style: { background: 'plain' } }), 'branch');
+});
+
+test('вибір фону зберігається в стилі картки лише цієї картки', () => {
+  const layout = ensureModuleInstances(emptyLayout('profile-a'), [{ id: 'm1', branch: 'air', fields: FIELDS, defaultSpan: 1, definitionId: 'm1' }, { id: 'm2', branch: 'air', fields: FIELDS, defaultSpan: 1, definitionId: 'm2' }]).layout;
+  const [first, second] = layout.instances;
+  const changed = updateInstance(layout, first.id, { style: { background: 'plain' } });
+  assert.ok(changed.ok);
+  assert.equal(backgroundOf(changed.layout.instances.find(item => item.id === first.id)), 'plain');
+  assert.equal(backgroundOf(changed.layout.instances.find(item => item.id === second.id)), 'branch');
 });

@@ -76,3 +76,20 @@ export function sizeChoices(width) {
   const known = SIZE_CHOICES.map(item => ({ w: item.w, label: item.label }));
   return known.some(item => item.w === width) ? known : [...known, { w: width, label: `${width} з 12` }].sort((a, b) => a.w - b.w);
 }
+
+/** Фон картки: за замовчуванням у кольорі роду військ модуля; «звичайний» — як стиль самого модуля. */
+export const BACKGROUND_CHOICES = Object.freeze([
+  Object.freeze({ id: 'branch', label: 'Фон: за родом військ' }),
+  Object.freeze({ id: 'plain', label: 'Фон: звичайний' }),
+]);
+
+export const backgroundOf = instance => (instance?.style?.background === 'plain' ? 'plain' : 'branch');
+
+/**
+ * Стиль, з яким малюється картка. Порожній чи невідомий фон = за родом військ: звичайний стиль модуля
+ * стає «Кольори роду військ»; власний стиль модуля («Пункт керування») не перебивається.
+ */
+export function cardStyle(moduleStyle, instance) {
+  const own = moduleStyle || 'standard';
+  return backgroundOf(instance) === 'branch' && own === 'standard' ? 'branch' : own;
+}
