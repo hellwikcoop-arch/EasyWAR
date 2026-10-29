@@ -592,9 +592,13 @@ by hand with narrow anchored patches (see `AGENTS.md`), then run
 
 - `emptyLayout(profileId)`, `addInstance`, `duplicateInstance`, `removeInstance`, `updateInstance`,
   `rebindInstance`, `placeInstance`, `setSharedPeriod`: усі повертають нову заморожену розкладку або
-  `{ ok: false, code }`. Один модуль — до `MAX_COPIES` (4) разів; кожен екземпляр має власні назву,
+  `{ ok: false, code }`. Один модуль на одній таблиці — до `MAX_COPIES` (4) разів (різні таблиці одного шаблону лічаться окремо); кожен екземпляр має власні назву,
   період (`shared` / `all` / `last-days` / `range`) і стиль, а також розміщення `{ x, y, w, h }` на сітці
   12 колонок.
+- `src/module-instance-modules-core.js`: кожен модуль користувача має принаймні одну картку
+  (`ensureModuleInstances`, `forgetModuleInstances`; визначення — `rust-template:<шаблон>`), період діє
+  за підтвердженою роллю «Дата події» (`periodColumn`, `rowsInPeriod`): без підтвердженого стовпця
+  період не застосовується й не приховує рядків, рядки без дати за обмеженого періоду рахуються окремо.
 - `effectivePeriod(layout, id, today)`: межі `{ from, to }`; «останні N днів» рахуються від дати, яку
   передає виклик.
 - `instanceState(layout, schema, id, definitions)` і `sourceConsistency`: стан картки за схемою

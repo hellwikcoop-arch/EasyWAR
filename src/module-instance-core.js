@@ -3,7 +3,8 @@
 //
 // Чисте ядро без DOM, сховищ, годинника й мережі. Описує розкладку «Мій дашборд» профілю:
 //   - `ModuleInstance` — одна картка: визначення з реєстру (E1), джерело зі схеми профілю (E3), власні
-//     назва, період і стиль. Один модуль можна поставити до чотирьох разів (`MAX_COPIES`);
+//     назва, період і стиль. Один модуль на одному джерелі можна поставити до чотирьох разів
+//     (`MAX_COPIES`); різні джерела одного шаблону лічаться окремо;
 //   - `DashboardPlacement` — де картка стоїть на сітці й якого вона розміру.
 //
 // Правила (рішення власника):
@@ -21,7 +22,7 @@ import { availability, resolveRoles } from './profile-schema-core.js';
 export const LAYOUT_FORMAT = 'easywar.dashboard-layout';
 export const LAYOUT_VERSION = 1;
 
-/** Скільки разів один модуль можна поставити на дашборд (рішення власника, розділ 2). */
+/** Скільки разів один модуль на одному джерелі можна поставити на дашборд (рішення власника, розділ 2). */
 export const MAX_COPIES = 4;
 
 export const LIMITS = Object.freeze({
@@ -93,9 +94,9 @@ export function emptyLayout(profileId, dashboardId = 'my') {
   });
 }
 
-/** Скільки копій цього визначення вже стоїть. */
-export function copiesOf(layout, definitionId) {
-  return layout.instances.filter(instance => instance.definitionId === definitionId).length;
+/** Скільки копій цього визначення на цьому джерелі вже стоїть. Без `sourceId` — на всіх джерелах. */
+export function copiesOf(layout, definitionId, sourceId) {
+  return layout.instances.filter(instance => instance.definitionId === definitionId && (sourceId === undefined || instance.sourceId === sourceId)).length;
 }
 
 /** Найменший вільний id вигляду `<definitionId>#n`. */
@@ -129,7 +130,7 @@ export function addInstance(layout, spec) {
   const sourceId = text(spec?.sourceId, 80);
   if (!definitionId) return fail('bad_definition', 'У картки немає визначення модуля.');
   if (!sourceId) return fail('bad_source', 'У картки немає джерела даних.');
-  if (copiesOf(layout, definitionId) >= MAX_COPIES) return fail('too_many_copies', `Один модуль можна поставити не більш як ${MAX_COPIES} рази.`);
+  if (copiesOf(layout, definitionId, sourceId) >= MAX_COPIES) return fail('too_many_copies', `Один модуль на одній таблиці можна поставити не більш як ${MAX_COPIES} рази.`);
   if (layout.instances.length >= LIMITS.maxInstances) return fail('too_many_instances', 'Забагато карток на дашборді.');
   const id = text(spec.id, 100) || nextInstanceId(layout, definitionId);
   if (findInstance(layout, id)) return fail('duplicate_instance', `Картка «${id}» уже є.`);
@@ -302,9 +303,10 @@ export function parseLayout(input) {
     ids.add(id);
     if (!text(instance.definitionId, 80) || !text(instance.sourceId, 80)) err('bad_instance', `У картки «${id}» немає визначення чи джерела.`);
     if (!normalizePeriod(instance.period)) err('bad_period', `Період картки «${id}» некоректний.`);
-    copies.set(instance.definitionId, (copies.get(instance.definitionId) || 0) + 1);
+    const pair = `${instance.definitionId}\u0000${instance.sourceId}`;
+    copies.set(pair, (copies.get(pair) || 0) + 1);
   }
-  for (const [definitionId, count] of copies) if (count > MAX_COPIES) err('too_many_copies', `Модуль «${definitionId}» стоїть ${count} разів, ліміт ${MAX_COPIES}.`);
+  for (const [pair, count] of copies) if (count > MAX_COPIES) err('too_many_copies', `Модуль «${pair.split('\u0000')[0]}» стоїть ${count} разів на одній таблиці, ліміт ${MAX_COPIES}.`);
   const placed = new Set();
   for (const placement of value.placements) {
     if (!ids.has(placement?.instanceId)) err('unknown_instance', `Розміщення посилається на невідому картку «${placement?.instanceId}».`);
