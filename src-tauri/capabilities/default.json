@@ -116,6 +116,11 @@
     "allow-workspace-files-add",
     "allow-workspace-files-delete",
     "allow-workspace-files-export",
-    "allow-workspace-files-open"
+    "allow-workspace-files-open",
+    "allow-profile-data-status",
+    "allow-profile-data-get",
+    "allow-profile-data-set",
+    "allow-profile-data-remove",
+    "allow-profile-data-list"
   ]
 }

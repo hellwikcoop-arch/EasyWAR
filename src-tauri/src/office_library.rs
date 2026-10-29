@@ -71,9 +71,9 @@ pub const SUPPORTED_EXTENSIONS: [&str; 5] = ["xlsx", "csv", "docx", "txt", "pptx
 /// Розширення шаблонів і згенерованих документів.
 pub const TEMPLATE_EXTENSIONS: [&str; 3] = ["docx", "pptx", "xlsx"];
 
-const KEY_LEN: usize = 32;
-const NONCE_LEN: usize = 24;
-const SALT_LEN: usize = 16;
+pub(crate) const KEY_LEN: usize = 32;
+pub(crate) const NONCE_LEN: usize = 24;
+pub(crate) const SALT_LEN: usize = 16;
 const TAG_LEN: usize = 16;
 const FORMAT: u8 = 1;
 const BLOB_MAGIC: &[u8; 4] = b"EWLB";
@@ -89,6 +89,9 @@ const LABEL_FINGERPRINT: &[u8] = b"easywar/library/v1/fingerprint";
 const LABEL_RECOVERY_KEK: &[u8] = b"easywar/library/v1/recovery-kek";
 /// Підключ сховища файлів «Робочого середовища» (тека на диску, `workspace_files.rs`).
 const LABEL_STORE: &[u8] = b"easywar/library/v1/store";
+/// Ключ запасного слота даних профілю (`profile_data.rs`): з ним ключ даних можна розгорнути
+/// після відновлення пароля кодом бібліотеки.
+const LABEL_PROFILE_DATA: &[u8] = b"easywar/library/v1/profile-data-wrap";
 /// Файл сховища: `EWFS` · формат · u32 BE довжина метаданих · nonce ‖ шифротекст метаданих
 /// (JSON `{ name, size }`) · nonce ‖ шифротекст вмісту. AAD обох частин прив'язує їх до профілю
 /// й до ідентифікатора файлу (назви на диску), тож блоб не перенести в інший профіль чи під
@@ -262,19 +265,19 @@ fn name_aad(profile_id: &str, item_id: &str) -> Vec<u8> {
     format!("easywar/library/v1/name\0{profile_id}\0{item_id}").into_bytes()
 }
 
-fn random_array<const N: usize>() -> [u8; N] {
+pub(crate) fn random_array<const N: usize>() -> [u8; N] {
     let mut bytes = [0u8; N];
     OsRng.fill_bytes(&mut bytes);
     bytes
 }
 
-fn random_key() -> Zeroizing<[u8; KEY_LEN]> {
+pub(crate) fn random_key() -> Zeroizing<[u8; KEY_LEN]> {
     let mut key = Zeroizing::new([0u8; KEY_LEN]);
     OsRng.fill_bytes(&mut key[..]);
     key
 }
 
-fn to_hex(bytes: &[u8]) -> String {
+pub(crate) fn to_hex(bytes: &[u8]) -> String {
     const DIGITS: &[u8; 16] = b"0123456789abcdef";
     let mut out = String::with_capacity(bytes.len() * 2);
     for byte in bytes {
@@ -289,7 +292,7 @@ fn random_id(prefix: &str) -> String {
     format!("{prefix}-{}", to_hex(&random_array::<12>()))
 }
 
-fn valid_profile_id(id: &str) -> bool {
+pub(crate) fn valid_profile_id(id: &str) -> bool {
     id.len() == 32 && id.starts_with("profile-") && is_lower_hex(&id[8..])
 }
 
@@ -300,7 +303,7 @@ fn is_lower_hex(text: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
-fn derive_kek(
+pub(crate) fn derive_kek(
     password: &[u8],
     salt: &[u8],
     params: KdfParams,
@@ -327,7 +330,7 @@ async fn derive_kek_blocking(
         .map_err(|_| LibraryError::Crypto)?
 }
 
-fn seal(
+pub(crate) fn seal(
     key: &[u8; KEY_LEN],
     nonce: &[u8; NONCE_LEN],
     plaintext: &[u8],
@@ -344,7 +347,7 @@ fn seal(
         .map_err(|_| LibraryError::Crypto)
 }
 
-fn open(
+pub(crate) fn open(
     key: &[u8; KEY_LEN],
     nonce: &[u8],
     ciphertext: &[u8],
@@ -391,7 +394,7 @@ fn unwrap_ldk(
     Some(ldk)
 }
 
-fn hkdf_key(ikm: &[u8], salt: Option<&[u8]>, label: &[u8]) -> Zeroizing<[u8; KEY_LEN]> {
+pub(crate) fn hkdf_key(ikm: &[u8], salt: Option<&[u8]>, label: &[u8]) -> Zeroizing<[u8; KEY_LEN]> {
     let mut okm = Zeroizing::new([0u8; KEY_LEN]);
     Hkdf::<Sha256>::new(salt, ikm)
         .expand(label, &mut okm[..])
@@ -399,7 +402,7 @@ fn hkdf_key(ikm: &[u8], salt: Option<&[u8]>, label: &[u8]) -> Zeroizing<[u8; KEY
     okm
 }
 
-fn hmac_hex(key: &[u8; KEY_LEN], bytes: &[u8]) -> String {
+pub(crate) fn hmac_hex(key: &[u8; KEY_LEN], bytes: &[u8]) -> String {
     let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(key)
         .expect("HMAC-SHA256 приймає ключ будь-якої довжини");
     mac.update(bytes);
@@ -446,6 +449,12 @@ impl LibraryKeys {
 
     pub fn profile_id(&self) -> &str {
         &self.profile_id
+    }
+
+    /// Ключ запасного слота даних профілю: той самий для тієї самої бібліотеки (і після
+    /// зміни пароля), інший для іншої.
+    pub fn profile_data_wrap_key(&self) -> Zeroizing<[u8; KEY_LEN]> {
+        hkdf_key(&*self.store, None, LABEL_PROFILE_DATA)
     }
 
     /// `content_id = hex(HMAC-SHA256(content-id-ключ, відкриті байти))`.

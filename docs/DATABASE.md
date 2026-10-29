@@ -337,6 +337,19 @@ automated restore tests use temporary synthetic databases; acceptance of the
 full restart flow in packaged macOS and Windows applications remains a release
 gate.
 
+## Profile data store (outside SQLite)
+
+`src-tauri/src/profile_data.rs` keeps per-profile application data in
+`<app local data>/profile-data/<profile id>/`; nothing of it is in the database and there is no
+migration. `keyring.json` holds `format`, the Argon2id parameters and salt, the password slot and an
+optional library slot (the same data key wrapped by `LibraryKeys::profile_data_wrap_key`). Each record is
+`<first 32 hex of HMAC(name key, key)>.ewd` = `EWPD` + version + 24-byte nonce + XChaCha20-Poly1305
+ciphertext, with the profile id and file name as associated data; writes are atomic. Limits: key ≤ 80
+characters, value ≤ 32 MB, ≤ 512 records per profile. Deleting a profile (also
+`delete_local_profile_with_library`) removes its directory. The backup (`backup.rs`) copies SQLite only,
+so this directory is **not** backed up; a forgotten password without a library slot makes the data
+unrecoverable. Details and the key/window rules: [`WORKSPACE.md`](WORKSPACE.md), «Дані профілю».
+
 ## Office library
 
 `src-tauri/src/office_library.rs` is the core of the «Офіс» library (its Tauri

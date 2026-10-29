@@ -5,7 +5,8 @@
 // `pendingFile` — документ з бібліотеки, який чекає у вікні редактора (його першим віддає
 // office_open_file, без вікна вибору); віддавши його, host ставить позначку в history.state кадру,
 // тож після перезавантаження вікна документ уже не вважається очікуваним. Нічого не надсилається
-// в мережу й не пишеться в сховища браузера.
+// в мережу. У сховища браузера пише лише `host.profile` без Tauri (перегляд у браузері); у
+// настільному застосунку дані профілю зашифровані й лежать у прихованій теці (profile-store.js).
 import {
   CONTRACT_VERSION,
   UI_LANGUAGE,
@@ -17,6 +18,7 @@ import {
   parsePendingFile,
   toBytes,
 } from './workspace-core.js';
+import { createProfileStore } from './profile-store.js';
 
 /** Tauri invoke цієї сторінки або батьківських (сторінка застосунку лежить у двох iframe). */
 export function findInvoke(win = globalThis.window) {
@@ -129,10 +131,13 @@ export function markPendingTaken(name, win = globalThis.window) {
  * збірки (там лежать і статичні файли з src/public), від неї рахує `host.resolve(path)`;
  * `pendingFile` — файл з бібліотеки, який віддасть перший openFile (типово шукається від
  * поточного вікна, як invoke; лише в настільному застосунку, без Tauri його немає);
- * `onPendingTaken(name)` — виклик, коли office_open_file віддав саме його (типово markPendingTaken).
+ * `onPendingTaken(name)` — виклик, коли office_open_file віддав саме його (типово markPendingTaken);
+ * `profileStorage` — сховище-подібний (Storage) об'єкт для `host.profile` лише без Tauri (перегляд у
+ * браузері): у настільному застосунку дані профілю ходять командами profile_data_* і зашифровані.
  */
 export function createHost({
   appEntry, invoke = null, browser = null, onState = () => {}, rootUrl = '', pendingFile = findPendingFile(), onPendingTaken = markPendingTaken,
+  profileStorage = null,
 }) {
   const state = { title: '', dirty: false };
   const pending = invoke ? parsePendingFile(pendingFile) : null;
@@ -189,6 +194,10 @@ export function createHost({
   // Захищені колективи (E8, C3b): лише для застосунку «Колективи» й лише в настільному
   // застосунку — команди collective_* дозволені вікну редактора. Пароль профілю йде в Rust
   // і ніде в JS не зберігається; назад приходять відбитки, назви й лічильники.
+  // Дані профілю: зашифровані записи в прихованій теці застосунку; вікно редактора бачить лише
+  // простір імен свого застосунку (Rust). Див. profile-store.js.
+  const profile = createProfileStore({ invoke, storage: invoke ? null : profileStorage });
+
   const collectives = invoke && appEntry.id === 'collectives'
     ? Object.freeze({
       status: () => invoke('collective_status'),
@@ -211,6 +220,7 @@ export function createHost({
     saveFileAs,
     closeFile,
     collectives,
+    profile,
     setTitle(title) {
       state.title = String(title ?? '');
       publish();

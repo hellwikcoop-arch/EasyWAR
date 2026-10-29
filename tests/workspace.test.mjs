@@ -318,6 +318,8 @@ test('модуль підключено в лаунчері, у збірці й 
 
   const dir = new URL('src/workspace/', root);
   for (const file of (await readdir(dir)).filter(name => /\.(js|html)$/.test(name))) {
+    // profile-store.js — єдине місце, де є запасний режим на localStorage (лише без Tauri, див. docs/WORKSPACE.md).
+    if (file === 'profile-store.js') continue;
     // Простір імен SVG (createElementNS) — не мережеве посилання.
     const text = (await read(`src/workspace/${file}`)).replaceAll("'http://www.w3.org/2000/svg'", '');
     assert.doesNotMatch(text, /https?:\/\/|fetch\(|XMLHttpRequest|WebSocket|localStorage|sessionStorage|indexedDB/, `${file}: без мережі й сховищ браузера`);

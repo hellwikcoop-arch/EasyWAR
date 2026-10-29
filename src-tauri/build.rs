@@ -122,6 +122,11 @@ const COMMANDS: &[&str] = &[
     "workspace_files_delete",
     "workspace_files_export",
     "workspace_files_open",
+    "profile_data_status",
+    "profile_data_get",
+    "profile_data_set",
+    "profile_data_remove",
+    "profile_data_list",
 ];
 
 fn main() {

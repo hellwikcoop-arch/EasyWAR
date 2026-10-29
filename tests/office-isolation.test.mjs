@@ -19,6 +19,9 @@ const read = path => readFile(new URL(path, root), 'utf8');
 const EDITOR_LABEL = 'office-editor';
 const EDITOR_COMMANDS = ['office_open_file', 'office_save_file', 'office_save_file_as', 'office_close_file', 'office_editor_close',
   'collective_status', 'collective_create_identity', 'collective_create'];
+// Дані профілю: вікно редактора бачить лише простір імен свого застосунку (Rust: profile_data_window_allows).
+const PROFILE_EDITOR_COMMANDS = ['profile_data_get', 'profile_data_set', 'profile_data_remove', 'profile_data_list'];
+const EDITOR_GRANTED = [...EDITOR_COMMANDS, ...PROFILE_EDITOR_COMMANDS];
 const LIBRARY_COMMANDS = [
   'library_status', 'library_create', 'library_unlock', 'library_lock', 'library_list',
   'library_versions', 'library_import', 'library_rename', 'library_set_hidden', 'library_set_current',
@@ -57,7 +60,8 @@ test('усі власні команди зареєстровано в дозв�
   const manifest = await manifestCommands();
   assert.equal(new Set(handler).size, handler.length, 'команди без повторів');
   assert.deepEqual([...manifest].sort(), [...handler].sort());
-  for (const command of EDITOR_COMMANDS) assert.ok(handler.includes(command), command);
+  for (const command of EDITOR_GRANTED) assert.ok(handler.includes(command), command);
+  assert.ok(handler.includes('profile_data_status'));
 });
 
 test('вікно редактора має лише дозволи office_*, без core і плагінів', async () => {
@@ -69,7 +73,7 @@ test('вікно редактора має лише дозволи office_*, б�
   assert.deepEqual(cap.windows, [EDITOR_LABEL]);
   assert.equal(cap.webviews, undefined);
   assert.equal(cap.remote, undefined, 'жодних віддалених адрес');
-  assert.deepEqual([...cap.permissions].sort(), EDITOR_COMMANDS.map(permission).sort());
+  assert.deepEqual([...cap.permissions].sort(), EDITOR_GRANTED.map(permission).sort());
 });
 
 test('головне вікно має всі власні команди, крім файлових команд редактора', async () => {
@@ -80,6 +84,7 @@ test('головне вікно має всі власні команди, кр�
   const granted = new Set(main[0].permissions.filter(item => typeof item === 'string'));
   for (const command of handler) {
     assert.equal(granted.has(permission(command)), !EDITOR_COMMANDS.includes(command), command);
+    // profile_data_* потрібні і головному вікну, і редактору; решта office_* — лише редактору.
   }
   const plugins = [...granted].filter(item => item.includes(':') && !item.startsWith('core:'));
   assert.deepEqual(plugins, [], 'дозволів плагінів (dialog, sql, updater) з JavaScript немає, як і раніше');
@@ -104,6 +109,15 @@ test('кожна команда office_* перевіряє мітку вікн�
   const open = lib.slice(lib.indexOf('fn workspace_open_editor(')).split('\n#[tauri::command]')[0];
   assert.match(open, /window\.label\(\) != desktop_shell::MAIN_WINDOW_LABEL/);
   assert.match(open, /office_files::editor_app\(&app_id\)/);
+  // Команди даних профілю не вимагають вікна редактора, а звужують доступ ключем: головне вікно бачить усе,
+  // редактор — лише простір імен застосунку, який у ньому відкрито; профіль береться з сесії, не з аргументів.
+  for (const command of PROFILE_EDITOR_COMMANDS) {
+    const body = lib.slice(lib.indexOf(`fn ${command}(`)).split('\n#[tauri::command]')[0];
+    assert.match(body, /profile_data_keys\(&window, &handles, &session, &data, &(key|prefix)\)/, command);
+    assert.doesNotMatch(body, /profile_id: String/, `${command}: профіль не передається з вікна`);
+  }
+  const status = lib.slice(lib.indexOf('fn profile_data_status(')).split('\n#[tauri::command]')[0];
+  assert.match(status, /window\.label\(\) != desktop_shell::MAIN_WINDOW_LABEL/);
   const files = await read('src-tauri/src/office_files.rs');
   assert.match(files, /pub const EDITOR_WINDOW_LABEL: &str = "office-editor";/);
 });

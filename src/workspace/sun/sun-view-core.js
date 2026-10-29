@@ -8,6 +8,8 @@ import { moonDay } from '../easyfly/moon-core.js';
 import { MAX_PLACES, parsePlace, parseState as parseWeatherState } from '../weather/weather-core.js';
 
 export const SUN_STORAGE_KEY = 'easywar.workspace.sun.v1';
+/** Ключ запису в даних профілю (profile-store.js); SUN_STORAGE_KEY — старе місце в localStorage. */
+export const SUN_PROFILE_KEY = 'sun.state';
 
 /** Рядки Сонця в порядку доби: ключ у sunTimes, підпис, пояснення. */
 export const SUN_ROWS = Object.freeze([
