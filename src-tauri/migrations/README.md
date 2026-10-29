@@ -152,3 +152,15 @@ New migrations must be append-only, registered in `src-tauri/src/database.rs`
 (`database::migrations()`, which a test compares with the embedded migrator),
 and covered by a migration test. Never put operational fixtures in this
 directory. A migration that has shipped is never edited.
+
+`0019_collective_storage.sql` creates a local, profile-scoped encrypted staging schema
+for collectives: opaque local instances, immutable contiguous membership event
+history, encrypted shared-table schemas, encrypted envelopes with separate delivery
+receipts, encrypted row caches keyed by row HMAC, and per-peer sync cursors.
+There is no plaintext table name, member label, row value or access key. The SQL
+constraints prevent cross-collective foreign-key references, missing membership
+sequence numbers and silent deletion of a profile with a registered collective.
+C3b must independently validate signatures, permissions, epochs, replay and
+cryptographic secrecy before storing or reading contents. This migration adds
+**no Tauri commands, transport or production access** and does not read the
+unprotected local `.ewcoll` planning files.

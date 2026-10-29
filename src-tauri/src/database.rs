@@ -109,6 +109,9 @@ pub(crate) const PROFILE_SCHEMAS_SQL: &str = include_str!("../migrations/0017_pr
 pub(crate) const DASHBOARD_LAYOUTS_SQL: &str =
     include_str!("../migrations/0018_dashboard_layouts.sql");
 
+pub(crate) const COLLECTIVE_STORAGE_SQL: &str =
+    include_str!("../migrations/0019_collective_storage.sql");
+
 pub fn migrations() -> Vec<Migration> {
     vec![
         Migration {
@@ -219,6 +222,12 @@ pub fn migrations() -> Vec<Migration> {
             sql: DASHBOARD_LAYOUTS_SQL,
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 19,
+            description: "add_collective_storage",
+            sql: COLLECTIVE_STORAGE_SQL,
+            kind: MigrationKind::Up,
+        },
     ]
 }
 
@@ -285,12 +294,13 @@ pub(crate) async fn create_migrated_database(
 mod tests {
     use super::{
         create_migrated_database, migrations, DatabaseMigrationState, DatabaseStatusError,
-        DatabaseStatusStore, COMMAND_TABLES_SQL, DASHBOARD_LAYOUTS_SQL, DASHBOARD_MODULES_SQL,
-        DASHBOARD_MODULE_CORRECTIONS_SQL, DASHBOARD_MODULE_CORRECTION_STATUS_SQL,
-        DASHBOARD_MODULE_STYLE_SQL, DATABASE_URL, DOCUMENT_LINKS_SQL, EMBEDDED_MIGRATOR,
-        INITIAL_SCHEMA_SQL, LIBRARY_BLOB_REPAIR_SQL, LOCAL_PROFILES_SQL, OFFICE_LIBRARY_SQL,
-        OWN_LOSSES_TABLES_SQL, PROFILE_BRANCH_TABLES_SQL, PROFILE_DETAILS_SQL, PROFILE_MODULES_SQL,
-        PROFILE_SCHEMAS_SQL, WORKSPACE_TEMPLATES_SQL, XLSX_DUPLICATE_LINKS_SQL,
+        DatabaseStatusStore, COLLECTIVE_STORAGE_SQL, COMMAND_TABLES_SQL, DASHBOARD_LAYOUTS_SQL,
+        DASHBOARD_MODULES_SQL, DASHBOARD_MODULE_CORRECTIONS_SQL,
+        DASHBOARD_MODULE_CORRECTION_STATUS_SQL, DASHBOARD_MODULE_STYLE_SQL, DATABASE_URL,
+        DOCUMENT_LINKS_SQL, EMBEDDED_MIGRATOR, INITIAL_SCHEMA_SQL, LIBRARY_BLOB_REPAIR_SQL,
+        LOCAL_PROFILES_SQL, OFFICE_LIBRARY_SQL, OWN_LOSSES_TABLES_SQL, PROFILE_BRANCH_TABLES_SQL,
+        PROFILE_DETAILS_SQL, PROFILE_MODULES_SQL, PROFILE_SCHEMAS_SQL, WORKSPACE_TEMPLATES_SQL,
+        XLSX_DUPLICATE_LINKS_SQL,
     };
     use super::{live_connect_options, writable_connect_options};
     use sqlx::{sqlite::SqlitePoolOptions, Row};
@@ -301,7 +311,7 @@ mod tests {
         assert_eq!(DATABASE_URL, "sqlite:easywar.db");
         assert!(include_str!("../tauri.conf.json").contains(DATABASE_URL));
         let registered = migrations();
-        assert_eq!(registered.len(), 18);
+        assert_eq!(registered.len(), 19);
         assert_eq!(registered[0].version, 1);
         assert_eq!(registered[0].description, "create_provenance_schema");
         assert_eq!(registered[1].version, 2);
@@ -344,6 +354,8 @@ mod tests {
         assert_eq!(registered[16].description, "add_profile_schemas");
         assert_eq!(registered[17].version, 18);
         assert_eq!(registered[17].description, "add_dashboard_layouts");
+        assert_eq!(registered[18].version, 19);
+        assert_eq!(registered[18].description, "add_collective_storage");
         assert_eq!(
             EMBEDDED_MIGRATOR
                 .iter()
@@ -364,7 +376,7 @@ mod tests {
                 .map(|migration| migration.sql)
                 .collect::<Vec<_>>()
         );
-        assert_eq!(super::latest_schema_version(), Some(18));
+        assert_eq!(super::latest_schema_version(), Some(19));
     }
 
     #[tokio::test]
@@ -376,9 +388,9 @@ mod tests {
             DatabaseStatusStore::new(pool.clone()).load().await.unwrap(),
             super::DatabaseStatus {
                 app_version: env!("CARGO_PKG_VERSION").to_owned(),
-                schema_version: 18,
-                supported_schema_version: 18,
-                migration_count: 18,
+                schema_version: 19,
+                supported_schema_version: 19,
+                migration_count: 19,
                 migration_state: DatabaseMigrationState::Current,
             }
         );
@@ -474,8 +486,138 @@ mod tests {
             .execute(&pool)
             .await
             .expect("dashboard layouts migration must apply");
+        sqlx::raw_sql(COLLECTIVE_STORAGE_SQL)
+            .execute(&pool)
+            .await
+            .expect("collective storage migration must apply");
 
         pool
+    }
+
+    #[tokio::test]
+    async fn collective_storage_keeps_ciphertext_and_contiguous_immutable_membership() {
+        let pool = migrated_pool().await;
+        let p = "profile-aaaaaaaaaaaaaaaaaaaaaaaa";
+        sqlx::query("INSERT INTO local_profiles (id, display_name, name_key, created_at, updated_at) VALUES (?, 'Синтетичний', 'synthetic', '2026-01-01', '2026-01-01')")
+            .bind(p).execute(&pool).await.unwrap();
+
+        let collective = vec![7u8; 16];
+        let member = vec![9u8; 32];
+        sqlx::query("INSERT INTO collective_local_instances (profile_id, collective_id, member_id, created_at) VALUES (?, ?, ?, '2026-01-01')")
+            .bind(p).bind(&collective).bind(&member).execute(&pool).await.unwrap();
+
+        let bad_member = sqlx::query("INSERT INTO collective_local_instances (profile_id, collective_id, member_id, created_at) VALUES (?, ?, ?, '2026-01-01')")
+            .bind(p).bind(vec![8u8; 16]).bind(vec![9u8; 16]).execute(&pool).await;
+        assert!(bad_member.is_err(), "member ID must be exactly 32 bytes");
+
+        let payload = vec![0x5au8; 80];
+        let insert_event = |seq: i64, id: u8| {
+            sqlx::query("INSERT INTO collective_membership_events (profile_id, collective_id, event_seq, event_id, event_cipher, stored_at) VALUES (?, ?, ?, ?, ?, '2026-01-01')")
+                .bind(p).bind(collective.clone()).bind(seq).bind(vec![id; 16]).bind(payload.clone())
+        };
+        assert!(
+            insert_event(2, 2).execute(&pool).await.is_err(),
+            "cannot skip first sequence"
+        );
+        insert_event(1, 1).execute(&pool).await.unwrap();
+        assert!(
+            insert_event(3, 3).execute(&pool).await.is_err(),
+            "sequence cannot have a gap"
+        );
+        insert_event(2, 2).execute(&pool).await.unwrap();
+
+        assert!(
+            sqlx::query(
+                "UPDATE collective_membership_events SET event_cipher = ? WHERE profile_id = ?"
+            )
+            .bind(vec![0u8; 80])
+            .bind(p)
+            .execute(&pool)
+            .await
+            .is_err(),
+            "membership ciphertext immutable"
+        );
+        assert!(
+            sqlx::query("DELETE FROM collective_membership_events WHERE profile_id = ?")
+                .bind(p)
+                .execute(&pool)
+                .await
+                .is_err(),
+            "membership history cannot be deleted"
+        );
+        assert!(
+            insert_event(2, 2).execute(&pool).await.is_err(),
+            "replacing an old sequence is forbidden"
+        );
+        let replace_event = sqlx::query(
+            "INSERT OR REPLACE INTO collective_membership_events (profile_id, collective_id, event_seq, event_id, event_cipher, stored_at) VALUES (?, ?, 3, ?, ?, '2026-01-02')",
+        ).bind(p).bind(&collective).bind(vec![1u8; 16]).bind(vec![0u8; 80])
+            .execute(&pool).await;
+        assert!(
+            replace_event.is_err(),
+            "REPLACE cannot silently erase an older event via event_id"
+        );
+        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM collective_membership_events")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 2, "membership history remains unchanged");
+
+        let table = vec![3u8; 16];
+        sqlx::query("INSERT INTO collective_shared_tables (profile_id, collective_id, table_id, schema_version, schema_cipher, updated_at) VALUES (?, ?, ?, 1, ?, '2026-01-01')")
+            .bind(p).bind(&collective).bind(&table).bind(vec![1u8; 90]).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO collective_row_cache (profile_id, collective_id, table_id, row_key_hmac, row_version, row_cipher, updated_at) VALUES (?, ?, ?, ?, 1, ?, '2026-01-01')")
+            .bind(p).bind(&collective).bind(&table).bind(vec![4u8; 32]).bind(vec![5u8; 100])
+            .execute(&pool).await.unwrap();
+
+        let wrong_table = sqlx::query("INSERT INTO collective_row_cache (profile_id, collective_id, table_id, row_key_hmac, row_version, row_cipher, updated_at) VALUES (?, ?, ?, ?, 1, ?, '2026-01-01')")
+            .bind(p).bind(&collective).bind(vec![8u8; 16]).bind(vec![6u8; 32]).bind(vec![5u8; 100]).execute(&pool).await;
+        assert!(
+            wrong_table.is_err(),
+            "row cache cannot reference another table"
+        );
+
+        let envelope = vec![0x33u8; 120];
+        sqlx::query("INSERT INTO collective_envelopes (profile_id, collective_id, envelope_id, direction, epoch, envelope_cipher, stored_at) VALUES (?, ?, ?, 'outbound', 0, ?, '2026-01-01')")
+            .bind(p).bind(&collective).bind(vec![1u8; 16]).bind(&envelope).execute(&pool).await.unwrap();
+        assert!(sqlx::query("INSERT INTO collective_envelopes (profile_id, collective_id, envelope_id, direction, epoch, envelope_cipher, stored_at) VALUES (?, ?, ?, 'outbound', 0, ?, '2026-01-01')")
+            .bind(p).bind(&collective).bind(vec![1u8; 16]).bind(&envelope).execute(&pool).await.is_err(), "duplicate envelope cannot replace");
+        assert!(sqlx::query("INSERT OR REPLACE INTO collective_envelopes (profile_id, collective_id, envelope_id, direction, epoch, envelope_cipher, stored_at) VALUES (?, ?, ?, 'outbound', 0, ?, '2026-01-02')")
+            .bind(p).bind(&collective).bind(vec![1u8; 16]).bind(vec![9u8; 120]).execute(&pool).await.is_err(),
+            "REPLACE cannot silently replace authenticated envelope bytes");
+        assert!(
+            sqlx::query("UPDATE collective_envelopes SET envelope_cipher = ? WHERE profile_id = ?")
+                .bind(vec![9u8; 120])
+                .bind(p)
+                .execute(&pool)
+                .await
+                .is_err(),
+            "envelope immutable"
+        );
+        assert!(
+            sqlx::query("DELETE FROM collective_envelopes WHERE profile_id = ?")
+                .bind(p)
+                .execute(&pool)
+                .await
+                .is_err(),
+            "envelope cannot be deleted"
+        );
+
+        sqlx::query("INSERT INTO collective_envelope_receipts (profile_id, collective_id, envelope_id, status, changed_at) VALUES (?, ?, ?, 'pending', '2026-01-01')")
+            .bind(p).bind(&collective).bind(vec![1u8; 16]).execute(&pool).await.unwrap();
+
+        let tables: Vec<String> = sqlx::query_scalar(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'collective_%' ORDER BY name",
+        ).fetch_all(&pool).await.unwrap();
+        assert_eq!(tables.len(), 7);
+        assert!(
+            sqlx::query("DELETE FROM local_profiles WHERE id = ?")
+                .bind(p)
+                .execute(&pool)
+                .await
+                .is_err(),
+            "cannot silently cascade-delete active collective"
+        );
     }
 
     #[tokio::test]
