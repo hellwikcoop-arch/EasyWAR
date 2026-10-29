@@ -54,9 +54,13 @@ test('вогнева бригада: «УДШВ 148оабр», «УДШВ 148 о
   assert.equal(api.brigadeKey(undefined), '');
 });
 
-test('підрозділи за замовчуванням — 7, 8 і 9 реабатр', () => {
-  assert.deepEqual(J(api.crews), ['7 реабатр', '8 реабатр', '9 реабатр']);
-  assert.deepEqual(J(api.loadFireCrews()), ['7 реабатр', '8 реабатр', '9 реабатр']);
+test('підрозділи за замовчуванням — РУК, ГРВ, 7, 8 і 9 реабатр, усі рівнозначні', () => {
+  const def = ['РУК', 'ГРВ', '7 реабатр', '8 реабатр', '9 реабатр'];
+  assert.deepEqual(J(api.crews), def);
+  assert.deepEqual(J(api.loadFireCrews()), def);
+  const [g] = J(api.fireByBrigade([row('148 оабр', 'рук', 1), row('148 оабр', 'ГРВ', 2), row('148 оабр', '7 реабатр', 3), row('148 оабр', '9 РЕАБАТР', 4), row('148 оабр', 'ЗСУ', 5)]));
+  assert.deepEqual(g.by.map(c => c.mun), [1, 2, 3, 0, 4], 'усі п\'ять рядків рахуються однаково');
+  assert.deepEqual(g.other, { n: 1, mun: 5 });
 });
 
 test('зведення по бригадах: БП й операції по 7/8/9 реабатр та решті, сума збігається із загальною', () => {
@@ -65,7 +69,7 @@ test('зведення по бригадах: БП й операції по 7/8/
     row('УДШВ 107 реабр', '9 реабатр', 5), row('УДШВ 107 реабр', '7 реабатр', 1),
     row('УДШВ 107 реабр', 'ЗСУ', 3), row('', '', 7), row('УДШВ 148 оабр', '8 реабатр', '3')
   ];
-  const out = J(api.fireByBrigade(rows));
+  const out = J(api.fireByBrigade(rows, ['7 реабатр', '8 реабатр', '9 реабатр']));
   assert.deepEqual(out.map(g => g.key), ['148 оабр', '107 реабр', 'Не вказано'], 'за БП спадно, «Не вказано» — останнім');
   const [a, b, none] = out;
   assert.deepEqual({ n: a.n, mun: a.mun }, { n: 4, mun: 15 });
@@ -99,9 +103,9 @@ test('перелік підрозділів: чиститься, зберіга�
   assert.deepEqual(J(api.crews), ['10 реабатр', 'ГРВ']);
   assert.deepEqual(JSON.parse(api.mem[api.FIRE_CREWS_KEY]), ['10 реабатр', 'ГРВ']);
   assert.deepEqual(J(api.loadFireCrews()), ['10 реабатр', 'ГРВ'], 'після перезавантаження сторінки перелік той самий');
-  assert.deepEqual(J(api.saveFireCrews([' ', ''])), ['7 реабатр', '8 реабатр', '9 реабатр'], 'порожній перелік повертає типовий');
+  assert.deepEqual(J(api.saveFireCrews([' ', ''])), ['РУК', 'ГРВ', '7 реабатр', '8 реабатр', '9 реабатр'], 'порожній перелік повертає типовий');
   api.mem[api.FIRE_CREWS_KEY] = '{зіпсовано';
-  assert.deepEqual(J(api.loadFireCrews()), ['7 реабатр', '8 реабатр', '9 реабатр'], 'зіпсоване сховище не ламає картку');
+  assert.deepEqual(J(api.loadFireCrews()), ['РУК', 'ГРВ', '7 реабатр', '8 реабатр', '9 реабатр'], 'зіпсоване сховище не ламає картку');
 });
 
 test('зведення по бригадах: порожні дані й рядки без кількості не ламають підрахунок', () => {
@@ -133,7 +137,7 @@ test('картка має редактор підрозділів: кнопка 
   assert.match(html, /box\.append\(fireCrewTools\(A\)\);/, 'редактор доступний і коли даних за період немає');
   assert.match(html, /'Змінити'\)\);/);
   assert.match(html, /saveFireCrews\(read\(\)\)/);
-  assert.match(html, /'7 \/ 8 \/ 9 за замовчуванням'/);
+  assert.match(html, /'За замовчуванням'/);
   assert.match(html, /e\.key === 'Escape'/);
   assert.match(html, /\.fb-edit \{/);
   assert.doesNotMatch(html, /crewRow\('РУК'|crewRow\('ГРВ'|fb-ruk|fb-grv/, 'жорстко закодованих РУК / ГРВ у картці більше немає');

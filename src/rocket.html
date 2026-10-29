@@ -4761,8 +4761,8 @@ const canonUnit = u => UNIT_ALIAS[u.toLowerCase().replace(/\s+/g, ' ').trim()] |
 const LAT2UK = { A: 'А', B: 'В', C: 'С', E: 'Е', H: 'Н', I: 'І', K: 'К', M: 'М', O: 'О', P: 'Р', T: 'Т', X: 'Х', Y: 'У' };
 const crewKey = v => { const s = String(v == null ? '' : v).replace(/\s+/g, ' ').trim().toUpperCase().replace(/[A-Z]/g, c => LAT2UK[c] || c); return NONE.has(s) ? '' : s; };
 const brigadeKey = v => { const s = String(v == null ? '' : v).replace(/\s+/g, ' ').trim(); if (NONE.has(s)) return ''; const m = /(\d+)\s*([A-Za-zА-Яа-яІіЇїЄєҐґ]+)/.exec(s); return m ? m[1] + ' ' + m[2].toLowerCase() : s; };
-/* Підрозділи (від кого машина) для рядків картки «Вогневі бригади»: за замовчуванням 7, 8 і 9 реабатр; список можна змінити в картці. */
-const FIRE_CREWS_DEFAULT = ['7 реабатр', '8 реабатр', '9 реабатр'];
+/* Підрозділи (від кого машина) для рядків картки «Вогневі бригади»: за замовчуванням РУК, ГРВ, 7, 8 і 9 реабатр — усі рівнозначні; список можна змінити в картці. */
+const FIRE_CREWS_DEFAULT = ['РУК', 'ГРВ', '7 реабатр', '8 реабатр', '9 реабатр'];
 const FIRE_CREWS_KEY = 'easywar.rocket.fireCrews';
 const FIRE_CREWS_MAX = 8;
 const crewCmp = v => crewKey(v).replace(/\s+/g, '');
@@ -6427,7 +6427,7 @@ function renderMunPanel(A) {
   const IC_ROCK='<path d="M14 4c3-1.5 5.5-1 6-1 0 .5.5 3-1 6l-6.5 6.5-5-5z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M7.5 10.5L4 11l3-3.5h3M13.5 16.5L13 20l3.5-3v-3M6 18l-2 2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>';
   box.append(h('div',{class:'mx-bot'},info,stat(IC_ROCK,'Використано',value,munDaily(rows,name,r=>+r.count||0)),stat(IC_G,'Точок DPI',dpi,munDaily(rows,name,r=>r.dpi?1:0))));
 }
-/* --- «Вогневі бригади»: скільки БП випустила кожна бригада і скільки з цього на кожен підрозділ зі списку (за замовчуванням 7, 8, 9 реабатр; список редагується тут же) --- */
+/* --- «Вогневі бригади»: скільки БП випустила кожна бригада і скільки з цього на кожен підрозділ зі списку (за замовчуванням РУК, ГРВ, 7, 8, 9 реабатр; список редагується тут же) --- */
 const FIRE_UI = { edit: false, draft: [] };
 function fireCrewTools(A) {
   const again = () => renderFirePanel(A);
@@ -6445,7 +6445,7 @@ function fireCrewTools(A) {
     form.append(h('div', { class: 'fb-ea' },
       FIRE_UI.draft.length < FIRE_CREWS_MAX ? h('button', { class: 'btn', type: 'button', onclick: () => { FIRE_UI.draft = read(); FIRE_UI.draft.push(''); draw(FIRE_UI.draft.length - 1); } }, '+ Додати') : null,
       h('button', { class: 'btn primary', type: 'submit' }, 'Зберегти'),
-      h('button', { class: 'btn', type: 'button', onclick: () => { FIRE_UI.draft = FIRE_CREWS_DEFAULT.slice(); draw(0); } }, '7 / 8 / 9 за замовчуванням'),
+      h('button', { class: 'btn', type: 'button', onclick: () => { FIRE_UI.draft = FIRE_CREWS_DEFAULT.slice(); draw(0); } }, 'За замовчуванням'),
       h('button', { class: 'btn', type: 'button', onclick: () => { FIRE_UI.edit = false; again(); } }, 'Скасувати')));
     const f = form.querySelectorAll('input.fb-in')[focus == null ? 0 : focus]; if (f) Promise.resolve().then(() => f.focus());
   };
