@@ -611,8 +611,7 @@ impl LibraryKeys {
         len.copy_from_slice(&data[STORE_MAGIC.len() + 1..STORE_HEADER_LEN]);
         let meta_len = u32::from_be_bytes(len) as usize;
         let content_start = STORE_HEADER_LEN + meta_len;
-        if meta_len < NONCE_LEN + TAG_LEN
-            || meta_len > STORE_META_MAX + NONCE_LEN + TAG_LEN
+        if !(NONCE_LEN + TAG_LEN..=STORE_META_MAX + NONCE_LEN + TAG_LEN).contains(&meta_len)
             || data.len() < content_start + NONCE_LEN + TAG_LEN
         {
             return Err(LibraryError::Damaged);
