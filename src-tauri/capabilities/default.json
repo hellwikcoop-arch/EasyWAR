@@ -111,6 +111,16 @@
     "allow-library-link-statuses",
     "allow-library-unlink",
     "allow-library-recover",
-    "allow-library-reissue-recovery"
+    "allow-library-reissue-recovery",
+    "allow-workspace-files-list",
+    "allow-workspace-files-add",
+    "allow-workspace-files-delete",
+    "allow-workspace-files-export",
+    "allow-workspace-files-open",
+    "allow-workspace-files-list-tables",
+    "allow-workspace-files-export-table",
+    "allow-workspace-files-delete-table",
+    "allow-move-profile-database-to-store",
+    "allow-create-profile-base-table-in-store"
   ]
 }

@@ -139,6 +139,15 @@ values; cards only refer to sources of the profile schema. The number 0018 was
 free on main when taken (the collectives plan reserved it provisionally: the first
 merged migration takes the number, E8 uses the next free one).
 
+`0019_collectives.sql` adds the first E8 (C3b) tables, all keyed by profile and
+deleted with it: `collective_identities` (public member and device keys of the
+profile; secrets stay in the secret-store file under the profile password),
+`collectives` (collectives created by the profile) and
+`collective_membership_log` (the applied contiguous prefix of the signed
+membership journal, one canonical record blob per `seq`, re-verified on read).
+Commands `collective_*` are allowed only to the editor window where the
+«Колективи» screen runs; there is no network.
+
 The `dashboard_data_<id>` tables of user-created dashboard modules are not
 migration objects: Rust creates them at runtime from a validated catalog
 template and adds columns that later appear in a template with `ALTER TABLE`,

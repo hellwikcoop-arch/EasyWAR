@@ -50,3 +50,26 @@ test('ліміт 100 і відсутність небезпечних побіч
   assert.throws(() => addParticipant(draft, 'Понад ліміт'), /100/);
   assert.ok(encodeCollective(draft).length < 65536);
 });
+
+// Захищені колективи (E8, C3b): чиста логіка екрана без DOM і IPC.
+import {
+  MAX_COLLECTIVES, canCreateCollective, canCreateIdentity, checkPassword, collectiveLine, keyStoreText,
+} from '../src/workspace/collectives/secure-core.js';
+
+test('захищені колективи: стани ключа, межі пароля, рядок колективу', () => {
+  const absent = { keyStore: 'absent', identity: null, collectives: [] };
+  assert.ok(canCreateIdentity(absent));
+  assert.ok(!canCreateCollective(absent));
+  assert.match(keyStoreText(absent), /ще немає/);
+  const locked = { keyStore: 'locked', identity: { fingerprint: 'ABCDE-FGHIJ' }, collectives: [] };
+  assert.ok(!canCreateIdentity(locked));
+  assert.ok(canCreateCollective(locked));
+  assert.ok(!canCreateCollective({ ...locked, collectives: Array(MAX_COLLECTIVES).fill({}) }));
+  assert.match(keyStoreText({ keyStore: 'damaged' }), /пошкоджене/);
+  assert.ok(!canCreateIdentity({ keyStore: 'damaged' }));
+  assert.throws(() => checkPassword('кор'), /8 до 1024/);
+  assert.doesNotThrow(() => checkPassword('пароль-8'));
+  assert.throws(() => checkPassword('a'.repeat(1025)), /8 до 1024/);
+  assert.equal(collectiveLine({ members: 1, latestSeq: 2, rejectedRecords: 0 }), 'учасників: 1, записів журналу: 2');
+  assert.match(collectiveLine({ members: 0, latestSeq: 0, rejectedRecords: 2 }), /відхилених записів: 2/);
+});

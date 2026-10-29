@@ -34,6 +34,7 @@ pub const SIGNATURE_LEN: usize = 64;
 pub mod labels {
     pub const MEMBER_ID: &[u8] = b"easywar/collective/v1/member-id";
     pub const DEVICE_RECORD: &[u8] = b"easywar/collective/v1/device";
+    pub const EXCHANGE_BINDING: &[u8] = b"easywar/collective/v1/exchange-binding";
     pub const EPOCH_WRAP: &[u8] = b"easywar/collective/v1/epoch-wrap";
     pub const OPERATION: &[u8] = b"easywar/collective/v1/op";
     pub const SECRET_KEYRING: &[u8] = b"easywar/collective/v1/keyring";
@@ -69,6 +70,14 @@ pub enum Reason {
     /// Спільний секрет X25519 неконтрибутивний (ключ обміну з малої підгрупи або нульовий,
     /// RFC 7748, розділ 6.1): обгортка не створюється й не розгортається (G12, зауваження 1).
     WeakExchangeKey,
+    /// Ключ обміну не зв'язаний підписом учасника з цим колективом (G12, U1/U2).
+    ExchangeNotBound,
+    /// Зв'язування не новіше за чинне: `join` не перезаписує ключ обміну, ротація — лише
+    /// новішим підписаним записом (G12, U2).
+    BindingNotNewer,
+    /// Відкладення неможливе: `membership_seq` за горизонтом, черга відкладених повна або
+    /// конверт пролежав довше TTL (G12, N1).
+    DeferLimit,
 }
 
 impl Reason {
@@ -87,6 +96,11 @@ impl Reason {
             Reason::IntegrityViolation => "той самий ідентифікатор операції з іншим змістом",
             Reason::WrongRecipient => "обгортка адресована іншому учаснику",
             Reason::WeakExchangeKey => "ключ обміну недійсний (мала підгрупа або нуль)",
+            Reason::ExchangeNotBound => "ключ обміну не підтверджений підписом учасника",
+            Reason::BindingNotNewer => "запис ключа обміну не новіший за чинний",
+            Reason::DeferLimit => {
+                "конверт не може чекати журналу складу (горизонт, черга або строк)"
+            }
         }
     }
 }
