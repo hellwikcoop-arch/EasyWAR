@@ -116,7 +116,7 @@ async function start() {
     showState(stubPanel(app, 'У РОЗРОБЦІ', `${app.title} поки недоступний`, 'Редактор ще не підключено. Поверніться до Офісу та оберіть інший застосунок.'));
     return;
   }
-  const graphics = graphicsProblem(graphicsSupport());
+  const graphics = app.id === 'collectives' ? '' : graphicsProblem(graphicsSupport());
   if (graphics) {
     showState(errorPanel(app, graphics));
     return;
