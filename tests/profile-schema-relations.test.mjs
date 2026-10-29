@@ -261,3 +261,34 @@ test('схема зв’язків не містить значень кліти
   assert.deepEqual([...keys].filter(key => key && !/^\d+$/.test(key)).sort(),
     ['at', 'basis', 'cardinality', 'columns', 'decidedAtRevision', 'id', 'left', 'right', 'sourceId', 'status', 'types', 'versions'].sort());
 });
+
+test('id й пара не плутаються через службові символи в іменах', () => {
+  assert.notEqual(relationId(side('A', 'a\u001eb', 'c'), side('B', 'p', 'q')), relationId(side('A', 'a', 'b\u001ec'), side('B', 'p', 'q')));
+  let schema = emptySchema('p');
+  for (const id of ['a\u001fb', 'c', 'a', 'b\u001fc']) schema = must(addSource(schema, { id, type: 'module-table', ref: id, columns: COLS }));
+  schema = must(link(schema, 'a\u001fb', 'c'));
+  assert.ok(link(schema, 'a', 'b\u001fc').ok, 'інша пара таблиць, а не «пара зайнята»');
+  assert.ok(parseSchema(serializeSchema(must(link(schema, 'a', 'b\u001fc')))).ok);
+});
+
+test('довгі імена: схема, яку створило ядро, читається', () => {
+  const long = 'x'.repeat(190);
+  let schema = emptySchema('p');
+  const keys = [`${'k'.repeat(199)}1`, `${'k'.repeat(199)}2`];
+  const cols = keys.map(key => ({ key, header: key.slice(-3), type: 'text' }));
+  for (const id of [`${long}A`, `${long}B`]) schema = must(addSource(schema, { id, type: 'module-table', ref: id, columns: cols }));
+  schema = must(rejectRelation(schema, { left: side(`${long}A`, keys[0]), right: side(`${long}B`, keys[0]) }));
+  schema = must(rejectRelation(schema, { left: side(`${long}A`, keys[0]), right: side(`${long}B`, keys[1]) }));
+  assert.equal(relationsOf(schema).length, 2);
+  assert.ok(parseSchema(serializeSchema(schema)).ok);
+});
+
+test('оновлення стовпців не виходить за ліміт 200 через стовпці зв’язків', () => {
+  const make = (prefix, count) => Array.from({ length: count }, (_, i) => ({ key: `${prefix}${i}`, header: `${prefix}${i}`, type: 'text' }));
+  let schema = must(addSource(emptySchema('p'), { id: 'a', type: 'module-table', ref: 'a', columns: make('c', LIMITS.maxColumns) }));
+  schema = must(addSource(schema, { id: 'b', type: 'module-table', ref: 'b', columns: COLS }));
+  schema = must(confirmRelation(schema, { left: side('a', 'c0'), right: side('b', 'k'), cardinality: 'one-many', basis: 'manual' }));
+  const result = updateSourceColumns(schema, 'a', make('n', LIMITS.maxColumns));
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'bad_columns');
+});

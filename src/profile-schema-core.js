@@ -179,6 +179,7 @@ export function updateSourceColumns(schema, sourceId, columns) {
   const have = new Set(kept.map(column => column.key));
   const added = incoming.filter(column => !have.has(column.key));
   const merged = [...kept, ...added];
+  if (merged.length > LIMITS.maxColumns) return fail('bad_columns', 'Після оновлення стовпців стало б більш як 200: стовпці зв’язків і зіставлень лишаються.');
   const changed = JSON.stringify(merged) !== JSON.stringify(target.columns);
   if (!changed) return done(next, { added: [], orphaned: [] });
   target.columns = merged;
@@ -424,14 +425,15 @@ export const relationsOf = schema => (Array.isArray(schema?.relations) ? schema.
 /** Групи таблиць схеми (поле необов'язкове). */
 export const groupsOf = schema => (Array.isArray(schema?.groups) ? schema.groups : []);
 
-const sideMark = side => `${side.sourceId}\u001f${side.columns.join('\u001e')}`;
+// Метки без роздільників у рядку: імена з будь-якими символами не збігаються в різних парах.
+const sideMark = side => JSON.stringify([side.sourceId, side.columns]);
 
 /** Ідентифікатор зв'язку не залежить від того, яку таблицю названо першою: однакова пара ключів — однаковий `id`. */
 export function relationId(left, right) {
-  return `rel:${[sideMark(left), sideMark(right)].sort().join('~')}`;
+  return `rel:${JSON.stringify([sideMark(left), sideMark(right)].sort())}`;
 }
 
-const pairMark = (a, b) => [a, b].sort().join('\u001f');
+const pairMark = (a, b) => JSON.stringify([a, b].sort());
 
 function normalizeSide(schema, side) {
   const source = findSource(schema, text(side?.sourceId));
@@ -637,7 +639,7 @@ function validateRelations(value, sources, err) {
     return true;
   };
   for (const relation of relations) {
-    const id = text(relation?.id, 400);
+    const id = typeof relation?.id === 'string' ? relation.id : '';
     if (!id) { err('bad_relation', 'У зв’язку немає ідентифікатора.'); continue; }
     if (seen.has(id)) err('duplicate_relation', `Зв’язок «${id}» повторено.`);
     seen.add(id);
