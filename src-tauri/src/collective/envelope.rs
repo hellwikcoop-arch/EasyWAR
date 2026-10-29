@@ -171,7 +171,7 @@ impl SignedPayload {
     }
 
     /// Перевірка підпису ключем пристрою, зазначеним у payload. Відповідність пристрою
-    /// учасникові й журналу складу перевіряє `replay::authorize`.
+    /// учасникові й журналу складу перевіряє `replay::receive`.
     pub fn verify_signature(&self) -> Result<(), Reason> {
         let message = Payload::signed_message(&self.payload.canonical());
         identity::verify(&self.payload.device_pub, &message, &self.signature)
