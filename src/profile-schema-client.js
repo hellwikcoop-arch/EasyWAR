@@ -2,6 +2,7 @@
 // profile-schema-core.js; тут лише обмін із Rust. `invoke` передає викликач (у тестах — підміна).
 
 import { emptySchema, parseSchema, serializeSchema } from './profile-schema-core.js';
+import { forgetModuleSource, syncModuleSources } from './profile-schema-modules-core.js';
 
 /** Фрагмент повідомлення Rust про застарілу ревізію (`ProfileSchemaError::Stale`). */
 export const STALE_MARK = 'змінено в іншому місці';
@@ -71,3 +72,9 @@ export async function updateProfileSchema(invoke, change) {
   }
   return failure('stale', 'Схему профілю змінено в іншому місці; повторіть дію.');
 }
+
+/** Приводить схему профілю до списку модулів гілки (нові джерела, нові поля шаблону). Без змін нічого не пише. */
+export const syncProfileSchemaModules = (invoke, modules) => updateProfileSchema(invoke, schema => syncModuleSources(schema, modules));
+
+/** Прибирає з схеми профілю джерело видаленого модуля разом із його зіставленнями. */
+export const forgetProfileSchemaModule = (invoke, moduleId) => updateProfileSchema(invoke, schema => forgetModuleSource(schema, moduleId));

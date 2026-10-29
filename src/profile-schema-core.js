@@ -34,7 +34,7 @@ export const SOURCE_TYPES = Object.freeze({
 export const BINDING_STATUSES = Object.freeze(['confirmed', 'rejected']);
 
 export const LIMITS = Object.freeze({
-  maxSources: 64,
+  maxSources: 256,
   maxColumns: 200,
   maxBindings: 2000,
   textLength: 200,
@@ -174,6 +174,29 @@ export function updateSourceColumns(schema, sourceId, columns) {
     added: added.map(column => column.key),
     orphaned: merged.filter(column => column.orphan).map(column => column.key),
   });
+}
+
+/** Прибирає джерело разом із його зіставленнями (наприклад, після видалення модуля). Невідоме джерело — не помилка. */
+export function removeSource(schema, sourceId) {
+  if (!findSource(schema, sourceId)) return done(fresh(schema));
+  const next = fresh(schema);
+  next.sources = next.sources.filter(source => source.id !== sourceId);
+  next.bindings = next.bindings.filter(binding => binding.sourceId !== sourceId);
+  return done(bump(next));
+}
+
+/** Назва джерела (наприклад, модуль перейменовано). Без змін — та сама схема й ревізія. */
+export function renameSource(schema, sourceId, title) {
+  const source = findSource(schema, sourceId);
+  if (!source) return fail('unknown_source', `Джерела «${sourceId}» немає.`);
+  const label = text(title);
+  if (!label) return fail('bad_title', 'Назва не може бути порожньою.');
+  if (label === source.title) return done(fresh(schema));
+  const next = fresh(schema);
+  const target = findSource(next, sourceId);
+  target.title = label;
+  target.version += 1;
+  return done(bump(next));
 }
 
 /** Новий порядок стовпців користувача: перестановка наявних ключів. Зіставлення від порядку не залежать. */
