@@ -609,3 +609,12 @@ by hand with narrow anchored patches (see `AGENTS.md`), then run
   (`loadDashboardLayout`, `saveDashboardLayout`, `resetDashboardLayout`, `updateDashboardLayout`
   з одним повтором на свіжій розкладці при конфлікті ревізій) і команди `get_dashboard_layout`,
   `save_dashboard_layout`, `reset_dashboard_layout` (профіль із сеансу); екрана конструктора ще нема.
+
+Екран (перший крок конструктора) — `src/dashboard-layout-panel.js` (показ: `sharedPeriodBar`,
+`instanceBar`) і `src/dashboard-layout-view-core.js` (модель: `cardModel`, `orderedCards`, вибір
+періоду). У `dashboard-module-catalog.js` `loadModules` після читання модулів кличе `syncLayout`
+(кожному модулю картка, свіжа схема профілю), `renderHost` малює картки за розкладкою (збій розкладки
+повертає малювання «по одному на модуль»), `renderModule(module, payload, placed)` показує рядки
+періоду картки. Зміни розкладки — через `changeLayout` (`updateDashboardLayout`, один повтор при
+конфлікті ревізій). Картки стоять у порядку розміщень; перетягування, розмір, колір і фон — наступні
+кроки E4.
