@@ -37,6 +37,11 @@ BEGIN
         (SELECT MAX(event_seq) FROM collective_membership_events
          WHERE profile_id = NEW.profile_id AND collective_id = NEW.collective_id), 0
     ) THEN RAISE(ABORT, 'membership sequence must be contiguous') END;
+    -- REPLACE suppresses DELETE triggers by default: reject an existing event_id first.
+    SELECT CASE WHEN EXISTS (
+        SELECT 1 FROM collective_membership_events
+        WHERE profile_id = NEW.profile_id AND collective_id = NEW.collective_id AND event_id = NEW.event_id
+    ) THEN RAISE(ABORT, 'membership event ID already exists') END;
 END;
 CREATE TRIGGER collective_membership_no_update
 BEFORE UPDATE ON collective_membership_events
@@ -73,6 +78,23 @@ CREATE TABLE collective_envelopes (
         REFERENCES collective_local_instances(profile_id, collective_id) ON DELETE RESTRICT
 ) WITHOUT ROWID;
 CREATE INDEX idx_collective_envelopes_direction ON collective_envelopes(profile_id, collective_id, direction, stored_at);
+
+-- Конверт не замінюють новими байтами: status доставки живе в окремій таблиці.
+-- Явний захист INSERT OR REPLACE, бо прихований DELETE не запускає DELETE trigger.
+CREATE TRIGGER collective_envelopes_no_replace
+BEFORE INSERT ON collective_envelopes
+BEGIN
+    SELECT CASE WHEN EXISTS (
+        SELECT 1 FROM collective_envelopes
+        WHERE profile_id = NEW.profile_id AND collective_id = NEW.collective_id AND envelope_id = NEW.envelope_id
+    ) THEN RAISE(ABORT, 'envelope ID already exists') END;
+END;
+CREATE TRIGGER collective_envelopes_no_update
+BEFORE UPDATE ON collective_envelopes
+BEGIN SELECT RAISE(ABORT, 'envelopes are immutable'); END;
+CREATE TRIGGER collective_envelopes_no_delete
+BEFORE DELETE ON collective_envelopes
+BEGIN SELECT RAISE(ABORT, 'envelopes are immutable'); END;
 
 -- Статуси доставки відокремлені від незмінних байтів конверта.
 -- Значення статусів — не криптографічний доказ; C3b завжди перевіряє конверт заново.
