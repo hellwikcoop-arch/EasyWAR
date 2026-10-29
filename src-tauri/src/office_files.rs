@@ -304,19 +304,32 @@ pub fn ensure_library_format(ext: &str, bytes: &[u8]) -> Result<(), OfficeFileEr
     }
 }
 
-/// Куди пише номер файлу: у файл на диску або новою версією документа бібліотеки.
+/// Куди пише номер файлу: у файл на диску, новою версією документа бібліотеки або в
+/// зашифрований блоб сховища «Робочого середовища».
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HandleTarget {
     Disk(PathBuf),
     Library(LibraryTarget),
+    Store(StoreTarget),
 }
 
-/// Звідки взяти очікуваний файл: версія документа бібліотеки або файл сховища
-/// «Робочого середовища» на диску (`workspace_files`).
+/// Файл сховища «Робочого середовища» (`workspace_files`), відкритий у редакторі: тека
+/// профілю, ідентифікатор блоба, назва для редактора і мітка бібліотеки, ключем якої
+/// блоб запечатано (як [`LibraryTarget::library_tag`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoreTarget {
+    pub dir: PathBuf,
+    pub id: String,
+    pub name: String,
+    pub library_tag: String,
+}
+
+/// Звідки взяти очікуваний файл: версія документа бібліотеки або зашифрований блоб
+/// сховища «Робочого середовища» (`workspace_files`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PendingSource {
     Library { version_id: String },
-    Disk { path: PathBuf },
+    Store { dir: PathBuf, id: String },
 }
 
 /// Документ бібліотеки чи файл сховища, який головне вікно передало редактору: його
@@ -385,6 +398,11 @@ impl OfficeFileHandles {
         self.insert(profile_id, webview, HandleTarget::Disk(path))
     }
 
+    /// Запам'ятовує файл сховища «Робочого середовища» для профілю й webview.
+    pub fn remember_store(&self, profile_id: &str, webview: &str, target: StoreTarget) -> String {
+        self.insert(profile_id, webview, HandleTarget::Store(target))
+    }
+
     /// Запам'ятовує документ бібліотеки для профілю й webview і повертає новий номер.
     pub fn remember_library(
         &self,
@@ -418,7 +436,9 @@ impl OfficeFileHandles {
     ) -> Result<PathBuf, OfficeFileError> {
         match self.target(profile_id, webview, handle)? {
             HandleTarget::Disk(path) => Ok(path),
-            HandleTarget::Library(_) => Err(OfficeFileError::UnknownHandle),
+            HandleTarget::Library(_) | HandleTarget::Store(_) => {
+                Err(OfficeFileError::UnknownHandle)
+            }
         }
     }
 

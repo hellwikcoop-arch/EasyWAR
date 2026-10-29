@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
 import test from 'node:test';
 import {
-  addSummary, appForExt, appName, errorText, extensionOf, filesApi, filterFiles, kindLabel, metaLine, sortFiles,
+  addSummary, appForExt, appName, errorText, extensionOf, filesApi, filterFiles, isLockedError, kindLabel, metaLine, sortFiles, storeScreen,
 } from '../src/workspace/files-core.js';
 
 const root = new URL('../', import.meta.url);
@@ -16,27 +16,30 @@ const read = path => readFile(new URL(path, root), 'utf8');
 const CONTRACT = Object.freeze({
   workspace_files_list: [],
   workspace_files_add: [],
-  workspace_files_delete: ['name'],
-  workspace_files_export: ['name'],
-  workspace_files_open: ['name'],
+  workspace_files_delete: ['id'],
+  workspace_files_export: ['id'],
+  workspace_files_open: ['id'],
 });
+const ID = '0123456789abcdef0123456789abcdef';
 
 test('filesApi викликає команди контракту з точними назвами й ключами', async () => {
   const calls = [];
   const api = filesApi((command, args) => { calls.push([command, args]); return Promise.resolve('ok'); });
+  await api.status();
   await api.list();
   await api.add();
-  await api.remove('Наказ.pdf');
-  await api.exportCopy('Таблиця.xlsx');
-  await api.open('Таблиця.xlsx');
+  await api.remove(ID);
+  await api.exportCopy(ID);
+  await api.open(ID);
   assert.deepEqual(calls, [
+    ['library_status', undefined],
     ['workspace_files_list', undefined],
     ['workspace_files_add', undefined],
-    ['workspace_files_delete', { name: 'Наказ.pdf' }],
-    ['workspace_files_export', { name: 'Таблиця.xlsx' }],
-    ['workspace_files_open', { name: 'Таблиця.xlsx' }],
+    ['workspace_files_delete', { id: ID }],
+    ['workspace_files_export', { id: ID }],
+    ['workspace_files_open', { id: ID }],
   ]);
-  for (const [command, args] of calls) assert.deepEqual(Object.keys(args ?? {}), CONTRACT[command], command);
+  for (const [command, args] of calls.slice(1)) assert.deepEqual(Object.keys(args ?? {}), CONTRACT[command], command);
 });
 
 // Параметри Rust-команди без станів Tauri: snake_case-назви, у які Tauri перекладає camelCase-ключі JS.
@@ -75,9 +78,19 @@ test('команди workspace_files_* у Rust: сигнатури, generate_han
     assert.ok(main.permissions.includes(permission), `${permission} у головному вікні`);
     assert.ok(!JSON.stringify(editor).includes(permission), `${permission} не у вікні редактора`);
   }
-  // Відкриття в редакторі — лише з головного вікна, і файл іде через очікуваний файл з диска.
-  assert.match(lib, /async fn workspace_files_open\([\s\S]*?window\.label\(\) != desktop_shell::MAIN_WINDOW_LABEL[\s\S]*?PendingSource::Disk \{ path \}/);
-  assert.match(lib, /office_files::PendingSource::Disk \{ path \} => \{[\s\S]*?handles\.remember\(&profile_id, webview\.label\(\), path\)/, 'office_open_file читає файл сховища з диска');
+  // Відкриття в редакторі — лише з головного вікна, і файл іде через очікуваний блоб сховища.
+  assert.match(lib, /async fn workspace_files_open\([\s\S]*?window\.label\(\) != desktop_shell::MAIN_WINDOW_LABEL[\s\S]*?PendingSource::Store \{ dir, id: item\.id \}/);
+  assert.match(lib, /office_files::PendingSource::Store \{ dir, id \} => \{[\s\S]*?keys_quiet\(&profile_id\)[\s\S]*?workspace_files::read\(&read_dir, &read_keys, &read_id\)[\s\S]*?handles\.remember_store\(/, 'office_open_file розшифровує блоб ключем бібліотеки');
+  assert.match(lib, /office_files::HandleTarget::Store\(target\) => \{[\s\S]*?keys\.handle_tag\(\) != target\.library_tag[\s\S]*?workspace_files::overwrite\(&target\.dir, &keys, &target\.id, &bytes\)/, '«Зберегти» запечатує назад у той самий блоб');
+  // Кожна команда сховища бере ключі бібліотеки (заблокована → та сама помилка, що й у library_*).
+  for (const command of Object.keys(CONTRACT)) {
+    const body = new RegExp(`async fn ${command}\\([\\s\\S]*?\\n\\}\\n`).exec(lib)[0];
+    assert.match(body, /workspace_files_keys\(&app, &session, &library\)/, `${command} бере ключі бібліотеки`);
+  }
+  const rust = await read('src-tauri/src/workspace_files.rs');
+  assert.match(rust, /BLOB_EXT: &str = "ewf"/);
+  assert.match(rust, /keys\.seal_store_file\(&id, &meta, bytes\)/);
+  assert.match(rust, /keys\.open_store_meta\(id, &data\)/, 'список читає лише метадані');
   // Жодних нових дозволів плагінів: fs і dialog для JS не відкрито.
   assert.ok(!main.permissions.some(permission => /^(fs|dialog):/.test(String(permission))), 'без fs:*/dialog:* у головному вікні');
 });
@@ -116,6 +129,20 @@ test('розширення, вид і рядок метаданих', () => {
   assert.equal(kindLabel(''), 'Файл');
   assert.equal(metaLine({ ext: 'pdf', size: 1536, modifiedAt: '2026-10-29T10:00:00Z' }, { offsetMinutes: 120 }), 'PDF · 1,5 КБ · змінено 29.10.2026 12:00');
   assert.equal(metaLine({ ext: '', size: 0, modifiedAt: null }), 'Файл · 0 Б');
+  assert.equal(metaLine({ damaged: true, ext: '', size: 100, modifiedAt: null }), 'Пошкоджено: не розшифровується цим ключем · 100 Б');
+});
+
+test('екран за станом бібліотеки: сховище лише з розблокованою бібліотекою', async () => {
+  assert.deepEqual(storeScreen({ state: 'unlocked' }), { screen: 'unlocked', text: '' });
+  for (const state of ['locked', 'none', 'no_password', 'no_profile']) {
+    const result = storeScreen({ state });
+    assert.equal(result.screen, state);
+    assert.ok(result.text.length > 20, state);
+  }
+  assert.equal(storeScreen(null).screen, 'unknown');
+  assert.equal(storeScreen({ state: 'weird' }).screen, 'unknown');
+  const message = /pub const LOCKED_MESSAGE: &str = "([^"]+)";/.exec(await read('src-tauri/src/office_library.rs'))[1];
+  assert.equal(isLockedError(message), true, 'помилка Rust «бібліотека заблокована…» повертає на екран пояснення');
 });
 
 test('сортування за назвою й пошук за словами', () => {
@@ -155,10 +182,12 @@ test('оболонка: вкладка «Файли», окремий чанк, 
   assert.ok(new RegExp(chunkRule[1].slice(1, -1)).test('/x/src/workspace/files.js'), 'чанк files.js має префікс workspace-');
   assert.ok(!new RegExp(chunkRule[1].slice(1, -1)).test('/x/src/workspace/files-core.js'));
   const files = await read('src/workspace/files.js');
-  for (const label of ['Додати файли…', 'Оновити список', 'Зберегти копію…', 'Видалити', 'Скасувати', 'Відкрити в ${app}', 'Пошук за назвою']) {
+  for (const label of ['Додати файли…', 'Оновити список', 'Зберегти копію…', 'Видалити', 'Скасувати', 'Відкрити в ${app}', 'Пошук за назвою', 'Перейти до бібліотеки', 'пошкоджено']) {
     assert.ok(files.includes(label), label);
   }
   assert.match(files, /listen\('office-editor-closed'/);
+  assert.match(files, /listen\('library-state'/, 'блокування бібліотеки одразу ховає список');
+  assert.match(files, /if \(isLockedError\(error\)\) onLocked\(\)/);
   assert.ok(!/innerHTML|localStorage|fetch\(/.test(files), 'без innerHTML, localStorage і мережі');
   // Усі виклики invoke у вкладці — лише через filesApi.
   assert.ok(!/invoke\(/.test(files.replace(/findInvoke\(window\)/g, '')), 'files.js не викликає invoke напряму');

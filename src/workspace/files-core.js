@@ -1,20 +1,42 @@
 // Сховище файлів «Робочого середовища» (вкладка «Файли»): чиста логіка без DOM і Tauri —
-// виклики команд workspace_files_* з точними назвами й ключами контракту, підписи видів
-// за розширенням, сортування й пошук за назвою, підсумок «Додати файли…», текст помилки.
-// Файли лежать у теці на диску (workspace_files.rs), не в базі й не в бібліотеці.
-// Перевірка — tests/workspace-files.test.mjs.
-import { formatDateTime, formatSize } from './library-core.js';
+// виклики команд workspace_files_* з точними назвами й ключами контракту, екран за станом
+// бібліотеки (сховище зашифроване її ключем), підписи видів за розширенням, сортування й
+// пошук за назвою, підсумок «Додати файли…», текст помилки. Файли лежать зашифрованими
+// блобами в теці на диску (workspace_files.rs), не в базі. Перевірка — tests/workspace-files.test.mjs.
+import { formatDateTime, formatSize, isLockedError } from './library-core.js';
 
-export { formatDateTime, formatSize };
+export { formatDateTime, formatSize, isLockedError };
+
+/**
+ * Екран вкладки за статусом бібліотеки (library_status): сховище відкривається лише з
+ * розблокованою бібліотекою. → { screen, text } ; screen 'unlocked' — показувати список.
+ */
+export function storeScreen(status) {
+  switch (status?.state) {
+    case 'unlocked':
+      return { screen: 'unlocked', text: '' };
+    case 'locked':
+      return { screen: 'locked', text: 'Сховище зашифроване ключем бібліотеки профілю. Розблокуйте бібліотеку паролем профілю на вкладці «Бібліотека» — і файли з’являться тут.' };
+    case 'none':
+      return { screen: 'none', text: 'Сховище зашифроване ключем бібліотеки профілю, а бібліотеку для цього профілю ще не створено. Створіть її на вкладці «Бібліотека» (потрібен пароль профілю).' };
+    case 'no_password':
+      return { screen: 'no_password', text: 'Сховище доступне лише профілю з паролем: ним шифруються файли. Задайте пароль профілю у вікні «Профілі».' };
+    case 'no_profile':
+      return { screen: 'no_profile', text: 'Увійдіть у профіль: сховище файлів належить профілю.' };
+    default:
+      return { screen: 'unknown', text: 'Не вдалося прочитати стан бібліотеки. Закрийте «Робоче середовище» й відкрийте його знову.' };
+  }
+}
 
 /** Виклики команд сховища: назви й ключі — контракт з `src-tauri/src/lib.rs`. */
 export function filesApi(invoke) {
   return Object.freeze({
+    status: () => invoke('library_status'),
     list: () => invoke('workspace_files_list'),
     add: () => invoke('workspace_files_add'),
-    remove: name => invoke('workspace_files_delete', { name }),
-    exportCopy: name => invoke('workspace_files_export', { name }),
-    open: name => invoke('workspace_files_open', { name }),
+    remove: id => invoke('workspace_files_delete', { id }),
+    exportCopy: id => invoke('workspace_files_export', { id }),
+    open: id => invoke('workspace_files_open', { id }),
   });
 }
 
@@ -65,9 +87,9 @@ export function kindLabel(ext) {
   return normalized ? `Файл .${normalized}` : 'Файл';
 }
 
-/** Рядок під назвою: вид · розмір · змінено. */
+/** Рядок під назвою: вид · розмір · змінено (для пошкодженого блоба — «Пошкоджено»). */
 export function metaLine(file, { offsetMinutes } = {}) {
-  const parts = [kindLabel(file?.ext), formatSize(file?.size)];
+  const parts = [file?.damaged ? 'Пошкоджено: не розшифровується цим ключем' : kindLabel(file?.ext), formatSize(file?.size)];
   const changed = formatDateTime(file?.modifiedAt, { offsetMinutes });
   if (changed !== '—') parts.push(`змінено ${changed}`);
   return parts.join(' · ');

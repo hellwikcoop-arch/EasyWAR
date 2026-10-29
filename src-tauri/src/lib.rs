@@ -1257,25 +1257,35 @@ async fn office_open_file(
     if let Some(pending) = pending {
         let version_id = match pending.source {
             office_files::PendingSource::Library { version_id } => version_id,
-            office_files::PendingSource::Disk { path } => {
-                // Файл сховища «Робочого середовища»: читається з диска, а номер пише в той самий файл.
-                let bytes = {
-                    let path = path.clone();
-                    tauri::async_runtime::spawn_blocking(move || {
-                        office_files::read_regular_file(
-                            &path,
-                            office_files::MAX_FILE_BYTES,
-                            &office_files::OfficeFileError::TooLarge.to_string(),
-                        )
-                    })
-                    .await
-                    .map_err(|error| error.to_string())??
-                };
-                let handle = handles.remember(&profile_id, webview.label(), path);
+            office_files::PendingSource::Store { dir, id } => {
+                // Зашифрований файл сховища «Робочого середовища»: ключ бібліотеки без
+                // продовження часу до автоблокування; номер запечатує «Зберегти» назад у блоб.
+                let keys = library
+                    .keys_quiet(&profile_id)
+                    .map_err(|_| office_files::OfficeFileError::LibraryLocked.to_string())?;
+                let read_keys = Arc::clone(&keys);
+                let read_dir = dir.clone();
+                let read_id = id.clone();
+                let (item, mut bytes) = tauri::async_runtime::spawn_blocking(move || {
+                    workspace_files::read(&read_dir, &read_keys, &read_id)
+                })
+                .await
+                .map_err(|error| error.to_string())?
+                .map_err(|error| error.to_string())?;
+                let handle = handles.remember_store(
+                    &profile_id,
+                    webview.label(),
+                    office_files::StoreTarget {
+                        dir,
+                        id,
+                        name: item.name.clone(),
+                        library_tag: keys.handle_tag(),
+                    },
+                );
                 return Ok(Some(OfficeOpenedFile {
                     handle,
-                    name: pending.name,
-                    bytes,
+                    name: item.name,
+                    bytes: std::mem::take(&mut *bytes),
                 }));
             }
         };
@@ -1369,6 +1379,23 @@ async fn office_save_file(
         .map_err(|error| error.to_string())?
     {
         office_files::HandleTarget::Disk(path) => path,
+        office_files::HandleTarget::Store(target) => {
+            let keys = library
+                .keys_quiet(&profile_id)
+                .map_err(|_| office_files::OfficeFileError::LibraryLocked.to_string())?;
+            if keys.handle_tag() != target.library_tag {
+                return Err(office_files::OfficeFileError::UnknownHandle.to_string());
+            }
+            let name = target.name.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                workspace_files::overwrite(&target.dir, &keys, &target.id, &bytes)
+            })
+            .await
+            .map_err(|error| error.to_string())?
+            .map_err(|error| error.to_string())?;
+            library.touch();
+            return Ok(OfficeSavedFile { handle, name });
+        }
         office_files::HandleTarget::Library(target) => {
             office_files::ensure_library_format(&target.ext, &bytes)
                 .map_err(|error| error.to_string())?;
@@ -2573,7 +2600,7 @@ async fn library_reissue_recovery(
     })
 }
 
-// --- Сховище файлів «Робочого середовища» (тека на диску, workspace_files.rs) ---------
+// --- Сховище файлів «Робочого середовища» (зашифровані блоби в теці, workspace_files.rs) ---
 
 /// Тека сховища активного профілю: `<app_local_data>/workspace-files/<profile_id>`.
 fn workspace_files_dir(
@@ -2591,30 +2618,46 @@ fn workspace_files_dir(
     ))
 }
 
+/// Тека й ключі бібліотеки профілю сесії (сховище зашифроване її ключем: заблокована
+/// бібліотека → та сама помилка «бібліотека заблокована…», що й у команд `library_*`).
+fn workspace_files_keys(
+    app: &tauri::AppHandle,
+    session: &ProfileSession,
+    library: &LibrarySession,
+) -> Result<(String, PathBuf, Arc<office_library::LibraryKeys>), String> {
+    let (profile_id, dir) = workspace_files_dir(app, session)?;
+    let keys = library
+        .keys(&profile_id)
+        .map_err(|error| error.to_string())?;
+    Ok((profile_id, dir, keys))
+}
+
 /// Файли сховища профілю за назвою і шлях теки.
 #[tauri::command]
 async fn workspace_files_list(
     app: tauri::AppHandle,
     session: tauri::State<'_, ProfileSession>,
+    library: tauri::State<'_, LibrarySession>,
 ) -> Result<workspace_files::Listing, String> {
-    let (_, dir) = workspace_files_dir(&app, &session)?;
+    let (_, dir, keys) = workspace_files_keys(&app, &session, &library)?;
     let root = dir.to_string_lossy().into_owned();
-    let items = tauri::async_runtime::spawn_blocking(move || workspace_files::list(&dir))
+    let items = tauri::async_runtime::spawn_blocking(move || workspace_files::list(&dir, &keys))
         .await
         .map_err(|error| error.to_string())?
         .map_err(|error| error.to_string())?;
     Ok(workspace_files::Listing { root, items })
 }
 
-/// «Додати файли…»: вікно вибору (кілька файлів будь-якого типу), копія кожного в теку
-/// сховища. Файли на диску не змінюються; файл з наявною назвою отримує суфікс « (2)».
-/// `None` — вікно закрили.
+/// «Додати файли…»: вікно вибору (кілька файлів будь-якого типу), зашифрована копія кожного
+/// в теці сховища. Файли на диску не змінюються. `None` — вікно закрили.
 #[tauri::command]
 async fn workspace_files_add(
     app: tauri::AppHandle,
     session: tauri::State<'_, ProfileSession>,
+    library: tauri::State<'_, LibrarySession>,
 ) -> Result<Option<workspace_files::AddResult>, String> {
-    let (_, dir) = workspace_files_dir(&app, &session)?;
+    let (profile_id, dir, keys) = workspace_files_keys(&app, &session, &library)?;
+    drop(keys);
     let dialog_app = app.clone();
     let selected = tauri::async_runtime::spawn_blocking(move || {
         dialog_app
@@ -2635,10 +2678,14 @@ async fn workspace_files_add(
     {
         paths.push(file.into_path().map_err(|error| error.to_string())?);
     }
+    // Ключі беруться після вікна вибору: поки воно було відкрите, бібліотеку могли заблокувати.
+    let keys = library
+        .keys(&profile_id)
+        .map_err(|error| error.to_string())?;
     let result = tauri::async_runtime::spawn_blocking(move || {
         let mut result = workspace_files::AddResult::default();
         for path in paths {
-            match workspace_files::add(&dir, &path) {
+            match workspace_files::add(&dir, &keys, &path) {
                 Ok(item) => result.added.push(item),
                 Err(error) => result.skipped.push(workspace_files::SkippedFile {
                     name: office_files::file_name(&path),
@@ -2653,31 +2700,35 @@ async fn workspace_files_add(
     Ok(Some(result))
 }
 
-/// Видаляє файл сховища назавжди.
+/// Видаляє блоб сховища назавжди (і пошкоджений теж).
 #[tauri::command]
 async fn workspace_files_delete(
     app: tauri::AppHandle,
     session: tauri::State<'_, ProfileSession>,
-    name: String,
+    library: tauri::State<'_, LibrarySession>,
+    id: String,
 ) -> Result<String, String> {
-    let (_, dir) = workspace_files_dir(&app, &session)?;
-    tauri::async_runtime::spawn_blocking(move || workspace_files::delete(&dir, &name))
+    let (_, dir, keys) = workspace_files_keys(&app, &session, &library)?;
+    drop(keys);
+    tauri::async_runtime::spawn_blocking(move || workspace_files::delete(&dir, &id))
         .await
         .map_err(|error| error.to_string())?
         .map_err(|error| error.to_string())
 }
 
-/// «Зберегти копію…»: копія файлу сховища в місце, яке обере користувач (наявний файл
-/// і таблиці профілів не перезаписуються). `None` — вікно закрили.
+/// «Зберегти копію…»: розшифрована копія файлу сховища в місце, яке обере користувач
+/// (наявний файл і таблиці профілів не перезаписуються). `None` — вікно закрили.
 #[tauri::command]
 async fn workspace_files_export(
     app: tauri::AppHandle,
     profiles: tauri::State<'_, LocalProfileStore>,
     session: tauri::State<'_, ProfileSession>,
-    name: String,
+    library: tauri::State<'_, LibrarySession>,
+    id: String,
 ) -> Result<Option<String>, String> {
-    let (_, dir) = workspace_files_dir(&app, &session)?;
-    let (item, source) = workspace_files::stat(&dir, &name).map_err(|error| error.to_string())?;
+    let (profile_id, dir, keys) = workspace_files_keys(&app, &session, &library)?;
+    let (item, _) = workspace_files::stat(&dir, &keys, &id).map_err(|error| error.to_string())?;
+    drop(keys);
     let ext = if item.ext.is_empty() {
         "bin".to_owned()
     } else {
@@ -2694,13 +2745,13 @@ async fn workspace_files_export(
     else {
         return Ok(None);
     };
+    let keys = library
+        .keys(&profile_id)
+        .map_err(|error| error.to_string())?;
     let path = target.path.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let bytes = office_files::read_regular_file(
-            &source,
-            workspace_files::MAX_FILE_BYTES,
-            &workspace_files::WorkspaceFilesError::TooLarge.to_string(),
-        )?;
+        let (_, bytes) =
+            workspace_files::read(&dir, &keys, &item.id).map_err(|error| error.to_string())?;
         phone_export::save_file(&target, &bytes).map_err(|error| error.to_string())
     })
     .await
@@ -2710,20 +2761,22 @@ async fn workspace_files_export(
 
 /// Відкриває файл сховища у вікні редактора його застосунку (як `library_open_in_editor`):
 /// файл чекає на перший `office_open_file` цього застосунку, а «Зберегти» в редакторі
-/// пише назад у той самий файл теки.
+/// запечатує байти назад у той самий блоб.
 #[tauri::command]
 async fn workspace_files_open(
     app: tauri::AppHandle,
     window: tauri::WebviewWindow,
     session: tauri::State<'_, ProfileSession>,
+    library: tauri::State<'_, LibrarySession>,
     handles: tauri::State<'_, office_files::OfficeFileHandles>,
-    name: String,
+    id: String,
 ) -> Result<(), String> {
     if window.label() != desktop_shell::MAIN_WINDOW_LABEL {
         return Err("редактор відкривається лише з головного вікна".to_owned());
     }
-    let (profile_id, dir) = workspace_files_dir(&app, &session)?;
-    let (item, path) = workspace_files::stat(&dir, &name).map_err(|error| error.to_string())?;
+    let (profile_id, dir, keys) = workspace_files_keys(&app, &session, &library)?;
+    let (item, _) = workspace_files::stat(&dir, &keys, &id).map_err(|error| error.to_string())?;
+    drop(keys);
     let app_id = item.app.ok_or_else(|| {
         workspace_files::WorkspaceFilesError::NoEditor(item.name.clone()).to_string()
     })?;
@@ -2734,7 +2787,7 @@ async fn workspace_files_open(
     handles.set_pending(office_files::PendingFile {
         profile_id,
         app: app_id,
-        source: office_files::PendingSource::Disk { path },
+        source: office_files::PendingSource::Store { dir, id: item.id },
         ext: item.ext,
         name: item.name.clone(),
     });
