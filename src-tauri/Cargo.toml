@@ -15,7 +15,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 base64 = "0.22"
-calamine = { version = "=0.26.1", features = ["dates"] }
+calamine = { version = "=0.37.0", features = ["dates"] }
 # Захищена бібліотека «Офісу»: AEAD для вмісту й обгорток ключа, HKDF-підключі, HMAC ідентифікаторів.
 chacha20poly1305 = "0.11"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
