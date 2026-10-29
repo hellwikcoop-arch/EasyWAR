@@ -4,7 +4,8 @@
 //! 29.10.2026: «треба щоб було шифрування»). Кожен файл лежить як блоб `<id>.ewf`
 //! ([`crate::office_library::LibraryKeys::seal_store_file`]): назва й розмір — у зашифрованих
 //! метаданих, вміст — окремим шифротекстом; `id` — 32 випадкові шістнадцяткові знаки. Без бази
-//! й без версій. Тека ніколи не містить підтек. Сховище працює лише з розблокованою
+//! й без версій. Єдина підтека — `tables/` зі зашифрованими таблицями дашбордів
+//! ([`crate::workspace_tables`]); список файлів її пропускає. Сховище працює лише з розблокованою
 //! бібліотекою: ключі дає [`crate::office_library::LibrarySession`], і після блокування
 //! (30 хвилин без дій, вихід із профілю) команди відмовляють як бібліотека.
 //!
@@ -54,6 +55,8 @@ pub enum WorkspaceFilesError {
     Damaged,
     #[error("{0}")]
     Library(String),
+    #[error("{0}")]
+    Table(String),
     #[error("не вдалося прочитати або записати теку сховища: {0}")]
     Io(String),
 }
@@ -169,7 +172,7 @@ pub fn validate_id(id: &str) -> Result<&str, WorkspaceFilesError> {
     }
 }
 
-fn new_id() -> String {
+pub(crate) fn new_id() -> String {
     let mut bytes = [0u8; 16];
     OsRng.fill_bytes(&mut bytes);
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
@@ -179,7 +182,7 @@ fn blob_path(dir: &Path, id: &str) -> PathBuf {
     dir.join(format!("{id}.{BLOB_EXT}"))
 }
 
-fn modified_at(metadata: &fs::Metadata) -> Option<String> {
+pub(crate) fn modified_at(metadata: &fs::Metadata) -> Option<String> {
     metadata
         .modified()
         .ok()
@@ -211,7 +214,7 @@ fn damaged_file(id: &str, metadata: &fs::Metadata) -> StoredFile {
     }
 }
 
-fn read_blob(path: &Path) -> Result<Vec<u8>, WorkspaceFilesError> {
+pub(crate) fn read_blob(path: &Path) -> Result<Vec<u8>, WorkspaceFilesError> {
     office_files::read_regular_file(
         path,
         MAX_FILE_BYTES + BLOB_OVERHEAD,
@@ -323,6 +326,7 @@ pub fn write_new(
     let meta = StoreFileMeta {
         name,
         size: bytes.len() as u64,
+        branch: None,
     };
     let data = keys.seal_store_file(&id, &meta, bytes)?;
     let target = SaveTarget {
@@ -353,6 +357,7 @@ pub fn overwrite(
     let meta = StoreFileMeta {
         name: previous.name,
         size: bytes.len() as u64,
+        branch: previous.branch,
     };
     let data = keys.seal_store_file(&id, &meta, bytes)?;
     let target = SaveTarget {
@@ -593,6 +598,7 @@ mod tests {
         let meta = StoreFileMeta {
             name: "a.txt".to_owned(),
             size: 3,
+            branch: None,
         };
         let id = new_id();
         let data = keys.seal_store_file(&id, &meta, b"abc").unwrap();

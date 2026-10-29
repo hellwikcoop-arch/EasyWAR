@@ -183,6 +183,20 @@ test('only password-protected profiles outside the session are locked', async ()
   assert.equal(databaseFileName('C:\\bases\\ROCKET.xlsx'), 'ROCKET.xlsx');
 });
 
+test('a table bound to the encrypted store is named by its reference, not by a path', async () => {
+  const { databaseFileName, databaseLocation, isStoreTable } = await import('../src/local-profiles-core.js');
+  const ref = 'ewstore:0123456789abcdef0123456789abcdef:EasyWAR_РВ.xlsx';
+  assert.equal(isStoreTable(ref), true);
+  assert.equal(isStoreTable('/Users/x/EasyWAR_РВ.xlsx'), false);
+  assert.equal(isStoreTable(null), false);
+  assert.equal(databaseFileName(ref), 'EasyWAR_РВ.xlsx');
+  assert.equal(databaseFileName('ewstore:0123456789abcdef0123456789abcdef:Звіт: жовтень.xlsx'), 'Звіт: жовтень.xlsx');
+  assert.equal(databaseFileName('ewstore:broken'), '');
+  assert.match(databaseLocation(ref), /^У зашифрованому сховищі профілю/);
+  assert.equal(databaseLocation('/Users/x/EasyWAR_РВ.xlsx'), '/Users/x/EasyWAR_РВ.xlsx');
+  assert.equal(databaseLocation(''), '');
+});
+
 test('profile database bytes are copied into this realm', async () => {
   const { readProfileDatabase } = await import('../src/local-profiles-core.js');
   // An ArrayBuffer from another realm, as the launcher window hands it to a module frame.
