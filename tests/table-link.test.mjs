@@ -496,3 +496,83 @@ test('ядро чисте: не торкається DOM, Tauri, мережі, �
     assert.ok(!source.includes(forbidden), `у ядрі не має бути «${forbidden}»`);
   }
 });
+
+test('дата проти тексту з датами не порівнюється мовчки: причина type-mismatch, невичерпно', () => {
+  const dates = Array.from({ length: 15 }, (_, i) => day(i));
+  // Правий стовпець: 15 дат і 5 сторонніх рядків — частка дат 75 % нижча за поріг, тож це текст, а не дата.
+  const right = [...dates, 'н/д-1', 'н/д-2', 'н/д-3', 'н/д-4', 'н/д-5'].map(value => ({ d: value }));
+  const { tables } = build([
+    { id: 'x', rows: dates.map(value => ({ d: value })), columns: [col('d', 'Дата', 'date')] },
+    { id: 'y', rows: right, columns: [col('d', 'Дата', 'text')] },
+  ]);
+  const manual = evaluateKey(tables[0], tables[1], ['d'], ['d']);
+  assert.ok(manual.ok && !manual.none, 'ключ, вказаний людиною, знаходиться');
+  const found = candidateKeys(tables[0], tables[1]);
+  assert.deepEqual(found.candidates, []);
+  assert.equal(found.exhaustive, false);
+  assert.ok(found.reasons.includes('type-mismatch'), JSON.stringify(found.reasons));
+  assert.equal(found.notes.find(note => note.code === 'type-mismatch').skipped, 1);
+  // Дата проти числа безглузда: причини не дає.
+  const numbers = build([
+    { id: 'x', rows: dates.map(value => ({ d: value })), columns: [col('d', 'Дата', 'date')] },
+    { id: 'y', rows: dates.map((_, i) => ({ n: String(1000 + i) })), columns: [col('n', 'Номер', 'number')] },
+  ]).tables;
+  assert.ok(!candidateKeys(numbers[0], numbers[1]).reasons.includes('type-mismatch'));
+});
+
+test('роль із різними видами стовпців теж робить пошук невичерпним', () => {
+  const dates = Array.from({ length: 10 }, (_, i) => day(i));
+  const { tables } = build([
+    { id: 'x', rows: dates.map(value => ({ d: value })), columns: [col('d', 'Дата', 'date')], roles: { 'event-date': 'd' } },
+    { id: 'y', rows: dates.map((value, i) => ({ d: i % 2 ? value : `дата ${i}` })), columns: [col('d', 'Дата', 'text')], roles: { 'event-date': 'd' } },
+  ]);
+  const found = candidateKeys(tables[0], tables[1]);
+  assert.ok(found.notes.some(note => note.code === 'role-skipped' && note.reason === 'type'), JSON.stringify(found.notes));
+  assert.equal(found.exhaustive, false);
+  assert.ok(found.reasons.includes('role-skipped'));
+});
+
+test('доказ порядку дат рахується окремо для кожного формату стовпця', () => {
+  // Дев'ять неоднозначних «дд-мм-рррр» і один доказ у ІНШОМУ форматі («25/03/2026»): порядок усе одно лише припущено.
+  const dash = ['03-04-2026', '04-05-2026', '05-06-2026', '06-07-2026', '07-08-2026', '08-09-2026', '09-10-2026', '10-11-2026', '11-12-2026'];
+  const iso = ['2026-04-03', '2026-05-04', '2026-06-05', '2026-07-06', '2026-08-07', '2026-09-08', '2026-10-09', '2026-11-10', '2026-12-11', '2026-03-25'];
+  const mixed = [...dash, '25/03/2026'];
+  const make = values => build([
+    { id: 'x', rows: iso.map((d, i) => ({ d, v: `Л-${i}` })), columns: [col('d', 'Дата', 'date'), col('v', 'Мітка')] },
+    { id: 'y', rows: values.map((d, i) => ({ d, w: `П-${i}` })), columns: [col('d', 'Дата', 'date'), col('w', 'Ознака')] },
+  ]).tables;
+  const tables = make(mixed);
+  const found = candidateKeys(tables[0], tables[1]);
+  const candidate = found.candidates.find(item => item.left.columns.join() === 'd' && item.right.columns.join() === 'd');
+  assert.ok(candidate, JSON.stringify(found.candidates));
+  assert.ok(candidate.caution.includes('date-order-assumed'), JSON.stringify(candidate.caution));
+  assert.ok(linkIssues(tables[0], tables[1], candidate).some(issue => issue.kind === 'date-order-assumed' && issue.side === 'right'));
+  assert.match(describeCandidate(candidate), /припущено/u);
+  // Контроль: доказ у тому самому форматі («25-03-2026») знімає застереження.
+  const proved = make([...dash, '25-03-2026']);
+  const sure = candidateKeys(proved[0], proved[1]).candidates.find(item => item.left.columns.join() === 'd' && item.right.columns.join() === 'd');
+  assert.ok(sure && !sure.caution.includes('date-order-assumed'));
+});
+
+test('межа 80 % у плаваючій крапці: рівно 8 з 10 спільних і рівно 20 % порожніх не відсіюються', () => {
+  const ids = (from, count) => Array.from({ length: count }, (_, i) => ({ id: `к-${String(from + i).padStart(2, '0')}` }));
+  const { tables } = build([
+    { id: 'x', rows: ids(1, 10), columns: [col('id', 'Код')] },
+    { id: 'y', rows: ids(3, 10), columns: [col('id', 'Код')] },
+  ]);
+  const manual = evaluateKey(tables[0], tables[1], ['id'], ['id']);
+  assert.ok(manual.ok && !manual.none);
+  assert.equal(manual.containment, 0.8);
+  const found = candidateKeys(tables[0], tables[1]);
+  assert.equal(found.candidates.length, 1, JSON.stringify(found));
+  assert.equal(found.candidates[0].containment, 0.8);
+  assert.equal(found.exhaustive, true, JSON.stringify(found.reasons));
+  // Два порожні рядки з десяти: рівно 20 % порожніх, стовпець ще придатний для ключа.
+  const blanks = build([
+    { id: 'x', rows: [...ids(1, 8), { id: '' }, { id: '' }], columns: [col('id', 'Код')] },
+    { id: 'y', rows: ids(1, 10), columns: [col('id', 'Код')] },
+  ]).tables;
+  const withBlanks = candidateKeys(blanks[0], blanks[1]);
+  assert.ok(!withBlanks.exclusions.some(item => item.reason === 'blank'), JSON.stringify(withBlanks.exclusions));
+  assert.equal(withBlanks.candidates.length, 1);
+});

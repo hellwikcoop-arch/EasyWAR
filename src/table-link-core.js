@@ -94,6 +94,8 @@ function numberKey(value) {
 // ─── Профіль стовпця ───────────────────────────────────────────────────────────────────────────────────
 
 const PARSE_SHARE = 0.8;
+// Поріг 80 % у плаваючій крапці: 1 − 0,8 = 0,19999999999999996, тож межу порівнюємо з допуском.
+const EPS = 1e-9;
 
 function profileColumn(column, rows, role, linker) {
   const raw = rows.map(row => (isRecord(row) ? row[column.key] : undefined));
@@ -101,20 +103,23 @@ function profileColumn(column, rows, role, linker) {
   const nonBlank = texts.filter(text => text !== '');
   let kind = column.type === 'date' ? 'date' : column.type === 'number' ? 'number' : 'text';
   // Текстовий стовпець, що складається з дат, читається як дата; спершу дешева перевірка початку стовпця.
-  if (kind === 'text' && nonBlank.length && nonBlank.slice(0, 40).filter(text => canonicalDate(text)).length / Math.min(40, nonBlank.length) >= 0.5
+  // Доля дат у початку текстового стовпця: дати, що не дійшли до порогу PARSE_SHARE, лишають стовпець текстовим,
+  // але пара «дата ↔ такий текст» не порівнюється, і про це треба сказати (`type-mismatch`).
+  const dateShare = kind === 'text' && nonBlank.length ? nonBlank.slice(0, 40).filter(text => canonicalDate(text)).length / Math.min(40, nonBlank.length) : 0;
+  if (kind === 'text' && nonBlank.length && dateShare >= 0.5
     && nonBlank.filter(text => canonicalDate(text)).length / nonBlank.length >= PARSE_SHARE) kind = 'date';
   const formats = new Map();
   let unparsed = 0;
-  let ambiguousDates = 0;
-  let dayFirstProof = 0;
+  const ambiguousByFormat = new Map();
+  const proofByFormat = new Map();
   const values = raw.map((value, i) => {
     if (texts[i] === '') return '';
     if (kind === 'date') {
       const date = canonicalDate(value);
       if (date) {
         formats.set(date.format, (formats.get(date.format) || 0) + 1);
-        if (date.ambiguous) ambiguousDates += 1;
-        if (date.dayFirstProof) dayFirstProof += 1;
+        if (date.ambiguous) ambiguousByFormat.set(date.format, (ambiguousByFormat.get(date.format) || 0) + 1);
+        if (date.dayFirstProof) proofByFormat.set(date.format, (proofByFormat.get(date.format) || 0) + 1);
         return date.iso;
       }
       unparsed += 1;
@@ -132,9 +137,10 @@ function profileColumn(column, rows, role, linker) {
   }
   return {
     key: column.key, header: column.header || column.key, type: column.type, decision: column.decision || '', role,
-    kind, values, ids, distinct, blanks: values.length - nonBlankCount(ids), formats, unparsed, rows: values.length,
-    // Порядок «день/місяць» припущено, якщо в стовпці є неоднозначні дати й жодної, що доводить «день першим».
-    orderAssumed: ambiguousDates > 0 && dayFirstProof === 0,
+    kind, dateLike: kind === 'text' && dateShare >= 0.2, values, ids, distinct, blanks: values.length - nonBlankCount(ids), formats, unparsed, rows: values.length,
+    // Порядок «день/місяць» припущено, якщо в якомусь форматі стовпця є неоднозначні дати, а дати цього самого
+    // формату, що доводила б «день першим», немає: доказ в іншому форматі (скажімо, `25/03/2026` поруч із `03-04-2026`) не рахується.
+    orderAssumed: [...ambiguousByFormat.keys()].some(format => !proofByFormat.get(format)),
     sequential: isSequential(values, distinct),
   };
 }
@@ -325,7 +331,7 @@ const pairKind = (a, b) => (a.kind === b.kind ? a.kind : [a.kind, b.kind].sort()
 // Частка меншого набору значень, що є у більшому; −1, якщо збігу за порогом бути не може (рання зупинка).
 function containment(a, b) {
   const [small, big] = a.size <= b.size ? [a, b] : [b, a];
-  const allowed = Math.floor(small.size * (1 - LINK_LIMITS.minMatch));
+  const allowed = Math.floor(small.size * (1 - LINK_LIMITS.minMatch) + EPS);
   let misses = 0;
   let hits = 0;
   for (const value of small) {
@@ -336,7 +342,7 @@ function containment(a, b) {
 }
 
 function eligible(column, tooBlank) {
-  return column.distinct.size >= 2 && column.blanks / Math.max(1, column.rows) <= tooBlank;
+  return column.distinct.size >= 2 && column.blanks / Math.max(1, column.rows) <= tooBlank + EPS;
 }
 
 function limitColumns(profile, notes, side) {
@@ -374,9 +380,13 @@ export function evaluateKey(leftTable, rightTable, leftColumns, rightColumns) {
  *
  * Повнота пошуку. `exhaustive: true` лише тоді, коли ніщо не відсіяно евристикою й жодне обмеження не спрацювало;
  * інакше `reasons` називає, чому результат може бути неповним (не вичерпним): `columns-limited`, `pairs-limited`,
- * `candidates-limited` (знайдено більше за показані), `truncated` (читання усічене), `component-prefilter` (пари
+ * `candidates-limited` (знайдено більше за показані), `truncated` (читання усічене), `type-mismatch` (дата й текст із датами,
+ * що не дотяг до частки дат, не порівнювались), `role-skipped` (підтверджена роль не дала пари: стовпець
+ * непридатний або види різні), `component-prefilter` (пари
  * стовпців за значеннями, що не досягли порогу збігу, не брались до складених ключів), `sample-prefilter` (складені
- * ключі відсіяно за вибіркою рядків). Ключі за підтвердженими ролями перебираються повністю. `exclusions` — стовпці,
+ * ключі відсіяно за вибіркою рядків). Ключі за підтвердженими ролями з придатними стовпцями однакового виду
+ * перебираються повністю. Межі, які не мають окремої причини: ключ — до трьох стовпців, унікальний хоча б з
+ * одного боку (чотири й більше стовпців, N:M — поза пошуком). `exclusions` — стовпці,
  * які за правилами ключем не бувають (послідовні номери, міри, мало різних значень, багато порожніх, прапорці).
  * `caution` кандидата: `date-order-assumed` (порядок «день/місяць» дат у ключі лише припущено), `incomplete-read`.
  */
@@ -389,7 +399,7 @@ function exclusionReason(column, tooBlank) {
   if (NUMERIC_ROLES.includes(column.role)) return 'measure';
   if (column.sequential) return 'sequential';
   if (column.distinct.size < 2) return 'few-values';
-  if (column.blanks / Math.max(1, column.rows) > tooBlank) return 'blank';
+  if (column.blanks / Math.max(1, column.rows) > tooBlank + EPS) return 'blank';
   return '';
 }
 
@@ -414,10 +424,10 @@ function candidatesFor(left, right, linker) {
     if (!other) continue;
     const l = left.byKey.get(binding.columnKey);
     const r = right.byKey.get(other.columnKey);
-    if (!l || !r || !eligible(l, tooBlank) || !eligible(r, tooBlank)) { notes.push({ code: 'role-skipped', role, reason: 'unusable' }); continue; }
+    if (!l || !r || !eligible(l, tooBlank) || !eligible(r, tooBlank)) { notes.push({ code: 'role-skipped', role, reason: 'unusable' }); reasons.add('role-skipped'); continue; }
     // Кількість — міра, а не ключ: ключем не пропонується (різні одиниці — окреме питання, не помилка).
     if (NUMERIC_ROLES.includes(role)) { if (!unitsCompatible(binding.unit, other.unit)) notes.push({ code: 'role-skipped', role, reason: 'units' }); continue; }
-    if (!pairKind(l, r)) { notes.push({ code: 'role-skipped', role, reason: 'type' }); continue; }
+    if (!pairKind(l, r)) { notes.push({ code: 'role-skipped', role, reason: 'type' }); reasons.add('role-skipped'); continue; }
     pool.push({ l, r, role, basis: 'roles', fit: 1 });
     used.add(l.key + SEP + r.key);
   }
@@ -426,9 +436,15 @@ function candidatesFor(left, right, linker) {
   const rcols = limitColumns(right, notes, 'right').filter(column => eligible(column, tooBlank) && !column.sequential && !NUMERIC_ROLES.includes(column.role));
   const found = [];
   let rejectedPairs = 0;
+  let typeMismatches = 0;
   for (const l of lcols) {
     for (const r of rcols) {
-      if (used.has(l.key + SEP + r.key) || !pairKind(l, r)) continue;
+      if (used.has(l.key + SEP + r.key)) continue;
+      // Дата ↔ текст із датами не порівнюється: це причина неповноти. Інші розбіжності видів (дата ↔ число тощо) причини не дають.
+      if (!pairKind(l, r)) {
+        if ((l.kind === 'date' && r.dateLike) || (r.kind === 'date' && l.dateLike)) typeMismatches += 1;
+        continue;
+      }
       const fit = containment(l.distinct, r.distinct);
       if (fit < 0) { rejectedPairs += 1; continue; }
       found.push({ l, r, role: '', basis: 'values', fit, same: normalizeHeader(l.header) === normalizeHeader(r.header) ? 1 : 0 });
@@ -437,6 +453,7 @@ function candidatesFor(left, right, linker) {
   found.sort((a, b) => b.same - a.same || b.fit - a.fit || a.l.key.localeCompare(b.l.key) || a.r.key.localeCompare(b.r.key));
   const room = Math.max(0, LINK_LIMITS.maxPairs - pool.length);
   if (found.length > room) { notes.push({ code: 'pairs-limited', limit: LINK_LIMITS.maxPairs, found: found.length + pool.length }); reasons.add('pairs-limited'); }
+  if (typeMismatches) { notes.push({ code: 'type-mismatch', skipped: typeMismatches }); reasons.add('type-mismatch'); }
   if (rejectedPairs) { notes.push({ code: 'component-prefilter', rejected: rejectedPairs }); reasons.add('component-prefilter'); }
   if (notes.some(note => note.code === 'columns-limited')) reasons.add('columns-limited');
   pool.push(...found.slice(0, room));
