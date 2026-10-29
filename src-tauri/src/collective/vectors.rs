@@ -13,7 +13,7 @@ use super::epoch::{self, EpochKey};
 use super::hex;
 use super::identity::{self, DeviceIdentity, MemberIdentity};
 use super::replay::{
-    receive, Decision, InMemoryMembership, Journals, MembershipView, RevokedPolicy,
+    receive, Decision, InMemoryMembership, Journals, MembershipView, RevokedPolicy, DEFER_HORIZON,
 };
 use super::{hkdf, Reason, ID_LEN, KEY_LEN, NONCE_LEN};
 
@@ -347,6 +347,16 @@ fn negative_vectors_behave_as_declared() {
         envelope::seal(key_for(epoch).as_ref().unwrap(), header, &signed).to_bytes()
     };
     let base = make(3, 1_761_696_000, 0, &s.payload.op);
+    // Журнал без відкликання: вступ, право на таблицю, пристрій (seq 1–3).
+    let fresh = || {
+        let mut fresh = InMemoryMembership::new(collective);
+        fresh.join(&binding).unwrap();
+        fresh.grant_table(&s.member.member_id(), s.payload.table_id);
+        fresh
+            .add_device(&s.member.issue_device(&s.device.public(), 1))
+            .unwrap();
+        fresh
+    };
     for v in f["negative"].as_array().unwrap() {
         let name = field(v, "name");
         let expect = field(v, "expect");
@@ -364,12 +374,7 @@ fn negative_vectors_behave_as_declared() {
             }
             "same op_id, different payload" => {
                 // Для цього сценарію автор не відкликаний: окремий журнал без відкликання.
-                let mut fresh = InMemoryMembership::new(collective);
-                fresh.join(&binding).unwrap();
-                fresh.grant_table(&s.member.member_id(), s.payload.table_id);
-                fresh
-                    .add_device(&s.member.issue_device(&s.device.public(), 1))
-                    .unwrap();
+                let fresh = fresh();
                 assert!(matches!(
                     receive(&mut journals, &fresh, policy, key_for, &base),
                     Decision::Apply(_)
@@ -412,11 +417,29 @@ fn negative_vectors_behave_as_declared() {
             ),
             "membership_seq from the future" => receive(
                 &mut journals,
+                &fresh(),
+                policy,
+                key_for,
+                &make(12, 1_761_696_000, 0, &s.payload.op),
+            ),
+            // N1: відкликаний на поточному журналі автор не відкладається.
+            "membership_seq from the future, revoked author" => receive(
+                &mut journals,
                 &membership,
                 policy,
                 key_for,
                 &make(12, 1_761_696_000, 0, &s.payload.op),
             ),
+            "membership_seq beyond the deferral horizon" => {
+                assert_eq!(v["horizon"], json!(super::replay::DEFER_HORIZON));
+                receive(
+                    &mut journals,
+                    &fresh(),
+                    policy,
+                    key_for,
+                    &make(3 + DEFER_HORIZON + 1, 1_761_696_000, 0, &s.payload.op),
+                )
+            }
             other => panic!("невідомий негативний вектор {other}"),
         };
         let actual = match &decision {

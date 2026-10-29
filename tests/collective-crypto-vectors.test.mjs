@@ -103,6 +103,8 @@ test('фікстура описує протокол v1 / suite 1 і має вс
     'old envelope after revocation, quarantine policy',
     'new epoch from revoked member',
     'membership_seq from the future',
+    'membership_seq from the future, revoked author',
+    'membership_seq beyond the deferral horizon',
   ]);
   for (const n of fixture.negative) assert.match(n.expect, /^(rejected:[A-Za-z]+|integrity_violation|quarantine|deferred)$/, n.name);
 });
