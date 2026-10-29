@@ -12,6 +12,8 @@ use fs2::FileExt;
 
 use super::codec::{Reader, Writer};
 use super::envelope::Envelope;
+use super::identity::DeviceIdentity;
+use super::receipt::StoredReceipt;
 use super::{sha256, ID_LEN, KEY_LEN};
 
 const MAGIC: &[u8; 8] = b"EWRELAY1";
@@ -54,6 +56,12 @@ struct Entry {
 pub enum PutResult {
     Stored,
     AlreadyStored,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SignedPut {
+    pub result: PutResult,
+    pub receipt: StoredReceipt,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -211,6 +219,31 @@ impl OfflineMailbox {
         self.next_seq = next_seq;
         self.entries = entries;
         Ok(PutResult::Stored)
+    }
+
+    /// Підписує `STORED` лише після успішного запису конверта. Для повторного
+    /// `put` підписує фактичний TTL уже збереженого запису, а не новий запит.
+    pub fn put_with_receipt(
+        &mut self,
+        bytes: &[u8],
+        expires_at: i64,
+        now: i64,
+        relay: &DeviceIdentity,
+    ) -> Result<SignedPut, MailboxError> {
+        let result = self.put(bytes, expires_at, now)?;
+        let envelope = Envelope::from_bytes(bytes).map_err(|_| MailboxError::InvalidEnvelope)?;
+        let stored = self
+            .entries
+            .iter()
+            .find(|entry| {
+                entry.scope == envelope.header.recipient_scope
+                    && entry.id == envelope.header.envelope_id
+            })
+            .ok_or(MailboxError::Corrupt)?;
+        Ok(SignedPut {
+            result,
+            receipt: StoredReceipt::sign(relay, &envelope, stored.digest, stored.expires_at),
+        })
     }
 
     /// Cursor — локальний монотонний номер. Повторне читання без ACK є безпечним;
@@ -400,5 +433,37 @@ mod tests {
         drop(first);
         let second = OfflineMailbox::open(&path, 4096).unwrap();
         assert_eq!(second.fetch(scope, 0, 1, 2).envelopes, vec![bytes]);
+    }
+
+    #[test]
+    fn signed_stored_receipt_is_bound_to_relay_and_exact_ciphertext() {
+        let dir = tempfile::tempdir().unwrap();
+        let key = EpochKey::generate();
+        let scope = [10; ID_LEN];
+        let bytes = sealed(&key, scope, b'C');
+        let relay = DeviceIdentity::generate();
+        let mut mailbox = OfflineMailbox::open(dir.path().join("queue"), 4096).unwrap();
+        let first = mailbox.put_with_receipt(&bytes, 100, 1, &relay).unwrap();
+        assert_eq!(first.result, PutResult::Stored);
+        first.receipt.verify(&relay.public(), &bytes, 2).unwrap();
+        let parsed = StoredReceipt::from_bytes(&first.receipt.to_bytes()).unwrap();
+        assert_eq!(parsed, first.receipt);
+        let repeat = mailbox.put_with_receipt(&bytes, 200, 2, &relay).unwrap();
+        assert_eq!(repeat.result, PutResult::AlreadyStored);
+        assert_eq!(repeat.receipt, first.receipt);
+        assert!(first
+            .receipt
+            .verify(&DeviceIdentity::generate().public(), &bytes, 2)
+            .is_err());
+        assert!(first.receipt.verify(&relay.public(), &bytes, 100).is_err());
+        let mut tampered = bytes.clone();
+        *tampered.last_mut().unwrap() ^= 1;
+        assert!(first.receipt.verify(&relay.public(), &tampered, 2).is_err());
+        let mut bad_signature = first.receipt.to_bytes();
+        *bad_signature.last_mut().unwrap() ^= 1;
+        let bad = StoredReceipt::from_bytes(&bad_signature).unwrap();
+        assert!(bad.verify(&relay.public(), &bytes, 2).is_err());
+        assert!(StoredReceipt::from_bytes(&bad_signature[..bad_signature.len() - 1]).is_err());
+        assert_eq!(mailbox.fetch(scope, 0, 1, 2).envelopes, vec![bytes]);
     }
 }
