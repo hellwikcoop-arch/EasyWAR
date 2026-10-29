@@ -680,7 +680,10 @@ mod tests {
             );
         }
         handles.set_editor_window_app(Some("collectives"));
-        assert_eq!(ensure_collectives_editor(EDITOR_WINDOW_LABEL, &handles), Ok(()));
+        assert_eq!(
+            ensure_collectives_editor(EDITOR_WINDOW_LABEL, &handles),
+            Ok(())
+        );
         assert_eq!(
             ensure_collectives_editor("main", &handles),
             Err(OfficeFileError::NotEditorWindow)
