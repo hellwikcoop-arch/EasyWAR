@@ -114,6 +114,11 @@ const COMMANDS: &[&str] = &[
     "library_unlink",
     "library_recover",
     "library_reissue_recovery",
+    "workspace_files_list",
+    "workspace_files_add",
+    "workspace_files_delete",
+    "workspace_files_export",
+    "workspace_files_open",
 ];
 
 fn main() {
