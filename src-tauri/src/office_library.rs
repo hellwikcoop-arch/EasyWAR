@@ -324,9 +324,9 @@ fn seal(
     plaintext: &[u8],
     aad: &[u8],
 ) -> Result<Vec<u8>, LibraryError> {
-    XChaCha20Poly1305::new(Key::from_slice(key))
+    XChaCha20Poly1305::new(&Key::from(*key))
         .encrypt(
-            XNonce::from_slice(nonce),
+            &XNonce::from(*nonce),
             Payload {
                 msg: plaintext,
                 aad,
@@ -344,9 +344,10 @@ fn open(
     if nonce.len() != NONCE_LEN {
         return None;
     }
-    XChaCha20Poly1305::new(Key::from_slice(key))
+    let nonce = XNonce::try_from(nonce).ok()?;
+    XChaCha20Poly1305::new(&Key::from(*key))
         .decrypt(
-            XNonce::from_slice(nonce),
+            &nonce,
             Payload {
                 msg: ciphertext,
                 aad,
