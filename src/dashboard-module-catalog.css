@@ -208,4 +208,10 @@ html[data-theme=light] .ewmc-create-live{box-shadow:0 10px 14px -12px rgba(31,75
 .ewmc-update-diff{display:grid;gap:8px}.ewmc-update-diff>.btn{justify-self:start;margin:0 14px}.ewmc-update-summary{display:flex;flex-wrap:wrap;gap:6px 14px;margin:0 14px;padding:0;list-style:none;font-weight:700}.ewmc-update-list{margin:0 14px;font-size:12px}.ewmc-update-list summary{cursor:pointer}.ewmc-update-list ul{margin:4px 0 0;padding-left:18px}.ewmc-update-sheet{margin:0 14px;font-size:12px}
 .ewmc-dashboard-grid[data-layout]{grid-template-columns:repeat(12,minmax(0,1fr))}.ewmc-drag-handle{cursor:grab;color:var(--muted,#9fb0c4);font-size:16px;line-height:1;padding:2px 4px;user-select:none}.ewmc-drag-handle:active{cursor:grabbing}.ewmc-instance-bar select{min-height:30px;font-size:12px}.ewmc-instance-bar .ewmc-move{min-width:30px;padding:3px 8px}
 @media(max-width:640px){.ewmc-dashboard-grid[data-layout]{grid-template-columns:1fr}.ewmc-dashboard-grid[data-layout] .ewmc-module{grid-column:auto!important}}
-
+.ewmc-links{margin:0 0 12px;border:1px solid var(--line,#26364a);border-radius:12px;background:var(--surface,#101a2a)}.ewmc-links>summary{padding:10px 14px;font-weight:700;cursor:pointer}
+.ewmc-links .ewmc-links-hint,.ewmc-links .ewmc-links-status{margin:0 14px 8px;color:var(--muted,#9fb0c4);font-size:11px}.ewmc-links .ewmc-links-status.error{color:var(--bad,#ff7b7b)}.ewmc-links .ewmc-links-status:empty{display:none}
+.ewmc-links-actions{display:flex;gap:8px;margin:0 14px 8px}.ewmc-links-out{display:grid;gap:8px;padding:0 14px 12px}
+.ewmc-links-pair{padding:8px 10px;border:1px solid var(--line,#26364a);border-radius:10px;background:var(--surface-2,#142238)}.ewmc-links-pair h4{margin:0 0 6px;font-size:13px}
+.ewmc-links-cands,.ewmc-links-issues,.ewmc-links-reasons{margin:0 0 6px;padding-left:18px;font-size:12px}.ewmc-links-issues,.ewmc-links-reasons{color:var(--muted,#9fb0c4);font-size:11px}
+.ewmc-links-none,.ewmc-links-full,.ewmc-links-partial{margin:0 0 4px;font-size:11px;color:var(--muted,#9fb0c4)}.ewmc-links-partial{color:var(--warn,#f2b84b)}
+.ewmc-links-excl{font-size:11px;color:var(--muted,#9fb0c4)}
