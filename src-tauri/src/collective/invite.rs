@@ -285,8 +285,7 @@ pub fn admit(
         .enumerate()
         .map(|(epoch, key)| wrap_epoch_key(key, epoch as u32, &bound))
         .collect::<Result<Vec<_>, _>>()?;
-    let join_seq = membership.join(&request.binding)?;
-    let device_seq = membership.add_device(&request.device)?;
+    let (join_seq, device_seq) = membership.join_with_device(&request.binding, &request.device)?;
     ledger.used.insert(invitation.nonce);
     Ok(Admission {
         member: bound.member_id(),
