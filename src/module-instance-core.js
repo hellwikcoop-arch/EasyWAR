@@ -136,11 +136,12 @@ export function addInstance(layout, spec) {
   if (findInstance(layout, id)) return fail('duplicate_instance', `Картка «${id}» уже є.`);
   const period = normalizePeriod(spec.period);
   if (!period) return fail('bad_period', 'Період некоректний.');
-  const size = normalizePlacement({ x: 0, y: 0, w: spec.size?.w ?? 4, h: spec.size?.h ?? 3 });
-  if (!size) return fail('bad_size', 'Розмір картки некоректний.');
+  // Розмір перевіряємо вже в тому місці, куди картка стане: під усіма наявними, а не на нульовому ряду.
+  const size = normalizePlacement({ x: 0, y: firstFreeRow(layout), w: spec.size?.w ?? 4, h: spec.size?.h ?? 3 });
+  if (!size) return fail('bad_size', 'Розмір картки некоректний або вона не вміщується на сітці.');
   const next = fresh(layout);
   next.instances.push({ id, definitionId, sourceId, title: text(spec.title), period, style: normalizeStyle(spec.style) });
-  next.placements.push({ instanceId: id, x: 0, y: firstFreeRow(layout), w: size.w, h: size.h });
+  next.placements.push({ instanceId: id, x: 0, y: size.y, w: size.w, h: size.h });
   return done(bump(next), { instanceId: id });
 }
 
@@ -238,8 +239,8 @@ function pack(layout, ids) {
 
 const packed = (layout, ids) => {
   const placements = pack(layout, ids);
-  const last = placements.at(-1);
-  return last && last.y + last.h > LIMITS.maxRows ? null : placements;
+  // Низ кожної картки, а не лише останньої: у рядку вищою може бути не вона.
+  return placements.some(item => item.y + item.h > LIMITS.maxRows) ? null : placements;
 };
 
 /**

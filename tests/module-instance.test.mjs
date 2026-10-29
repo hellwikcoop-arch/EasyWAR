@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {
   LAYOUT_FORMAT, MAX_COPIES, emptyLayout, addInstance, duplicateInstance, removeInstance, updateInstance, rebindInstance,
   placeInstance, setSharedPeriod, effectivePeriod, normalizePeriod, instanceState, sourceConsistency, copiesOf,
-  serializeLayout, parseLayout, SIZE_CHOICES, orderedIds, moveInstance, resizeInstance,
+  serializeLayout, parseLayout, SIZE_CHOICES, orderedIds, moveInstance, resizeInstance, LIMITS,
 } from '../src/module-instance-core.js';
 import { emptySchema, addSource, confirmBinding } from '../src/profile-schema-core.js';
 
@@ -224,4 +224,39 @@ test('перекладена розкладка проходить переві�
   let layout = moveInstance(four(), 'a', 'd').layout;
   layout = resizeInstance(layout, 'b', 8).layout;
   assert.ok(parseLayout(serializeLayout(layout)).ok);
+});
+
+const bottoms = layout => layout.placements.map(item => item.y + item.h);
+
+test('додавання поза сіткою: картка, що не вміщується під наявними, відхиляється, наявні не страждають', () => {
+  let layout = emptyLayout('profile-a');
+  let refused = null;
+  for (let i = 0; i < 80 && !refused; i += 1) {
+    const added = addInstance(layout, { definitionId: `d${i}`, sourceId: `s${i}`, size: { w: 4, h: 3 } });
+    if (added.ok) layout = added.layout; else refused = added;
+  }
+  assert.equal(refused.code, 'bad_size');
+  assert.equal(layout.instances.length, Math.floor(LIMITS.maxRows / 3));
+  assert.ok(Math.max(...bottoms(layout)) <= LIMITS.maxRows);
+  assert.ok(parseLayout(serializeLayout(layout)).ok);
+  // Копіювання йде тим самим шляхом і тієї ж межі не обходить.
+  assert.equal(duplicateInstance(layout, layout.instances[0].id).code, 'bad_size');
+});
+
+test('перекладання рядками: низ кожної картки, а не лише останньої, не виходить за межу', () => {
+  let layout = layoutWith(
+    { definitionId: 'b', sourceId: 's1', id: 'B', size: { w: 8, h: 1 } },
+    { definitionId: 'a', sourceId: 's2', id: 'A', size: { w: 6, h: 1 } },
+    { definitionId: 'c', sourceId: 's3', id: 'C', size: { w: 4, h: 1 } },
+  );
+  layout = placeInstance(layout, 'B', { x: 0, y: 0, w: 8, h: LIMITS.maxRows }).layout;
+  layout = placeInstance(layout, 'A', { x: 0, y: 1, w: 6, h: 1 }).layout;
+  layout = placeInstance(layout, 'C', { x: 8, y: 1, w: 4, h: 1 }).layout;
+  assert.deepEqual(orderedIds(layout), ['B', 'A', 'C']);
+  // B після A не вміщується в ряд, тож іде нижче й виходить за 200 рядків, хоча остання картка (C) низька.
+  const moved = moveInstance(layout, 'B', 'A');
+  assert.equal(moved.ok, false);
+  assert.equal(moved.code, 'bad_placement');
+  assert.deepEqual(orderedIds(layout), ['B', 'A', 'C'], 'вхідна розкладка не змінюється');
+  assert.ok(Math.max(...bottoms(layout)) <= LIMITS.maxRows);
 });
