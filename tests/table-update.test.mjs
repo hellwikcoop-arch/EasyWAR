@@ -60,6 +60,31 @@ test('підказка ключа: однозначний стовпець аб�
   assert.deepEqual(suggestKeyColumns(FIELDS, [], []), []);
 });
 
+test('підказка ключа знаходить трійку стовпців, коли немає ні одного, ні пари', () => {
+  const fields = ['a', 'b', 'c'].map(key => ({ key, label: key, dataType: 'text' }));
+  const rows = [];
+  for (const a of ['0', '1']) for (const b of ['0', '1']) for (const c of ['0', '1']) rows.push({ a, b, c });
+  assert.equal(new Set(rows.map(r => rowKey(r, ['a', 'b', 'c']))).size, 8);
+  assert.deepEqual(suggestKeyColumns(fields, rows, rows).map(item => item.columns), [['a', 'b', 'c']]);
+});
+
+test('підказка ключа: ліміт кандидатів не обриває пошук перед першою трійкою, порожні стовпці пропускаються', () => {
+  // Перші стовпці мають порожнечі або самі по собі нічого не розрізняють; трійка — лише в кінці.
+  const keys = ['n1', 'n2', 'n3', 'n4', 'n5', 'n6', 'a', 'b', 'c'];
+  const fields = keys.map(key => ({ key, label: key, dataType: 'text' }));
+  const rows = [];
+  for (const a of ['0', '1']) for (const b of ['0', '1']) for (const c of ['0', '1']) {
+    rows.push({ n1: '', n2: 'x', n3: 'x', n4: a, n5: b, n6: 'y', a, b, c });
+  }
+  const found = suggestKeyColumns(fields, rows, rows);
+  assert.ok(found.length >= 1);
+  assert.deepEqual(found[0].columns.length, 3);
+  assert.ok(found.every(item => !item.columns.includes('n1')), 'стовпець із порожнечами не береться');
+  assert.ok(found.length <= 5);
+  // Дубль рядка: ключа немає за жодної довжини.
+  assert.deepEqual(suggestKeyColumns(fields, [...rows, rows[0]], [...rows, rows[0]]), []);
+});
+
 test('порівняння: додані, змінені, зниклі й незмінені рядки', () => {
   const next = [row('2026-05-01', 'A1', 2, 'x'), row('2026-05-02', 'A2', 5), row('2026-05-09', 'B9', 1)];
   const diff = diffRows({ fields: FIELDS, oldRows: OLD, newRows: next, keyColumns: KEY });
