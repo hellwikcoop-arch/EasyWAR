@@ -3,11 +3,12 @@
 //! доказ дозволу маршруту. Rust-перевірка класу, членства й права потрібна до send.
 
 use std::collections::HashSet;
-use std::fs;
-#[cfg(unix)]
-use std::fs::File;
+use std::ffi::OsString;
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+
+use fs2::FileExt;
 
 use super::codec::{Reader, Writer};
 use super::envelope::Envelope;
@@ -32,6 +33,8 @@ pub enum MailboxError {
     Capacity,
     #[error("ідентифікатор конверта вже має інший вміст")]
     ConflictingEnvelope,
+    #[error("локальна черга вже відкрита іншим процесом")]
+    Busy,
     #[error("помилка локальної черги: {0}")]
     Io(#[from] io::Error),
 }
@@ -60,10 +63,11 @@ pub struct Page {
     pub has_more: bool,
 }
 
-/// Один власник файлу на процес. Доступ до мережі та автентифікація одержувача
+/// Один власник файлу одночасно. Доступ до мережі та автентифікація одержувача
 /// навмисно відсутні; викликач має забезпечити їх до будь-якого транспорту.
 pub struct OfflineMailbox {
     path: PathBuf,
+    _lock_file: File,
     capacity_bytes: usize,
     next_seq: u64,
     entries: Vec<Entry>,
@@ -75,8 +79,23 @@ impl OfflineMailbox {
             return Err(MailboxError::Capacity);
         }
         let path = path.as_ref().to_path_buf();
+        let mut lock_name: OsString = path.as_os_str().to_os_string();
+        lock_name.push(".lock");
+        let lock_file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(PathBuf::from(lock_name))?;
+        match FileExt::try_lock_exclusive(&lock_file) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                return Err(MailboxError::Busy);
+            }
+            Err(error) => return Err(error.into()),
+        }
         let mut mailbox = Self {
             path,
+            _lock_file: lock_file,
             capacity_bytes,
             next_seq: 1,
             entries: Vec::new(),
@@ -362,5 +381,23 @@ mod tests {
         assert_eq!(next.envelopes, vec![c]);
         assert!(!next.has_more);
         assert_eq!(mailbox.fetch(other, 0, 1, 2).envelopes, vec![b]);
+    }
+
+    #[test]
+    fn concurrent_open_is_rejected_then_restart_keeps_the_first_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("queue");
+        let key = EpochKey::generate();
+        let scope = [9; ID_LEN];
+        let bytes = sealed(&key, scope, b'C');
+        let mut first = OfflineMailbox::open(&path, 4096).unwrap();
+        assert!(matches!(
+            OfflineMailbox::open(&path, 4096),
+            Err(MailboxError::Busy)
+        ));
+        first.put(&bytes, 100, 1).unwrap();
+        drop(first);
+        let second = OfflineMailbox::open(&path, 4096).unwrap();
+        assert_eq!(second.fetch(scope, 0, 1, 2).envelopes, vec![bytes]);
     }
 }
