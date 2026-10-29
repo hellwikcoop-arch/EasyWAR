@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 import {
-  UPDATE_LIMITS, applyDiff, correctionCell, diffRows, fileFingerprint, normalizeValue,
+  UPDATE_LIMITS, applyDiff, correctedCellsFor, correctionCell, diffRows, fileFingerprint, normalizeValue,
   previewDiff, recognizeSource, rowKey, suggestKeyColumns,
 } from '../src/table-update-core.js';
 
@@ -180,4 +180,18 @@ test('ліміт рядків захищає від надто великих п
 test('ядро не звертається до DOM, Tauri, мережі, часу та випадковості', async () => {
   const source = await readFile(new URL('../src/table-update-core.js', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /document\.|window\.|invoke\(|fetch\(|Date\.now|new Date|Math\.random|localStorage/u);
+});
+
+test('чинні ручні виправлення стають клітинками за ключем рядка, історичні й безхазяйні пропускаються', () => {
+  const stored = OLD.map((r, i) => ({ ...r, rowId: i + 1 }));
+  const cells = correctedCellsFor(stored, [
+    { rowId: 2, fieldKey: 'qty', status: 'current' },
+    { rowId: 3, fieldKey: 'qty', status: 'superseded' },
+    { rowId: 99, fieldKey: 'qty', status: 'current' },
+    { rowId: 1, status: 'current' },
+  ], KEY);
+  assert.deepEqual([...cells], [correctionCell(rowKey(OLD[1], KEY), 'qty')]);
+  const diff = diffRows({ fields: FIELDS, oldRows: stored, newRows: [{ ...stored[1], qty: 99 }], keyColumns: KEY, correctedCells: cells });
+  assert.equal(diff.keptCorrections, 1);
+  assert.deepEqual(correctedCellsFor(null, null, KEY), new Set());
 });

@@ -149,6 +149,21 @@ const sameValue = (a, b) => normalizeValue(a) === normalizeValue(b);
 export const correctionCell = (key, fieldKey) => `${key}${SEP}${fieldKey}`;
 
 /**
+ * Клітинки, виправлені вручну й досі чинні (`status: 'current'`), у вигляді множини `correctionCell`
+ * за ключем рядка. Виправлення, що не знайшли свій рядок чи ключ, пропускаються.
+ */
+export function correctedCellsFor(rows, corrections, keyColumns) {
+  const byId = new Map((Array.isArray(rows) ? rows : []).map(row => [row?.rowId, row]));
+  const cells = new Set();
+  for (const item of Array.isArray(corrections) ? corrections : []) {
+    if (item?.status !== 'current') continue;
+    const key = rowKey(byId.get(item.rowId), keyColumns);
+    if (key !== null && typeof item.fieldKey === 'string') cells.add(correctionCell(key, item.fieldKey));
+  }
+  return cells;
+}
+
+/**
  * Порівняння двох версій таблиці модуля.
  * `fields` — поля модуля; `oldRows` — рядки модуля зараз; `newRows` — рядки з нового файла (вже у ключах
  * полів модуля); `keyColumns` — правило ідентичності; `correctedCells` — множина `correctionCell(...)`
