@@ -582,7 +582,9 @@ mod tests {
 
         assert_eq!(
             restore::inspect_backup(&live).await.unwrap(),
-            BackupInspection { schema_version: current_schema_version() }
+            BackupInspection {
+                schema_version: current_schema_version()
+            }
         );
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
@@ -621,7 +623,9 @@ mod tests {
         );
         assert_eq!(
             restore::inspect_backup(&live).await.unwrap(),
-            BackupInspection { schema_version: current_schema_version() }
+            BackupInspection {
+                schema_version: current_schema_version()
+            }
         );
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
@@ -748,12 +752,15 @@ mod tests {
 
         prepare_database(&live).await.unwrap();
 
-        let second_backup = numbered_pre_migration_backup_path(&live, 3, current_schema_version(), 1).unwrap();
+        let second_backup =
+            numbered_pre_migration_backup_path(&live, 3, current_schema_version(), 1).unwrap();
         assert_eq!(fs::read(&first_backup).unwrap(), first_original);
         assert_eq!(fs::read(&second_backup).unwrap(), restored_original);
         assert_eq!(
             restore::inspect_backup(&live).await.unwrap(),
-            BackupInspection { schema_version: current_schema_version() }
+            BackupInspection {
+                schema_version: current_schema_version()
+            }
         );
     }
 
@@ -771,13 +778,17 @@ mod tests {
 
         assert_eq!(
             restore::inspect_backup(&live).await.unwrap(),
-            BackupInspection { schema_version: current_schema_version() }
+            BackupInspection {
+                schema_version: current_schema_version()
+            }
         );
         assert!(!previous.exists());
         assert_eq!(
-            restore::inspect_backup(&pre_migration_backup_path(&live, 3, current_schema_version()).unwrap())
-                .await
-                .unwrap(),
+            restore::inspect_backup(
+                &pre_migration_backup_path(&live, 3, current_schema_version()).unwrap()
+            )
+            .await
+            .unwrap(),
             BackupInspection { schema_version: 3 }
         );
     }
