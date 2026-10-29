@@ -11,6 +11,7 @@ mod migration_startup;
 pub mod model_install;
 pub mod module_source;
 pub mod module_source_selection;
+pub mod network_policy;
 pub mod office_files;
 pub mod office_library;
 pub mod office_sources;

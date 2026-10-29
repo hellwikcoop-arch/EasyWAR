@@ -32,9 +32,9 @@
 **Файли:** змінити тільки після scoped task `src-tauri/tauri.conf.json`, `src-tauri/src/desktop_shell.rs`, bounded ділянки `src/air.html`/`src/rocket.html`, `local_profiles.rs`; створити `tests/network-boundary.test.mjs`, `docs/adr/network-and-secret-boundaries.md`. Сховище секретів/adapter визначити в ADR, не вводити випадкову паралельну систему.  
 **Інтерфейси:** `networkPolicy(profile, purpose) → allowed/denied`; `secretStore.read/write/delete(purpose, profile)` у Rust; JS споживає статус/результат без секрету. Залежність: P0; перед production E2EE A5/A6.
 
-- [ ] Інвентаризувати фактичні зовнішні адреси: оновлення, модель, погода, карти, Signal loopback і заплановані Q12/Q13/Base44. Для кожної — trigger, дані, право, timeout, cancellation.
-- [ ] До зміни CSP записати точні дозволені ресурси всіх legacy/WASM/worker/3D сценаріїв. Зміна `null` на надто вузьку політику без перевірки не вважається виправленням.
-- [ ] Тести: непогоджена мережа не виконується; XSS-подібна назва джерела не виконує скрипт; editor не отримує нові права; logout зупиняє запити й стирає session state.
+- [x] Інвентаризувати фактичні зовнішні адреси: оновлення, модель, погода, карти, Signal loopback і заплановані Q12/Q13/Base44. Для кожної — trigger, дані, право, timeout, cancellation. *(R3, 29.10.2026: ADR `network-and-secret-boundaries.md`, розділ 1; `networkPolicy` — `src-tauri/src/network_policy.rs` без команд, підключення до команд — C3b.)*
+- [x] До зміни CSP записати точні дозволені ресурси всіх legacy/WASM/worker/3D сценаріїв. Зміна `null` на надто вузьку політику без перевірки не вважається виправленням. *(R3: ADR, розділ 5 — перелік; CSP не змінено, рішення JE-21.)*
+- [ ] Тести: непогоджена мережа не виконується; XSS-подібна назва джерела не виконує скрипт; editor не отримує нові права; logout зупиняє запити й стирає session state. *(R3: файловий тест `tests/network-boundary.test.mjs` — мережеві виклики лише з переліку, editor без мережі; поведінкові тести — C3b.)*
 - [ ] Команди: `node --test tests/network-boundary.test.mjs tests/office-isolation.test.mjs tests/desktop-frontend.test.mjs`; Rust gates; build; UI smoke офлайн та дозволених інтеграцій.
 - [ ] Перенесення Planet key із localStorage/URL у Rust — окремий PR за P2-2; задати consent/сумісність/очищення старого значення. Очищення залишків профілю в storage — окремий перевірений крок за P2-3.
 - [ ] Коміт по межі: `security: enforce reviewed network and secret boundaries`.
