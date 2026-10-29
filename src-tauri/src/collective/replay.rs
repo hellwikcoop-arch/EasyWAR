@@ -8,6 +8,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+use super::codec::{Reader, Writer};
 use super::envelope::{self, Envelope, SignedPayload};
 use super::epoch::{CollectiveId, EpochKey};
 use super::identity::{BoundMember, DeviceRecord, ExchangeBinding, MemberId};
@@ -264,6 +265,65 @@ pub enum MembershipRecord {
     Revoke(MemberId),
 }
 
+impl MembershipRecord {
+    const JOIN: u8 = 1;
+    const ROTATE_EXCHANGE: u8 = 2;
+    const GRANT_TABLE: u8 = 3;
+    const ADD_DEVICE: u8 = 4;
+    const REVOKE: u8 = 5;
+
+    /// Канонічне кодування для сховища (C3b): байт виду і поля фіксованої довжини.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut w = Writer::with_capacity(1 + ExchangeBinding::LEN);
+        match self {
+            MembershipRecord::Join(binding) => {
+                w.u8(Self::JOIN).fixed(&binding.to_bytes());
+            }
+            MembershipRecord::RotateExchange(binding) => {
+                w.u8(Self::ROTATE_EXCHANGE).fixed(&binding.to_bytes());
+            }
+            MembershipRecord::GrantTable { member, table_id } => {
+                w.u8(Self::GRANT_TABLE).fixed(member).fixed(table_id);
+            }
+            MembershipRecord::AddDevice(record) => {
+                w.u8(Self::ADD_DEVICE).fixed(&record.to_bytes());
+            }
+            MembershipRecord::Revoke(member) => {
+                w.u8(Self::REVOKE).fixed(member);
+            }
+        }
+        w.finish()
+    }
+
+    /// Розбір без перевірки підписів: їх перевіряє застосування запису до журналу.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, Reason> {
+        let (&kind, rest) = bytes.split_first().ok_or(Reason::Malformed)?;
+        match kind {
+            Self::JOIN => Ok(MembershipRecord::Join(ExchangeBinding::from_bytes(rest)?)),
+            Self::ROTATE_EXCHANGE => Ok(MembershipRecord::RotateExchange(
+                ExchangeBinding::from_bytes(rest)?,
+            )),
+            Self::GRANT_TABLE => {
+                let mut r = Reader::new(rest);
+                let record = MembershipRecord::GrantTable {
+                    member: r.fixed()?,
+                    table_id: r.fixed()?,
+                };
+                r.finish()?;
+                Ok(record)
+            }
+            Self::ADD_DEVICE => Ok(MembershipRecord::AddDevice(DeviceRecord::from_bytes(rest)?)),
+            Self::REVOKE => {
+                let mut r = Reader::new(rest);
+                let member = r.fixed()?;
+                r.finish()?;
+                Ok(MembershipRecord::Revoke(member))
+            }
+            _ => Err(Reason::Malformed),
+        }
+    }
+}
+
 /// Еталонна реалізація журналу складу в пам'яті (синтетична; для тестів і як зразок для
 /// C1c/C3b). Вступ і ротація ключа обміну — лише з підписаним зв'язуванням для цього
 /// колективу (G12, U2); запис пристрою — лише з дійсним підписом учасника. Записи з чужого
@@ -297,6 +357,23 @@ impl InMemoryMembership {
             members: HashMap::new(),
             epochs: vec![0],
         }
+    }
+
+    pub fn collective_id(&self) -> &CollectiveId {
+        &self.collective_id
+    }
+
+    /// Застосований префікс журналу: запис `i` має `seq = i + 1`.
+    pub fn records(&self) -> &[MembershipRecord] {
+        &self.log
+    }
+
+    /// Учасники, не відкликані на поточному журналі.
+    pub fn active_members(&self) -> usize {
+        self.members
+            .values()
+            .filter(|state| state.revoked_at.is_none())
+            .count()
     }
 
     /// Записи, отримані після розриву й ще не застосовані.
@@ -1096,5 +1173,47 @@ mod tests {
             Decision::Apply(_)
         ));
         assert!(q.is_empty());
+    }
+
+    #[test]
+    fn membership_records_round_trip_and_rebuild_the_same_journal() {
+        let w = World::new();
+        let records = w.membership.records().to_vec();
+        assert_eq!(records.len(), 3);
+        let mut rebuilt = InMemoryMembership::new(w.collective);
+        for (index, record) in records.iter().enumerate() {
+            let bytes = record.to_bytes();
+            let parsed = MembershipRecord::from_bytes(&bytes).unwrap();
+            assert_eq!(&parsed, record);
+            rebuilt.apply(index as u64 + 1, parsed).unwrap();
+        }
+        assert_eq!(rebuilt.latest_seq(), 3);
+        assert_eq!(rebuilt.active_members(), 1);
+        for record in [
+            MembershipRecord::GrantTable {
+                member: [1; KEY_LEN],
+                table_id: [2; ID_LEN],
+            },
+            MembershipRecord::Revoke([3; KEY_LEN]),
+        ] {
+            assert_eq!(
+                MembershipRecord::from_bytes(&record.to_bytes()).unwrap(),
+                record
+            );
+        }
+        assert_eq!(
+            MembershipRecord::from_bytes(&[]).unwrap_err(),
+            Reason::Malformed
+        );
+        assert_eq!(
+            MembershipRecord::from_bytes(&[9, 0]).unwrap_err(),
+            Reason::Malformed
+        );
+        let mut extra = records[1].to_bytes();
+        extra.push(0);
+        assert_eq!(
+            MembershipRecord::from_bytes(&extra).unwrap_err(),
+            Reason::Malformed
+        );
     }
 }

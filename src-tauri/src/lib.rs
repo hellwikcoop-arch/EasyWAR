@@ -3,6 +3,8 @@ mod app_update;
 pub mod backup;
 pub mod base_tables;
 pub mod collective;
+pub mod collective_store;
+use collective_store::CollectiveStore;
 pub mod dashboard_layout;
 pub mod dashboard_modules;
 mod database;
@@ -1522,6 +1524,78 @@ async fn workspace_open_editor(
 fn office_editor_close(window: tauri::WebviewWindow) -> Result<(), String> {
     office_files::ensure_editor_window(window.label()).map_err(|error| error.to_string())?;
     window.destroy().map_err(|error| error.to_string())
+}
+
+// --- Колективи (E8, C3b, перший зріз: ключ учасника й захищений колектив) ----------------
+//
+// Команди лише для вікна редактора, де працює екран «Колективи» (capability
+// `office-editor.json`). Пароль — пароль профілю через той самий обмежувач спроб, що й
+// бібліотека; у JS не повертається жоден секрет, лише відбитки й лічильники. Мережі немає.
+
+#[tauri::command]
+async fn collective_status(
+    webview: tauri::Webview,
+    session: tauri::State<'_, ProfileSession>,
+    collectives: tauri::State<'_, CollectiveStore>,
+) -> Result<collective_store::CollectiveStatus, String> {
+    office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
+    let profile_id = active_profile_id(&session)?;
+    collectives
+        .status(&profile_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// Створює ключ учасника профілю; ключ відновлення сховища показується один раз.
+#[tauri::command]
+async fn collective_create_identity(
+    webview: tauri::Webview,
+    profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
+    collectives: tauri::State<'_, CollectiveStore>,
+    password: String,
+) -> Result<collective_store::CreatedIdentity, String> {
+    office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
+    let password = zeroize::Zeroizing::new(password);
+    let profile_id = active_profile_id(&session)?;
+    if !profiles
+        .has_password(&profile_id)
+        .await
+        .map_err(|error| error.to_string())?
+    {
+        return Err(LibraryError::ProfileWithoutPassword.to_string());
+    }
+    verify_library_password(&profiles, &profile_id, &password).await?;
+    collectives
+        .create_identity(&profile_id, password, &library_now())
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// Створює захищений колектив, де власник — учасник цього профілю.
+#[tauri::command]
+async fn collective_create(
+    webview: tauri::Webview,
+    profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
+    collectives: tauri::State<'_, CollectiveStore>,
+    password: String,
+    name: String,
+) -> Result<collective_store::CollectiveSummary, String> {
+    office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
+    let password = zeroize::Zeroizing::new(password);
+    let profile_id = active_profile_id(&session)?;
+    verify_library_password(&profiles, &profile_id, &password).await?;
+    collectives
+        .create_collective(
+            &profile_id,
+            password,
+            &name,
+            &library_now(),
+            Utc::now().timestamp(),
+        )
+        .await
+        .map_err(|error| error.to_string())
 }
 
 // --- Захищена бібліотека «Офісу» (office_library, контракт library_*) -------------------
@@ -3515,6 +3589,13 @@ pub fn run() {
             app.manage(DashboardLayoutStore::new(pool.clone()));
             app.manage(module_source_selection::SourceSelections::default());
             app.manage(office_files::OfficeFileHandles::default());
+            let collective_keys_dir = startup_recovery::or_exit(
+                &dialogs,
+                app.path().app_local_data_dir(),
+                "Не вдалося визначити директорію даних EasyWAR",
+            )
+            .join("collective-keys");
+            app.manage(CollectiveStore::new(pool.clone(), collective_keys_dir));
             app.manage(LibraryStore::new(pool.clone()));
             app.manage(LibrarySession::default());
             app.manage(LibraryStateEvents::default());
@@ -3611,6 +3692,9 @@ pub fn run() {
             weather_online_search,
             office_editor_close,
             workspace_open_editor,
+            collective_status,
+            collective_create_identity,
+            collective_create,
             clear_profile_database,
             read_profile_database,
             write_profile_database,

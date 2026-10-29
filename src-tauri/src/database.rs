@@ -108,6 +108,7 @@ pub(crate) const DASHBOARD_MODULE_CORRECTION_STATUS_SQL: &str =
 pub(crate) const PROFILE_SCHEMAS_SQL: &str = include_str!("../migrations/0017_profile_schemas.sql");
 pub(crate) const DASHBOARD_LAYOUTS_SQL: &str =
     include_str!("../migrations/0018_dashboard_layouts.sql");
+pub(crate) const COLLECTIVES_SQL: &str = include_str!("../migrations/0019_collectives.sql");
 
 pub fn migrations() -> Vec<Migration> {
     vec![
@@ -219,6 +220,12 @@ pub fn migrations() -> Vec<Migration> {
             sql: DASHBOARD_LAYOUTS_SQL,
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 19,
+            description: "add_collectives",
+            sql: COLLECTIVES_SQL,
+            kind: MigrationKind::Up,
+        },
     ]
 }
 
@@ -285,12 +292,13 @@ pub(crate) async fn create_migrated_database(
 mod tests {
     use super::{
         create_migrated_database, migrations, DatabaseMigrationState, DatabaseStatusError,
-        DatabaseStatusStore, COMMAND_TABLES_SQL, DASHBOARD_LAYOUTS_SQL, DASHBOARD_MODULES_SQL,
-        DASHBOARD_MODULE_CORRECTIONS_SQL, DASHBOARD_MODULE_CORRECTION_STATUS_SQL,
-        DASHBOARD_MODULE_STYLE_SQL, DATABASE_URL, DOCUMENT_LINKS_SQL, EMBEDDED_MIGRATOR,
-        INITIAL_SCHEMA_SQL, LIBRARY_BLOB_REPAIR_SQL, LOCAL_PROFILES_SQL, OFFICE_LIBRARY_SQL,
-        OWN_LOSSES_TABLES_SQL, PROFILE_BRANCH_TABLES_SQL, PROFILE_DETAILS_SQL, PROFILE_MODULES_SQL,
-        PROFILE_SCHEMAS_SQL, WORKSPACE_TEMPLATES_SQL, XLSX_DUPLICATE_LINKS_SQL,
+        DatabaseStatusStore, COLLECTIVES_SQL, COMMAND_TABLES_SQL, DASHBOARD_LAYOUTS_SQL,
+        DASHBOARD_MODULES_SQL, DASHBOARD_MODULE_CORRECTIONS_SQL,
+        DASHBOARD_MODULE_CORRECTION_STATUS_SQL, DASHBOARD_MODULE_STYLE_SQL, DATABASE_URL,
+        DOCUMENT_LINKS_SQL, EMBEDDED_MIGRATOR, INITIAL_SCHEMA_SQL, LIBRARY_BLOB_REPAIR_SQL,
+        LOCAL_PROFILES_SQL, OFFICE_LIBRARY_SQL, OWN_LOSSES_TABLES_SQL, PROFILE_BRANCH_TABLES_SQL,
+        PROFILE_DETAILS_SQL, PROFILE_MODULES_SQL, PROFILE_SCHEMAS_SQL, WORKSPACE_TEMPLATES_SQL,
+        XLSX_DUPLICATE_LINKS_SQL,
     };
     use super::{live_connect_options, writable_connect_options};
     use sqlx::{sqlite::SqlitePoolOptions, Row};
@@ -301,7 +309,7 @@ mod tests {
         assert_eq!(DATABASE_URL, "sqlite:easywar.db");
         assert!(include_str!("../tauri.conf.json").contains(DATABASE_URL));
         let registered = migrations();
-        assert_eq!(registered.len(), 18);
+        assert_eq!(registered.len(), 19);
         assert_eq!(registered[0].version, 1);
         assert_eq!(registered[0].description, "create_provenance_schema");
         assert_eq!(registered[1].version, 2);
@@ -344,6 +352,8 @@ mod tests {
         assert_eq!(registered[16].description, "add_profile_schemas");
         assert_eq!(registered[17].version, 18);
         assert_eq!(registered[17].description, "add_dashboard_layouts");
+        assert_eq!(registered[18].version, 19);
+        assert_eq!(registered[18].description, "add_collectives");
         assert_eq!(
             EMBEDDED_MIGRATOR
                 .iter()
@@ -364,7 +374,7 @@ mod tests {
                 .map(|migration| migration.sql)
                 .collect::<Vec<_>>()
         );
-        assert_eq!(super::latest_schema_version(), Some(18));
+        assert_eq!(super::latest_schema_version(), Some(19));
     }
 
     #[tokio::test]
@@ -376,9 +386,9 @@ mod tests {
             DatabaseStatusStore::new(pool.clone()).load().await.unwrap(),
             super::DatabaseStatus {
                 app_version: env!("CARGO_PKG_VERSION").to_owned(),
-                schema_version: 18,
-                supported_schema_version: 18,
-                migration_count: 18,
+                schema_version: 19,
+                supported_schema_version: 19,
+                migration_count: 19,
                 migration_state: DatabaseMigrationState::Current,
             }
         );
@@ -474,6 +484,10 @@ mod tests {
             .execute(&pool)
             .await
             .expect("dashboard layouts migration must apply");
+        sqlx::raw_sql(COLLECTIVES_SQL)
+            .execute(&pool)
+            .await
+            .expect("collectives migration must apply");
 
         pool
     }
