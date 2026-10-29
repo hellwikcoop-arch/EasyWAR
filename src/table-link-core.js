@@ -48,8 +48,9 @@ const DATE_PATTERNS = Object.freeze([
 ]);
 
 /**
- * Дата в одному з розпізнаних форматів → `{ iso: 'YYYY-MM-DD', format }`; інакше `null`. Слеш-дати читаються
- * «день/місяць/рік» (як в українських таблицях); час відкидається; неіснуюча дата (31.02) не розпізнається.
+ * Дата в одному з розпізнаних форматів → `{ iso: 'YYYY-MM-DD', format, ambiguous, dayFirstProof }`; інакше `null`.
+ * Слеш- і дефіс-дати читаються «день/місяць/рік» (як в українських таблицях), але `ambiguous: true`, якщо їх
+ * можна прочитати й як «місяць/день/рік»; час відкидається; неіснуюча дата (31.02) не розпізнається.
  */
 export function canonicalDate(value) {
   const text = cell(value);
@@ -60,7 +61,17 @@ export function canonicalDate(value) {
     const [year, month, day] = order.map(index => Number(match[index + 1]));
     const probe = new Date(Date.UTC(year, month - 1, day));
     if (probe.getUTCFullYear() !== year || probe.getUTCMonth() !== month - 1 || probe.getUTCDate() !== day) return null;
-    return { iso: `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`, format };
+    // Слеш і дефіс у рядку «д/м/р» можуть бути й «м/д/р»: якщо обидві частини ≤ 12 і різні, порядок лише припущено;
+    // частина > 12 на першому місці доводить «день першим».
+    const first = Number(match[1]);
+    const second = Number(match[2]);
+    const loose = (format === 'dmy-slash' || format === 'dmy-dash');
+    return {
+      iso: `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
+      format,
+      ambiguous: loose && first <= 12 && second <= 12 && first !== second,
+      dayFirstProof: loose && first > 12,
+    };
   }
   return null;
 }
@@ -94,11 +105,18 @@ function profileColumn(column, rows, role, linker) {
     && nonBlank.filter(text => canonicalDate(text)).length / nonBlank.length >= PARSE_SHARE) kind = 'date';
   const formats = new Map();
   let unparsed = 0;
+  let ambiguousDates = 0;
+  let dayFirstProof = 0;
   const values = raw.map((value, i) => {
     if (texts[i] === '') return '';
     if (kind === 'date') {
       const date = canonicalDate(value);
-      if (date) { formats.set(date.format, (formats.get(date.format) || 0) + 1); return date.iso; }
+      if (date) {
+        formats.set(date.format, (formats.get(date.format) || 0) + 1);
+        if (date.ambiguous) ambiguousDates += 1;
+        if (date.dayFirstProof) dayFirstProof += 1;
+        return date.iso;
+      }
       unparsed += 1;
       return textKey(value);
     }
@@ -115,6 +133,8 @@ function profileColumn(column, rows, role, linker) {
   return {
     key: column.key, header: column.header || column.key, type: column.type, decision: column.decision || '', role,
     kind, values, ids, distinct, blanks: values.length - nonBlankCount(ids), formats, unparsed, rows: values.length,
+    // Порядок «день/місяць» припущено, якщо в стовпці є неоднозначні дати й жодної, що доводить «день першим».
+    orderAssumed: ambiguousDates > 0 && dayFirstProof === 0,
     sequential: isSequential(values, distinct),
   };
 }
@@ -168,10 +188,13 @@ function buildProfile(table, linker) {
   const truncated = table?.truncated === true || (Array.isArray(table?.rows) && table.rows.length > LINK_LIMITS.maxRows);
   const roleOf = new Map();
   for (const [role, { columnKey }] of Object.entries(table?.roles || {})) roleOf.set(columnKey, role);
+  const dropped = (Array.isArray(table?.columns) ? table.columns : [])
+    .filter(column => column && typeof column.key === 'string' && column.type === 'flag')
+    .map(column => column.key);
   const columns = (Array.isArray(table?.columns) ? table.columns : [])
     .filter(column => column && typeof column.key === 'string' && column.type !== 'flag')
     .map(column => profileColumn(column, rows, roleOf.get(column.key) || '', linker));
-  return { sourceId: table?.sourceId, title: table?.title || table?.sourceId, rows: rows.length, truncated, columns, roles: table?.roles || {}, byKey: new Map(columns.map(column => [column.key, column])) };
+  return { sourceId: table?.sourceId, title: table?.title || table?.sourceId, rows: rows.length, truncated, columns, roles: table?.roles || {}, byKey: new Map(columns.map(column => [column.key, column])), dropped };
 }
 
 /** Таблиця для ядра зі схеми профілю й прочитаних рядків. Підсумок зіставлення стовпця береться з `suggestBindings`. */
@@ -348,15 +371,41 @@ export function evaluateKey(leftTable, rightTable, leftColumns, rightColumns) {
  * Спершу пари стовпців з однаковою підтвердженою роллю, потім пари за збігом значень; з пар складаються
  * ключі до трьох стовпців, надмножини вже знайдених пропускаються. Найкращі — ролі, коротший ключ, більший збіг.
  * `notes`: `columns-limited` (стовпців забагато, розглянуто частину), `pairs-limited` (пар забагато), `role-skipped`.
+ *
+ * Повнота пошуку. `exhaustive: true` лише тоді, коли ніщо не відсіяно евристикою й жодне обмеження не спрацювало;
+ * інакше `reasons` називає, чому результат може бути неповним (не вичерпним): `columns-limited`, `pairs-limited`,
+ * `candidates-limited` (знайдено більше за показані), `truncated` (читання усічене), `component-prefilter` (пари
+ * стовпців за значеннями, що не досягли порогу збігу, не брались до складених ключів), `sample-prefilter` (складені
+ * ключі відсіяно за вибіркою рядків). Ключі за підтвердженими ролями перебираються повністю. `exclusions` — стовпці,
+ * які за правилами ключем не бувають (послідовні номери, міри, мало різних значень, багато порожніх, прапорці).
+ * `caution` кандидата: `date-order-assumed` (порядок «день/місяць» дат у ключі лише припущено), `incomplete-read`.
  */
 export function candidateKeys(leftTable, rightTable) {
   const linker = createLinker();
   return candidatesFor(profileTable(leftTable, linker), profileTable(rightTable, linker), linker);
 }
 
+function exclusionReason(column, tooBlank) {
+  if (NUMERIC_ROLES.includes(column.role)) return 'measure';
+  if (column.sequential) return 'sequential';
+  if (column.distinct.size < 2) return 'few-values';
+  if (column.blanks / Math.max(1, column.rows) > tooBlank) return 'blank';
+  return '';
+}
+
 function candidatesFor(left, right, linker) {
   const notes = [];
+  const reasons = new Set();
   const tooBlank = 1 - LINK_LIMITS.minMatch;
+  const exclusions = [];
+  for (const [side, profile] of [['left', left], ['right', right]]) {
+    for (const column of profile.columns) {
+      const reason = exclusionReason(column, tooBlank);
+      if (reason) exclusions.push({ side, sourceId: profile.sourceId, column: column.key, reason });
+    }
+    for (const key of profile.dropped) exclusions.push({ side, sourceId: profile.sourceId, column: key, reason: 'flag' });
+  }
+  if (left.truncated || right.truncated) reasons.add('truncated');
   const used = new Set();
   const pool = [];
 
@@ -376,21 +425,25 @@ function candidatesFor(left, right, linker) {
   const lcols = limitColumns(left, notes, 'left').filter(column => eligible(column, tooBlank) && !column.sequential && !NUMERIC_ROLES.includes(column.role));
   const rcols = limitColumns(right, notes, 'right').filter(column => eligible(column, tooBlank) && !column.sequential && !NUMERIC_ROLES.includes(column.role));
   const found = [];
+  let rejectedPairs = 0;
   for (const l of lcols) {
     for (const r of rcols) {
       if (used.has(l.key + SEP + r.key) || !pairKind(l, r)) continue;
       const fit = containment(l.distinct, r.distinct);
-      if (fit < 0) continue;
+      if (fit < 0) { rejectedPairs += 1; continue; }
       found.push({ l, r, role: '', basis: 'values', fit, same: normalizeHeader(l.header) === normalizeHeader(r.header) ? 1 : 0 });
     }
   }
   found.sort((a, b) => b.same - a.same || b.fit - a.fit || a.l.key.localeCompare(b.l.key) || a.r.key.localeCompare(b.r.key));
   const room = Math.max(0, LINK_LIMITS.maxPairs - pool.length);
-  if (found.length > room) notes.push({ code: 'pairs-limited', limit: LINK_LIMITS.maxPairs, found: found.length + pool.length });
+  if (found.length > room) { notes.push({ code: 'pairs-limited', limit: LINK_LIMITS.maxPairs, found: found.length + pool.length }); reasons.add('pairs-limited'); }
+  if (rejectedPairs) { notes.push({ code: 'component-prefilter', rejected: rejectedPairs }); reasons.add('component-prefilter'); }
+  if (notes.some(note => note.code === 'columns-limited')) reasons.add('columns-limited');
   pool.push(...found.slice(0, room));
   // Ролі в пулі понад ліміт не відкидаємо: підтверджене користувачем важливіше за здогад.
   const candidates = [];
   const accepted = [];
+  let sampled = 0;
   const capacity = columns => columns.reduce((product, column) => product * column.distinct.size, 1);
   const grow = (size, start, chosen) => {
     if (chosen.length === size) {
@@ -400,7 +453,9 @@ function candidatesFor(left, right, linker) {
       const rc = chosen.map(pair => pair.r);
       // Унікальний ключ не може мати менше різних значень, ніж рядків (хоча б з одного боку).
       if (capacity(lc) < left.rows * LINK_LIMITS.minMatch && capacity(rc) < right.rows * LINK_LIMITS.minMatch) return;
-      if (size > 1 && sampleHitRate(left, lc, right, rc) < SAMPLE_MIN_HIT && sampleHitRate(right, rc, left, lc) < SAMPLE_MIN_HIT) return;
+      // Підтверджені ролі перебираються повністю; відсів за вибіркою стосується лише наборів зі здогадних пар.
+      if (size > 1 && chosen.some(pair => pair.basis !== 'roles')
+        && sampleHitRate(left, lc, right, rc) < SAMPLE_MIN_HIT && sampleHitRate(right, rc, left, lc) < SAMPLE_MIN_HIT) { sampled += 1; return; }
       const stats = evaluate(left, right, lc, rc, { requireUnique: true }, linker);
       if (!stats) return;
       accepted.push(ids);
@@ -410,6 +465,10 @@ function candidatesFor(left, right, linker) {
         basis: chosen.every(pair => pair.basis === 'roles') ? 'roles' : 'values',
         // Скільки стовпців ключа мають однакові заголовки в обох таблицях: за інших рівних умов це вагоміший збіг.
         sameHeaders: chosen.filter(pair => normalizeHeader(pair.l.header) === normalizeHeader(pair.r.header)).length,
+        caution: [
+          ...(chosen.some(pair => pair.l.orderAssumed || pair.r.orderAssumed) ? ['date-order-assumed'] : []),
+          ...(stats.complete ? [] : ['incomplete-read']),
+        ],
         ...stats,
       });
       return;
@@ -430,7 +489,16 @@ function candidatesFor(left, right, linker) {
     || b.containment - a.containment
     || a.left.columns.join(SEP).localeCompare(b.left.columns.join(SEP))
     || a.right.columns.join(SEP).localeCompare(b.right.columns.join(SEP)));
-  return { ok: true, candidates: candidates.slice(0, LINK_LIMITS.maxCandidates), notes };
+  if (sampled) { notes.push({ code: 'sample-prefilter', pruned: sampled }); reasons.add('sample-prefilter'); }
+  if (candidates.length > LINK_LIMITS.maxCandidates) { notes.push({ code: 'candidates-limited', limit: LINK_LIMITS.maxCandidates, found: candidates.length }); reasons.add('candidates-limited'); }
+  return {
+    ok: true,
+    candidates: candidates.slice(0, LINK_LIMITS.maxCandidates),
+    notes,
+    exhaustive: reasons.size === 0,
+    reasons: [...reasons].sort(),
+    exclusions,
+  };
 }
 
 /**
@@ -485,6 +553,7 @@ export function linkIssues(leftTable, rightTable, candidate) {
       else if (column.decision === 'ambiguous') issues.push({ kind: 'ambiguous-column', side, sourceId: profile.sourceId, column: key, header: column.header });
       if (column.kind === 'date') {
         const formats = dateFormats(column);
+        if (column.orderAssumed) issues.push({ kind: 'date-order-assumed', side, sourceId: profile.sourceId, column: key, header: column.header });
         if (formats.length > 1 || column.unparsed > 0) issues.push({ kind: 'date-format', side, sourceId: profile.sourceId, column: key, header: column.header, formats, unparsed: column.unparsed });
       }
     }
@@ -578,6 +647,7 @@ export function describeCandidate(candidate) {
   const percent = Math.floor(candidate.containment * 100);
   const parts = [`${side(candidate.left.headers)} ↔ ${side(candidate.right.headers)}`, CARDINALITY_LABELS[candidate.cardinality], `збіг ${percent} %`];
   if (!candidate.complete) parts.push('перевірено не на всіх рядках');
+  if (candidate.caution?.includes('date-order-assumed')) parts.push('порядок «день/місяць» дат лише припущено');
   return parts.join(' · ');
 }
 

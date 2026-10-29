@@ -61,12 +61,18 @@ function planAndFlights({ days = 6 } = {}) {
 }
 
 test('canonicalDate розпізнає формати й відкидає неіснуючі дати', () => {
-  assert.deepEqual(canonicalDate('2026-09-05'), { iso: '2026-09-05', format: 'iso' });
-  assert.deepEqual(canonicalDate('2026-09-05T10:20:30Z'), { iso: '2026-09-05', format: 'iso' });
-  assert.deepEqual(canonicalDate('5.9.2026'), { iso: '2026-09-05', format: 'dmy-dot' });
-  assert.deepEqual(canonicalDate('05/09/2026'), { iso: '2026-09-05', format: 'dmy-slash' });
-  assert.deepEqual(canonicalDate('05-09-2026 14:30'), { iso: '2026-09-05', format: 'dmy-dash' });
-  assert.deepEqual(canonicalDate('2026.09.05'), { iso: '2026-09-05', format: 'ymd-dot' });
+  const plain = { ambiguous: false, dayFirstProof: false };
+  assert.deepEqual(canonicalDate('2026-09-05'), { iso: '2026-09-05', format: 'iso', ...plain });
+  assert.deepEqual(canonicalDate('2026-09-05T10:20:30Z'), { iso: '2026-09-05', format: 'iso', ...plain });
+  assert.deepEqual(canonicalDate('5.9.2026'), { iso: '2026-09-05', format: 'dmy-dot', ...plain });
+  assert.deepEqual(canonicalDate('05/09/2026'), { iso: '2026-09-05', format: 'dmy-slash', ambiguous: true, dayFirstProof: false });
+  assert.deepEqual(canonicalDate('05-09-2026 14:30'), { iso: '2026-09-05', format: 'dmy-dash', ambiguous: true, dayFirstProof: false });
+  assert.deepEqual(canonicalDate('2026.09.05'), { iso: '2026-09-05', format: 'ymd-dot', ...plain });
+  // День більше 12 на першому місці доводить «день першим»; однакові частини й крапка неоднозначними не бувають.
+  assert.deepEqual(canonicalDate('25/09/2026'), { iso: '2026-09-25', format: 'dmy-slash', ambiguous: false, dayFirstProof: true });
+  assert.equal(canonicalDate('05/05/2026').ambiguous, false);
+  // Місяць/день/рік з днем більше 12 не розпізнається мовчки як інша дата.
+  assert.equal(canonicalDate('09/25/2026'), null);
   assert.equal(canonicalDate('31.02.2026'), null);
   assert.equal(canonicalDate('вчора'), null);
   assert.equal(canonicalDate(''), null);
@@ -383,6 +389,105 @@ test('синтетичний бюджет часу: 8 таблиць × 10 000 �
   // Поріг із запасом для повільного CI; локально у кілька разів менший (див. звіт PR).
   assert.ok(elapsed < 20_000, `пошук тривав ${Math.round(elapsed)} мс`);
   console.log(`# table-link: 8×10000×20, 28 пар за ${Math.round(elapsed)} мс`);
+});
+
+function rng(seed) {
+  let state = seed;
+  return () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+}
+
+test('повнота пошуку: ролі без інших стовпців — вичерпно; інакше причини названі', () => {
+  const rows = Array.from({ length: 6 }, (_, d) => UNITS.slice(0, 3).map(unit => ({ date: day(d), unit }))).flat();
+  const roleOnly = build([
+    { id: 'x', rows, columns: [col('date', 'Дата', 'date'), col('unit', 'Підрозділ')], roles: { 'event-date': 'date', unit: 'unit' } },
+    { id: 'y', rows: rows.map(row => ({ ...row })), columns: [col('date', 'Дата', 'date'), col('unit', 'Підрозділ')], roles: { 'event-date': 'date', unit: 'unit' } },
+  ]).tables;
+  const exact = candidateKeys(roleOnly[0], roleOnly[1]);
+  assert.equal(exact.exhaustive, true);
+  assert.deepEqual(exact.reasons, []);
+  // Додатковий стовпець без пари за значеннями відсіяно порогом збігу: пошук за значеннями вже не вичерпний.
+  const wider = build(planAndFlights()).tables;
+  const result = candidateKeys(wider[0], wider[1]);
+  assert.equal(result.exhaustive, false);
+  assert.ok(result.reasons.includes('component-prefilter'), JSON.stringify(result.reasons));
+  assert.equal(result.candidates[0].basis, 'roles');
+});
+
+test('відсів складених ключів за вибіркою рахується й робить результат невичерпним', () => {
+  const next = rng(5);
+  const make = n => Array.from({ length: n }, () => ({ a: `a${Math.floor(next() * 40)}`, b: `b${Math.floor(next() * 40)}`, tag: `т${Math.floor(next() * 1000)}` }));
+  const columns = [col('a', 'Перша'), col('b', 'Друга'), col('tag', 'Мітка')];
+  const { tables } = build([{ id: 'x', rows: make(300), columns }, { id: 'y', rows: make(300), columns }]);
+  const result = candidateKeys(tables[0], tables[1]);
+  assert.equal(result.exhaustive, false);
+  assert.ok(result.reasons.includes('sample-prefilter'), JSON.stringify(result));
+  assert.ok(result.notes.find(note => note.code === 'sample-prefilter').pruned >= 1);
+});
+
+test('ключі за підтвердженими ролями не відсіюються вибіркою', () => {
+  // Двоколонковий ключ за ролями з малим перетином рядків (≈17 %), але повним збігом множин ключів не вигадати;
+  // перевіряємо, що лічильник відсіву не зростає для наборів лише з ролей.
+  const next = rng(9);
+  const make = n => Array.from({ length: n }, () => ({ d: day(Math.floor(next() * 28)), u: UNITS[Math.floor(next() * 6)] }));
+  const columns = [col('d', 'Дата', 'date'), col('u', 'Підрозділ')];
+  const { tables } = build([
+    { id: 'x', rows: make(400), columns, roles: { 'event-date': 'd', unit: 'u' } },
+    { id: 'y', rows: make(400), columns, roles: { 'event-date': 'd', unit: 'u' } },
+  ]);
+  const result = candidateKeys(tables[0], tables[1]);
+  assert.ok(!result.notes.some(note => note.code === 'sample-prefilter'));
+});
+
+test('усічене читання й надлишок кандидатів теж названо причинами', () => {
+  const specs = planAndFlights();
+  specs[1].truncated = true;
+  const { tables } = build(specs);
+  assert.ok(candidateKeys(tables[0], tables[1]).reasons.includes('truncated'));
+  const rows = Array.from({ length: 20 }, (_, i) => Object.fromEntries(Array.from({ length: 7 }, (_, k) => [`k${k}`, `к${k}-${i}`])));
+  const columns = Array.from({ length: 7 }, (_, k) => col(`k${k}`, `Код ${k}`));
+  const many = build([{ id: 'x', rows, columns }, { id: 'y', rows: rows.map(row => ({ ...row })), columns }]).tables;
+  const result = candidateKeys(many[0], many[1]);
+  assert.equal(result.candidates.length, LINK_LIMITS.maxCandidates);
+  assert.ok(result.reasons.includes('candidates-limited'));
+  assert.equal(result.exhaustive, false);
+});
+
+test('стовпці, що ключем не бувають, названі в exclusions, а не зникають мовчки', () => {
+  const rows = Array.from({ length: 10 }, (_, i) => ({ nr: String(i + 1), count: i * 3, same: 'так', flag: i % 2 === 0, hole: i < 4 ? '' : `П-${i}`, key: `К-${i}` }));
+  const columns = [col('nr', 'Номер за списком', 'number'), col('count', 'Кількість БП', 'number'), col('same', 'Стан'), col('flag', 'Відбій', 'flag'), col('hole', 'Примітка'), col('key', 'Код')];
+  const { tables } = build([
+    { id: 'x', rows, columns, roles: { 'munition-count': 'count' } },
+    { id: 'y', rows: rows.map(row => ({ ...row })), columns, roles: { 'munition-count': 'count' } },
+  ]);
+  const { exclusions } = candidateKeys(tables[0], tables[1]);
+  const left = Object.fromEntries(exclusions.filter(item => item.side === 'left').map(item => [item.column, item.reason]));
+  assert.deepEqual(left, { nr: 'sequential', count: 'measure', same: 'few-values', hole: 'blank', flag: 'flag' });
+});
+
+test('неоднозначний порядок слеш-дат: кандидат із застереженням, питання, підпис; доказ «день першим» знімає', () => {
+  const ambiguous = ['01/02/2026', '03/04/2026', '05/06/2026', '07/08/2026', '09/10/2026', '11/12/2026', '02/03/2026', '04/05/2026'];
+  const iso = ['2026-02-01', '2026-04-03', '2026-06-05', '2026-08-07', '2026-10-09', '2026-12-11', '2026-03-02', '2026-05-04'];
+  const left = ambiguous.map((date, i) => ({ date, v: `Л-${i}` }));
+  const right = iso.map((date, i) => ({ date, w: `П-${i}` }));
+  const { tables } = build([
+    { id: 'x', rows: left, columns: [col('date', 'Дата', 'date'), col('v', 'Запис')] },
+    { id: 'y', rows: right, columns: [col('date', 'Дата', 'date'), col('w', 'Текст')] },
+  ]);
+  const candidate = candidateKeys(tables[0], tables[1]).candidates.find(item => item.left.columns[0] === 'date');
+  assert.ok(candidate, 'збіг за припущенням «день першим» знайдено як пропозицію');
+  assert.ok(candidate.caution.includes('date-order-assumed'));
+  assert.match(describeCandidate(candidate), /порядок «день\/місяць» дат лише припущено/u);
+  assert.ok(linkIssues(tables[0], tables[1], candidate).some(issue => issue.kind === 'date-order-assumed' && issue.side === 'left'));
+  // Одне значення з днем більше 12 доводить порядок для всього стовпця.
+  left[0] = { date: '25/01/2026', v: 'Л-0' };
+  right[0] = { date: '2026-01-25', w: 'П-0' };
+  const proven = build([
+    { id: 'x', rows: left, columns: [col('date', 'Дата', 'date'), col('v', 'Запис')] },
+    { id: 'y', rows: right, columns: [col('date', 'Дата', 'date'), col('w', 'Текст')] },
+  ]).tables;
+  const sure = candidateKeys(proven[0], proven[1]).candidates.find(item => item.left.columns[0] === 'date');
+  assert.ok(sure);
+  assert.ok(!sure.caution.includes('date-order-assumed'));
 });
 
 test('ядро чисте: не торкається DOM, Tauri, мережі, сховища чи годинника', () => {
