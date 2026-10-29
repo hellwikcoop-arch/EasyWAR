@@ -1,8 +1,9 @@
 // Запускає справжній код карток основних показників РВ із src/rocket.html на синтетичних рядках.
-// Нічого не копіюється: беруться тексти оголошень з файлу й відрізок renderAll між «const cur = …»
-// та «// карта». Потрібен, щоб зафіксувати числа карток перед винесенням у спільне ядро (E2).
+// Нічого не копіюється: беруться тексти оголошень з файлу й відрізок renderAll між «const K = …»
+// та «// карта», а числа рахує справжнє спільне ядро (як window.RVKpiCore, що його ставить src/rv-kpi.js).
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
+import * as core from '../../src/module-adapters/rv-kpi-core.js';
 
 const SOURCE = new URL('../../src/rocket.html', import.meta.url);
 
@@ -39,7 +40,7 @@ function constSource(src, name) {
 /** Повертає run(rows, state): картки (аргументи kpiCard) і текст «ефективності» за рядками й станом D. */
 export async function loadRocketKpi() {
   const src = await readFile(SOURCE, 'utf8');
-  const from = src.indexOf('  const cur = ROWS.filter(inRange), A = agg(cur);');
+  const from = src.indexOf('  const K = window.RVKpiCore.computeRvKpis(');
   const to = src.indexOf('  // карта\n', from);
   if (from < 0 || to < 0) throw new Error('rocket.html: не знайдено відрізок карток у renderAll');
   const body = src.slice(from, to);
@@ -53,7 +54,7 @@ export async function loadRocketKpi() {
     ${body}
     return { cards: el.kpiGrid.cards, eff: el.kpiEff.textContent };
   })`;
-  const factory = vm.runInNewContext(code, { Math, Date, Map, Set, Number, String, isFinite, Array, Object }, { filename: 'rocket-kpi.js', timeout: 5000 });
+  const factory = vm.runInNewContext(code, { Math, Date, Map, Set, Number, String, isFinite, Array, Object, window: { RVKpiCore: Object.freeze({ ...core }) } }, { filename: 'rocket-kpi.js', timeout: 5000 });
   // JSON-копія: об'єкти з vm мають інші прототипи, і assert.deepEqual вважав би їх різними.
   return (rows, state, dmin) => JSON.parse(JSON.stringify(factory(rows, state, dmin, card => card)));
 }
