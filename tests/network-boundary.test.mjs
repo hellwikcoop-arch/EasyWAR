@@ -62,7 +62,7 @@ test('прямі мережеві виклики в src/*.js лише у фай�
   }
 });
 
-test('КОМБАТ: ін'єктований fetch обліковується в мережевих межах', async () => {
+test('КОМБАТ: ін’єктований fetch обліковується в мережевих межах', async () => {
   // T-0021: раніше сканер ловив fetch(...), але пропускав fetchImpl(...).
   assert.ok(NETWORK_CALL.test('await fetchImpl(url, options)'), 'fetchImpl має виявлятися');
   const client = await read('src/assistant/assistant-cloud.js');
