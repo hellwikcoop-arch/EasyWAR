@@ -73,3 +73,38 @@ test('захищені колективи: стани ключа, межі па�
   assert.equal(collectiveLine({ members: 1, latestSeq: 2, rejectedRecords: 0 }), 'учасників: 1, записів журналу: 2');
   assert.match(collectiveLine({ members: 0, latestSeq: 0, rejectedRecords: 2 }), /відхилених записів: 2/);
 });
+
+import {
+  CLASS_OPTIONS, PURPOSE_OPTIONS, TRANSPORT_OPTIONS, checkHours, checkOperation, detailLine,
+  expectText, reportText, tableLine, textKind, transportNote,
+} from '../src/workspace/collectives/secure-core.js';
+
+test('обмін у колективі: підписи класу, транспорту, відмов і перевірки форм', () => {
+  assert.deepEqual(CLASS_OPTIONS.map(option => option.value), ['A', 'B', 'C', 'D']);
+  assert.deepEqual(PURPOSE_OPTIONS.map(option => option.value), ['after-fact', 'planned']);
+  assert.deepEqual(TRANSPORT_OPTIONS.map(option => option.value), ['lan', 'peer_wan', 'base44']);
+  assert.equal(tableLine({ class: 'B', declaredClass: 'B', purpose: 'after-fact', canWrite: true, mine: true }),
+    'клас B, облік після факту, запис дозволено, ваша таблиця');
+  assert.match(tableLine({ class: 'D', declaredClass: 'C', purpose: 'planned', canWrite: false, mine: false }),
+    /вказано C; діє D.*\(завжди D\), без права запису$/);
+  assert.equal(detailLine({ epoch: 0, latestSeq: 3, outbox: 1 }), 'епоха 0, записів журналу: 3, у локальній черзі відправки: 1');
+  const current = { wanAccepted: false, base44Accepted: false };
+  assert.match(transportNote(current, 'peer_wan'), /не прийнятий власником/);
+  assert.match(transportNote(current, 'base44'), /Клас D у хмару не йде/);
+  assert.match(transportNote(current, 'lan'), /мережі на цьому етапі немає/);
+  assert.match(reportText({ allowed: true, message: 'Конверт у локальній черзі', outbox: 2 }), /У черзі: 2\.$/);
+  assert.equal(reportText({ allowed: false, code: 'wan-not-ready', message: 'WAN-транспорт не пройшов безпекове приймання' }),
+    'Відмова (wan-not-ready): WAN-транспорт не пройшов безпекове приймання.');
+  assert.throws(() => checkOperation(''), /64 КіБ/);
+  assert.throws(() => checkOperation('я'.repeat(32 * 1024 + 1)), /64 КіБ/, 'межа в байтах UTF-8');
+  assert.doesNotThrow(() => checkOperation('{"row":"synthetic"}'));
+  assert.equal(checkHours('24'), 24);
+  for (const bad of ['0', '169', '1.5', 'день']) assert.throws(() => checkHours(bad), /1 до 168/);
+  assert.equal(textKind(' EWINV1.abc\n'), 'invitation');
+  assert.equal(textKind('EWJOIN1.abc'), 'request');
+  assert.equal(textKind('EWKEYS1.abc'), 'keys');
+  assert.equal(textKind('щось інше'), null);
+  assert.throws(() => expectText('EWKEYS1.x', 'invitation'), /Вставлено пакет ключів/);
+  assert.throws(() => expectText('', 'keys'), /EWKEYS1\./);
+  assert.doesNotThrow(() => expectText('EWJOIN1.x', 'request'));
+});

@@ -13,7 +13,7 @@ use serde::Serialize;
 use sqlx::{Row, SqlitePool};
 use zeroize::Zeroizing;
 
-use crate::collective::epoch::CollectiveId;
+use crate::collective::epoch::{CollectiveId, EpochKey};
 use crate::collective::identity::{DeviceIdentity, MemberIdentity};
 use crate::collective::replay::{InMemoryMembership, MembershipRecord, MembershipView};
 use crate::collective::secret_store::{SecretStore, StoreError, StoreStatus, UnlockedStore};
@@ -47,6 +47,30 @@ pub enum CollectiveStoreError {
     InvalidName,
     #[error("гранична кількість захищених колективів — 20")]
     TooManyCollectives,
+    #[error("колектив не знайдено в цьому профілі")]
+    CollectiveNotFound,
+    #[error("таблицю колективу не знайдено")]
+    TableNotFound,
+    #[error("клас і призначення таблиці змінює лише її власник")]
+    NotTableOwner,
+    #[error("цей профіль не є учасником колективу")]
+    NotAMember,
+    #[error("ви вже учасник цього колективу")]
+    AlreadyJoined,
+    #[error("текст пошкоджений або не того типу")]
+    InvalidText,
+    #[error("назва таблиці: від 1 до 80 символів без керівних знаків")]
+    InvalidTitle,
+    #[error("невідомий клас, призначення чи транспорт")]
+    InvalidChoice,
+    #[error("строк запрошення: від 1 до 168 годин")]
+    InvalidInvitationHours,
+    #[error("операція порожня або більша за 64 КіБ")]
+    OperationSize,
+    #[error("ключ епохи відсутній: колектив створено попередньою версією, створіть його знову")]
+    EpochKeyMissing,
+    #[error("відмова: {0}")]
+    Rejected(&'static str),
     #[error("помилка сховища ключів: {0}")]
     Io(String),
     #[error("помилка локальної бази колективів: {0}")]
@@ -105,9 +129,9 @@ pub struct CreatedIdentity {
 }
 
 pub struct CollectiveStore {
-    pool: SqlitePool,
-    secrets_dir: PathBuf,
-    params: KdfParams,
+    pub(crate) pool: SqlitePool,
+    pub(crate) secrets_dir: PathBuf,
+    pub(crate) params: KdfParams,
 }
 
 impl CollectiveStore {
@@ -120,7 +144,7 @@ impl CollectiveStore {
     }
 
     #[cfg(test)]
-    fn for_tests(pool: SqlitePool, secrets_dir: PathBuf) -> Self {
+    pub(crate) fn for_tests(pool: SqlitePool, secrets_dir: PathBuf) -> Self {
         Self {
             pool,
             secrets_dir,
@@ -128,7 +152,7 @@ impl CollectiveStore {
         }
     }
 
-    fn secret_store(&self, profile_id: &str) -> SecretStore {
+    pub(crate) fn secret_store(&self, profile_id: &str) -> SecretStore {
         SecretStore::new(secret_store_path(&self.secrets_dir, profile_id), profile_id)
     }
 
@@ -182,7 +206,7 @@ impl CollectiveStore {
 
     /// Журнал складу з бази, заново перевірений: записи застосовуються по `seq`, недійсний
     /// зупиняє префікс і лічиться як відхилений.
-    async fn load_journal(
+    pub(crate) async fn load_journal(
         &self,
         profile_id: &str,
         collective_id: &CollectiveId,
@@ -321,7 +345,7 @@ impl CollectiveStore {
         }
         let store = self.secret_store(profile_id);
         let records = tokio::task::spawn_blocking(move || {
-            let unlocked = store.unlock(password.as_bytes())?;
+            let mut unlocked = store.unlock(password.as_bytes())?;
             let (member, device) = identities(&unlocked)?;
             let public = member.public();
             if public.sign.as_slice() != expected.0
@@ -338,6 +362,12 @@ impl CollectiveStore {
             membership
                 .add_device(&member.issue_device(&device.public(), now_unix))
                 .map_err(|_| CollectiveStoreError::StoreDamaged)?;
+            // Ключ епохи 0 — лише у сховищі секретів; без нього колектив не запечатає жодного
+            // конверта й не впустить нового учасника.
+            unlocked.write(
+                &epoch_purpose(&collective_id, 0),
+                EpochKey::generate().as_bytes(),
+            )?;
             Ok::<_, CollectiveStoreError>((collective_id, membership.records().to_vec()))
         })
         .await
@@ -379,7 +409,7 @@ impl CollectiveStore {
     }
 }
 
-fn identities(
+pub(crate) fn identities(
     unlocked: &UnlockedStore,
 ) -> Result<(MemberIdentity, DeviceIdentity), CollectiveStoreError> {
     let secret = |purpose: &str| -> Result<[u8; KEY_LEN], CollectiveStoreError> {
@@ -397,7 +427,7 @@ fn identities(
     ))
 }
 
-fn check_password(password: &str) -> Result<(), CollectiveStoreError> {
+pub(crate) fn check_password(password: &str) -> Result<(), CollectiveStoreError> {
     if (MIN_PASSWORD_BYTES..=MAX_PASSWORD_BYTES).contains(&password.len()) {
         Ok(())
     } else {
@@ -405,7 +435,7 @@ fn check_password(password: &str) -> Result<(), CollectiveStoreError> {
     }
 }
 
-fn collective_name(name: &str) -> Result<String, CollectiveStoreError> {
+pub(crate) fn collective_name(name: &str) -> Result<String, CollectiveStoreError> {
     let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
     let chars = name.chars().count();
     if chars == 0 || chars > 80 || name.chars().any(is_control_or_format) {
@@ -424,6 +454,12 @@ fn is_control_or_format(c: char) -> bool {
         || ('\u{2066}'..='\u{206F}').contains(&c)
 }
 
+/// Мітка ключа епохи у сховищі секретів профілю: `collective/epoch/<id>/<n>`.
+pub(crate) fn epoch_purpose(collective_id: &CollectiveId, epoch: u32) -> String {
+    let id: String = collective_id.iter().map(|b| format!("{b:02x}")).collect();
+    format!("collective/epoch/{id}/{epoch}")
+}
+
 /// Файл сховища ключів профілю. Ідентифікатор профілю входить у назву лише як hex від
 /// SHA-256, тож у шляху немає довільного тексту.
 pub fn secret_store_path(dir: &Path, profile_id: &str) -> PathBuf {
@@ -434,7 +470,7 @@ pub fn secret_store_path(dir: &Path, profile_id: &str) -> PathBuf {
 
 const BASE32: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
-fn base32(bytes: &[u8]) -> String {
+pub(crate) fn base32(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len().div_ceil(5) * 8);
     let mut buffer: u32 = 0;
     let mut bits = 0;

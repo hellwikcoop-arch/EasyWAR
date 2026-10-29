@@ -214,6 +214,13 @@ impl InvitationLedger {
         Self::default()
     }
 
+    /// Реєстр з уже використаних талонів (збережених у базі колективу).
+    pub fn from_used(used: impl IntoIterator<Item = [u8; ID_LEN]>) -> Self {
+        Self {
+            used: used.into_iter().collect(),
+        }
+    }
+
     pub fn is_used(&self, nonce: &[u8; ID_LEN]) -> bool {
         self.used.contains(nonce)
     }
