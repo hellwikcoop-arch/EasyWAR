@@ -1,5 +1,6 @@
 //! Ідентичність (ADR, 2.2): ключ учасника (Ed25519 для підпису + окрема пара X25519 для
-//! обгорток) і ключ пристрою (Ed25519), запис якого підписує учасник.
+//! обгорток), підписане зв'язування ключа обміну з колективом (G12, U1) і ключ пристрою
+//! (Ed25519), запис якого підписує учасник.
 
 use argon2::password_hash::rand_core::OsRng;
 use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
@@ -7,7 +8,7 @@ use x25519_dalek::{PublicKey, StaticSecret};
 use zeroize::Zeroizing;
 
 use super::codec::{Reader, Writer};
-use super::{labels, sha256, Reason, KEY_LEN, SIGNATURE_LEN};
+use super::{labels, sha256, Reason, ID_LEN, KEY_LEN, SIGNATURE_LEN};
 
 /// Ідентифікатор учасника: SHA-256(мітка ‖ публічний ключ підпису). Не виводиться з
 /// апаратних номерів і не є ідентифікатором лічильника встановлень.
@@ -80,6 +81,41 @@ impl MemberIdentity {
         &self.exchange
     }
 
+    /// Учасник підписує зв'язування свого ключа обміну з колективом (G12, U1):
+    /// `member_id ‖ exchange_pub ‖ collective_id ‖ issued_at` під міткою
+    /// `easywar/collective/v1/exchange-binding`. Новіший запис (більший `issued_at`) — ротація.
+    pub fn bind_exchange(&self, collective_id: [u8; ID_LEN], issued_at: i64) -> ExchangeBinding {
+        self.sign_binding(self.public().exchange, collective_id, issued_at)
+    }
+
+    fn sign_binding(
+        &self,
+        exchange_pub: [u8; KEY_LEN],
+        collective_id: [u8; ID_LEN],
+        issued_at: i64,
+    ) -> ExchangeBinding {
+        let mut binding = ExchangeBinding {
+            sign_pub: self.signing.verifying_key().to_bytes(),
+            exchange_pub,
+            collective_id,
+            issued_at,
+            signature: [0u8; SIGNATURE_LEN],
+        };
+        binding.signature = self.signing.sign(&binding.signed_bytes()).to_bytes();
+        binding
+    }
+
+    /// Зв'язування довільного ключа обміну — лише для тестів зловмисного учасника.
+    #[cfg(test)]
+    pub(crate) fn bind_foreign_exchange(
+        &self,
+        exchange_pub: [u8; KEY_LEN],
+        collective_id: [u8; ID_LEN],
+        issued_at: i64,
+    ) -> ExchangeBinding {
+        self.sign_binding(exchange_pub, collective_id, issued_at)
+    }
+
     /// Учасник підтверджує пристрій (ADR, 2.2): `{device_pub, member_id, issued_at}` під
     /// підписом учасника.
     pub fn issue_device(&self, device: &DevicePublic, issued_at: i64) -> DeviceRecord {
@@ -91,6 +127,104 @@ impl MemberIdentity {
         };
         record.signature = self.signing.sign(&record.signed_bytes()).to_bytes();
         record
+    }
+}
+
+/// Підписане зв'язування ключа обміну учасника з колективом (G12, U1). Ключ підпису
+/// передається разом із записом, бо `member_id` рахується саме з нього.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ExchangeBinding {
+    pub sign_pub: [u8; KEY_LEN],
+    pub exchange_pub: [u8; KEY_LEN],
+    pub collective_id: [u8; ID_LEN],
+    pub issued_at: i64,
+    pub signature: [u8; SIGNATURE_LEN],
+}
+
+impl ExchangeBinding {
+    pub const LEN: usize = 2 * KEY_LEN + ID_LEN + 8 + SIGNATURE_LEN;
+
+    fn member_id(&self) -> MemberId {
+        sha256(&[labels::MEMBER_ID, &self.sign_pub])
+    }
+
+    fn signed_bytes(&self) -> Vec<u8> {
+        let mut w =
+            Writer::with_capacity(labels::EXCHANGE_BINDING.len() + 2 * KEY_LEN + ID_LEN + 8);
+        w.fixed(labels::EXCHANGE_BINDING)
+            .fixed(&self.member_id())
+            .fixed(&self.exchange_pub)
+            .fixed(&self.collective_id)
+            .i64(self.issued_at);
+        w.finish()
+    }
+
+    /// Перевірка підпису учасника і прив'язки до колективу (G12, U2). Лише перевірений
+    /// запис дає [`BoundMember`] — без нього не можна ні вступити, ні отримати обгортку.
+    pub fn verify(&self, collective_id: &[u8; ID_LEN]) -> Result<BoundMember, Reason> {
+        if &self.collective_id != collective_id {
+            return Err(Reason::ExchangeNotBound);
+        }
+        verify(&self.sign_pub, &self.signed_bytes(), &self.signature)
+            .map_err(|_| Reason::ExchangeNotBound)?;
+        Ok(BoundMember {
+            public: MemberPublic {
+                sign: self.sign_pub,
+                exchange: self.exchange_pub,
+            },
+            collective_id: self.collective_id,
+            issued_at: self.issued_at,
+        })
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut w = Writer::with_capacity(Self::LEN);
+        w.fixed(&self.sign_pub)
+            .fixed(&self.exchange_pub)
+            .fixed(&self.collective_id)
+            .i64(self.issued_at)
+            .fixed(&self.signature);
+        w.finish()
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, Reason> {
+        let mut r = Reader::new(bytes);
+        let binding = Self {
+            sign_pub: r.fixed()?,
+            exchange_pub: r.fixed()?,
+            collective_id: r.fixed()?,
+            issued_at: r.i64()?,
+            signature: r.fixed()?,
+        };
+        r.finish()?;
+        Ok(binding)
+    }
+}
+
+/// Учасник із перевіреним зв'язуванням ключа обміну. Створюється лише
+/// [`ExchangeBinding::verify`], тому кожна обгортка епохи адресована підтвердженому ключу.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct BoundMember {
+    public: MemberPublic,
+    collective_id: [u8; ID_LEN],
+    issued_at: i64,
+}
+
+impl BoundMember {
+    pub fn public(&self) -> &MemberPublic {
+        &self.public
+    }
+
+    pub fn member_id(&self) -> MemberId {
+        self.public.member_id()
+    }
+
+    pub fn collective_id(&self) -> &[u8; ID_LEN] {
+        &self.collective_id
+    }
+
+    pub fn issued_at(&self) -> i64 {
+        self.issued_at
     }
 }
 
@@ -220,6 +354,61 @@ mod tests {
             DeviceIdentity::from_secret(&device.secret()).public(),
             device.public()
         );
+    }
+
+    #[test]
+    fn exchange_binding_is_signed_by_member_for_one_collective() {
+        let member = MemberIdentity::generate();
+        let other = MemberIdentity::generate();
+        let collective = [7u8; ID_LEN];
+        let binding = member.bind_exchange(collective, 1_700_000_000);
+        let bound = binding.verify(&collective).unwrap();
+        assert_eq!(bound.public(), &member.public());
+        assert_eq!(bound.member_id(), member.member_id());
+        assert_eq!(bound.issued_at(), 1_700_000_000);
+        assert_eq!(
+            ExchangeBinding::from_bytes(&binding.to_bytes()).unwrap(),
+            binding
+        );
+        assert_eq!(binding.to_bytes().len(), ExchangeBinding::LEN);
+
+        // Інший колектив, підмінений ключ обміну, час чи ключ підпису — запис недійсний.
+        assert_eq!(
+            binding.verify(&[8u8; ID_LEN]).unwrap_err(),
+            Reason::ExchangeNotBound
+        );
+        let mut swapped = binding;
+        swapped.exchange_pub = other.public().exchange;
+        assert_eq!(
+            swapped.verify(&collective).unwrap_err(),
+            Reason::ExchangeNotBound
+        );
+        let mut later = binding;
+        later.issued_at += 1;
+        assert_eq!(
+            later.verify(&collective).unwrap_err(),
+            Reason::ExchangeNotBound
+        );
+        let mut stolen = binding;
+        stolen.sign_pub = other.public().sign;
+        assert_eq!(
+            stolen.verify(&collective).unwrap_err(),
+            Reason::ExchangeNotBound
+        );
+        assert_eq!(
+            ExchangeBinding::from_bytes(&binding.to_bytes()[..ExchangeBinding::LEN - 1])
+                .unwrap_err(),
+            Reason::Malformed
+        );
+    }
+
+    #[test]
+    fn exchange_binding_label_differs_from_device_record() {
+        // Підпис запису пристрою не можна видати за зв'язування й навпаки: різні мітки.
+        assert_ne!(labels::EXCHANGE_BINDING, labels::DEVICE_RECORD);
+        let member = MemberIdentity::generate();
+        let binding = member.bind_exchange([1u8; ID_LEN], 5);
+        assert!(binding.signed_bytes().starts_with(labels::EXCHANGE_BINDING));
     }
 
     #[test]

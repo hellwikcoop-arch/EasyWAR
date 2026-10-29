@@ -509,3 +509,19 @@ test('оболонка: вкладки «Розділи» і «Бібліоте�
     assert.ok(library.includes(`'${label}`) || library.includes(`${label}'`), label);
   }
 });
+
+test('host.collectives є лише в застосунку «Колективи» з Tauri і викликає команди collective_*', async () => {
+  const calls = [];
+  const invoke = async (command, args) => { calls.push([command, args]); return { keyStore: 'absent' }; };
+  const host = createHost({ appEntry: appById('collectives'), invoke });
+  assert.deepEqual(await host.collectives.status(), { keyStore: 'absent' });
+  await host.collectives.createIdentity('пароль-профілю');
+  await host.collectives.create('пароль-профілю', 'Група');
+  assert.deepEqual(calls, [
+    ['collective_status', undefined],
+    ['collective_create_identity', { password: 'пароль-профілю' }],
+    ['collective_create', { password: 'пароль-профілю', name: 'Група' }],
+  ]);
+  assert.equal(createHost({ appEntry: appById('collectives') }).collectives, null, 'без Tauri');
+  assert.equal(createHost({ appEntry: appById('easygreen'), invoke }).collectives, null, 'інший застосунок');
+});

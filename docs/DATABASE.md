@@ -79,6 +79,16 @@ and style) and grid placements. As for the profile schema, Rust checks only the 
 `revision` used as a compare-and-swap mark; the JS core (`src/module-instance-core.js`)
 composes and validates the content. No module rows or raw XLSX values are stored; deleting
 the profile removes the layouts (`ON DELETE CASCADE`). Migration
+`0019_collectives.sql` (E8, stage C3b, first slice) adds three tables owned by the
+profile and deleted with it: `collective_identities` (the profile's member key —
+only the public parts: `member_id`, `sign_pub`, `exchange_pub`, `device_pub`; the
+secrets live in the per-profile secret store file under the profile password,
+`collective::secret_store`, never in the database), `collectives` (collectives this
+profile created: random 16-byte id, name) and `collective_membership_log` (the
+applied contiguous prefix of the signed membership journal, one canonical
+`MembershipRecord` blob per `seq`; Rust re-verifies and re-applies the journal on
+every read, so a tampered row grants nothing). No network touches these rows.
+Migration
 `0012_dashboard_module_style.sql` adds `dashboard_modules.style` — the look chosen
 when the module was created: `standard` (default for existing modules), `branch`
 (colours of the dashboard's service branch) or `heightwell` («Пункт керування»);
