@@ -14,7 +14,7 @@ pub const SCHEMA_FORMAT: &str = "easywar.profile-schema";
 /// Найвища версія формату, яку цей застосунок уміє читати й писати.
 pub const SUPPORTED_FORMAT_VERSION: i64 = 1;
 const MAX_SCHEMA_BYTES: usize = 1_048_576;
-const MAX_SOURCES: usize = 64;
+const MAX_SOURCES: usize = 256;
 const MAX_COLUMNS_PER_SOURCE: usize = 200;
 const MAX_BINDINGS: usize = 2000;
 

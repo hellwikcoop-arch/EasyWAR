@@ -3,6 +3,7 @@ mod app_update;
 pub mod backup;
 pub mod base_tables;
 pub mod collective;
+pub mod dashboard_layout;
 pub mod dashboard_modules;
 mod database;
 mod desktop_shell;
@@ -40,6 +41,7 @@ use app_update::{AppUpdateStatus, PendingUpdate};
 use backup::BackupStore;
 use base_tables::BaseTable;
 use chrono::{SecondsFormat, Utc};
+use dashboard_layout::{DashboardLayoutRecord, DashboardLayoutStore};
 use dashboard_modules::{
     DashboardModule, DashboardModuleData, DashboardModuleStore, DashboardModuleTemplate,
     NewImportCorrection,
@@ -479,6 +481,60 @@ async fn reset_profile_schema(
 ) -> Result<(), String> {
     schemas
         .reset(&active_profile_id(&session)?, expected_revision)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// Розкладка дашборда активного профілю: картки модулів, їхні період, стиль і місце (етап E4).
+/// Профіль береться з сеансу. Без збереженої розкладки повертає `layout: null`, ревізію 0.
+#[tauri::command]
+async fn get_dashboard_layout(
+    layouts: tauri::State<'_, DashboardLayoutStore>,
+    session: tauri::State<'_, ProfileSession>,
+    dashboard_id: String,
+) -> Result<DashboardLayoutRecord, String> {
+    layouts
+        .get(&active_profile_id(&session)?, &dashboard_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// Зберігає розкладку активного профілю (дашборд береться з документа). `expected_revision` —
+/// ревізія, яку клієнт прочитав (0, якщо розкладки ще не було); якщо збережена вже інша,
+/// нічого не змінюється.
+#[tauri::command]
+async fn save_dashboard_layout(
+    layouts: tauri::State<'_, DashboardLayoutStore>,
+    session: tauri::State<'_, ProfileSession>,
+    layout: Value,
+    expected_revision: i64,
+) -> Result<DashboardLayoutRecord, String> {
+    let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
+    layouts
+        .save(
+            &active_profile_id(&session)?,
+            &layout,
+            expected_revision,
+            &now,
+        )
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// Стирає розкладку дашборда активного профілю. Таблиці модулів, їхні дані й схему профілю не чіпає.
+#[tauri::command]
+async fn reset_dashboard_layout(
+    layouts: tauri::State<'_, DashboardLayoutStore>,
+    session: tauri::State<'_, ProfileSession>,
+    dashboard_id: String,
+    expected_revision: i64,
+) -> Result<(), String> {
+    layouts
+        .reset(
+            &active_profile_id(&session)?,
+            &dashboard_id,
+            expected_revision,
+        )
         .await
         .map_err(|error| error.to_string())
 }
@@ -3456,6 +3512,7 @@ pub fn run() {
             app.manage(DatabaseStatusStore::new(pool.clone()));
             app.manage(DashboardModuleStore::new(pool.clone()));
             app.manage(ProfileSchemaStore::new(pool.clone()));
+            app.manage(DashboardLayoutStore::new(pool.clone()));
             app.manage(module_source_selection::SourceSelections::default());
             app.manage(office_files::OfficeFileHandles::default());
             app.manage(LibraryStore::new(pool.clone()));
@@ -3518,6 +3575,9 @@ pub fn run() {
             get_profile_schema,
             save_profile_schema,
             reset_profile_schema,
+            get_dashboard_layout,
+            save_dashboard_layout,
+            reset_dashboard_layout,
             get_local_profiles,
             register_local_profile,
             set_local_profile_modules,
