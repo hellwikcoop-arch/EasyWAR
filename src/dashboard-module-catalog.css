@@ -229,3 +229,4 @@ html[data-theme=light] .ewmc-create-live{box-shadow:0 10px 14px -12px rgba(31,75
 .ewmc-links-decide{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0}.ewmc-links-done{color:var(--ok,#5fd08a);font-size:12px;font-weight:700}
 .ewmc-links-rejected{font-size:11px;color:var(--muted,#9fb0c4)}
 .ewmc-related{margin:6px 0 0;padding:0 14px;font-size:11px;color:var(--muted,#9fb0c4)}
+.ewmc-links-groups{display:grid;gap:6px}.ewmc-links-reset{display:grid;gap:6px;justify-items:start}.ewmc-delete-links{margin:0 0 6px;font-size:12px;color:var(--warn,#f2b84b)}

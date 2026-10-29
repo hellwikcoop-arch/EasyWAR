@@ -5,10 +5,10 @@ import { readFile } from 'node:fs/promises';
 import { emptySchema } from '../src/profile-schema-core.js';
 import { syncModuleSources } from '../src/profile-schema-modules-core.js';
 import { linkIssues, suggestRelations } from '../src/table-link-core.js';
-import { confirmRelation, rejectRelation, clearRelation, relationsOf } from '../src/profile-schema-core.js';
+import { confirmRelation, rejectRelation, clearRelation, clearRelations, setGroups, groupsOf, relationsOf, removeSource } from '../src/profile-schema-core.js';
 import {
   EXCLUSION_TEXT, REASON_TEXT, confirmArgs, confirmBlock, decisionOf, issueText, linkInputs, pairView, rejectArgs,
-  rejectedRelationViews, relatedLine, savedRelationViews, summaryLine,
+  rejectedRelationViews, relatedLine, savedRelationViews, summaryLine, suggestedGroups, groupsNeedSaving, savedGroupViews, deleteLinksNote,
 } from '../src/table-link-view-core.js';
 
 // Лише синтетичні дані: вигадані підрозділи, жодних реальних таблиць.
@@ -207,4 +207,65 @@ test('збережені зв’язки: текст, «перевірте», р
   // жодне значення клітинки не потрапляє ні в схему, ні в показ
   const everything = JSON.stringify([saved, savedRelationViews(saved), relatedLine(saved, 'module:plan')]);
   for (const unit of UNITS) assert.ok(!everything.includes(unit));
+});
+
+function threeTables() {
+  const third = { id: 'extra', title: 'Склад', fields: [field('date', 'Дата', 'date', 0), field('unit', 'Підрозділ', 'text', 1), field('item', 'Позиція', 'text', 2)] };
+  const lonely = { id: 'lonely', title: 'Окрема', fields: [field('a', 'Альфа', 'text', 0), field('b', 'Бета', 'text', 1)] };
+  const synced = syncModuleSources(emptySchema('profile-view'), [modulePlan, moduleFlights, third, lonely]);
+  assert.ok(synced.ok, synced.message);
+  return synced.schema;
+}
+const keyArgs = (l, r) => ({ left: { sourceId: l, columns: ['date', 'unit'] }, right: { sourceId: r, columns: ['date', 'unit'] }, cardinality: 'one-many', basis: 'values' });
+
+test('групи: з’єднані зв’язками таблиці — одна група, окрема таблиця в групу не потрапляє', () => {
+  let schema = threeTables();
+  assert.deepEqual(suggestedGroups(schema), []);
+  schema = confirmRelation(schema, keyArgs('module:plan', 'module:flights')).schema;
+  schema = confirmRelation(schema, keyArgs('module:flights', 'module:extra')).schema;
+  const groups = suggestedGroups(schema);
+  assert.equal(groups.length, 1);
+  assert.deepEqual(groups[0].sourceIds, ['module:extra', 'module:flights', 'module:plan']);
+  assert.equal(groups[0].title, 'Склад + Вильоти + План');
+  assert.equal(groupsNeedSaving(schema), true);
+  const saved = setGroups(schema, groups);
+  assert.ok(saved.ok, saved.message);
+  assert.equal(groupsNeedSaving(saved.schema), false);
+  assert.equal(savedGroupViews(saved.schema)[0].tables.length, 3);
+});
+
+test('групи: дві окремі пари дають дві групи, зняття зв’язку розпускає групу, «Скинути зв’язки» чистить усе', () => {
+  let schema = threeTables();
+  schema = confirmRelation(schema, keyArgs('module:plan', 'module:flights')).schema;
+  schema = confirmRelation(schema, { left: { sourceId: 'module:extra', columns: ['unit'] }, right: { sourceId: 'module:lonely', columns: ['a'] }, cardinality: 'one-many', basis: 'values' }).schema;
+  const groups = suggestedGroups(schema);
+  assert.equal(groups.length, 2);
+  const grouped = setGroups(schema, groups).schema;
+  const [first] = relationsOf(grouped);
+  const cut = clearRelation(grouped, first.id).schema;
+  assert.equal(groupsOf(cut).length, 1, 'розпалась лише група цієї пари');
+  const reset = clearRelations(grouped).schema;
+  assert.deepEqual([relationsOf(reset), groupsOf(reset)], [[], []]);
+  assert.equal(reset.sources.length, 4, 'таблиці лишаються');
+});
+
+test('попередження перед видаленням модуля називає зв’язані таблиці; після видалення зв’язків і груп немає', () => {
+  let schema = threeTables();
+  assert.equal(deleteLinksNote(schema, 'module:plan'), '');
+  schema = confirmRelation(schema, keyArgs('module:plan', 'module:flights')).schema;
+  assert.equal(deleteLinksNote(schema, 'module:plan'), 'Зникне й підтверджений зв’язок із «Вильоти»; решта модулів лишиться без змін.');
+  assert.match(deleteLinksNote(schema, 'module:flights'), /«План»/u);
+  assert.equal(deleteLinksNote(schema, 'module:lonely'), '');
+  schema = setGroups(schema, suggestedGroups(schema)).schema;
+  const removed = removeSource(schema, 'module:plan');
+  assert.deepEqual([relationsOf(removed.schema).length, groupsOf(removed.schema).length], [0, 0]);
+  assert.equal(removed.schema.sources.some(source => source.id === 'module:plan'), false);
+});
+
+test('екран B4: кнопки груп і скидання, попередження в картці', async () => {
+  const panel = await readFile(new URL('../src/table-link-panel.js', import.meta.url), 'utf8');
+  for (const action of ['split-groups', 'clear-groups', 'reset-links', 'confirm-reset-links']) assert.match(panel, new RegExp(`data-action': '${action}'`, 'u'));
+  const page = await readFile(new URL('../src/dashboard-module-catalog.js', import.meta.url), 'utf8');
+  assert.match(page, /deleteLinksNote\(state\.schema/u);
+  assert.match(page, /data-delete-links-for/u);
 });

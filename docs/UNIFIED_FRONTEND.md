@@ -721,6 +721,10 @@ v1 і блоки вкладок через `listDefinitions` + `validateRegistry
 припущеним порядком «день/місяць» не підтверджується), `savedRelationViews`, `rejectedRelationViews`, `relatedLine`
 (рядок «Зв'язано з: …» `p.ewmc-related[data-related-for]` на картці модуля). Кнопки: `confirm-relation`,
 `replace-relation`, `reject-relation`, `clear-relation`, `restore-relation`.
+Групи й попередження (B4): `suggestedGroups` (компоненти зв'язності підтверджених зв'язків з ≥ 2 таблиць, `g1`, `g2`…),
+`groupsNeedSaving`, `savedGroupViews`, `deleteLinksNote` (текст у картці модуля перед видаленням: `p.ewmc-delete-links[data-delete-links-for]`,
+оновлюється разом із `refreshRelatedLines`); кнопки `split-groups` (`setGroups`), `clear-groups`, `reset-links` →
+`confirm-reset-links` (`clearRelations`, два кроки). `removeSource` розпускає групу, що лишилась з однієї таблиці.
 CSS — `.ewmc-links*` у `dashboard-module-catalog.css`. Тести — `tests/table-link-view.test.mjs`
 (логіка й текстові контракти: імпорт, відсутність `invoke`, `innerHTML`, запису схеми).
 
