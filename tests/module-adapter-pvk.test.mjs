@@ -9,6 +9,7 @@ import {
   percentageAffected,
   pvkSummaryInputs,
 } from '../src/module-adapters/pvk-summary-core.js';
+import { PVK_DYNAMICS_DEFINITIONS, computePvkDynamics } from '../src/module-adapters/pvk-dynamics-core.js';
 
 // Еталон «до»: формули підсумку з createDashboardModel до E2, скопійовані дослівно.
 function sumGroup(sheetModel, groupName) {
@@ -148,5 +149,66 @@ test('E2 ПВК: блок охоплює картки реєстру, а ста�
   assert.match(core, /computePvkSummary\(pvkSummaryInputs\(\{ aa, air, objects \}, sumGroup\)\)/);
   assert.doesNotMatch(core, /totalAu:/, 'формула підсумку лишилась у старому ядрі');
   const adapter = await readFile(new URL('../src/module-adapters/pvk-summary-core.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(adapter, /document|window|innerHTML/, 'ядро блока не працює з DOM');
+});
+
+// Еталон «до» для рядів за днями: код createDashboardModel до другого блока E2, дослівно.
+function legacyMergeDaily(models, selector) {
+  const values = new Map();
+  for (const sheet of models) {
+    const metrics = selector(sheet);
+    for (const metric of metrics) {
+      const widget = sheet.widgets.find(item => item.metric === metric);
+      for (const item of widget?.series || []) values.set(item.date, (values.get(item.date) || 0) + item.value);
+    }
+  }
+  return [...values.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([date, value]) => ({ date, value }));
+}
+
+function legacyDynamics(sheets) {
+  const activity = legacyMergeDaily(sheets, sheet => sheet.name === 'АА' || sheet.name === 'ПС' ? ['АУ'] : []);
+  return {
+    activity,
+    dynamics: {
+      au: activity,
+      munitions: legacyMergeDaily(sheets, sheet => sheet.groups.find(group => group.name === 'Боєприпаси')?.metrics || []),
+      objects: legacyMergeDaily(sheets, sheet => sheet.name === "Об'єкти" ? (sheet.groups.find(group => group.name === 'Уражені об’єкти')?.metrics || []) : []),
+      expenditure: legacyMergeDaily(sheets, sheet => sheet.name === "Об'єкти" ? ['Витрата'] : []),
+      affected: legacyMergeDaily(sheets, sheet => sheet.name === 'АА' || sheet.name === 'ПС' ? ['Уражено'] : []),
+      reconnaissance: legacyMergeDaily(sheets, sheet => sheet.name === 'ПС' ? ['Дорозвідується'] : []),
+    },
+  };
+}
+
+test('E2 ПВК: ряди за днями через спільне ядро дорівнюють еталону «до» для кожного випадку', () => {
+  for (const [name, workbook, range] of CASES) {
+    const model = createDashboardModel(workbook, range);
+    const before = legacyDynamics(model.sheets);
+    assert.deepEqual(computePvkDynamics(model.sheets), before, name);
+    assert.deepEqual({ activity: model.summary.activity, dynamics: model.summary.dynamics }, before, `${name}: summary дашборда`);
+    assert.equal(model.summary.dynamics.au, model.summary.activity, `${name}: «АУ» динаміки — той самий ряд, що й календар`);
+  }
+});
+
+test('E2 ПВК: ряди повної книги збігаються з ручним підрахунком', () => {
+  const { summary } = createDashboardModel(FULL);
+  assert.deepEqual(summary.activity, [
+    { date: '2026-03-01', value: 6 }, { date: '2026-03-02', value: 3 },
+    { date: '2026-03-15', value: 1 }, { date: '2026-03-31', value: 1 },
+  ]);
+  assert.deepEqual(summary.dynamics.munitions.map(item => item.value), [22, 6, 2, 3]);
+  assert.deepEqual(summary.dynamics.objects, [{ date: '2026-03-01', value: 3 }, { date: '2026-03-31', value: 2 }]);
+  assert.deepEqual(summary.dynamics.expenditure, [{ date: '2026-03-01', value: 12 }, { date: '2026-03-31', value: 3 }]);
+  assert.deepEqual(summary.dynamics.reconnaissance, [{ date: '2026-03-01', value: 1 }, { date: '2026-03-15', value: 1 }]);
+  assert.deepEqual(computePvkDynamics(), { activity: [], dynamics: { au: [], munitions: [], objects: [], expenditure: [], affected: [], reconnaissance: [] } });
+});
+
+test('E2 ПВК: блок рядів відповідає реєстру, а старе ядро не рахує ряди саме', async () => {
+  const registry = new Map(listDefinitions().map(item => [item.definitionId, item]));
+  for (const id of PVK_DYNAMICS_DEFINITIONS) assert.ok(registry.get(id)?.usedIn.some(use => use.surface === 'pvk'), `${id} немає в реєстрі модулів`);
+  const core = await readFile(new URL('../src/pvk-dashboard-core.js', import.meta.url), 'utf8');
+  assert.match(core, /Object\.assign\(summary, computePvkDynamics\(sheets\)\)/);
+  assert.doesNotMatch(core, /function mergeDaily/, 'ряди за днями лишились у старому ядрі');
+  const adapter = await readFile(new URL('../src/module-adapters/pvk-dynamics-core.js', import.meta.url), 'utf8');
   assert.doesNotMatch(adapter, /document|window|innerHTML/, 'ядро блока не працює з DOM');
 });

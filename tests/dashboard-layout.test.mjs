@@ -36,15 +36,15 @@ test('картки внизу меню: лише локальні зображе
 test('картки показників ПВК: кожен ключ icon з pvk-dashboard.js має маску, а міні-графік — реальний ряд з моделі', async () => {
   const js = await read('pvk-dashboard.js');
   const css = await read('dashboard-layout.css');
-  const core = await read('pvk-dashboard-core.js');
+  const core = await read('module-adapters/pvk-dynamics-core.js');
   const keys = new Set([...js.matchAll(/icon:\s*'([\w-]+)'/g)].map(match => match[1]));
   assert.ok(keys.size >= 8, `ключів іконок: ${keys.size}`);
   for (const key of keys) {
     assert.match(css, new RegExp(`\\.pvk-kpi-ic\\[data-ic="${key}"\\]\\s*\\{\\s*--kpi-ic:\\s*var\\(--ic-${key}\\)`), `немає маски для ${key}`);
     assert.match(css, new RegExp(`--ic-${key}:\\s*url\\(`), `немає --ic-${key}`);
   }
-  // Ряди для графіків беруться лише з summary.dynamics, який рахує ядро; вигаданих рядів на фронтенді немає.
-  for (const [, series] of js.matchAll(/series:\s*summary\.dynamics\.(\w+)/g)) assert.match(core, new RegExp(`\\b${series}:\\s*(mergeDaily|summary\\.activity)`), `ядро не рахує dynamics.${series}`);
+  // Ряди для графіків беруться лише з summary.dynamics, який рахує спільне ядро; вигаданих рядів на фронтенді немає.
+  for (const [, series] of js.matchAll(/series:\s*summary\.dynamics\.(\w+)/g)) assert.match(core, new RegExp(`\\b${series}:\\s*(mergeDaily|activity)`), `ядро не рахує dynamics.${series}`);
 });
 
 test('картки УДШВ: плитка-іконка, міні-графік із заливкою, число лишається прямим нащадком картки', async () => {
