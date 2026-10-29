@@ -635,3 +635,9 @@ keyColumns, correctedCells })` дає додані, змінені, зниклі
 `keyOptions`). Єдиний запис — `replace_dashboard_module_rows` з `replaceRowsRequest`, тобто з перевіркою
 позначки версії; огляд файла забувається (`release: true`) після застосування й при згортанні панелі.
 
+Розмір і порядок карток (E4): `module-instance-core.js` — `SIZE_CHOICES`, `orderedIds`, `moveInstance(layout, id, targetId)`,
+`resizeInstance(layout, id, width)`; `dashboard-layout-view-core.js` — `sizeChoices(width)`, `orderedCards` повертає й
+`at` (розміщення). `instanceBar` має список розміру, кнопки `move-earlier`/`move-later` і ручку `drag-card`;
+`renderModule` ставить `grid-column: span w`, сітка `.ewmc-dashboard-grid[data-layout]` — 12 колонок, а картка
+приймає `drop` від ручки іншої. Висоту `h` розкладка зберігає, але екран її поки не застосовує.
+

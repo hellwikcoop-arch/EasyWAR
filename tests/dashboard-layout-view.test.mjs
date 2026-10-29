@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-import { PERIOD_CHOICES, choiceOf, periodFromChoice, periodLabel, orderedCards, cardModel } from '../src/dashboard-layout-view-core.js';
+import { PERIOD_CHOICES, choiceOf, periodFromChoice, periodLabel, orderedCards, cardModel, sizeChoices } from '../src/dashboard-layout-view-core.js';
 import { emptyLayout, duplicateInstance, updateInstance, placeInstance, setSharedPeriod, MAX_COPIES } from '../src/module-instance-core.js';
 import { ensureModuleInstances } from '../src/module-instance-modules-core.js';
 import { emptySchema, addSource, confirmBinding } from '../src/profile-schema-core.js';
@@ -108,4 +108,15 @@ test('екран: каталог модулів кличе розкладку л
   assert.match(panel, /data-action': 'duplicate-card'/u);
   assert.match(panel, /data-action': 'remove-card'/u);
   assert.doesNotMatch(panel, /stroke-dasharray/u);
+});
+
+test('вибір розміру: готові ширини, нестандартна з розкладки не губиться; картки несуть своє розміщення', () => {
+  assert.deepEqual(sizeChoices(6).map(item => item.w), [4, 6, 8, 12]);
+  assert.deepEqual(sizeChoices(5).map(item => item.w), [4, 5, 6, 8, 12]);
+  const base = ensureModuleInstances(emptyLayout('p'), [module('m1')]).layout;
+  const id = base.instances[0].id;
+  assert.equal(orderedCards(base, [module('m1')])[0].at.w, 6, 'типово — половина ширини');
+  const layout = placeInstance(base, id, { x: 0, y: 0, w: 8, h: 3 }).layout;
+  assert.equal(orderedCards(layout, [module('m1')])[0].at.w, 8);
+  assert.equal(ensureModuleInstances(emptyLayout('p'), [module('m2', { defaultSpan: 2 })]).layout.placements[0].w, 12);
 });

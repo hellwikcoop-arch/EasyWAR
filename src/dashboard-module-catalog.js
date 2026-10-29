@@ -48,7 +48,7 @@ import { mountChart } from './dashboard-module-charts.js';
 import { columnPicker } from './dashboard-module-picker.js';
 import { forgetProfileSchemaModule, loadProfileSchema, syncProfileSchemaModules } from './profile-schema-client.js';
 import { loadDashboardLayout, updateDashboardLayout } from './dashboard-layout-client.js';
-import { duplicateInstance, removeInstance, setSharedPeriod, updateInstance } from './module-instance-core.js';
+import { duplicateInstance, moveInstance, removeInstance, resizeInstance, setSharedPeriod, updateInstance } from './module-instance-core.js';
 import { ensureModuleInstances, forgetModuleInstances } from './module-instance-modules-core.js';
 import { cardModel, orderedCards } from './dashboard-layout-view-core.js';
 import { instanceBar, sharedPeriodBar } from './dashboard-layout-panel.js';
@@ -319,11 +319,13 @@ function initialize() {
     if (state.layout) {
       host.append(sharedPeriodBar({ el, layout: state.layout, onChange: period => changeLayout(layout => setSharedPeriod(layout, period)) }));
       const today = localDay();
-      for (const { instance, module } of orderedCards(state.layout, state.modules)) {
+      const cards = orderedCards(state.layout, state.modules);
+      grid.dataset.layout = 'cards';
+      cards.forEach(({ instance, module, at }, index) => {
         const payload = state.data.get(module.id);
         const model = cardModel({ layout: state.layout, schema: state.schema, instance, rows: cardReadState(payload).rows, today });
-        grid.append(renderModule(module, payload, { instance, model }));
-      }
+        grid.append(renderModule(module, payload, { instance, model, width: at.w, before: cards[index - 1]?.instance.id || '', after: cards[index + 1]?.instance.id || '' }));
+      });
     } else {
       for (const module of state.modules) grid.append(renderModule(module, state.data.get(module.id)));
     }
@@ -377,7 +379,14 @@ function initialize() {
     keepButton.addEventListener('click', () => ask(false));
     confirmButton.addEventListener('click', () => deleteModule(module, [keepButton, confirmButton]));
     loadStyleFonts(module.style);
-    const card = el('article', { class: `ewmc-module span-${module.defaultSpan === 2 ? 2 : 1}`, 'data-kind': module.visualKind, 'data-style': module.style, 'data-branch': module.branch },
+    const card = el('article', {
+      class: placed ? 'ewmc-module' : `ewmc-module span-${module.defaultSpan === 2 ? 2 : 1}`,
+      style: placed ? { gridColumn: `span ${placed.width}` } : null,
+      'data-kind': module.visualKind,
+      'data-style': module.style,
+      'data-branch': module.branch,
+      'data-instance-id': placed?.instance.id,
+    },
       el('header', { class: 'ewmc-module-head' },
         el('div', {}, el('h3', { text: placed?.instance.title || module.title }), el('p', { text: `${rowCountLabel(module.rowCount)} · локальна SQLite${placed?.model.ok ? ` · ${placed.model.periodLabel}` : ''}` })),
         el('span', { class: `ewmc-live${failed ? ' is-failed' : ''}`, text: failed ? 'Не прочитано' : module.rowCount ? 'Дані' : 'Створено' })),
@@ -388,6 +397,11 @@ function initialize() {
         onPeriod: period => changeLayout(layout => updateInstance(layout, placed.instance.id, { period })),
         onDuplicate: () => changeLayout(layout => duplicateInstance(layout, placed.instance.id), 'Картку скопійовано: змініть їй період.'),
         onRemove: () => changeLayout(layout => removeInstance(layout, placed.instance.id), 'Картку прибрано; таблиця й дані модуля лишились.'),
+        width: placed.width,
+        canEarlier: Boolean(placed.before),
+        canLater: Boolean(placed.after),
+        onSize: width => changeLayout(layout => resizeInstance(layout, placed.instance.id, width)),
+        onMove: direction => changeLayout(layout => moveInstance(layout, placed.instance.id, direction < 0 ? placed.before : placed.after)),
       }) : null,
       failed
         ? el('div', { class: 'ewmc-visual ewmc-read-failed', role: 'alert' },
@@ -424,6 +438,15 @@ function initialize() {
         el('p', { text: schemaSummary(module.fields) })),
     );
     if (readState === 'empty') card.querySelector('.ewmc-visual')?.append(el('p', { class: 'ewmc-no-data', text: 'Таблиця готова · даних ще немає' }));
+    if (placed) {
+      // Картку можна кинути на іншу: вона стає на її місце (ручка перетягування — в смужці картки).
+      card.addEventListener('dragover', event => event.preventDefault());
+      card.addEventListener('drop', event => {
+        event.preventDefault();
+        const draggedId = event.dataTransfer?.getData('text/plain');
+        if (draggedId && draggedId !== placed.instance.id) changeLayout(layout => moveInstance(layout, draggedId, placed.instance.id));
+      });
+    }
     return card;
   }
 
