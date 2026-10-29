@@ -311,13 +311,22 @@ pub enum HandleTarget {
     Library(LibraryTarget),
 }
 
-/// Документ бібліотеки, який головне вікно передало редактору: його забирає перший
-/// `office_open_file` того самого профілю й застосунку з відповідним розширенням.
+/// Звідки взяти очікуваний файл: версія документа бібліотеки або файл сховища
+/// «Робочого середовища» на диску (`workspace_files`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PendingSource {
+    Library { version_id: String },
+    Disk { path: PathBuf },
+}
+
+/// Документ бібліотеки чи файл сховища, який головне вікно передало редактору: його
+/// забирає перший `office_open_file` того самого профілю й застосунку з відповідним
+/// розширенням.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingFile {
     pub profile_id: String,
     pub app: &'static str,
-    pub version_id: String,
+    pub source: PendingSource,
     pub ext: String,
     pub name: String,
 }
@@ -663,7 +672,9 @@ mod tests {
         PendingFile {
             profile_id: profile.to_owned(),
             app,
-            version_id: "ver-1".to_owned(),
+            source: PendingSource::Library {
+                version_id: "ver-1".to_owned(),
+            },
             ext: ext.to_owned(),
             name: format!("Довідка.{ext}"),
         }
@@ -693,7 +704,12 @@ mod tests {
             None
         );
         let taken = handles.take_pending("p1", "easydoc", &docx).unwrap();
-        assert_eq!(taken.version_id, "ver-1");
+        assert_eq!(
+            taken.source,
+            PendingSource::Library {
+                version_id: "ver-1".to_owned()
+            }
+        );
         assert_eq!(handles.take_pending("p1", "easydoc", &docx), None);
         assert!(!handles.has_pending());
 

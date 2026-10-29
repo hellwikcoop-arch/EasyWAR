@@ -111,6 +111,11 @@
     "allow-library-link-statuses",
     "allow-library-unlink",
     "allow-library-recover",
-    "allow-library-reissue-recovery"
+    "allow-library-reissue-recovery",
+    "allow-workspace-files-list",
+    "allow-workspace-files-add",
+    "allow-workspace-files-delete",
+    "allow-workspace-files-export",
+    "allow-workspace-files-open"
   ]
 }
