@@ -166,7 +166,9 @@ test('вікно редактора без мережі, webview без HTTP/she
   const editor = JSON.parse(await read('src-tauri/capabilities/office-editor.json'));
   for (const permission of editor.permissions) {
     const id = typeof permission === 'string' ? permission : permission.identifier;
-    assert.match(id, /^allow-office-/, `редактор: ${id}`);
+    // Лише власні локальні команди: файли «Офісу» й колективи (E8 C3b: ключ учасника,
+    // створення колективу — без мережі, пароль профілю через обмежувач спроб).
+    assert.match(id, /^allow-(office|collective)-/, `редактор: ${id}`);
   }
   const main = JSON.parse(await read('src-tauri/capabilities/default.json'));
   for (const permission of main.permissions) {

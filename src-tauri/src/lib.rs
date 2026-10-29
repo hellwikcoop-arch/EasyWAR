@@ -3,6 +3,8 @@ mod app_update;
 pub mod backup;
 pub mod base_tables;
 pub mod collective;
+pub mod collective_store;
+use collective_store::CollectiveStore;
 pub mod dashboard_layout;
 pub mod dashboard_modules;
 mod database;
@@ -33,6 +35,8 @@ pub mod signal_settings;
 mod startup_recovery;
 pub mod update_settings;
 pub mod weather_online;
+pub mod workspace_files;
+pub mod workspace_tables;
 pub mod workspace_templates;
 pub mod xlsx_export;
 pub mod xlsx_import;
@@ -81,6 +85,7 @@ use std::{
 use tauri::{Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
 use update_settings::{AutoUpdateSettings, AutoUpdateStore};
+use workspace_tables::TableRef;
 use workspace_templates::{WorkspaceTemplateStore, WorkspaceTemplatesState};
 use xlsx_export::XlsxExportResult;
 
@@ -227,20 +232,72 @@ fn read_source_file(path: &Path) -> Result<(Vec<u8>, String), String> {
     Ok((bytes, name))
 }
 
+/// Джерело таблиці для модуля: файл на диску або зашифрована таблиця дашборда зі сховища
+/// профілю (тоді `path` — шлях блоба, а читання розшифровує його ключами бібліотеки).
+struct ResolvedSource {
+    path: PathBuf,
+    name: String,
+    store: Option<(PathBuf, String, Arc<LibraryKeys>)>,
+}
+
+impl ResolvedSource {
+    fn disk(path: PathBuf) -> Self {
+        Self {
+            name: office_files::file_name(&path),
+            path,
+            store: None,
+        }
+    }
+
+    fn read(&self) -> Result<(Vec<u8>, String), String> {
+        match &self.store {
+            None => read_source_file(&self.path),
+            Some((dir, id, keys)) => workspace_tables::read(dir, keys, id)
+                .map(|(_, bytes)| (bytes.to_vec(), self.name.clone()))
+                .map_err(|error| error.to_string()),
+        }
+    }
+}
+
+/// Прив'язана таблиця профілю як джерело для модуля.
+fn resolve_source(
+    app: &tauri::AppHandle,
+    session: &ProfileSession,
+    library: &LibrarySession,
+    profile_id: &str,
+    table: TableRef,
+) -> Result<ResolvedSource, String> {
+    match table {
+        TableRef::Disk(path) => Ok(ResolvedSource::disk(path)),
+        TableRef::Store { id, name } => {
+            let (dir, keys) = store_table_access(app, session, library, profile_id)?;
+            Ok(ResolvedSource {
+                path: workspace_tables::blob_path(&dir, &id),
+                name,
+                store: Some((dir, id, keys)),
+            })
+        }
+    }
+}
+
 /// Огляд таблиці: аркуші для інтерфейсу та запис огляду (шлях, вікно, профіль, сеанс і
 /// відбиток вмісту) у пам'яті Rust. Інтерфейс отримує лише непрозорий ідентифікатор.
 async fn inspect_and_register(
     selections: &module_source_selection::SourceSelections,
-    path: PathBuf,
+    source: ResolvedSource,
     origin: module_source_selection::SelectionOrigin,
     owner: module_source_selection::SelectionOwner,
 ) -> Result<module_source::SourceWorkbook, String> {
     let label = origin.as_str();
     let (inspected, digest, path) = tauri::async_runtime::spawn_blocking(move || {
-        let (bytes, name) = read_source_file(&path)?;
+        let (bytes, name) = source.read()?;
         let inspected = module_source::inspect_bytes(&bytes, &name, label)
             .map_err(|error| error.to_string())?;
-        Ok::<_, String>((inspected, module_source_selection::digest(&bytes), path))
+        Ok::<_, String>((
+            inspected,
+            module_source_selection::digest(&bytes),
+            source.path,
+        ))
     })
     .await
     .map_err(|error| error.to_string())??;
@@ -272,24 +329,27 @@ fn selection_owner(
 /// під час створення підтягує дані. Лише читання; `None`, якщо таблицю не прив'язано.
 #[tauri::command]
 async fn inspect_linked_module_source(
+    app: tauri::AppHandle,
     window: tauri::Window,
     profiles: tauri::State<'_, LocalProfileStore>,
     session: tauri::State<'_, ProfileSession>,
+    library: tauri::State<'_, LibrarySession>,
     selections: tauri::State<'_, module_source_selection::SourceSelections>,
     branch: String,
 ) -> Result<Option<module_source::SourceWorkbook>, String> {
     let parsed = dashboard_branch(&branch)?;
     let owner = selection_owner(&window, &session)?;
-    let Some(path) = profiles
+    let Some(table) = profiles
         .table_path(&owner.profile_id, parsed)
         .await
         .map_err(|error| error.to_string())?
-        .map(PathBuf::from)
+        .map(|path| workspace_tables::parse_ref(&path))
     else {
         return Ok(None);
     };
+    let source = resolve_source(&app, &session, &library, &owner.profile_id, table)?;
     let origin = module_source_selection::SelectionOrigin::Linked { branch };
-    inspect_and_register(&selections, path, origin, owner)
+    inspect_and_register(&selections, source, origin, owner)
         .await
         .map(Some)
 }
@@ -320,7 +380,7 @@ async fn pick_module_source(
     // Профіль і сеанс беруться після вікна вибору: за цей час користувач міг вийти з профілю.
     let owner = selection_owner(&window, &session)?;
     let origin = module_source_selection::SelectionOrigin::Picked;
-    inspect_and_register(&selections, path, origin, owner)
+    inspect_and_register(&selections, ResolvedSource::disk(path), origin, owner)
         .await
         .map(Some)
 }
@@ -331,10 +391,13 @@ async fn pick_module_source(
 /// лише якщо вміст файла (а для таблиці профілю — і прив'язка) не змінився після огляду.
 /// `release: true` без аркуша забуває огляд після закриття форми й повертає `None`.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn read_module_source_sheet(
+    app: tauri::AppHandle,
     window: tauri::Window,
     profiles: tauri::State<'_, LocalProfileStore>,
     session: tauri::State<'_, ProfileSession>,
+    library: tauri::State<'_, LibrarySession>,
     selections: tauri::State<'_, module_source_selection::SourceSelections>,
     selection: String,
     sheet: Option<String>,
@@ -349,18 +412,24 @@ async fn read_module_source_sheet(
     let chosen = selections
         .resolve(&selection, &owner)
         .map_err(|error| error.to_string())?;
-    if let module_source_selection::SelectionOrigin::Linked { branch } = &chosen.origin {
-        let bound = profiles
-            .table_path(&owner.profile_id, dashboard_branch(branch)?)
-            .await
-            .map_err(|error| error.to_string())?
-            .map(PathBuf::from);
-        if bound.as_deref() != Some(chosen.path.as_path()) {
-            return Err(module_source_selection::SelectionError::Rebound.to_string());
+    let source = match &chosen.origin {
+        module_source_selection::SelectionOrigin::Linked { branch } => {
+            let bound = profiles
+                .table_path(&owner.profile_id, dashboard_branch(branch)?)
+                .await
+                .map_err(|error| error.to_string())?
+                .map(|path| workspace_tables::parse_ref(&path))
+                .map(|table| resolve_source(&app, &session, &library, &owner.profile_id, table))
+                .transpose()?;
+            match bound {
+                Some(source) if source.path == chosen.path => source,
+                _ => return Err(module_source_selection::SelectionError::Rebound.to_string()),
+            }
         }
-    }
+        _ => ResolvedSource::disk(chosen.path.clone()),
+    };
     tauri::async_runtime::spawn_blocking(move || {
-        let (bytes, _) = read_source_file(&chosen.path)?;
+        let (bytes, _) = source.read()?;
         if module_source_selection::digest(&bytes) != chosen.digest {
             return Err(module_source_selection::SelectionError::Changed.to_string());
         }
@@ -631,17 +700,19 @@ async fn rename_local_profile(
 async fn activate_local_profile(
     app: tauri::AppHandle,
     profiles: tauri::State<'_, LocalProfileStore>,
+    store: tauri::State<'_, LibraryStore>,
     session: tauri::State<'_, ProfileSession>,
     library: tauri::State<'_, LibrarySession>,
     handles: tauri::State<'_, office_files::OfficeFileHandles>,
     profile_id: String,
     password: Option<String>,
 ) -> Result<LocalProfilesState, String> {
+    let password = zeroize::Zeroizing::new(password.unwrap_or_default());
     if session.get().as_deref() != Some(profile_id.as_str()) {
         ensure_editor_closed(&app, &handles)?;
     }
     if !profiles
-        .verify_password(&profile_id, password.as_deref().unwrap_or(""))
+        .verify_password(&profile_id, &password)
         .await
         .map_err(|error| error.to_string())?
     {
@@ -653,12 +724,58 @@ async fn activate_local_profile(
         .await
         .map_err(|error| error.to_string())?;
     // Перехід в інший профіль блокує бібліотеку попереднього.
-    if library.unlocked_profile().as_deref() != Some(profile_id.as_str()) {
+    let library_unlocked = library.unlocked_profile().as_deref() == Some(profile_id.as_str());
+    if !library_unlocked {
         lock_library(&library, &handles);
     }
-    session.set(Some(profile_id));
+    session.set(Some(profile_id.clone()));
+    // Вхід паролем розблоковує й бібліотеку профілю (рішення власника 29.10.2026): таблиці
+    // дашбордів у зашифрованому сховищі мають відкриватися без окремого розблокування.
+    if !library_unlocked && !password.is_empty() {
+        unlock_library_at_sign_in(
+            &app,
+            &store,
+            &library,
+            &handles,
+            &session,
+            &profile_id,
+            &password,
+        )
+        .await;
+    }
     notify_library_state(&app);
     Ok(state)
+}
+
+/// Розблоковує бібліотеку профілю щойно перевіреним паролем входу, якщо бібліотеку
+/// створено. Невдача (бібліотека пошкоджена, базу не прочитати) вхід не скасовує:
+/// бібліотека лишається заблокованою, і її можна розблокувати на вкладці «Бібліотека».
+async fn unlock_library_at_sign_in(
+    app: &tauri::AppHandle,
+    store: &LibraryStore,
+    library: &LibrarySession,
+    handles: &office_files::OfficeFileHandles,
+    session: &ProfileSession,
+    profile_id: &str,
+    password: &str,
+) {
+    match store.has_active_keyring(profile_id).await {
+        Ok(true) => {}
+        Ok(false) => return,
+        Err(error) => {
+            eprintln!("EasyWAR: не вдалося перевірити бібліотеку профілю при вході: {error}");
+            return;
+        }
+    }
+    let epoch = library.epoch();
+    match store.unlock(profile_id, password, &library_now()).await {
+        Ok(keys) => {
+            install_library_keys(app, library, handles, session, epoch, keys);
+        }
+        Err(error) => {
+            eprintln!("EasyWAR: бібліотеку профілю не розблоковано при вході: {error}");
+        }
+    }
 }
 
 /// Профіль, у який увійшли в цьому запуску.
@@ -1228,7 +1345,11 @@ async fn office_bound_tables(profiles: &LocalProfileStore) -> Result<Vec<PathBuf
         .await
         .map_err(|error| error.to_string())?
         .into_iter()
-        .map(PathBuf::from)
+        .filter_map(|path| match workspace_tables::parse_ref(&path) {
+            TableRef::Disk(path) => Some(path),
+            // Таблиці сховища лежать у підтеці `tables/`, якої редактори не бачать.
+            TableRef::Store { .. } => None,
+        })
         .collect())
 }
 
@@ -1254,12 +1375,46 @@ async fn office_open_file(
         .editor_window_app()
         .and_then(|app_id| handles.take_pending(&profile_id, app_id, &extensions));
     if let Some(pending) = pending {
+        let version_id = match pending.source {
+            office_files::PendingSource::Library { version_id } => version_id,
+            office_files::PendingSource::Store { dir, id } => {
+                // Зашифрований файл сховища «Робочого середовища»: ключ бібліотеки без
+                // продовження часу до автоблокування; номер запечатує «Зберегти» назад у блоб.
+                let keys = library
+                    .keys_quiet(&profile_id)
+                    .map_err(|_| office_files::OfficeFileError::LibraryLocked.to_string())?;
+                let read_keys = Arc::clone(&keys);
+                let read_dir = dir.clone();
+                let read_id = id.clone();
+                let (item, mut bytes) = tauri::async_runtime::spawn_blocking(move || {
+                    workspace_files::read(&read_dir, &read_keys, &read_id)
+                })
+                .await
+                .map_err(|error| error.to_string())?
+                .map_err(|error| error.to_string())?;
+                let handle = handles.remember_store(
+                    &profile_id,
+                    webview.label(),
+                    office_files::StoreTarget {
+                        dir,
+                        id,
+                        name: item.name.clone(),
+                        library_tag: keys.handle_tag(),
+                    },
+                );
+                return Ok(Some(OfficeOpenedFile {
+                    handle,
+                    name: item.name,
+                    bytes: std::mem::take(&mut *bytes),
+                }));
+            }
+        };
         // Відкриття у вікні редактора не продовжує час до автоблокування.
         let keys = library
             .keys_quiet(&profile_id)
             .map_err(|error| error.to_string())?;
         let (version, mut bytes) = store
-            .read_version(&keys, &pending.version_id)
+            .read_version(&keys, &version_id)
             .await
             .map_err(|error| error.to_string())?;
         let handle = handles.remember_library(
@@ -1344,6 +1499,23 @@ async fn office_save_file(
         .map_err(|error| error.to_string())?
     {
         office_files::HandleTarget::Disk(path) => path,
+        office_files::HandleTarget::Store(target) => {
+            let keys = library
+                .keys_quiet(&profile_id)
+                .map_err(|_| office_files::OfficeFileError::LibraryLocked.to_string())?;
+            if keys.handle_tag() != target.library_tag {
+                return Err(office_files::OfficeFileError::UnknownHandle.to_string());
+            }
+            let name = target.name.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                workspace_files::overwrite(&target.dir, &keys, &target.id, &bytes)
+            })
+            .await
+            .map_err(|error| error.to_string())?
+            .map_err(|error| error.to_string())?;
+            library.touch();
+            return Ok(OfficeSavedFile { handle, name });
+        }
         office_files::HandleTarget::Library(target) => {
             office_files::ensure_library_format(&target.ext, &bytes)
                 .map_err(|error| error.to_string())?;
@@ -1522,6 +1694,78 @@ async fn workspace_open_editor(
 fn office_editor_close(window: tauri::WebviewWindow) -> Result<(), String> {
     office_files::ensure_editor_window(window.label()).map_err(|error| error.to_string())?;
     window.destroy().map_err(|error| error.to_string())
+}
+
+// --- Колективи (E8, C3b, перший зріз: ключ учасника й захищений колектив) ----------------
+//
+// Команди лише для вікна редактора, де працює екран «Колективи» (capability
+// `office-editor.json`). Пароль — пароль профілю через той самий обмежувач спроб, що й
+// бібліотека; у JS не повертається жоден секрет, лише відбитки й лічильники. Мережі немає.
+
+#[tauri::command]
+async fn collective_status(
+    webview: tauri::Webview,
+    session: tauri::State<'_, ProfileSession>,
+    collectives: tauri::State<'_, CollectiveStore>,
+) -> Result<collective_store::CollectiveStatus, String> {
+    office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
+    let profile_id = active_profile_id(&session)?;
+    collectives
+        .status(&profile_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// Створює ключ учасника профілю; ключ відновлення сховища показується один раз.
+#[tauri::command]
+async fn collective_create_identity(
+    webview: tauri::Webview,
+    profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
+    collectives: tauri::State<'_, CollectiveStore>,
+    password: String,
+) -> Result<collective_store::CreatedIdentity, String> {
+    office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
+    let password = zeroize::Zeroizing::new(password);
+    let profile_id = active_profile_id(&session)?;
+    if !profiles
+        .has_password(&profile_id)
+        .await
+        .map_err(|error| error.to_string())?
+    {
+        return Err(LibraryError::ProfileWithoutPassword.to_string());
+    }
+    verify_library_password(&profiles, &profile_id, &password).await?;
+    collectives
+        .create_identity(&profile_id, password, &library_now())
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// Створює захищений колектив, де власник — учасник цього профілю.
+#[tauri::command]
+async fn collective_create(
+    webview: tauri::Webview,
+    profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
+    collectives: tauri::State<'_, CollectiveStore>,
+    password: String,
+    name: String,
+) -> Result<collective_store::CollectiveSummary, String> {
+    office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
+    let password = zeroize::Zeroizing::new(password);
+    let profile_id = active_profile_id(&session)?;
+    verify_library_password(&profiles, &profile_id, &password).await?;
+    collectives
+        .create_collective(
+            &profile_id,
+            password,
+            &name,
+            &library_now(),
+            Utc::now().timestamp(),
+        )
+        .await
+        .map_err(|error| error.to_string())
 }
 
 // --- Захищена бібліотека «Офісу» (office_library, контракт library_*) -------------------
@@ -2267,7 +2511,9 @@ async fn library_open_in_editor(
     handles.set_pending(office_files::PendingFile {
         profile_id,
         app: app_id,
-        version_id: version.id,
+        source: office_files::PendingSource::Library {
+            version_id: version.id,
+        },
         ext: version.ext,
         name: name.clone(),
     });
@@ -2546,6 +2792,203 @@ async fn library_reissue_recovery(
     })
 }
 
+// --- Сховище файлів «Робочого середовища» (зашифровані блоби в теці, workspace_files.rs) ---
+
+/// Тека сховища активного профілю: `<app_local_data>/workspace-files/<profile_id>`.
+fn workspace_files_dir(
+    app: &tauri::AppHandle,
+    session: &ProfileSession,
+) -> Result<(String, PathBuf), String> {
+    let profile_id = active_profile_id(session)?;
+    let base = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|error| error.to_string())?;
+    Ok((
+        profile_id.clone(),
+        workspace_files::root_dir(&base, &profile_id),
+    ))
+}
+
+/// Тека й ключі бібліотеки профілю сесії (сховище зашифроване її ключем: заблокована
+/// бібліотека → та сама помилка «бібліотека заблокована…», що й у команд `library_*`).
+fn workspace_files_keys(
+    app: &tauri::AppHandle,
+    session: &ProfileSession,
+    library: &LibrarySession,
+) -> Result<(String, PathBuf, Arc<office_library::LibraryKeys>), String> {
+    let (profile_id, dir) = workspace_files_dir(app, session)?;
+    let keys = library
+        .keys(&profile_id)
+        .map_err(|error| error.to_string())?;
+    Ok((profile_id, dir, keys))
+}
+
+/// Файли сховища профілю за назвою і шлях теки.
+#[tauri::command]
+async fn workspace_files_list(
+    app: tauri::AppHandle,
+    session: tauri::State<'_, ProfileSession>,
+    library: tauri::State<'_, LibrarySession>,
+) -> Result<workspace_files::Listing, String> {
+    let (_, dir, keys) = workspace_files_keys(&app, &session, &library)?;
+    let root = dir.to_string_lossy().into_owned();
+    let items = tauri::async_runtime::spawn_blocking(move || workspace_files::list(&dir, &keys))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())?;
+    Ok(workspace_files::Listing { root, items })
+}
+
+/// «Додати файли…»: вікно вибору (кілька файлів будь-якого типу), зашифрована копія кожного
+/// в теці сховища. Файли на диску не змінюються. `None` — вікно закрили.
+#[tauri::command]
+async fn workspace_files_add(
+    app: tauri::AppHandle,
+    session: tauri::State<'_, ProfileSession>,
+    library: tauri::State<'_, LibrarySession>,
+) -> Result<Option<workspace_files::AddResult>, String> {
+    let (profile_id, dir, keys) = workspace_files_keys(&app, &session, &library)?;
+    drop(keys);
+    let dialog_app = app.clone();
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        dialog_app
+            .dialog()
+            .file()
+            .set_title("Додати файли до сховища")
+            .blocking_pick_files()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let mut paths = Vec::with_capacity(selected.len());
+    for file in selected
+        .into_iter()
+        .take(workspace_files::MAX_FILES_PER_ADD)
+    {
+        paths.push(file.into_path().map_err(|error| error.to_string())?);
+    }
+    // Ключі беруться після вікна вибору: поки воно було відкрите, бібліотеку могли заблокувати.
+    let keys = library
+        .keys(&profile_id)
+        .map_err(|error| error.to_string())?;
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let mut result = workspace_files::AddResult::default();
+        for path in paths {
+            match workspace_files::add(&dir, &keys, &path) {
+                Ok(item) => result.added.push(item),
+                Err(error) => result.skipped.push(workspace_files::SkippedFile {
+                    name: office_files::file_name(&path),
+                    reason: error.to_string(),
+                }),
+            }
+        }
+        result
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    Ok(Some(result))
+}
+
+/// Видаляє блоб сховища назавжди (і пошкоджений теж).
+#[tauri::command]
+async fn workspace_files_delete(
+    app: tauri::AppHandle,
+    session: tauri::State<'_, ProfileSession>,
+    library: tauri::State<'_, LibrarySession>,
+    id: String,
+) -> Result<String, String> {
+    let (_, dir, keys) = workspace_files_keys(&app, &session, &library)?;
+    drop(keys);
+    tauri::async_runtime::spawn_blocking(move || workspace_files::delete(&dir, &id))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+/// «Зберегти копію…»: розшифрована копія файлу сховища в місце, яке обере користувач
+/// (наявний файл і таблиці профілів не перезаписуються). `None` — вікно закрили.
+#[tauri::command]
+async fn workspace_files_export(
+    app: tauri::AppHandle,
+    profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
+    library: tauri::State<'_, LibrarySession>,
+    id: String,
+) -> Result<Option<String>, String> {
+    let (profile_id, dir, keys) = workspace_files_keys(&app, &session, &library)?;
+    let (item, _) = workspace_files::stat(&dir, &keys, &id).map_err(|error| error.to_string())?;
+    drop(keys);
+    let ext = if item.ext.is_empty() {
+        "bin".to_owned()
+    } else {
+        item.ext.clone()
+    };
+    let Some(target) = library_save_dialog(
+        app,
+        &profiles,
+        "Зберегти копію зі сховища",
+        item.name.clone(),
+        ext,
+    )
+    .await?
+    else {
+        return Ok(None);
+    };
+    let keys = library
+        .keys(&profile_id)
+        .map_err(|error| error.to_string())?;
+    let path = target.path.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let (_, bytes) =
+            workspace_files::read(&dir, &keys, &item.id).map_err(|error| error.to_string())?;
+        phone_export::save_file(&target, &bytes).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+/// Відкриває файл сховища у вікні редактора його застосунку (як `library_open_in_editor`):
+/// файл чекає на перший `office_open_file` цього застосунку, а «Зберегти» в редакторі
+/// запечатує байти назад у той самий блоб.
+#[tauri::command]
+async fn workspace_files_open(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    session: tauri::State<'_, ProfileSession>,
+    library: tauri::State<'_, LibrarySession>,
+    handles: tauri::State<'_, office_files::OfficeFileHandles>,
+    id: String,
+) -> Result<(), String> {
+    if window.label() != desktop_shell::MAIN_WINDOW_LABEL {
+        return Err("редактор відкривається лише з головного вікна".to_owned());
+    }
+    let (profile_id, dir, keys) = workspace_files_keys(&app, &session, &library)?;
+    let (item, _) = workspace_files::stat(&dir, &keys, &id).map_err(|error| error.to_string())?;
+    drop(keys);
+    let app_id = item.app.ok_or_else(|| {
+        workspace_files::WorkspaceFilesError::NoEditor(item.name.clone()).to_string()
+    })?;
+    let app_id = office_files::editor_app(app_id).map_err(|error| error.to_string())?;
+    if editor_open(&app, &handles) {
+        return Err(EDITOR_OPEN_MESSAGE.to_owned());
+    }
+    handles.set_pending(office_files::PendingFile {
+        profile_id,
+        app: app_id,
+        source: office_files::PendingSource::Store { dir, id: item.id },
+        ext: item.ext,
+        name: item.name.clone(),
+    });
+    desktop_shell::open_office_editor(&app, &window, app_id, Some(&item.name)).map_err(|error| {
+        handles.clear_pending();
+        error.to_string()
+    })
+}
+
 /// Зберігає порожню базову таблицю в новий файл і прив'язує її до профілю
 /// для того роду військ, чий модуль її відкриває.
 #[tauri::command]
@@ -2613,6 +3056,7 @@ async fn export_phone_file(
     app: tauri::AppHandle,
     profiles: tauri::State<'_, LocalProfileStore>,
     session: tauri::State<'_, ProfileSession>,
+    library: tauri::State<'_, LibrarySession>,
     dashboard: PhoneDashboard,
     with_table: Option<bool>,
 ) -> Result<Option<PhoneExportResult>, String> {
@@ -2637,15 +3081,8 @@ async fn export_phone_file(
             .map_err(|error| error.to_string())?
             .active_profile_id
             .ok_or_else(|| "Оберіть профіль, до якого прив'язано таблицю.".to_string())?;
-        let path =
-            bound_database_path(&profiles, &session, &profile_id, dashboard.branch()).await?;
-        let name = path
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "table.xlsx".to_string());
-        let xlsx = tauri::async_runtime::spawn_blocking(move || read_selected_xlsx(&path))
-            .await
-            .map_err(|error| error.to_string())??;
+        let table = bound_table(&profiles, &session, &profile_id, dashboard.branch()).await?;
+        let (xlsx, name) = read_bound_table(&app, &session, &library, &profile_id, table).await?;
         bytes = phone_export::embed_table(
             &bytes,
             &name,
@@ -2681,45 +3118,91 @@ async fn export_phone_file(
     }))
 }
 
-async fn bound_database_path(
+/// Прив'язана таблиця профілю: файл на диску або таблиця зашифрованого сховища
+/// (`ewstore:<id>:<назва>`, див. `workspace_tables`).
+async fn bound_table(
     profiles: &LocalProfileStore,
     session: &ProfileSession,
     profile_id: &str,
     branch: Branch,
-) -> Result<PathBuf, String> {
+) -> Result<TableRef, String> {
     ensure_profile_unlocked(profiles, session, profile_id).await?;
     profiles
         .table_path(profile_id, branch)
         .await
         .map_err(|error| error.to_string())?
-        .map(PathBuf::from)
+        .map(|path| workspace_tables::parse_ref(&path))
         .ok_or_else(|| format!("До профілю не прив'язано таблицю {}", branch.genitive()))
 }
 
-/// Сирі байти прив'язаної таблиці (без JSON, щоб не роздувати великі файли).
+/// Пояснення для дашборда, чия таблиця лежить у сховищі, коли бібліотеку заблоковано.
+const STORE_LOCKED_MESSAGE: &str = "Таблицю зашифровано у сховищі профілю, а бібліотеку профілю заблоковано (30 хвилин без дій або вихід із профілю). Увійдіть у профіль ще раз паролем або розблокуйте бібліотеку в «Робочому середовищі».";
+
+/// Підтека таблиць сховища профілю `profile_id` і ключі його бібліотеки. Ключі є лише в
+/// профілю сесії; заблокована бібліотека → [`STORE_LOCKED_MESSAGE`].
+fn store_table_access(
+    app: &tauri::AppHandle,
+    session: &ProfileSession,
+    library: &LibrarySession,
+    profile_id: &str,
+) -> Result<(PathBuf, Arc<LibraryKeys>), String> {
+    if session.get().as_deref() != Some(profile_id) {
+        return Err("Таблиця зі сховища відкривається лише в профілі, у який увійшли".to_owned());
+    }
+    let base = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|error| error.to_string())?;
+    let dir = workspace_tables::tables_dir(&workspace_files::root_dir(&base, profile_id));
+    let keys = library.keys(profile_id).map_err(|error| match error {
+        LibraryError::Locked => STORE_LOCKED_MESSAGE.to_owned(),
+        other => other.to_string(),
+    })?;
+    Ok((dir, keys))
+}
+
+/// Байти прив'язаної таблиці та її назва: файл з диска або розшифрований блоб сховища.
+async fn read_bound_table(
+    app: &tauri::AppHandle,
+    session: &ProfileSession,
+    library: &LibrarySession,
+    profile_id: &str,
+    table: TableRef,
+) -> Result<(Vec<u8>, String), String> {
+    let source = resolve_source(app, session, library, profile_id, table)?;
+    tauri::async_runtime::spawn_blocking(move || source.read())
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+/// Сирі байти прив'язаної таблиці (без JSON, щоб не роздувати великі файли). Таблиця
+/// зі сховища розшифровується ключами бібліотеки профілю.
 #[tauri::command]
 async fn read_profile_database(
+    app: tauri::AppHandle,
     profiles: tauri::State<'_, LocalProfileStore>,
     session: tauri::State<'_, ProfileSession>,
+    library: tauri::State<'_, LibrarySession>,
     profile_id: String,
     branch: Branch,
 ) -> Result<tauri::ipc::Response, String> {
-    let path = bound_database_path(&profiles, &session, &profile_id, branch).await?;
-    let bytes = tauri::async_runtime::spawn_blocking(move || read_selected_xlsx(&path))
-        .await
-        .map_err(|error| error.to_string())??;
+    let table = bound_table(&profiles, &session, &profile_id, branch).await?;
+    let (bytes, _) = read_bound_table(&app, &session, &library, &profile_id, table).await?;
     Ok(tauri::ipc::Response::new(bytes))
 }
 
 /// Записує таблицю назад у прив'язаний файл. Тіло запиту — сирі байти XLSX,
 /// профіль і рід військ — у заголовках `x-easywar-profile` і `x-easywar-branch`.
 /// Байти перевіряються як книга, а попередній стан зберігається поруч у
-/// `<назва>.easywar-prev.xlsx` (див. `profile_table`).
+/// `<назва>.easywar-prev.xlsx` (див. `profile_table`). Таблиця зі сховища запечатується
+/// назад у свій блоб, попередній стан — у `<id>.prev.ewf` (див. `workspace_tables`).
 #[tauri::command]
 async fn write_profile_database(
+    app: tauri::AppHandle,
     request: tauri::ipc::Request<'_>,
     profiles: tauri::State<'_, LocalProfileStore>,
     session: tauri::State<'_, ProfileSession>,
+    library: tauri::State<'_, LibrarySession>,
 ) -> Result<(), String> {
     let header = |name: &str| {
         request
@@ -2739,14 +3222,199 @@ async fn write_profile_database(
         return Err("Некоректний файл XLSX".to_owned());
     }
     let bytes = bytes.clone();
-    let path = bound_database_path(&profiles, &session, &profile_id, branch).await?;
-    tauri::async_runtime::spawn_blocking(move || {
-        profile_table::save(&path, branch, &bytes)
-            .map(|_| ())
+    match bound_table(&profiles, &session, &profile_id, branch).await? {
+        TableRef::Disk(path) => tauri::async_runtime::spawn_blocking(move || {
+            profile_table::save(&path, branch, &bytes)
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        })
+        .await
+        .map_err(|error| error.to_string())?,
+        TableRef::Store { id, .. } => {
+            let (dir, keys) = store_table_access(&app, &session, &library, &profile_id)?;
+            tauri::async_runtime::spawn_blocking(move || {
+                workspace_tables::save(&dir, &keys, &id, branch, &bytes)
+                    .map(|_| ())
+                    .map_err(|error| error.to_string())
+            })
+            .await
+            .map_err(|error| error.to_string())?
+        }
+    }
+}
+
+/// «Перенести у сховище»: прив'язана таблиця з диска стає зашифрованою таблицею сховища
+/// профілю (новий блоб у `tables/`), а прив'язка — посиланням `ewstore:…`. Файл на диску
+/// не змінюється й не видаляється. Потрібна розблокована бібліотека профілю сесії.
+#[tauri::command]
+async fn move_profile_database_to_store(
+    app: tauri::AppHandle,
+    profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
+    library: tauri::State<'_, LibrarySession>,
+    profile_id: String,
+    branch: Branch,
+) -> Result<LocalProfilesState, String> {
+    let TableRef::Disk(path) = bound_table(&profiles, &session, &profile_id, branch).await? else {
+        return Err("Ця таблиця вже у сховищі".to_owned());
+    };
+    let (dir, keys) = store_table_access(&app, &session, &library, &profile_id)?;
+    let stored = tauri::async_runtime::spawn_blocking(move || {
+        let (bytes, name) = read_source_file(&path)?;
+        workspace_tables::write_new(&dir, &keys, &name, branch, &bytes)
             .map_err(|error| error.to_string())
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string())??;
+    let reference = workspace_tables::store_ref(&stored.id, &stored.name);
+    let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
+    profiles
+        .set_table_path(&profile_id, branch, Some(&reference), &now)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// Порожня базова таблиця одразу в зашифрованому сховищі профілю (без вікна збереження)
+/// з прив'язкою до свого роду військ. `path` у відповіді — назва таблиці у сховищі.
+#[tauri::command]
+async fn create_profile_base_table_in_store(
+    app: tauri::AppHandle,
+    profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
+    library: tauri::State<'_, LibrarySession>,
+    profile_id: String,
+    table: BaseTable,
+) -> Result<CreatedBaseTable, String> {
+    ensure_profile_unlocked(&profiles, &session, &profile_id).await?;
+    let (dir, keys) = store_table_access(&app, &session, &library, &profile_id)?;
+    let stored = tauri::async_runtime::spawn_blocking(move || {
+        workspace_tables::write_new(
+            &dir,
+            &keys,
+            table.file_name(),
+            table.branch(),
+            table.bytes(),
+        )
+        .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    let reference = workspace_tables::store_ref(&stored.id, &stored.name);
+    let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
+    let state = profiles
+        .set_table_path(&profile_id, table.branch(), Some(&reference), &now)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(CreatedBaseTable {
+        state,
+        path: stored.name,
+    })
+}
+
+/// Таблиці дашбордів у сховищі профілю сесії (розділ «Таблиці дашбордів» вкладки «Файли»);
+/// `bound` — прив'язана до якогось профілю.
+#[tauri::command]
+async fn workspace_files_list_tables(
+    app: tauri::AppHandle,
+    profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
+    library: tauri::State<'_, LibrarySession>,
+) -> Result<Vec<workspace_tables::StoredTable>, String> {
+    let (_, dir, keys) = workspace_files_keys(&app, &session, &library)?;
+    let dir = workspace_tables::tables_dir(&dir);
+    let bound = workspace_tables::bound_ids(
+        profiles
+            .all_table_paths()
+            .await
+            .map_err(|error| error.to_string())?
+            .iter()
+            .map(String::as_str),
+    );
+    let mut items =
+        tauri::async_runtime::spawn_blocking(move || workspace_tables::list(&dir, &keys))
+            .await
+            .map_err(|error| error.to_string())?
+            .map_err(|error| error.to_string())?;
+    for item in &mut items {
+        item.bound = bound.contains(&item.id);
+    }
+    Ok(items)
+}
+
+/// «Зберегти копію…» таблиці дашборда зі сховища: розшифрована книга XLSX у місце, яке
+/// обере користувач. `None` — вікно закрили.
+#[tauri::command]
+async fn workspace_files_export_table(
+    app: tauri::AppHandle,
+    profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
+    library: tauri::State<'_, LibrarySession>,
+    id: String,
+) -> Result<Option<String>, String> {
+    let (profile_id, dir, keys) = workspace_files_keys(&app, &session, &library)?;
+    let dir = workspace_tables::tables_dir(&dir);
+    let (item, _) = {
+        let dir = dir.clone();
+        tauri::async_runtime::spawn_blocking(move || workspace_tables::read(&dir, &keys, &id))
+            .await
+            .map_err(|error| error.to_string())?
+            .map_err(|error| error.to_string())?
+    };
+    let Some(target) = library_save_dialog(
+        app,
+        &profiles,
+        "Зберегти копію таблиці зі сховища",
+        item.name.clone(),
+        "xlsx".to_owned(),
+    )
+    .await?
+    else {
+        return Ok(None);
+    };
+    let keys = library
+        .keys(&profile_id)
+        .map_err(|error| error.to_string())?;
+    let path = target.path.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let (_, bytes) =
+            workspace_tables::read(&dir, &keys, &item.id).map_err(|error| error.to_string())?;
+        phone_export::save_file(&target, &bytes).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+/// Видаляє таблицю дашборда зі сховища назавжди (разом із попередньою копією). Таблицю,
+/// прив'язану до будь-якого профілю, видалити не можна: спершу її відв'язують у «Профілях».
+#[tauri::command]
+async fn workspace_files_delete_table(
+    app: tauri::AppHandle,
+    profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
+    library: tauri::State<'_, LibrarySession>,
+    id: String,
+) -> Result<String, String> {
+    let (_, dir, keys) = workspace_files_keys(&app, &session, &library)?;
+    drop(keys);
+    let dir = workspace_tables::tables_dir(&dir);
+    let bound = workspace_tables::bound_ids(
+        profiles
+            .all_table_paths()
+            .await
+            .map_err(|error| error.to_string())?
+            .iter()
+            .map(String::as_str),
+    );
+    if bound.contains(&id) {
+        return Err(
+            "Таблиця прив'язана до профілю: спершу відв'яжіть її у вікні «Профілі»".to_owned(),
+        );
+    }
+    tauri::async_runtime::spawn_blocking(move || workspace_tables::delete(&dir, &id))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
 }
 
 /// Видаляє профіль. Профіль із захищеною бібліотекою так не видалити: для нього є
@@ -3515,6 +4183,13 @@ pub fn run() {
             app.manage(DashboardLayoutStore::new(pool.clone()));
             app.manage(module_source_selection::SourceSelections::default());
             app.manage(office_files::OfficeFileHandles::default());
+            let collective_keys_dir = startup_recovery::or_exit(
+                &dialogs,
+                app.path().app_local_data_dir(),
+                "Не вдалося визначити директорію даних EasyWAR",
+            )
+            .join("collective-keys");
+            app.manage(CollectiveStore::new(pool.clone(), collective_keys_dir));
             app.manage(LibraryStore::new(pool.clone()));
             app.manage(LibrarySession::default());
             app.manage(LibraryStateEvents::default());
@@ -3611,6 +4286,9 @@ pub fn run() {
             weather_online_search,
             office_editor_close,
             workspace_open_editor,
+            collective_status,
+            collective_create_identity,
+            collective_create,
             clear_profile_database,
             read_profile_database,
             write_profile_database,
@@ -3669,7 +4347,17 @@ pub fn run() {
             library_link_statuses,
             library_unlink,
             library_recover,
-            library_reissue_recovery
+            library_reissue_recovery,
+            workspace_files_list,
+            workspace_files_add,
+            workspace_files_delete,
+            workspace_files_export,
+            workspace_files_open,
+            workspace_files_list_tables,
+            workspace_files_export_table,
+            workspace_files_delete_table,
+            move_profile_database_to_store,
+            create_profile_base_table_in_store
         ])
         .build(context)
         .unwrap_or_else(|error| {
