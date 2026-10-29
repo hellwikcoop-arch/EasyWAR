@@ -98,6 +98,17 @@ function keyStats(rows, keyColumns) {
   return { unkeyed, duplicated, distinct: seen.size };
 }
 
+// Усі рядки мають значення в ключових стовпцях, і жоден ключ не повторюється; зупиняється на першому збої.
+function isUnique(rows, keyColumns) {
+  const seen = new Set();
+  for (const row of rows) {
+    const key = rowKey(row, keyColumns);
+    if (key === null || seen.has(key)) return false;
+    seen.add(key);
+  }
+  return true;
+}
+
 /**
  * Підказка ключа: найменший набір із 1–3 стовпців, у якому всі рядки обох версій мають значення і
  * жоден ключ не повторюється. Лише пропозиція: рішення за користувачем. Порожній список — ключа немає.
@@ -106,20 +117,29 @@ export function suggestKeyColumns(fields, oldRows, newRows) {
   const keys = (Array.isArray(fields) ? fields : [])
     .map(field => field?.key)
     .filter(key => typeof key === 'string' && key !== 'id');
-  const rows = [...(Array.isArray(oldRows) ? oldRows : []), ...(Array.isArray(newRows) ? newRows : [])];
-  if (!rows.length || rows.length > UPDATE_LIMITS.maxRows * 2) return [];
+  const lists = [oldRows, newRows].map(list => (Array.isArray(list) ? list : []));
+  const total = lists[0].length + lists[1].length;
+  if (!total || total > UPDATE_LIMITS.maxRows * 2) return [];
+  // Стовпець із порожніми клітинками в будь-якій версії не може входити до ключа; решту відбираємо наперед.
+  const usable = keys.filter(key => lists.every(list => keyStats(list, [key]).unkeyed === 0));
+  const distinct = new Map(usable.map(key => [key, lists.map(list => keyStats(list, [key]).distinct)]));
   const candidates = [];
   const tryColumns = columns => {
+    // Набір не може бути унікальним, якщо добуток різних значень стовпців менший за кількість рядків.
+    const capacity = lists.map((list, i) => columns.reduce((product, key) => product * distinct.get(key)[i], 1));
+    if (capacity.some((value, i) => value < lists[i].length)) return;
     // Повторювані ключі шукаємо в кожній версії окремо: один і той самий ключ у двох версіях — норма.
-    const stats = [oldRows, newRows].map(list => keyStats(Array.isArray(list) ? list : [], columns));
-    if (stats.every(s => s.unkeyed === 0 && s.duplicated === 0)) candidates.push({ columns, unique: true });
+    if (lists.every(list => isUnique(list, columns))) candidates.push({ columns, unique: true });
   };
-  for (const key of keys) tryColumns([key]);
-  if (!candidates.length && UPDATE_LIMITS.maxKeyColumns >= 2) {
-    for (let i = 0; i < keys.length && candidates.length < 5; i += 1) {
-      for (let j = i + 1; j < keys.length && candidates.length < 5; j += 1) tryColumns([keys[i], keys[j]]);
-    }
-  }
+  const SHORTLIST = 5;
+  // Обмеження SHORTLIST стосується знайдених кандидатів, а не перевірених наборів: перебір не
+  // обривається, доки на поточній довжині ключа (1, 2, 3) не знайдено жодного.
+  const grow = (size, start, chosen) => {
+    if (candidates.length >= SHORTLIST) return;
+    if (chosen.length === size) { tryColumns([...chosen]); return; }
+    for (let i = start; i < usable.length; i += 1) grow(size, i + 1, [...chosen, usable[i]]);
+  };
+  for (let size = 1; size <= UPDATE_LIMITS.maxKeyColumns && !candidates.length; size += 1) grow(size, 0, []);
   return candidates;
 }
 
