@@ -5,7 +5,11 @@ import { readFile } from 'node:fs/promises';
 import { emptySchema } from '../src/profile-schema-core.js';
 import { syncModuleSources } from '../src/profile-schema-modules-core.js';
 import { linkIssues, suggestRelations } from '../src/table-link-core.js';
-import { EXCLUSION_TEXT, REASON_TEXT, issueText, linkInputs, pairView, summaryLine } from '../src/table-link-view-core.js';
+import { confirmRelation, rejectRelation, clearRelation, relationsOf } from '../src/profile-schema-core.js';
+import {
+  EXCLUSION_TEXT, REASON_TEXT, confirmArgs, confirmBlock, decisionOf, issueText, linkInputs, pairView, rejectArgs,
+  rejectedRelationViews, relatedLine, savedRelationViews, summaryLine,
+} from '../src/table-link-view-core.js';
 
 // Лише синтетичні дані: вигадані підрозділи, жодних реальних таблиць.
 
@@ -132,7 +136,8 @@ test('summaryLine рахує пари, варіанти й неповні пош
 test('панель підключена до «Мого дашборда», нічого не зберігає й не виходить за межі пристрою', async () => {
   const page = await readFile(new URL('../src/dashboard-module-catalog.js', import.meta.url), 'utf8');
   assert.match(page, /import \{ linkPanel \} from '\.\/table-link-panel\.js';/u);
-  assert.match(page, /linkPanel\(\{ el, schema: \(\) => state\.schema, modules: \(\) => state\.modules, data: \(\) => state\.data \}\)/u);
+  assert.match(page, /linkPanel\(\{ el, schema: \(\) => state\.schema, modules: \(\) => state\.modules, data: \(\) => state\.data, apply: applyLinkChange, onChange: refreshRelatedLines \}\)/u);
+  assert.match(page, /updateProfileSchema\(invoke, change\)/u);
   assert.match(page, /state\.modules\.length >= 2 && state\.schema/u);
   const panel = await readFile(new URL('../src/table-link-panel.js', import.meta.url), 'utf8');
   const core = await readFile(new URL('../src/table-link-view-core.js', import.meta.url), 'utf8');
@@ -146,4 +151,60 @@ test('панель підключена до «Мого дашборда», ні
   assert.match(panel, /tick: async/u);
   assert.match(panel, /!panel\.isConnected/u);
   assert.match(panel, /data-action': 'cancel-links'/u);
+});
+
+async function firstCandidate() {
+  const { schema, data } = setup();
+  const { tables } = linkInputs(schema, [modulePlan, moduleFlights], data);
+  const found = await suggestRelations(tables);
+  assert.ok(found.ok && found.pairs[0].candidates.length);
+  return { schema, candidate: found.pairs[0].candidates[0] };
+}
+
+test('рішення: підтвердити → «підтверджено», відхилити → «відхилено», зняти → знову відкрито; після перезавантаження так само', async () => {
+  const { schema, candidate } = await firstCandidate();
+  assert.equal(decisionOf(schema, candidate).state, 'open');
+  const confirmed = confirmRelation(schema, confirmArgs(candidate, { at: '2026-10-29T10:00:00Z' }));
+  assert.ok(confirmed.ok, confirmed.message);
+  assert.equal(decisionOf(confirmed.schema, candidate).state, 'confirmed');
+  assert.equal(relationsOf(confirmed.schema)[0].basis, 'values');
+  const cleared = clearRelation(confirmed.schema, decisionOf(confirmed.schema, candidate).id);
+  assert.equal(decisionOf(cleared.schema, candidate).state, 'open');
+  const rejected = rejectRelation(schema, rejectArgs(candidate));
+  assert.ok(rejected.ok);
+  assert.equal(decisionOf(rejected.schema, candidate).state, 'rejected');
+  assert.deepEqual(savedRelationViews(rejected.schema), []);
+  assert.equal(rejectedRelationViews(rejected.schema).length, 1);
+});
+
+test('рішення: інший ключ тієї ж пари — «taken», заміна лише явна', async () => {
+  const { schema, candidate } = await firstCandidate();
+  const first = confirmRelation(schema, confirmArgs(candidate)).schema;
+  const other = { ...candidate, left: { ...candidate.left, columns: [candidate.left.columns[0]], headers: [candidate.left.headers[0]] }, right: { ...candidate.right, columns: [candidate.right.columns[0]], headers: [candidate.right.headers[0]] } };
+  const state = decisionOf(first, other);
+  assert.equal(state.state, 'taken');
+  assert.equal(confirmRelation(first, confirmArgs(other)).code, 'pair_taken');
+  const replaced = confirmRelation(first, confirmArgs(other, { replace: true }));
+  assert.ok(replaced.ok);
+  assert.equal(relationsOf(replaced.schema).length, 1);
+});
+
+test('кандидат з припущеним порядком дат не підтверджується', () => {
+  assert.match(confirmBlock({ caution: ['date-order-assumed'] }), /лише припущено/u);
+  assert.equal(confirmBlock({ caution: ['incomplete-read'] }), '');
+  assert.equal(confirmBlock({}), '');
+});
+
+test('збережені зв’язки: текст, «перевірте», рядок «Зв’язано з» на картці', async () => {
+  const { schema, candidate } = await firstCandidate();
+  const saved = confirmRelation(schema, confirmArgs(candidate)).schema;
+  const [view] = savedRelationViews(saved);
+  assert.match(view.text, /План: Дата \+ Підрозділ ↔ Вильоти: Дата \+ Підрозділ/u);
+  assert.equal(view.stale, false);
+  assert.match(relatedLine(saved, 'module:plan'), /^Зв’язано з: Вильоти \(за «Дата \+ Підрозділ»\)$/u);
+  assert.match(relatedLine(saved, 'module:flights'), /План/u);
+  assert.equal(relatedLine(schema, 'module:plan'), '');
+  // жодне значення клітинки не потрапляє ні в схему, ні в показ
+  const everything = JSON.stringify([saved, savedRelationViews(saved), relatedLine(saved, 'module:plan')]);
+  for (const unit of UNITS) assert.ok(!everything.includes(unit));
 });

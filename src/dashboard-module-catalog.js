@@ -46,7 +46,7 @@ import { chartModel, takeoffHoursModel, tickerItems } from './dashboard-module-c
 import { MINE_LABEL, MINE_SLOT } from './personal-dashboard.js';
 import { mountChart } from './dashboard-module-charts.js';
 import { columnPicker } from './dashboard-module-picker.js';
-import { forgetProfileSchemaModule, loadProfileSchema, syncProfileSchemaModules } from './profile-schema-client.js';
+import { forgetProfileSchemaModule, loadProfileSchema, syncProfileSchemaModules, updateProfileSchema } from './profile-schema-client.js';
 import { loadDashboardLayout, updateDashboardLayout } from './dashboard-layout-client.js';
 import { duplicateInstance, moveInstance, removeInstance, resizeInstance, setSharedPeriod, updateInstance } from './module-instance-core.js';
 import { ensureModuleInstances, forgetModuleInstances } from './module-instance-modules-core.js';
@@ -58,6 +58,7 @@ import { CATALOG as PS_CATALOG, KPI_TILES, VIEW_BY_BLOCK } from './ps-kpi.js';
 import { addRequest, buildRegistry } from './module-registry-view-core.js';
 import { registryPanel } from './module-registry-panel.js';
 import { linkPanel } from './table-link-panel.js';
+import { relatedLine } from './table-link-view-core.js';
 import { updatePanel } from './dashboard-module-update.js';
 import {
   buildImport,
@@ -277,6 +278,23 @@ function initialize() {
     state.schema = schema.ok ? schema.schema : null;
   }
 
+  // Рішення про зв'язок: прочитати → змінити → зберегти (як решта схеми); при збої схема лишається попередньою.
+  async function applyLinkChange(change) {
+    const result = await updateProfileSchema(invoke, change);
+    if (result.ok) state.schema = result.schema;
+    else if (result.code === 'stale') await refreshSchema();
+    return result;
+  }
+
+  // Рядок «Зв'язано з: …» на картках оновлюється на місці, щоб не перемальовувати панель під час роботи з нею.
+  function refreshRelatedLines() {
+    for (const node of host.querySelectorAll('[data-related-for]')) {
+      const text = state.schema ? relatedLine(state.schema, `module:${node.dataset.relatedFor}`) : '';
+      node.textContent = text;
+      node.hidden = !text;
+    }
+  }
+
   const localDay = () => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
@@ -334,8 +352,8 @@ function initialize() {
     } else {
       for (const module of state.modules) grid.append(renderModule(module, state.data.get(module.id)));
     }
-    // Підказки зв'язків між таблицями (E3б, B1): лише показ, нічого не зберігається; потрібні щонайменше дві таблиці.
-    if (state.modules.length >= 2 && state.schema) host.append(linkPanel({ el, schema: () => state.schema, modules: () => state.modules, data: () => state.data }));
+    // Зв'язки між таблицями (E3б, B1/B3): підказки й рішення людини; потрібні щонайменше дві таблиці.
+    if (state.modules.length >= 2 && state.schema) host.append(linkPanel({ el, schema: () => state.schema, modules: () => state.modules, data: () => state.data, apply: applyLinkChange, onChange: refreshRelatedLines }));
     host.append(grid, ticker(tickerItems(state.modules, state.data)));
   }
 
@@ -356,6 +374,11 @@ function initialize() {
     state.data.set(module.id, payload);
     if (payload.failed) showToast(`Не вдалося прочитати модуль «${module.title}».`, true);
     renderHost();
+  }
+
+  function relatedNote(module) {
+    const text = state.schema ? relatedLine(state.schema, `module:${module.id}`) : '';
+    return el('p', { class: 'ewmc-related', 'data-related-for': module.id, text, hidden: !text });
   }
 
   function renderModule(module, payload, placed = null) {
@@ -419,6 +442,7 @@ function initialize() {
           el('button', { type: 'button', class: 'btn quiet', text: 'Прочитати знову', 'data-action': 'retry-read', 'data-module-id': module.id, onclick: event => retryRead(module, event.currentTarget) }))
         : visual(module, rows),
       failed ? null : takeoffVisual(module, rows),
+      relatedNote(module),
       el('div', { class: 'ewmc-module-actions' },
         el('button', {
           type: 'button',

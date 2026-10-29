@@ -702,7 +702,7 @@ v1 і блоки вкладок через `listDefinitions` + `validateRegistry
 `create_dashboard_module` із `addRequest`, далі `loadModules()` (розкладка E4 ставить картку). Нових команд Tauri,
 записів у схему профілю, міграцій, capabilities і CSP немає. CSS — `.ewmc-reg*`, `.ewmc-catalog-tools`. Тести —
 `tests/module-registry-view.test.mjs`.
-Збереження зв'язків у схемі профілю (B2), майстер «залишити зв'язок» (B3) і групи (B4) — наступні блоки, тільки за рішенням власника.
+Збереження зв'язків у схемі профілю (B2) і підтвердження на екрані (B3) описано нижче; групи (B4) — наступний блок.
 
 ### Підказки зв'язків на екрані (E3б, показ ядра B1)
 
@@ -713,8 +713,14 @@ v1 і блоки вкладок через `listDefinitions` + `validateRegistry
 `src/table-link-panel.js` — DOM: `<details class="ewmc-links">` «Зв'язки між таблицями» з кнопками
 `find-links` / `cancel-links`; пошук через `suggestRelations` із `tick` (віддає керування між парами) і
 `cancelled` (кнопка або зникла з сторінки панель, `!panel.isConnected`); лише `textContent`, без `innerHTML`.
-Панель бере `state.schema` і `state.data` каталогу й **не викликає Tauri** (нічого не пише): у
-`dashboard-module-catalog.js` її додає `renderHost` перед сіткою карток, коли модулів ≥ 2 і схему прочитано.
+Панель бере `state.schema` і `state.data` каталогу й сама **не викликає Tauri**: рішення (B3) вона віддає функції
+`apply(change)`, яку дає `dashboard-module-catalog.js` (`applyLinkChange` → `updateProfileSchema`, ті самі команди
+`get/save_profile_schema`, без нових команд і capabilities), а після запису кличе `onChange` (`refreshRelatedLines`).
+У каталозі панель додає `renderHost` перед сіткою карток, коли модулів ≥ 2 і схему прочитано. Рішення (B3):
+`decisionOf` (`open` / `confirmed` / `rejected` / `taken`), `confirmArgs` / `rejectArgs`, `confirmBlock` (кандидат з
+припущеним порядком «день/місяць» не підтверджується), `savedRelationViews`, `rejectedRelationViews`, `relatedLine`
+(рядок «Зв'язано з: …» `p.ewmc-related[data-related-for]` на картці модуля). Кнопки: `confirm-relation`,
+`replace-relation`, `reject-relation`, `clear-relation`, `restore-relation`.
 CSS — `.ewmc-links*` у `dashboard-module-catalog.css`. Тести — `tests/table-link-view.test.mjs`
 (логіка й текстові контракти: імпорт, відсутність `invoke`, `innerHTML`, запису схеми).
 
