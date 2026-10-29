@@ -56,6 +56,14 @@ pub enum PutResult {
     AlreadyStored,
 }
 
+/// Результат видалення за підтвердженням.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RemoveResult {
+    Removed,
+    /// Немає такого пакета (уже видалено або минув TTL): повторне підтвердження безпечне.
+    NotFound,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Page {
     pub envelopes: Vec<Vec<u8>>,
@@ -213,6 +221,37 @@ impl OfflineMailbox {
         Ok(PutResult::Stored)
     }
 
+    /// Видаляє конверт за перевіреним підтвердженням одержувача (ADR store-forward, `ack`).
+    /// Інший digest — відмова без видалення: чужий чи підмінений пакет не зникає.
+    pub fn remove(
+        &mut self,
+        scope: [u8; ID_LEN],
+        id: [u8; ID_LEN],
+        digest: &[u8; KEY_LEN],
+        now: i64,
+    ) -> Result<RemoveResult, MailboxError> {
+        let Some(position) = self
+            .entries
+            .iter()
+            .position(|entry| entry.expires_at > now && entry.scope == scope && entry.id == id)
+        else {
+            return Ok(RemoveResult::NotFound);
+        };
+        if &self.entries[position].digest != digest {
+            return Err(MailboxError::ConflictingEnvelope);
+        }
+        let entries: Vec<Entry> = self
+            .entries
+            .iter()
+            .enumerate()
+            .filter(|(index, entry)| *index != position && entry.expires_at > now)
+            .map(|(_, entry)| entry.clone())
+            .collect();
+        self.write_snapshot(self.next_seq, &entries)?;
+        self.entries = entries;
+        Ok(RemoveResult::Removed)
+    }
+
     /// Cursor — локальний монотонний номер. Повторне читання без ACK є безпечним;
     /// лише одержувач із ключем епохи може перевірити й застосувати пакет.
     pub fn fetch(&self, scope: [u8; ID_LEN], cursor: u64, limit: usize, now: i64) -> Page {
@@ -348,6 +387,39 @@ mod tests {
         ));
         assert!(mailbox.fetch(scope, 0, 1, 2).envelopes[0] == bytes);
         assert_eq!(mailbox.put(&another, 200, 100).unwrap(), PutResult::Stored);
+    }
+
+    #[test]
+    fn remove_needs_the_same_digest_and_survives_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("queue");
+        let key = EpochKey::generate();
+        let scope = [5; ID_LEN];
+        let bytes = sealed(&key, scope, b'C');
+        let envelope = Envelope::from_bytes(&bytes).unwrap();
+        let id = envelope.header.envelope_id;
+        let mut mailbox = OfflineMailbox::open(&path, 4096).unwrap();
+        mailbox.put(&bytes, 100, 1).unwrap();
+        assert!(matches!(
+            mailbox.remove(scope, id, &[0; KEY_LEN], 2),
+            Err(MailboxError::ConflictingEnvelope)
+        ));
+        assert_eq!(
+            mailbox.fetch(scope, 0, 10, 2).envelopes,
+            vec![bytes.clone()]
+        );
+        let digest = sha256(&[&bytes]);
+        assert_eq!(
+            mailbox.remove(scope, id, &digest, 2).unwrap(),
+            RemoveResult::Removed
+        );
+        assert_eq!(
+            mailbox.remove(scope, id, &digest, 2).unwrap(),
+            RemoveResult::NotFound
+        );
+        drop(mailbox);
+        let mailbox = OfflineMailbox::open(&path, 4096).unwrap();
+        assert!(mailbox.fetch(scope, 0, 10, 2).envelopes.is_empty());
     }
 
     #[test]
