@@ -13,7 +13,11 @@
 //   планова таблиця й таблиця з непідтвердженим призначенням — D (зауваження J5 F-6);
 // - клас таблиці — найвищий серед її стовпців; порожня таблиця й змішана таблиця — D;
 // - D іде лише по LAN («Дельта» в v1 не перевірена, G10); A–C — LAN або Base44 лише з
-//   наскрізним шифруванням; peer_wan (WAN-mesh, етап C8) заборонений для всіх класів.
+//   наскрізним шифруванням; за уточненням JE від 29.10 WAN/relay — обов'язковий цільовий
+//   режим, але C8 не ввімкнено. peer_wan можна пропонувати лише для підтвердженого
+//   обліку класу C після позитивних перевірок; production-виконання лишається за Rust.
+// - Дозвіл цієї JS-функції не є криптографічним доказом: жодне поле options із JS не
+//   можна використовувати в Rust замість перевіреного членства, класифікації чи E2EE.
 // Будь-що невідоме (клас, транспорт, роль) веде до D або до відмови, ніколи до дозволу.
 
 import { ROLES } from './module-definition-core.js';
@@ -152,6 +156,8 @@ const allow = Object.freeze({ allowed: true, code: 'allowed', reason: 'Тран�
 
 /**
  * Чи можна передати таблицю цього класу цим транспортом. Нічого не відкриває: лише відповідь.
+ * Для peer_wan позитивна відповідь є лише UX-preflight. Усі прапорці встановлюються
+ * *виключно* з перевіреного стану, а Rust сам повторює повний gate перед передачею.
  * @returns {{ allowed: boolean, code: string, reason: string }}
  */
 export function routeFor(cls, transport, options) {
@@ -167,8 +173,18 @@ export function routeFor(cls, transport, options) {
       return allow;
     case 'delta':
       return deny('delta-unverified', '«Дельту» ще не перевірено (G10); у v1 клас D працює лише по LAN');
-    case 'peer_wan':
-      return deny('peer-wan-forbidden', 'Передача через інший EasyWAR в інтернеті заборонена для всіх класів (етап C8)');
+    case 'peer_wan': {
+      const o = opts(options);
+      if (cls === 'D') return deny('class-d-wan', 'Клас D передається лише через локальну мережу LAN');
+      if (cls !== 'C') return deny('wan-class-unapproved', 'У WAN дозволений лише підтверджений облік класу C');
+      if (endToEnd !== true) return deny('no-e2e', 'Інтернет-обмін потребує наскрізного шифрування');
+      if (o.confirmedAfterFact !== true) return deny('wan-purpose-unconfirmed', 'Власник має підтвердити облік після факту');
+      if (o.membershipVerified !== true) return deny('wan-membership-unverified', 'Потрібно перевірити підписаний склад колективу');
+      if (o.explicitUserChoice !== true) return deny('wan-needs-user-choice', 'Користувач має явно вибрати передачу через інтернет');
+      if (o.relayOpaqueVerified !== true) return deny('wan-relay-unverified', 'Relay має передавати лише зашифровані пакети');
+      if (o.transportSecurityApproved !== true) return deny('wan-not-ready', 'WAN-транспорт не пройшов безпекове приймання');
+      return allow;
+    }
     default:
       return deny('unknown-transport', 'Невідомий транспорт — передачу заборонено');
   }
