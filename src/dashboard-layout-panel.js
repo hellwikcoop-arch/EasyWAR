@@ -2,7 +2,7 @@
 // виклики: логіка — dashboard-layout-view-core.js та module-instance-core.js, обмін із Rust —
 // dashboard-layout-client.js. Нічого не змінюється, доки людина не вибере період чи не натисне кнопку.
 
-import { PERIOD_CHOICES, choiceOf, periodFromChoice, sizeChoices } from './dashboard-layout-view-core.js';
+import { PERIOD_CHOICES, STYLE_CHOICES, choiceOf, periodFromChoice, sizeChoices } from './dashboard-layout-view-core.js';
 
 /** Список і поля дат для періоду. `onChange(period)` викликається, лише коли період повний і коректний. */
 function periodControl({ el, label, period, allowShared, onChange }) {
@@ -37,7 +37,7 @@ export function sharedPeriodBar({ el, layout, onChange }) {
  * Смужка картки: власний період, «Копія» і «Прибрати картку». `model` — результат `cardModel`;
  * кнопки, що неможливі, вимкнені з поясненням у підказці.
  */
-export function instanceBar({ el, instance, model, width = 6, canEarlier = false, canLater = false, onPeriod, onDuplicate, onRemove, onSize, onMove }) {
+export function instanceBar({ el, instance, model, width = 6, canEarlier = false, canLater = false, onPeriod, onDuplicate, onRemove, onSize, onMove, style = 'branch', onStyle }) {
   const duplicate = el('button', {
     type: 'button',
     class: 'btn quiet',
@@ -61,6 +61,9 @@ export function instanceBar({ el, instance, model, width = 6, canEarlier = false
   const size = el('select', { 'aria-label': `Розмір картки ${instance.title}`, 'data-action': 'card-size', title: 'Ширина картки на сітці' },
     sizeChoices(width).map(item => el('option', { value: item.w, text: item.label, selected: item.w === width })));
   size.addEventListener('change', () => onSize(Number(size.value)));
+  const styleSelect = el('select', { 'aria-label': `Стиль картки ${instance.title}`, 'data-action': 'card-style', title: 'Стиль оформлення картки' },
+    STYLE_CHOICES.map(item => el('option', { value: item.id, text: item.label, selected: item.id === style })));
+  styleSelect.addEventListener('change', () => onStyle(styleSelect.value));
   const arrow = (action, text, label, enabled, direction) => el('button', {
     type: 'button',
     class: 'btn quiet ewmc-move',
@@ -90,6 +93,7 @@ export function instanceBar({ el, instance, model, width = 6, canEarlier = false
     handle,
     periodControl({ el, label: `Період картки ${instance.title}`, period: instance.period, allowShared: true, onChange: onPeriod }),
     size,
+    styleSelect,
     arrow('move-earlier', '←', 'Раніше', canEarlier, -1),
     arrow('move-later', '→', 'Пізніше', canLater, 1),
     duplicate, remove,

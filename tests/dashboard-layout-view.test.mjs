@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-import { PERIOD_CHOICES, choiceOf, periodFromChoice, periodLabel, orderedCards, cardModel, sizeChoices } from '../src/dashboard-layout-view-core.js';
+import { PERIOD_CHOICES, choiceOf, periodFromChoice, periodLabel, orderedCards, cardModel, sizeChoices, STYLE_CHOICES, cardStyle } from '../src/dashboard-layout-view-core.js';
 import { emptyLayout, duplicateInstance, updateInstance, placeInstance, setSharedPeriod, MAX_COPIES } from '../src/module-instance-core.js';
 import { ensureModuleInstances } from '../src/module-instance-modules-core.js';
 import { emptySchema, addSource, confirmBinding } from '../src/profile-schema-core.js';
@@ -119,4 +119,28 @@ test('вибір розміру: готові ширини, нестандарт
   const layout = placeInstance(base, id, { x: 0, y: 0, w: 8, h: 3 }).layout;
   assert.equal(orderedCards(layout, [module('m1')])[0].at.w, 8);
   assert.equal(ensureModuleInstances(emptyLayout('p'), [module('m2', { defaultSpan: 2 })]).layout.placements[0].w, 12);
+});
+
+test('стиль картки: три стилі каталогу, за замовчуванням рід військ, явний вибір діє як є', () => {
+  assert.deepEqual(STYLE_CHOICES.map(item => item.id), ['standard', 'branch', 'heightwell']);
+  const fresh = { style: { accent: '', background: '', view: '' } };
+  assert.equal(cardStyle('standard', fresh), 'branch');
+  assert.equal(cardStyle(undefined, fresh), 'branch');
+  assert.equal(cardStyle('heightwell', fresh), 'heightwell', 'власний стиль модуля без вибору не перебивається');
+  assert.equal(cardStyle('standard', { style: { background: 'щось' } }), 'branch');
+  assert.equal(cardStyle('standard', { style: { background: 'standard' } }), 'standard');
+  assert.equal(cardStyle('standard', { style: { background: 'plain' } }), 'standard', 'старе значення plain = звичайний');
+  assert.equal(cardStyle('standard', { style: { background: 'heightwell' } }), 'heightwell');
+  assert.equal(cardStyle('heightwell', { style: { background: 'branch' } }), 'branch');
+  assert.equal(cardStyle('standard', undefined), 'branch');
+});
+
+test('вибір стилю зберігається лише в цієї картки', () => {
+  const layout = ensureModuleInstances(emptyLayout('profile-a'), [{ id: 'm1', branch: 'air', fields: FIELDS, defaultSpan: 1, definitionId: 'm1' }, { id: 'm2', branch: 'air', fields: FIELDS, defaultSpan: 1, definitionId: 'm2' }]).layout;
+  const [first, second] = layout.instances;
+  const changed = updateInstance(layout, first.id, { style: { background: 'heightwell' } });
+  assert.ok(changed.ok);
+  const byId = id => changed.layout.instances.find(item => item.id === id);
+  assert.equal(cardStyle('standard', byId(first.id)), 'heightwell');
+  assert.equal(cardStyle('standard', byId(second.id)), 'branch');
 });
