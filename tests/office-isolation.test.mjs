@@ -95,17 +95,24 @@ test('жодна capability не застосовується до всіх ві
   }
 });
 
-test('кожна команда office_* перевіряє мітку вікна, яку дає Tauri', async () => {
+test('команди редактора перевіряють мітку Tauri, а колективів — також активний застосунок', async () => {
   const lib = await read('src-tauri/src/lib.rs');
   for (const command of EDITOR_COMMANDS) {
     const body = lib.slice(lib.indexOf(`fn ${command}(`)).split('\n#[tauri::command]')[0];
-    assert.match(body, /office_files::ensure_editor_window\((webview|window)\.label\(\)\)/, command);
+    if (command.startsWith('collective_')) {
+      assert.match(body, /office_files::ensure_collectives_editor\(webview\.label\(\), &handles\)/, command);
+    } else {
+      assert.match(body, /office_files::ensure_editor_window\((webview|window)\.label\(\)\)/, command);
+    }
   }
   const open = lib.slice(lib.indexOf('fn workspace_open_editor(')).split('\n#[tauri::command]')[0];
   assert.match(open, /window\.label\(\) != desktop_shell::MAIN_WINDOW_LABEL/);
   assert.match(open, /office_files::editor_app\(&app_id\)/);
   const files = await read('src-tauri/src/office_files.rs');
   assert.match(files, /pub const EDITOR_WINDOW_LABEL: &str = "office-editor";/);
+  assert.match(files, /pub fn ensure_collectives_editor\(/);
+  assert.match(files, /ensure_editor_window\(label\)\?/);
+  assert.match(files, /handles\.editor_window_app\(\) == Some\("collectives"\)/);
 });
 
 test('оболонка відкриває застосунок в окремому вікні, а не в iframe головного вікна', async () => {
