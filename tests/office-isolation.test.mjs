@@ -155,7 +155,11 @@ test('вікно редактора відкриває всі підключен
   const connected = [];
   // Застосунки без файлів («Обстановка», «Колектив (демо)») лишаються в головному вікні й у вікно
   // редактора не потрапляють — те саме правило, що й в оболонці (opensInEditorWindow).
-  for (const app of WORKSPACE_APPS.filter(entry => opensInEditorWindow(entry.id))) {
+  // Явний перелік застосунків головного вікна: якщо opensInEditorWindow помилково виключить застосунок
+  // «Офісу», тест це помітить (зауваження C3 до PR #196).
+  const MAIN_WINDOW_APPS = ['weather', 'collective-demo'];
+  for (const entry of WORKSPACE_APPS) assert.equal(opensInEditorWindow(entry.id), !MAIN_WINDOW_APPS.includes(entry.id), `${entry.id}: вікно`);
+  for (const app of WORKSPACE_APPS.filter(entry => !MAIN_WINDOW_APPS.includes(entry.id))) {
     const present = await access(new URL(`src/workspace/${app.id}/app.js`, root)).then(() => true, () => false);
     if (present) connected.push(app.id);
   }

@@ -67,28 +67,64 @@ test('повторна доставка того самого пакета не 
   assert.equal(synchronize(demo, 'B').received, 0, 'нових змін немає');
 });
 
-test('дві правки одного рядка → конфлікт без мовчазного перезапису; рішення йде через «Доповісти»', () => {
+test('дві правки одного рядка → однаковий конфлікт в обох копіях, без мовчазного перезапису', () => {
   const demo = createDemo();
   editRow(demo, 'A', 'r1', { amount: 30 });
-  editRow(demo, 'B', 'r1', { amount: 40 });
   report(demo, 'A');
-  report(demo, 'B');
-  const atB = synchronize(demo, 'B');
-  assert.equal(atB.conflicts, 1);
-  assert.equal(row(demo, 'B', 'r1').values.amount, 40, 'своє значення Б не затерто');
-  const [conflict] = conflictsOf(demo, 'B');
-  assert.equal(conflict.theirs.amount, 30);
-  assert.equal(conflict.mine.amount, 40);
-  const decided = resolve(demo, 'B', conflict.conflictId, 'take-theirs');
-  assert.equal(decided.ok, true, decided.reason);
-  assert.equal(conflictsOf(demo, 'B').length, 1, 'конфлікт закривається лише разом із застосуванням рішення');
+  editRow(demo, 'B', 'r1', { amount: 40 });
   const { result } = report(demo, 'B');
   assert.equal(result.ok, true, result.reason);
-  assert.equal(conflictsOf(demo, 'B').length, 0);
-  assert.equal(row(demo, 'B', 'r1').values.amount, 30);
+  assert.equal(result.summary.conflicts, 1, 'правка Б перетнулася з правкою А в журналі');
+  assert.equal(row(demo, 'B', 'r1').values.amount, 30, 'у Б застосовано те, що прийшло першим');
+  const [atB] = conflictsOf(demo, 'B');
+  assert.deepEqual([atB.mine.amount, atB.theirs.amount, atB.author], [30, 40, 'ваша']);
   const atA = synchronize(demo, 'A');
-  assert.equal(atA.conflicts, 1, 'перша правка Б для А — теж конфлікт, не перезапис');
+  assert.equal(atA.conflicts, 1);
   assert.equal(row(demo, 'A', 'r1').values.amount, 30);
+  assert.equal(conflictsOf(demo, 'A')[0].author, 'від Б');
+  const decided = resolve(demo, 'B', atB.conflictId, 'take-theirs');
+  assert.equal(decided.ok, true, decided.reason);
+  assert.equal(conflictsOf(demo, 'B').length, 1, 'конфлікт закривається лише разом із застосуванням рішення');
+  assert.equal(report(demo, 'B').result.ok, true);
+  assert.equal(conflictsOf(demo, 'B').length, 0);
+  synchronize(demo, 'A');
+  assert.equal(row(demo, 'A', 'r1').values.amount, 40);
+  assert.deepEqual(visibleRows(demo, 'A'), visibleRows(demo, 'B'), 'копії однакові, включно з версіями');
+});
+
+test('регресія C3: друга правка Б після конфлікту не затирає правку А мовчки, копії сходяться', () => {
+  const demo = createDemo();
+  editRow(demo, 'A', 'r1', { amount: 30 });
+  report(demo, 'A');
+  editRow(demo, 'B', 'r1', { amount: 40 });
+  report(demo, 'B');
+  // Б бачить у таблиці значення А (30) і свідомо змінює його далі.
+  assert.equal(row(demo, 'B', 'r1').values.amount, 30);
+  editRow(demo, 'B', 'r1', { amount: 50 });
+  assert.equal(demo.clients.B.pending[0].base_version, row(demo, 'B', 'r1').version, 'база — версія після правки А');
+  report(demo, 'B');
+  const atA = synchronize(demo, 'A');
+  assert.deepEqual({ conflicts: atA.conflicts, applied: atA.applied }, { conflicts: 1, applied: 1 });
+  assert.equal(conflictsOf(demo, 'A')[0].theirs.amount, 40, 'перехресна правка видна в конфлікті');
+  assert.deepEqual(visibleRows(demo, 'A'), visibleRows(demo, 'B'));
+});
+
+test('застарілий перегляд після конфлікту не підтвердити; без права запису конфлікт не розв\'язати й чернетку не зачепити', () => {
+  const demo = createDemo();
+  editRow(demo, 'A', 'r1', { amount: 30 });
+  report(demo, 'A');
+  editRow(demo, 'B', 'r1', { amount: 40 });
+  report(demo, 'B');
+  editRow(demo, 'B', 'r2', { amount: 1 });
+  assert.equal(openReport(demo, 'B').ok, true);
+  editRow(demo, 'A', 'r3', { amount: 2 });
+  report(demo, 'A');
+  synchronize(demo, 'B');
+  assert.equal(confirmReport(demo, 'B').code, 'stale-revision');
+  setWriteRight(demo, 'B', false);
+  const [conflict] = conflictsOf(demo, 'B');
+  assert.equal(resolve(demo, 'B', conflict.conflictId, 'keep-mine').ok, false);
+  assert.equal(demo.clients.B.pending.length, 1, 'чернетка рядка r2 лишилась');
 });
 
 test('без права запису «Доповісти» відмовляє з поясненням', () => {

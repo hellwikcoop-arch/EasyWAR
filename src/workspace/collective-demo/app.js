@@ -198,7 +198,7 @@ export async function mount(container) {
     actions.append(
       button('Підтвердити й відправити', () => {
         const sent = confirmReport(demo, clientId);
-        say(clientId, sent.ok ? `Відправлено змін: ${sent.count}. Інший учасник отримає їх після «Звірити»` : sent.reason, sent.ok ? 'info' : 'warn');
+        say(clientId, sent.ok ? `Відправлено змін: ${sent.count}. ${sent.notes.length ? sent.notes.join('. ') : 'Інший учасник отримає їх після «Звірити»'}` : sent.reason, sent.ok && !sent.summary.conflicts ? 'info' : 'warn');
         render();
       }, { primary: true }),
       button('Скасувати', () => { demo.clients[clientId].preview = null; render(); }),
@@ -213,12 +213,12 @@ export async function mount(container) {
     for (const conflict of conflicts) {
       const item = el('div', 'cd-conflict');
       item.append(
-        el('p', '', `Рядок ${conflict.rowKey}: інший учасник змінив той самий рядок. Нічого не перезаписано — оберіть варіант.`),
-        el('p', 'cd-muted', `Ваше: ${COLUMNS.map(c => formatCell(conflict.mine && conflict.mine[c])).join(' · ')}`),
-        el('p', 'cd-muted', `Отримане: ${COLUMNS.map(c => formatCell(conflict.theirs && conflict.theirs[c])).join(' · ')}`),
+        el('p', '', `Рядок ${conflict.rowKey}: дві зміни одного рядка перетнулися. Нічого не перезаписано — оберіть варіант.`),
+        el('p', 'cd-muted', `Поточне в таблиці: ${COLUMNS.map(c => formatCell(conflict.mine && conflict.mine[c])).join(' · ')}`),
+        el('p', 'cd-muted', `Зміна, що не застосувалась (${conflict.author}): ${COLUMNS.map(c => formatCell(conflict.theirs && conflict.theirs[c])).join(' · ')}`),
       );
       const actions = el('div', 'cd-actions');
-      for (const [choice, label] of [['keep-mine', 'Залишити своє'], ['take-theirs', 'Прийняти отримане']]) {
+      for (const [choice, label] of [['keep-mine', 'Залишити поточне'], ['take-theirs', 'Застосувати цю зміну']]) {
         actions.append(button(label, () => {
           const decided = resolve(demo, clientId, conflict.conflictId, choice);
           say(clientId, decided.reason, decided.ok ? 'info' : 'warn');

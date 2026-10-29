@@ -2,8 +2,10 @@
 //
 // Логіку не дублюємо: операції, конфлікти й дублі — shared-table-core.js (C1b), перегляд і
 // фіксація «Доповісти» — report-submission-core.js (C1d), політики відправки й застосування —
-// sync-policy-core.js (C1d), маршрут за класом чутливості — sensitivity-core.js (C1a).
-// Тут лише стан двох демонстраційних клієнтів і «доставка» між ними.
+// sync-policy-core.js (C1d; маршрут за класом чутливості — sensitivity-core.js (C1a) через evaluateOutbound).
+// Тут лише стан двох демонстраційних клієнтів і «доставка» між ними. «Доставка» — один спільний
+// упорядкований журнал (як квитанції сховища): кожен клієнт застосовує операції саме в цьому порядку,
+// і свої теж, тому версії рядків однакові в усіх копіях, а перехресні правки дають конфлікт.
 //
 // Чесні межі S1 (наказ JE 29.10.2026):
 // - доставка — масив у пам'яті вікна, мережі немає; після закриття застосунку все зникає;
@@ -156,78 +158,82 @@ export function openReport(demo, clientId) {
   return { ok: true, preview: client.preview };
 }
 
-/** «Підтвердити» після перегляду: фіксація рівно показаних операцій, застосування в себе й «доставка». */
+/**
+ * «Підтвердити» після перегляду: фіксація рівно показаних операцій і «доставка» в спільний журнал.
+ * Свої операції застосовуються в порядку журналу разом із чужими, що прийшли раніше (як після
+ * квитанції сховища): якщо інший учасник устиг змінити той самий рядок, обидві копії побачать
+ * однаковий конфлікт, а не мовчазний перезапис.
+ */
 export function confirmReport(demo, clientId) {
   const client = demo.clients[clientId];
   const committed = commitReport(client.preview, { currentRevision: client.revision, confirmedDeletions: [] });
   if (!committed.ok) return committed;
-  // У себе операції застосовує те саме ядро, що й в отримувача; розв'язання конфлікту — через
-  // resolveConflict, який закриває саме названий конфлікт лише разом із застосуванням.
-  let table = client.table;
-  for (const op of committed.ops) {
-    const conflictId = client.resolutions[op.op_id];
-    const applied = conflictId
-      ? resolveConflict(table, conflictId, op, applyOptions(demo))
-      : applyOperation(table, op, applyOptions(demo));
-    if (applied.status !== 'applied') {
-      log(demo, client, 'rejected', `Не відправлено: ${reasonText(applied.reason)}`);
-      return { ok: false, code: applied.reason, reason: reasonText(applied.reason) };
-    }
-    table = applied.state;
-  }
-  client.table = table;
-  client.resolutions = {};
-  client.revision += 1;
-  for (const op of committed.ops) {
-    demo.channel.push({ op, from: clientId });
-    log(demo, client, 'stored', `Відправлено (рядок ${op.row_key})`, op.op_id);
-  }
+  const before = demo.channel.length;
+  for (const op of committed.ops) demo.channel.push({ op, from: clientId });
+  for (const op of committed.ops) log(demo, client, 'stored', `Відправлено (рядок ${op.row_key})`, op.op_id);
+  const crossed = demo.channel.slice(client.cursor, before).length;
+  const summary = applyEntries(demo, clientId, demo.channel.slice(client.cursor));
+  client.cursor = demo.channel.length;
   client.pending = [];
   client.preview = null;
-  return { ok: true, count: committed.ops.length, reason: committed.reason };
+  client.resolutions = {};
+  const notes = [];
+  if (crossed) notes.push(`Перед вашими змінами вже були нові зміни інших учасників (${crossed}) — їх застосовано першими`);
+  if (summary.conflicts) notes.push('Є конфлікт: дві зміни одного рядка перетнулися — рішення нижче');
+  return { ok: true, count: committed.ops.length, reason: committed.reason, notes, summary };
 }
 
-/** «Звірити»: отримати нові операції інших учасників і застосувати перевірене. */
+/** «Звірити»: отримати нові операції журналу й застосувати перевірене в тому самому порядку. */
 export function synchronize(demo, clientId) {
   const client = demo.clients[clientId];
-  const batch = demo.channel.slice(client.cursor).filter(entry => entry.from !== clientId).map(entry => entry.op);
+  const batch = demo.channel.slice(client.cursor);
   client.cursor = demo.channel.length;
   if (batch.length) client.lastBatch = batch;
-  return receive(demo, clientId, batch);
+  const summary = applyEntries(demo, clientId, batch);
+  if (batch.length === 0) log(demo, client, 'idle', 'Нових змін немає');
+  return summary;
 }
 
 /** Повторна доставка останнього отриманого пакета — перевірка, що дубль не застосовується двічі. */
 export function redeliver(demo, clientId) {
   const client = demo.clients[clientId];
   if (!client.lastBatch) return { applied: 0, skipped: 0, conflicts: 0, rejected: 0, received: 0 };
-  return receive(demo, clientId, client.lastBatch);
+  return applyEntries(demo, clientId, client.lastBatch);
 }
 
-function receive(demo, clientId, batch) {
+function applyEntries(demo, clientId, entries) {
   const client = demo.clients[clientId];
-  const summary = { received: batch.length, applied: 0, skipped: 0, conflicts: 0, rejected: 0 };
-  for (const op of batch) {
-    const result = applyOperation(client.table, op, applyOptions(demo));
+  const summary = { received: entries.length, applied: 0, skipped: 0, conflicts: 0, rejected: 0 };
+  for (const { op, from } of entries) {
+    const own = from === clientId;
+    const conflictId = own ? client.resolutions[op.op_id] : undefined;
+    const result = conflictId && client.table.conflicts.some(c => c.conflictId === conflictId && c.resolvedBy === null)
+      ? resolveConflict(client.table, conflictId, op, applyOptions(demo))
+      : applyOperation(client.table, op, applyOptions(demo));
     const inbound = evaluateInbound({ policy: demo.policy.inbound, applyStatus: result.status, kind: op.kind });
     const who = op.author_member_id === CLIENTS.A.memberId ? 'А' : 'Б';
+    const subject = own ? 'вашу зміну' : `зміну від ${who}`;
     if (inbound.action === 'apply') {
       summary.applied += 1;
-      log(demo, client, 'applied', `Застосовано зміну від ${who} (рядок ${op.row_key})`, op.op_id);
+      log(demo, client, 'applied', `Застосовано ${subject} (рядок ${op.row_key})`, op.op_id);
     } else if (inbound.action === 'skip') {
       summary.skipped += 1;
       log(demo, client, 'duplicate', `Повтор пропущено (рядок ${op.row_key})`, op.op_id);
     } else if (inbound.action === 'conflict') {
       summary.conflicts += 1;
-      log(demo, client, 'conflict', `Конфлікт у рядку ${op.row_key}: потрібне рішення`, op.op_id);
+      log(demo, client, 'conflict', `Конфлікт у рядку ${op.row_key}: ${subject} перетнулася з іншою — потрібне рішення`, op.op_id);
     } else {
       summary.rejected += 1;
-      log(demo, client, 'rejected', `Відхилено зміну від ${who}: ${reasonText(result.reason)}`, op.op_id);
+      // S1 не зберігає відхилене: S2 має класти такі операції в карантин, а не губити їх.
+      log(demo, client, 'rejected', `Відхилено ${subject}: ${reasonText(result.reason)}`, op.op_id);
     }
-    // Стан змінюється лише тим, що повернуло ядро: застосування, дубль без змін, конфлікт у журналі.
-    if (result.status === 'applied' || result.status === 'conflict') client.table = result.state;
-    if (result.status === 'applied') client.revision += 1;
+    // Стан змінюється лише тим, що повернуло ядро; конфлікт теж змінює стан (журнал конфліктів),
+    // тож ревізія росте й старий перегляд «Доповісти» більше не підтвердити.
+    if (result.status === 'applied' || result.status === 'conflict') {
+      client.table = result.state;
+      client.revision += 1;
+    }
   }
-  if (batch.length === 0) log(demo, client, 'idle', 'Нових змін немає');
   return summary;
 }
 
@@ -236,28 +242,26 @@ export function conflictsOf(demo, clientId) {
   const client = demo.clients[clientId];
   return openConflicts(client.table).map(conflict => {
     const row = client.table.rows[conflict.rowKey];
-    return { conflictId: conflict.conflictId, rowKey: conflict.rowKey, mine: row ? row.values : null, theirs: conflict.op.values, reason: conflict.reason };
+    const author = conflict.op.author_member_id === CLIENTS[clientId].memberId ? 'ваша' : (conflict.op.author_member_id === CLIENTS.A.memberId ? 'від А' : 'від Б');
+    return { conflictId: conflict.conflictId, rowKey: conflict.rowKey, mine: row ? row.values : null, theirs: conflict.op.values, author, reason: conflict.reason };
   });
 }
 
 /**
  * Розв'язання конфлікту рішенням людини: «keep-mine» — залишити поточне значення, «take-theirs» —
- * прийняти отримане. Розв'язання — нова чернетка від поточної версії рядка; вона піде іншим
+ * застосувати зміну, що не пройшла. Розв'язання — нова чернетка від поточної версії рядка; вона піде іншим
  * через «Доповісти», як будь-яка правка (К6).
  */
 export function resolve(demo, clientId, conflictId, choice) {
   const client = demo.clients[clientId];
   const conflict = conflictsOf(demo, clientId).find(item => item.conflictId === conflictId);
   if (!conflict) return { ok: false, reason: 'Конфлікт уже розв\'язано' };
+  if (!canWrite(demo, clientId)) return { ok: false, reason: 'Розв\'язати конфлікт може лише учасник із правом запису' };
   const values = choice === 'take-theirs' ? conflict.theirs : conflict.mine;
   const draft = editRow(demo, clientId, conflict.rowKey, values);
   if (!draft.ok) return draft;
-  if (!canWrite(demo, clientId)) {
-    client.pending = client.pending.filter(op => op.op_id !== draft.op.op_id);
-    return { ok: false, reason: 'Розв\'язати конфлікт може лише учасник із правом запису' };
-  }
   client.resolutions[draft.op.op_id] = conflictId;
-  log(demo, client, 'resolved', `Рішення щодо рядка ${conflict.rowKey}: ${choice === 'take-theirs' ? 'прийняти отримане' : 'залишити своє'} — у чернетці`, draft.op.op_id);
+  log(demo, client, 'resolved', `Рішення щодо рядка ${conflict.rowKey}: ${choice === 'take-theirs' ? 'застосувати зміну' : 'залишити поточне'} — у чернетці`, draft.op.op_id);
   return { ok: true, reason: 'Рішення стоїть у чернетці: натисніть «Доповісти», щоб застосувати його й передати іншим' };
 }
 
