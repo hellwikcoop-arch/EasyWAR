@@ -378,12 +378,13 @@ function initialize() {
     removeButton.addEventListener('click', () => ask(true));
     keepButton.addEventListener('click', () => ask(false));
     confirmButton.addEventListener('click', () => deleteModule(module, [keepButton, confirmButton]));
-    loadStyleFonts(module.style);
+    const shownStyle = placed ? cardStyle(module.style, placed.instance) : module.style;
+    loadStyleFonts(shownStyle);
     const card = el('article', {
       class: placed ? 'ewmc-module' : `ewmc-module span-${module.defaultSpan === 2 ? 2 : 1}`,
       style: placed ? { gridColumn: `span ${placed.width}` } : null,
       'data-kind': module.visualKind,
-      'data-style': placed ? cardStyle(module.style, placed.instance) : module.style,
+      'data-style': shownStyle,
       'data-branch': module.branch,
       'data-instance-id': placed?.instance.id,
     },
@@ -401,7 +402,8 @@ function initialize() {
         canEarlier: Boolean(placed.before),
         canLater: Boolean(placed.after),
         onSize: width => changeLayout(layout => resizeInstance(layout, placed.instance.id, width)),
-        onBackground: background => changeLayout(layout => updateInstance(layout, placed.instance.id, { style: { background } })),
+        style: cardStyle(module.style, placed.instance),
+        onStyle: background => changeLayout(layout => updateInstance(layout, placed.instance.id, { style: { background } })),
         onMove: direction => changeLayout(layout => moveInstance(layout, placed.instance.id, direction < 0 ? placed.before : placed.after)),
       }) : null,
       failed

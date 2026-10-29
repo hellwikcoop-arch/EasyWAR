@@ -3,6 +3,7 @@
 import { MAX_COPIES, SIZE_CHOICES, copiesOf, effectivePeriod } from './module-instance-core.js';
 import { moduleSourceId } from './profile-schema-modules-core.js';
 import { periodColumn, rowsInPeriod } from './module-instance-modules-core.js';
+import { MODULE_STYLES } from './dashboard-module-catalog-core.js';
 
 export const PERIOD_CHOICES = Object.freeze([
   { id: 'shared', label: 'Як у спільній панелі' },
@@ -77,19 +78,18 @@ export function sizeChoices(width) {
   return known.some(item => item.w === width) ? known : [...known, { w: width, label: `${width} з 12` }].sort((a, b) => a.w - b.w);
 }
 
-/** Фон картки: за замовчуванням у кольорі роду військ модуля; «звичайний» — як стиль самого модуля. */
-export const BACKGROUND_CHOICES = Object.freeze([
-  Object.freeze({ id: 'branch', label: 'Фон: за родом військ' }),
-  Object.freeze({ id: 'plain', label: 'Фон: звичайний' }),
-]);
-
-export const backgroundOf = instance => (instance?.style?.background === 'plain' ? 'plain' : 'branch');
+/** Стиль окремої картки: ті самі три стилі, що й у каталозі модулів. */
+export const STYLE_CHOICES = Object.freeze(MODULE_STYLES.map(item => Object.freeze({ id: item.id, label: item.label })));
+const STYLE_IDS = new Set(STYLE_CHOICES.map(item => item.id));
 
 /**
- * Стиль, з яким малюється картка. Порожній чи невідомий фон = за родом військ: звичайний стиль модуля
- * стає «Кольори роду військ»; власний стиль модуля («Пункт керування») не перебивається.
+ * Стиль, з яким малюється картка. Явний вибір (`instance.style.background`) діє як є; старе значення
+ * `plain` — «Звичайний». Порожній чи невідомий вибір = за родом військ: звичайний стиль модуля стає
+ * «Кольори роду військ», власний стиль модуля («Пункт керування») не перебивається.
  */
 export function cardStyle(moduleStyle, instance) {
-  const own = moduleStyle || 'standard';
-  return backgroundOf(instance) === 'branch' && own === 'standard' ? 'branch' : own;
+  const chosen = instance?.style?.background === 'plain' ? 'standard' : instance?.style?.background;
+  if (STYLE_IDS.has(chosen)) return chosen;
+  const own = STYLE_IDS.has(moduleStyle) ? moduleStyle : 'standard';
+  return own === 'standard' ? 'branch' : own;
 }
