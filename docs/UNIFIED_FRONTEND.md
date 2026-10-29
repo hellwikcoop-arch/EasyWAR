@@ -565,3 +565,19 @@ by hand with narrow anchored patches (see `AGENTS.md`), then run
 
 Файли відкриваються й зберігаються командами оболонки `office_*` (`src-tauri/src/office_files.rs`);
 власних команд EasySlide не має. CSP і capabilities Tauri не змінювалися.
+
+## Схема профілю (E3)
+
+Рішення користувача про стовпці його таблиць живуть окремо від шаблонів модулів. Чисте ядро —
+`src/profile-schema-core.js`: джерело (`module-table`, ключ, версія, стовпці в порядку користувача),
+зіставлення стовпець–роль (`confirmed`/`rejected`, одиниця), пропозиції за заголовками
+(`suggestBindings`: `bound`/`single`/`ambiguous`/`unknown`, нічого не записують), оновлення шаблону
+(`updateSourceColumns`: нові стовпці в кінець, вибір, порядок і підписи цілі, стовпець зі
+зіставленням, якого в шаблону вже немає, лишається як `orphan`), читання рядка за ключем у будь-якому
+порядку (`readRow`), доступність визначень реєстру E1 (`availability`) і текст попередження перед
+видаленням стовпця (`columnDependents`). Збереження — `src/profile-schema-client.js` над командами
+`get_profile_schema`, `save_profile_schema`, `reset_profile_schema` (Rust: `profile_schema.rs`, таблиця
+`profile_schemas`, міграція 0017): профіль береться з сеансу, запис вимагає ревізії, яку клієнт
+прочитав, а при конфлікті зміна один раз повторюється на свіжій схемі. У дашборди й екран
+підтвердження схему ще не підключено (залишок E3). Тести — `tests/profile-schema.test.mjs`,
+`tests/profile-schema-client.test.mjs`.
