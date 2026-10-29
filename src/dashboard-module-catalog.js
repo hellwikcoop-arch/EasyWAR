@@ -53,6 +53,7 @@ import { ensureModuleInstances, forgetModuleInstances } from './module-instance-
 import { cardModel, cardStyle, orderedCards } from './dashboard-layout-view-core.js';
 import { instanceBar, sharedPeriodBar } from './dashboard-layout-panel.js';
 import { rolesPanel } from './profile-schema-panel.js';
+import { linkPanel } from './table-link-panel.js';
 import { updatePanel } from './dashboard-module-update.js';
 import {
   buildImport,
@@ -329,6 +330,8 @@ function initialize() {
     } else {
       for (const module of state.modules) grid.append(renderModule(module, state.data.get(module.id)));
     }
+    // Підказки зв'язків між таблицями (E3б, B1): лише показ, нічого не зберігається; потрібні щонайменше дві таблиці.
+    if (state.modules.length >= 2 && state.schema) host.append(linkPanel({ el, schema: () => state.schema, modules: () => state.modules, data: () => state.data }));
     host.append(grid, ticker(tickerItems(state.modules, state.data)));
   }
 
