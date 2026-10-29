@@ -3,6 +3,7 @@
 import { MAX_COPIES, SIZE_CHOICES, copiesOf, effectivePeriod } from './module-instance-core.js';
 import { moduleSourceId } from './profile-schema-modules-core.js';
 import { periodColumn, rowsInPeriod } from './module-instance-modules-core.js';
+import { MODULE_STYLES } from './dashboard-module-catalog-core.js';
 
 export const PERIOD_CHOICES = Object.freeze([
   { id: 'shared', label: 'Як у спільній панелі' },
@@ -75,4 +76,20 @@ export function cardModel({ layout, schema, instance, rows, today }) {
 export function sizeChoices(width) {
   const known = SIZE_CHOICES.map(item => ({ w: item.w, label: item.label }));
   return known.some(item => item.w === width) ? known : [...known, { w: width, label: `${width} з 12` }].sort((a, b) => a.w - b.w);
+}
+
+/** Стиль окремої картки: ті самі три стилі, що й у каталозі модулів. */
+export const STYLE_CHOICES = Object.freeze(MODULE_STYLES.map(item => Object.freeze({ id: item.id, label: item.label })));
+const STYLE_IDS = new Set(STYLE_CHOICES.map(item => item.id));
+
+/**
+ * Стиль, з яким малюється картка. Явний вибір (`instance.style.background`) діє як є; старе значення
+ * `plain` — «Звичайний». Порожній чи невідомий вибір = за родом військ: звичайний стиль модуля стає
+ * «Кольори роду військ», власний стиль модуля («Пункт керування») не перебивається.
+ */
+export function cardStyle(moduleStyle, instance) {
+  const chosen = instance?.style?.background === 'plain' ? 'standard' : instance?.style?.background;
+  if (STYLE_IDS.has(chosen)) return chosen;
+  const own = STYLE_IDS.has(moduleStyle) ? moduleStyle : 'standard';
+  return own === 'standard' ? 'branch' : own;
 }
