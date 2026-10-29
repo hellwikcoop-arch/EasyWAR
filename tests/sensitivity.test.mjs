@@ -183,7 +183,7 @@ test('невідомий клас чи транспорт — відмова, а
   const all = [routeFor('E', 'lan'), routeFor('A', 'ftp'), routeFor('D', 'base44', { endToEnd: true }),
     routeFor('A', 'base44'), routeFor('A', 'delta'), routeFor('A', 'peer_wan'), routeFor('A', 'lan')];
   assert.deepEqual(all.map(r => r.code),
-    ['unknown-class', 'unknown-transport', 'class-d-cloud', 'no-e2e', 'delta-unverified', 'no-e2e', 'allowed']);
+    ['unknown-class', 'unknown-transport', 'class-d-cloud', 'no-e2e', 'delta-unverified', 'wan-class-unapproved', 'allowed']);
   for (const r of all) assert.match(r.reason, /^[^a-z]*[А-ЯІЇЄҐ«]/u, `${r.code}: пояснення українською`);
 });
 
