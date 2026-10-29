@@ -32,8 +32,8 @@ CSP головного вікна = `null`. Перед будь-яким про�
 Виклики з webview (не через Rust): плитки карт і dimap у legacy `air.html`/`rocket.html`
 (розділ 5), решта `fetch` у `src/*.js` — лише власні ресурси застосунку (`asset`/`tauri`
 походження: `.glb`, відео заставки, map-assets, довідники, шаблони телефону). Тест
-`tests/network-boundary.test.mjs` закріплює цей перелік: новий `fetch`/`XMLHttpRequest`/
-`WebSocket`/`EventSource`/`sendBeacon` поза ним ламає тест.
+`tests/network-boundary.test.mjs` закріплює цей перелік як регресійний тест (межі тесту — розділ 6):
+новий `fetch`/`XMLHttpRequest`/`WebSocket`/`EventSource`/`sendBeacon` поза ним ламає тест.
 
 Заплановані, ще не реалізовані передачі: Q12 (структура модулів) і Q13/К11 (лічильник
 інсталяцій) — за винятком власника в `AGENTS.md`; у політику додаються як окремі `Purpose`
@@ -127,6 +127,19 @@ network_policy(&NetworkContext, Purpose) -> Verdict::Allowed | Verdict::Denied(r
 legacy/WASM/3D сценаріїв (скіл `run-easywar`); (б) письмово прийняти ризик P2-1 до E8 і
 заборонити listener; (в) CSP лише для нових сторінок (`src/workspace/*`, `src/guides/*`) через
 окремі вікна, legacy — пізніше.
+
+## 6. Межі самого тесту меж (зауваження J5 P1-01)
+
+`tests/network-boundary.test.mjs` — **регресійний тест меж на рівні файлів**, не доказ
+відсутності мережевих шляхів: він ловить новий `fetch`/`reqwest`/хост у відомих місцях (мутант
+у `src/sensitivity-core.js` перевірено), але не бачить динамічно зібраних адрес, коду у
+`src/public/**` (вендорні бандли «Офісу», three.js) і поведінки webview. Rust сканується
+рекурсивно по `src-tauri/src/**`, але лише текстово. Поведінкові перевірки (непогоджена мережа
+не виконується, XSS-подібна назва джерела не виконує скрипт, редактор не отримує прав, logout
+стирає сеанс) — у C3b через скіл `run-easywar` і на Windows/macOS. **P2-1 не вважається
+закритим** ні цим тестом, ні CSP з `'unsafe-inline'` (проміжний варіант, доки legacy HTML не
+перейде на хеші): закриття — лише після рішення JE-21, окремого scoped CSP PR і поведінкових
+XSS/CSP перевірок на Windows і macOS.
 
 ## Наслідки
 

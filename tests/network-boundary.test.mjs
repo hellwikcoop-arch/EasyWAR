@@ -9,7 +9,9 @@
 // 4) перелік призначень Purpose у Rust збігається з розділом 1 ADR;
 // 5) вікно редактора «Офісу» не має мережевих дозволів, а webview не має HTTP/shell-плагінів;
 // 6) CSP головного вікна = null лишається відомим ризиком P2-1 (JE-21): друкується, не падає.
-// Поведінку справжнього webview тест не доводить; поведінкові тести — C3b.
+// Це регресійний тест меж на рівні файлів, не доказ відсутності мережевих шляхів (ADR, розділ 6):
+// динамічні адреси, вендорні бандли в src/public/** і поведінку webview він не бачить; поведінкові
+// тести — C3b (run-easywar, Windows/macOS). CSP з 'unsafe-inline' не закриває P2-1.
 import assert from 'node:assert/strict';
 import { readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
@@ -88,12 +90,22 @@ const RUST_NETWORK_ALLOWLIST = new Set([
 ]);
 const RUST_NETWORK = /\breqwest\b|\bstd::net\b|\btokio::net\b|TcpListener|TcpStream|UdpSocket/;
 
+async function listRust(dir) {
+  const out = [];
+  for (const entry of await readdir(new URL(dir + '/', root))) {
+    const rel = `${dir}/${entry}`;
+    if ((await stat(new URL(rel, root))).isDirectory()) out.push(...await listRust(rel));
+    else if (entry.endsWith('.rs')) out.push(rel);
+  }
+  return out;
+}
+
 test('reqwest і std::net у Rust лише в модулях з переліку ADR', async () => {
-  const dir = new URL('src-tauri/src/', root);
-  const files = (await readdir(dir)).filter(name => name.endsWith('.rs'));
+  const files = await listRust('src-tauri/src');
   const offenders = [];
-  for (const name of files) {
-    const text = await readFile(new URL(name, dir), 'utf8');
+  for (const rel of files) {
+    const name = path.posix.relative('src-tauri/src', rel); // підмодулі — як `collective/lan.rs`
+    const text = await read(rel);
     const code = text.split('\n').filter(line => !line.trimStart().startsWith('//')).join('\n');
     if (RUST_NETWORK.test(code) && !RUST_NETWORK_ALLOWLIST.has(name)) offenders.push(name);
   }
