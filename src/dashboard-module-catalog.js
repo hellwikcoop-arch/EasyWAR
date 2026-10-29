@@ -53,6 +53,7 @@ import { ensureModuleInstances, forgetModuleInstances } from './module-instance-
 import { cardModel, orderedCards } from './dashboard-layout-view-core.js';
 import { instanceBar, sharedPeriodBar } from './dashboard-layout-panel.js';
 import { rolesPanel } from './profile-schema-panel.js';
+import { updatePanel } from './dashboard-module-update.js';
 import {
   buildImport,
   correctionOutcome,
@@ -1600,6 +1601,23 @@ function initialize() {
       el('div', { class: 'ewmc-page-body' },
         corrections.length ? correctionsList() : null,
         rolesPanel({ el, invoke, module, modules: () => state.modules }),
+        readOnly ? null : updatePanel({
+          el, invoke, module, payload,
+          onApplied: result => {
+            const updated = normalizeModules([result?.module])[0] || module;
+            state.modules = state.modules.map(item => item.id === module.id ? updated : item);
+            state.data.set(module.id, {
+              module: updated,
+              rows: Array.isArray(result?.rows) ? result.rows : [],
+              truncated: result?.truncated === true,
+              corrections: Array.isArray(result?.corrections) ? result.corrections : [],
+            });
+            renderHost();
+            showModulePage(updated);
+            showToast('Таблицю оновлено з нового файла.');
+          },
+          onConflict: () => reopenFresh(module.id, 'Таблицю змінено в іншому вікні. Показано актуальні дані — повторіть дію.'),
+        }),
         ...(readOnly ? [el('div', { class: 'ewmc-readonly' },
           el('p', { class: 'ewmc-form-status error', text: access.reason }),
           payload.failed === true

@@ -628,3 +628,10 @@ keyColumns, correctedCells })` дає додані, змінені, зниклі
 `previewDiff` обрізає списки для показу; `applyDiff(oldRows, diff, { removed })` збирає нові рядки модуля
 (змінені значення беруться з нової версії, крім виправлених вручну; зниклі лишаються, якщо користувач
 не обрав `remove`). Без ключа порівняння не виконується (`no_key`), рядки не зіставляються за порядком.
+
+Екран: `src/dashboard-module-update.js` (`updatePanel({ el, invoke, module, payload, onApplied, onConflict })`,
+`<details>` на сторінці модуля після «Ролей стовпців», не монтується для таблиці лише для читання) і
+`src/table-update-view-core.js` (`summaryLines`, `hasChanges`, `changeText`, `rowLabel`, `readiness`,
+`keyOptions`). Єдиний запис — `replace_dashboard_module_rows` з `replaceRowsRequest`, тобто з перевіркою
+позначки версії; огляд файла забувається (`release: true`) після застосування й при згортанні панелі.
+
