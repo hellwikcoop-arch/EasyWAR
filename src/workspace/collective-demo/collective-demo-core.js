@@ -171,7 +171,9 @@ export function confirmReport(demo, clientId) {
   const before = demo.channel.length;
   for (const op of committed.ops) demo.channel.push({ op, from: clientId });
   for (const op of committed.ops) log(demo, client, 'stored', `Відправлено (рядок ${op.row_key})`, op.op_id);
-  const crossed = demo.channel.slice(client.cursor, before).length;
+  const foreign = demo.channel.slice(client.cursor, before);
+  const crossed = foreign.length;
+  if (crossed) client.lastBatch = foreign;
   const summary = applyEntries(demo, clientId, demo.channel.slice(client.cursor));
   client.cursor = demo.channel.length;
   client.pending = [];
@@ -237,6 +239,10 @@ function applyEntries(demo, clientId, entries) {
   return summary;
 }
 
+// Відоме обмеження S1 (C3, N1): клієнт, що розв'язав конфлікт, закриває його через resolveConflict, а
+// інша копія отримує те саме рішення як звичайну операцію — рядки сходяться, але її конфлікт лишається
+// відкритим. Посилання на розв'язаний конфлікт у самій операції потребує зміни формату операції
+// (OPERATION_FIELDS, C1b) — це рішення для S2, не для демонстрації.
 /** Нерозв'язані конфлікти клієнта з «моїм» і «їхнім» варіантами рядка. */
 export function conflictsOf(demo, clientId) {
   const client = demo.clients[clientId];
