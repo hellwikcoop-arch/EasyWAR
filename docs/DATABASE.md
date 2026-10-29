@@ -534,3 +534,17 @@ To add a migration:
 3. Add a synthetic test that applies all migrations to an empty in-memory DB.
 4. Verify forward migration, constraints and provenance invariants.
 5. Never edit a migration that has shipped; add a new migration instead.
+
+## Collective encrypted staging (migration 0019)
+
+`0019_collective_storage.sql` adds seven tables: `collective_local_instances`,
+`collective_membership_events`, `collective_shared_tables`, `collective_envelopes`,
+`collective_envelope_receipts`, `collective_row_cache`, `collective_sync_cursors`.
+Only opaque identifiers, encrypted payloads and bounded status/cursor metadata
+are stored. There are no operational fixtures, names, row keys, plaintext table
+values, cryptographic secrets, Tauri IPC or network interfaces. Membership events
+are append-only and require contiguous `event_seq` per profile/collective; the
+actual signed-prefix verification remains C3b's responsibility. An active local
+collective blocks profile deletion until protected cleanup. Receipt statuses
+are informational, not permission or signature proofs. `.ewcoll` planning files
+are **not** migrated into this schema or treated as verified membership.
