@@ -679,3 +679,17 @@ keyColumns, correctedCells })` дає додані, змінені, зниклі
 може тримати потік понад секунду (≈1,5 с у найгіршому виміряному випадку, 12 нерозпізнаних ролей), а 28 пар
 у такому випадку — десятки секунд: у майстрі B3 пошук має йти порціями.
 Збереження зв'язків у схемі профілю, майстер у «Моєму дашборді» й групи — наступні блоки, тільки за рішенням власника.
+
+## Екран «Усі визначення модулів» (реєстр E1 на екрані)
+
+`src/module-registry-view-core.js` (чисте): `buildRegistry` (шаблони Rust з `get_dashboard_module_catalog`, каталог ПС
+v1 і блоки вкладок через `listDefinitions` + `validateRegistry`), `filterDefinitions` (слова через пробіл за назвою,
+обчисленням, назвами ролей і місцями; тип, вигляд, рід військ), `facets`, `definitionView` (людські тексти, однакові
+вимоги зведені з кількістю, `addable` лише для шаблонів «Мого дашборда», що є в каталозі збірки; для решти `reason` —
+де блок уже стоїть), `addRequest` (`{ branch, templateId, title, style: 'standard' }` або `null`), `VISUAL_LABELS`
+(тест вимагає підпис для кожного виду в реєстрі). `src/module-registry-panel.js` — DOM: пошук, три списки, картки,
+кнопка `add-definition`; лише `textContent`. У `dashboard-module-catalog.js`: кнопка `show-registry` поруч із пошуком
+каталогу, `showRegistry()` (`dialog.dataset.view = 'registry'`, перелік кешується в `state.registry`), додавання —
+`create_dashboard_module` із `addRequest`, далі `loadModules()` (розкладка E4 ставить картку). Нових команд Tauri,
+записів у схему профілю, міграцій, capabilities і CSP немає. CSS — `.ewmc-reg*`, `.ewmc-catalog-tools`. Тести —
+`tests/module-registry-view.test.mjs`.

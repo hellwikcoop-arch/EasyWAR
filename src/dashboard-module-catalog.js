@@ -53,6 +53,10 @@ import { ensureModuleInstances, forgetModuleInstances } from './module-instance-
 import { cardModel, cardStyle, orderedCards } from './dashboard-layout-view-core.js';
 import { instanceBar, sharedPeriodBar } from './dashboard-layout-panel.js';
 import { rolesPanel } from './profile-schema-panel.js';
+import { psCatalogUsage } from './module-definition-core.js';
+import { CATALOG as PS_CATALOG, KPI_TILES, VIEW_BY_BLOCK } from './ps-kpi.js';
+import { addRequest, buildRegistry } from './module-registry-view-core.js';
+import { registryPanel } from './module-registry-panel.js';
 import { updatePanel } from './dashboard-module-update.js';
 import {
   buildImport,
@@ -127,7 +131,7 @@ function initialize() {
 
   // `cancelEdit` — скасування рядка, що редагується: Escape скасовує правку, а не закриває вікно разом із набраним рядком.
   // `tableViews` — пошук і група колонок сторінки кожного модуля: після збереження рядка сторінка перебудовується, а вибір лишається.
-  const state = { branch, catalog: [], modules: [], data: new Map(), busy: false, profileMissing: false, cancelEdit: null, tableViews: new Map(), leaveReview: null, layout: null, schema: null };
+  const state = { branch, catalog: [], modules: [], data: new Map(), busy: false, profileMissing: false, cancelEdit: null, tableViews: new Map(), leaveReview: null, layout: null, schema: null, registry: null };
   const openButton = el('button', {
     type: 'button',
     class: 'btn quiet ewmc-open',
@@ -507,13 +511,52 @@ function initialize() {
       el('form', { method: 'dialog', class: 'ewmc-dialog-head' },
         el('div', {}, el('p', { class: 'ewmc-eyebrow', text: 'Аналітика' }), el('h2', { id: 'ewmc-dialog-title', text: 'Каталог модулів' }), el('p', { text: 'Оберіть вигляд. EasyWAR створить картку та окрему таблицю з відповідними колонками.' })),
         el('button', { value: 'cancel', class: 'ewmc-close', 'aria-label': 'Закрити', text: '×' })),
-      search,
+      el('div', { class: 'ewmc-catalog-tools' }, search,
+        el('button', { type: 'button', class: 'btn quiet', text: 'Усі визначення', 'data-action': 'show-registry', title: 'Усі блоки дашбордів і шаблони з описом потрібних даних', onclick: showRegistry })),
       list,
     );
     paint();
     dialog.dataset.view = 'catalog';
     if (!dialog.open) dialog.showModal();
     search.focus();
+  }
+
+  // Екран «Усі визначення» (реєстр E1): шаблони «Мого дашборда», картки ПС і блоки вкладок з описом потрібних даних.
+  // Додати одним натисканням можна лише шаблон «Мого дашборда»: це той самий `create_dashboard_module`, що й у формі
+  // створення (назва шаблону, стиль «Звичайний», без підтягування з таблиці); картку на дашборді ставить розкладка E4.
+  function showRegistry() {
+    if (!state.registry) {
+      state.registry = buildRegistry({ rustTemplates: state.catalog, catalogs: [PS_CATALOG], catalogUsage: psCatalogUsage(KPI_TILES, VIEW_BY_BLOCK) });
+      if (state.registry.problems.length) console.warn('Реєстр визначень модулів:', state.registry.problems.join('; '));
+    }
+    const available = new Set(state.catalog.map(item => item.id));
+    const panel = registryPanel({
+      el, definitions: state.registry.definitions, available, branch: state.branch, branchLabel: BRANCH_LABELS[state.branch] || '',
+      onBack: showCatalog,
+      onAdd: async definition => {
+        const request = addRequest(definition, state.branch, { available });
+        if (!request || state.busy) return;
+        state.busy = true;
+        try {
+          await invoke('create_dashboard_module', request);
+          await loadModules();
+          showToast(`Модуль «${request.title}» додано на «Мій дашборд».`);
+        } catch (error) {
+          showToast(String(error || 'Не вдалося додати модуль.'), true);
+        } finally {
+          state.busy = false;
+        }
+      },
+    });
+    dialog.replaceChildren(
+      el('form', { method: 'dialog', class: 'ewmc-dialog-head' },
+        el('div', {}, el('p', { class: 'ewmc-eyebrow', text: 'Аналітика' }), el('h2', { id: 'ewmc-dialog-title', text: 'Усі визначення модулів' }),
+          el('p', { text: 'Кожен блок дашбордів і шаблон «Мого дашборда» з описом даних, яких він потребує. Додати на «Мій дашборд» можна шаблони; решта вже стоїть на своїх дашбордах.' })),
+        el('button', { value: 'cancel', class: 'ewmc-close', 'aria-label': 'Закрити', text: '×' })),
+      panel.node);
+    dialog.dataset.view = 'registry';
+    if (!dialog.open) dialog.showModal();
+    panel.focus();
   }
 
   function catalogCard(item) {
