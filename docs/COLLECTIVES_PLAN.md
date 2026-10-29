@@ -384,7 +384,7 @@ Op {
 | Підетап | Зміст | Умова |
 |---|---|---|
 | C1a–C1d | Чисте JS-ядро: чутливість і маршрут; операції й конфлікти; членство й машина станів вступу; політики обміну й «Доповісти» | Як C1 |
-| C2a | ADR криптопрофілю й перелік крейтів | Затвердження переліку власником (К9, JE-15). **Подано JE 29.10.2026 (R3, T-0016):** [`adr/collective-crypto.md`](adr/collective-crypto.md) з двома варіантами набору й результатом `cargo audit`; `Cargo.lock` не змінено |
+| C2a | ADR криптопрофілю й перелік крейтів | Затвердження переліку власником (К9, JE-15). **JE-15 вирішено 29.10.2026: варіант Б, умовно (gate незалежної перевірки протоколу).** Подано в R3 (T-0016): [`adr/collective-crypto.md`](adr/collective-crypto.md) з двома варіантами набору й результатом `cargo audit`; `Cargo.lock` не змінено |
 | C2p | PAKE і SAS для вступу | C2, JE-15 |
 | C3b | Rust-сховище, єдина політика (`networkPolicy` → `routeFor` → `syncPolicy`), команди Tauri | C3, P1 |
 | C6a | Прямий обмін і доставка заявки вступу в LAN | C3b, P1; **JE-13 вирішено (29.10.2026): LAN-first — C6a і C5 раніше за C4**; listener лише після JE-21 |
@@ -484,8 +484,10 @@ C1 — єдиний етап, який можна почати без хмари
   C2/C3, перелік крейтів, відкриті поля конверта, прийом мережі й mDNS, сховище секретів,
   клас D на вузлі LAN, потреба C6c у v1, CSP. **Прийнято JE:** JE-01 (старт C1a–C1d, наказ
   T-0002, 21.10.2026), JE-02 (вступ за кодом у C1c, 21.10.2026), JE-13 (LAN-first: C6a і C5
-  раніше за C4, 29.10.2026). **Подано JE в R3 (29.10.2026):** JE-15, JE-16 ([`adr/collective-crypto.md`](adr/collective-crypto.md)),
-  JE-18, JE-21 ([`adr/network-and-secret-boundaries.md`](adr/network-and-secret-boundaries.md)).
+  раніше за C4, 29.10.2026), JE-15 (варіант Б, умовно: незалежна перевірка протоколу перед
+  production), JE-16 (а: `expiry` лише в payload) — [`adr/collective-crypto.md`](adr/collective-crypto.md);
+  JE-18 (Ф: файл + Argon2id), JE-21 (а: CSP окремим PR, listener після приймання CSP) —
+  [`adr/network-and-secret-boundaries.md`](adr/network-and-secret-boundaries.md) (усі 29.10.2026, контроль J5).
   Решта **відкриті**; рекомендації J3 у
   [`plans/2026-10-21-easywar-sync-pair-mesh-review.md`](plans/2026-10-21-easywar-sync-pair-mesh-review.md),
   розділ 5, — довідка, не рішення.
