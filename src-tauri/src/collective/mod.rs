@@ -16,6 +16,7 @@ pub mod invite;
 pub mod pairing;
 pub mod relay;
 pub mod relay_auth;
+pub mod relay_node;
 pub mod rendezvous;
 pub mod replay;
 pub mod secret_store;
@@ -50,6 +51,7 @@ pub mod labels {
     pub const RELAY_FETCH: &[u8] = b"easywar/collective/v1/relay-fetch";
     pub const RELAY_ACK: &[u8] = b"easywar/collective/v1/relay-ack";
     pub const RELAY_STORED: &[u8] = b"easywar/collective/v1/relay-stored";
+    pub const RELAY_JOURNAL: &[u8] = b"easywar/collective/v1/relay-journal";
     pub const EPOCH_WRAP: &[u8] = b"easywar/collective/v1/epoch-wrap";
     pub const OPERATION: &[u8] = b"easywar/collective/v1/op";
     pub const SECRET_KEYRING: &[u8] = b"easywar/collective/v1/keyring";

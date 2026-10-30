@@ -21,8 +21,23 @@
 //!
 //! Помилка — статус 4xx/5xx і короткий код у тілі (`rate-limited`, `no-such-slot`…).
 //! Сервер не розбирає повідомлення: PAKE, теги й кадри для нього — непрозорі байти.
+//!
+//! **EasyWAR Relay** (етап 2б) вмикається лише з `--data <тека>` і хоча б одним
+//! `--collective <відбиток колективу>/<відбиток засновника>`; стан — [`RelayNode`]. Протокол —
+//! `POST /v1/relay/<дія>`, тіло — `колектив (16) ‖ підписаний запит`:
+//!
+//! | дія     | запит                 | відповідь 200                         |
+//! |---------|-----------------------|---------------------------------------|
+//! | node    | порожнє (без колективу) | відкритий ключ вузла (32)           |
+//! | journal | `JournalRequest`      | номер останнього запису журналу (u64) |
+//! | put     | `PutRequest`          | підписана квитанція `StoredReceipt`   |
+//! | fetch   | `FetchRequest`        | сторінка `Page`                       |
+//! | ack     | `AckRequest`          | `AckStatus` (1 байт)                  |
+//!
+//! Вміст пакетів вузол не читає: ключів епох у нього немає.
 
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -35,14 +50,22 @@ use hyper_util::rt::TokioIo;
 use tokio::net::TcpListener;
 
 use crate::collective::codec::{Reader, Writer};
+use crate::collective::epoch::CollectiveId;
+use crate::collective::relay::{Page, MAX_CAPACITY_BYTES, MAX_ENVELOPE_BYTES};
+use crate::collective::relay_auth::{
+    AckRequest, AckStatus, FetchRequest, JournalRequest, PutRequest, StoredReceipt,
+};
+use crate::collective::relay_node::{HostedCollective, NodeDenied, RelayNode};
 use crate::collective::rendezvous::{
     Rendezvous, RendezvousDenied, SlotToken, MAX_MESSAGE, MAX_QUEUED,
 };
 use crate::collective::send_gate::GatePolicy;
-use crate::collective::ID_LEN;
+use crate::collective::{ID_LEN, KEY_LEN};
 
 /// Найбільше тіло запиту: повідомлення плюс скринька й ключ.
 pub const MAX_REQUEST_BODY: usize = MAX_MESSAGE + 1 + ID_LEN + 16;
+/// Найбільше тіло запиту до Relay: конверт (чи журнал) плюс колектив і підпис.
+pub const MAX_RELAY_BODY: usize = MAX_ENVELOPE_BYTES + 1024;
 /// Скільки чекати тіло запиту.
 const BODY_TIMEOUT: Duration = Duration::from_secs(20);
 /// Час запиту клієнта.
@@ -161,34 +184,90 @@ pub fn handle(
     }
 }
 
+fn node_status(denied: NodeDenied) -> StatusCode {
+    use crate::collective::relay_auth::RelayDenied;
+    match denied {
+        NodeDenied::NotHosted => StatusCode::NOT_FOUND,
+        NodeDenied::Malformed | NodeDenied::JournalInvalid => StatusCode::BAD_REQUEST,
+        NodeDenied::JournalDiverged | NodeDenied::ConflictingEnvelope => StatusCode::CONFLICT,
+        NodeDenied::Capacity => StatusCode::INSUFFICIENT_STORAGE,
+        NodeDenied::InvalidExpiry => StatusCode::BAD_REQUEST,
+        NodeDenied::Storage => StatusCode::INTERNAL_SERVER_ERROR,
+        NodeDenied::Relay(RelayDenied::Busy) => StatusCode::SERVICE_UNAVAILABLE,
+        NodeDenied::Relay(RelayDenied::InvalidEnvelope | RelayDenied::BadLimit) => {
+            StatusCode::BAD_REQUEST
+        }
+        NodeDenied::NotFounder | NodeDenied::Relay(_) => StatusCode::FORBIDDEN,
+    }
+}
+
+/// Обробити запит до Relay (без мережі — для тестів і `serve`).
+pub fn handle_relay(
+    node: &Mutex<RelayNode>,
+    action: &str,
+    body: &[u8],
+    now: i64,
+) -> (StatusCode, Vec<u8>) {
+    let Ok(mut node) = node.lock() else {
+        return (StatusCode::INTERNAL_SERVER_ERROR, b"storage".to_vec());
+    };
+    match node.handle(action, body, now) {
+        Ok(body) => (StatusCode::OK, body),
+        Err(denied) => (node_status(denied), denied.code().as_bytes().to_vec()),
+    }
+}
+
+/// Стан сервера: зустріч завжди, Relay — лише якщо оператор його налаштував.
+struct Hub {
+    pair: Mutex<Rendezvous>,
+    relay: Option<Arc<Mutex<RelayNode>>>,
+}
+
 async fn respond(
-    state: Arc<Mutex<Rendezvous>>,
+    hub: Arc<Hub>,
     request: Request<Incoming>,
 ) -> Result<Response<Full<Bytes>>, std::convert::Infallible> {
-    let action = request
-        .uri()
-        .path()
-        .strip_prefix("/v1/pair/")
-        .map(str::to_owned);
-    let (Some(action), true) = (action, request.method() == Method::POST) else {
+    let path = request.uri().path().to_owned();
+    let route = match (
+        path.strip_prefix("/v1/pair/"),
+        path.strip_prefix("/v1/relay/"),
+    ) {
+        (Some(action), _) => Some((false, action.to_owned(), MAX_REQUEST_BODY)),
+        (_, Some(action)) if hub.relay.is_some() => Some((true, action.to_owned(), MAX_RELAY_BODY)),
+        _ => None,
+    };
+    let (Some((relay, action, limit)), true) = (route, request.method() == Method::POST) else {
         return Ok(reply(StatusCode::NOT_FOUND, b"not-found".to_vec()));
     };
-    let body = Limited::new(request.into_body(), MAX_REQUEST_BODY);
+    let body = Limited::new(request.into_body(), limit);
     let body = match tokio::time::timeout(BODY_TIMEOUT, body.collect()).await {
         Ok(Ok(collected)) => collected.to_bytes(),
         Ok(Err(_)) => return Ok(reply(StatusCode::PAYLOAD_TOO_LARGE, b"too-large".to_vec())),
         Err(_) => return Ok(reply(StatusCode::REQUEST_TIMEOUT, b"timeout".to_vec())),
     };
-    let (status, body) = handle(&state, &action, &body, now_unix());
+    let (status, body) = match (relay, hub.relay.clone()) {
+        // Черга пише знімок на диск: не тримати потік рушія.
+        (true, Some(node)) => {
+            tokio::task::spawn_blocking(move || handle_relay(&node, &action, &body, now_unix()))
+                .await
+                .unwrap_or((StatusCode::INTERNAL_SERVER_ERROR, b"storage".to_vec()))
+        }
+        _ => handle(&hub.pair, &action, &body, now_unix()),
+    };
     Ok(reply(status, body))
 }
 
-/// Слухати `listener` і обслуговувати сервер зустрічі, доки не завершиться `shutdown`.
+/// Слухати `listener` і обслуговувати сервер зустрічі (і Relay, якщо `relay` задано), доки не
+/// завершиться `shutdown`.
 pub async fn serve(
     listener: TcpListener,
+    relay: Option<RelayNode>,
     shutdown: impl std::future::Future<Output = ()>,
 ) -> std::io::Result<()> {
-    let state = Arc::new(Mutex::new(Rendezvous::new()));
+    let state = Arc::new(Hub {
+        pair: Mutex::new(Rendezvous::new()),
+        relay: relay.map(|node| Arc::new(Mutex::new(node))),
+    });
     tokio::pin!(shutdown);
     loop {
         let (stream, _) = tokio::select! {
@@ -205,11 +284,65 @@ pub async fn serve(
     }
 }
 
-/// Режим `easywar --relay-server <адреса:порт>`: окремий процес без вікна.
-pub fn run_server_blocking(address: &str) -> Result<(), String> {
+/// Параметри режиму сервера з командного рядка.
+#[derive(Debug, Default, Eq, PartialEq)]
+pub struct ServerOptions {
+    pub address: String,
+    pub data_dir: Option<PathBuf>,
+    pub collectives: Vec<HostedCollective>,
+}
+
+impl ServerOptions {
+    /// `[адреса:порт] [--data <тека>] [--collective <XXXXX-XXXXX/YYYYY-YYYYY>]…`
+    pub fn parse(args: &[String]) -> Result<Self, String> {
+        let mut options = Self {
+            address: "127.0.0.1:7443".to_owned(),
+            ..Self::default()
+        };
+        let mut args = args.iter();
+        let mut first = true;
+        while let Some(arg) = args.next() {
+            match arg.as_str() {
+                "--data" => {
+                    let dir = args.next().ok_or("після --data потрібна тека")?;
+                    options.data_dir = Some(PathBuf::from(dir));
+                }
+                "--collective" => {
+                    let text = args.next().ok_or("після --collective потрібні відбитки")?;
+                    options.collectives.push(HostedCollective::parse(text)?);
+                }
+                other if first && !other.starts_with("--") => options.address = other.to_owned(),
+                other => return Err(format!("невідомий параметр «{other}»")),
+            }
+            first = false;
+        }
+        if options.collectives.is_empty() != options.data_dir.is_none() {
+            return Err("для Relay потрібні разом --data і хоча б один --collective".to_owned());
+        }
+        Ok(options)
+    }
+}
+
+/// Режим `easywar --relay-server …`: окремий процес без вікна.
+pub fn run_server_blocking(options: ServerOptions) -> Result<(), String> {
+    let address = options.address.as_str();
     let address: SocketAddr = address
         .parse()
         .map_err(|_| format!("адреса «{address}» не розбирається, приклад: 127.0.0.1:7443"))?;
+    let relay = match &options.data_dir {
+        Some(dir) => {
+            let capacity = MAX_CAPACITY_BYTES / options.collectives.len();
+            Some(RelayNode::open(dir, options.collectives.clone(), capacity)?)
+        }
+        None => None,
+    };
+    if let Some(node) = &relay {
+        eprintln!(
+            "EasyWAR Relay: колективів у списку {}, відбиток ключа вузла {}",
+            options.collectives.len(),
+            crate::collective_store::fingerprint(&node.node_public())
+        );
+    }
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -221,7 +354,7 @@ pub fn run_server_blocking(address: &str) -> Result<(), String> {
         eprintln!(
             "EasyWAR: сервер зустрічі слухає http://{address} (TLS — на зворотному проксі); Ctrl+C — зупинити"
         );
-        serve(listener, async {
+        serve(listener, relay, async {
             let _ = tokio::signal::ctrl_c().await;
         })
         .await
@@ -256,6 +389,31 @@ impl PairClientError {
     }
 }
 
+/// Спільна перевірка адреси й дозволу WAN для клієнтів сервера зустрічі й Relay.
+fn http_client(
+    base: &str,
+    policy: &GatePolicy,
+) -> Result<(reqwest::Url, reqwest::Client), PairClientError> {
+    if !policy.wan_transport_accepted {
+        return Err(PairClientError::WanDisabled);
+    }
+    let base = reqwest::Url::parse(base).map_err(|_| PairClientError::InsecureAddress)?;
+    let loopback = matches!(base.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"));
+    match base.scheme() {
+        "https" => {}
+        "http" if loopback => {}
+        _ => return Err(PairClientError::InsecureAddress),
+    }
+    crate::install_tls_provider();
+    let client = reqwest::Client::builder()
+        .timeout(CLIENT_TIMEOUT)
+        .user_agent(USER_AGENT)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|_| PairClientError::Unreachable)?;
+    Ok((base, client))
+}
+
 /// Клієнт сервера зустрічі.
 pub struct PairServer {
     base: reqwest::Url,
@@ -265,23 +423,7 @@ pub struct PairServer {
 impl PairServer {
     /// Клієнт для `base` (`https://…/`). Без дозволу WAN у `policy` — [`PairClientError::WanDisabled`].
     pub fn new(base: &str, policy: &GatePolicy) -> Result<Self, PairClientError> {
-        if !policy.wan_transport_accepted {
-            return Err(PairClientError::WanDisabled);
-        }
-        let base = reqwest::Url::parse(base).map_err(|_| PairClientError::InsecureAddress)?;
-        let loopback = matches!(base.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"));
-        match base.scheme() {
-            "https" => {}
-            "http" if loopback => {}
-            _ => return Err(PairClientError::InsecureAddress),
-        }
-        crate::install_tls_provider();
-        let client = reqwest::Client::builder()
-            .timeout(CLIENT_TIMEOUT)
-            .user_agent(USER_AGENT)
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .map_err(|_| PairClientError::Unreachable)?;
+        let (base, client) = http_client(base, policy)?;
         Ok(Self { base, client })
     }
 
@@ -394,6 +536,131 @@ impl PairServer {
     }
 }
 
+/// Помилка клієнта Relay.
+#[derive(Debug, Eq, PartialEq)]
+pub enum RelayClientError {
+    /// Адреса, дозвіл WAN або зв'язок — як у сервера зустрічі.
+    Connection(PairClientError),
+    /// Вузол відмовив.
+    Denied(NodeDenied),
+}
+
+impl RelayClientError {
+    pub fn message(&self) -> &'static str {
+        match self {
+            RelayClientError::Connection(PairClientError::Unreachable) => {
+                "немає зв'язку з EasyWAR Relay"
+            }
+            RelayClientError::Connection(PairClientError::BadResponse) => {
+                "EasyWAR Relay відповів незрозуміло"
+            }
+            RelayClientError::Connection(error) => error.message(),
+            RelayClientError::Denied(denied) => denied.message(),
+        }
+    }
+}
+
+impl From<PairClientError> for RelayClientError {
+    fn from(error: PairClientError) -> Self {
+        RelayClientError::Connection(error)
+    }
+}
+
+const BAD_RESPONSE: RelayClientError = RelayClientError::Connection(PairClientError::BadResponse);
+
+/// Клієнт EasyWAR Relay для одного колективу. Квитанцію `STORED` перевіряє викликач ключем
+/// вузла, якому довіряє ([`StoredReceipt::verify`]); ключ, який вузол називає сам
+/// ([`RelayClient::node_key`]), треба звірити з оператором, а не приймати на віру.
+pub struct RelayClient {
+    base: reqwest::Url,
+    client: reqwest::Client,
+    collective_id: CollectiveId,
+}
+
+impl RelayClient {
+    pub fn new(
+        base: &str,
+        policy: &GatePolicy,
+        collective_id: CollectiveId,
+    ) -> Result<Self, RelayClientError> {
+        let (base, client) = http_client(base, policy)?;
+        Ok(Self {
+            base,
+            client,
+            collective_id,
+        })
+    }
+
+    async fn call(
+        &self,
+        action: &str,
+        request: Option<Vec<u8>>,
+    ) -> Result<Vec<u8>, RelayClientError> {
+        let url = self
+            .base
+            .join(&format!("v1/relay/{action}"))
+            .map_err(|_| PairClientError::InsecureAddress)?;
+        let body = match request {
+            Some(request) => [self.collective_id.as_slice(), &request].concat(),
+            None => Vec::new(),
+        };
+        let response = self
+            .client
+            .post(url)
+            .header("content-type", "application/octet-stream")
+            .body(body)
+            .send()
+            .await
+            .map_err(|_| PairClientError::Unreachable)?;
+        let status = response.status();
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(|_| PairClientError::Unreachable)?;
+        if bytes.len() > 101 * (MAX_ENVELOPE_BYTES + 4) {
+            return Err(BAD_RESPONSE);
+        }
+        if status.is_success() {
+            return Ok(bytes.to_vec());
+        }
+        let code = std::str::from_utf8(&bytes).unwrap_or_default();
+        Err(NodeDenied::from_code(code)
+            .map(RelayClientError::Denied)
+            .unwrap_or(BAD_RESPONSE))
+    }
+
+    /// Ключ, яким вузол підписує квитанції (звірити відбиток з оператором).
+    pub async fn node_key(&self) -> Result<[u8; KEY_LEN], RelayClientError> {
+        let body = self.call("node", None).await?;
+        body.as_slice().try_into().map_err(|_| BAD_RESPONSE)
+    }
+
+    /// Передати журнал складу; відповідь — останній запис, відомий вузлу.
+    pub async fn journal(&self, request: &JournalRequest) -> Result<u64, RelayClientError> {
+        let body = self.call("journal", Some(request.to_bytes())).await?;
+        let bytes: [u8; 8] = body.as_slice().try_into().map_err(|_| BAD_RESPONSE)?;
+        Ok(u64::from_be_bytes(bytes))
+    }
+
+    pub async fn put(&self, request: &PutRequest) -> Result<StoredReceipt, RelayClientError> {
+        let body = self.call("put", Some(request.to_bytes())).await?;
+        StoredReceipt::from_bytes(&body).map_err(|_| BAD_RESPONSE)
+    }
+
+    pub async fn fetch(&self, request: &FetchRequest) -> Result<Page, RelayClientError> {
+        let body = self.call("fetch", Some(request.to_bytes())).await?;
+        Page::from_bytes(&body).map_err(|_| BAD_RESPONSE)
+    }
+
+    pub async fn ack(&self, request: &AckRequest) -> Result<AckStatus, RelayClientError> {
+        let body = self.call("ack", Some(request.to_bytes())).await?;
+        match body.as_slice() {
+            [code] => AckStatus::from_code(*code).ok_or(BAD_RESPONSE),
+            _ => Err(BAD_RESPONSE),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -417,6 +684,34 @@ mod tests {
         );
         assert!(PairServer::new("https://relay.example/", &OPEN).is_ok());
         assert!(PairServer::new("http://127.0.0.1:7443/", &OPEN).is_ok());
+    }
+
+    fn args(text: &str) -> Vec<String> {
+        text.split_whitespace().map(str::to_owned).collect()
+    }
+
+    #[test]
+    fn server_options_need_data_and_collectives_together() {
+        let options = ServerOptions::parse(&args("0.0.0.0:9000")).unwrap();
+        assert_eq!(options.address, "0.0.0.0:9000");
+        assert!(options.data_dir.is_none() && options.collectives.is_empty());
+        let options = ServerOptions::parse(&args(
+            "--data /srv/relay --collective MZXW6-YTBOI/MZXW6-YTBOJ --collective mzxw6-ytboa/mzxw6-ytbob",
+        ))
+        .unwrap();
+        assert_eq!(options.address, "127.0.0.1:7443");
+        assert_eq!(options.data_dir, Some(PathBuf::from("/srv/relay")));
+        assert_eq!(options.collectives.len(), 2);
+        for bad in [
+            "--data /srv/relay",
+            "--collective MZXW6-YTBOI/MZXW6-YTBOJ",
+            "--data",
+            "--collective bad --data /x",
+            "--port 1",
+            "127.0.0.1:1 127.0.0.1:2",
+        ] {
+            assert!(ServerOptions::parse(&args(bad)).is_err(), "{bad}");
+        }
     }
 
     #[test]
@@ -452,7 +747,7 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}/", listener.local_addr().unwrap());
         let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
-        let server = tokio::spawn(serve(listener, async {
+        let server = tokio::spawn(serve(listener, None, async {
             let _ = stopped.await;
         }));
         let host_api = PairServer::new(&base, &OPEN).unwrap();
@@ -536,5 +831,147 @@ mod tests {
         );
         let _ = stop.send(());
         server.await.unwrap().unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn two_members_exchange_a_sealed_package_through_the_relay_on_loopback() {
+        use crate::collective::envelope::{sample_payload, seal, EnvelopeHeader};
+        use crate::collective::epoch::EpochKey;
+        use crate::collective::identity::{DeviceIdentity, MemberIdentity};
+        use crate::collective::random_array;
+        use crate::collective::relay_auth::member_scope;
+        use crate::collective::replay::{InMemoryMembership, MembershipRecord, MembershipView};
+        use crate::collective_store::fingerprint;
+
+        let now = now_unix();
+        let collective: CollectiveId = random_array();
+        let mut membership = InMemoryMembership::new(collective);
+        let founder = (MemberIdentity::generate(), DeviceIdentity::generate());
+        let colleague = (MemberIdentity::generate(), DeviceIdentity::generate());
+        for (member, device) in [&founder, &colleague] {
+            membership
+                .join(&member.bind_exchange(collective, now - 60))
+                .unwrap();
+            membership
+                .add_device(&member.issue_device(&device.public(), now - 60))
+                .unwrap();
+        }
+        let records: Vec<_> = membership
+            .records()
+            .iter()
+            .map(MembershipRecord::to_bytes)
+            .collect();
+
+        let dir = tempfile::tempdir().unwrap();
+        let hosted = HostedCollective {
+            collective: fingerprint(&collective),
+            founder: fingerprint(&founder.0.member_id()),
+        };
+        let node = RelayNode::open(dir.path(), vec![hosted], 1 << 20).unwrap();
+        let trusted = node.node_public();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}/", listener.local_addr().unwrap());
+        let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+        let server = tokio::spawn(serve(listener, Some(node), async {
+            let _ = stopped.await;
+        }));
+
+        let api = RelayClient::new(&base, &OPEN, collective).unwrap();
+        assert!(RelayClient::new(&base, &GatePolicy::CURRENT, collective).is_err());
+        assert_eq!(api.node_key().await.unwrap(), trusted);
+        // «Вінниця»: засновник приносить журнал і кладе пакет для колеги.
+        let journal =
+            JournalRequest::sign(&collective, founder.0.member_id(), &founder.1, records, now);
+        assert_eq!(
+            api.journal(&journal).await.unwrap(),
+            membership.latest_seq()
+        );
+        let scope = member_scope(&collective, &colleague.0.member_id());
+        let mut payload =
+            sample_payload(&founder.1, founder.0.member_id(), membership.latest_seq());
+        payload.op_id = random_array();
+        let envelope = seal(
+            &EpochKey::generate(),
+            EnvelopeHeader::new(collective, 0, scope),
+            &payload.sign(&founder.1),
+        )
+        .to_bytes();
+        let put = PutRequest::sign(
+            &collective,
+            founder.0.member_id(),
+            &founder.1,
+            envelope.clone(),
+            now + 3600,
+            now,
+        );
+        let receipt = api.put(&put).await.unwrap();
+        receipt.verify(&trusted, &envelope).unwrap();
+        // Повтор того самого запиту відхиляється.
+        assert_eq!(
+            api.put(&put).await.err(),
+            Some(RelayClientError::Denied(NodeDenied::Relay(
+                crate::collective::relay_auth::RelayDenied::Replay
+            )))
+        );
+
+        // «Дніпро»: колега забирає пакет і підтверджує.
+        let fetch = FetchRequest::sign(
+            &collective,
+            colleague.0.member_id(),
+            &colleague.1,
+            scope,
+            0,
+            10,
+            now,
+        );
+        let page = api.fetch(&fetch).await.unwrap();
+        assert_eq!(page.envelopes, vec![envelope.clone()]);
+        let ack = AckRequest::sign(
+            &collective,
+            colleague.0.member_id(),
+            &colleague.1,
+            &envelope,
+            now,
+        )
+        .unwrap();
+        assert_eq!(api.ack(&ack).await.unwrap(), AckStatus::Removed);
+
+        // Колектив поза списком.
+        let other = RelayClient::new(&base, &OPEN, random_array()).unwrap();
+        let fetch = FetchRequest::sign(
+            &collective,
+            colleague.0.member_id(),
+            &colleague.1,
+            scope,
+            0,
+            10,
+            now,
+        );
+        assert_eq!(
+            other.fetch(&fetch).await.err(),
+            Some(RelayClientError::Denied(NodeDenied::NotHosted))
+        );
+        let _ = stop.send(());
+        server.await.unwrap().unwrap();
+    }
+
+    #[test]
+    fn relay_routes_are_absent_without_configuration() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let base = format!("http://{}/", listener.local_addr().unwrap());
+            let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+            let server = tokio::spawn(serve(listener, None, async {
+                let _ = stopped.await;
+            }));
+            let api = RelayClient::new(&base, &OPEN, [1; ID_LEN]).unwrap();
+            assert_eq!(api.node_key().await.err(), Some(BAD_RESPONSE));
+            let _ = stop.send(());
+            server.await.unwrap().unwrap();
+        });
     }
 }

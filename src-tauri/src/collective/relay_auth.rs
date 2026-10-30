@@ -18,13 +18,13 @@
 
 use std::collections::HashMap;
 
-use super::codec::Writer;
+use super::codec::{Reader, Writer};
 use super::envelope::Envelope;
 use super::epoch::CollectiveId;
 use super::identity::{self, DeviceIdentity, MemberId};
 use super::relay::{MailboxError, OfflineMailbox, Page, PutResult, RemoveResult};
 use super::replay::MembershipView;
-use super::{labels, random_array, sha256, ID_LEN, KEY_LEN, SIGNATURE_LEN};
+use super::{labels, random_array, sha256, Reason, ID_LEN, KEY_LEN, SIGNATURE_LEN};
 
 /// Допустиме розходження годинників запитувача й вузла.
 pub const FRESHNESS_SECONDS: i64 = 300;
@@ -113,6 +113,27 @@ impl RequestAuth {
         );
         identity::verify(&self.device_pub, &message, &self.signature).is_ok()
     }
+
+    /// Довжина в мережевому кодуванні.
+    const WIRE_LEN: usize = ID_LEN + KEY_LEN + 8 + ID_LEN + SIGNATURE_LEN;
+
+    fn write(&self, w: &mut Writer) {
+        w.fixed(&self.member_id)
+            .fixed(&self.device_pub)
+            .i64(self.issued_at)
+            .fixed(&self.nonce)
+            .fixed(&self.signature);
+    }
+
+    fn read(r: &mut Reader) -> Result<Self, Reason> {
+        Ok(Self {
+            member_id: r.fixed()?,
+            device_pub: r.fixed()?,
+            issued_at: r.i64()?,
+            nonce: r.fixed()?,
+            signature: r.fixed()?,
+        })
+    }
 }
 
 /// Покласти конверт у чергу.
@@ -151,6 +172,26 @@ impl PutRequest {
             envelope,
             expires_at,
         }
+    }
+
+    /// Мережеве кодування (етап 2б): підпис ‖ строк ‖ конверт до кінця.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut w = Writer::with_capacity(RequestAuth::WIRE_LEN + 8 + self.envelope.len());
+        self.auth.write(&mut w);
+        w.i64(self.expires_at).fixed(&self.envelope);
+        w.finish()
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, Reason> {
+        let mut r = Reader::new(bytes);
+        let auth = RequestAuth::read(&mut r)?;
+        let expires_at = r.i64()?;
+        let envelope = r.rest().to_vec();
+        Ok(Self {
+            auth,
+            envelope,
+            expires_at,
+        })
     }
 }
 
@@ -193,6 +234,25 @@ impl FetchRequest {
             cursor,
             limit,
         }
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut w = Writer::with_capacity(RequestAuth::WIRE_LEN + ID_LEN + 12);
+        self.auth.write(&mut w);
+        w.fixed(&self.scope).u64(self.cursor).u32(self.limit);
+        w.finish()
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, Reason> {
+        let mut r = Reader::new(bytes);
+        let request = Self {
+            auth: RequestAuth::read(&mut r)?,
+            scope: r.fixed()?,
+            cursor: r.u64()?,
+            limit: r.u32()?,
+        };
+        r.finish()?;
+        Ok(request)
     }
 }
 
@@ -239,6 +299,94 @@ impl AckRequest {
             envelope_id,
             digest,
         })
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut w = Writer::with_capacity(RequestAuth::WIRE_LEN + 2 * ID_LEN + KEY_LEN);
+        self.auth.write(&mut w);
+        w.fixed(&self.scope)
+            .fixed(&self.envelope_id)
+            .fixed(&self.digest);
+        w.finish()
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, Reason> {
+        let mut r = Reader::new(bytes);
+        let request = Self {
+            auth: RequestAuth::read(&mut r)?,
+            scope: r.fixed()?,
+            envelope_id: r.fixed()?,
+            digest: r.fixed()?,
+        };
+        r.finish()?;
+        Ok(request)
+    }
+}
+
+/// Найбільше записів журналу складу в одному завантаженні на вузол.
+pub const MAX_JOURNAL_RECORDS: usize = 4096;
+
+/// Учасник передає вузлу журнал складу від запису 1, щоб вузол знав, хто член колективу.
+/// Вузол перевіряє кожен запис сам ([`super::replay::InMemoryMembership::apply`]); підпис
+/// запиту лише показує, хто з учасників приніс журнал.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct JournalRequest {
+    pub auth: RequestAuth,
+    pub records: Vec<Vec<u8>>,
+}
+
+impl JournalRequest {
+    fn body(records: &[Vec<u8>]) -> Vec<u8> {
+        let mut w = Writer::with_capacity(4 + records.iter().map(|r| r.len() + 4).sum::<usize>());
+        w.u32(records.len() as u32);
+        for record in records {
+            w.var(record);
+        }
+        w.finish()
+    }
+
+    pub fn sign(
+        collective_id: &CollectiveId,
+        member_id: MemberId,
+        device: &DeviceIdentity,
+        records: Vec<Vec<u8>>,
+        now: i64,
+    ) -> Self {
+        let body = sha256(&[&Self::body(&records)]);
+        Self {
+            auth: RequestAuth::sign(
+                labels::RELAY_JOURNAL,
+                collective_id,
+                member_id,
+                device,
+                now,
+                &body,
+            ),
+            records,
+        }
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let body = Self::body(&self.records);
+        let mut w = Writer::with_capacity(RequestAuth::WIRE_LEN + body.len());
+        self.auth.write(&mut w);
+        w.fixed(&body);
+        w.finish()
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, Reason> {
+        let mut r = Reader::new(bytes);
+        let auth = RequestAuth::read(&mut r)?;
+        let count = r.u32()? as usize;
+        if count == 0 || count > MAX_JOURNAL_RECORDS {
+            return Err(Reason::Malformed);
+        }
+        let mut records = Vec::with_capacity(count);
+        for _ in 0..count {
+            records.push(r.var()?.to_vec());
+        }
+        r.finish()?;
+        Ok(Self { auth, records })
     }
 }
 
@@ -288,6 +436,41 @@ impl StoredReceipt {
         identity::verify(&self.relay_pub, &self.signed_bytes(), &self.signature)
             .map_err(|_| RelayDenied::BadSignature)
     }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut w = Writer::with_capacity(160 + SIGNATURE_LEN);
+        w.fixed(&self.relay_pub)
+            .fixed(&self.collective_id)
+            .fixed(&self.scope)
+            .fixed(&self.envelope_id)
+            .fixed(&self.digest)
+            .i64(self.expires_at)
+            .i64(self.stored_at)
+            .u8(u8::from(self.already_stored))
+            .fixed(&self.signature);
+        w.finish()
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, Reason> {
+        let mut r = Reader::new(bytes);
+        let receipt = Self {
+            relay_pub: r.fixed()?,
+            collective_id: r.fixed()?,
+            scope: r.fixed()?,
+            envelope_id: r.fixed()?,
+            digest: r.fixed()?,
+            expires_at: r.i64()?,
+            stored_at: r.i64()?,
+            already_stored: match r.u8()? {
+                0 => false,
+                1 => true,
+                _ => return Err(Reason::Malformed),
+            },
+            signature: r.fixed()?,
+        };
+        r.finish()?;
+        Ok(receipt)
+    }
 }
 
 /// Відповідь на підтвердження.
@@ -299,6 +482,22 @@ pub enum AckStatus {
     NotFound,
     /// Пакет для всього колективу лишається до TTL: інші учасники ще читають.
     Retained,
+}
+
+impl AckStatus {
+    pub fn code(self) -> u8 {
+        match self {
+            AckStatus::Removed => 1,
+            AckStatus::NotFound => 2,
+            AckStatus::Retained => 3,
+        }
+    }
+
+    pub fn from_code(code: u8) -> Option<Self> {
+        [AckStatus::Removed, AckStatus::NotFound, AckStatus::Retained]
+            .into_iter()
+            .find(|status| status.code() == code)
+    }
 }
 
 /// Відмова вузла.
@@ -435,6 +634,18 @@ impl AuthenticatedRelay {
 
     fn scope_allowed(&self, member: &MemberId, scope: &[u8; ID_LEN]) -> bool {
         *scope == COLLECTIVE_SCOPE || *scope == member_scope(&self.collective_id, member)
+    }
+
+    /// Перевірити, що журнал приніс дійсний пристрій учасника. `membership` — журнал після
+    /// застосування принесених записів; які записи приймати, вирішує викликач.
+    pub fn journal(
+        &mut self,
+        membership: &dyn MembershipView,
+        request: &JournalRequest,
+        now: i64,
+    ) -> Result<(), RelayDenied> {
+        let body = sha256(&[&JournalRequest::body(&request.records)]);
+        self.authenticate(membership, labels::RELAY_JOURNAL, &request.auth, &body, now)
     }
 
     pub fn put(

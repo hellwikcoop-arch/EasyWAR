@@ -12,7 +12,7 @@ use fs2::FileExt;
 
 use super::codec::{Reader, Writer};
 use super::envelope::Envelope;
-use super::{sha256, ID_LEN, KEY_LEN};
+use super::{sha256, Reason, ID_LEN, KEY_LEN};
 
 const MAGIC: &[u8; 8] = b"EWRELAY1";
 pub const MAX_TTL_SECONDS: i64 = 24 * 60 * 60;
@@ -69,6 +69,49 @@ pub struct Page {
     pub envelopes: Vec<Vec<u8>>,
     pub next_cursor: u64,
     pub has_more: bool,
+}
+
+impl Page {
+    /// Мережеве кодування (етап 2б): курсор ‖ ще є ‖ кількість ‖ конверти (var).
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let size = 13 + self.envelopes.iter().map(|e| e.len() + 4).sum::<usize>();
+        let mut w = Writer::with_capacity(size);
+        w.u64(self.next_cursor)
+            .u8(u8::from(self.has_more))
+            .u32(self.envelopes.len() as u32);
+        for envelope in &self.envelopes {
+            w.var(envelope);
+        }
+        w.finish()
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, Reason> {
+        let mut r = Reader::new(bytes);
+        let next_cursor = r.u64()?;
+        let has_more = match r.u8()? {
+            0 => false,
+            1 => true,
+            _ => return Err(Reason::Malformed),
+        };
+        let count = r.u32()? as usize;
+        if count > 100 {
+            return Err(Reason::Malformed);
+        }
+        let mut envelopes = Vec::with_capacity(count);
+        for _ in 0..count {
+            let envelope = r.var()?;
+            if envelope.len() > MAX_ENVELOPE_BYTES {
+                return Err(Reason::Malformed);
+            }
+            envelopes.push(envelope.to_vec());
+        }
+        r.finish()?;
+        Ok(Self {
+            envelopes,
+            next_cursor,
+            has_more,
+        })
+    }
 }
 
 /// Один власник файлу одночасно. Доступ до мережі та автентифікація одержувача
