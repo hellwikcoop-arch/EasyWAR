@@ -127,7 +127,8 @@ test('каталог малює картку блока з основної та
   assert.match(catalog, /tools \? null : removeButton/);
   // Мала картка показника («Мала», 2 колонки з 12): лише підпис і число.
   const view = await readFile(new URL('../src/module-block-card-view.js', import.meta.url), 'utf8');
-  assert.match(view, /block\.kind === 'kpi' && placed\.width <= 3\) return compactCard\(/);
+  assert.match(view, /const compact = kpi && placed\.width <= 3;/);
+  assert.match(view, /kpiNode\(el, block\.model, palette, \{ compact, tools: toolsMenu\(el, tools\), period \}\)/);
   assert.match(catalog, /placeable: hasBlockCard\(definition\.definitionId\)/);
 });
 
