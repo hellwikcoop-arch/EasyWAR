@@ -203,27 +203,44 @@ async fn create_dashboard_module(
     custom_fields: Option<Vec<dashboard_modules::NewCustomField>>,
 ) -> Result<DashboardModule, String> {
     let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
-    // Об'єднана таблиця: стовпці задає виклик (`custom_fields`), шаблон — службовий `merged-table`;
-    // для шаблонних модулів `custom_fields` не допускається.
-    let merged = template_id == dashboard_modules::MERGED_TEMPLATE_ID;
-    if merged != custom_fields.is_some()
-        || (merged && corrections.as_ref().is_some_and(|items| !items.is_empty()))
+    // Об'єднана й основна таблиці користувача: стовпці задає виклик (`custom_fields`), шаблон — службовий
+    // `merged-table` чи `user-table`; для шаблонних модулів `custom_fields` не допускається.
+    let custom = template_id == dashboard_modules::MERGED_TEMPLATE_ID
+        || template_id == dashboard_modules::USER_TABLE_TEMPLATE_ID;
+    if custom != custom_fields.is_some()
+        || (custom && corrections.as_ref().is_some_and(|items| !items.is_empty()))
     {
         return Err(dashboard_modules::DashboardModuleError::InvalidCustomFields.to_string());
     }
     if let Some(fields) = custom_fields {
-        return modules
-            .create_custom(
-                &active_profile_id(&session)?,
-                &branch,
-                title.as_deref(),
-                style.as_deref(),
-                fields,
-                rows.unwrap_or_default(),
-                &now,
-            )
-            .await
-            .map_err(|error| error.to_string());
+        let profile_id = active_profile_id(&session)?;
+        let rows = rows.unwrap_or_default();
+        let created = if template_id == dashboard_modules::USER_TABLE_TEMPLATE_ID {
+            modules
+                .create_user_table(
+                    &profile_id,
+                    &branch,
+                    title.as_deref(),
+                    style.as_deref(),
+                    fields,
+                    rows,
+                    &now,
+                )
+                .await
+        } else {
+            modules
+                .create_custom(
+                    &profile_id,
+                    &branch,
+                    title.as_deref(),
+                    style.as_deref(),
+                    fields,
+                    rows,
+                    &now,
+                )
+                .await
+        };
+        return created.map_err(|error| error.to_string());
     }
     modules
         .create_styled(
@@ -506,6 +523,29 @@ async fn replace_dashboard_module_rows(
             &active_profile_id(&session)?,
             &module_id,
             rows,
+            &expected_updated_at,
+            &now,
+        )
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// Дописує стовпці до основної таблиці користувача (`user-table`) і повертає оновлений модуль. Версія
+/// таблиці (`expected_updated_at`) обов'язкова; шаблонні й об'єднані таблиці не змінюються.
+#[tauri::command]
+async fn add_dashboard_module_fields(
+    modules: tauri::State<'_, DashboardModuleStore>,
+    session: tauri::State<'_, ProfileSession>,
+    module_id: String,
+    fields: Vec<dashboard_modules::NewCustomField>,
+    expected_updated_at: String,
+) -> Result<DashboardModule, String> {
+    let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
+    modules
+        .add_fields(
+            &active_profile_id(&session)?,
+            &module_id,
+            fields,
             &expected_updated_at,
             &now,
         )
@@ -4474,6 +4514,7 @@ pub fn run() {
             read_module_source_sheet,
             get_dashboard_module_data,
             replace_dashboard_module_rows,
+            add_dashboard_module_fields,
             delete_dashboard_module,
             set_dashboard_module_style,
             get_profile_schema,
