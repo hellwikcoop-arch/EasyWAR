@@ -270,11 +270,8 @@ export function linkCoverageViews(schema, sourceId, modules, data) {
 
 const rowsWord = n => (n % 10 === 1 && n % 100 !== 11 ? 'рядок' : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? 'рядки' : 'рядків');
 
-/**
- * Що дало б об'єднання двох таблиць за підтвердженим зв'язком: стовпці, підсумок рядків і кілька перших рядків.
- * Нічого не створює. `{ ok: true, title, summary, notes, columns, sample }` або `{ ok: false, message }`.
- */
-export function mergePreviewView(schema, relationId, modules, data) {
+/** Підтверджений зв'язок, обидві таблиці з даних дашборда й результат об'єднання (`sample` рядків). */
+function mergeOf(schema, relationId, modules, data, sample) {
   const relation = relationsOf(schema).find(item => item.id === relationId && item.status === 'confirmed');
   if (!relation) return { ok: false, message: 'Такого підтвердженого зв’язку немає.' };
   if (staleRelations(schema).includes(relation.id)) return { ok: false, message: 'Зв’язок треба перевірити: стовпець ключа змінився.' };
@@ -288,10 +285,21 @@ export function mergePreviewView(schema, relationId, modules, data) {
   const left = tableOf(relation.left.sourceId);
   const right = tableOf(relation.right.sourceId);
   if (!left || !right) return { ok: false, message: 'Дані однієї з таблиць не прочитано.' };
-  const merged = mergePreview(left, right, relation.left.columns, relation.right.columns);
+  const merged = mergePreview(left, right, relation.left.columns, relation.right.columns, { sample });
   if (!merged.ok) return { ok: false, message: merged.message };
+  return { ok: true, left, right, merged };
+}
+
+/**
+ * Що дало б об'єднання двох таблиць за підтвердженим зв'язком: стовпці, підсумок рядків і кілька перших рядків.
+ * Нічого не створює. `{ ok: true, title, summary, notes, columns, sample }` або `{ ok: false, message }`.
+ */
+export function mergePreviewView(schema, relationId, modules, data) {
+  const made = mergeOf(schema, relationId, modules, data, 5);
+  if (!made.ok) return made;
+  const { left, right, merged } = made;
   const notes = [];
-  if (!merged.complete) notes.push('Таблицю прочитано не повністю: підсумок за прочитаним.');
+  if (!merged.complete) notes.push('Таблицю прочитано не повністю: підсумок за прочитаним, а файл завантажити не можна.');
   if (merged.onlyLeft || merged.onlyRight) notes.push(`Рядки без пари лишаються з порожніми стовпцями іншої таблиці: ${merged.onlyLeft} з «${left.title}», ${merged.onlyRight} з «${right.title}».`);
   return {
     ok: true,
@@ -300,5 +308,33 @@ export function mergePreviewView(schema, relationId, modules, data) {
     notes,
     columns: merged.columns.map(column => column.header),
     sample: merged.sample,
+    downloadable: merged.complete,
+  };
+}
+
+/** CSV у вигляді решти вивантажень застосунку: крапка з комою, BOM для Excel, CRLF; лапки подвоєно. */
+export function tableCsv(rows) {
+  const escape = value => {
+    const text = String(value ?? '');
+    return /[";\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+  };
+  return `\uFEFF${rows.map(row => row.map(escape).join(';')).join('\r\n')}`;
+}
+
+/**
+ * Файл з об'єднаною таблицею для завантаження: новий CSV, вихідні таблиці не змінюються. Неповно прочитану таблицю
+ * не віддаємо (файл мовчки втратив би рядки). `{ ok: true, filename, text, rowCount }` або `{ ok: false, message }`.
+ */
+export function mergeDownloadView(schema, relationId, modules, data, now = () => new Date().toISOString()) {
+  const made = mergeOf(schema, relationId, modules, data, Infinity);
+  if (!made.ok) return made;
+  const { merged } = made;
+  if (!merged.complete) return { ok: false, message: 'Таблицю прочитано не повністю: файл був би неповним. Файл не створено.' };
+  const stamp = String(now()).slice(0, 10).replaceAll('-', '');
+  return {
+    ok: true,
+    filename: `eW_obyednana_${stamp}.csv`,
+    text: tableCsv([merged.columns.map(column => column.header), ...merged.sample]),
+    rowCount: merged.rowCount,
   };
 }
