@@ -3,7 +3,7 @@
 // людські тексти й стан рішень (B3). Нічого не зберігає: рішення людини ухвалює і записує викликач через
 // `confirmRelation`/`rejectRelation`/`clearRelation` ядра схеми.
 
-import { CARDINALITY_LABELS, LINK_LIMITS, connectedGroups, describeCandidate, tableFromSchema } from './table-link-core.js';
+import { CARDINALITY_LABELS, LINK_LIMITS, connectedGroups, describeCandidate, linkCoverage, tableFromSchema } from './table-link-core.js';
 import { moduleSourceId } from './profile-schema-modules-core.js';
 import { LIMITS, groupsOf, relationId, relationsOf, staleRelations } from './profile-schema-core.js';
 
@@ -221,4 +221,47 @@ export function deleteLinksNote(schema, sourceId) {
   if (!others.length) return '';
   const names = [...new Set(others)].map(name => `«${name}»`).join(', ');
   return `Зникне й підтверджений зв’язок із ${names}; решта модулів лишиться без змін.`;
+}
+
+// ─── Читання за зв'язком (покриття) ────────────────────────────────────────────────────────────────────
+
+// «з N рядків»: родовий відмінок, окрема форма лише для 1, 21, 31… (крім 11).
+const rows = n => (n % 10 === 1 && n % 100 !== 11 ? 'рядка' : 'рядків');
+
+/**
+ * Що дає підтверджений зв'язок для картки модуля: для кожного чинного зв'язку — скільки рядків цієї й пов'язаної таблиці
+ * мають пару. Зв'язок із позначкою «перевірте» і зв'язок, чию іншу таблицю не прочитано, пропускаються з поясненням.
+ * Повертає масив `{ relationId, text, warn }`; значень клітинок немає.
+ */
+export function linkCoverageViews(schema, sourceId, modules, data) {
+  const stale = new Set(staleRelations(schema));
+  const byId = new Map();
+  const tableOf = id => {
+    if (byId.has(id)) return byId.get(id);
+    const module = (Array.isArray(modules) ? modules : []).find(item => moduleSourceId(item.id) === id);
+    const payload = module ? (data instanceof Map ? data.get(module.id) : data?.[module.id]) : null;
+    const rows = Array.isArray(payload?.rows) ? payload.rows : null;
+    const made = rows && payload.failed !== true ? tableFromSchema(schema, id, rows.slice(0, LINK_LIMITS.maxRows), { truncated: payload.truncated === true || rows.length > LINK_LIMITS.maxRows }) : null;
+    const table = made?.ok ? made.table : null;
+    byId.set(id, table);
+    return table;
+  };
+  const views = [];
+  for (const relation of relationsOf(schema)) {
+    if (relation.status !== 'confirmed' || (relation.left.sourceId !== sourceId && relation.right.sourceId !== sourceId)) continue;
+    const mine = relation.left.sourceId === sourceId ? relation.left : relation.right;
+    const other = relation.left.sourceId === sourceId ? relation.right : relation.left;
+    const name = titleOf(schema, other.sourceId);
+    if (stale.has(relation.id)) { views.push({ relationId: relation.id, text: `«${name}»: зв’язок треба перевірити, рахунок пропущено.`, warn: true }); continue; }
+    const left = tableOf(mine.sourceId);
+    const right = tableOf(other.sourceId);
+    if (!left || !right) { views.push({ relationId: relation.id, text: `«${name}»: дані не прочитано, рахунок пропущено.`, warn: true }); continue; }
+    const cover = linkCoverage(left, right, mine.columns, other.columns);
+    if (!cover.ok) { views.push({ relationId: relation.id, text: `«${name}»: ${cover.message}`, warn: true }); continue; }
+    const lone = cover.leftRows - cover.leftMatched;
+    const loneOther = cover.rightRows - cover.rightMatched;
+    const text = `«${name}»: пару має ${cover.leftMatched} з ${cover.leftRows} ${rows(cover.leftRows)} тут і ${cover.rightMatched} з ${cover.rightRows} там; без пари: ${lone} тут, ${loneOther} там.${cover.complete ? '' : ' Таблицю прочитано не повністю: рахунок за прочитаним.'}`;
+    views.push({ relationId: relation.id, text, warn: lone > 0 || loneOther > 0 || !cover.complete });
+  }
+  return views;
 }
