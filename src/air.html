@@ -5103,7 +5103,7 @@ function renderAll() {
   if (!el.content) return; // дані прийшли раніше, ніж збудовано дашборд: init() покаже їх сам
   if (AV.S.wb && AV.S.wb.kind === 'pvk') {
     el.empty.hidden = true; el.toolbar.hidden = true; el.content.hidden = true; el.side.hidden = true; syncFilterBtn();
-    window.PVKDashboard?.render(root, AV.S.wb, { downloadCSV, refresh: () => AV.refresh(true), canRefresh: !!AV.S.handle, readSheets: u8 => window.AVCORE.readAllSheets(u8) });
+    window.PVKDashboard?.render(root, AV.S.wb, { downloadCSV, refresh: () => AV.refresh(true), canRefresh: !!AV.S.handle, readSheets: u8 => window.AVCORE.readAllSheets(u8), openBase: () => showView('base') });
     return;
   }
   window.PVKDashboard?.unmount(root);
