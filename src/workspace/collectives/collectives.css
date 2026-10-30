@@ -33,3 +33,4 @@
 .ec-area{min-height:72px;font-family:var(--mono,ui-monospace,monospace);font-size:13px;resize:vertical;overflow-wrap:anywhere}
 .ec-check{display:flex;align-items:center;gap:8px;font-size:14px}
 @media(max-width:580px){.ec-root{padding:22px 12px}.ec-row{flex-wrap:wrap}.ec-row .ec-input{margin-left:0}.ec-toolbar .ec-btn{flex:1}}
+.ec-with-error{display:grid;gap:6px}

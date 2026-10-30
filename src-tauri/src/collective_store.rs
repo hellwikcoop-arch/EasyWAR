@@ -557,10 +557,14 @@ pub(crate) fn base32(bytes: &[u8]) -> String {
     out
 }
 
-/// Відбиток для інтерфейсу: перші 10 символів base32, `ABCDE-FGHIJ`.
+/// Відбиток для інтерфейсу: перші 10 символів base32 без роздільника, `ABCDEFGHIJ`
+/// (50 біт; коротший відбиток зробив би підбір ключа з тим самим відбитком дешевшим).
+pub const FINGERPRINT_LEN: usize = 10;
+
 pub fn fingerprint(bytes: &[u8]) -> String {
-    let text = base32(bytes);
-    format!("{}-{}", &text[..5], &text[5..10])
+    let mut text = base32(bytes);
+    text.truncate(FINGERPRINT_LEN);
+    text
 }
 
 /// Ключ відновлення для показу: base32 групами по чотири.
@@ -627,7 +631,7 @@ mod tests {
         assert_eq!(base32(b""), "");
         assert_eq!(base32(b"f"), "MY");
         assert_eq!(base32(b"foobar"), "MZXW6YTBOI");
-        assert_eq!(fingerprint(b"foobar"), "MZXW6-YTBOI");
+        assert_eq!(fingerprint(b"foobar"), "MZXW6YTBOI");
         let recovery = recovery_text(&[0u8; KEY_LEN]);
         assert_eq!(recovery.len(), 52 + 12);
         assert!(recovery.starts_with("AAAA-AAAA-"));
@@ -667,7 +671,7 @@ mod tests {
             .create_identity(PROFILE, password("синтетичний-пароль"), T1)
             .await
             .unwrap();
-        assert_eq!(created.identity.fingerprint.len(), 11);
+        assert_eq!(created.identity.fingerprint.len(), FINGERPRINT_LEN);
         assert_eq!(created.recovery_key.len(), 64);
         let status = store.status(PROFILE).await.unwrap();
         assert_eq!(status.key_store, "locked");

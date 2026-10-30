@@ -104,16 +104,25 @@ export async function mount(container, host) {
     e.placeholder = 'Пароль профілю';
     return e;
   }
-  async function secureAction(fn) {
+  // Помилка показується під тією формою, яка її спричинила (`secureErrorAt`), а не під першою.
+  let secureErrorAt = '';
+  async function secureAction(fn, at = '') {
     if (secureBusy) return;
-    secureBusy = true; secureError = ''; renderSecure();
+    secureBusy = true; secureError = ''; secureErrorAt = ''; renderSecure();
     try {
       await fn();
       secureState = await host.collectives.status();
       detail = exchangeFp ? await host.collectives.detail(exchangeFp).catch(() => null) : null;
     }
-    catch (error) { secureError = String(error?.message || error || 'Не вдалося виконати дію.'); }
+    catch (error) { secureError = String(error?.message || error || 'Не вдалося виконати дію.'); secureErrorAt = at; }
     finally { secureBusy = false; renderSecure(); }
+  }
+  function errorAt(at) {
+    if (!secureError || secureErrorAt !== at) return [];
+    const err = $('p', 'ec-status', secureError);
+    err.dataset.error = 'true';
+    err.dataset.at = at;
+    return [err];
   }
   function renderSecure() {
     secure.replaceChildren($('p', 'ec-label', 'ЗАХИЩЕНИЙ КОЛЕКТИВ'), $('h2', '', 'Ключ учасника і захищені колективи'));
@@ -156,9 +165,9 @@ export async function mount(container, host) {
           const created = await host.collectives.createIdentity(pass.value);
           pass.value = '';
           recoveryKey = created.recoveryKey;
-        });
+        }, 'identity');
       });
-      secure.append(form);
+      secure.append(form, ...errorAt('identity'));
     }
     const list = $('div', 'ec-list');
     for (const item of secureState.collectives) {
@@ -181,15 +190,11 @@ export async function mount(container, host) {
           checkPassword(pass.value);
           await host.collectives.create(pass.value, name.value);
           pass.value = ''; name.value = '';
-        });
+        }, 'create');
       });
-      secure.append(form);
+      secure.append(form, ...errorAt('create'));
     }
-    if (secureError) {
-      const err = $('p', 'ec-status', secureError);
-      err.dataset.error = 'true';
-      secure.append(err);
-    }
+    secure.append(...errorAt(''));
     if (secureState.identity) renderExchange();
     secure.append($('p', 'ec-caption', 'Обмін іде лише через тексти, які ви пересилаєте самі, і локальну чергу відправки. Мережі на цьому етапі немає.'));
   }
@@ -206,7 +211,7 @@ export async function mount(container, host) {
     box.append($('p', 'ec-label', shared.title), $('p', 'ec-caption', shared.hint), text, hide);
     return box;
   }
-  function passwordForm(submitText, fields, run) {
+  function passwordForm(submitText, fields, run, at = '') {
     const form = $('form', 'ec-inline');
     const pass = passwordInput();
     const submit = button(submitText);
@@ -219,9 +224,14 @@ export async function mount(container, host) {
         checkPassword(pass.value);
         await run(pass.value);
         pass.value = '';
-      });
+      }, at);
     });
     return form;
+  }
+  function withError(form, at) {
+    const wrap = $('div', 'ec-with-error');
+    wrap.append(form, ...errorAt(at));
+    return wrap;
   }
   function renderExchange() {
     const box = $('div', 'ec-exchange');
@@ -240,21 +250,21 @@ export async function mount(container, host) {
     const shown = sharedBox();
     if (shown) box.append(shown);
     const invitation = area('EWINV1.…');
-    box.append($('p', 'ec-label', 'ВСТУПИТИ ЗА ЗАПРОШЕННЯМ'), passwordForm('Підготувати відповідь', [field('Текст запрошення', invitation)], async password => {
+    box.append($('p', 'ec-label', 'ВСТУПИТИ ЗА ЗАПРОШЕННЯМ'), withError(passwordForm('Підготувати відповідь', [field('Текст запрошення', invitation)], async password => {
       expectText(invitation.value, 'invitation');
       const made = await host.collectives.joinRequest(password, invitation.value);
       shared = { title: 'ВІДПОВІДЬ НА ЗАПРОШЕННЯ', text: made.text,
         hint: `Колектив ${made.collectiveFingerprint}, запросив ${made.inviterFingerprint}. Звірте відбиток із запрошувачем голосом чи особисто й передайте йому цей текст.` };
-    }));
+    }, 'join-request'), 'join-request'));
     const keys = area('EWKEYS1.…');
-    box.append($('p', 'ec-label', 'ПРИЙНЯТИ ПАКЕТ КЛЮЧІВ'), passwordForm('Прийняти й вступити', [field('Пакет ключів', keys)], async password => {
+    box.append($('p', 'ec-label', 'ПРИЙНЯТИ ПАКЕТ КЛЮЧІВ'), withError(passwordForm('Прийняти й вступити', [field('Пакет ключів', keys)], async password => {
       expectText(keys.value, 'keys');
       const joined = await host.collectives.joinAccept(password, keys.value);
       exchangeFp = joined.collective.fingerprint;
       shared = { title: 'ВИ В КОЛЕКТИВІ', text: joined.members.join('\n'),
         hint: `«${joined.collective.name}»: відбитки учасників за перевіреним журналом. Звірте їх із запрошувачем.` };
       keys.value = '';
-    }));
+    }, 'join-accept'), 'join-accept'));
     secure.append(box);
   }
   function renderDetail(box) {
@@ -287,25 +297,25 @@ export async function mount(container, host) {
       event.preventDefault();
       secureAction(async () => {
         await host.collectives.setTable({ collective: exchangeFp, title: title.value, cls: cls.value, purpose: purpose.value });
-      });
+      }, 'table');
     });
-    box.append($('p', 'ec-label', 'НОВА ТАБЛИЦЯ (КЛАС ПІДТВЕРДЖУЄТЕ ВИ ЯК ВЛАСНИК)'), tableForm);
+    box.append($('p', 'ec-label', 'НОВА ТАБЛИЦЯ (КЛАС ПІДТВЕРДЖУЄТЕ ВИ ЯК ВЛАСНИК)'), withError(tableForm, 'table'));
 
     const hours = input('24');
     hours.value = '24';
-    box.append($('p', 'ec-label', 'ЗАПРОСИТИ УЧАСНИКА'), passwordForm('Створити запрошення', [field('Строк, годин', hours)], async password => {
+    box.append($('p', 'ec-label', 'ЗАПРОСИТИ УЧАСНИКА'), withError(passwordForm('Створити запрошення', [field('Строк, годин', hours)], async password => {
       const made = await host.collectives.inviteCreate(password, exchangeFp, checkHours(hours.value));
       shared = { title: 'ЗАПРОШЕННЯ', text: made.text,
         hint: 'Одноразове. Передайте текст запрошеному поза EasyWAR; він поверне відповідь, яку ви вставите нижче.' };
-    }));
+    }, 'invite'), 'invite'));
     const request = area('EWJOIN1.…');
-    box.append($('p', 'ec-label', 'ВПУСТИТИ ЗА ВІДПОВІДДЮ'), passwordForm('Впустити', [field('Відповідь запрошеного', request)], async password => {
+    box.append($('p', 'ec-label', 'ВПУСТИТИ ЗА ВІДПОВІДДЮ'), withError(passwordForm('Впустити', [field('Відповідь запрошеного', request)], async password => {
       expectText(request.value, 'request');
       const admitted = await host.collectives.inviteAdmit(password, exchangeFp, request.value);
       shared = { title: 'ПАКЕТ КЛЮЧІВ ДЛЯ НОВОГО УЧАСНИКА', text: admitted.text,
         hint: `Учасник ${admitted.memberFingerprint} у журналі. Передайте йому цей текст; відкритих ключів у ньому немає.` };
       request.value = '';
-    }));
+    }, 'admit'), 'admit'));
 
     const writable = detail.tables.filter(table => table.canWrite);
     if (!writable.length) return;
@@ -319,11 +329,11 @@ export async function mount(container, host) {
       const cancel = button('Скасувати');
       cancel.disabled = secureBusy;
       cancel.addEventListener('click', () => { prepared = null; reportResult = ''; renderSecure(); });
-      box.append($('p', 'ec-status', prepared.text), passwordForm('Доповісти', [], async password => {
+      box.append($('p', 'ec-status', prepared.text), withError(passwordForm('Доповісти', [], async password => {
         const intent = prepared.intent;
         prepared = null;
         reportResult = reportText(await host.collectives.reportConfirm(password, intent));
-      }), cancel);
+      }, 'report'), 'report'), cancel);
     } else {
       // Крок 1: Rust перевіряє маршрут і права й запам'ятовує намір на 60 секунд.
       const wan = checkbox('Явно обираю передачу через інтернет');
@@ -342,9 +352,9 @@ export async function mount(container, host) {
           reportResult = '';
           if (outcome.allowed) prepared = { intent: outcome.intent, text: preparedText(outcome) };
           else reportResult = reportText(outcome);
-        });
+        }, 'report');
       });
-      box.append(note, form);
+      box.append(note, withError(form, 'report'));
     }
     if (reportResult) box.append($('p', 'ec-status', reportResult));
   }

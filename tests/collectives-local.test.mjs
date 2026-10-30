@@ -61,7 +61,7 @@ test('захищені колективи: стани ключа, межі па�
   assert.ok(canCreateIdentity(absent));
   assert.ok(!canCreateCollective(absent));
   assert.match(keyStoreText(absent), /ще немає/);
-  const locked = { keyStore: 'locked', identity: { fingerprint: 'ABCDE-FGHIJ' }, collectives: [] };
+  const locked = { keyStore: 'locked', identity: { fingerprint: 'ABCDEFGHIJ' }, collectives: [] };
   assert.ok(!canCreateIdentity(locked));
   assert.ok(canCreateCollective(locked));
   assert.ok(!canCreateCollective({ ...locked, collectives: Array(MAX_COLLECTIVES).fill({}) }));
