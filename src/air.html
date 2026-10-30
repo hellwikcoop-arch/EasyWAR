@@ -50,6 +50,9 @@ html[data-module="army"][data-theme="light"] { --accent: #3f7a1c; --accent-ink: 
 html[data-module="army"] .brand .branch-service-mark { height: 38px; width: auto; }
 html[data-module="army"]:not([data-theme="light"]) { --nav-hi: #b4ec7a !important; --nav-mid: #6fae3a !important; --nav-end: #355f17 !important; --nav-glow: rgba(111, 174, 58, .35) !important; --nav-ink: #0b1a06 !important; }
 html[data-module="army"] .kc-blue { --tc: #8fcf4a; }
+/* Фото в картках «Основних показників» (Вильоти, БП, Уражено, Пошкоджено, Не уражено) — на всю картку, текст лишається читабельним. */
+html[data-module="army"] .kc > .kc-art.kc-art-bg, html[data-module="army"] .kc > .kc-art.kc-art-photo { inset: 0 !important; width: auto !important; height: auto !important; -webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,.75), #000 30%, rgba(0,0,0,.55) 70%, rgba(0,0,0,.3)) !important; mask-image: linear-gradient(to bottom, rgba(0,0,0,.75), #000 30%, rgba(0,0,0,.55) 70%, rgba(0,0,0,.3)) !important; }
+html[data-module="army"] .kc > .kc-art .kc-photo { width: 100% !important; height: 100% !important; object-fit: cover; object-position: 60% 40%; opacity: .5 !important; }
 html[data-module="army"]:not([data-theme="light"]) .face.front { background: #0b140d; }
 html[data-module="army"] .a2-kv span, html[data-module="army"] .a2-pbtn .ic, html[data-module="army"] .a2-s > .k-ic, html[data-module="army"] .a2-s > .ic { color: #8fcf4a; }
 html[data-module="army"] .al-b { background: #8fcf4a; }
