@@ -34,9 +34,9 @@ const rows = [
   { c1: '2026-09-03', c2: '', c3: null },
 ];
 
-test('шість карток РВ уміють рахуватися з основної таблиці, карта — ще ні', () => {
+test('шість карток РВ уміють рахуватися з основної таблиці, глибина ураження — ще ні', () => {
   for (const id of RV_KPI_DEFINITIONS) assert.equal(hasBlockCard(id), true, id);
-  assert.equal(hasBlockCard('legacy:strike-map'), false);
+  assert.equal(hasBlockCard('legacy:strike-depth'), false);
   assert.equal(hasBlockCard(undefined), false);
 });
 
@@ -181,7 +181,7 @@ test('спільні блоки ПС і РВ малюються тими сам�
   for (const id of ['legacy:result-distribution', 'legacy:result-dynamics', 'legacy:platform-types', 'legacy:munition-use', 'legacy:top-units', 'legacy:activity-by-day', 'legacy:hour-of-day', 'legacy:repeat-targets', 'legacy:target-types', 'legacy:firing-units']) {
     assert.equal(hasBlockCard(id), true, id);
   }
-  for (const id of ['legacy:strike-map', 'legacy:strike-depth']) assert.equal(hasBlockCard(id), false, id);
+  assert.equal(hasBlockCard('legacy:strike-depth'), false);
   const donut = chart('legacy:result-distribution');
   assert.equal(donut.kind, 'donut');
   assert.equal(donut.model.total, 12);
@@ -298,4 +298,29 @@ test('зауваження запису збігаються з правилам
   ]);
   assert.deepEqual(recordIssues({ 'munition-count': '4.0', 'event-time': '09:15' }), []);
   assert.match(recordIssues({ 'strike-result': 'x'.repeat(80) })[0], /…»$/);
+});
+
+test('карта операцій: точки з MGRS і десяткових координат, колір за результатом, без вибору виду', () => {
+  const geo = { ...wide, fields: [...wide.fields, field('c9', 'Координати', 'text', 8)] };
+  let schema = syncModuleSources(emptySchema('profile-card'), [geo]).schema;
+  for (const [columnKey, role] of Object.entries({ ...WIDE_ROLES, c9: 'coordinates' })) schema = confirmBinding(schema, { sourceId: SOURCE, columnKey, role }).schema;
+  const data = [
+    { c1: '2026-09-01', c2: 'Знищено', c7: 'Ц-1', c9: '36U UB 12345 67890' },
+    { c1: '2026-09-01', c2: 'Пошкоджено', c7: 'Ц-2', c9: '48.5, 37.25' },
+    { c1: '2026-09-02', c2: 'Не уражено', c7: 'Ц-3', c9: 'невідомо' },
+    { c1: '2026-09-02', c2: 'Знищено', c7: 'Ц-4', c9: '' },
+  ];
+  const card = blockCardModel({ definition: byId('legacy:strike-map'), schema, sourceId: SOURCE, rows: data });
+  assert.equal(card.ok, true);
+  assert.equal(card.kind, 'map');
+  assert.deepEqual(card.model.points.map(point => [point.label, point.status, point.tone]), [['Ц-1', 'Знищено', 'good'], ['Ц-2', 'Пошкоджено', 'warn']]);
+  assert.equal(card.model.skipped, 2, 'записи без розпізнаних координат лічаться окремо');
+  assert.deepEqual(card.model.legend, [{ name: 'Знищено', tone: 'good' }, { name: 'Пошкоджено', tone: 'warn' }]);
+  const pair = blockCardModel({ definition: byId('legacy:strike-map'), schema, sourceId: SOURCE, rows: [{ c2: 'Пошкоджено', c9: '48, 36' }, { c2: 'Подавлено', c9: '49, 37' }] });
+  assert.deepEqual(pair.model.legend.map(item => item.name), ['Пошкоджено / Подавлено'], 'однакові кольори — один рядок легенди');
+  assert.deepEqual(chartViews('legacy:strike-map'), [], 'карта не має інших видів');
+  const missing = blockCardModel({ definition: byId('legacy:strike-map'), schema: wideSchema(), sourceId: SOURCE, rows: data });
+  assert.equal(missing.ok, false, 'без ролі координат блок не рахується');
+  const placed = placeBlockCard(ensureModuleInstances(emptyLayout('p1'), [{ id: 'main', templateId: 'user-table', title: 'Основна таблиця', defaultSpan: 1 }]).layout, { definition: byId('legacy:strike-map'), sourceId: SOURCE });
+  assert.equal(placed.layout.placements.find(item => item.instanceId.startsWith('legacy:strike-map')).w, 6, 'карта — половина ширини');
 });

@@ -21,8 +21,8 @@ test('шаблони містять лише блоки, що рахуються
     for (const id of preset.blocks) assert.equal(hasBlockCard(id), true, id);
     assert.equal(presetDefinitions(preset, definitions).length, preset.blocks.length, `${preset.id}: усі блоки є в реєстрі`);
   }
-  assert.equal(PRESETS.rv.blocks.length, 18);
-  assert.equal(PRESETS.ps.blocks.length, 17, 'у ПС немає вогневих бригад');
+  assert.equal(PRESETS.rv.blocks.length, 19);
+  assert.equal(PRESETS.ps.blocks.length, 18, 'у ПС немає вогневих бригад');
   assert.deepEqual(PRESETS.rv.blocks.slice(-2), ['legacy:records-journal', 'legacy:data-quality'], 'журнал і перевірка — останніми');
   assert.equal(PRESETS.ps.blocks.includes('legacy:firing-units'), false);
   assert.deepEqual(PRESETS.rv.blocks.slice(0, 6).map(id => id.replace('legacy:rv-kpi-', '')), ['launches', 'munitions', 'destroyed', 'damaged', 'miss', 'unknown']);
@@ -34,7 +34,7 @@ test('шаблони містять лише блоки, що рахуються
 test('без основної таблиці шаблон РВ створює її з усіма обов’язковими стовпцями без повторів', () => {
   const result = planPreset({ preset: PRESETS.rv, definitions });
   assert.equal(result.ok, true);
-  assert.equal(result.missing.length, 18);
+  assert.equal(result.missing.length, 19);
   assert.equal(result.done, false);
   const roles = result.plan.items.map(item => item.role);
   assert.equal(new Set(roles).size, roles.length, 'кожна роль — один стовпець');
@@ -44,7 +44,7 @@ test('без основної таблиці шаблон РВ створює ї
   assert.equal(roles[0], 'event-date', 'порядок — за першим блоком, що вимагає роль');
   assert.equal(result.plan.fields.length, roles.length);
   assert.deepEqual(result.plan.items.map(item => item.columnKey), roles.map((_, index) => `c${index + 1}`));
-  assert.match(result.summary, /^поставить карток: 18; додасть: «/);
+  assert.match(result.summary, /^поставить карток: 19; додасть: «/);
   assert.equal(roles.includes('record-issues'), false, 'перевірці окремий стовпець зауважень не потрібен');
   const ps = planPreset({ preset: PRESETS.ps, definitions });
   assert.equal(ps.plan.items.some(item => item.role === 'firing-unit'), false, 'ПС не просить стовпця вогневої бригади');
@@ -60,18 +60,18 @@ test('наявні стовпці зіставляються, а вже пост
   let layout = ensureModuleInstances(emptyLayout('p1'), [table]).layout;
   const ready = planPreset({ preset: PRESETS.rv, definitions, schema, module, layout, sourceId: SOURCE });
   assert.equal(ready.plan.nothingToAdd, true);
-  assert.equal(ready.summary, 'поставить карток: 18');
+  assert.equal(ready.summary, 'поставить карток: 19');
   const placed = placePreset(layout, { preset: PRESETS.rv, definitions: ready.definitions, sourceId: SOURCE, freshTable: true });
   assert.equal(placed.ok, true);
-  assert.equal(placed.placed, 18);
+  assert.equal(placed.placed, 19);
   layout = placed.layout;
   const order = orderedIds(layout);
-  assert.deepEqual(order.slice(0, 18).map(id => id.replace(/#\d+$/u, '')), PRESETS.rv.blocks, 'картки в порядку шаблону, таблиця — під ними');
-  assert.equal(order.length, 19);
+  assert.deepEqual(order.slice(0, 19).map(id => id.replace(/#\d+$/u, '')), PRESETS.rv.blocks, 'картки в порядку шаблону, таблиця — під ними');
+  assert.equal(order.length, 20);
   const width = id => layout.placements.find(item => item.instanceId === id).w;
   assert.equal(width(order[0]), 4);
-  assert.equal(width(order[6]), 6);
-  assert.equal(width(order[18]), 12, 'нова таблиця — на всю ширину');
+  assert.equal(width(order[6]), 6, 'карта — половина ширини');
+  assert.equal(width(order[19]), 12, 'нова таблиця — на всю ширину');
   const again = planPreset({ preset: PRESETS.rv, definitions, schema, module, layout, sourceId: SOURCE });
   assert.equal(again.done, true);
   assert.equal(placePreset(layout, { preset: PRESETS.rv, definitions: again.definitions, sourceId: SOURCE }).placed, 0);
