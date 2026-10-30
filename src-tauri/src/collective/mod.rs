@@ -12,6 +12,7 @@ pub mod codec;
 pub mod envelope;
 pub mod epoch;
 pub mod identity;
+pub mod relay;
 pub mod replay;
 pub mod secret_store;
 
