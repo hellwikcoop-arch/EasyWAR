@@ -60,5 +60,8 @@ html[data-motion=off] .ewmc-style-preview{transition:none}
 .ewmc-bk-tiles{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:0}.ewmc-bk-tiles div{padding:7px 9px;border-radius:9px;background:rgba(163,174,194,.07)}
 .ewmc-bk-tiles dt{color:var(--muted,#9fb0c4);font-size:10.5px}.ewmc-bk-tiles dd{margin:2px 0 0;font-size:15px;font-weight:750;font-variant-numeric:tabular-nums;color:var(--ink,#eaf1ff)}
 .ewmc-bk-missing,.ewmc-bk-note{margin:0;color:var(--muted,#9fb0c4);font-size:12px;line-height:1.45}
+.ewmc-block.is-compact{padding:0;gap:0;border:0;background:none;box-shadow:none}.ewmc-block.is-compact .ewmc-bk{padding:10px 12px;gap:4px}.ewmc-block.is-compact .ewmc-bk-value{font-size:30px}
+.ewmc-block.is-compact .ewmc-block-tools>summary{width:24px;height:24px;font-size:14px;border-color:transparent}.ewmc-block.is-compact .ewmc-bk-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ewmc-block.is-compact{position:relative}.ewmc-block.is-compact .ewmc-block-tools{position:static}.ewmc-block.is-compact .ewmc-block-tools>.ewmc-instance-bar{left:0;right:auto;top:calc(100% + 6px)}
 :root[data-theme=light] .ewmc-bk{background:linear-gradient(160deg,color-mix(in srgb,var(--bk) 10%,transparent),transparent 65%),var(--ewmc-surface,#fff)}
 :root[data-theme=light] .ewmc-bk-value,:root[data-theme=light] .ewmc-bk-tiles dd,:root[data-theme=light] .ewmc-bk-ring b{color:#13213a}

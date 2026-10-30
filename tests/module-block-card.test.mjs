@@ -125,6 +125,9 @@ test('каталог малює картку блока з основної та
   // Налаштування звичайної картки на «Моєму дашборді» — за «⋯» разом із видаленням і структурою таблиці.
   assert.match(catalog, /el\('div', \{ class: 'ewmc-card-menu' \}, cardTools\(module, placed\), removeButton, confirmBox, schemaBox\)/);
   assert.match(catalog, /tools \? null : removeButton/);
+  // Мала картка показника («Мала», 2 колонки з 12): лише підпис і число.
+  const view = await readFile(new URL('../src/module-block-card-view.js', import.meta.url), 'utf8');
+  assert.match(view, /block\.kind === 'kpi' && placed\.width <= 3\) return compactCard\(/);
   assert.match(catalog, /placeable: hasBlockCard\(definition\.definitionId\)/);
 });
 

@@ -48,11 +48,32 @@ export function kpiNode(el, model) {
     el('dl', { class: 'ewmc-bk-tiles' }, (model.tiles || []).map(([label, value]) => el('div', {}, el('dt', { text: label }), el('dd', { text: value })))));
 }
 
+function compactCard({ el, module, placed, model, tools, style }) {
+  return el('article', {
+    class: 'ewmc-module ewmc-block is-compact',
+    style: { gridColumn: `span ${placed.width}` },
+    'data-kind': 'kpi',
+    'data-style': style,
+    'data-branch': module.branch,
+    'data-instance-id': placed.instance.id,
+    title: `${model.label}: ${model.valueText}${model.unit ? ` · ${model.unit}` : ''} · ${placed.model.ok ? placed.model.periodLabel : 'Увесь час'}`,
+  },
+    el('div', { class: 'ewmc-bk', 'data-tone': model.tone || 'blue', role: 'img', 'aria-label': `${model.label}: ${model.valueText}` },
+      el('div', { class: 'ewmc-bk-top' },
+        el('span', { class: 'ewmc-bk-label', text: model.label }),
+        el('details', { class: 'ewmc-block-tools' },
+          el('summary', { text: '⋯', title: 'Налаштувати картку', 'aria-label': 'Налаштувати картку' }),
+          tools)),
+      el('strong', { class: 'ewmc-bk-value', text: model.valueText })));
+}
+
 /**
  * Картка блока. `tools` — смужка налаштувань картки (`instanceBar`); `visual(block)` — діаграма для блоків-діаграм;
  * `failed` / `retry` — стан читання таблиці. Повертає `<article>` з тими ж атрибутами, що й картки модулів.
  */
 export function blockCardView({ el, module, placed, block, tools, visual, failed = false, retry = null, style }) {
+  // Мала картка показника (ширина до 3 колонок): лише підпис і число, як «Знищено 4»; решта — за «⋯».
+  if (!failed && block.ok && block.kind === 'kpi' && placed.width <= 3) return compactCard({ el, module, placed, model: block.model, tools, style });
   const body = failed
     ? el('div', { class: 'ewmc-visual ewmc-read-failed', role: 'alert' },
       el('p', { text: 'Основну таблицю не прочитано. Показник не можна вважати нульовим: записи збережені.' }),

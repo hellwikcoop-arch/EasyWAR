@@ -111,8 +111,8 @@ test('екран: каталог модулів кличе розкладку л
 });
 
 test('вибір розміру: готові ширини, нестандартна з розкладки не губиться; картки несуть своє розміщення', () => {
-  assert.deepEqual(sizeChoices(6).map(item => item.w), [4, 6, 8, 12]);
-  assert.deepEqual(sizeChoices(5).map(item => item.w), [4, 5, 6, 8, 12]);
+  assert.deepEqual(sizeChoices(6).map(item => item.w), [2, 4, 6, 8, 12]);
+  assert.deepEqual(sizeChoices(5).map(item => item.w), [2, 4, 5, 6, 8, 12]);
   const base = ensureModuleInstances(emptyLayout('p'), [module('m1')]).layout;
   const id = base.instances[0].id;
   assert.equal(orderedCards(base, [module('m1')])[0].at.w, 6, 'типово — половина ширини');
