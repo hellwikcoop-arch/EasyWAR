@@ -2219,4 +2219,49 @@ mod tests {
         assert_eq!(left.len(), 1);
         assert!(!left.contains(&epoch_purpose(&orphan, 0)));
     }
+
+    /// SEC-003 (вимога J5 00:50Z): справді паралельні «Доповісти» одним наміром з різних
+    /// потоків багатопотокового runtime — рівно один конверт у черзі, решта `intent-unknown`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+    async fn parallel_confirms_from_threads_queue_exactly_one_envelope() {
+        const CALLERS: usize = 16;
+        for round in 0..5 {
+            let (store, _dir, collective) = owner_with_collective().await;
+            let table = owner_table(&store, &collective).await;
+            let intent = prepare(&store, &collective, &table.fingerprint).await;
+            let store = std::sync::Arc::new(store);
+            let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(CALLERS));
+            let mut handles = Vec::new();
+            for _ in 0..CALLERS {
+                let (store, barrier, intent) = (store.clone(), barrier.clone(), intent.clone());
+                handles.push(tokio::spawn(async move {
+                    barrier.wait().await;
+                    let thread = std::thread::current().id();
+                    let outcome = store
+                        .report_confirm(OWNER, password(), &intent, UNIX + 1)
+                        .await
+                        .unwrap();
+                    (outcome.code, thread)
+                }));
+            }
+            let mut queued = 0;
+            let mut threads = std::collections::HashSet::new();
+            for handle in handles {
+                let (code, thread) = handle.await.unwrap();
+                threads.insert(thread);
+                match code {
+                    "queued" => queued += 1,
+                    "intent-unknown" => {}
+                    other => panic!("неочікуваний код {other}"),
+                }
+            }
+            assert_eq!(queued, 1, "раунд {round}");
+            assert!(threads.len() > 1, "виклики справді йшли з різних потоків");
+            assert_eq!(
+                store.detail(OWNER, &collective, UNIX).await.unwrap().outbox,
+                1,
+                "раунд {round}"
+            );
+        }
+    }
 }
