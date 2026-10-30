@@ -4,6 +4,7 @@ pub mod backup;
 pub mod base_tables;
 pub mod collective;
 pub mod collective_store;
+pub mod collective_sync;
 use collective_store::CollectiveStore;
 pub mod dashboard_layout;
 pub mod dashboard_modules;
@@ -1764,6 +1765,210 @@ async fn collective_create(
             &library_now(),
             Utc::now().timestamp(),
         )
+        .await
+        .map_err(|error| error.to_string())
+}
+
+// --- Колективи: обмін (E8, C3b, другий зріз; рішення JE 29.10.2026 «Так: команди і 0020») ---
+//
+// Ті самі межі: лише вікно редактора, пароль профілю через обмежувач спроб. Тексти запрошень
+// і ключів люди пересилають самі; «Доповісти» кладе конверт лише в локальну чергу. Мережі немає.
+
+/// Пароль профілю для операцій із секретами колективу (як у `collective_create_identity`).
+async fn collective_password(
+    profiles: &LocalProfileStore,
+    profile_id: &str,
+    password: String,
+) -> Result<zeroize::Zeroizing<String>, String> {
+    let password = zeroize::Zeroizing::new(password);
+    if !profiles
+        .has_password(profile_id)
+        .await
+        .map_err(|error| error.to_string())?
+    {
+        return Err(LibraryError::ProfileWithoutPassword.to_string());
+    }
+    verify_library_password(profiles, profile_id, &password).await?;
+    Ok(password)
+}
+
+#[tauri::command]
+async fn collective_detail(
+    webview: tauri::Webview,
+    session: tauri::State<'_, ProfileSession>,
+    collectives: tauri::State<'_, CollectiveStore>,
+    collective: String,
+) -> Result<collective_sync::CollectiveDetail, String> {
+    office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
+    let profile_id = active_profile_id(&session)?;
+    collectives
+        .detail(&profile_id, &collective, Utc::now().timestamp())
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// Нова таблиця колективу або зміна класу й призначення своєї таблиці.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+async fn collective_table_set(
+    webview: tauri::Webview,
+    session: tauri::State<'_, ProfileSession>,
+    collectives: tauri::State<'_, CollectiveStore>,
+    collective: String,
+    table: Option<String>,
+    title: String,
+    class: String,
+    purpose: String,
+) -> Result<collective_sync::TableSummary, String> {
+    office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
+    let profile_id = active_profile_id(&session)?;
+    collectives
+        .set_table(
+            &profile_id,
+            &collective,
+            table.as_deref(),
+            &title,
+            &class,
+            &purpose,
+            &library_now(),
+        )
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn collective_invite_create(
+    webview: tauri::Webview,
+    profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
+    collectives: tauri::State<'_, CollectiveStore>,
+    password: String,
+    collective: String,
+    hours: i64,
+) -> Result<collective_sync::InvitationText, String> {
+    office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
+    let profile_id = active_profile_id(&session)?;
+    let password = collective_password(&profiles, &profile_id, password).await?;
+    collectives
+        .create_invitation(
+            &profile_id,
+            password,
+            &collective,
+            hours,
+            Utc::now().timestamp(),
+        )
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn collective_join_request(
+    webview: tauri::Webview,
+    profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
+    collectives: tauri::State<'_, CollectiveStore>,
+    password: String,
+    invitation: String,
+) -> Result<collective_sync::JoinRequestText, String> {
+    office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
+    let profile_id = active_profile_id(&session)?;
+    let password = collective_password(&profiles, &profile_id, password).await?;
+    collectives
+        .join_request(&profile_id, password, &invitation, Utc::now().timestamp())
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn collective_invite_admit(
+    webview: tauri::Webview,
+    profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
+    collectives: tauri::State<'_, CollectiveStore>,
+    password: String,
+    collective: String,
+    request: String,
+) -> Result<collective_sync::AdmissionText, String> {
+    office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
+    let profile_id = active_profile_id(&session)?;
+    let password = collective_password(&profiles, &profile_id, password).await?;
+    collectives
+        .admit(
+            &profile_id,
+            password,
+            &collective,
+            &request,
+            &library_now(),
+            Utc::now().timestamp(),
+        )
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn collective_join_accept(
+    webview: tauri::Webview,
+    profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
+    collectives: tauri::State<'_, CollectiveStore>,
+    password: String,
+    keys: String,
+) -> Result<collective_sync::JoinedCollective, String> {
+    office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
+    let profile_id = active_profile_id(&session)?;
+    let password = collective_password(&profiles, &profile_id, password).await?;
+    collectives
+        .join_accept(&profile_id, password, &keys, &library_now())
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// «Підготувати» (SEC-003): Rust перевіряє маршрут і права й тримає намір у себе; JS
+/// отримує лише ідентифікатор і підсумок. Пароль не потрібен.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+async fn collective_report_prepare(
+    webview: tauri::Webview,
+    session: tauri::State<'_, ProfileSession>,
+    collectives: tauri::State<'_, CollectiveStore>,
+    collective: String,
+    table: String,
+    transport: String,
+    explicit_wan: bool,
+    operation: String,
+) -> Result<collective_sync::PrepareOutcome, String> {
+    office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
+    let profile_id = active_profile_id(&session)?;
+    collectives
+        .report_prepare(
+            &profile_id,
+            &collective,
+            &table,
+            &transport,
+            explicit_wan,
+            &operation,
+            Utc::now().timestamp(),
+        )
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// «Доповісти» (SEC-003): одноразовий намір, перевірка стану заново, допуск `send_gate` і
+/// локальна черга. Прапорця «переглянуто» від викликача немає. Відмова — відповідь з кодом.
+#[tauri::command]
+async fn collective_report_confirm(
+    webview: tauri::Webview,
+    profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
+    collectives: tauri::State<'_, CollectiveStore>,
+    password: String,
+    intent: String,
+) -> Result<collective_sync::ReportOutcome, String> {
+    office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
+    let profile_id = active_profile_id(&session)?;
+    let password = collective_password(&profiles, &profile_id, password).await?;
+    collectives
+        .report_confirm(&profile_id, password, &intent, Utc::now().timestamp())
         .await
         .map_err(|error| error.to_string())
 }
@@ -4289,6 +4494,14 @@ pub fn run() {
             collective_status,
             collective_create_identity,
             collective_create,
+            collective_detail,
+            collective_table_set,
+            collective_invite_create,
+            collective_join_request,
+            collective_invite_admit,
+            collective_join_accept,
+            collective_report_prepare,
+            collective_report_confirm,
             clear_profile_database,
             read_profile_database,
             write_profile_database,

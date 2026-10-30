@@ -148,6 +148,13 @@ membership journal, one canonical record blob per `seq`, re-verified on read).
 Commands `collective_*` are allowed only to the editor window where the
 «Колективи» screen runs; there is no network.
 
+`0020_collective_sync.sql` (owner decision 2026-10-29 23:19Z) adds
+`collective_tables` (title, owner, class and purpose with who confirmed each — the
+input of the Rust send gate; unconfirmed or planned means class D) and
+`collective_invitations_used` (single-use invitation nonces). Both are keyed by
+`(profile_id, collective_id)` and cascade with the collective. Number 0020 was the
+next free one on main.
+
 The `dashboard_data_<id>` tables of user-created dashboard modules are not
 migration objects: Rust creates them at runtime from a validated catalog
 template and adds columns that later appear in a template with `ALTER TABLE`,

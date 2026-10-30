@@ -7,13 +7,14 @@
 //! кожному читанні заново перевіряється через [`InMemoryMembership::apply`]: підмінений у базі
 //! рядок не дає ні учасника, ні прав.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use sqlx::{Row, SqlitePool};
 use zeroize::Zeroizing;
 
-use crate::collective::epoch::CollectiveId;
+use crate::collective::epoch::{CollectiveId, EpochKey};
 use crate::collective::identity::{DeviceIdentity, MemberIdentity};
 use crate::collective::replay::{InMemoryMembership, MembershipRecord, MembershipView};
 use crate::collective::secret_store::{SecretStore, StoreError, StoreStatus, UnlockedStore};
@@ -47,6 +48,30 @@ pub enum CollectiveStoreError {
     InvalidName,
     #[error("гранична кількість захищених колективів — 20")]
     TooManyCollectives,
+    #[error("колектив не знайдено в цьому профілі")]
+    CollectiveNotFound,
+    #[error("таблицю колективу не знайдено")]
+    TableNotFound,
+    #[error("клас і призначення таблиці змінює лише її власник")]
+    NotTableOwner,
+    #[error("цей профіль не є учасником колективу")]
+    NotAMember,
+    #[error("ви вже учасник цього колективу")]
+    AlreadyJoined,
+    #[error("текст пошкоджений або не того типу")]
+    InvalidText,
+    #[error("назва таблиці: від 1 до 80 символів без керівних знаків")]
+    InvalidTitle,
+    #[error("невідомий клас, призначення чи транспорт")]
+    InvalidChoice,
+    #[error("строк запрошення: від 1 до 168 годин")]
+    InvalidInvitationHours,
+    #[error("операція порожня або більша за 64 КіБ")]
+    OperationSize,
+    #[error("ключ епохи відсутній: колектив створено попередньою версією, створіть його знову")]
+    EpochKeyMissing,
+    #[error("відмова: {0}")]
+    Rejected(&'static str),
     #[error("помилка сховища ключів: {0}")]
     Io(String),
     #[error("помилка локальної бази колективів: {0}")]
@@ -105,9 +130,10 @@ pub struct CreatedIdentity {
 }
 
 pub struct CollectiveStore {
-    pool: SqlitePool,
-    secrets_dir: PathBuf,
-    params: KdfParams,
+    pub(crate) pool: SqlitePool,
+    pub(crate) secrets_dir: PathBuf,
+    pub(crate) params: KdfParams,
+    pub(crate) intents: crate::collective_sync::IntentStore,
 }
 
 impl CollectiveStore {
@@ -116,19 +142,38 @@ impl CollectiveStore {
             pool,
             secrets_dir,
             params: KdfParams::PRODUCTION,
+            intents: Default::default(),
         }
     }
 
     #[cfg(test)]
-    fn for_tests(pool: SqlitePool, secrets_dir: PathBuf) -> Self {
+    pub(crate) fn for_tests(pool: SqlitePool, secrets_dir: PathBuf) -> Self {
         Self {
             pool,
             secrets_dir,
             params: KdfParams::FOR_TESTS,
+            intents: Default::default(),
         }
     }
 
-    fn secret_store(&self, profile_id: &str) -> SecretStore {
+    /// Колективи профілю за базою; `None`, якщо читання не вдалося (див.
+    /// [`orphan_epoch_purposes`]).
+    pub(crate) async fn known_collective_ids(
+        &self,
+        profile_id: &str,
+    ) -> Option<HashSet<CollectiveId>> {
+        let rows: Vec<Vec<u8>> =
+            sqlx::query_scalar("SELECT collective_id FROM collectives WHERE profile_id = ?")
+                .bind(profile_id)
+                .fetch_all(&self.pool)
+                .await
+                .ok()?;
+        rows.into_iter()
+            .map(|row| CollectiveId::try_from(row.as_slice()).ok())
+            .collect()
+    }
+
+    pub(crate) fn secret_store(&self, profile_id: &str) -> SecretStore {
         SecretStore::new(secret_store_path(&self.secrets_dir, profile_id), profile_id)
     }
 
@@ -182,7 +227,7 @@ impl CollectiveStore {
 
     /// Журнал складу з бази, заново перевірений: записи застосовуються по `seq`, недійсний
     /// зупиняє префікс і лічиться як відхилений.
-    async fn load_journal(
+    pub(crate) async fn load_journal(
         &self,
         profile_id: &str,
         collective_id: &CollectiveId,
@@ -302,6 +347,7 @@ impl CollectiveStore {
         now_unix: i64,
     ) -> Result<CollectiveSummary, CollectiveStoreError> {
         check_password(&password)?;
+        let retry = password.clone();
         let name = collective_name(name)?;
         let row = sqlx::query(
             "SELECT sign_pub, exchange_pub, device_pub FROM collective_identities WHERE profile_id = ?",
@@ -320,8 +366,9 @@ impl CollectiveStore {
             return Err(CollectiveStoreError::TooManyCollectives);
         }
         let store = self.secret_store(profile_id);
+        let known = self.known_collective_ids(profile_id).await;
         let records = tokio::task::spawn_blocking(move || {
-            let unlocked = store.unlock(password.as_bytes())?;
+            let mut unlocked = store.unlock(password.as_bytes())?;
             let (member, device) = identities(&unlocked)?;
             let public = member.public();
             if public.sign.as_slice() != expected.0
@@ -338,36 +385,58 @@ impl CollectiveStore {
             membership
                 .add_device(&member.issue_device(&device.public(), now_unix))
                 .map_err(|_| CollectiveStoreError::StoreDamaged)?;
+            // Після автентифікації прибрати осиротілі ключі цього профілю (SEC-004). Невдале
+            // прибирання зупиняє операцію до будь-якого запису: нічого не створено.
+            let orphans = orphan_epoch_purposes(unlocked.purposes(), known.as_ref());
+            unlocked
+                .delete_many(&orphans)
+                .map_err(|_| CollectiveStoreError::Rejected(ORPHAN_SWEEP_FAILED))?;
+            // Ключ епохи 0 — лише у сховищі секретів; без нього колектив не запечатає жодного
+            // конверта й не впустить нового учасника.
+            unlocked.write(
+                &epoch_purpose(&collective_id, 0),
+                EpochKey::generate().as_bytes(),
+            )?;
             Ok::<_, CollectiveStoreError>((collective_id, membership.records().to_vec()))
         })
         .await
         .map_err(|error| CollectiveStoreError::Io(error.to_string()))??;
         let (collective_id, records) = records;
-        let mut tx = self.pool.begin().await?;
-        sqlx::query(
-            "INSERT INTO collectives (profile_id, collective_id, name, created_at) VALUES (?, ?, ?, ?)",
-        )
-        .bind(profile_id)
-        .bind(collective_id.as_slice())
-        .bind(&name)
-        .bind(now)
-        .execute(&mut *tx)
-        .await?;
-        for (index, record) in records.iter().enumerate() {
+        // Ключ епохи 0 уже в сховищі; якщо SQL не вдався, він прибирається (E8-SEC-001).
+        let stored = async {
+            let mut tx = self.pool.begin().await?;
             sqlx::query(
-                "INSERT INTO collective_membership_log
-                     (profile_id, collective_id, seq, record, recorded_at)
-                 VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO collectives (profile_id, collective_id, name, created_at) VALUES (?, ?, ?, ?)",
             )
             .bind(profile_id)
             .bind(collective_id.as_slice())
-            .bind(index as i64 + 1)
-            .bind(record.to_bytes())
+            .bind(&name)
             .bind(now)
             .execute(&mut *tx)
             .await?;
+            for (index, record) in records.iter().enumerate() {
+                sqlx::query(
+                    "INSERT INTO collective_membership_log
+                         (profile_id, collective_id, seq, record, recorded_at)
+                     VALUES (?, ?, ?, ?, ?)",
+                )
+                .bind(profile_id)
+                .bind(collective_id.as_slice())
+                .bind(index as i64 + 1)
+                .bind(record.to_bytes())
+                .bind(now)
+                .execute(&mut *tx)
+                .await?;
+            }
+            tx.commit().await?;
+            Ok::<_, CollectiveStoreError>(())
         }
-        tx.commit().await?;
+        .await;
+        if let Err(error) = stored {
+            self.forget_secrets(profile_id, retry, vec![epoch_purpose(&collective_id, 0)])
+                .await;
+            return Err(error);
+        }
         Ok(CollectiveSummary {
             fingerprint: fingerprint(&collective_id),
             name,
@@ -379,7 +448,7 @@ impl CollectiveStore {
     }
 }
 
-fn identities(
+pub(crate) fn identities(
     unlocked: &UnlockedStore,
 ) -> Result<(MemberIdentity, DeviceIdentity), CollectiveStoreError> {
     let secret = |purpose: &str| -> Result<[u8; KEY_LEN], CollectiveStoreError> {
@@ -397,7 +466,7 @@ fn identities(
     ))
 }
 
-fn check_password(password: &str) -> Result<(), CollectiveStoreError> {
+pub(crate) fn check_password(password: &str) -> Result<(), CollectiveStoreError> {
     if (MIN_PASSWORD_BYTES..=MAX_PASSWORD_BYTES).contains(&password.len()) {
         Ok(())
     } else {
@@ -405,7 +474,7 @@ fn check_password(password: &str) -> Result<(), CollectiveStoreError> {
     }
 }
 
-fn collective_name(name: &str) -> Result<String, CollectiveStoreError> {
+pub(crate) fn collective_name(name: &str) -> Result<String, CollectiveStoreError> {
     let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
     let chars = name.chars().count();
     if chars == 0 || chars > 80 || name.chars().any(is_control_or_format) {
@@ -424,6 +493,42 @@ fn is_control_or_format(c: char) -> bool {
         || ('\u{2066}'..='\u{206F}').contains(&c)
 }
 
+/// Мітка ключа епохи у сховищі секретів профілю: `collective/epoch/<id>/<n>`.
+/// Ключі епох у сховищі профілю, для яких у базі цього профілю немає колективу
+/// (залишок аварії між записом ключів і `commit`, SEC-004). `known == None` — читання бази
+/// не вдалося: тоді не прибирається нічого, щоб не зачепити ключі чинних колективів.
+pub(crate) fn orphan_epoch_purposes<'a>(
+    purposes: impl IntoIterator<Item = &'a str>,
+    known: Option<&HashSet<CollectiveId>>,
+) -> Vec<String> {
+    let Some(known) = known else {
+        return Vec::new();
+    };
+    let keep: HashSet<String> = known
+        .iter()
+        .map(|id| id.iter().map(|b| format!("{b:02x}")).collect())
+        .collect();
+    purposes
+        .into_iter()
+        .filter(|purpose| {
+            purpose
+                .strip_prefix("collective/epoch/")
+                .and_then(|rest| rest.split('/').next())
+                .is_some_and(|id| !keep.contains(id))
+        })
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Невдале прибирання осиротілих ключів (SEC-004): операція зупиняється до запису.
+pub(crate) const ORPHAN_SWEEP_FAILED: &str =
+    "не вдалося прибрати залишкові ключі у сховищі профілю; нічого не змінено, спробуйте ще раз";
+
+pub(crate) fn epoch_purpose(collective_id: &CollectiveId, epoch: u32) -> String {
+    let id: String = collective_id.iter().map(|b| format!("{b:02x}")).collect();
+    format!("collective/epoch/{id}/{epoch}")
+}
+
 /// Файл сховища ключів профілю. Ідентифікатор профілю входить у назву лише як hex від
 /// SHA-256, тож у шляху немає довільного тексту.
 pub fn secret_store_path(dir: &Path, profile_id: &str) -> PathBuf {
@@ -434,7 +539,7 @@ pub fn secret_store_path(dir: &Path, profile_id: &str) -> PathBuf {
 
 const BASE32: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
-fn base32(bytes: &[u8]) -> String {
+pub(crate) fn base32(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len().div_ceil(5) * 8);
     let mut buffer: u32 = 0;
     let mut bits = 0;
