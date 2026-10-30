@@ -1469,7 +1469,13 @@ mod tests {
         assert_eq!(stored().await, upgraded);
         // Нові хеші одразу з параметрами сховища.
         strong
-            .set_password(&profile, Some("секрет-1"), Some("новий секрет-1"), None, NOW_2)
+            .set_password(
+                &profile,
+                Some("секрет-1"),
+                Some("новий секрет-1"),
+                None,
+                NOW_2,
+            )
             .await
             .unwrap();
         assert!(stored().await.starts_with("$argon2id$v=19$m=16,t=2,p=1$"));
@@ -1565,7 +1571,10 @@ mod tests {
             assert!(!store.verify_password(&profile, "хибний").await.unwrap());
         }
         // Під час паузи не пускає навіть правильний пароль.
-        let error = store.verify_password(&profile, "секрет-1").await.unwrap_err();
+        let error = store
+            .verify_password(&profile, "секрет-1")
+            .await
+            .unwrap_err();
         assert!(matches!(
             error,
             LocalProfileError::TooManyAttempts { wait_secs: 30 }
@@ -1614,7 +1623,13 @@ mod tests {
         }
         assert!(matches!(
             store
-                .set_password(&profile, Some("секрет-1"), Some("новий-пароль"), None, NOW_2)
+                .set_password(
+                    &profile,
+                    Some("секрет-1"),
+                    Some("новий-пароль"),
+                    None,
+                    NOW_2
+                )
                 .await,
             Err(LocalProfileError::TooManyAttempts { .. })
         ));
@@ -2675,19 +2690,32 @@ mod tests {
         let pool = migrated_pool().await;
         let store = LocalProfileStore::new(pool.clone());
         let profile = id("Старий пароль");
-        store.create(&profile, "Старий пароль", NOW_1).await.unwrap();
-        let old = "секрет";
-        assert!(matches!(
-            store.set_password(&profile, None, Some(old), None, NOW_2).await,
-            Err(LocalProfileError::InvalidPassword)
-        ));
-        let hash = hash_password(old.as_bytes(), LOGIN_KDF).unwrap();
-        sqlx::query("UPDATE local_profile_details SET password_hash = ? WHERE profile_id = ?")
-            .bind(&hash)
-            .bind(&profile)
-            .execute(&pool)
+        store
+            .create(&profile, "Старий пароль", NOW_1)
             .await
             .unwrap();
+        let old = "секрет";
+        assert!(matches!(
+            store
+                .set_password(&profile, None, Some(old), None, NOW_2)
+                .await,
+            Err(LocalProfileError::InvalidPassword)
+        ));
+        // Хеш записано так, як це робила попередня версія з мінімумом 6.
+        let hash = hash_password(old.as_bytes(), LOGIN_KDF).unwrap();
+        let changed = sqlx::query(
+            "INSERT INTO local_profile_details (profile_id, password_hash, updated_at)
+             VALUES (?, ?, ?)
+             ON CONFLICT(profile_id) DO UPDATE SET password_hash = excluded.password_hash",
+        )
+        .bind(&profile)
+        .bind(&hash)
+        .bind(NOW_1)
+        .execute(&pool)
+        .await
+        .unwrap()
+        .rows_affected();
+        assert_eq!(changed, 1);
         assert!(store.verify_password(&profile, old).await.unwrap());
         assert!(!store.verify_password(&profile, "інший").await.unwrap());
         // Змінити його можна лише на пароль нової довжини.
@@ -2701,6 +2729,9 @@ mod tests {
             .set_password(&profile, Some(old), Some("новий-пароль"), None, NOW_2)
             .await
             .unwrap();
-        assert!(store.verify_password(&profile, "новий-пароль").await.unwrap());
+        assert!(store
+            .verify_password(&profile, "новий-пароль")
+            .await
+            .unwrap());
     }
 }
