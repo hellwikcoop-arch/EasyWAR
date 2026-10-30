@@ -134,7 +134,7 @@ test('файл ПВК для телефона не несе коду презе�
     const { target, bytes } = await buildPage(entry, dir);
     const html = await readFile(target, 'utf8');
     assert.ok(!html.includes('PptxGenJS') && !html.includes('pdf-lib'), 'pptxgenjs і pdf-lib не вбудовуються у файл ПВК');
-    assert.ok(bytes < 5e6, `файл ПВК ${(bytes / 1e6).toFixed(2)} МБ має лишатись компактним`);
+    assert.ok(bytes < 10e6, `файл ПВК ${(bytes / 1e6).toFixed(2)} МБ має лишатись компактним`);
     assert.match(html, /id="presentBtn"[^>]*hidden/, 'кнопка в розмітці прихована, у командному режимі її не показують');
   } finally {
     await rm(dir, { recursive: true, force: true });

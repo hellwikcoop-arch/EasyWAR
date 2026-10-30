@@ -892,8 +892,9 @@ pub fn catalog() -> Vec<DashboardModuleTemplate> {
     ]
 }
 
+/// Гілка модуля: рід військ, командування або «Власний модуль» (`custom`, без таблиці профілю).
 fn valid_branch(branch: &str) -> bool {
-    matches!(branch, "air" | "rocket" | "pvk" | "dshv")
+    matches!(branch, "air" | "rocket" | "pvk" | "dshv" | "custom")
 }
 
 fn valid_style(style: &str) -> bool {
@@ -2393,10 +2394,11 @@ impl DashboardModuleStore {
 mod tests {
     use super::*;
     use crate::database::{
-        COMMAND_TABLES_SQL, DASHBOARD_MODULES_SQL, DASHBOARD_MODULE_CORRECTIONS_SQL,
-        DASHBOARD_MODULE_CORRECTION_STATUS_SQL, DASHBOARD_MODULE_STYLE_SQL, INITIAL_SCHEMA_SQL,
-        LOCAL_PROFILES_SQL, OWN_LOSSES_TABLES_SQL, PROFILE_BRANCH_TABLES_SQL, PROFILE_DETAILS_SQL,
-        PROFILE_MODULES_SQL, WORKSPACE_TEMPLATES_SQL, XLSX_DUPLICATE_LINKS_SQL,
+        COMMAND_TABLES_SQL, CUSTOM_MODULE_SQL, DASHBOARD_MODULES_SQL,
+        DASHBOARD_MODULE_CORRECTIONS_SQL, DASHBOARD_MODULE_CORRECTION_STATUS_SQL,
+        DASHBOARD_MODULE_STYLE_SQL, INITIAL_SCHEMA_SQL, LOCAL_PROFILES_SQL, OWN_LOSSES_TABLES_SQL,
+        PROFILE_BRANCH_TABLES_SQL, PROFILE_DETAILS_SQL, PROFILE_MODULES_SQL,
+        WORKSPACE_TEMPLATES_SQL, XLSX_DUPLICATE_LINKS_SQL,
     };
     use serde_json::json;
     use sqlx::sqlite::SqlitePoolOptions;
@@ -2526,6 +2528,7 @@ mod tests {
             DASHBOARD_MODULE_CORRECTIONS_SQL,
             DASHBOARD_MODULE_STYLE_SQL,
             DASHBOARD_MODULE_CORRECTION_STATUS_SQL,
+            CUSTOM_MODULE_SQL,
         ] {
             sqlx::raw_sql(migration).execute(&pool).await.unwrap();
         }

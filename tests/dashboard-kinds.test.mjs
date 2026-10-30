@@ -59,9 +59,9 @@ test('лончер відкриває кожен вид у власному ві
   const sources = html.match(/const MODULE_SRC = (\{[^}]+\});/);
   assert.ok(sources, 'MODULE_SRC');
   const map = vm.runInNewContext(`(${sources[1].replace(/(\w+):'/g, '"$1":\'')})`);
-  assert.deepEqual({ ...map }, { air: './air.html', rocket: './rocket.html', artillery: './artillery.html', pvk: './air.html?command=pvk', dshv: './rocket.html?command=dshv' });
-  assert.equal(new Set(Object.values(map)).size, 5, 'п\'ять різних адрес');
-  for (const branch of ['air', 'rocket', 'artillery', 'pvk', 'dshv']) assert.match(html, new RegExp(`id="frame-${branch}"`), `frame-${branch}`);
+  assert.deepEqual({ ...map }, { air: './air.html', rocket: './rocket.html', artillery: './artillery.html', pvk: './air.html?command=pvk', dshv: './rocket.html?command=dshv', custom: './custom.html' });
+  assert.equal(new Set(Object.values(map)).size, 6, 'шість різних адрес');
+  for (const branch of ['air', 'rocket', 'artillery', 'pvk', 'dshv', 'custom']) assert.match(html, new RegExp(`id="frame-${branch}"`), `frame-${branch}`);
   assert.match(html, /branch-card" data-branch="air"/);
   assert.match(html, /branch-card" data-branch="rocket"/);
   assert.match(html, /command-tile" data-command="pvk"/);

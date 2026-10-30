@@ -257,9 +257,16 @@ async fn create_dashboard_module(
         .map_err(|error| error.to_string())
 }
 
-fn dashboard_branch(branch: &str) -> Result<Branch, String> {
+/// Слот таблиці профілю, з якого модуль дашборда гілки `branch` може підтягнути дані.
+/// «Власний модуль» (`custom`) таблиці профілю не має: `Ok(None)`.
+fn dashboard_branch(branch: &str) -> Result<Option<Branch>, String> {
+    if branch == "custom" {
+        return Ok(None);
+    }
     match Branch::parse(branch) {
-        Ok(parsed @ (Branch::Air | Branch::Rocket | Branch::Pvk | Branch::Dshv)) => Ok(parsed),
+        Ok(parsed @ (Branch::Air | Branch::Rocket | Branch::Pvk | Branch::Dshv)) => {
+            Ok(Some(parsed))
+        }
         _ => Err(dashboard_modules::DashboardModuleError::InvalidBranch.to_string()),
     }
 }
@@ -379,7 +386,9 @@ async fn inspect_linked_module_source(
     selections: tauri::State<'_, module_source_selection::SourceSelections>,
     branch: String,
 ) -> Result<Option<module_source::SourceWorkbook>, String> {
-    let parsed = dashboard_branch(&branch)?;
+    let Some(parsed) = dashboard_branch(&branch)? else {
+        return Ok(None);
+    };
     let owner = selection_owner(&window, &session)?;
     let Some(table) = profiles
         .table_path(&owner.profile_id, parsed)
@@ -456,8 +465,11 @@ async fn read_module_source_sheet(
         .map_err(|error| error.to_string())?;
     let source = match &chosen.origin {
         module_source_selection::SelectionOrigin::Linked { branch } => {
+            let Some(slot) = dashboard_branch(branch)? else {
+                return Err(module_source_selection::SelectionError::Rebound.to_string());
+            };
             let bound = profiles
-                .table_path(&owner.profile_id, dashboard_branch(branch)?)
+                .table_path(&owner.profile_id, slot)
                 .await
                 .map_err(|error| error.to_string())?
                 .map(|path| workspace_tables::parse_ref(&path))
