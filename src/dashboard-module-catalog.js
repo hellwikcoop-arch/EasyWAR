@@ -46,7 +46,7 @@ import { chartModel, takeoffHoursModel, tickerItems } from './dashboard-module-c
 import { MINE_LABEL, MINE_SLOT } from './personal-dashboard.js';
 import { mountChart } from './dashboard-module-charts.js';
 import { columnPicker } from './dashboard-module-picker.js';
-import { forgetProfileSchemaModule, loadProfileSchema, syncProfileSchemaModules } from './profile-schema-client.js';
+import { forgetProfileSchemaModule, loadProfileSchema, syncProfileSchemaModules, updateProfileSchema } from './profile-schema-client.js';
 import { loadDashboardLayout, updateDashboardLayout } from './dashboard-layout-client.js';
 import { duplicateInstance, moveInstance, removeInstance, resizeInstance, setSharedPeriod, updateInstance } from './module-instance-core.js';
 import { ensureModuleInstances, forgetModuleInstances } from './module-instance-modules-core.js';
@@ -58,6 +58,7 @@ import { CATALOG as PS_CATALOG, KPI_TILES, VIEW_BY_BLOCK } from './ps-kpi.js';
 import { addRequest, buildRegistry } from './module-registry-view-core.js';
 import { registryPanel } from './module-registry-panel.js';
 import { linkPanel } from './table-link-panel.js';
+import { deleteLinksNote, linkCoverageViews, relatedLine } from './table-link-view-core.js';
 import { updatePanel } from './dashboard-module-update.js';
 import {
   buildImport,
@@ -277,6 +278,29 @@ function initialize() {
     state.schema = schema.ok ? schema.schema : null;
   }
 
+  // Рішення про зв'язок: прочитати → змінити → зберегти (як решта схеми); при збої схема лишається попередньою.
+  async function applyLinkChange(change) {
+    const result = await updateProfileSchema(invoke, change);
+    if (result.ok) state.schema = result.schema;
+    else if (result.code === 'stale') await refreshSchema();
+    return result;
+  }
+
+  // Рядок «Зв'язано з: …» на картках оновлюється на місці, щоб не перемальовувати панель під час роботи з нею.
+  function refreshRelatedLines() {
+    for (const node of host.querySelectorAll('[data-related-for]')) {
+      const text = state.schema ? relatedLine(state.schema, `module:${node.dataset.relatedFor}`) : '';
+      node.textContent = text;
+      node.hidden = !text;
+    }
+    for (const list of host.querySelectorAll('[data-related-stats-for]')) fillCoverage(list, list.dataset.relatedStatsFor);
+    for (const node of host.querySelectorAll('[data-delete-links-for]')) {
+      const text = state.schema ? deleteLinksNote(state.schema, `module:${node.dataset.deleteLinksFor}`) : '';
+      node.textContent = text;
+      node.hidden = !text;
+    }
+  }
+
   const localDay = () => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
@@ -334,8 +358,8 @@ function initialize() {
     } else {
       for (const module of state.modules) grid.append(renderModule(module, state.data.get(module.id)));
     }
-    // Підказки зв'язків між таблицями (E3б, B1): лише показ, нічого не зберігається; потрібні щонайменше дві таблиці.
-    if (state.modules.length >= 2 && state.schema) host.append(linkPanel({ el, schema: () => state.schema, modules: () => state.modules, data: () => state.data }));
+    // Зв'язки між таблицями (E3б, B1/B3): підказки й рішення людини; потрібні щонайменше дві таблиці.
+    if (state.modules.length >= 2 && state.schema) host.append(linkPanel({ el, schema: () => state.schema, modules: () => state.modules, data: () => state.data, apply: applyLinkChange, onChange: refreshRelatedLines }));
     host.append(grid, ticker(tickerItems(state.modules, state.data)));
   }
 
@@ -358,6 +382,28 @@ function initialize() {
     renderHost();
   }
 
+  function deleteNote(module) {
+    const text = state.schema ? deleteLinksNote(state.schema, `module:${module.id}`) : '';
+    return el('p', { class: 'ewmc-delete-links', 'data-delete-links-for': module.id, text, hidden: !text });
+  }
+
+  function relatedNote(module) {
+    const text = state.schema ? relatedLine(state.schema, `module:${module.id}`) : '';
+    const stats = el('ul', { class: 'ewmc-related-stats', 'data-related-stats-for': module.id, hidden: true });
+    fillCoverage(stats, module.id);
+    return el('div', { class: 'ewmc-related-box' }, el('p', { class: 'ewmc-related', 'data-related-for': module.id, text, hidden: !text }), stats);
+  }
+
+  // Читання за зв'язком: скільки рядків мають пару за підтвердженим ключем. Рахується після малювання, щоб не затримувати дашборд.
+  function fillCoverage(list, moduleId) {
+    setTimeout(() => {
+      if (!list.isConnected || !state.schema) return;
+      const views = linkCoverageViews(state.schema, `module:${moduleId}`, state.modules, state.data);
+      list.replaceChildren(...views.map(view => el('li', { class: view.warn ? 'is-warn' : '', 'data-relation-id': view.relationId, text: view.text })));
+      list.hidden = !views.length;
+    }, 0);
+  }
+
   function renderModule(module, payload, placed = null) {
     const { state: readState, rows: allRows } = cardReadState(payload);
     // Картка розкладки показує рядки свого періоду; без розкладки — усі, як раніше.
@@ -376,6 +422,7 @@ function initialize() {
     const confirmButton = el('button', { type: 'button', class: 'btn ewmc-danger solid', text: 'Так, видалити', 'data-action': 'confirm-delete-module' });
     const confirmBox = el('div', { class: 'ewmc-confirm ewmc-module-confirm', role: 'group', 'aria-label': `Видалення модуля ${module.title}`, hidden: true },
       el('p', { text: deleteModulePrompt(module) }),
+      deleteNote(module),
       el('div', { class: 'ewmc-confirm-actions' }, keepButton, confirmButton));
     const ask = asking => {
       confirmBox.hidden = !asking;
@@ -419,6 +466,7 @@ function initialize() {
           el('button', { type: 'button', class: 'btn quiet', text: 'Прочитати знову', 'data-action': 'retry-read', 'data-module-id': module.id, onclick: event => retryRead(module, event.currentTarget) }))
         : visual(module, rows),
       failed ? null : takeoffVisual(module, rows),
+      relatedNote(module),
       el('div', { class: 'ewmc-module-actions' },
         el('button', {
           type: 'button',

@@ -658,6 +658,35 @@ export function keyConflicts(leftTable, rightTable, candidate, { columnPairs = n
 
 // ─── Показ ─────────────────────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Покриття підтвердженого зв'язку (читання за зв'язком): скільки рядків кожної таблиці мають пару за ключем і скільки без пари.
+ * Порожнє значення ключа пари не має. Повертає `{ ok, leftRows, leftMatched, rightRows, rightMatched, complete }`;
+ * `complete: false`, якщо будь-яку таблицю прочитано не повністю (рахунок тоді лише за прочитаним). Значень клітинок у результаті немає.
+ */
+export function linkCoverage(leftTable, rightTable, leftColumns, rightColumns) {
+  const linker = createLinker();
+  const left = profileTable(leftTable, linker);
+  const right = profileTable(rightTable, linker);
+  const lc = (leftColumns || []).map(key => left.byKey.get(key));
+  const rc = (rightColumns || []).map(key => right.byKey.get(key));
+  if (!lc.length || lc.length !== rc.length || lc.length > LINK_LIMITS.maxKeyColumns || lc.includes(undefined) || rc.includes(undefined)) {
+    return fail('bad_key', 'Ключ — від одного до трьох стовпців з кожного боку, однакова кількість.');
+  }
+  const keyAt = (columns, i) => {
+    const key = columns.map(column => column.values[i]);
+    return key.includes('') ? null : key.join(SEP);
+  };
+  const leftKeys = new Set();
+  const rightKeys = new Set();
+  for (let i = 0; i < left.rows; i += 1) { const key = keyAt(lc, i); if (key !== null) leftKeys.add(key); }
+  for (let j = 0; j < right.rows; j += 1) { const key = keyAt(rc, j); if (key !== null) rightKeys.add(key); }
+  let leftMatched = 0;
+  let rightMatched = 0;
+  for (let i = 0; i < left.rows; i += 1) { const key = keyAt(lc, i); if (key !== null && rightKeys.has(key)) leftMatched += 1; }
+  for (let j = 0; j < right.rows; j += 1) { const key = keyAt(rc, j); if (key !== null && leftKeys.has(key)) rightMatched += 1; }
+  return { ok: true, leftRows: left.rows, leftMatched, rightRows: right.rows, rightMatched, complete: !left.truncated && !right.truncated };
+}
+
 /** Короткий підпис кандидата для списку: «Дата + Підрозділ ↔ Дата події + Підрозділ · 1 : N · збіг 96 %». */
 export function describeCandidate(candidate) {
   const side = headers => headers.join(' + ');

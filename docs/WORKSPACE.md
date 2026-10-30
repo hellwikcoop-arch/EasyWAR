@@ -399,7 +399,7 @@ export async function mount(container, host) {
 Rust (`app.dialog()`, `std::fs`), плагіни `fs`/`dialog` для JS не відкрито.
 
 - **Тека і формат.** `<app_local_data_dir>/workspace-files/<profile_id>/` (`workspace_files::root_dir`);
-  без підтек. Кожен файл — блоб `<id>.ewf` (`id` — 32 випадкові hex-знаки, `validate_id`):
+  єдина підтека — `tables/` із таблицями дашбордів (нижче), яку список файлів пропускає. Кожен файл — блоб `<id>.ewf` (`id` — 32 випадкові hex-знаки, `validate_id`):
   `EWFS` · формат 1 · u32 BE довжина метаданих · nonce ‖ шифротекст метаданих (JSON
   `{ name, size }`, до 4 КБ) · nonce ‖ шифротекст вмісту (`LibraryKeys::seal_store_file` /
   `open_store_meta` / `open_store_file` в `office_library.rs`). Ключ — підключ HKDF
@@ -461,6 +461,66 @@ Rust (`app.dialog()`, `std::fs`), плагіни `fs`/`dialog` для JS не в
   пошкодженим блобом, додавання, видалення, пошук). **Не перевірено**: справжній Tauri (вікна
   вибору, запис у `app_local_data_dir`, відкриття блоба у вікні редактора, збереження назад і
   відмова після блокування) — WebKitGTK, WKWebView, WebView2.
+
+### Таблиці дашбордів у сховищі (`workspace_tables.rs`)
+
+Рішення власника 29.10.2026 («таблиці, які ми відкриваємо для дашбордів, теж тут
+зберігаються» → картка «Таблиці в сховищі»): таблиця, прив'язана до слота профілю, може
+лежати не файлом на диску, а зашифрованим блобом у сховищі; міграції бази немає.
+
+- **Прив'язка.** `local_profile_tables.path` замість шляху містить посилання
+  `ewstore:<32 hex>:<назва>` (`workspace_tables::store_ref` / `parse_ref` → `TableRef::Disk |
+  Store { id, name }`); вкладається в наявний CHECK (1–4096 символів). Зіпсоване посилання
+  розбирається як шлях на диску й дає звичайну помилку файлу. У JS `isStoreTable`,
+  `databaseFileName` (назва після id, може містити «:») і `databaseLocation`
+  (`local-profiles-core.js`).
+- **Блоб.** `<тека сховища>/tables/<id>.ewf` того самого формату `EWFS` (`seal_store_file`),
+  метадані `{ name, size, branch }` (`StoreFileMeta.branch` — `Branch::as_str`, у звичайних
+  файлів відсутній; `serde(default)`). Попередня копія — `<id>.prev.ewf` під тим самим `id`
+  (та сама AAD): `workspace_tables::save` перевіряє книгу (`profile_table::validate_workbook`),
+  ротує копію не частіше ніж раз на `PREVIOUS_COPY_MIN_AGE` (5 хв), не затирає її
+  нечитабельною поточною книгою чи різким зменшенням рядків (`rows_collapsed`,
+  `COLLAPSE_GUARD_WINDOW`), і атомарно замінює блоб (`Rotation::Updated | NotNeeded | Protected`).
+- **Дашборди.** `read_profile_database` / `write_profile_database` (і `export_phone_file`
+  з таблицею, `inspect_linked_module_source` / `read_module_source_sheet` для модулів) через
+  `bound_table` → `TableRef`; для `Store` — `store_table_access`: лише профіль сесії,
+  `LibrarySession::keys` (продовжує час до автоблокування), а `LibraryError::Locked` →
+  `STORE_LOCKED_MESSAGE` («Таблицю зашифровано у сховищі профілю, а бібліотеку профілю
+  заблоковано… Увійдіть у профіль ще раз паролем…»). Для модулів `ResolvedSource` реєструє
+  огляд за шляхом блоба, тож перевірка «прив'язку не змінили» працює як для диска.
+- **Вхід розблоковує бібліотеку.** `activate_local_profile` після перевірки пароля викликає
+  `unlock_library_at_sign_in`: якщо є активна зв'язка ключів (`has_active_keyring`),
+  `LibraryStore::unlock` тим самим паролем і `install_library_keys` (епоха до KDF, як у
+  `library_unlock`). Невдача не скасовує вхід (лише `eprintln`), бібліотека лишається
+  заблокованою. Профіль без пароля бібліотеки не має, тож таблиці у сховищі йому недоступні
+  (команди відмовляють як `library_*`).
+- **Команди** (головне вікно): `move_profile_database_to_store({ profileId, branch })` — читає
+  прив'язаний файл (`read_source_file`), `workspace_tables::write_new`, нова прив'язка; файл на
+  диску не змінюється й не видаляється; `create_profile_base_table_in_store({ profileId, table })`
+  — вбудована базова таблиця (`BaseTable::bytes`) одразу блобом, відповідь `CreatedBaseTable`
+  з `path` = назва; `workspace_files_list_tables` → `StoredTable[]` (`{ id, name, branch, size,
+  modifiedAt, hasPrevious, damaged, bound }`, `bound` — є в `all_table_paths` будь-якого профілю);
+  `workspace_files_export_table({ id })` — `library_save_dialog` + розшифрований `.xlsx`;
+  `workspace_files_delete_table({ id })` — лише не прив'язана (інакше «Таблиця прив'язана до
+  профілю: спершу відв'яжіть її у вікні «Профілі»»), видаляє і попередню копію. Відкриття
+  таблиці сховища в редакторі навмисно немає (як і для таблиць на диску, прив'язаних до
+  профілю: `office_bound_tables` пропускає посилання `ewstore:`, бо редактори підтеки не бачать).
+- **Інтерфейс.** «Профілі» (`local-profiles.js`): позначка «у сховищі» в рядку слота й на
+  плитці (`is-store`), кнопка «У сховище» лише для таблиці на диску активного профілю (з
+  підтвердженням), «Створити у сховищі» поруч із «Створити…», повідомлення після
+  відв'язування каже, що таблиця лишилася у сховищі. Вкладка «Файли» (`files.js`): розділ
+  «Таблиці дашбордів» після списку файлів — `tableCard` з позначкою «прив'язана до профілю» /
+  «не прив'язана» / «пошкоджено», `tableMetaLine` (`branchLabel`), «Зберегти копію…», «Видалити»
+  лише за `tableDeletable` (`!bound`); список таблиць читається окремим викликом після файлів.
+- **Перевірено.** `cargo test workspace_tables` (посилання й відмова зіпсованих, round trip з
+  попередньою копією: перший запис, свіжа копія, оновлення через min_age, порожні й не-книги,
+  чужий ключ, видалення з копією, підтека не в списку файлів), `tests/workspace-files.test.mjs`
+  (контракт трьох нових `workspace_files_*` і двох команд профілів проти сигнатур Rust,
+  реєстрація, capabilities лише головного вікна, видалення лише непов'язаних, запис таблиці
+  сховища лише ключами профілю сесії, розблокування при вході, «Перенести» без видалення
+  оригіналу, підписи), `tests/local-profiles.test.mjs` (`databaseFileName` / `isStoreTable` /
+  `databaseLocation` для посилання). **Не перевірено**: справжній Tauri (запис блоба дашбордом,
+  автоблокування посеред роботи, перенесення великої таблиці) — WebKitGTK, WKWebView, WebView2.
 
 ## Файли оболонки
 

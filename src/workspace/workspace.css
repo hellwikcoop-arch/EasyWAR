@@ -191,6 +191,8 @@ p.ws-lib-hint{margin:0}
 .ws-lib-fields{display:grid;gap:6px;align-content:start}
 .ws-files-path{user-select:all}
 .ws-files-item .ws-lib-name{font-size:15px}
+.ws-files-tables{margin-top:28px;padding-top:16px;border-top:1px solid var(--ws-border,rgba(255,255,255,.12))}
+.ws-files-tables .ws-lib-title{font-size:17px;margin-bottom:6px}
 .ws-lib-fields ul{margin:0;padding-left:18px;display:grid;gap:2px;font:400 12px/1.5 var(--sans);color:var(--muted)}
 .ws-lib-fields code,.ws-lib-block code{font:400 12px/1.5 var(--mono);color:var(--text)}
 .ws-lib-fields li[data-known="false"] code{color:var(--danger)}

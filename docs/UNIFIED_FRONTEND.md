@@ -192,7 +192,7 @@ ends, and the launcher stays `inert` until sign-in.
 
 ## Робоче середовище (розділи «Офіс» і «Обстановка»)
 
-Кнопка «Робоче середовище» на головному екрані відкриває модуль `workspace` у накладці поверх лаунчера, так само як 3D-довідники; legacy HTML не змінювався. Модуль — окремі сторінки збірки `workspace/index.html` (оболонка з розділом «Офіс» і картками EasyGreen, EasyDoc, EasySlide, розділом «Обстановка» з карткою «Погода» та вкладками «Бібліотека» — зашифроване сховище документів у базі — і «Файли» — сховище файлів будь-якого типу в теці на диску, зашифрованих ключем бібліотеки) і `workspace/app.html?app=<id>` (сторінка одного застосунку в `<iframe>` оболонки). Контракт підключення застосунку, команди відкриття й збереження файлів і перелік файлів — у [WORKSPACE.md](WORKSPACE.md).
+Кнопка «Робоче середовище» на головному екрані відкриває модуль `workspace` у накладці поверх лаунчера, так само як 3D-довідники; legacy HTML не змінювався. Модуль — окремі сторінки збірки `workspace/index.html` (оболонка з розділом «Офіс» і картками EasyGreen, EasyDoc, EasySlide, розділом «Обстановка» з карткою «Погода» та вкладками «Бібліотека» — зашифроване сховище документів у базі — і «Файли» — сховище файлів будь-якого типу в теці на диску, зашифрованих ключем бібліотеки, з окремим розділом «Таблиці дашбордів»: таблиці, які дашборди читають і записують у тому самому зашифрованому сховищі замість файла на диску, прив'язка `ewstore:<id>:<назва>` у `local_profile_tables.path`) і `workspace/app.html?app=<id>` (сторінка одного застосунку в `<iframe>` оболонки). Контракт підключення застосунку, команди відкриття й збереження файлів і перелік файлів — у [WORKSPACE.md](WORKSPACE.md).
 
 - `src/workspace-launcher.js` імпортується в `launcher-tools.js` після `guides-launcher.js`, тож кнопка стоїть крайньою ліворуч; перед закриттям накладки питає `EW_WORKSPACE.requestClose()` (незбережені зміни).
 - Код застосунку — `src/workspace/<id>/app.js` з `mount(container, host)`; оболонка знаходить його через `import.meta.glob`, без змін у самій оболонці. Поки файлу немає, картка відкриває заглушку «у розробці».
@@ -585,6 +585,15 @@ by hand with narrow anchored patches (see `AGENTS.md`), then run
 читання дашбордів за підтвердженими ролями ще не підключено (залишок E3). Тести — `tests/profile-schema.test.mjs`,
 `tests/profile-schema-client.test.mjs`.
 
+Зв'язки між таблицями (E3б, B2) зберігаються в тому самому документі v1 необов'язковими полями `relations` і
+`groups` (без нової міграції, команди чи capability): `confirmRelation` / `rejectRelation` / `clearRelation` /
+`clearRelations` («Скинути зв'язки»), `setGroups`, читання `relatedSources`, `staleRelations` («перевірте», якщо
+стовпець ключа зник чи змінив тип). Одна пара таблиць має не більш як один підтверджений ключ; «багато до багатьох» —
+лише вручну із застереженням; схема зберігає імена стовпців, кардинальність і основу, але не значення клітинок.
+`removeSource` прибирає зв'язки таблиці й розпускає групи, що розпались; `updateSourceColumns` не губить стовпці
+ключа (лишає їх як `orphan`); `columnDependents` додатково називає зв'язки, що користуються стовпцем. Екрана для
+рішень ще немає (майстер — B3). Тести — `tests/profile-schema-relations.test.mjs`; Rust-ліміти (256 зв'язків, 64 групи) — `profile_schema.rs`.
+
 ## Екземпляри модулів і розкладка (E4)
 
 `src/module-instance-core.js` — чисте ядро розкладки «Мій дашборд» профілю без DOM, сховищ і
@@ -693,7 +702,7 @@ v1 і блоки вкладок через `listDefinitions` + `validateRegistry
 `create_dashboard_module` із `addRequest`, далі `loadModules()` (розкладка E4 ставить картку). Нових команд Tauri,
 записів у схему профілю, міграцій, capabilities і CSP немає. CSS — `.ewmc-reg*`, `.ewmc-catalog-tools`. Тести —
 `tests/module-registry-view.test.mjs`.
-Збереження зв'язків у схемі профілю (B2), майстер «залишити зв'язок» (B3) і групи (B4) — наступні блоки, тільки за рішенням власника.
+Збереження зв'язків у схемі профілю (B2) і підтвердження на екрані (B3) описано нижче; групи (B4) — наступний блок.
 
 ### Підказки зв'язків на екрані (E3б, показ ядра B1)
 
@@ -704,8 +713,22 @@ v1 і блоки вкладок через `listDefinitions` + `validateRegistry
 `src/table-link-panel.js` — DOM: `<details class="ewmc-links">` «Зв'язки між таблицями» з кнопками
 `find-links` / `cancel-links`; пошук через `suggestRelations` із `tick` (віддає керування між парами) і
 `cancelled` (кнопка або зникла з сторінки панель, `!panel.isConnected`); лише `textContent`, без `innerHTML`.
-Панель бере `state.schema` і `state.data` каталогу й **не викликає Tauri** (нічого не пише): у
-`dashboard-module-catalog.js` її додає `renderHost` перед сіткою карток, коли модулів ≥ 2 і схему прочитано.
+Панель бере `state.schema` і `state.data` каталогу й сама **не викликає Tauri**: рішення (B3) вона віддає функції
+`apply(change)`, яку дає `dashboard-module-catalog.js` (`applyLinkChange` → `updateProfileSchema`, ті самі команди
+`get/save_profile_schema`, без нових команд і capabilities), а після запису кличе `onChange` (`refreshRelatedLines`).
+У каталозі панель додає `renderHost` перед сіткою карток, коли модулів ≥ 2 і схему прочитано. Рішення (B3):
+`decisionOf` (`open` / `confirmed` / `rejected` / `taken`), `confirmArgs` / `rejectArgs`, `confirmBlock` (кандидат з
+припущеним порядком «день/місяць» не підтверджується), `savedRelationViews`, `rejectedRelationViews`, `relatedLine`
+(рядок «Зв'язано з: …» `p.ewmc-related[data-related-for]` на картці модуля). Кнопки: `confirm-relation`,
+`replace-relation`, `reject-relation`, `clear-relation`, `restore-relation`.
+Групи й попередження (B4): `suggestedGroups` (компоненти зв'язності підтверджених зв'язків з ≥ 2 таблиць, `g1`, `g2`…),
+`groupsNeedSaving`, `savedGroupViews`, `deleteLinksNote` (текст у картці модуля перед видаленням: `p.ewmc-delete-links[data-delete-links-for]`,
+оновлюється разом із `refreshRelatedLines`); кнопки `split-groups` (`setGroups`), `clear-groups`, `reset-links` →
+`confirm-reset-links` (`clearRelations`, два кроки).
+Читання за зв'язком (перший крок): `linkCoverage` (`table-link-core.js`: рядки з парою за ключем у кожній із двох таблиць, `complete`
+для усіченого читання) і `linkCoverageViews` (`table-link-view-core.js`: текст по кожному підтвердженому зв'язку; «перевірте» й непрочитані дані
+пропускаються з поясненням). У картці `ul.ewmc-related-stats[data-related-stats-for]` заповнює `fillCoverage` через `setTimeout(0)` після малювання
+і з `refreshRelatedLines`; тільки підрахунок, без фільтра й без змін у картках. `removeSource` розпускає групу, що лишилась з однієї таблиці.
 CSS — `.ewmc-links*` у `dashboard-module-catalog.css`. Тести — `tests/table-link-view.test.mjs`
 (логіка й текстові контракти: імпорт, відсутність `invoke`, `innerHTML`, запису схеми).
 
