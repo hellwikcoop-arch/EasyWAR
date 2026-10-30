@@ -19,8 +19,8 @@ import { blockColumns, tileColumns } from './catalog-core.js';
 
 export const REGISTRY_VERSION = 1;
 export const SOURCE_CATALOGS = Object.freeze(['rust-template', 'catalog-v1', 'legacy']);
-/** Роди військ так, як їх зберігає Rust (`valid_branch`): ПС, РВ, ПВК, УДШВ. */
-export const BRANCHES = Object.freeze(['air', 'rocket', 'pvk', 'dshv']);
+/** Гілки так, як їх зберігає Rust (`valid_branch`): ПС, РВ, ПВК, УДШВ і «Власний модуль» (без роду військ). */
+export const BRANCHES = Object.freeze(['air', 'rocket', 'army', 'pvk', 'dshv', 'custom']);
 
 /** Де стоїть модуль. file — файл, у якому живе його код (по ньому тест шукає якорі). */
 export const SURFACES = Object.freeze({
@@ -87,6 +87,7 @@ export const WORKSPACE_APPS = Object.freeze(['EasyGreen', 'EasyDoc', 'EasySlide'
 export const NON_MODULE_SECTIONS = Object.freeze({
   'own-losses': ['Наші втрати'], // порожня сторінка до відкриття таблиці
   pvk: ['Помилки', 'Попередження', 'Інформаційно'], // незмінні лічильники блока «Перевірка даних»
+  dshv: ['База даних'], // аркуші файлу як імпортовано, не модуль
 });
 
 // --- старі вкладки -------------------------------------------------------------------------

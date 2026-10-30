@@ -112,11 +112,11 @@ test('each branch has its own table slot and base tables open in their module', 
   assert.equal(profileTablePath(profile, 'air'), '/synthetic/air.xlsx');
   assert.equal(profileTablePath(profile, 'rocket'), null);
   assert.equal(profileTablePath({}, 'air'), null);
-  assert.deepEqual(PROFILE_BRANCHES.map(item => item.branch), ['air', 'pvk', 'rocket', 'dshv']);
+  assert.deepEqual(PROFILE_BRANCHES.map(item => item.branch), ['air', 'army', 'pvk', 'rocket', 'dshv']);
   assert.equal(profileTablePath({ tables: { pvk: '/synthetic/pvk.xlsx', dshv: '/synthetic/dshv.xlsx' } }, 'dshv'), '/synthetic/dshv.xlsx');
   assert.deepEqual(
     Object.fromEntries(BASE_TABLES.map(table => [table.key, table.branch])),
-    { air: 'air', pvk: 'pvk', rvia: 'rocket' },
+    { air: 'air', army: 'army', pvk: 'pvk', rvia: 'rocket' },
   );
   assert.equal(BASE_TABLES.find(table => table.key === 'pvk').note, undefined);
 });

@@ -111,3 +111,9 @@ test('збірка: map.html — окремий вхід, а 100+ МБ ресу�
   assert.match(cfg, /map: fileURLToPath\(new URL\("\.\/src\/map\.html"/);
   assert.match(cfg, /startsWith\("map-assets\/"\)/);
 });
+
+test('армійська авіація відкриває 3D-карту у своєму зеленому режимі', () => {
+  assert.match(read('public/map-3d-bridge.js'), /'\.\/map\.html\?embed=1' \+ \(document\.documentElement\.dataset\.module === 'army' \? '&module=army' : ''\)/);
+  assert.match(read('map-app.js'), /get\('module'\) === 'army'\) document\.documentElement\.dataset\.module = 'army';/);
+  assert.match(read('map.css'), /:root\[data-module="army"\]:not\(\[data-theme="light"\]\)\{\n  --bg:#0b150c;/);
+});

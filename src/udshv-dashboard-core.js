@@ -86,6 +86,35 @@ export const isoFromDay = value => new Date(value * 864e5).toISOString().slice(0
 const colNum = letters => { let n = 0; for (const ch of letters) n = n * 26 + (ch.charCodeAt(0) - 64); return n; };
 const cellText = cell => cell == null ? '' : (typeof cell === 'object' ? cell.v : cell);
 
+/**
+ * Аркуш у вигляді прямокутної сітки для показу «як імпортовано»: непорожні рядки, стовпці за літерами Excel.
+ * `head` — скільки перших рядків сітки є шапкою (рядок із «Підрозділ/ВгЗ/КББ/Дата» і підшапка під ним).
+ * Дати-числа Excel у стовпці «Дата» показуємо як ДД.ММ.РРРР, решта значень — текстом без змін.
+ */
+export function rawSheetGrid(sheet) {
+  const all = (sheet && sheet.rows) || [];
+  const rows = all.filter(row => Object.values(row.cells || {}).some(cell => clean(cellText(cell)) !== ''));
+  const letters = new Set();
+  for (const row of rows) for (const [letter, cell] of Object.entries(row.cells || {})) if (clean(cellText(cell)) !== '') letters.add(letter);
+  const columns = [...letters].sort((a, b) => colNum(a) - colNum(b));
+  const header = headerRowOf(all);
+  const dateCols = new Set(header ? columns.filter(letter => norm(cellText(header.cells[letter])) === 'дата') : []);
+  const show = (row, letter) => {
+    const value = clean(cellText((row.cells || {})[letter]));
+    if (header && row.r > header.r && dateCols.has(letter)) {
+      const iso = cellDate(value);
+      if (iso) return `${iso.slice(8, 10)}.${iso.slice(5, 7)}.${iso.slice(0, 4)}`;
+    }
+    return value;
+  };
+  const headEnd = header ? rows.findIndex(row => row.r > header.r + 1) : 0;
+  return {
+    columns,
+    head: header ? (headEnd < 0 ? rows.length : headEnd) : 0,
+    rows: rows.map(row => ({ r: row.r, cells: columns.map(letter => show(row, letter)) })),
+  };
+}
+
 /** Аркуш схожий на таблицю УДШВ: у шапці є «Підрозділ», «ВгЗ», «КББ» і «Дата». */
 function headerRowOf(rows) {
   return rows.slice(0, 8).find(row => {
@@ -118,7 +147,11 @@ export function parseUdshvWorkbook(sheets, sourceName = '') {
     error.code = 'NOT_UDSHV';
     throw error;
   }
-  return buildWorkbook(out, sourceName);
+  const workbook = buildWorkbook(out, sourceName);
+  // Аркуші файлу як є — для вкладки «База даних» (показ без підрахунків і правок).
+  // Не перелічується: помічник і копіювання моделі обходять лише розібрані дані, а не вдруге весь сирий вміст.
+  Object.defineProperty(workbook, 'raw', { enumerable: false, configurable: true, writable: true, value: (sheets || []).map(sheet => ({ name: sheet.name, template: TEMPLATE_SHEET.test(sheet.name) && !!headerRowOf(sheet.rows || []), rows: sheet.rows || [] })) });
+  return workbook;
 }
 
 function parseSheet(name, rows, header) {
