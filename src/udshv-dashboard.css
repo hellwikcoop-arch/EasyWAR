@@ -214,8 +214,7 @@ body.udshv-open #view-ref { display: none !important; }
 }
 body.udshv-open .appbar .tabs { visibility: hidden; }
 
-/* Фон дашборда УДШВ — один колір без картинки й градієнта: темний у темній темі, світлий у світлій. */
-html:has(body.udshv-open) { background: #1b0a10 !important; }
+/* Фон дашборда УДШВ: у темній темі — плакат (rocket-background.css), у світлій — один світлий колір. */
 :root[data-theme="light"]:has(body.udshv-open) { background: #f1eaee !important; }
 html body.udshv-open, html.rocket-ref24 body.udshv-open, html:root body.udshv-open { background: transparent !important; }
 
