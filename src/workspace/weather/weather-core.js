@@ -10,6 +10,8 @@ import { weatherHazard, weatherText } from '../../dashboard-module-weather-core.
 import { WMO_LABELS } from './weather-icons.js';
 
 export const STORAGE_KEY = 'easywar.workspace.weather.v1';
+/** Ключ запису в даних профілю (profile-store.js); STORAGE_KEY — старе місце в localStorage. */
+export const PROFILE_KEY = 'weather.state';
 /** Як часто оновлювати вибраний пункт, поки застосунок відкритий і мережу ввімкнено. */
 export const REFRESH_MINUTES = 30;
 /** Старше за це спостереження позначається як застаріле. */
