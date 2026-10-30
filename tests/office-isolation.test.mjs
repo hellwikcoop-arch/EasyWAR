@@ -20,7 +20,7 @@ const EDITOR_LABEL = 'office-editor';
 const EDITOR_COMMANDS = ['office_open_file', 'office_save_file', 'office_save_file_as', 'office_close_file', 'office_editor_close',
   'collective_status', 'collective_create_identity', 'collective_create',
   'collective_detail', 'collective_table_set', 'collective_invite_create', 'collective_join_request',
-  'collective_invite_admit', 'collective_join_accept', 'collective_report'];
+  'collective_invite_admit', 'collective_join_accept', 'collective_report_prepare', 'collective_report_confirm'];
 const LIBRARY_COMMANDS = [
   'library_status', 'library_create', 'library_unlock', 'library_lock', 'library_list',
   'library_versions', 'library_import', 'library_rename', 'library_set_hidden', 'library_set_current',
@@ -164,4 +164,16 @@ test('вікно редактора відкриває всі підключен
   // Підключений застосунок, якого немає в списку, у настільному застосунку не відкриється
   // («Не вдалося відкрити»): office_* не працюють поза вікном редактора.
   assert.deepEqual([...allowed].sort(), connected.sort(), 'EDITOR_APPS (Rust) і підключені застосунки WORKSPACE_APPS (JS)');
+});
+
+test('SEC-003: «Доповісти» не приймає з вікна ні прапорця «переглянуто», ні операції, ні маршруту', async () => {
+  const lib = await read('src-tauri/src/lib.rs');
+  const confirm = lib.match(/async fn collective_report_confirm\(([\s\S]*?)\) ->/);
+  assert.ok(confirm, 'команда collective_report_confirm');
+  for (const name of ['reviewed', 'operation', 'transport', 'table', 'explicit_wan', 'collective:'])
+    assert.doesNotMatch(confirm[1], new RegExp(`\\b${name}`), name);
+  assert.doesNotMatch(lib, /async fn collective_report\(/, 'однокрокової команди немає');
+  const sync = await read('src-tauri/src/collective_sync.rs');
+  assert.match(sync, /reviewed_by_human: true,/, 'підтвердження ставить Rust');
+  assert.doesNotMatch(sync, /reviewed_by_human: reviewed/);
 });

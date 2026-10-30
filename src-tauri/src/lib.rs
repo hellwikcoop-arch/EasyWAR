@@ -1805,37 +1805,52 @@ async fn collective_join_accept(
         .map_err(|error| error.to_string())
 }
 
-/// «Доповісти»: допуск `send_gate` і локальна черга. Відмова — відповідь з кодом.
+/// «Підготувати» (SEC-003): Rust перевіряє маршрут і права й тримає намір у себе; JS
+/// отримує лише ідентифікатор і підсумок. Пароль не потрібен.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
-async fn collective_report(
+async fn collective_report_prepare(
+    webview: tauri::Webview,
+    session: tauri::State<'_, ProfileSession>,
+    collectives: tauri::State<'_, CollectiveStore>,
+    collective: String,
+    table: String,
+    transport: String,
+    explicit_wan: bool,
+    operation: String,
+) -> Result<collective_sync::PrepareOutcome, String> {
+    office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
+    let profile_id = active_profile_id(&session)?;
+    collectives
+        .report_prepare(
+            &profile_id,
+            &collective,
+            &table,
+            &transport,
+            explicit_wan,
+            &operation,
+            Utc::now().timestamp(),
+        )
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// «Доповісти» (SEC-003): одноразовий намір, перевірка стану заново, допуск `send_gate` і
+/// локальна черга. Прапорця «переглянуто» від викликача немає. Відмова — відповідь з кодом.
+#[tauri::command]
+async fn collective_report_confirm(
     webview: tauri::Webview,
     profiles: tauri::State<'_, LocalProfileStore>,
     session: tauri::State<'_, ProfileSession>,
     collectives: tauri::State<'_, CollectiveStore>,
     password: String,
-    collective: String,
-    table: String,
-    transport: String,
-    explicit_wan: bool,
-    reviewed: bool,
-    operation: String,
+    intent: String,
 ) -> Result<collective_sync::ReportOutcome, String> {
     office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
     let profile_id = active_profile_id(&session)?;
     let password = collective_password(&profiles, &profile_id, password).await?;
     collectives
-        .report(
-            &profile_id,
-            password,
-            &collective,
-            &table,
-            &transport,
-            explicit_wan,
-            reviewed,
-            &operation,
-            Utc::now().timestamp(),
-        )
+        .report_confirm(&profile_id, password, &intent, Utc::now().timestamp())
         .await
         .map_err(|error| error.to_string())
 }
@@ -4142,7 +4157,8 @@ pub fn run() {
             collective_join_request,
             collective_invite_admit,
             collective_join_accept,
-            collective_report,
+            collective_report_prepare,
+            collective_report_confirm,
             clear_profile_database,
             read_profile_database,
             write_profile_database,

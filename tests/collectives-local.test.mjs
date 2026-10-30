@@ -76,7 +76,7 @@ test('захищені колективи: стани ключа, межі па�
 
 import {
   CLASS_OPTIONS, PURPOSE_OPTIONS, TRANSPORT_OPTIONS, checkHours, checkOperation, detailLine,
-  expectText, reportText, tableLine, textKind, transportNote,
+  expectText, preparedText, reportText, tableLine, textKind, transportNote,
 } from '../src/workspace/collectives/secure-core.js';
 
 test('обмін у колективі: підписи класу, транспорту, відмов і перевірки форм', () => {
@@ -93,6 +93,12 @@ test('обмін у колективі: підписи класу, трансп�
   assert.match(transportNote(current, 'base44'), /Клас D у хмару не йде/);
   assert.match(transportNote(current, 'lan'), /мережі на цьому етапі немає/);
   assert.match(reportText({ allowed: true, message: 'Конверт у локальній черзі', outbox: 2 }), /У черзі: 2\.$/);
+  assert.equal(preparedText({ allowed: true, table: 'Облік', class: 'C', transport: 'lan',
+    recipients: 'усі учасники колективу', bytes: 2, expiresIn: 60 }),
+  'Таблиця «Облік», клас C, транспорт lan, адресати: усі учасники колективу, 2 байт. Підтвердьте паролем протягом 60 с.');
+  assert.equal(preparedText({ allowed: false, code: 'wan-not-ready', message: 'WAN-транспорт не пройшов безпекове приймання' }),
+    'Відмова (wan-not-ready): WAN-транспорт не пройшов безпекове приймання.');
+  assert.doesNotMatch(transportNote(current, 'peer_wan'), /лише облік класу C/, 'SEC-005: клас не блокує');
   assert.equal(reportText({ allowed: false, code: 'wan-not-ready', message: 'WAN-транспорт не пройшов безпекове приймання' }),
     'Відмова (wan-not-ready): WAN-транспорт не пройшов безпекове приймання.');
   assert.throws(() => checkOperation(''), /64 КіБ/);

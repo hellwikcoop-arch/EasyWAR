@@ -150,10 +150,6 @@ pub struct SendRequest<'a> {
 pub enum SendDenied {
     /// Клас D не йде в хмару.
     ClassDCloud,
-    /// Клас D не йде через Інтернет.
-    ClassDWan,
-    /// У WAN дозволений лише підтверджений облік класу C.
-    WanClassUnapproved,
     /// Користувач не обрав WAN явно.
     WanNeedsUserChoice,
     /// WAN-транспорт не пройшов безпекове приймання.
@@ -187,8 +183,6 @@ impl SendDenied {
     pub fn code(self) -> &'static str {
         match self {
             SendDenied::ClassDCloud => "class-d-cloud",
-            SendDenied::ClassDWan => "class-d-wan",
-            SendDenied::WanClassUnapproved => "wan-class-unapproved",
             SendDenied::WanNeedsUserChoice => "wan-needs-user-choice",
             SendDenied::WanNotReady => "wan-not-ready",
             SendDenied::Base44NotReady => "base44-not-ready",
@@ -209,8 +203,6 @@ impl SendDenied {
     pub fn message(self) -> &'static str {
         match self {
             SendDenied::ClassDCloud => "Клас D не передається через хмару",
-            SendDenied::ClassDWan => "Клас D передається лише через локальну мережу LAN",
-            SendDenied::WanClassUnapproved => "У WAN дозволений лише підтверджений облік класу C",
             SendDenied::WanNeedsUserChoice => "Користувач має явно вибрати передачу через інтернет",
             SendDenied::WanNotReady => "WAN-транспорт не пройшов безпекове приймання",
             SendDenied::Base44NotReady => "Транспорт Base44 ще не відкритий власником",
@@ -298,7 +290,12 @@ pub fn authorize_send(
     request: &SendRequest<'_>,
 ) -> Result<SendPermit, SendDenied> {
     let class = request.table.effective_class();
-    route(policy, class, request)?;
+    route(
+        policy,
+        class,
+        request.transport,
+        request.explicit_user_choice,
+    )?;
     match request.outbound_policy {
         OutboundPolicy::ReviewEachReport => {}
         OutboundPolicy::AutoAfterLocalApproval => return Err(SendDenied::OwnerDecisionRequired),
@@ -346,15 +343,56 @@ pub fn authorize_send(
     })
 }
 
+/// Попередня перевірка для кроку «Підготувати» (SEC-003): ті самі маршрут, режим відправки,
+/// відкликання, пристрій, право запису й епоха, що й у [`authorize_send`], на поточному
+/// журналі, але без підпису й без підтвердження. Позитивна відповідь нічого не дозволяє:
+/// крок «Доповісти» проходить повний [`authorize_send`] заново.
+#[allow(clippy::too_many_arguments)]
+pub fn preflight(
+    policy: &GatePolicy,
+    membership: &dyn MembershipView,
+    table: &TableAttestation,
+    transport: Transport,
+    outbound_policy: OutboundPolicy,
+    explicit_user_choice: bool,
+    author: &MemberId,
+    device_pub: &[u8; KEY_LEN],
+) -> Result<(), SendDenied> {
+    route(
+        policy,
+        table.effective_class(),
+        transport,
+        explicit_user_choice,
+    )?;
+    match outbound_policy {
+        OutboundPolicy::ReviewEachReport => {}
+        OutboundPolicy::AutoAfterLocalApproval => return Err(SendDenied::OwnerDecisionRequired),
+        OutboundPolicy::Disabled => return Err(SendDenied::OutboundDisabled),
+    }
+    let latest = membership.latest_seq();
+    if membership.revoked_at(author).is_some() {
+        return Err(SendDenied::MemberRevoked);
+    }
+    if !membership.device_valid_at(latest, author, device_pub) {
+        return Err(SendDenied::DeviceNotValid);
+    }
+    if !membership.can_write_at(latest, author, &table.table_id) {
+        return Err(SendDenied::NoWriteRight);
+    }
+    current_epoch(membership, latest, author).ok_or(SendDenied::EpochNotHeld)?;
+    Ok(())
+}
+
 /// Маршрут за класом і транспортом (`routeFor` у `sensitivity-core.js`), але без прапорців:
 /// наскрізне шифрування тут завжди (конверт запечатується нижче), relay бачить лише
 /// шифротекст за побудовою, а приймання транспорту — [`GatePolicy`].
 fn route(
     policy: &GatePolicy,
     class: TableClass,
-    request: &SendRequest<'_>,
+    transport: Transport,
+    explicit_user_choice: bool,
 ) -> Result<(), SendDenied> {
-    match request.transport {
+    match transport {
         Transport::Lan => Ok(()),
         Transport::Base44 => {
             if class == TableClass::D {
@@ -365,16 +403,11 @@ fn route(
             }
             Ok(())
         }
+        // Рішення JE 30.10.2026 (SEC-005): клас не блокує синхронізацію між авторизованими
+        // учасниками. Через WAN усе вирішують явний вибір, прийнятий захищений транспорт і
+        // ті самі перевірки членства, прав, пристрою, підпису й адресатів нижче.
         Transport::PeerWan => {
-            if class == TableClass::D {
-                return Err(SendDenied::ClassDWan);
-            }
-            if class != TableClass::C
-                || request.table.confirmed_purpose() != Some(TablePurpose::AfterFact)
-            {
-                return Err(SendDenied::WanClassUnapproved);
-            }
-            if !request.explicit_user_choice {
+            if !explicit_user_choice {
                 return Err(SendDenied::WanNeedsUserChoice);
             }
             if !policy.wan_transport_accepted {
@@ -548,7 +581,7 @@ mod tests {
     }
 
     #[test]
-    fn unconfirmed_table_is_class_d_and_stays_on_lan() {
+    fn unconfirmed_table_is_class_d_kept_out_of_the_cloud_only() {
         let mut w = World::new();
         let stranger = MemberIdentity::generate().member_id();
         for (class_by, purpose, purpose_by) in [
@@ -571,11 +604,10 @@ mod tests {
                 wan_transport_accepted: true,
                 base44_accepted: true,
             };
-            assert_eq!(
-                w.authorize(&open, &w.request(&signed, Transport::PeerWan))
-                    .err(),
-                Some(SendDenied::ClassDWan)
-            );
+            // SEC-005: клас не блокує синхронізацію між учасниками; хмара — інша справа.
+            assert!(w
+                .authorize(&open, &w.request(&signed, Transport::PeerWan))
+                .is_ok());
             assert_eq!(
                 w.authorize(&open, &w.request(&signed, Transport::Base44))
                     .err(),
@@ -588,19 +620,21 @@ mod tests {
     }
 
     #[test]
-    fn wan_only_for_confirmed_class_c_with_user_choice_and_accepted_transport() {
+    fn wan_for_any_class_needs_user_choice_and_accepted_transport() {
         let mut w = World::new();
         let open = GatePolicy {
             wan_transport_accepted: true,
             base44_accepted: false,
         };
-        for class in [TableClass::A, TableClass::B] {
+        for class in [TableClass::A, TableClass::B, TableClass::D] {
             w.table.class = class;
             let signed = w.signed();
+            let request = w.request(&signed, Transport::PeerWan);
+            assert!(w.authorize(&open, &request).is_ok(), "{class:?}");
             assert_eq!(
-                w.authorize(&open, &w.request(&signed, Transport::PeerWan))
-                    .err(),
-                Some(SendDenied::WanClassUnapproved)
+                w.authorize(&GatePolicy::CURRENT, &request).err(),
+                Some(SendDenied::WanNotReady),
+                "{class:?}"
             );
         }
         w.table.class = TableClass::C;
@@ -733,11 +767,61 @@ mod tests {
     }
 
     #[test]
+    fn preflight_checks_route_and_rights_without_a_signature() {
+        let mut w = World::new();
+        let author = w.alice.member_id();
+        let device = w.device.public().0;
+        let check = |w: &World, transport, explicit| {
+            preflight(
+                &GatePolicy::CURRENT,
+                &w.membership,
+                &w.table,
+                transport,
+                OutboundPolicy::ReviewEachReport,
+                explicit,
+                &author,
+                &device,
+            )
+        };
+        assert_eq!(check(&w, Transport::Lan, false), Ok(()));
+        assert_eq!(
+            check(&w, Transport::PeerWan, true),
+            Err(SendDenied::WanNotReady)
+        );
+        assert_eq!(
+            check(&w, Transport::PeerWan, false),
+            Err(SendDenied::WanNeedsUserChoice)
+        );
+        let stranger = DeviceIdentity::generate().public().0;
+        assert_eq!(
+            preflight(
+                &GatePolicy::CURRENT,
+                &w.membership,
+                &w.table,
+                Transport::Lan,
+                OutboundPolicy::ReviewEachReport,
+                false,
+                &author,
+                &stranger,
+            ),
+            Err(SendDenied::DeviceNotValid)
+        );
+        w.table.table_id = [9; ID_LEN];
+        assert_eq!(
+            check(&w, Transport::Lan, false),
+            Err(SendDenied::NoWriteRight)
+        );
+        w.membership.revoke(&author);
+        assert_eq!(
+            check(&w, Transport::Lan, false),
+            Err(SendDenied::MemberRevoked)
+        );
+    }
+
+    #[test]
     fn codes_and_messages_are_ukrainian_and_unique() {
         let all = [
             SendDenied::ClassDCloud,
-            SendDenied::ClassDWan,
-            SendDenied::WanClassUnapproved,
             SendDenied::WanNeedsUserChoice,
             SendDenied::WanNotReady,
             SendDenied::Base44NotReady,

@@ -30,13 +30,13 @@ use crate::collective::relay_auth::COLLECTIVE_SCOPE;
 use crate::collective::replay::{InMemoryMembership, MembershipRecord, MembershipView};
 use crate::collective::secret_store::UnlockedStore;
 use crate::collective::send_gate::{
-    authorize_send, GatePolicy, OutboundPolicy, SendRequest, TableAttestation, TableClass,
-    TablePurpose, Transport,
+    authorize_send, preflight, GatePolicy, OutboundPolicy, SendRequest, TableAttestation,
+    TableClass, TablePurpose, Transport,
 };
 use crate::collective::{random_array, sha256, ID_LEN, KEY_LEN};
 use crate::collective_store::{
-    check_password, collective_name, epoch_purpose, fingerprint, identities, CollectiveStore,
-    CollectiveStoreError, CollectiveSummary, MAX_COLLECTIVES,
+    check_password, collective_name, epoch_purpose, fingerprint, identities, orphan_epoch_purposes,
+    CollectiveStore, CollectiveStoreError, CollectiveSummary, MAX_COLLECTIVES,
 };
 
 const INVITE_PREFIX: &str = "EWINV1.";
@@ -51,6 +51,12 @@ pub const OUTBOX_TTL_SECONDS: i64 = 24 * 60 * 60;
 /// Квота локальної черги відправки одного колективу.
 const OUTBOX_CAPACITY_BYTES: usize = 16 * 1024 * 1024;
 const OUTBOX_FILE_LABEL: &[u8] = b"easywar/collective/v1/outbox-file";
+/// Строк дії підготовленої доповіді (SEC-003).
+pub const INTENT_TTL_SECONDS: i64 = 60;
+/// Скільки підготовлених доповідей одночасно тримає один профіль; старіші витісняються.
+const MAX_INTENTS_PER_PROFILE: usize = 8;
+const INTENT_ID_LEN: usize = 16;
+const INTENT_LABEL: &[u8] = b"easywar/collective/v1/report-intent";
 
 type Result<T> = std::result::Result<T, CollectiveStoreError>;
 
@@ -127,6 +133,68 @@ pub struct ReportOutcome {
     pub message: &'static str,
     pub outbox: usize,
 }
+
+impl ReportOutcome {
+    fn denied(code: &'static str, message: &'static str) -> Self {
+        Self {
+            allowed: false,
+            code,
+            message,
+            outbox: 0,
+        }
+    }
+}
+
+/// Відповідь кроку «Підготувати»: ідентифікатор наміру й підсумок для показу людині.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrepareOutcome {
+    pub allowed: bool,
+    pub code: &'static str,
+    pub message: &'static str,
+    pub intent: Option<String>,
+    pub table: String,
+    pub class: char,
+    pub transport: &'static str,
+    pub recipients: &'static str,
+    pub bytes: usize,
+    pub expires_in: i64,
+}
+
+impl PrepareOutcome {
+    fn denied(code: &'static str, message: &'static str) -> Self {
+        Self {
+            allowed: false,
+            code,
+            message,
+            intent: None,
+            table: String::new(),
+            class: 'D',
+            transport: "",
+            recipients: "",
+            bytes: 0,
+            expires_in: 0,
+        }
+    }
+}
+
+/// Намір «Доповісти», який тримає Rust між кроками (SEC-003). У JS не потрапляє нічого,
+/// крім ідентифікатора.
+pub(crate) struct ReportIntent {
+    profile_id: String,
+    collective_id: CollectiveId,
+    table_id: [u8; ID_LEN],
+    transport: Transport,
+    explicit_wan: bool,
+    operation: Vec<u8>,
+    binding: [u8; KEY_LEN],
+    expires_at: i64,
+    created_at: i64,
+}
+
+/// Сховище намірів одного процесу; доступ лише під цим замком.
+pub(crate) type IntentStore =
+    std::sync::Mutex<std::collections::HashMap<[u8; INTENT_ID_LEN], ReportIntent>>;
 
 struct Me {
     member_id: MemberId,
@@ -636,8 +704,18 @@ impl CollectiveStore {
             .collect();
         let retry = password.clone();
         let to_write = purposes.clone();
+        let known = self
+            .known_collective_ids(profile_id)
+            .await
+            .map(|mut known| {
+                known.insert(collective_id);
+                known
+            });
         self.with_secrets(profile_id, password, move |unlocked, member, _| {
             let keys = invite::accept(member, &wraps).map_err(rejected)?;
+            // Після автентифікації прибрати осиротілі ключі цього профілю (SEC-004).
+            let orphans = orphan_epoch_purposes(unlocked.purposes(), known.as_ref());
+            let _ = unlocked.delete_many(&orphans);
             let entries: Vec<(String, &[u8])> = to_write
                 .into_iter()
                 .zip(keys.iter().map(|key| key.as_bytes().as_slice()))
@@ -688,22 +766,21 @@ impl CollectiveStore {
         })
     }
 
-    /// «Доповісти»: операція підписується пристроєм профілю, проходить авторитетний допуск і
-    /// лише тоді кладеться в локальну чергу відправки. Відмова — звичайна відповідь з кодом,
-    /// не помилка.
+    /// Крок «Підготувати» (SEC-003, варіант А): Rust перевіряє маршрут і права на поточному
+    /// журналі й запам'ятовує намір — операцію, таблицю, маршрут, адресатів і прив'язку до
+    /// поточного стану — у своїй пам'яті. JS отримує лише ідентифікатор наміру й підсумок
+    /// для показу. Пароль тут не потрібен: нічого не підписується й не запечатується.
     #[allow(clippy::too_many_arguments)]
-    pub async fn report(
+    pub async fn report_prepare(
         &self,
         profile_id: &str,
-        password: Zeroizing<String>,
         collective_fp: &str,
         table_fp: &str,
         transport: &str,
         explicit_wan: bool,
-        reviewed: bool,
         operation: &str,
         now_unix: i64,
-    ) -> Result<ReportOutcome> {
+    ) -> Result<PrepareOutcome> {
         if operation.is_empty() || operation.len() > MAX_OPERATION_BYTES {
             return Err(CollectiveStoreError::OperationSize);
         }
@@ -717,10 +794,175 @@ impl CollectiveStore {
             .into_iter()
             .find(|table| fingerprint(&table.attestation.table_id) == table_fp)
             .ok_or(CollectiveStoreError::TableNotFound)?;
-        let outbox = self.outbox_path(profile_id, &collective_id);
+        if let Err(denied) = preflight(
+            &GatePolicy::CURRENT,
+            &membership,
+            &table.attestation,
+            transport,
+            OutboundPolicy::ReviewEachReport,
+            explicit_wan,
+            &me.member_id,
+            &me.device_pub,
+        ) {
+            return Ok(PrepareOutcome::denied(denied.code(), denied.message()));
+        }
         let operation = operation.as_bytes().to_vec();
+        let binding = report_binding(
+            profile_id,
+            &collective_id,
+            &me,
+            &membership,
+            &table,
+            transport,
+            explicit_wan,
+            &operation,
+        );
+        let intent_id: [u8; INTENT_ID_LEN] = random_array();
+        let bytes = operation.len();
+        let intent = ReportIntent {
+            profile_id: profile_id.to_owned(),
+            collective_id,
+            table_id: table.attestation.table_id,
+            transport,
+            explicit_wan,
+            operation,
+            binding,
+            expires_at: now_unix.saturating_add(INTENT_TTL_SECONDS),
+            created_at: now_unix,
+        };
+        {
+            let mut intents = self.intents.lock().map_err(|_| poisoned())?;
+            intents.retain(|_, held| held.expires_at > now_unix);
+            let mut mine: Vec<([u8; INTENT_ID_LEN], i64)> = intents
+                .iter()
+                .filter(|(_, held)| held.profile_id == profile_id)
+                .map(|(id, held)| (*id, held.created_at))
+                .collect();
+            mine.sort_by_key(|(_, created)| *created);
+            while mine.len() >= MAX_INTENTS_PER_PROFILE {
+                let (oldest, _) = mine.remove(0);
+                intents.remove(&oldest);
+            }
+            intents.insert(intent_id, intent);
+        }
+        Ok(PrepareOutcome {
+            allowed: true,
+            code: "prepared",
+            message: "Перевірте підсумок і підтвердьте паролем протягом 60 секунд",
+            intent: Some(hex(&intent_id)),
+            table: table.title,
+            class: table.attestation.effective_class().code() as char,
+            transport: transport_text(transport),
+            recipients: "усі учасники колективу",
+            bytes,
+            expires_in: INTENT_TTL_SECONDS,
+        })
+    }
+
+    /// Крок «Доповісти» (SEC-003): намір забирається зі сховища під замком одразу, тож його
+    /// можна використати лише раз, навіть за паралельних викликів. Операція, таблиця, маршрут
+    /// і адресати беруться з наміру, а не з JS. Стан перечитується з бази; якщо прив'язка
+    /// змінилася (таблиця, клас, призначення, журнал складу, права, пристрій, епоха, профіль) —
+    /// відмова. Підтвердження `reviewed` ставить Rust, а не викликач. Це прив'язка
+    /// підтвердження до операції, а не доказ фізичного натискання людиною.
+    pub async fn report_confirm(
+        &self,
+        profile_id: &str,
+        password: Zeroizing<String>,
+        intent_text: &str,
+        now_unix: i64,
+    ) -> Result<ReportOutcome> {
+        let intent_id = parse_intent(intent_text)?;
+        let intent = {
+            let mut intents = self.intents.lock().map_err(|_| poisoned())?;
+            match intents.get(&intent_id) {
+                Some(held) if held.profile_id == profile_id => intents.remove(&intent_id),
+                _ => None,
+            }
+        };
+        let Some(intent) = intent else {
+            return Ok(ReportOutcome::denied(
+                "intent-unknown",
+                "Підготовленої доповіді немає або її вже використано: підготуйте знову",
+            ));
+        };
+        if now_unix >= intent.expires_at {
+            return Ok(ReportOutcome::denied(
+                "intent-expired",
+                "Минуло 60 секунд після підготовки: підготуйте доповідь знову",
+            ));
+        }
+        let stale = || {
+            ReportOutcome::denied(
+                "intent-stale",
+                "Таблиця, склад або права змінилися після підготовки: підготуйте знову",
+            )
+        };
+        let Ok((collective_id, _)) = self
+            .find_collective(profile_id, &fingerprint(&intent.collective_id))
+            .await
+        else {
+            return Ok(stale());
+        };
+        let me = self.me(profile_id).await?;
+        let (membership, _) = self.load_journal(profile_id, &collective_id).await?;
+        let Some(table) = self
+            .tables(profile_id, &collective_id)
+            .await?
+            .into_iter()
+            .find(|table| table.attestation.table_id == intent.table_id)
+        else {
+            return Ok(stale());
+        };
+        let binding = report_binding(
+            profile_id,
+            &collective_id,
+            &me,
+            &membership,
+            &table,
+            intent.transport,
+            intent.explicit_wan,
+            &intent.operation,
+        );
+        if binding != intent.binding {
+            return Ok(stale());
+        }
+        self.seal_and_queue(
+            profile_id,
+            password,
+            collective_id,
+            membership,
+            table,
+            intent.transport,
+            intent.explicit_wan,
+            intent.operation,
+            now_unix,
+        )
+        .await
+    }
+
+    /// Підпис, авторитетний допуск і локальна черга. Викликається лише з
+    /// [`Self::report_confirm`], тому `reviewed_by_human` тут завжди виставляє Rust.
+    #[allow(clippy::too_many_arguments)]
+    async fn seal_and_queue(
+        &self,
+        profile_id: &str,
+        password: Zeroizing<String>,
+        collective_id: CollectiveId,
+        membership: InMemoryMembership,
+        table: StoredTable,
+        transport: Transport,
+        explicit_wan: bool,
+        operation: Vec<u8>,
+        now_unix: i64,
+    ) -> Result<ReportOutcome> {
+        let me = self.me(profile_id).await?;
+        let outbox = self.outbox_path(profile_id, &collective_id);
         let author = me.member_id;
         self.with_secrets(profile_id, password, move |unlocked, _, device| {
+            if device.public().0 != me.device_pub {
+                return Err(CollectiveStoreError::StoreDamaged);
+            }
             let epoch = membership.current_epoch();
             let key = epoch_keys(unlocked, &collective_id, epoch)?
                 .pop()
@@ -741,7 +983,7 @@ impl CollectiveStore {
                 table: &table.attestation,
                 transport,
                 outbound_policy: OutboundPolicy::ReviewEachReport,
-                reviewed_by_human: reviewed,
+                reviewed_by_human: true,
                 explicit_user_choice: explicit_wan,
                 signed: &signed,
                 recipient_scope: COLLECTIVE_SCOPE,
@@ -755,14 +997,7 @@ impl CollectiveStore {
                 &request,
             ) {
                 Ok(permit) => permit,
-                Err(denied) => {
-                    return Ok(ReportOutcome {
-                        allowed: false,
-                        code: denied.code(),
-                        message: denied.message(),
-                        outbox: 0,
-                    })
-                }
+                Err(denied) => return Ok(ReportOutcome::denied(denied.code(), denied.message())),
             };
             let bytes = permit
                 .take(now_unix)
@@ -783,6 +1018,90 @@ impl CollectiveStore {
             })
         })
         .await
+    }
+}
+
+/// Прив'язка наміру до стану (SEC-003, уточнення J5 00:09Z): не лише номер останнього запису
+/// журналу, а й фактичний зміст дозволів автора на цьому записі та повна атестація таблиці.
+#[allow(clippy::too_many_arguments)]
+fn report_binding(
+    profile_id: &str,
+    collective_id: &CollectiveId,
+    me: &Me,
+    membership: &InMemoryMembership,
+    table: &StoredTable,
+    transport: Transport,
+    explicit_wan: bool,
+    operation: &[u8],
+) -> [u8; KEY_LEN] {
+    let latest = membership.latest_seq();
+    let a = &table.attestation;
+    let confirmed = |who: &Option<MemberId>| -> Vec<u8> {
+        match who {
+            Some(id) => [&[1u8][..], id.as_slice()].concat(),
+            None => vec![0],
+        }
+    };
+    let bound = membership.bound_member(&me.member_id);
+    let exchange = bound
+        .map(|b| [b.public().exchange.as_slice(), &b.issued_at().to_be_bytes()].concat())
+        .unwrap_or_default();
+    let facts = [
+        u8::from(membership.revoked_at(&me.member_id).is_some()),
+        u8::from(membership.device_valid_at(latest, &me.member_id, &me.device_pub)),
+        u8::from(membership.can_write_at(latest, &me.member_id, &a.table_id)),
+        u8::from(explicit_wan),
+        a.class.code(),
+        a.effective_class().code(),
+    ];
+    sha256(&[
+        INTENT_LABEL,
+        profile_id.as_bytes(),
+        collective_id,
+        &me.member_id,
+        &me.device_pub,
+        &a.table_id,
+        &a.owner,
+        &confirmed(&a.class_confirmed_by),
+        purpose_text(a.purpose).as_bytes(),
+        &confirmed(&a.purpose_confirmed_by),
+        table.title.as_bytes(),
+        transport_text(transport).as_bytes(),
+        &COLLECTIVE_SCOPE,
+        &latest.to_be_bytes(),
+        &membership.current_epoch().to_be_bytes(),
+        &exchange,
+        &facts,
+        &sha256(&[operation]),
+    ])
+}
+
+fn poisoned() -> CollectiveStoreError {
+    CollectiveStoreError::Io("сховище намірів пошкоджене".into())
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn parse_intent(text: &str) -> Result<[u8; INTENT_ID_LEN]> {
+    let text = text.trim();
+    if text.len() != INTENT_ID_LEN * 2 || !text.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(CollectiveStoreError::InvalidText);
+    }
+    let mut out = [0u8; INTENT_ID_LEN];
+    for (i, byte) in out.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&text[i * 2..i * 2 + 2], 16)
+            .map_err(|_| CollectiveStoreError::InvalidText)?;
+    }
+    Ok(out)
+}
+
+fn transport_text(transport: Transport) -> &'static str {
+    match transport {
+        Transport::Lan => "lan",
+        Transport::PeerWan => "peer_wan",
+        Transport::Base44 => "base44",
     }
 }
 
@@ -1030,6 +1349,32 @@ mod tests {
         (store, dir)
     }
 
+    /// «Підготувати» й одразу «Доповісти» тим самим наміром.
+    #[allow(clippy::too_many_arguments)]
+    async fn report(
+        store: &CollectiveStore,
+        profile: &str,
+        password: Zeroizing<String>,
+        collective: &str,
+        table: &str,
+        transport: &str,
+        explicit: bool,
+        operation: &str,
+        now: i64,
+    ) -> Result<ReportOutcome> {
+        let prepared = store
+            .report_prepare(
+                profile, collective, table, transport, explicit, operation, now,
+            )
+            .await?;
+        if !prepared.allowed {
+            return Ok(ReportOutcome::denied(prepared.code, prepared.message));
+        }
+        store
+            .report_confirm(profile, password, prepared.intent.as_deref().unwrap(), now)
+            .await
+    }
+
     async fn owner_with_collective() -> (CollectiveStore, tempfile::TempDir, String) {
         let (store, dir) = node(OWNER).await;
         let created = store
@@ -1062,20 +1407,19 @@ mod tests {
         assert_eq!(detail.outbox, 0);
         assert!(!detail.wan_accepted && !detail.base44_accepted);
 
-        let outcome = store
-            .report(
-                OWNER,
-                password(),
-                &collective,
-                &table.fingerprint,
-                "lan",
-                false,
-                true,
-                "{\"row\":\"synthetic\"}",
-                UNIX,
-            )
-            .await
-            .unwrap();
+        let outcome = report(
+            &store,
+            OWNER,
+            password(),
+            &collective,
+            &table.fingerprint,
+            "lan",
+            false,
+            "{\"row\":\"synthetic\"}",
+            UNIX,
+        )
+        .await
+        .unwrap();
         assert!(outcome.allowed, "{}", outcome.message);
         assert_eq!((outcome.code, outcome.outbox), ("queued", 1));
         assert_eq!(
@@ -1099,33 +1443,31 @@ mod tests {
             .await
             .unwrap();
         let cases = [
-            ("peer_wan", true, true, "wan-not-ready"),
-            ("peer_wan", false, true, "wan-needs-user-choice"),
-            ("base44", false, true, "base44-not-ready"),
-            ("lan", false, false, "needs-report-review"),
+            ("peer_wan", true, "wan-not-ready"),
+            ("peer_wan", false, "wan-needs-user-choice"),
+            ("base44", false, "base44-not-ready"),
         ];
-        for (transport, explicit, reviewed, code) in cases {
-            let outcome = store
-                .report(
-                    OWNER,
-                    password(),
-                    &collective,
-                    &table.fingerprint,
-                    transport,
-                    explicit,
-                    reviewed,
-                    "{}",
-                    UNIX,
-                )
-                .await
-                .unwrap();
+        for (transport, explicit, code) in cases {
+            let outcome = report(
+                &store,
+                OWNER,
+                password(),
+                &collective,
+                &table.fingerprint,
+                transport,
+                explicit,
+                "{}",
+                UNIX,
+            )
+            .await
+            .unwrap();
             assert_eq!(
                 (outcome.allowed, outcome.code),
                 (false, code),
                 "{transport}"
             );
         }
-        // Планова таблиця — клас D: ні WAN, ні хмари.
+        // Планова таблиця — клас D: у хмару ні, а між учасниками клас не блокує (SEC-005).
         let planned = store
             .set_table(
                 OWNER,
@@ -1139,71 +1481,67 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(planned.class, 'D');
-        let outcome = store
-            .report(
-                OWNER,
-                password(),
-                &collective,
-                &table.fingerprint,
-                "peer_wan",
-                true,
-                true,
-                "{}",
-                UNIX,
-            )
-            .await
-            .unwrap();
-        assert_eq!(outcome.code, "class-d-wan");
+        let outcome = report(
+            &store,
+            OWNER,
+            password(),
+            &collective,
+            &table.fingerprint,
+            "peer_wan",
+            true,
+            "{}",
+            UNIX,
+        )
+        .await
+        .unwrap();
+        assert_eq!(outcome.code, "wan-not-ready");
         assert_eq!(
             store.detail(OWNER, &collective, UNIX).await.unwrap().outbox,
             0
         );
         assert!(matches!(
-            store
-                .report(
-                    OWNER,
-                    password(),
-                    &collective,
-                    &table.fingerprint,
-                    "ftp",
-                    false,
-                    true,
-                    "{}",
-                    UNIX
-                )
-                .await,
+            report(
+                &store,
+                OWNER,
+                password(),
+                &collective,
+                &table.fingerprint,
+                "ftp",
+                false,
+                "{}",
+                UNIX
+            )
+            .await,
             Err(CollectiveStoreError::InvalidChoice)
         ));
         assert!(matches!(
-            store
-                .report(
-                    OWNER,
-                    password(),
-                    &collective,
-                    &table.fingerprint,
-                    "lan",
-                    false,
-                    true,
-                    "",
-                    UNIX
-                )
-                .await,
+            report(
+                &store,
+                OWNER,
+                password(),
+                &collective,
+                &table.fingerprint,
+                "lan",
+                false,
+                "",
+                UNIX
+            )
+            .await,
             Err(CollectiveStoreError::OperationSize)
         ));
         assert!(matches!(
-            store
-                .report(
-                    OWNER,
-                    Zeroizing::new("не-той-пароль".into()),
-                    &collective,
-                    &table.fingerprint,
-                    "lan",
-                    false,
-                    true,
-                    "{}",
-                    UNIX
-                )
-                .await,
+            report(
+                &store,
+                OWNER,
+                Zeroizing::new("не-той-пароль".into()),
+                &collective,
+                &table.fingerprint,
+                "lan",
+                false,
+                "{}",
+                UNIX
+            )
+            .await,
             Err(CollectiveStoreError::WrongPassword)
         ));
     }
@@ -1286,20 +1624,19 @@ mod tests {
             )
             .await
             .unwrap();
-        let outcome = guest
-            .report(
-                GUEST,
-                password(),
-                &collective,
-                &table.fingerprint,
-                "lan",
-                false,
-                true,
-                "{}",
-                UNIX,
-            )
-            .await
-            .unwrap();
+        let outcome = report(
+            &guest,
+            GUEST,
+            password(),
+            &collective,
+            &table.fingerprint,
+            "lan",
+            false,
+            "{}",
+            UNIX,
+        )
+        .await
+        .unwrap();
         assert!(outcome.allowed, "{}", outcome.message);
         // Чужу таблицю власник не перекласифікує.
         let owner_detail = owner.detail(OWNER, &collective, UNIX).await.unwrap();
@@ -1487,5 +1824,327 @@ mod tests {
             .unwrap();
         assert_eq!(joined.collective.fingerprint, collective);
         assert_eq!(epoch_secrets(&guest, GUEST).len(), 1);
+    }
+
+    async fn owner_table(store: &CollectiveStore, collective: &str) -> TableSummary {
+        store
+            .set_table(OWNER, collective, None, "Облік", "C", "after-fact", T1)
+            .await
+            .unwrap()
+    }
+
+    async fn prepare(store: &CollectiveStore, collective: &str, table: &str) -> String {
+        let prepared = store
+            .report_prepare(OWNER, collective, table, "lan", false, "{}", UNIX)
+            .await
+            .unwrap();
+        assert!(prepared.allowed, "{}", prepared.message);
+        assert_eq!(prepared.expires_in, INTENT_TTL_SECONDS);
+        prepared.intent.unwrap()
+    }
+
+    /// SEC-003: два одночасні «Доповісти» одним наміром — рівно один конверт у черзі.
+    #[tokio::test]
+    async fn intent_is_single_use_even_for_parallel_confirms() {
+        let (store, _dir, collective) = owner_with_collective().await;
+        let table = owner_table(&store, &collective).await;
+        let intent = prepare(&store, &collective, &table.fingerprint).await;
+        let (first, second) = tokio::join!(
+            store.report_confirm(OWNER, password(), &intent, UNIX + 1),
+            store.report_confirm(OWNER, password(), &intent, UNIX + 1),
+        );
+        let mut codes = vec![first.unwrap().code, second.unwrap().code];
+        codes.sort();
+        assert_eq!(codes, vec!["intent-unknown", "queued"]);
+        let again = store
+            .report_confirm(OWNER, password(), &intent, UNIX + 2)
+            .await
+            .unwrap();
+        assert_eq!(again.code, "intent-unknown");
+        assert_eq!(
+            store.detail(OWNER, &collective, UNIX).await.unwrap().outbox,
+            1
+        );
+    }
+
+    /// SEC-003: строк 60 секунд; прострочений намір не оживає.
+    #[tokio::test]
+    async fn intent_expires_after_sixty_seconds() {
+        let (store, _dir, collective) = owner_with_collective().await;
+        let table = owner_table(&store, &collective).await;
+        let intent = prepare(&store, &collective, &table.fingerprint).await;
+        let late = store
+            .report_confirm(OWNER, password(), &intent, UNIX + INTENT_TTL_SECONDS)
+            .await
+            .unwrap();
+        assert_eq!((late.allowed, late.code), (false, "intent-expired"));
+        let retry = store
+            .report_confirm(OWNER, password(), &intent, UNIX)
+            .await
+            .unwrap();
+        assert_eq!(retry.code, "intent-unknown");
+        assert_eq!(
+            store.detail(OWNER, &collective, UNIX).await.unwrap().outbox,
+            0
+        );
+    }
+
+    /// SEC-003: зміна класу, призначення або журналу складу після «Підготувати» — відмова.
+    #[tokio::test]
+    async fn changed_table_or_journal_makes_the_intent_stale() {
+        let (store, _dir, collective) = owner_with_collective().await;
+        let table = owner_table(&store, &collective).await;
+        for change in ["class", "purpose", "journal"] {
+            let intent = prepare(&store, &collective, &table.fingerprint).await;
+            match change {
+                "class" => {
+                    store
+                        .set_table(
+                            OWNER,
+                            &collective,
+                            Some(&table.fingerprint),
+                            "Облік",
+                            "A",
+                            "after-fact",
+                            T1,
+                        )
+                        .await
+                        .unwrap();
+                }
+                "purpose" => {
+                    store
+                        .set_table(
+                            OWNER,
+                            &collective,
+                            Some(&table.fingerprint),
+                            "Облік",
+                            "A",
+                            "planned",
+                            T1,
+                        )
+                        .await
+                        .unwrap();
+                }
+                _ => {
+                    // Нове право на іншу таблицю — новий запис журналу складу.
+                    store
+                        .set_table(OWNER, &collective, None, "Інша", "B", "after-fact", T1)
+                        .await
+                        .unwrap();
+                }
+            }
+            let outcome = store
+                .report_confirm(OWNER, password(), &intent, UNIX + 1)
+                .await
+                .unwrap();
+            assert_eq!(
+                (outcome.allowed, outcome.code),
+                (false, "intent-stale"),
+                "{change}"
+            );
+        }
+        assert_eq!(
+            store.detail(OWNER, &collective, UNIX).await.unwrap().outbox,
+            0
+        );
+    }
+
+    /// SEC-003: намір іншого профілю не видно і не витрачається; некоректний текст — помилка.
+    #[tokio::test]
+    async fn intent_of_another_profile_is_unknown_and_not_burned() {
+        let (store, _dir, collective) = owner_with_collective().await;
+        let table = owner_table(&store, &collective).await;
+        let intent = prepare(&store, &collective, &table.fingerprint).await;
+        let foreign = store
+            .report_confirm(GUEST, password(), &intent, UNIX + 1)
+            .await
+            .unwrap();
+        assert_eq!(foreign.code, "intent-unknown");
+        assert!(matches!(
+            store
+                .report_confirm(OWNER, password(), "не-намір", UNIX + 1)
+                .await,
+            Err(CollectiveStoreError::InvalidText)
+        ));
+        let mine = store
+            .report_confirm(OWNER, password(), &intent, UNIX + 1)
+            .await
+            .unwrap();
+        assert_eq!(mine.code, "queued");
+    }
+
+    /// SEC-003: відмова на кроці «Підготувати» не створює наміру; хибний пароль на кроці
+    /// «Доповісти» намір теж спалює (одноразовість навіть при відмові).
+    #[tokio::test]
+    async fn denied_prepare_gives_no_intent_and_wrong_password_burns_it() {
+        let (store, _dir, collective) = owner_with_collective().await;
+        let table = owner_table(&store, &collective).await;
+        let denied = store
+            .report_prepare(
+                OWNER,
+                &collective,
+                &table.fingerprint,
+                "peer_wan",
+                true,
+                "{}",
+                UNIX,
+            )
+            .await
+            .unwrap();
+        assert_eq!((denied.allowed, denied.code), (false, "wan-not-ready"));
+        assert!(denied.intent.is_none());
+        let intent = prepare(&store, &collective, &table.fingerprint).await;
+        assert!(matches!(
+            store
+                .report_confirm(
+                    OWNER,
+                    Zeroizing::new("не-той-пароль".into()),
+                    &intent,
+                    UNIX + 1
+                )
+                .await,
+            Err(CollectiveStoreError::WrongPassword)
+        ));
+        let after = store
+            .report_confirm(OWNER, password(), &intent, UNIX + 1)
+            .await
+            .unwrap();
+        assert_eq!(after.code, "intent-unknown");
+    }
+
+    /// SEC-004: аварія між записом ключів і `commit`, перезапуск. Осиротілий ключ не дає
+    /// доступу до колективу й прибирається після наступної автентифікації; ключі чинного
+    /// колективу лишаються.
+    #[tokio::test]
+    async fn crash_orphan_key_gives_no_access_and_is_swept_after_login() {
+        let (store, dir, collective) = owner_with_collective().await;
+        let orphan: CollectiveId = random_array();
+        {
+            let mut unlocked = store
+                .secret_store(OWNER)
+                .unlock(PASSWORD.as_bytes())
+                .unwrap();
+            let key = EpochKey::generate();
+            let entries = vec![(epoch_purpose(&orphan, 0), key.as_bytes().as_slice())];
+            unlocked.write_many(&entries).unwrap();
+        }
+        // «Перезапуск»: новий екземпляр над тією самою базою й текою ключів.
+        let restarted = CollectiveStore::for_tests(store.pool.clone(), store.secrets_dir.clone());
+        drop(store);
+        let status = restarted.status(OWNER).await.unwrap();
+        assert_eq!(status.collectives.len(), 1);
+        assert!(matches!(
+            restarted.detail(OWNER, &fingerprint(&orphan), UNIX).await,
+            Err(CollectiveStoreError::CollectiveNotFound)
+        ));
+        assert!(matches!(
+            restarted
+                .report_prepare(
+                    OWNER,
+                    &fingerprint(&orphan),
+                    "AAAAA-AAAAA",
+                    "lan",
+                    false,
+                    "{}",
+                    UNIX
+                )
+                .await,
+            Err(CollectiveStoreError::CollectiveNotFound)
+        ));
+        assert_eq!(epoch_secrets(&restarted, OWNER).len(), 2);
+        restarted
+            .create_collective(OWNER, password(), "Друга група", T1, UNIX)
+            .await
+            .unwrap();
+        let left = epoch_secrets(&restarted, OWNER);
+        assert_eq!(
+            left.len(),
+            2,
+            "осиротілий прибрано, два чинні колективи лишились"
+        );
+        assert!(!left.contains(&epoch_purpose(&orphan, 0)));
+        // Чинний колектив і далі працює зі своїм ключем.
+        let table = owner_table(&restarted, &collective).await;
+        let intent = prepare(&restarted, &collective, &table.fingerprint).await;
+        let outcome = restarted
+            .report_confirm(OWNER, password(), &intent, UNIX + 1)
+            .await
+            .unwrap();
+        assert_eq!(outcome.code, "queued");
+        drop(dir);
+    }
+
+    /// SEC-004: аварія посеред `join_accept` (ключ записано, рядка колективу немає) —
+    /// повторний вступ тим самим пакетом після перезапуску проходить і перезаписує ключ.
+    #[tokio::test]
+    async fn rejoin_after_crash_overwrites_the_leftover_key() {
+        let (owner, _a, collective) = owner_with_collective().await;
+        let (guest, _b) = node(GUEST).await;
+        let invitation = owner
+            .create_invitation(OWNER, password(), &collective, 24, UNIX)
+            .await
+            .unwrap();
+        let request = guest
+            .join_request(GUEST, password(), &invitation.text, UNIX + 10)
+            .await
+            .unwrap();
+        let admission = owner
+            .admit(OWNER, password(), &collective, &request.text, T1, UNIX + 20)
+            .await
+            .unwrap();
+        let (collective_id, ..) = unbundle(&decode(KEYS_PREFIX, &admission.text).unwrap()).unwrap();
+        {
+            let mut unlocked = guest
+                .secret_store(GUEST)
+                .unlock(PASSWORD.as_bytes())
+                .unwrap();
+            let garbage = [7u8; KEY_LEN];
+            let entries = vec![(epoch_purpose(&collective_id, 0), garbage.as_slice())];
+            unlocked.write_many(&entries).unwrap();
+        }
+        let restarted = CollectiveStore::for_tests(guest.pool.clone(), guest.secrets_dir.clone());
+        assert!(restarted
+            .status(GUEST)
+            .await
+            .unwrap()
+            .collectives
+            .is_empty());
+        restarted
+            .join_accept(GUEST, password(), &admission.text, T1)
+            .await
+            .unwrap();
+        let unlocked = restarted
+            .secret_store(GUEST)
+            .unlock(PASSWORD.as_bytes())
+            .unwrap();
+        let key = unlocked
+            .read(&epoch_purpose(&collective_id, 0))
+            .unwrap()
+            .unwrap();
+        assert_ne!(key.as_slice(), [7u8; KEY_LEN].as_slice());
+        assert_eq!(epoch_secrets(&restarted, GUEST).len(), 1);
+    }
+
+    /// SEC-004: без списку колективів з бази нічого не прибирається; прибирання лише ключів
+    /// епох невідомих колективів.
+    #[test]
+    fn orphan_sweep_skips_on_read_failure_and_keeps_known_keys() {
+        let known: CollectiveId = [1; ID_LEN];
+        let orphan: CollectiveId = [2; ID_LEN];
+        let purposes = [
+            epoch_purpose(&known, 0),
+            epoch_purpose(&known, 1),
+            epoch_purpose(&orphan, 0),
+            "collective/member-sign".to_owned(),
+        ];
+        let refs = || purposes.iter().map(String::as_str);
+        assert!(orphan_epoch_purposes(refs(), None).is_empty());
+        let set: std::collections::HashSet<_> = [known].into_iter().collect();
+        assert_eq!(
+            orphan_epoch_purposes(refs(), Some(&set)),
+            vec![epoch_purpose(&orphan, 0)]
+        );
+        let empty = std::collections::HashSet::new();
+        assert_eq!(orphan_epoch_purposes(refs(), Some(&empty)).len(), 3);
     }
 }
