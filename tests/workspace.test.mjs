@@ -516,11 +516,11 @@ test('host.collectives є лише в застосунку «Колективи�
   const host = createHost({ appEntry: appById('collectives'), invoke });
   assert.deepEqual(await host.collectives.status(), { keyStore: 'absent' });
   await host.collectives.createIdentity('пароль-профілю');
-  await host.collectives.create('пароль-профілю', 'Група');
+  await host.collectives.create('пароль-профілю', 'Група', 'Синтетик');
   assert.deepEqual(calls, [
     ['collective_status', undefined],
     ['collective_create_identity', { password: 'пароль-профілю' }],
-    ['collective_create', { password: 'пароль-профілю', name: 'Група' }],
+    ['collective_create', { password: 'пароль-профілю', name: 'Група', memberName: 'Синтетик' }],
   ]);
   assert.equal(createHost({ appEntry: appById('collectives') }).collectives, null, 'без Tauri');
   assert.equal(createHost({ appEntry: appById('easygreen'), invoke }).collectives, null, 'інший застосунок');
@@ -534,7 +534,7 @@ test('host.collectives: команди обміну передають лише 
   await host.collectives.setTable({ collective: 'ABCDEFGHIJ', title: 'Облік', cls: 'C', purpose: 'after-fact' });
   await host.collectives.setTable({ collective: 'ABCDEFGHIJ', table: 'KLMNOPQRST', title: 'Облік', cls: 'D', purpose: 'planned' });
   await host.collectives.inviteCreate('пароль-профілю', 'ABCDEFGHIJ', '24');
-  await host.collectives.joinRequest('пароль-профілю', 'EWINV1.x');
+  await host.collectives.joinRequest('пароль-профілю', 'EWINV1.x', 'Синтетик');
   await host.collectives.inviteAdmit('пароль-профілю', 'ABCDEFGHIJ', 'EWJOIN1.x');
   await host.collectives.joinAccept('пароль-профілю', 'EWKEYS1.x');
   await host.collectives.reportPrepare({ collective: 'ABCDEFGHIJ', table: 'KLMNOPQRST',
@@ -545,7 +545,7 @@ test('host.collectives: команди обміну передають лише 
     ['collective_table_set', { collective: 'ABCDEFGHIJ', table: null, title: 'Облік', class: 'C', purpose: 'after-fact' }],
     ['collective_table_set', { collective: 'ABCDEFGHIJ', table: 'KLMNOPQRST', title: 'Облік', class: 'D', purpose: 'planned' }],
     ['collective_invite_create', { password: 'пароль-профілю', collective: 'ABCDEFGHIJ', hours: 24 }],
-    ['collective_join_request', { password: 'пароль-профілю', invitation: 'EWINV1.x' }],
+    ['collective_join_request', { password: 'пароль-профілю', invitation: 'EWINV1.x', memberName: 'Синтетик' }],
     ['collective_invite_admit', { password: 'пароль-профілю', collective: 'ABCDEFGHIJ', request: 'EWJOIN1.x' }],
     ['collective_join_accept', { password: 'пароль-профілю', keys: 'EWKEYS1.x' }],
     ['collective_report_prepare', { collective: 'ABCDEFGHIJ', table: 'KLMNOPQRST',

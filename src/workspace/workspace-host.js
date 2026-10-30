@@ -193,7 +193,10 @@ export function createHost({
     ? Object.freeze({
       status: () => invoke('collective_status'),
       createIdentity: password => invoke('collective_create_identity', { password: String(password ?? '') }),
-      create: (password, name) => invoke('collective_create', { password: String(password ?? ''), name: String(name ?? '') }),
+      // Ім'я в колективі вказує сам учасник; воно йде в журнал складу під його підписом.
+      create: (password, name, memberName) => invoke('collective_create', {
+        password: String(password ?? ''), name: String(name ?? ''), memberName: String(memberName ?? ''),
+      }),
       // Обмін (C3b, другий зріз): тексти запрошень і ключів люди пересилають самі,
       // «Підготувати» лишає намір у Rust, «Доповісти» підтверджує його паролем (SEC-003);
       // прапорця «переглянуто» з JS немає. Конверт іде лише в локальну чергу.
@@ -205,8 +208,8 @@ export function createHost({
       inviteCreate: (password, collective, hours) => invoke('collective_invite_create', {
         password: String(password ?? ''), collective: String(collective ?? ''), hours: Number(hours),
       }),
-      joinRequest: (password, invitation) => invoke('collective_join_request', {
-        password: String(password ?? ''), invitation: String(invitation ?? ''),
+      joinRequest: (password, invitation, memberName) => invoke('collective_join_request', {
+        password: String(password ?? ''), invitation: String(invitation ?? ''), memberName: String(memberName ?? ''),
       }),
       inviteAdmit: (password, collective, request) => invoke('collective_invite_admit', {
         password: String(password ?? ''), collective: String(collective ?? ''), request: String(request ?? ''),

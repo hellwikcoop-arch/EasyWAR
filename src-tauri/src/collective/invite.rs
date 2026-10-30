@@ -21,7 +21,7 @@ use std::collections::HashSet;
 
 use super::codec::{Reader, Writer};
 use super::epoch::{unwrap_epoch_key, wrap_epoch_key, CollectiveId, EpochKey, EpochWrap};
-use super::identity::{self, DeviceRecord, ExchangeBinding, MemberId, MemberIdentity};
+use super::identity::{self, DeviceRecord, ExchangeBinding, MemberId, MemberIdentity, NameRecord};
 use super::replay::{InMemoryMembership, MembershipView};
 use super::{labels, Reason, ID_LEN, SIGNATURE_LEN};
 
@@ -134,13 +134,16 @@ impl Invitation {
     }
 }
 
-/// Відповідь запрошеного: зв'язування, перший пристрій і підпис над nonce запрошення.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Відповідь запрошеного: зв'язування, перший пристрій, підпис над nonce запрошення і,
+/// необов'язково, ім'я, яке запрошений вказав сам ([`NameRecord`] з власним підписом).
+/// Ім'я йде останнім полем, тож відповідь без імені кодується як і раніше.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct JoinRequest {
     pub invitation: Invitation,
     pub binding: ExchangeBinding,
     pub device: DeviceRecord,
     pub signature: [u8; SIGNATURE_LEN],
+    pub name: Option<NameRecord>,
 }
 
 impl JoinRequest {
@@ -174,7 +177,23 @@ impl JoinRequest {
             binding,
             device,
             signature,
+            name: None,
         }
+    }
+
+    /// Відповідь з ім'ям, яке запрошений вказав сам.
+    pub fn build_named(
+        invitation: Invitation,
+        member: &MemberIdentity,
+        device: &identity::DevicePublic,
+        name: &str,
+        now: i64,
+    ) -> Result<Self, Reason> {
+        let name = member.name_record(invitation.collective_id, name, now)?;
+        Ok(Self {
+            name: Some(name),
+            ..Self::build(invitation, member, device, now)
+        })
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
@@ -183,6 +202,9 @@ impl JoinRequest {
             .var(&self.binding.to_bytes())
             .var(&self.device.to_bytes())
             .fixed(&self.signature);
+        if let Some(name) = &self.name {
+            w.var(&name.to_bytes());
+        }
         w.finish()
     }
 
@@ -192,12 +214,18 @@ impl JoinRequest {
         let binding = ExchangeBinding::from_bytes(r.var()?)?;
         let device = DeviceRecord::from_bytes(r.var()?)?;
         let signature = r.fixed()?;
+        let name = if r.at_end() {
+            None
+        } else {
+            Some(NameRecord::from_bytes(r.var()?)?)
+        };
         r.finish()?;
         Ok(Self {
             invitation,
             binding,
             device,
             signature,
+            name,
         })
     }
 }
@@ -241,10 +269,17 @@ pub struct Admission {
     pub member: MemberId,
     pub join_seq: u64,
     pub device_seq: u64,
+    /// Запис імені, якщо запрошений його вказав.
+    pub name_seq: Option<u64>,
     pub wraps: Vec<EpochWrap>,
 }
 
 impl Admission {
+    /// Останній запис журналу, доданий цим вступом.
+    pub fn last_seq(&self) -> u64 {
+        self.name_seq.unwrap_or(self.device_seq)
+    }
+
     /// Поточна епоха на момент вступу.
     pub fn epoch(&self) -> u32 {
         (self.wraps.len() - 1) as u32
@@ -278,6 +313,10 @@ pub fn admit(
         return Err(Reason::DeviceNotValid);
     }
     request.device.verify(bound.public())?;
+    // Ім'я перевіряється до будь-якої зміни журналу, як і пристрій.
+    if let Some(name) = &request.name {
+        name.verify(bound.public(), membership.collective_id())?;
+    }
     if membership.bound_member(&bound.member_id()).is_some()
         || membership.revoked_at(&bound.member_id()).is_some()
     {
@@ -293,11 +332,18 @@ pub fn admit(
         .map(|(epoch, key)| wrap_epoch_key(key, epoch as u32, &bound))
         .collect::<Result<Vec<_>, _>>()?;
     let (join_seq, device_seq) = membership.join_with_device(&request.binding, &request.device)?;
+    // Ім'я вже перевірене на ключі нового учасника, тож запис не відхиляється.
+    let name_seq = request
+        .name
+        .as_ref()
+        .map(|name| membership.set_name(name))
+        .transpose()?;
     ledger.used.insert(invitation.nonce);
     Ok(Admission {
         member: bound.member_id(),
         join_seq,
         device_seq,
+        name_seq,
         wraps,
     })
 }
@@ -480,14 +526,14 @@ mod tests {
         // Чуже зв'язування під іншим талоном.
         let moved = JoinRequest {
             invitation: second,
-            ..request
+            ..request.clone()
         };
         assert_eq!(w.admit(&moved, T0 + 1).err(), Some(Reason::BadSignature));
         // Пристрій, підтверджений іншим учасником.
         let mallory = MemberIdentity::generate();
         let swapped = JoinRequest {
             device: mallory.issue_device(&device, T0),
-            ..request
+            ..request.clone()
         };
         assert_eq!(w.admit(&swapped, T0 + 1).err(), Some(Reason::BadSignature));
         assert_eq!(w.membership.latest_seq(), 1);
@@ -540,5 +586,48 @@ mod tests {
         assert_eq!(w.admit(&request, T0 + 3).err(), Some(Reason::UnknownEpoch));
         assert_eq!(w.membership.latest_seq(), before);
         assert!(!w.ledger.is_used(&request.invitation.nonce));
+    }
+    #[test]
+    fn named_request_round_trips_and_admits_with_the_name() {
+        let mut w = World::new();
+        let bob = MemberIdentity::generate();
+        let device = DeviceIdentity::generate().public();
+        let invitation = w.invite();
+        let request = JoinRequest::from_bytes(
+            &JoinRequest::build_named(invitation, &bob, &device, "Синтетик Боб", T0)
+                .unwrap()
+                .to_bytes(),
+        )
+        .unwrap();
+        assert_eq!(
+            request.name.as_ref().map(|n| n.name.as_str()),
+            Some("Синтетик Боб")
+        );
+        // Підмінене ім'я (чужий підпис) відхиляється без сліду в журналі.
+        let mallory = MemberIdentity::generate();
+        let mut forged = request.clone();
+        forged.name = Some(
+            mallory
+                .name_record(w.collective, "Синтетик Боб", T0)
+                .unwrap(),
+        );
+        assert_eq!(
+            w.admit(&forged, T0 + 1).err(),
+            Some(Reason::ExchangeNotBound)
+        );
+        assert_eq!(w.membership.latest_seq(), 1);
+        let admission = w.admit(&request, T0 + 1).unwrap();
+        assert_eq!(admission.name_seq, Some(admission.device_seq + 1));
+        assert_eq!(admission.last_seq(), w.membership.latest_seq());
+        assert_eq!(
+            w.membership.member_name(&bob.member_id()),
+            Some("Синтетик Боб")
+        );
+        // Відповідь без імені кодується як раніше і читається без імені.
+        let plain = JoinRequest::build(w.invite(), &MemberIdentity::generate(), &device, T0);
+        assert_eq!(
+            JoinRequest::from_bytes(&plain.to_bytes()).unwrap().name,
+            None
+        );
     }
 }

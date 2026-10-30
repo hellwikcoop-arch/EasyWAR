@@ -62,6 +62,11 @@ const KIND_NAMES = Object.freeze({ invitation: 'запрошення', request: 
 const purposeLabel = value => PURPOSE_OPTIONS.find(option => option.value === value)?.label ?? 'Невідоме призначення';
 
 /** Рядок про таблицю колективу. Різниця між вказаним і чинним класом пояснюється. */
+// Учасник у списку: ім’я, яке він вказав сам, і відбиток; без імені — лише відбиток.
+export function memberLine(member) {
+  return member?.name ? `${member.name} · ${member.fingerprint}` : String(member?.fingerprint ?? '');
+}
+
 export function tableLine(table) {
   const parts = [`клас ${table.class}`];
   if (table.declaredClass !== table.class) parts[0] += ` (вказано ${table.declaredClass}; діє D, бо дані не підтверджені як облік після факту)`;

@@ -35,8 +35,9 @@ use crate::collective::send_gate::{
 };
 use crate::collective::{random_array, sha256, ID_LEN, KEY_LEN};
 use crate::collective_store::{
-    check_password, collective_name, epoch_purpose, fingerprint, identities, orphan_epoch_purposes,
-    CollectiveStore, CollectiveStoreError, CollectiveSummary, MAX_COLLECTIVES, ORPHAN_SWEEP_FAILED,
+    check_password, collective_name, epoch_purpose, fingerprint, identities, normalize_member_name,
+    orphan_epoch_purposes, CollectiveStore, CollectiveStoreError, CollectiveSummary,
+    MAX_COLLECTIVES, ORPHAN_SWEEP_FAILED,
 };
 
 const INVITE_PREFIX: &str = "EWINV1.";
@@ -83,13 +84,21 @@ pub struct CollectiveDetail {
     pub name: String,
     pub epoch: u32,
     pub latest_seq: u64,
-    pub members: Vec<String>,
+    pub members: Vec<MemberSummary>,
     pub tables: Vec<TableSummary>,
     /// Конверти в локальній черзі відправки.
     pub outbox: usize,
     /// Чинна політика транспортів: обидва `false`, доки власник не прийме транспорт.
     pub wan_accepted: bool,
     pub base44_accepted: bool,
+}
+
+/// Учасник за журналом складу: відбиток і ім'я, яке він вказав сам (якщо вказав).
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemberSummary {
+    pub fingerprint: String,
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -112,6 +121,8 @@ pub struct JoinRequestText {
 #[serde(rename_all = "camelCase")]
 pub struct AdmissionText {
     pub member_fingerprint: String,
+    /// Ім'я, яке запрошений вказав сам; звірте його разом із відбитком.
+    pub member_name: Option<String>,
     /// Пакет ключів для запрошеного; відкритих ключів у ньому немає.
     pub text: String,
     pub latest_seq: u64,
@@ -121,8 +132,8 @@ pub struct AdmissionText {
 #[serde(rename_all = "camelCase")]
 pub struct JoinedCollective {
     pub collective: CollectiveSummary,
-    /// Відбитки учасників за перевіреним журналом: звірте із запрошувачем.
-    pub members: Vec<String>,
+    /// Учасники за перевіреним журналом: звірте відбитки із запрошувачем.
+    pub members: Vec<MemberSummary>,
 }
 
 #[derive(Debug, Serialize)]
@@ -370,7 +381,7 @@ impl CollectiveStore {
         let me = self.me(profile_id).await?;
         let (membership, _) = self.load_journal(profile_id, &collective_id).await?;
         let latest = membership.latest_seq();
-        let mut members: Vec<String> = membership
+        let mut members: Vec<MemberSummary> = membership
             .records()
             .iter()
             .filter_map(|record| match record {
@@ -378,7 +389,7 @@ impl CollectiveStore {
                 _ => None,
             })
             .filter(|bound| membership.revoked_at(&bound.member_id()).is_none())
-            .map(|bound| fingerprint(&bound.member_id()))
+            .map(|bound| member_summary(&membership, &bound.member_id()))
             .collect();
         members.dedup();
         let tables = self
@@ -544,8 +555,10 @@ impl CollectiveStore {
         profile_id: &str,
         password: Zeroizing<String>,
         invitation_text: &str,
+        member_name: &str,
         now_unix: i64,
     ) -> Result<JoinRequestText> {
+        let member_name = normalize_member_name(member_name)?;
         let invitation = Invitation::from_bytes(&decode(INVITE_PREFIX, invitation_text)?)
             .map_err(|_| CollectiveStoreError::InvalidText)?;
         if self
@@ -556,7 +569,14 @@ impl CollectiveStore {
             return Err(CollectiveStoreError::AlreadyJoined);
         }
         self.with_secrets(profile_id, password, move |_, member, device| {
-            let request = JoinRequest::build(invitation, member, &device.public(), now_unix);
+            let request = JoinRequest::build_named(
+                invitation,
+                member,
+                &device.public(),
+                &member_name,
+                now_unix,
+            )
+            .map_err(|_| CollectiveStoreError::InvalidMemberName)?;
             Ok(JoinRequestText {
                 text: encode(JOIN_PREFIX, &request.to_bytes()),
                 collective_fingerprint: fingerprint(&invitation.collective_id),
@@ -578,6 +598,7 @@ impl CollectiveStore {
     ) -> Result<AdmissionText> {
         let request = JoinRequest::from_bytes(&decode(JOIN_PREFIX, request_text)?)
             .map_err(|_| CollectiveStoreError::InvalidText)?;
+        let nonce = request.invitation.nonce;
         let (collective_id, name) = self.find_collective(profile_id, collective_fp).await?;
         let me = self.me(profile_id).await?;
         let (membership, _) = self.load_journal(profile_id, &collective_id).await?;
@@ -612,7 +633,7 @@ impl CollectiveStore {
             &collective_id,
             &membership,
             admission.join_seq,
-            admission.device_seq,
+            admission.last_seq(),
             now,
         )
         .await?;
@@ -622,13 +643,14 @@ impl CollectiveStore {
         )
         .bind(profile_id)
         .bind(collective_id.as_slice())
-        .bind(request.invitation.nonce.as_slice())
+        .bind(nonce.as_slice())
         .bind(now)
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
         Ok(AdmissionText {
             member_fingerprint: fingerprint(&admission.member),
+            member_name: membership.member_name(&admission.member).map(str::to_owned),
             text: encode(
                 KEYS_PREFIX,
                 &bundle(&collective_id, &name, &membership, &admission.wraps),
@@ -686,14 +708,14 @@ impl CollectiveStore {
                 "ключі епох не відповідають журналу",
             ));
         }
-        let members: Vec<String> = membership
+        let members: Vec<MemberSummary> = membership
             .records()
             .iter()
             .filter_map(|record| match record {
                 MembershipRecord::Join(binding) => binding
                     .verify(&collective_id)
                     .ok()
-                    .map(|bound| fingerprint(&bound.member_id())),
+                    .map(|bound| member_summary(&membership, &bound.member_id())),
                 _ => None,
             })
             .collect();
@@ -1083,6 +1105,13 @@ fn poisoned() -> CollectiveStoreError {
     CollectiveStoreError::Io("сховище намірів пошкоджене".into())
 }
 
+fn member_summary(membership: &InMemoryMembership, member: &MemberId) -> MemberSummary {
+    MemberSummary {
+        fingerprint: fingerprint(member),
+        name: membership.member_name(member).map(str::to_owned),
+    }
+}
+
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
@@ -1381,7 +1410,14 @@ mod tests {
     async fn owner_with_collective() -> (CollectiveStore, tempfile::TempDir, String) {
         let (store, dir) = node(OWNER).await;
         let created = store
-            .create_collective(OWNER, password(), "Навчальна група", T1, UNIX)
+            .create_collective(
+                OWNER,
+                password(),
+                "Навчальна група",
+                "Синтетик Власник",
+                T1,
+                UNIX,
+            )
             .await
             .unwrap();
         (store, dir, created.fingerprint)
@@ -1405,7 +1441,10 @@ mod tests {
         assert_eq!((table.class, table.declared_class), ('B', 'B'));
         assert!(table.mine && table.can_write);
         let detail = store.detail(OWNER, &collective, UNIX).await.unwrap();
-        assert_eq!(detail.latest_seq, 3, "вступ, пристрій, право на таблицю");
+        assert_eq!(
+            detail.latest_seq, 4,
+            "вступ, пристрій, ім'я, право на таблицю"
+        );
         assert_eq!(detail.tables, vec![table.clone()]);
         assert_eq!(detail.outbox, 0);
         assert!(!detail.wan_accepted && !detail.base44_accepted);
@@ -1563,6 +1602,7 @@ mod tests {
                 GUEST,
                 password(),
                 &format!(" {}\n", invitation.text),
+                "  Синтетик   Гість ",
                 UNIX + 10,
             )
             .await
@@ -1581,7 +1621,7 @@ mod tests {
             .admit(OWNER, password(), &collective, &request.text, T1, UNIX + 20)
             .await
             .unwrap();
-        assert_eq!(admission.latest_seq, 4);
+        assert_eq!(admission.latest_seq, 6);
         let guest_fp = guest
             .status(GUEST)
             .await
@@ -1590,6 +1630,7 @@ mod tests {
             .unwrap()
             .fingerprint;
         assert_eq!(admission.member_fingerprint, guest_fp);
+        assert_eq!(admission.member_name.as_deref(), Some("Синтетик Гість"));
         // Той самий талон удруге не впускає.
         assert!(matches!(
             owner
@@ -1604,10 +1645,20 @@ mod tests {
             .unwrap();
         assert_eq!(joined.collective.fingerprint, collective);
         assert_eq!(joined.collective.members, 2);
-        assert_eq!(joined.members, vec![owner_fp.clone(), guest_fp.clone()]);
+        let expected = vec![
+            MemberSummary {
+                fingerprint: owner_fp,
+                name: Some("Синтетик Власник".into()),
+            },
+            MemberSummary {
+                fingerprint: guest_fp,
+                name: Some("Синтетик Гість".into()),
+            },
+        ];
+        assert_eq!(joined.members, expected);
         let detail = guest.detail(GUEST, &collective, UNIX).await.unwrap();
-        assert_eq!(detail.members, vec![owner_fp, guest_fp]);
-        assert_eq!(detail.latest_seq, 4);
+        assert_eq!(detail.members, expected);
+        assert_eq!(detail.latest_seq, 6);
         assert!(matches!(
             guest
                 .join_accept(GUEST, password(), &admission.text, T1)
@@ -1656,7 +1707,7 @@ mod tests {
         let (stranger, _c) = node(GUEST).await;
         assert!(matches!(
             guest
-                .join_request(GUEST, password(), "EWJOIN1.AAAA", UNIX)
+                .join_request(GUEST, password(), "EWJOIN1.AAAA", "Синтетик Гість", UNIX)
                 .await,
             Err(CollectiveStoreError::InvalidText)
         ));
@@ -1665,7 +1716,7 @@ mod tests {
             .await
             .unwrap();
         let request = guest
-            .join_request(GUEST, password(), &invitation.text, UNIX)
+            .join_request(GUEST, password(), &invitation.text, "Синтетик Гість", UNIX)
             .await
             .unwrap();
         // Прострочений талон.
@@ -1779,19 +1830,33 @@ mod tests {
         // Відмова на другій вставці тієї самої транзакції: рядок колективу відкочується.
         fail_inserts(&store, "collective_membership_log").await;
         assert!(store
-            .create_collective(OWNER, password(), "Навчальна група", T1, UNIX)
+            .create_collective(
+                OWNER,
+                password(),
+                "Навчальна група",
+                "Синтетик Власник",
+                T1,
+                UNIX
+            )
             .await
             .is_err());
         assert!(epoch_secrets(&store, OWNER).is_empty());
         assert!(store.status(OWNER).await.unwrap().collectives.is_empty());
         heal_inserts(&store, "collective_membership_log").await;
         let created = store
-            .create_collective(OWNER, password(), "Навчальна група", T1, UNIX)
+            .create_collective(
+                OWNER,
+                password(),
+                "Навчальна група",
+                "Синтетик Власник",
+                T1,
+                UNIX,
+            )
             .await
             .unwrap();
         assert_eq!(epoch_secrets(&store, OWNER).len(), 1);
         assert_eq!(store.status(OWNER).await.unwrap().collectives.len(), 1);
-        assert_eq!(created.latest_seq, 2);
+        assert_eq!(created.latest_seq, 3);
     }
 
     /// E8-SEC-001: join_accept з відмовою SQL прибирає ключі епох; повтор проходить.
@@ -1804,7 +1869,13 @@ mod tests {
             .await
             .unwrap();
         let request = guest
-            .join_request(GUEST, password(), &invitation.text, UNIX + 10)
+            .join_request(
+                GUEST,
+                password(),
+                &invitation.text,
+                "Синтетик Гість",
+                UNIX + 10,
+            )
             .await
             .unwrap();
         let admission = owner
@@ -2056,7 +2127,14 @@ mod tests {
         ));
         assert_eq!(epoch_secrets(&restarted, OWNER).len(), 2);
         restarted
-            .create_collective(OWNER, password(), "Друга група", T1, UNIX)
+            .create_collective(
+                OWNER,
+                password(),
+                "Друга група",
+                "Синтетик Власник",
+                T1,
+                UNIX,
+            )
             .await
             .unwrap();
         let left = epoch_secrets(&restarted, OWNER);
@@ -2088,7 +2166,13 @@ mod tests {
             .await
             .unwrap();
         let request = guest
-            .join_request(GUEST, password(), &invitation.text, UNIX + 10)
+            .join_request(
+                GUEST,
+                password(),
+                &invitation.text,
+                "Синтетик Гість",
+                UNIX + 10,
+            )
             .await
             .unwrap();
         let admission = owner
@@ -2170,7 +2254,13 @@ mod tests {
             .await
             .unwrap();
         let request = guest
-            .join_request(GUEST, password(), &invitation.text, UNIX + 10)
+            .join_request(
+                GUEST,
+                password(),
+                &invitation.text,
+                "Синтетик Гість",
+                UNIX + 10,
+            )
             .await
             .unwrap();
         let admission = owner
@@ -2200,7 +2290,14 @@ mod tests {
         ));
         assert!(failed(
             guest
-                .create_collective(GUEST, password(), "Група гостя", T1, UNIX)
+                .create_collective(
+                    GUEST,
+                    password(),
+                    "Група гостя",
+                    "Синтетик Власник",
+                    T1,
+                    UNIX
+                )
                 .await
                 .map(|_| ())
         ));

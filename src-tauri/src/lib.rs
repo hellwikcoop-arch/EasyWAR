@@ -1776,6 +1776,7 @@ async fn collective_create(
     collectives: tauri::State<'_, CollectiveStore>,
     password: String,
     name: String,
+    member_name: String,
 ) -> Result<collective_store::CollectiveSummary, String> {
     office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
     let password = zeroize::Zeroizing::new(password);
@@ -1786,6 +1787,7 @@ async fn collective_create(
             &profile_id,
             password,
             &name,
+            &member_name,
             &library_now(),
             Utc::now().timestamp(),
         )
@@ -1893,12 +1895,19 @@ async fn collective_join_request(
     collectives: tauri::State<'_, CollectiveStore>,
     password: String,
     invitation: String,
+    member_name: String,
 ) -> Result<collective_sync::JoinRequestText, String> {
     office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
     let profile_id = active_profile_id(&session)?;
     let password = collective_password(&profiles, &profile_id, password).await?;
     collectives
-        .join_request(&profile_id, password, &invitation, Utc::now().timestamp())
+        .join_request(
+            &profile_id,
+            password,
+            &invitation,
+            &member_name,
+            Utc::now().timestamp(),
+        )
         .await
         .map_err(|error| error.to_string())
 }

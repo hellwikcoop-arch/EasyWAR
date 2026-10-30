@@ -76,7 +76,7 @@ test('захищені колективи: стани ключа, межі па�
 
 import {
   CLASS_OPTIONS, PURPOSE_OPTIONS, TRANSPORT_OPTIONS, checkHours, checkOperation, detailLine,
-  expectText, preparedText, reportText, tableLine, textKind, transportNote,
+  expectText, memberLine, preparedText, reportText, tableLine, textKind, transportNote,
 } from '../src/workspace/collectives/secure-core.js';
 
 test('обмін у колективі: підписи класу, транспорту, відмов і перевірки форм', () => {
@@ -113,4 +113,9 @@ test('обмін у колективі: підписи класу, трансп�
   assert.throws(() => expectText('EWKEYS1.x', 'invitation'), /Вставлено пакет ключів/);
   assert.throws(() => expectText('', 'keys'), /EWKEYS1\./);
   assert.doesNotThrow(() => expectText('EWJOIN1.x', 'request'));
+});
+
+test('учасник колективу показується з ім’ям, яке він вказав сам', () => {
+  assert.equal(memberLine({ fingerprint: 'ABCDEFGHIJ', name: 'Синтетик Петро' }), 'Синтетик Петро · ABCDEFGHIJ');
+  assert.equal(memberLine({ fingerprint: 'ABCDEFGHIJ', name: null }), 'ABCDEFGHIJ');
 });

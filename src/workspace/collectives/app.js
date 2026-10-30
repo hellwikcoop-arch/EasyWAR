@@ -6,7 +6,7 @@ import {
 import {
   CLASS_OPTIONS, PURPOSE_OPTIONS, TRANSPORT_OPTIONS, canCreateCollective, canCreateIdentity,
   checkHours, checkOperation, checkPassword, collectiveLine, detailLine, expectText, keyStoreText,
-  preparedText, reportText, tableLine, transportNote,
+  memberLine, preparedText, reportText, tableLine, transportNote,
 } from './secure-core.js';
 import './collectives.css';
 
@@ -106,6 +106,12 @@ export async function mount(container, host) {
   }
   // Помилка показується під тією формою, яка її спричинила (`secureErrorAt`), а не під першою.
   let secureErrorAt = '';
+  function memberNameInput() {
+    const e = input('Як вас бачитимуть учасники');
+    e.maxLength = 40;
+    e.autocomplete = 'name';
+    return e;
+  }
   async function secureAction(fn, at = '') {
     if (secureBusy) return;
     secureBusy = true; secureError = ''; secureErrorAt = ''; renderSecure();
@@ -179,17 +185,18 @@ export async function mount(container, host) {
     if (canCreateCollective(secureState)) {
       const form = $('form', 'ec-inline');
       const name = input('Назва колективу');
+      const me = memberNameInput();
       const pass = passwordInput();
       const submit = button('Створити захищений колектив');
       submit.type = 'submit';
       submit.disabled = secureBusy;
-      form.append(field('Назва', name), field('Пароль профілю', pass), submit);
+      form.append(field('Назва', name), field('Ваше ім’я в колективі', me), field('Пароль профілю', pass), submit);
       form.addEventListener('submit', event => {
         event.preventDefault();
         secureAction(async () => {
           checkPassword(pass.value);
-          await host.collectives.create(pass.value, name.value);
-          pass.value = ''; name.value = '';
+          await host.collectives.create(pass.value, name.value, me.value);
+          pass.value = ''; name.value = ''; me.value = '';
         }, 'create');
       });
       secure.append(form, ...errorAt('create'));
@@ -250,9 +257,10 @@ export async function mount(container, host) {
     const shown = sharedBox();
     if (shown) box.append(shown);
     const invitation = area('EWINV1.…');
-    box.append($('p', 'ec-label', 'ВСТУПИТИ ЗА ЗАПРОШЕННЯМ'), withError(passwordForm('Підготувати відповідь', [field('Текст запрошення', invitation)], async password => {
+    const me = memberNameInput();
+    box.append($('p', 'ec-label', 'ВСТУПИТИ ЗА ЗАПРОШЕННЯМ'), withError(passwordForm('Підготувати відповідь', [field('Текст запрошення', invitation), field('Ваше ім’я в колективі', me)], async password => {
       expectText(invitation.value, 'invitation');
-      const made = await host.collectives.joinRequest(password, invitation.value);
+      const made = await host.collectives.joinRequest(password, invitation.value, me.value);
       shared = { title: 'ВІДПОВІДЬ НА ЗАПРОШЕННЯ', text: made.text,
         hint: `Колектив ${made.collectiveFingerprint}, запросив ${made.inviterFingerprint}. Звірте відбиток із запрошувачем голосом чи особисто й передайте йому цей текст.` };
     }, 'join-request'), 'join-request'));
@@ -261,7 +269,7 @@ export async function mount(container, host) {
       expectText(keys.value, 'keys');
       const joined = await host.collectives.joinAccept(password, keys.value);
       exchangeFp = joined.collective.fingerprint;
-      shared = { title: 'ВИ В КОЛЕКТИВІ', text: joined.members.join('\n'),
+      shared = { title: 'ВИ В КОЛЕКТИВІ', text: joined.members.map(memberLine).join('\n'),
         hint: `«${joined.collective.name}»: відбитки учасників за перевіреним журналом. Звірте їх із запрошувачем.` };
       keys.value = '';
     }, 'join-accept'), 'join-accept'));
@@ -272,7 +280,7 @@ export async function mount(container, host) {
     const members = $('div', 'ec-list');
     for (const member of detail.members) {
       const row = $('div', 'ec-row');
-      row.append($('span', 'ec-label', 'Учасник'), $('code', '', member));
+      row.append($('span', 'ec-person', member.name || 'Учасник без імені'), $('code', '', member.fingerprint));
       members.append(row);
     }
     box.append(members);
@@ -313,7 +321,7 @@ export async function mount(container, host) {
       expectText(request.value, 'request');
       const admitted = await host.collectives.inviteAdmit(password, exchangeFp, request.value);
       shared = { title: 'ПАКЕТ КЛЮЧІВ ДЛЯ НОВОГО УЧАСНИКА', text: admitted.text,
-        hint: `Учасник ${admitted.memberFingerprint} у журналі. Передайте йому цей текст; відкритих ключів у ньому немає.` };
+        hint: `Учасник ${admitted.memberName ? `«${admitted.memberName}» ` : ''}${admitted.memberFingerprint} у журналі. Ім’я учасник вказав сам: звірте відбиток. Передайте йому цей текст; відкритих ключів у ньому немає.` };
       request.value = '';
     }, 'admit'), 'admit'));
 
