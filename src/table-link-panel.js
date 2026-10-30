@@ -8,7 +8,7 @@ import { clearRelation, clearRelations, confirmRelation, rejectRelation, setGrou
 import { linkIssues, suggestRelations } from './table-link-core.js';
 import {
   confirmArgs, confirmBlock, decisionOf, groupsNeedSaving, linkInputs, pairView, rejectArgs, rejectedRelationViews, savedGroupViews,
-  mergeDownloadView, mergePreviewView, savedRelationViews, suggestedGroups, summaryLine,
+  mergeDownloadView, mergeModuleView, mergePreviewView, savedRelationViews, suggestedGroups, summaryLine,
 } from './table-link-view-core.js';
 
 const yieldToPage = () => new Promise(resolve => setTimeout(resolve, 0));
@@ -16,9 +16,10 @@ const yieldToPage = () => new Promise(resolve => setTimeout(resolve, 0));
 /**
  * `schema`, `modules`, `data` — функції, що повертають поточний стан дашборда. `apply(change)` записує зміну схеми
  * профілю (`change(schema)` → результат ядра) і повертає `{ ok, schema?, message? }`; `onChange()` кличеться після
- * успішного запису; `download(filename, text)` віддає користувачу новий файл (за замовчуванням — завантаження через браузер). Без `apply` панель лише показує підказки. Повертає `<details>`.
+ * успішного запису; `download(filename, text)` віддає користувачу новий файл (за замовчуванням — завантаження через браузер);
+ * `createModule(request)` створює модуль з об'єднаної таблиці (`create_dashboard_module`) і повертає `{ ok, message? }`; без нього кнопки «Створити таблицю» немає. Без `apply` панель лише показує підказки. Повертає `<details>`.
  */
-export function linkPanel({ el, schema, modules, data, apply = null, onChange = () => {}, now = () => new Date().toISOString(), download = downloadText }) {
+export function linkPanel({ el, schema, modules, data, apply = null, onChange = () => {}, now = () => new Date().toISOString(), download = downloadText, createModule = null }) {
   const status = el('p', { class: 'ewmc-links-status', role: 'status' });
   const output = el('div', { class: 'ewmc-links-out' });
   const saved = el('div', { class: 'ewmc-links-saved' });
@@ -105,7 +106,7 @@ export function linkPanel({ el, schema, modules, data, apply = null, onChange = 
     const open = item.querySelector('.ewmc-links-merge');
     if (open) { open.remove(); return; }
     const view = mergePreviewView(schema(), relationId, modules(), data());
-    item.append(mergeNode(el, view, () => saveMerge(relationId, item)));
+    item.append(mergeNode(el, view, { download: () => saveMerge(relationId, item), create: createModule ? button => makeModule(relationId, item, button) : null }));
   }
 
   // Новий CSV з об'єднаною таблицею: вихідні таблиці й профіль не змінюються, нічого не записується.
@@ -115,6 +116,23 @@ export function linkPanel({ el, schema, modules, data, apply = null, onChange = 
     if (file.ok) download(file.filename, file.text);
     const text = file.ok ? `Файл «${file.filename}» створено: ${file.rowCount} рядків. Вихідні таблиці не змінено.` : file.message;
     item.querySelector('.ewmc-links-merge')?.append(el('p', { class: 'ewmc-links-merge-result ewmc-links-block', role: 'status', text }));
+  }
+
+  // Нова таблиця в профілі: окремий модуль «Мого дашборда» з усіма рядками; вихідні таблиці не змінюються.
+  async function makeModule(relationId, item, button) {
+    item.querySelector('.ewmc-links-merge-result')?.remove();
+    const note = text => {
+      if (item.isConnected) item.querySelector('.ewmc-links-merge')?.append(el('p', { class: 'ewmc-links-merge-result ewmc-links-block', role: 'status', text }));
+    };
+    const made = mergeModuleView(schema(), relationId, modules(), data());
+    if (!made.ok) { note(made.message); return; }
+    button.disabled = true;
+    try {
+      const result = await createModule(made.request);
+      if (!result?.ok) note(result?.message || 'Не вдалося створити модуль.');
+    } finally {
+      button.disabled = false;
+    }
   }
 
   function renderOutput() {
@@ -216,12 +234,13 @@ function pairNode(el, view, current, tools) {
     view.exclusions.length ? el('details', { class: 'ewmc-links-excl' }, el('summary', { text: `Не брались за ключ: ${view.exclusions.length}` }), el('ul', {}, view.exclusions.map(text => el('li', { text })))) : null);
 }
 
-function mergeNode(el, view, onDownload) {
+function mergeNode(el, view, { download, create }) {
   if (!view.ok) return el('p', { class: 'ewmc-links-merge ewmc-links-block', text: view.message });
   return el('div', { class: 'ewmc-links-merge' },
-    el('p', { class: 'ewmc-links-hint', text: `${view.summary} Таблиця в профілі не створюється, вихідні дані не змінюються; результат можна лише завантажити новим файлом.` }),
+    el('p', { class: 'ewmc-links-hint', text: `${view.summary} Вихідні таблиці не змінюються: результат можна лише завантажити новим файлом або створити з нього окремий модуль.` }),
     ...view.notes.map(text => el('p', { class: 'ewmc-links-block', text })),
-    view.downloadable ? el('button', { type: 'button', class: 'btn quiet', text: 'Завантажити CSV', 'data-action': 'download-merge', onclick: onDownload }) : null,
+    view.downloadable && create ? el('button', { type: 'button', class: 'btn quiet', text: 'Створити таблицю в профілі', 'data-action': 'create-merged-module', onclick: event => create(event.currentTarget) }) : null,
+    view.downloadable ? el('button', { type: 'button', class: 'btn quiet', text: 'Завантажити CSV', 'data-action': 'download-merge', onclick: download }) : null,
     el('div', { class: 'ewmc-links-merge-scroll' }, el('table', { class: 'ewmc-links-merge-table' },
       el('thead', {}, el('tr', {}, view.columns.map(header => el('th', { text: header })))),
       el('tbody', {}, view.sample.map(row => el('tr', {}, row.map(value => el('td', { text: value }))))))));
