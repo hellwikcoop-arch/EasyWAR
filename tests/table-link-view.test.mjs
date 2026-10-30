@@ -8,7 +8,7 @@ import { linkIssues, suggestRelations } from '../src/table-link-core.js';
 import { confirmRelation, rejectRelation, clearRelation, clearRelations, setGroups, groupsOf, relationsOf, removeSource } from '../src/profile-schema-core.js';
 import {
   EXCLUSION_TEXT, REASON_TEXT, confirmArgs, confirmBlock, decisionOf, issueText, linkInputs, pairView, rejectArgs,
-  rejectedRelationViews, relatedLine, savedRelationViews, summaryLine, suggestedGroups, groupsNeedSaving, savedGroupViews, deleteLinksNote,
+  rejectedRelationViews, relatedLine, savedRelationViews, summaryLine, suggestedGroups, groupsNeedSaving, savedGroupViews, deleteLinksNote, linkCoverageViews,
 } from '../src/table-link-view-core.js';
 
 // Лише синтетичні дані: вигадані підрозділи, жодних реальних таблиць.
@@ -268,4 +268,38 @@ test('екран B4: кнопки груп і скидання, попередж
   const page = await readFile(new URL('../src/dashboard-module-catalog.js', import.meta.url), 'utf8');
   assert.match(page, /deleteLinksNote\(state\.schema/u);
   assert.match(page, /data-delete-links-for/u);
+});
+
+test('читання за зв’язком: покриття по кожному зв’язку, «перевірте» і непрочитані дані пропускаються з поясненням', async () => {
+  const { schema: base, data } = setup();
+  const { tables } = linkInputs(base, [modulePlan, moduleFlights], data);
+  const found = await suggestRelations(tables);
+  const candidate = found.pairs[0].candidates.find(item => item.left.columns.length === 2);
+  const schema = confirmRelation(base, confirmArgs(candidate)).schema;
+  const modules = [modulePlan, moduleFlights];
+  const [view] = linkCoverageViews(schema, 'module:plan', modules, data);
+  assert.equal(view.text, '«Вильоти»: пару має 24 з 24 рядків тут і 48 з 48 там; без пари: 0 тут, 0 там.');
+  assert.equal(view.warn, false);
+  assert.match(linkCoverageViews(schema, 'module:flights', modules, data)[0].text, /«План»: пару має 48 з 48/u);
+  // Дані пов'язаної таблиці не прочитано.
+  const failed = new Map([['plan', data.get('plan')], ['flights', { rows: [], failed: true }]]);
+  assert.match(linkCoverageViews(schema, 'module:plan', modules, failed)[0].text, /дані не прочитано/u);
+  // Таблиця з рядком без пари підсвічується.
+  const more = new Map(data);
+  more.set('plan', { rows: [...data.get('plan').rows, { date: day(20), unit: 'Ехо', goal: 'без пари' }] });
+  const odd = linkCoverageViews(schema, 'module:plan', modules, more)[0];
+  assert.match(odd.text, /пару має 24 з 25 рядків тут/u);
+  assert.equal(odd.warn, true);
+  // Зв'язок без залежностей: порожній перелік.
+  assert.deepEqual(linkCoverageViews(base, 'module:plan', modules, data), []);
+  // Зміна стовпця ключа: «перевірте».
+  const changed = { ...schema, sources: schema.sources.map(source => (source.id === 'module:plan' ? { ...source, columns: source.columns.map(column => (column.key === 'unit' ? { ...column, orphan: true } : column)) } : source)) };
+  assert.match(linkCoverageViews(changed, 'module:plan', modules, data)[0].text, /перевірити/u);
+});
+
+test('екран: покриття зв’язку рахується після малювання й не блокує дашборд', async () => {
+  const page = await readFile(new URL('../src/dashboard-module-catalog.js', import.meta.url), 'utf8');
+  assert.match(page, /function fillCoverage/u);
+  assert.match(page, /setTimeout\(\(\) => \{\s*if \(!list\.isConnected/u);
+  assert.match(page, /linkCoverageViews\(state\.schema/u);
 });

@@ -724,7 +724,11 @@ v1 і блоки вкладок через `listDefinitions` + `validateRegistry
 Групи й попередження (B4): `suggestedGroups` (компоненти зв'язності підтверджених зв'язків з ≥ 2 таблиць, `g1`, `g2`…),
 `groupsNeedSaving`, `savedGroupViews`, `deleteLinksNote` (текст у картці модуля перед видаленням: `p.ewmc-delete-links[data-delete-links-for]`,
 оновлюється разом із `refreshRelatedLines`); кнопки `split-groups` (`setGroups`), `clear-groups`, `reset-links` →
-`confirm-reset-links` (`clearRelations`, два кроки). `removeSource` розпускає групу, що лишилась з однієї таблиці.
+`confirm-reset-links` (`clearRelations`, два кроки).
+Читання за зв'язком (перший крок): `linkCoverage` (`table-link-core.js`: рядки з парою за ключем у кожній із двох таблиць, `complete`
+для усіченого читання) і `linkCoverageViews` (`table-link-view-core.js`: текст по кожному підтвердженому зв'язку; «перевірте» й непрочитані дані
+пропускаються з поясненням). У картці `ul.ewmc-related-stats[data-related-stats-for]` заповнює `fillCoverage` через `setTimeout(0)` після малювання
+і з `refreshRelatedLines`; тільки підрахунок, без фільтра й без змін у картках. `removeSource` розпускає групу, що лишилась з однієї таблиці.
 CSS — `.ewmc-links*` у `dashboard-module-catalog.css`. Тести — `tests/table-link-view.test.mjs`
 (логіка й текстові контракти: імпорт, відсутність `invoke`, `innerHTML`, запису схеми).
 

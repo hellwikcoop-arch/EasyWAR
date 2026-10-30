@@ -12,6 +12,7 @@ import {
   describeCandidate,
   evaluateKey,
   keyConflicts,
+  linkCoverage,
   linkIssues,
   suggestRelations,
   tableFromSchema,
@@ -575,4 +576,28 @@ test('межа 80 % у плаваючій крапці: рівно 8 з 10 сп�
   const withBlanks = candidateKeys(blanks[0], blanks[1]);
   assert.ok(!withBlanks.exclusions.some(item => item.reason === 'blank'), JSON.stringify(withBlanks.exclusions));
   assert.equal(withBlanks.candidates.length, 1);
+});
+
+test('linkCoverage: скільки рядків кожної таблиці мають пару, без значень клітинок у результаті', () => {
+  const { tables } = build(planAndFlights());
+  const full = linkCoverage(tables[0], tables[1], ['date', 'unit'], ['event', 'part']);
+  assert.deepEqual([full.ok, full.leftRows, full.leftMatched, full.rightRows, full.rightMatched, full.complete], [true, 24, 24, 48, 48, true]);
+  // Лишній рядок у планах без вильотів і вильоти без плану.
+  const specs = planAndFlights();
+  specs[0].rows.push({ date: day(20), unit: 'Ехо', goal: 'без пари' }, { date: '', unit: 'Альфа', goal: 'порожня дата' });
+  specs[1].rows.push({ event: day(21), part: 'Фокстрот', tail: '999' });
+  const odd = build(specs).tables;
+  const partial = linkCoverage(odd[0], odd[1], ['date', 'unit'], ['event', 'part']);
+  assert.deepEqual([partial.leftRows, partial.leftMatched, partial.rightRows, partial.rightMatched], [26, 24, 49, 48]);
+  const shown = JSON.stringify(partial);
+  for (const unit of UNITS) assert.ok(!shown.includes(unit));
+});
+
+test('linkCoverage: усічене читання позначається, поганий ключ — помилка', () => {
+  const specs = planAndFlights();
+  specs[1].truncated = true;
+  const { tables } = build(specs);
+  assert.equal(linkCoverage(tables[0], tables[1], ['date'], ['event']).complete, false);
+  assert.equal(linkCoverage(tables[0], tables[1], ['date'], []).code, 'bad_key');
+  assert.equal(linkCoverage(tables[0], tables[1], ['nope'], ['event']).code, 'bad_key');
 });

@@ -58,7 +58,7 @@ import { CATALOG as PS_CATALOG, KPI_TILES, VIEW_BY_BLOCK } from './ps-kpi.js';
 import { addRequest, buildRegistry } from './module-registry-view-core.js';
 import { registryPanel } from './module-registry-panel.js';
 import { linkPanel } from './table-link-panel.js';
-import { deleteLinksNote, relatedLine } from './table-link-view-core.js';
+import { deleteLinksNote, linkCoverageViews, relatedLine } from './table-link-view-core.js';
 import { updatePanel } from './dashboard-module-update.js';
 import {
   buildImport,
@@ -293,6 +293,7 @@ function initialize() {
       node.textContent = text;
       node.hidden = !text;
     }
+    for (const list of host.querySelectorAll('[data-related-stats-for]')) fillCoverage(list, list.dataset.relatedStatsFor);
     for (const node of host.querySelectorAll('[data-delete-links-for]')) {
       const text = state.schema ? deleteLinksNote(state.schema, `module:${node.dataset.deleteLinksFor}`) : '';
       node.textContent = text;
@@ -388,7 +389,19 @@ function initialize() {
 
   function relatedNote(module) {
     const text = state.schema ? relatedLine(state.schema, `module:${module.id}`) : '';
-    return el('p', { class: 'ewmc-related', 'data-related-for': module.id, text, hidden: !text });
+    const stats = el('ul', { class: 'ewmc-related-stats', 'data-related-stats-for': module.id, hidden: true });
+    fillCoverage(stats, module.id);
+    return el('div', { class: 'ewmc-related-box' }, el('p', { class: 'ewmc-related', 'data-related-for': module.id, text, hidden: !text }), stats);
+  }
+
+  // Читання за зв'язком: скільки рядків мають пару за підтвердженим ключем. Рахується після малювання, щоб не затримувати дашборд.
+  function fillCoverage(list, moduleId) {
+    setTimeout(() => {
+      if (!list.isConnected || !state.schema) return;
+      const views = linkCoverageViews(state.schema, `module:${moduleId}`, state.modules, state.data);
+      list.replaceChildren(...views.map(view => el('li', { class: view.warn ? 'is-warn' : '', 'data-relation-id': view.relationId, text: view.text })));
+      list.hidden = !views.length;
+    }, 0);
   }
 
   function renderModule(module, payload, placed = null) {
