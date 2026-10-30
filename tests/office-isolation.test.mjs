@@ -20,7 +20,8 @@ const EDITOR_LABEL = 'office-editor';
 const EDITOR_COMMANDS = ['office_open_file', 'office_save_file', 'office_save_file_as', 'office_close_file', 'office_editor_close',
   'collective_status', 'collective_create_identity', 'collective_create',
   'collective_detail', 'collective_table_set', 'collective_invite_create', 'collective_join_request',
-  'collective_invite_admit', 'collective_join_accept', 'collective_report_prepare', 'collective_report_confirm'];
+  'collective_invite_admit', 'collective_join_accept', 'collective_report_prepare', 'collective_report_confirm',
+  'collective_table_read', 'collective_sync_export', 'collective_sync_import'];
 const LIBRARY_COMMANDS = [
   'library_status', 'library_create', 'library_unlock', 'library_lock', 'library_list',
   'library_versions', 'library_import', 'library_rename', 'library_set_hidden', 'library_set_current',

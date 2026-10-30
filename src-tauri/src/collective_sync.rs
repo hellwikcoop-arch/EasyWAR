@@ -9,6 +9,10 @@
 //!   `GatePolicy::CURRENT` і кладеться в **локальну** чергу відправки (`OfflineMailbox`).
 //!   Транспорту немає: черга нікуди не передається до окремого рішення власника.
 //!
+//! - дані таблиці (міграція 0023): власник задає стовпці, зміна рядків — операція
+//!   `{"v":1,"rows":[…]}`; запечатаний конверт кожної доповіді зберігається локально, а
+//!   «Оновити таблицю» відкриває конверти паролем і перевіряє їх `replay::receive`.
+//!
 //! Назовні (у JS) — лише відбитки, назви, лічильники, коди відмов і тексти для пересилання;
 //! жодного секрету чи ключа епохи у відкритому вигляді.
 
@@ -16,7 +20,7 @@ use std::path::PathBuf;
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sqlx::{Row, Sqlite, Transaction};
 use zeroize::Zeroizing;
 
@@ -27,16 +31,20 @@ use crate::collective::identity::{DeviceIdentity, MemberId, MemberIdentity};
 use crate::collective::invite::{self, Invitation, InvitationLedger, JoinRequest};
 use crate::collective::relay::OfflineMailbox;
 use crate::collective::relay_auth::COLLECTIVE_SCOPE;
-use crate::collective::replay::{InMemoryMembership, MembershipRecord, MembershipView};
+use crate::collective::replay::{
+    self, Decision, InMemoryMembership, Journals, MembershipRecord, MembershipView, RevokedPolicy,
+};
 use crate::collective::secret_store::UnlockedStore;
 use crate::collective::send_gate::{
     authorize_send, preflight, GatePolicy, OutboundPolicy, SendRequest, TableAttestation,
     TableClass, TablePurpose, Transport,
 };
+use crate::collective::table_record::{TableRecord, TableRights};
 use crate::collective::{random_array, sha256, ID_LEN, KEY_LEN};
 use crate::collective_store::{
-    check_password, collective_name, epoch_purpose, fingerprint, identities, orphan_epoch_purposes,
-    CollectiveStore, CollectiveStoreError, CollectiveSummary, MAX_COLLECTIVES, ORPHAN_SWEEP_FAILED,
+    check_password, collective_name, epoch_purpose, fingerprint, identities, normalize_member_name,
+    orphan_epoch_purposes, CollectiveStore, CollectiveStoreError, CollectiveSummary,
+    MAX_COLLECTIVES, ORPHAN_SWEEP_FAILED,
 };
 
 const INVITE_PREFIX: &str = "EWINV1.";
@@ -57,8 +65,18 @@ pub const INTENT_TTL_SECONDS: i64 = 60;
 const MAX_INTENTS_PER_PROFILE: usize = 8;
 const INTENT_ID_LEN: usize = 16;
 const INTENT_LABEL: &[u8] = b"easywar/collective/v1/report-intent";
+/// Стовпців у таблиці колективу не більше.
+pub const MAX_TABLE_COLUMNS: usize = 32;
+const MAX_COLUMN_CHARS: usize = 40;
+/// Рядків в одній доповіді не більше.
+pub const MAX_ROWS_PER_CHANGE: usize = 500;
+const MAX_ROW_KEY_CHARS: usize = 64;
+const MAX_CELL_CHARS: usize = 1000;
 
 type Result<T> = std::result::Result<T, CollectiveStoreError>;
+
+mod share;
+pub use share::{SyncOutcome, SyncText};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -74,6 +92,57 @@ pub struct TableSummary {
     pub mine: bool,
     /// Цей профіль має право запису за журналом складу.
     pub can_write: bool,
+    /// Стовпці таблиці (задає власник).
+    pub columns: Vec<String>,
+    /// Збережені на цьому вузлі пакети змін (конверти доповідей).
+    pub changes: usize,
+}
+
+/// Зміна рядків таблиці колективу — зміст операції доповіді.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TableChange {
+    pub v: u8,
+    pub rows: Vec<RowChange>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RowChange {
+    pub key: String,
+    pub kind: RowKind,
+    #[serde(default)]
+    pub values: std::collections::BTreeMap<String, String>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RowKind {
+    Upsert,
+    Delete,
+}
+
+/// Перевірений пакет змін: хто, коли (за годинником автора) і що змінив.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TableChangeEntry {
+    pub author: String,
+    pub author_name: Option<String>,
+    pub mine: bool,
+    pub client_time: i64,
+    pub rows: Vec<RowChange>,
+}
+
+/// «Оновити таблицю»: стовпці й усі перевірені пакети змін у порядку запису.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TableData {
+    pub fingerprint: String,
+    pub title: String,
+    pub columns: Vec<String>,
+    pub changes: Vec<TableChangeEntry>,
+    /// Пакети, які не пройшли перевірку (підпис, права, епоха, формат) і не застосовані.
+    pub rejected: usize,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -83,13 +152,25 @@ pub struct CollectiveDetail {
     pub name: String,
     pub epoch: u32,
     pub latest_seq: u64,
-    pub members: Vec<String>,
+    pub members: Vec<MemberSummary>,
     pub tables: Vec<TableSummary>,
     /// Конверти в локальній черзі відправки.
     pub outbox: usize,
     /// Чинна політика транспортів: обидва `false`, доки власник не прийме транспорт.
     pub wan_accepted: bool,
     pub base44_accepted: bool,
+}
+
+/// Учасник за журналом складу: відбиток і ім'я, яке він вказав сам (якщо вказав).
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemberSummary {
+    pub fingerprint: String,
+    pub name: Option<String>,
+    /// Це ви (профіль цього вузла).
+    pub me: bool,
+    /// Перший запис `Join` журналу — той, хто створив колектив.
+    pub founder: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -104,7 +185,7 @@ pub struct InvitationText {
 pub struct JoinRequestText {
     pub text: String,
     pub collective_fingerprint: String,
-    /// Відбиток запрошувача: звірте його голосом чи особисто.
+    /// Відбиток запрошувача: звірте його особисто.
     pub inviter_fingerprint: String,
 }
 
@@ -112,6 +193,8 @@ pub struct JoinRequestText {
 #[serde(rename_all = "camelCase")]
 pub struct AdmissionText {
     pub member_fingerprint: String,
+    /// Ім'я, яке запрошений вказав сам; звірте його разом із відбитком.
+    pub member_name: Option<String>,
     /// Пакет ключів для запрошеного; відкритих ключів у ньому немає.
     pub text: String,
     pub latest_seq: u64,
@@ -121,8 +204,8 @@ pub struct AdmissionText {
 #[serde(rename_all = "camelCase")]
 pub struct JoinedCollective {
     pub collective: CollectiveSummary,
-    /// Відбитки учасників за перевіреним журналом: звірте із запрошувачем.
-    pub members: Vec<String>,
+    /// Учасники за перевіреним журналом: звірте відбитки із запрошувачем.
+    pub members: Vec<MemberSummary>,
 }
 
 #[derive(Debug, Serialize)]
@@ -203,7 +286,31 @@ struct Me {
 
 struct StoredTable {
     title: String,
+    columns: Vec<String>,
+    changes: usize,
     attestation: TableAttestation,
+    /// Підписаний власником запис таблиці (є в чужих таблицях і в своїх після пакета).
+    record: Option<Vec<u8>>,
+}
+
+impl StoredTable {
+    /// Хто може писати за підписаним записом; без запису — усі учасники (рішення власника
+    /// 30.10.2026).
+    fn writers(&self) -> Vec<MemberId> {
+        self.record
+            .as_deref()
+            .and_then(|bytes| TableRecord::from_bytes(bytes).ok())
+            .map(|record| record.writers)
+            .unwrap_or_default()
+    }
+
+    fn rights(&self) -> [([u8; ID_LEN], MemberId, Vec<MemberId>); 1] {
+        [(
+            self.attestation.table_id,
+            self.attestation.owner,
+            self.writers(),
+        )]
+    }
 }
 
 impl CollectiveStore {
@@ -248,9 +355,13 @@ impl CollectiveStore {
         collective_id: &CollectiveId,
     ) -> Result<Vec<StoredTable>> {
         let rows = sqlx::query(
-            "SELECT table_id, title, owner, class, class_confirmed_by, purpose, purpose_confirmed_by
-             FROM collective_tables WHERE profile_id = ? AND collective_id = ?
-             ORDER BY updated_at, table_id",
+            "SELECT t.table_id, t.title, t.owner, t.class, t.class_confirmed_by, t.purpose,
+                    t.purpose_confirmed_by, t.columns, t.record,
+                    (SELECT count(*) FROM collective_table_ops o
+                     WHERE o.profile_id = t.profile_id AND o.collective_id = t.collective_id
+                       AND o.table_id = t.table_id)
+             FROM collective_tables t WHERE t.profile_id = ? AND t.collective_id = ?
+             ORDER BY t.updated_at, t.table_id",
         )
         .bind(profile_id)
         .bind(collective_id.as_slice())
@@ -260,8 +371,14 @@ impl CollectiveStore {
             .map(|row| {
                 let class: String = row.get(3);
                 let purpose: String = row.get(5);
+                let columns: String = row.get(7);
+                let changes: i64 = row.get(9);
                 Ok(StoredTable {
                     title: row.get(1),
+                    columns: serde_json::from_str(&columns)
+                        .map_err(|_| CollectiveStoreError::InvalidColumns)?,
+                    changes: usize::try_from(changes).unwrap_or(0),
+                    record: row.get(8),
                     attestation: TableAttestation {
                         table_id: blob(row.get(0))?,
                         owner: blob(row.get(2))?,
@@ -370,7 +487,7 @@ impl CollectiveStore {
         let me = self.me(profile_id).await?;
         let (membership, _) = self.load_journal(profile_id, &collective_id).await?;
         let latest = membership.latest_seq();
-        let mut members: Vec<String> = membership
+        let mut members: Vec<MemberSummary> = membership
             .records()
             .iter()
             .filter_map(|record| match record {
@@ -378,7 +495,7 @@ impl CollectiveStore {
                 _ => None,
             })
             .filter(|bound| membership.revoked_at(&bound.member_id()).is_none())
-            .map(|bound| fingerprint(&bound.member_id()))
+            .map(|bound| member_summary(&membership, &bound.member_id(), &me.member_id))
             .collect();
         members.dedup();
         let tables = self
@@ -401,8 +518,9 @@ impl CollectiveStore {
     }
 
     /// Нова таблиця колективу (власник — цей профіль, право запису — записом журналу) або
-    /// зміна класу, призначення й назви своєї таблиці. Клас і призначення підтверджує той, хто
-    /// їх ставить, тобто власник.
+    /// зміна класу, призначення, назви й стовпців своєї таблиці. Клас і призначення
+    /// підтверджує той, хто їх ставить, тобто власник. `columns: None` залишає стовпці як є
+    /// (у нової таблиці — без стовпців).
     #[allow(clippy::too_many_arguments)]
     pub async fn set_table(
         &self,
@@ -412,9 +530,11 @@ impl CollectiveStore {
         title: &str,
         class: &str,
         purpose: &str,
+        columns: Option<&[String]>,
         now: &str,
     ) -> Result<TableSummary> {
         let title = collective_name(title).map_err(|_| CollectiveStoreError::InvalidTitle)?;
+        let columns = columns.map(table_columns).transpose()?;
         let class = parse_class(class)?;
         let purpose = parse_purpose(purpose)?;
         let (collective_id, _) = self.find_collective(profile_id, collective_fp).await?;
@@ -454,10 +574,12 @@ impl CollectiveStore {
                     now,
                 )
                 .await?;
+                let columns = columns.unwrap_or_default();
                 sqlx::query(
                     "INSERT INTO collective_tables (profile_id, collective_id, table_id, title, owner,
-                         class, class_confirmed_by, purpose, purpose_confirmed_by, updated_at)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                         class, class_confirmed_by, purpose, purpose_confirmed_by, updated_at,
+                         columns)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 )
                 .bind(profile_id)
                 .bind(collective_id.as_slice())
@@ -469,21 +591,28 @@ impl CollectiveStore {
                 .bind(purpose_text(purpose))
                 .bind(me.member_id.as_slice())
                 .bind(now)
+                .bind(columns_json(&columns))
                 .execute(&mut *tx)
                 .await?;
-                TableAttestation {
-                    table_id,
-                    owner: me.member_id,
-                    class,
-                    class_confirmed_by: Some(me.member_id),
-                    purpose,
-                    purpose_confirmed_by: Some(me.member_id),
-                }
+                (
+                    columns,
+                    0,
+                    TableAttestation {
+                        table_id,
+                        owner: me.member_id,
+                        class,
+                        class_confirmed_by: Some(me.member_id),
+                        purpose,
+                        purpose_confirmed_by: Some(me.member_id),
+                    },
+                )
             }
             Some(table) => {
+                let columns = columns.unwrap_or(table.columns);
                 sqlx::query(
                     "UPDATE collective_tables SET title = ?, class = ?, class_confirmed_by = ?,
-                         purpose = ?, purpose_confirmed_by = ?, updated_at = ?
+                         purpose = ?, purpose_confirmed_by = ?, updated_at = ?, columns = ?,
+                         record = NULL
                      WHERE profile_id = ? AND collective_id = ? AND table_id = ?",
                 )
                 .bind(&title)
@@ -492,22 +621,34 @@ impl CollectiveStore {
                 .bind(purpose_text(purpose))
                 .bind(me.member_id.as_slice())
                 .bind(now)
+                .bind(columns_json(&columns))
                 .bind(profile_id)
                 .bind(collective_id.as_slice())
                 .bind(table.attestation.table_id.as_slice())
                 .execute(&mut *tx)
                 .await?;
-                TableAttestation {
-                    class,
-                    class_confirmed_by: Some(me.member_id),
-                    purpose,
-                    purpose_confirmed_by: Some(me.member_id),
-                    ..table.attestation
-                }
+                (
+                    columns,
+                    table.changes,
+                    TableAttestation {
+                        class,
+                        class_confirmed_by: Some(me.member_id),
+                        purpose,
+                        purpose_confirmed_by: Some(me.member_id),
+                        ..table.attestation
+                    },
+                )
             }
         };
         tx.commit().await?;
-        let table = StoredTable { title, attestation };
+        let (columns, changes, attestation) = attestation;
+        let table = StoredTable {
+            title,
+            columns,
+            changes,
+            attestation,
+            record: None,
+        };
         Ok(summary(&table, &me, &membership, membership.latest_seq()))
     }
 
@@ -544,8 +685,10 @@ impl CollectiveStore {
         profile_id: &str,
         password: Zeroizing<String>,
         invitation_text: &str,
+        member_name: &str,
         now_unix: i64,
     ) -> Result<JoinRequestText> {
+        let member_name = normalize_member_name(member_name)?;
         let invitation = Invitation::from_bytes(&decode(INVITE_PREFIX, invitation_text)?)
             .map_err(|_| CollectiveStoreError::InvalidText)?;
         if self
@@ -556,7 +699,14 @@ impl CollectiveStore {
             return Err(CollectiveStoreError::AlreadyJoined);
         }
         self.with_secrets(profile_id, password, move |_, member, device| {
-            let request = JoinRequest::build(invitation, member, &device.public(), now_unix);
+            let request = JoinRequest::build_named(
+                invitation,
+                member,
+                &device.public(),
+                &member_name,
+                now_unix,
+            )
+            .map_err(|_| CollectiveStoreError::InvalidMemberName)?;
             Ok(JoinRequestText {
                 text: encode(JOIN_PREFIX, &request.to_bytes()),
                 collective_fingerprint: fingerprint(&invitation.collective_id),
@@ -578,6 +728,7 @@ impl CollectiveStore {
     ) -> Result<AdmissionText> {
         let request = JoinRequest::from_bytes(&decode(JOIN_PREFIX, request_text)?)
             .map_err(|_| CollectiveStoreError::InvalidText)?;
+        let nonce = request.invitation.nonce;
         let (collective_id, name) = self.find_collective(profile_id, collective_fp).await?;
         let me = self.me(profile_id).await?;
         let (membership, _) = self.load_journal(profile_id, &collective_id).await?;
@@ -612,7 +763,7 @@ impl CollectiveStore {
             &collective_id,
             &membership,
             admission.join_seq,
-            admission.device_seq,
+            admission.last_seq(),
             now,
         )
         .await?;
@@ -622,13 +773,14 @@ impl CollectiveStore {
         )
         .bind(profile_id)
         .bind(collective_id.as_slice())
-        .bind(request.invitation.nonce.as_slice())
+        .bind(nonce.as_slice())
         .bind(now)
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
         Ok(AdmissionText {
             member_fingerprint: fingerprint(&admission.member),
+            member_name: membership.member_name(&admission.member).map(str::to_owned),
             text: encode(
                 KEYS_PREFIX,
                 &bundle(&collective_id, &name, &membership, &admission.wraps),
@@ -686,14 +838,14 @@ impl CollectiveStore {
                 "ключі епох не відповідають журналу",
             ));
         }
-        let members: Vec<String> = membership
+        let members: Vec<MemberSummary> = membership
             .records()
             .iter()
             .filter_map(|record| match record {
                 MembershipRecord::Join(binding) => binding
                     .verify(&collective_id)
                     .ok()
-                    .map(|bound| fingerprint(&bound.member_id())),
+                    .map(|bound| member_summary(&membership, &bound.member_id(), &me.member_id)),
                 _ => None,
             })
             .collect();
@@ -797,9 +949,13 @@ impl CollectiveStore {
             .into_iter()
             .find(|table| fingerprint(&table.attestation.table_id) == table_fp)
             .ok_or(CollectiveStoreError::TableNotFound)?;
+        parse_change(operation.as_bytes(), &table.columns)?;
         if let Err(denied) = preflight(
             &GatePolicy::CURRENT,
-            &membership,
+            &TableRights {
+                membership: &membership,
+                tables: &table.rights(),
+            },
             &table.attestation,
             transport,
             OutboundPolicy::ReviewEachReport,
@@ -944,8 +1100,10 @@ impl CollectiveStore {
         .await
     }
 
-    /// Підпис, авторитетний допуск і локальна черга. Викликається лише з
-    /// [`Self::report_confirm`], тому `reviewed_by_human` тут завжди виставляє Rust.
+    /// Підпис, авторитетний допуск, локальна історія таблиці й черга відправки. Викликається
+    /// лише з [`Self::report_confirm`], тому `reviewed_by_human` тут завжди виставляє Rust.
+    /// Запечатаний конверт спершу записується в `collective_table_ops` (з нього «Оновити
+    /// таблицю» відновлює дані на цьому вузлі), потім кладеться в чергу відправки.
     #[allow(clippy::too_many_arguments)]
     async fn seal_and_queue(
         &self,
@@ -960,53 +1118,83 @@ impl CollectiveStore {
         now_unix: i64,
     ) -> Result<ReportOutcome> {
         let me = self.me(profile_id).await?;
-        let outbox = self.outbox_path(profile_id, &collective_id);
         let author = me.member_id;
-        self.with_secrets(profile_id, password, move |unlocked, _, device| {
-            if device.public().0 != me.device_pub {
-                return Err(CollectiveStoreError::StoreDamaged);
-            }
-            let epoch = membership.current_epoch();
-            let key = epoch_keys(unlocked, &collective_id, epoch)?
-                .pop()
-                .ok_or(CollectiveStoreError::EpochKeyMissing)?;
-            let signed = Payload {
-                op: operation,
-                author_member_id: author,
-                device_pub: device.public().0,
-                client_time: now_unix,
-                class: table.attestation.effective_class().code(),
-                table_id: table.attestation.table_id,
-                op_id: random_array(),
-                membership_seq: membership.latest_seq(),
-                expiry: None,
-            }
-            .sign(device);
-            let request = SendRequest {
-                table: &table.attestation,
-                transport,
-                outbound_policy: OutboundPolicy::ReviewEachReport,
-                reviewed_by_human: true,
-                explicit_user_choice: explicit_wan,
-                signed: &signed,
-                recipient_scope: COLLECTIVE_SCOPE,
-                now: now_unix,
-            };
-            let mut permit = match authorize_send(
-                &GatePolicy::CURRENT,
-                &membership,
-                &collective_id,
-                &key,
-                &request,
-            ) {
-                Ok(permit) => permit,
-                Err(denied) => return Ok(ReportOutcome::denied(denied.code(), denied.message())),
-            };
-            let bytes = permit
-                .take(now_unix)
-                .ok_or(CollectiveStoreError::Rejected("допуск прострочено"))?;
+        let table_id = table.attestation.table_id;
+        let sealed = self
+            .with_secrets(profile_id, password, move |unlocked, _, device| {
+                if device.public().0 != me.device_pub {
+                    return Err(CollectiveStoreError::StoreDamaged);
+                }
+                let epoch = membership.current_epoch();
+                let key = epoch_keys(unlocked, &collective_id, epoch)?
+                    .pop()
+                    .ok_or(CollectiveStoreError::EpochKeyMissing)?;
+                let signed = Payload {
+                    op: operation,
+                    author_member_id: author,
+                    device_pub: device.public().0,
+                    client_time: now_unix,
+                    class: table.attestation.effective_class().code(),
+                    table_id: table.attestation.table_id,
+                    op_id: random_array(),
+                    membership_seq: membership.latest_seq(),
+                    expiry: None,
+                }
+                .sign(device);
+                let request = SendRequest {
+                    table: &table.attestation,
+                    transport,
+                    outbound_policy: OutboundPolicy::ReviewEachReport,
+                    reviewed_by_human: true,
+                    explicit_user_choice: explicit_wan,
+                    signed: &signed,
+                    recipient_scope: COLLECTIVE_SCOPE,
+                    now: now_unix,
+                };
+                let mut permit = match authorize_send(
+                    &GatePolicy::CURRENT,
+                    &TableRights {
+                        membership: &membership,
+                        tables: &table.rights(),
+                    },
+                    &collective_id,
+                    &key,
+                    &request,
+                ) {
+                    Ok(permit) => permit,
+                    Err(denied) => {
+                        return Ok(Err(ReportOutcome::denied(denied.code(), denied.message())))
+                    }
+                };
+                let envelope_id = *permit.envelope_id();
+                let bytes = permit
+                    .take(now_unix)
+                    .ok_or(CollectiveStoreError::Rejected("допуск прострочено"))?;
+                Ok(Ok((envelope_id, bytes)))
+            })
+            .await?;
+        let (envelope_id, bytes) = match sealed {
+            Ok(sealed) => sealed,
+            Err(denied) => return Ok(denied),
+        };
+        sqlx::query(
+            "INSERT INTO collective_table_ops
+                 (profile_id, collective_id, table_id, envelope_id, envelope, recorded_at)
+             VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind(profile_id)
+        .bind(collective_id.as_slice())
+        .bind(table_id.as_slice())
+        .bind(envelope_id.as_slice())
+        .bind(bytes.as_slice())
+        .bind(unix_text(now_unix))
+        .execute(&self.pool)
+        .await?;
+        let outbox = self.outbox_path(profile_id, &collective_id);
+        tokio::task::spawn_blocking(move || {
             if let Some(dir) = outbox.parent() {
-                std::fs::create_dir_all(dir).map_err(|error| CollectiveStoreError::Io(error.to_string()))?;
+                std::fs::create_dir_all(dir)
+                    .map_err(|error| CollectiveStoreError::Io(error.to_string()))?;
             }
             let mut mailbox = OfflineMailbox::open(&outbox, OUTBOX_CAPACITY_BYTES)
                 .map_err(|error| CollectiveStoreError::Io(error.to_string()))?;
@@ -1016,12 +1204,182 @@ impl CollectiveStore {
             Ok(ReportOutcome {
                 allowed: true,
                 code: "queued",
-                message: "Конверт у локальній черзі відправки; мережі немає, передача — після окремого рішення власника",
+                message: "Зміни збережено в таблиці колективу й покладено в локальну чергу відправки; мережі немає, передача — після окремого рішення власника",
                 outbox: count_scope(&mailbox, now_unix),
             })
         })
         .await
+        .map_err(|error| CollectiveStoreError::Io(error.to_string()))?
     }
+
+    /// «Оновити таблицю»: стовпці й пакети змін, збережені на цьому вузлі. Кожен конверт
+    /// відкривається ключем своєї епохи й проходить ті самі перевірки, що й вхідний пакет
+    /// (`replay::receive`: підпис пристрою, пристрій і право запису на `membership_seq`,
+    /// володіння епохою, відкликання, повтори). Що не пройшло — не застосовується й лише
+    /// рахується в `rejected`.
+    pub async fn read_table(
+        &self,
+        profile_id: &str,
+        password: Zeroizing<String>,
+        collective_fp: &str,
+        table_fp: &str,
+    ) -> Result<TableData> {
+        let (collective_id, _) = self.find_collective(profile_id, collective_fp).await?;
+        let me = self.me(profile_id).await?;
+        let (membership, _) = self.load_journal(profile_id, &collective_id).await?;
+        if membership.bound_member(&me.member_id).is_none() {
+            return Err(CollectiveStoreError::NotAMember);
+        }
+        let table = self
+            .tables(profile_id, &collective_id)
+            .await?
+            .into_iter()
+            .find(|table| fingerprint(&table.attestation.table_id) == table_fp)
+            .ok_or(CollectiveStoreError::TableNotFound)?;
+        let table_id = table.attestation.table_id;
+        let envelopes: Vec<Vec<u8>> = sqlx::query_scalar(
+            "SELECT envelope FROM collective_table_ops
+             WHERE profile_id = ? AND collective_id = ? AND table_id = ?
+             ORDER BY recorded_at, rowid",
+        )
+        .bind(profile_id)
+        .bind(collective_id.as_slice())
+        .bind(table_id.as_slice())
+        .fetch_all(&self.pool)
+        .await?;
+        let columns = table.columns.clone();
+        let rights = table.rights();
+        let my_id = me.member_id;
+        let (changes, rejected) = self
+            .with_secrets(profile_id, password, move |unlocked, _, _| {
+                let keys = epoch_keys(unlocked, &collective_id, membership.current_epoch())?;
+                let mut journals = Journals::new();
+                let mut changes = Vec::new();
+                let mut rejected = 0usize;
+                for bytes in &envelopes {
+                    let decision = replay::receive(
+                        &mut journals,
+                        &TableRights {
+                            membership: &membership,
+                            tables: &rights,
+                        },
+                        RevokedPolicy::Reject,
+                        |epoch| {
+                            keys.get(epoch as usize)
+                                .map(|key| EpochKey::from_bytes(*key.as_bytes()))
+                        },
+                        bytes,
+                    );
+                    let signed = match decision {
+                        Decision::Apply(signed) => signed,
+                        Decision::SkipDuplicateEnvelope | Decision::Idempotent => continue,
+                        _ => {
+                            rejected += 1;
+                            continue;
+                        }
+                    };
+                    let payload = signed.payload;
+                    let Ok(change) = parse_change(&payload.op, &columns) else {
+                        rejected += 1;
+                        continue;
+                    };
+                    if payload.table_id != table_id {
+                        rejected += 1;
+                        continue;
+                    }
+                    let author = payload.author_member_id;
+                    changes.push(TableChangeEntry {
+                        author: fingerprint(&author),
+                        author_name: membership.member_name(&author).map(str::to_owned),
+                        mine: author == my_id,
+                        client_time: payload.client_time,
+                        rows: change.rows,
+                    });
+                }
+                // Порядок — за часом автора (потім автор і порядок запису): той самий на всіх
+                // вузлах, хоч би в якому порядку пакети дійшли.
+                changes.sort_by(|a, b| (a.client_time, &a.author).cmp(&(b.client_time, &b.author)));
+                Ok((changes, rejected))
+            })
+            .await?;
+        Ok(TableData {
+            fingerprint: fingerprint(&table_id),
+            title: table.title,
+            columns: table.columns,
+            changes,
+            rejected,
+        })
+    }
+}
+
+/// Стовпці таблиці: обрізані пробіли, 0..=32 різні назви по 1..=40 символів без керівних
+/// знаків.
+fn table_columns(columns: &[String]) -> Result<Vec<String>> {
+    if columns.len() > MAX_TABLE_COLUMNS {
+        return Err(CollectiveStoreError::InvalidColumns);
+    }
+    let mut out: Vec<String> = Vec::with_capacity(columns.len());
+    for column in columns {
+        let column = column.trim();
+        let chars = column.chars().count();
+        if chars == 0
+            || chars > MAX_COLUMN_CHARS
+            || column.chars().any(char::is_control)
+            || out.iter().any(|known| known == column)
+        {
+            return Err(CollectiveStoreError::InvalidColumns);
+        }
+        out.push(column.to_owned());
+    }
+    Ok(out)
+}
+
+fn columns_json(columns: &[String]) -> String {
+    serde_json::to_string(columns).unwrap_or_else(|_| "[]".to_owned())
+}
+
+/// Зміст доповіді: `{"v":1,"rows":[{"key":…,"kind":"upsert"|"delete","values":{…}}]}`.
+/// Значення — лише в наявних стовпцях; ключі рядків у пакеті не повторюються.
+fn parse_change(bytes: &[u8], columns: &[String]) -> Result<TableChange> {
+    let invalid = || CollectiveStoreError::InvalidTableChange;
+    let change: TableChange = serde_json::from_slice(bytes).map_err(|_| invalid())?;
+    if change.v != 1 || change.rows.is_empty() || change.rows.len() > MAX_ROWS_PER_CHANGE {
+        return Err(invalid());
+    }
+    let mut keys = std::collections::HashSet::new();
+    for row in &change.rows {
+        let chars = row.key.chars().count();
+        if chars == 0
+            || chars > MAX_ROW_KEY_CHARS
+            || row.key.chars().any(char::is_control)
+            || !keys.insert(row.key.as_str())
+        {
+            return Err(invalid());
+        }
+        match row.kind {
+            RowKind::Delete if !row.values.is_empty() => return Err(invalid()),
+            RowKind::Delete => {}
+            RowKind::Upsert => {
+                for (column, value) in &row.values {
+                    if !columns.iter().any(|known| known == column)
+                        || value.chars().count() > MAX_CELL_CHARS
+                        || value
+                            .chars()
+                            .any(|c| c.is_control() && c != '\n' && c != '\t')
+                    {
+                        return Err(invalid());
+                    }
+                }
+            }
+        }
+    }
+    Ok(change)
+}
+
+fn unix_text(unix: i64) -> String {
+    chrono::DateTime::from_timestamp(unix, 0)
+        .map(|time| time.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+        .unwrap_or_default()
 }
 
 /// Прив'язка наміру до стану (SEC-003, уточнення J5 00:09Z): не лише номер останнього запису
@@ -1052,7 +1410,13 @@ fn report_binding(
     let facts = [
         u8::from(membership.revoked_at(&me.member_id).is_some()),
         u8::from(membership.device_valid_at(latest, &me.member_id, &me.device_pub)),
-        u8::from(membership.can_write_at(latest, &me.member_id, &a.table_id)),
+        u8::from(
+            TableRights {
+                membership,
+                tables: &table.rights(),
+            }
+            .can_write_at(latest, &me.member_id, &a.table_id),
+        ),
         u8::from(explicit_wan),
         a.class.code(),
         a.effective_class().code(),
@@ -1069,6 +1433,7 @@ fn report_binding(
         purpose_text(a.purpose).as_bytes(),
         &confirmed(&a.purpose_confirmed_by),
         table.title.as_bytes(),
+        columns_json(&table.columns).as_bytes(),
         transport_text(transport).as_bytes(),
         &COLLECTIVE_SCOPE,
         &latest.to_be_bytes(),
@@ -1081,6 +1446,26 @@ fn report_binding(
 
 fn poisoned() -> CollectiveStoreError {
     CollectiveStoreError::Io("сховище намірів пошкоджене".into())
+}
+
+fn member_summary(
+    membership: &InMemoryMembership,
+    member: &MemberId,
+    me: &MemberId,
+) -> MemberSummary {
+    let founder = membership.records().iter().find_map(|record| match record {
+        MembershipRecord::Join(binding) => binding
+            .verify(membership.collective_id())
+            .ok()
+            .map(|bound| bound.member_id()),
+        _ => None,
+    });
+    MemberSummary {
+        fingerprint: fingerprint(member),
+        name: membership.member_name(member).map(str::to_owned),
+        me: member == me,
+        founder: founder.as_ref() == Some(member),
+    }
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -1122,7 +1507,13 @@ fn summary(
         declared_class: a.class.code() as char,
         purpose: purpose_text(a.purpose),
         mine: a.owner == me.member_id,
-        can_write: membership.can_write_at(latest, &me.member_id, &a.table_id),
+        can_write: TableRights {
+            membership,
+            tables: &table.rights(),
+        }
+        .can_write_at(latest, &me.member_id, &a.table_id),
+        columns: table.columns.clone(),
+        changes: table.changes,
     }
 }
 
@@ -1310,7 +1701,9 @@ fn parse_transport(text: &str) -> Result<Transport> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::database::{COLLECTIVES_SQL, COLLECTIVE_SYNC_SQL, LOCAL_PROFILES_SQL};
+    use crate::database::{
+        COLLECTIVES_SQL, COLLECTIVE_SYNC_SQL, COLLECTIVE_TABLE_DATA_SQL, LOCAL_PROFILES_SQL,
+    };
     use sqlx::sqlite::SqlitePoolOptions;
 
     const OWNER: &str = "profile-aaaaaaaaaaaaaaaaaaaaaaaa";
@@ -1318,6 +1711,8 @@ mod tests {
     const T1: &str = "2026-10-29T23:30:00Z";
     const UNIX: i64 = 1_761_780_600;
     const PASSWORD: &str = "синтетичний-пароль";
+    /// Синтетична зміна, дійсна для будь-якої таблиці (видалення рядка).
+    const OP: &str = r#"{"v":1,"rows":[{"key":"r1","kind":"delete"}]}"#;
 
     fn password() -> Zeroizing<String> {
         Zeroizing::new(PASSWORD.to_owned())
@@ -1330,7 +1725,12 @@ mod tests {
             .connect("sqlite::memory:")
             .await
             .unwrap();
-        for sql in [LOCAL_PROFILES_SQL, COLLECTIVES_SQL, COLLECTIVE_SYNC_SQL] {
+        for sql in [
+            LOCAL_PROFILES_SQL,
+            COLLECTIVES_SQL,
+            COLLECTIVE_SYNC_SQL,
+            COLLECTIVE_TABLE_DATA_SQL,
+        ] {
             sqlx::raw_sql(sql).execute(&pool).await.unwrap();
         }
         sqlx::query(
@@ -1381,7 +1781,14 @@ mod tests {
     async fn owner_with_collective() -> (CollectiveStore, tempfile::TempDir, String) {
         let (store, dir) = node(OWNER).await;
         let created = store
-            .create_collective(OWNER, password(), "Навчальна група", T1, UNIX)
+            .create_collective(
+                OWNER,
+                password(),
+                "Навчальна група",
+                "Синтетик Власник",
+                T1,
+                UNIX,
+            )
             .await
             .unwrap();
         (store, dir, created.fingerprint)
@@ -1398,6 +1805,7 @@ mod tests {
                 "Облік після факту",
                 "B",
                 "after-fact",
+                Some(&["Стан".to_owned()]),
                 T1,
             )
             .await
@@ -1405,7 +1813,10 @@ mod tests {
         assert_eq!((table.class, table.declared_class), ('B', 'B'));
         assert!(table.mine && table.can_write);
         let detail = store.detail(OWNER, &collective, UNIX).await.unwrap();
-        assert_eq!(detail.latest_seq, 3, "вступ, пристрій, право на таблицю");
+        assert_eq!(
+            detail.latest_seq, 4,
+            "вступ, пристрій, ім'я, право на таблицю"
+        );
         assert_eq!(detail.tables, vec![table.clone()]);
         assert_eq!(detail.outbox, 0);
         assert!(!detail.wan_accepted && !detail.base44_accepted);
@@ -1418,7 +1829,7 @@ mod tests {
             &table.fingerprint,
             "lan",
             false,
-            "{\"row\":\"synthetic\"}",
+            r#"{"v":1,"rows":[{"key":"r1","kind":"upsert","values":{"Стан":"synthetic"}}]}"#,
             UNIX,
         )
         .await
@@ -1436,13 +1847,220 @@ mod tests {
             .unwrap()
             .windows(b"synthetic".len())
             .any(|part| part == b"synthetic"));
+        // Той самий конверт — у локальній історії таблиці, теж шифротекстом.
+        let stored: Vec<u8> = sqlx::query_scalar("SELECT envelope FROM collective_table_ops")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        assert!(!stored
+            .windows(b"synthetic".len())
+            .any(|part| part == b"synthetic"));
+        let data = store
+            .read_table(OWNER, password(), &collective, &table.fingerprint)
+            .await
+            .unwrap();
+        assert_eq!(data.columns, vec!["Стан".to_owned()]);
+        assert_eq!(data.rejected, 0);
+        assert_eq!(data.changes.len(), 1);
+        assert!(data.changes[0].mine);
+        assert_eq!(data.changes[0].client_time, UNIX);
+        assert_eq!(
+            data.changes[0].rows[0]
+                .values
+                .get("Стан")
+                .map(String::as_str),
+            Some("synthetic")
+        );
+        assert_eq!(
+            store.detail(OWNER, &collective, UNIX).await.unwrap().tables[0].changes,
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn columns_and_changes_are_validated_and_bad_packages_are_not_applied() {
+        let (store, _dir, collective) = owner_with_collective().await;
+        let columns = |names: &[&str]| names.iter().map(|n| (*n).to_owned()).collect::<Vec<_>>();
+        for bad in [
+            columns(&["Стан", "Стан"]),
+            columns(&[" "]),
+            columns(&["а\u{7}"]),
+            columns(&[&"я".repeat(41)]),
+            (0..33).map(|i| format!("с{i}")).collect(),
+        ] {
+            assert!(matches!(
+                store
+                    .set_table(
+                        OWNER,
+                        &collective,
+                        None,
+                        "Облік",
+                        "C",
+                        "after-fact",
+                        Some(&bad),
+                        T1
+                    )
+                    .await,
+                Err(CollectiveStoreError::InvalidColumns)
+            ));
+        }
+        let table = store
+            .set_table(
+                OWNER,
+                &collective,
+                None,
+                "Облік",
+                "C",
+                "after-fact",
+                Some(&columns(&[" Підрозділ ", "Стан"])),
+                T1,
+            )
+            .await
+            .unwrap();
+        assert_eq!(table.columns, columns(&["Підрозділ", "Стан"]));
+        // `None` залишає стовпці, нові — замінюють.
+        let renamed = store
+            .set_table(
+                OWNER,
+                &collective,
+                Some(&table.fingerprint),
+                "Облік 2",
+                "C",
+                "after-fact",
+                None,
+                T1,
+            )
+            .await
+            .unwrap();
+        assert_eq!(renamed.columns, table.columns);
+
+        for bad in [
+            "{}",
+            r#"{"v":2,"rows":[{"key":"r1","kind":"delete"}]}"#,
+            r#"{"v":1,"rows":[]}"#,
+            r#"{"v":1,"rows":[{"key":"","kind":"delete"}]}"#,
+            r#"{"v":1,"rows":[{"key":"r1","kind":"delete"},{"key":"r1","kind":"delete"}]}"#,
+            r#"{"v":1,"rows":[{"key":"r1","kind":"upsert","values":{"Невідомий":"1"}}]}"#,
+            r#"{"v":1,"rows":[{"key":"r1","kind":"delete","values":{"Стан":"1"}}]}"#,
+            r#"{"v":1,"rows":[{"key":"r1","kind":"move"}]}"#,
+            r#"{"v":1,"rows":[{"key":"r1","kind":"delete"}],"extra":1}"#,
+        ] {
+            assert!(
+                matches!(
+                    store
+                        .report_prepare(
+                            OWNER,
+                            &collective,
+                            &table.fingerprint,
+                            "lan",
+                            false,
+                            bad,
+                            UNIX
+                        )
+                        .await,
+                    Err(CollectiveStoreError::InvalidTableChange)
+                ),
+                "{bad}"
+            );
+        }
+
+        for (i, op) in [
+            r#"{"v":1,"rows":[{"key":"r1","kind":"upsert","values":{"Підрозділ":"1 рота","Стан":"готова"}}]}"#,
+            r#"{"v":1,"rows":[{"key":"r1","kind":"upsert","values":{"Стан":"на марші"}},{"key":"r2","kind":"upsert","values":{"Підрозділ":"2 рота"}}]}"#,
+            r#"{"v":1,"rows":[{"key":"r2","kind":"delete"}]}"#,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let outcome = report(
+                &store, OWNER, password(), &collective, &table.fingerprint, "lan", false, op,
+                UNIX + i as i64,
+            )
+            .await
+            .unwrap();
+            assert!(outcome.allowed, "{}", outcome.message);
+        }
+        let (collective_id, _) = store.find_collective(OWNER, &collective).await.unwrap();
+        // Пошкоджений конверт у локальній історії: не застосовується, лише рахується.
+        let mut tampered: Vec<u8> =
+            sqlx::query_scalar("SELECT envelope FROM collective_table_ops LIMIT 1")
+                .fetch_one(&store.pool)
+                .await
+                .unwrap();
+        // Інший envelope_id у заголовку (2 + 2 + 16 байтів від початку): не дублікат, але
+        // заголовок входить в AAD, тож розшифрування не проходить.
+        tampered[20..36].copy_from_slice(&[7u8; 16]);
+        sqlx::query(
+            "INSERT INTO collective_table_ops
+                 (profile_id, collective_id, table_id, envelope_id, envelope, recorded_at)
+             SELECT profile_id, collective_id, table_id, ?, ?, ?
+             FROM collective_table_ops LIMIT 1",
+        )
+        .bind([7u8; 16].as_slice())
+        .bind(tampered.as_slice())
+        .bind("2026-10-30T09:00:00Z")
+        .execute(&store.pool)
+        .await
+        .unwrap();
+        let data = store
+            .read_table(OWNER, password(), &collective, &table.fingerprint)
+            .await
+            .unwrap();
+        assert_eq!(data.title, "Облік 2");
+        assert_eq!(data.changes.len(), 3);
+        assert_eq!(data.rejected, 1);
+        assert_eq!(
+            data.changes
+                .iter()
+                .map(|c| c.client_time)
+                .collect::<Vec<_>>(),
+            vec![UNIX, UNIX + 1, UNIX + 2]
+        );
+        assert_eq!(data.changes[2].rows[0].kind, RowKind::Delete);
+        assert!(matches!(
+            store
+                .read_table(
+                    OWNER,
+                    Zeroizing::new("не-той-пароль".into()),
+                    &collective,
+                    &table.fingerprint
+                )
+                .await,
+            Err(CollectiveStoreError::WrongPassword)
+        ));
+        assert!(matches!(
+            store
+                .read_table(OWNER, password(), &collective, "AAAAAAAAAA")
+                .await,
+            Err(CollectiveStoreError::TableNotFound)
+        ));
+        // Видалення колективу забирає й історію таблиць (каскад).
+        sqlx::query("DELETE FROM collectives WHERE collective_id = ?")
+            .bind(collective_id.as_slice())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let left: i64 = sqlx::query_scalar("SELECT count(*) FROM collective_table_ops")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        assert_eq!(left, 0);
     }
 
     #[tokio::test]
     async fn report_denials_come_back_as_codes_and_nothing_is_queued() {
         let (store, _dir, collective) = owner_with_collective().await;
         let table = store
-            .set_table(OWNER, &collective, None, "Облік", "C", "after-fact", T1)
+            .set_table(
+                OWNER,
+                &collective,
+                None,
+                "Облік",
+                "C",
+                "after-fact",
+                None,
+                T1,
+            )
             .await
             .unwrap();
         let cases = [
@@ -1459,7 +2077,7 @@ mod tests {
                 &table.fingerprint,
                 transport,
                 explicit,
-                "{}",
+                OP,
                 UNIX,
             )
             .await
@@ -1479,6 +2097,7 @@ mod tests {
                 "Облік",
                 "C",
                 "planned",
+                None,
                 T1,
             )
             .await
@@ -1492,7 +2111,7 @@ mod tests {
             &table.fingerprint,
             "peer_wan",
             true,
-            "{}",
+            OP,
             UNIX,
         )
         .await
@@ -1511,7 +2130,7 @@ mod tests {
                 &table.fingerprint,
                 "ftp",
                 false,
-                "{}",
+                OP,
                 UNIX
             )
             .await,
@@ -1541,11 +2160,286 @@ mod tests {
                 &table.fingerprint,
                 "lan",
                 false,
-                "{}",
+                OP,
                 UNIX
             )
             .await,
             Err(CollectiveStoreError::WrongPassword)
+        ));
+    }
+
+    /// Учасник у колективі власника (два вузли, вступ за запрошенням).
+    async fn owner_and_guest() -> (
+        CollectiveStore,
+        CollectiveStore,
+        tempfile::TempDir,
+        tempfile::TempDir,
+        String,
+    ) {
+        let (owner, a, collective) = owner_with_collective().await;
+        let (guest, b) = node(GUEST).await;
+        let invitation = owner
+            .create_invitation(OWNER, password(), &collective, 24, UNIX)
+            .await
+            .unwrap();
+        let request = guest
+            .join_request(
+                GUEST,
+                password(),
+                &invitation.text,
+                "Синтетик Гість",
+                UNIX + 1,
+            )
+            .await
+            .unwrap();
+        let admission = owner
+            .admit(OWNER, password(), &collective, &request.text, T1, UNIX + 2)
+            .await
+            .unwrap();
+        guest
+            .join_accept(GUEST, password(), &admission.text, T1)
+            .await
+            .unwrap();
+        (owner, guest, a, b, collective)
+    }
+
+    /// Рішення власника 30.10.2026: таблиця й зміни доходять до інших учасників пакетом
+    /// оновлення, і змінювати таблицю може кожен учасник.
+    #[tokio::test]
+    async fn sync_package_carries_table_and_changes_both_ways() {
+        let (owner, guest, _a, _b, collective) = owner_and_guest().await;
+        let columns = vec!["Підрозділ".to_owned(), "Стан".to_owned()];
+        let table = owner
+            .set_table(
+                OWNER,
+                &collective,
+                None,
+                "Облік",
+                "C",
+                "after-fact",
+                Some(&columns),
+                T1,
+            )
+            .await
+            .unwrap();
+        let first = r#"{"v":1,"rows":[{"key":"r1","kind":"upsert","values":{"Підрозділ":"1 рота","Стан":"готова"}}]}"#;
+        let outcome = report(
+            &owner,
+            OWNER,
+            password(),
+            &collective,
+            &table.fingerprint,
+            "lan",
+            false,
+            first,
+            UNIX + 10,
+        )
+        .await
+        .unwrap();
+        assert!(outcome.allowed, "{}", outcome.message);
+        // До пакета учасник таблиці не бачить.
+        assert!(guest
+            .detail(GUEST, &collective, UNIX)
+            .await
+            .unwrap()
+            .tables
+            .is_empty());
+
+        let package = owner
+            .sync_export(OWNER, password(), &collective, UNIX + 20)
+            .await
+            .unwrap();
+        assert!(package.text.starts_with("EWSYNC1."));
+        assert_eq!((package.tables, package.changes), (1, 1));
+        // Пакет зашифровано: назви таблиці й значень відкритим текстом немає.
+        let raw = decode(
+            "EWSYNC1.",
+            &package.text[..package.text.len().min(MAX_TEXT_BYTES)],
+        )
+        .unwrap();
+        for word in ["Облік", "готова", "Підрозділ"] {
+            assert!(
+                !raw.windows(word.len()).any(|w| w == word.as_bytes()),
+                "{word}"
+            );
+        }
+
+        let got = guest
+            .sync_import(GUEST, password(), &package.text, UNIX + 30)
+            .await
+            .unwrap();
+        assert_eq!(
+            (
+                got.collective.as_str(),
+                got.tables,
+                got.new_changes,
+                got.rejected
+            ),
+            (collective.as_str(), 1, 1, 0)
+        );
+        let detail = guest.detail(GUEST, &collective, UNIX).await.unwrap();
+        let seen = &detail.tables[0];
+        assert_eq!(
+            (seen.fingerprint.as_str(), seen.mine, seen.can_write),
+            (table.fingerprint.as_str(), false, true)
+        );
+        assert_eq!(seen.columns, columns);
+        let data = guest
+            .read_table(GUEST, password(), &collective, &table.fingerprint)
+            .await
+            .unwrap();
+        assert_eq!(data.changes.len(), 1);
+        assert_eq!(
+            data.changes[0].author_name.as_deref(),
+            Some("Синтетик Власник")
+        );
+
+        // Той самий пакет удруге нічого не додає.
+        let again = guest
+            .sync_import(GUEST, password(), &package.text, UNIX + 31)
+            .await
+            .unwrap();
+        assert_eq!(
+            (again.tables, again.new_changes, again.known_changes),
+            (0, 0, 1)
+        );
+
+        // Учасник доповідає свою зміну, власник приймає його пакет.
+        let second = r#"{"v":1,"rows":[{"key":"r1","kind":"upsert","values":{"Підрозділ":"1 рота","Стан":"на марші"}}]}"#;
+        let outcome = report(
+            &guest,
+            GUEST,
+            password(),
+            &collective,
+            &table.fingerprint,
+            "lan",
+            false,
+            second,
+            UNIX + 40,
+        )
+        .await
+        .unwrap();
+        assert!(outcome.allowed, "{}", outcome.message);
+        let back = guest
+            .sync_export(GUEST, password(), &collective, UNIX + 50)
+            .await
+            .unwrap();
+        let got = owner
+            .sync_import(OWNER, password(), &back.text, UNIX + 60)
+            .await
+            .unwrap();
+        assert_eq!(
+            (got.tables, got.new_changes, got.known_changes, got.rejected),
+            (0, 1, 1, 0)
+        );
+        let data = owner
+            .read_table(OWNER, password(), &collective, &table.fingerprint)
+            .await
+            .unwrap();
+        assert_eq!(data.rejected, 0);
+        assert_eq!(
+            data.changes.iter().map(|c| c.mine).collect::<Vec<_>>(),
+            vec![true, false]
+        );
+        assert_eq!(
+            data.changes[1].rows[0]
+                .values
+                .get("Стан")
+                .map(String::as_str),
+            Some("на марші")
+        );
+
+        // Власник змінює стовпці — новий підписаний запис доходить до учасника.
+        let renamed = vec![
+            "Підрозділ".to_owned(),
+            "Стан".to_owned(),
+            "Примітка".to_owned(),
+        ];
+        owner
+            .set_table(
+                OWNER,
+                &collective,
+                Some(&table.fingerprint),
+                "Облік",
+                "C",
+                "after-fact",
+                Some(&renamed),
+                T1,
+            )
+            .await
+            .unwrap();
+        let package = owner
+            .sync_export(OWNER, password(), &collective, UNIX + 70)
+            .await
+            .unwrap();
+        let got = guest
+            .sync_import(GUEST, password(), &package.text, UNIX + 80)
+            .await
+            .unwrap();
+        assert_eq!(got.tables, 1);
+        let detail = guest.detail(GUEST, &collective, UNIX).await.unwrap();
+        assert_eq!(detail.tables[0].columns, renamed);
+    }
+
+    #[tokio::test]
+    async fn damaged_or_foreign_sync_packages_change_nothing() {
+        let (owner, guest, _a, _b, collective) = owner_and_guest().await;
+        owner
+            .set_table(
+                OWNER,
+                &collective,
+                None,
+                "Облік",
+                "C",
+                "after-fact",
+                Some(&["Стан".to_owned()]),
+                T1,
+            )
+            .await
+            .unwrap();
+        let package = owner
+            .sync_export(OWNER, password(), &collective, UNIX + 20)
+            .await
+            .unwrap();
+        // Пошкоджений шифротекст — відмова цілком.
+        let mut bytes = decode("EWSYNC1.", &package.text).unwrap();
+        *bytes.last_mut().unwrap() ^= 1;
+        let damaged = format!("EWSYNC1.{}", URL_SAFE_NO_PAD.encode(&bytes));
+        assert!(matches!(
+            guest.sync_import(GUEST, password(), &damaged, UNIX).await,
+            Err(CollectiveStoreError::InvalidText)
+        ));
+        assert!(matches!(
+            guest
+                .sync_import(GUEST, password(), "EWINV1.AAAA", UNIX)
+                .await,
+            Err(CollectiveStoreError::InvalidText)
+        ));
+        assert!(matches!(
+            guest
+                .sync_import(
+                    GUEST,
+                    Zeroizing::new("не-той-пароль".into()),
+                    &package.text,
+                    UNIX
+                )
+                .await,
+            Err(CollectiveStoreError::WrongPassword)
+        ));
+        assert!(guest
+            .detail(GUEST, &collective, UNIX)
+            .await
+            .unwrap()
+            .tables
+            .is_empty());
+
+        // Колектив, якого немає в профілі, — пакет не приймається.
+        let (stranger, _c, _) = owner_with_collective().await;
+        assert!(matches!(
+            stranger
+                .sync_import(OWNER, password(), &package.text, UNIX)
+                .await,
+            Err(CollectiveStoreError::CollectiveNotFound)
         ));
     }
 
@@ -1563,6 +2457,7 @@ mod tests {
                 GUEST,
                 password(),
                 &format!(" {}\n", invitation.text),
+                "  Синтетик   Гість ",
                 UNIX + 10,
             )
             .await
@@ -1581,7 +2476,7 @@ mod tests {
             .admit(OWNER, password(), &collective, &request.text, T1, UNIX + 20)
             .await
             .unwrap();
-        assert_eq!(admission.latest_seq, 4);
+        assert_eq!(admission.latest_seq, 6);
         let guest_fp = guest
             .status(GUEST)
             .await
@@ -1590,6 +2485,7 @@ mod tests {
             .unwrap()
             .fingerprint;
         assert_eq!(admission.member_fingerprint, guest_fp);
+        assert_eq!(admission.member_name.as_deref(), Some("Синтетик Гість"));
         // Той самий талон удруге не впускає.
         assert!(matches!(
             owner
@@ -1604,10 +2500,24 @@ mod tests {
             .unwrap();
         assert_eq!(joined.collective.fingerprint, collective);
         assert_eq!(joined.collective.members, 2);
-        assert_eq!(joined.members, vec![owner_fp.clone(), guest_fp.clone()]);
+        let expected = vec![
+            MemberSummary {
+                fingerprint: owner_fp,
+                name: Some("Синтетик Власник".into()),
+                me: false,
+                founder: true,
+            },
+            MemberSummary {
+                fingerprint: guest_fp,
+                name: Some("Синтетик Гість".into()),
+                me: true,
+                founder: false,
+            },
+        ];
+        assert_eq!(joined.members, expected);
         let detail = guest.detail(GUEST, &collective, UNIX).await.unwrap();
-        assert_eq!(detail.members, vec![owner_fp, guest_fp]);
-        assert_eq!(detail.latest_seq, 4);
+        assert_eq!(detail.members, expected);
+        assert_eq!(detail.latest_seq, 6);
         assert!(matches!(
             guest
                 .join_accept(GUEST, password(), &admission.text, T1)
@@ -1623,6 +2533,7 @@ mod tests {
                 "Таблиця гостя",
                 "A",
                 "after-fact",
+                None,
                 T1,
             )
             .await
@@ -1635,7 +2546,7 @@ mod tests {
             &table.fingerprint,
             "lan",
             false,
-            "{}",
+            OP,
             UNIX,
         )
         .await
@@ -1656,7 +2567,7 @@ mod tests {
         let (stranger, _c) = node(GUEST).await;
         assert!(matches!(
             guest
-                .join_request(GUEST, password(), "EWJOIN1.AAAA", UNIX)
+                .join_request(GUEST, password(), "EWJOIN1.AAAA", "Синтетик Гість", UNIX)
                 .await,
             Err(CollectiveStoreError::InvalidText)
         ));
@@ -1665,7 +2576,7 @@ mod tests {
             .await
             .unwrap();
         let request = guest
-            .join_request(GUEST, password(), &invitation.text, UNIX)
+            .join_request(GUEST, password(), &invitation.text, "Синтетик Гість", UNIX)
             .await
             .unwrap();
         // Прострочений талон.
@@ -1720,7 +2631,7 @@ mod tests {
             ("Т", "A", "draft"),
         ] {
             assert!(store
-                .set_table(OWNER, &collective, None, title, class, purpose, T1)
+                .set_table(OWNER, &collective, None, title, class, purpose, None, T1)
                 .await
                 .is_err());
         }
@@ -1733,6 +2644,7 @@ mod tests {
                     "Т",
                     "A",
                     "after-fact",
+                    None,
                     T1
                 )
                 .await,
@@ -1779,19 +2691,33 @@ mod tests {
         // Відмова на другій вставці тієї самої транзакції: рядок колективу відкочується.
         fail_inserts(&store, "collective_membership_log").await;
         assert!(store
-            .create_collective(OWNER, password(), "Навчальна група", T1, UNIX)
+            .create_collective(
+                OWNER,
+                password(),
+                "Навчальна група",
+                "Синтетик Власник",
+                T1,
+                UNIX
+            )
             .await
             .is_err());
         assert!(epoch_secrets(&store, OWNER).is_empty());
         assert!(store.status(OWNER).await.unwrap().collectives.is_empty());
         heal_inserts(&store, "collective_membership_log").await;
         let created = store
-            .create_collective(OWNER, password(), "Навчальна група", T1, UNIX)
+            .create_collective(
+                OWNER,
+                password(),
+                "Навчальна група",
+                "Синтетик Власник",
+                T1,
+                UNIX,
+            )
             .await
             .unwrap();
         assert_eq!(epoch_secrets(&store, OWNER).len(), 1);
         assert_eq!(store.status(OWNER).await.unwrap().collectives.len(), 1);
-        assert_eq!(created.latest_seq, 2);
+        assert_eq!(created.latest_seq, 3);
     }
 
     /// E8-SEC-001: join_accept з відмовою SQL прибирає ключі епох; повтор проходить.
@@ -1804,7 +2730,13 @@ mod tests {
             .await
             .unwrap();
         let request = guest
-            .join_request(GUEST, password(), &invitation.text, UNIX + 10)
+            .join_request(
+                GUEST,
+                password(),
+                &invitation.text,
+                "Синтетик Гість",
+                UNIX + 10,
+            )
             .await
             .unwrap();
         let admission = owner
@@ -1831,14 +2763,23 @@ mod tests {
 
     async fn owner_table(store: &CollectiveStore, collective: &str) -> TableSummary {
         store
-            .set_table(OWNER, collective, None, "Облік", "C", "after-fact", T1)
+            .set_table(
+                OWNER,
+                collective,
+                None,
+                "Облік",
+                "C",
+                "after-fact",
+                None,
+                T1,
+            )
             .await
             .unwrap()
     }
 
     async fn prepare(store: &CollectiveStore, collective: &str, table: &str) -> String {
         let prepared = store
-            .report_prepare(OWNER, collective, table, "lan", false, "{}", UNIX)
+            .report_prepare(OWNER, collective, table, "lan", false, OP, UNIX)
             .await
             .unwrap();
         assert!(prepared.allowed, "{}", prepared.message);
@@ -1909,6 +2850,7 @@ mod tests {
                             "Облік",
                             "A",
                             "after-fact",
+                            None,
                             T1,
                         )
                         .await
@@ -1923,6 +2865,7 @@ mod tests {
                             "Облік",
                             "A",
                             "planned",
+                            None,
                             T1,
                         )
                         .await
@@ -1931,7 +2874,16 @@ mod tests {
                 _ => {
                     // Нове право на іншу таблицю — новий запис журналу складу.
                     store
-                        .set_table(OWNER, &collective, None, "Інша", "B", "after-fact", T1)
+                        .set_table(
+                            OWNER,
+                            &collective,
+                            None,
+                            "Інша",
+                            "B",
+                            "after-fact",
+                            None,
+                            T1,
+                        )
                         .await
                         .unwrap();
                 }
@@ -1989,7 +2941,7 @@ mod tests {
                 &table.fingerprint,
                 "peer_wan",
                 true,
-                "{}",
+                OP,
                 UNIX,
             )
             .await
@@ -2048,7 +3000,7 @@ mod tests {
                     "AAAAA-AAAAA",
                     "lan",
                     false,
-                    "{}",
+                    OP,
                     UNIX
                 )
                 .await,
@@ -2056,7 +3008,14 @@ mod tests {
         ));
         assert_eq!(epoch_secrets(&restarted, OWNER).len(), 2);
         restarted
-            .create_collective(OWNER, password(), "Друга група", T1, UNIX)
+            .create_collective(
+                OWNER,
+                password(),
+                "Друга група",
+                "Синтетик Власник",
+                T1,
+                UNIX,
+            )
             .await
             .unwrap();
         let left = epoch_secrets(&restarted, OWNER);
@@ -2088,7 +3047,13 @@ mod tests {
             .await
             .unwrap();
         let request = guest
-            .join_request(GUEST, password(), &invitation.text, UNIX + 10)
+            .join_request(
+                GUEST,
+                password(),
+                &invitation.text,
+                "Синтетик Гість",
+                UNIX + 10,
+            )
             .await
             .unwrap();
         let admission = owner
@@ -2170,7 +3135,13 @@ mod tests {
             .await
             .unwrap();
         let request = guest
-            .join_request(GUEST, password(), &invitation.text, UNIX + 10)
+            .join_request(
+                GUEST,
+                password(),
+                &invitation.text,
+                "Синтетик Гість",
+                UNIX + 10,
+            )
             .await
             .unwrap();
         let admission = owner
@@ -2200,7 +3171,14 @@ mod tests {
         ));
         assert!(failed(
             guest
-                .create_collective(GUEST, password(), "Група гостя", T1, UNIX)
+                .create_collective(
+                    GUEST,
+                    password(),
+                    "Група гостя",
+                    "Синтетик Власник",
+                    T1,
+                    UNIX
+                )
                 .await
                 .map(|_| ())
         ));

@@ -179,6 +179,14 @@ copied first for the same foreign-key reason as in 0021; rows, ids and indexes a
 kept. Existing profiles do NOT get the `army` row: the start screen shows only the
 modules a profile chose, and «Армійська авіація» is switched on in «Профілі».
 
+`0023_collective_table_data.sql` (owner decision 2026-10-30, «Так, починай») adds
+`collective_tables.columns` (JSON array of column names, `[]` by default) and
+`collective_table_ops` (one sealed envelope per «Доповісти», keyed by
+`envelope_id`, cascading with the table). Row values are never stored in clear;
+Rust rebuilds the table by opening and re-verifying the envelopes. It also adds
+`collective_tables.record`, the owner-signed table record that other members
+receive in the `EWSYNC1.` update package.
+
 The `dashboard_data_<id>` tables of user-created dashboard modules are not
 migration objects: Rust creates them at runtime from a validated catalog
 template and adds columns that later appear in a template with `ALTER TABLE`,
