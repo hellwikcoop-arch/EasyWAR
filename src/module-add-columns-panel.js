@@ -5,16 +5,20 @@
 import { planAddColumns } from './module-add-columns-core.js';
 
 /**
- * `tables()` — основні таблиці цього роду військ (модулі `user-table`); `schema()` — схема профілю; `apply({ plan, module })`
- * повертає Promise `{ ok, message? }` і сама перечитує список модулів. Повертає `<details>`.
+ * `tables()` — основні таблиці цього роду військ (модулі `user-table`); `schema()` — схема профілю; `apply({ definition, plan, module })`
+ * повертає Promise `{ ok, message? }` і сама перечитує список модулів. `placeable` — блок стає карткою «Мого дашборда»,
+ * що рахується з основної таблиці (інакше він поки читає свої звичайні джерела). Повертає `<details>`.
  */
-export function addColumnsPanel({ el, definition, tables, schema, apply }) {
+export function addColumnsPanel({ el, definition, tables, schema, apply, placeable = false }) {
   const status = el('p', { class: 'ewmc-update-status', role: 'status' });
   const body = el('div', { class: 'ewmc-update-body' });
   const hasOptional = definition.requirements.some(item => !item.required);
   const panel = el('details', { class: 'ewmc-update ewmc-addcols', 'data-definition-id': definition.definitionId },
     el('summary', {}, el('span', { text: 'Додати стовпці в основну таблицю' })),
     el('p', { class: 'ewmc-update-hint', text: 'Блок рахується зі стовпців вашої таблиці. Тут видно, яких стовпців йому бракує; після підтвердження вони додаються в основну таблицю, а значення в них вносите ви. Вихідні файли не змінюються.' }),
+    el('p', { class: 'ewmc-update-hint', text: placeable
+      ? 'Після додавання на «Моєму дашборді» з’явиться картка цього блока, що рахується з основної таблиці.'
+      : 'Цей блок поки рахується лише на своїй вкладці, зі звичайної таблиці дашборда; з основної таблиці він читатиме пізніше.' }),
     status, body);
   let busy = false;
   let withOptional = false;
@@ -51,6 +55,11 @@ export function addColumnsPanel({ el, definition, tables, schema, apply }) {
         : `Блок ${plan.summary}${module ? ` у таблиці «${module.title}»` : ''}.` }));
       if (!module) nodes.push(el('p', { class: 'ewmc-update-hint', text: 'Основної таблиці ще немає: її буде створено з цими стовпцями, без рядків.' }));
       if (!plan.nothingToAdd) nodes.push(confirmBox(plan, module));
+      else if (placeable) {
+        nodes.push(el('div', { class: 'ewmc-update-pick' }, el('button', {
+          type: 'button', class: 'btn quiet', text: 'Поставити картку на «Мій дашборд»', 'data-action': 'place-card', disabled: busy, onclick: () => commit(plan, module),
+        })));
+      }
     }
     body.replaceChildren(...nodes);
   }
@@ -78,7 +87,7 @@ export function addColumnsPanel({ el, definition, tables, schema, apply }) {
     say('Збереження в локальній SQLite…');
     paint();
     try {
-      const result = await apply({ plan, module });
+      const result = await apply({ definition, plan, module });
       say(result?.message || (result?.ok ? 'Готово.' : 'Не вдалося додати стовпці.'), !result?.ok);
     } catch (error) {
       say(String(error?.message || error || 'Не вдалося додати стовпці.'), true);
