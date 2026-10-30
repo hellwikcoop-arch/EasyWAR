@@ -1,0 +1,383 @@
+/* Tactical Professional v2: visual treatment for the existing launcher only. */
+@font-face {
+  font-family: "UAF Sans";
+  src: url("./fonts/UAFSans.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+#view-start {
+  --display: "UAF Sans", Inter, ui-sans-serif, sans-serif;
+  --bg: #111713;
+  --surface: #1a211c;
+  --surface-2: #222b24;
+  --line: #364238;
+  --line-strong: #506452;
+  --ink: #edf1e9;
+  --muted: #a8b4a8;
+  --tp-accent: #9ecb83;
+  --tp-accent-soft: rgba(158, 203, 131, .13);
+  background:
+    radial-gradient(ellipse at 78% 12%, rgba(89, 124, 87, .11), transparent 43%),
+    linear-gradient(150deg, #131a16 0%, #101612 55%, #0c120f 100%) !important;
+  padding: max(82px, env(safe-area-inset-top)) clamp(18px, 4vw, 72px) 34px !important;
+  color: var(--ink);
+  font-family: var(--display);
+}
+
+#view-start::before {
+  opacity: .24 !important;
+  background-image:
+    linear-gradient(rgba(172, 197, 166, .065) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(172, 197, 166, .065) 1px, transparent 1px) !important;
+  background-size: 32px 32px !important;
+}
+
+#view-start > .ew-tech-field,
+#view-start > .ew-hud,
+#view-start .start-brand .ew-radar {
+  display: none !important;
+}
+
+#view-start > .start-box {
+  --branch-card-height: 144px;
+  width: min(1320px, 100%) !important;
+  gap: 18px !important;
+  align-content: start !important;
+  padding: 0 0 24px !important;
+}
+
+#view-start > .ew-start-tools {
+  position: fixed !important;
+  inset: 0 0 auto !important;
+  z-index: 6;
+  width: 100%;
+  min-height: 62px;
+  padding: 10px clamp(18px, 4vw, 72px) !important;
+  justify-content: flex-end;
+  gap: 7px;
+  border-bottom: 1px solid #344136;
+  background: rgba(22, 29, 24, .96);
+  box-shadow: 0 5px 24px rgba(0, 0, 0, .18);
+}
+
+#view-start > .ew-start-tools::before {
+  content: "EASYWAR  /  КОМАНДНИЙ ЦЕНТР";
+  margin-right: auto;
+  align-self: center;
+  color: #e7eee3;
+  font: 700 14px/1 var(--display);
+  letter-spacing: .08em;
+  white-space: nowrap;
+}
+
+#view-start .ew-start-tools :is(.btn, .btn.quiet) {
+  min-height: 36px;
+  padding: 7px 12px;
+  border: 1px solid #465448;
+  border-radius: 7px;
+  background: #232b25;
+  color: #dce5da;
+  box-shadow: none;
+  font: 600 12px/1.15 var(--display);
+  backdrop-filter: none;
+}
+
+#view-start .ew-start-tools :is(.btn, .btn.quiet):hover,
+#view-start .ew-start-tools :is(.btn, .btn.quiet):focus-visible {
+  border-color: var(--tp-accent);
+  background: #303d32;
+  color: #f6faf3;
+}
+
+#view-start .start-brand.start-brand-reference {
+  display: flex !important;
+  flex-direction: row !important;
+  justify-content: flex-start !important;
+  align-items: center !important;
+  text-align: left !important;
+  width: 100% !important;
+  height: 108px !important;
+  aspect-ratio: auto !important;
+  margin: 0 !important;
+  padding: 10px 24px !important;
+  overflow: hidden !important;
+  border: 1px solid #3a493c !important;
+  border-radius: 11px !important;
+  background:
+    linear-gradient(100deg, #263129 0%, #1b251e 47%, #171f19 100%) !important;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .2) !important;
+}
+
+#view-start .start-brand.start-brand-reference::before {
+  content: "" !important;
+  display: block !important;
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: var(--tp-accent) !important;
+}
+
+#view-start .start-brand.start-brand-reference::after {
+  content: "Оберіть рід військ" !important;
+  display: block !important;
+  position: static !important;
+  inset: auto !important;
+  width: auto !important;
+  height: auto !important;
+  transform: none !important;
+  filter: none !important;
+  z-index: 1 !important;
+  pointer-events: auto;
+  margin-left: 24px;
+  color: #dce7d7;
+  font: 500 20px/1.2 var(--display);
+  letter-spacing: .01em;
+  white-space: nowrap;
+}
+
+#view-start .start-brand-art {
+  flex: none;
+  width: 100px !important;
+  height: 88px !important;
+  max-width: 100px !important;
+  aspect-ratio: auto !important;
+  object-fit: contain !important;
+  margin: 0 !important;
+  opacity: .9 !important;
+  filter: grayscale(.9) sepia(.6) hue-rotate(55deg) brightness(1.1) !important;
+}
+
+#view-start .branch-cards {
+  gap: 12px !important;
+}
+
+#view-start .branch-cards::before,
+#view-start .branch-cards::after {
+  padding: 0 0 8px 0 !important;
+  color: #b8c8b6 !important;
+  font: 600 14px/1.2 var(--display) !important;
+  letter-spacing: .11em !important;
+  text-shadow: none !important;
+  background: linear-gradient(90deg, #68866b, rgba(104, 134, 107, .08)) 0 100% / 100% 1px no-repeat !important;
+}
+
+#view-start .branch-cards .branch-card,
+#view-start .branch-cards .command-tile {
+  height: var(--branch-card-height) !important;
+  min-height: var(--branch-card-height) !important;
+  padding: 18px 20px !important;
+  border: 1px solid #3b4b3e !important;
+  border-radius: 10px !important;
+  background: linear-gradient(155deg, #222b24, #1a221c) !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .2), inset 0 1px rgba(255, 255, 255, .035) !important;
+  color: var(--ink);
+  transition: transform .2s ease, border-color .2s ease, background .2s ease, box-shadow .2s ease !important;
+}
+
+#view-start .branch-cards .branch-card::before {
+  background: linear-gradient(165deg, rgba(130, 164, 122, .075), transparent 50%) !important;
+  background-size: 100% 100% !important;
+  transform: none !important;
+}
+
+#view-start .branch-cards .branch-card::after {
+  display: none !important;
+}
+
+#view-start .branch-cards .branch-card:is(:hover, :focus-visible),
+#view-start .branch-cards .command-tile:focus-within {
+  transform: translateY(-2px) !important;
+  border-color: #8fb879 !important;
+  background: linear-gradient(155deg, #28352b, #1d2920) !important;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, .25), 0 0 0 1px rgba(158, 203, 131, .18) !important;
+}
+
+#view-start .branch-cards .branch-card:focus-visible,
+#view-start .branch-cards .command-tile :focus-visible {
+  outline: 2px solid var(--tp-accent) !important;
+  outline-offset: 3px;
+}
+
+#view-start .branch-cards .branch-card h3,
+#view-start .branch-cards .cmd-card h3 {
+  color: #ecf2e9 !important;
+  font: 600 17px/1.15 var(--display) !important;
+  letter-spacing: .01em !important;
+  text-shadow: none !important;
+  text-rendering: auto;
+}
+
+#view-start .branch-cards .branch-card .bc-icon {
+  width: 78px !important;
+  height: 70px !important;
+  color: #b6cfab !important;
+}
+
+#view-start .branch-cards .branch-card .bc-icon img {
+  width: auto !important;
+  max-width: 78px !important;
+  height: auto !important;
+  max-height: 70px !important;
+  object-fit: contain !important;
+  filter: grayscale(1) sepia(.72) hue-rotate(55deg) brightness(1.1) !important;
+  transform: none !important;
+}
+
+#view-start .branch-cards .branch-card[data-branch="sso"] {
+  opacity: .52 !important;
+}
+
+#view-start .branch-cards .branch-card .bc-soon {
+  color: #aebca9 !important;
+  border-color: #536552 !important;
+  background: #273229 !important;
+}
+
+#view-start .cmd-slot {
+  --ct-accent: #9ecb83 !important;
+}
+
+#view-start .cmd-slot[data-cmd="pvk"] .cmd-card,
+#view-start .cmd-slot[data-cmd="dshv"] .cmd-card,
+#view-start .branch-card.branch-card-soon.branch-card-live,
+#view-start .branch-cards .command-tile {
+  border-color: #4b604d !important;
+}
+
+#view-start .branch-card[data-branch="air"]:hover,
+#view-start .branch-card[data-branch="rocket"]:hover,
+#view-start .branch-card.branch-card-soon.branch-card-live:hover,
+#view-start .branch-card.branch-card-soon.branch-card-live:focus-visible {
+  border-color: #9ecb83 !important;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, .25), 0 0 0 1px rgba(158, 203, 131, .18) !important;
+}
+
+#view-start .cmd-slot .cmd-card {
+  border-left: 3px solid #83a674 !important;
+}
+
+#view-start .cmd-slot .command-tile {
+  height: var(--branch-card-height) !important;
+  align-content: space-between;
+  border-left: 3px solid #83a674 !important;
+  text-align: left;
+}
+
+#view-start .cmd-slot[data-open] .command-tile {
+  height: auto !important;
+  min-height: 206px !important;
+  overflow: visible !important;
+  align-content: start !important;
+  gap: 8px;
+}
+
+#view-start .ct-mark {
+  border-color: #668366;
+  border-radius: 5px;
+  color: #aed59a;
+  font-family: var(--display);
+}
+
+#view-start .ct-title,
+#view-start .ct-table,
+#view-start .ct-note,
+#view-start .ct-embed {
+  font-family: var(--display);
+}
+
+#view-start .ct-actions button {
+  border-color: #526455;
+  border-radius: 6px;
+  background: #2b382d;
+  color: #e5ede1;
+  font-family: var(--display);
+}
+
+#view-start .ct-actions button.ct-open {
+  border-color: #a6ca91;
+  background: #a6ca91;
+  color: #142015;
+}
+
+#view-start .ct-close {
+  border-color: #526455;
+  border-radius: 5px;
+}
+
+#view-start .dev-banner {
+  margin-top: 14px;
+  border: 1px solid #39483c;
+  border-radius: 9px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, .2);
+  filter: grayscale(.8) saturate(.55);
+}
+
+@media (min-width: 1000px) and (min-aspect-ratio: 3/2) {
+  #view-start .branch-cards .cmd-card {
+    grid-template-columns: 78px minmax(0, 1fr) !important;
+    column-gap: 18px !important;
+    padding: 18px 22px !important;
+  }
+  #view-start .branch-cards .branch-card.branch-card-soon {
+    grid-template-rows: 70px auto auto !important;
+    height: var(--branch-card-height) !important;
+    min-height: var(--branch-card-height) !important;
+    gap: 5px !important;
+  }
+  #view-start .branch-cards .branch-card.branch-card-soon[data-branch="artillery"] {
+    grid-template-rows: 70px auto !important;
+  }
+}
+
+@media (max-width: 700px) {
+  #view-start {
+    padding-top: max(116px, env(safe-area-inset-top)) !important;
+    padding-inline: 16px !important;
+  }
+  #view-start > .ew-start-tools {
+    flex-wrap: wrap;
+    justify-content: center;
+    padding: 8px 12px !important;
+  }
+  #view-start > .ew-start-tools::before {
+    flex-basis: 100%;
+    text-align: center;
+    font-size: 12px;
+  }
+  #view-start > .start-box {
+    --branch-card-height: 142px;
+    width: min(420px, 100%) !important;
+    gap: 14px !important;
+  }
+  #view-start .start-brand.start-brand-reference {
+    height: 100px !important;
+    padding: 10px 16px !important;
+  }
+  #view-start .start-brand-art {
+    width: 85px !important;
+    height: 84px !important;
+    max-width: 85px !important;
+  }
+  #view-start .start-brand.start-brand-reference::after {
+    margin-left: 8px;
+    font-size: 16px;
+    white-space: normal;
+  }
+  #view-start .branch-cards .branch-card,
+  #view-start .branch-cards .command-tile {
+    padding: 14px !important;
+  }
+  #view-start .branch-cards .branch-card h3,
+  #view-start .branch-cards .cmd-card h3 {
+    font-size: 15px !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #view-start .branch-cards .branch-card,
+  #view-start .branch-cards .command-tile {
+    transition: none !important;
+  }
+}
