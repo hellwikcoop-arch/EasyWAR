@@ -136,6 +136,39 @@ function marker(x, y, color, title) {
 // ---------------------------------------------------------------------------------------------
 // Види
 
+/**
+ * Плавна крива через точки ряду без «вигаданих» горбів: монотонна кубічна інтерполяція (Фріч — Карлсон, як
+ * monotoneX у d3). Між двома точками крива не виходить за їхні значення, тож пік на малюнку — справжній пік даних.
+ */
+export function monotonePath(points) {
+  if (!points.length) return '';
+  const n = points.length;
+  let d = `M${fixed(points[0].x)} ${fixed(points[0].y)}`;
+  if (n === 1) return d;
+  const h = [];
+  const slope = [];
+  for (let i = 0; i < n - 1; i += 1) {
+    h.push(points[i + 1].x - points[i].x || 1e-9);
+    slope.push((points[i + 1].y - points[i].y) / h[i]);
+  }
+  const tangent = points.map((point, i) => {
+    if (i === 0) return slope[0];
+    if (i === n - 1) return slope[n - 2];
+    const [s0, s1] = [slope[i - 1], slope[i]];
+    if (s0 * s1 <= 0) return 0;
+    const p = (s0 * h[i] + s1 * h[i - 1]) / (h[i - 1] + h[i]);
+    return Math.sign(s0) * Math.min(Math.abs(s0), Math.abs(s1), 0.5 * Math.abs(p)) * 2;
+  });
+  for (let i = 0; i < n - 1; i += 1) {
+    const [a, b] = [points[i], points[i + 1]];
+    const third = h[i] / 3;
+    d += ` C${fixed(a.x + third)} ${fixed(a.y + tangent[i] * third)} ${fixed(b.x - third)} ${fixed(b.y - tangent[i + 1] * third)} ${fixed(b.x)} ${fixed(b.y)}`;
+  }
+  return d;
+}
+
+let areaId = 0;
+
 function seriesLines(model, width, height, { compact }) {
   const frame = cartesian(width, height, model.scale);
   const count = model.categories.length;
@@ -155,12 +188,18 @@ function seriesLines(model, width, height, { compact }) {
         current.push({ x: x(index), y: frame.y(value), value, label: model.categories[index] });
       });
       if (current.length) runs.push(current);
+      // Заливка області — градієнт кольору ряду до прозорого біля основи.
+      const fillId = area ? `ewmc-area-${++areaId}` : '';
+      const base = fixed(frame.y(Math.max(0, model.scale.min)));
       return svg('g', {},
+        area ? svg('defs', {}, svg('linearGradient', { id: fillId, x1: 0, y1: 0, x2: 0, y2: 1 },
+          svg('stop', { offset: '0%', 'stop-color': color, 'stop-opacity': 0.42 }),
+          svg('stop', { offset: '100%', 'stop-color': color, 'stop-opacity': 0.02 }))) : null,
         area ? runs.map(run => svg('path', {
-          d: `M${fixed(run[0].x)} ${fixed(frame.y(Math.max(0, model.scale.min)))} ${run.map(point => `L${fixed(point.x)} ${fixed(point.y)}`).join(' ')} L${fixed(run.at(-1).x)} ${fixed(frame.y(Math.max(0, model.scale.min)))} Z`,
-          fill: color, class: 'ewmc-area',
+          d: `${monotonePath(run)} L${fixed(run.at(-1).x)} ${base} L${fixed(run[0].x)} ${base} Z`,
+          fill: `url(#${fillId})`, class: 'ewmc-area ewmc-area-fade',
         })) : null,
-        runs.map(run => svg('polyline', { points: run.map(point => `${fixed(point.x)},${fixed(point.y)}`).join(' '), stroke: color, class: 'ewmc-line' })),
+        runs.map(run => svg('path', { d: monotonePath(run), stroke: color, class: 'ewmc-line' })),
         showMarkers ? runs.flatMap(run => run.map(point => marker(point.x, point.y, color, `${point.label} · ${series.name}: ${model.valueText(point.value)}`))) : null,
         !compact && model.series.length <= 4 && runs.length ? (() => {
           const last = runs.at(-1).at(-1);
@@ -224,7 +263,7 @@ function columns(model, width, height, { compact }) {
     for (const point of points) { if (!point) { if (current.length) runs.push(current); current = []; } else current.push(point); }
     if (current.length) runs.push(current);
     return svg('g', {},
-      runs.map(run => svg('polyline', { points: run.map(point => `${fixed(point.x)},${fixed(point.y)}`).join(' '), stroke: color, class: 'ewmc-line' })),
+      runs.map(run => svg('path', { d: monotonePath(run), stroke: color, class: 'ewmc-line' })),
       count <= 24 ? runs.flatMap(run => run.map(point => marker(point.x, point.y, color, `${point.label} · ${series.name}: ${model.valueText(point.value)}`))) : null);
   });
   const body = svg('svg', { viewBox: `0 0 ${width} ${height}`, width, height, class: 'ewmc-svg' },

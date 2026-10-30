@@ -48,7 +48,7 @@ html .ewmc-dashboard-grid[data-layout] .ewmc-module:not([data-style=heightwell])
 .ewmc-block.is-kpi:not(.is-compact){position:relative}.ewmc-block.is-kpi:not(.is-compact) .ewmc-bk-top>.ewmc-block-tools{position:absolute;top:10px;right:10px}
 .ewmc-block .ewmc-module-head{margin:0;align-items:flex-start}.ewmc-block .ewmc-module-head h3{font-size:14px;font-weight:700;letter-spacing:.01em}.ewmc-block .ewmc-module-head p{font-size:11px}
 .ewmc-block>.ewmc-visual{flex:1;margin:0;padding:0;border:0;border-radius:0;background:transparent;--ewmc-surface:#121b2b;--ewmc-grid:rgba(148,170,204,.10)}
-.ewmc-block .ewmc-line{stroke-width:2.5;filter:drop-shadow(0 0 5px rgba(90,180,255,.45))}.ewmc-block .ewmc-area{opacity:.2}
+.ewmc-block .ewmc-line{stroke-width:2.5;filter:drop-shadow(0 0 5px rgba(90,180,255,.45))}
 .ewmc-block .ewmc-bar{filter:drop-shadow(0 0 6px rgba(90,180,255,.28))}.ewmc-block .ewmc-arc{stroke-width:14px;filter:drop-shadow(0 0 6px rgba(90,180,255,.3))}
 .ewmc-block-tools{position:relative;flex:none}.ewmc-block-tools>summary{list-style:none;display:grid;place-items:center;width:28px;height:28px;border:1px solid transparent;border-radius:9px;color:var(--muted,#9fb0c4);cursor:pointer;font-size:16px;line-height:1}
 .ewmc-block-tools>summary:hover{background:rgba(148,170,204,.1)}
