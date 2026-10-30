@@ -29,4 +29,7 @@
 .ec-fingerprint code,.ec-row code{font-family:var(--mono,ui-monospace,monospace);letter-spacing:.06em}
 .ec-recovery{display:grid;gap:10px;padding:14px 16px;border:1px solid var(--accent);border-radius:8px;background:var(--raised)}
 .ec-recovery-key{font-family:var(--mono,ui-monospace,monospace);font-size:15px;overflow-wrap:anywhere;user-select:all}
+.ec-exchange{display:grid;gap:12px;padding-top:6px;border-top:1px solid var(--line-2)}
+.ec-area{min-height:72px;font-family:var(--mono,ui-monospace,monospace);font-size:13px;resize:vertical;overflow-wrap:anywhere}
+.ec-check{display:flex;align-items:center;gap:8px;font-size:14px}
 @media(max-width:580px){.ec-root{padding:22px 12px}.ec-row{flex-wrap:wrap}.ec-row .ec-input{margin-left:0}.ec-toolbar .ec-btn{flex:1}}

@@ -88,6 +88,15 @@ profile created: random 16-byte id, name) and `collective_membership_log` (the
 applied contiguous prefix of the signed membership journal, one canonical
 `MembershipRecord` blob per `seq`; Rust re-verifies and re-applies the journal on
 every read, so a tampered row grants nothing). No network touches these rows.
+Migration `0020_collective_sync.sql` (E8, C3b, second slice) adds two more tables keyed by
+`(profile_id, collective_id)` and deleted with the collective: `collective_tables` (a
+collective table: random 16-byte id, title, owner `member_id`, the class `A`–`D` and the
+purpose `after-fact`/`planned` together with who confirmed each; the send gate
+`collective::send_gate` counts the effective class from these rows — anything not
+confirmed by the table owner, or planned, is class D) and `collective_invitations_used`
+(nonces of invitations that already admitted a member; each admits exactly one). Epoch keys
+live in the secret store file, the local send queue in `collective-outbox/*.queue`; neither
+is in the database.
 Migration
 `0012_dashboard_module_style.sql` adds `dashboard_modules.style` — the look chosen
 when the module was created: `standard` (default for existing modules), `branch`

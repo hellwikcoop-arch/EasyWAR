@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "office-editor",
-  "description": "Вікно редакторів «Офісу» (EasyGreen, EasyDoc, EasySlide, easyPay, EasyFLY, Колективи): відкриття, збереження й закриття файлів, закриття самого вікна і три локальні команди колективів (стан, ключ учасника, створення колективу). Жодних інших команд EasyWAR, плагінів чи core-дозволів.",
+  "description": "Вікно редакторів «Офісу» (EasyGreen, EasyDoc, EasySlide, easyPay, EasyFLY, Колективи): відкриття, збереження й закриття файлів, закриття самого вікна і локальні команди колективів (стан, ключ учасника, створення колективу, таблиці з класом, запрошення й вступ текстом, «Доповісти» в локальну чергу без мережі). Жодних інших команд EasyWAR, плагінів чи core-дозволів.",
   "windows": [
     "office-editor"
   ],
@@ -13,6 +13,13 @@
     "allow-office-editor-close",
     "allow-collective-status",
     "allow-collective-create-identity",
-    "allow-collective-create"
+    "allow-collective-create",
+    "allow-collective-detail",
+    "allow-collective-table-set",
+    "allow-collective-invite-create",
+    "allow-collective-join-request",
+    "allow-collective-invite-admit",
+    "allow-collective-join-accept",
+    "allow-collective-report"
   ]
 }

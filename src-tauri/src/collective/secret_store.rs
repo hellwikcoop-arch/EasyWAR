@@ -247,6 +247,51 @@ impl UnlockedStore {
         Ok((nonce, ciphertext))
     }
 
+    /// Кілька записів одним збереженням файлу: або всі нові записи на диску, або жодного
+    /// (файл замінюється атомарно, `persist`). Якщо шифрування будь-якого запису не вдалося,
+    /// сховище в пам'яті лишається без змін.
+    pub fn write_many(&mut self, entries: &[(String, &[u8])]) -> Result<(), StoreError> {
+        let mut encrypted = Vec::with_capacity(entries.len());
+        for (purpose, secret) in entries {
+            encrypted.push((purpose.clone(), self.encrypt_entry(purpose, secret)?));
+        }
+        let previous: Vec<_> = encrypted
+            .iter()
+            .map(|(purpose, _)| (purpose.clone(), self.entries.get(purpose).cloned()))
+            .collect();
+        self.entries.extend(encrypted);
+        if let Err(error) = self.persist() {
+            for (purpose, entry) in previous {
+                match entry {
+                    Some(entry) => self.entries.insert(purpose, entry),
+                    None => self.entries.remove(&purpose),
+                };
+            }
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    /// Видалення кількох записів одним збереженням файлу; повертає, скільки було видалено.
+    pub fn delete_many(&mut self, purposes: &[String]) -> Result<usize, StoreError> {
+        let removed: Vec<_> = purposes
+            .iter()
+            .filter_map(|purpose| {
+                self.entries
+                    .remove(purpose)
+                    .map(|entry| (purpose.clone(), entry))
+            })
+            .collect();
+        if removed.is_empty() {
+            return Ok(0);
+        }
+        if let Err(error) = self.persist() {
+            self.entries.extend(removed);
+            return Err(error);
+        }
+        Ok(removed.len())
+    }
+
     pub fn delete(&mut self, purpose: &str) -> Result<bool, StoreError> {
         let removed = self.entries.remove(purpose).is_some();
         if removed {
@@ -761,5 +806,26 @@ mod tests {
             store.create(b"pass", bad).unwrap_err(),
             StoreError::InvalidKdf
         ));
+    }
+
+    #[test]
+    fn write_many_and_delete_many_persist_once_and_survive_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store(&dir, "profile-x");
+        let (mut unlocked, _recovery) = store.create(b"pass-a", P).unwrap();
+        unlocked.write("keep", b"k").unwrap();
+        let entries = vec![
+            ("e/0".to_string(), &b"a"[..]),
+            ("e/1".to_string(), &b"b"[..]),
+        ];
+        unlocked.write_many(&entries).unwrap();
+        let reopened = store.unlock(b"pass-a").unwrap();
+        assert_eq!(reopened.read("e/1").unwrap().unwrap().as_slice(), b"b");
+        let purposes = vec!["e/0".to_string(), "e/1".to_string(), "absent".to_string()];
+        assert_eq!(unlocked.delete_many(&purposes).unwrap(), 2);
+        assert_eq!(unlocked.delete_many(&purposes).unwrap(), 0);
+        let reopened = store.unlock(b"pass-a").unwrap();
+        assert!(reopened.read("e/0").unwrap().is_none());
+        assert_eq!(reopened.read("keep").unwrap().unwrap().as_slice(), b"k");
     }
 }
