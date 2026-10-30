@@ -8,7 +8,7 @@ import { linkIssues, suggestRelations } from '../src/table-link-core.js';
 import { confirmRelation, rejectRelation, clearRelation, clearRelations, setGroups, groupsOf, relationsOf, removeSource } from '../src/profile-schema-core.js';
 import {
   EXCLUSION_TEXT, REASON_TEXT, confirmArgs, confirmBlock, decisionOf, issueText, linkInputs, pairView, rejectArgs,
-  rejectedRelationViews, relatedLine, savedRelationViews, summaryLine, suggestedGroups, groupsNeedSaving, savedGroupViews, deleteLinksNote, linkCoverageViews,
+  rejectedRelationViews, relatedLine, savedRelationViews, summaryLine, suggestedGroups, groupsNeedSaving, savedGroupViews, deleteLinksNote, linkCoverageViews, mergePreviewView,
 } from '../src/table-link-view-core.js';
 
 // Лише синтетичні дані: вигадані підрозділи, жодних реальних таблиць.
@@ -302,4 +302,34 @@ test('екран: покриття зв’язку рахується після
   assert.match(page, /function fillCoverage/u);
   assert.match(page, /setTimeout\(\(\) => \{\s*if \(!list\.isConnected/u);
   assert.match(page, /linkCoverageViews\(state\.schema/u);
+});
+
+test('перегляд об’єднання: текст підсумку, застереження, відмови; значень у схемі немає, нічого не створюється', async () => {
+  const { schema: base, data } = setup();
+  const modules = [modulePlan, moduleFlights];
+  const { tables } = linkInputs(base, modules, data);
+  const found = await suggestRelations(tables);
+  const candidate = found.pairs[0].candidates.find(item => item.left.columns.length === 2);
+  const schema = confirmRelation(base, confirmArgs(candidate)).schema;
+  const relationId = relationsOf(schema)[0].id;
+  const view = mergePreviewView(schema, relationId, modules, data);
+  assert.ok(view.ok, view.message);
+  assert.equal(view.title, 'План + Вильоти');
+  assert.equal(view.summary, 'Об’єднана таблиця мала б 48 рядків і 4 стовпців; з парою: 48.');
+  assert.deepEqual(view.columns, ['Дата', 'Підрозділ', 'Ціль', 'Борт']);
+  assert.equal(view.sample.length, 5);
+  assert.deepEqual(view.notes, []);
+  // Рядок без пари дає застереження.
+  const odd = new Map(data);
+  odd.set('plan', { rows: [...data.get('plan').rows, { date: day(20), unit: 'Ехо', goal: 'без пари' }] });
+  assert.match(mergePreviewView(schema, relationId, modules, odd).notes.join(' '), /1 з «План»/u);
+  // Відмови.
+  assert.match(mergePreviewView(schema, 'rel:нема', modules, data).message, /немає/u);
+  assert.match(mergePreviewView(schema, relationId, modules, new Map([['plan', data.get('plan')]])).message, /не прочитано/u);
+  assert.match(mergePreviewView(base, relationId, modules, data).message, /немає/u);
+  // Схема перегляд не змінює.
+  assert.equal(JSON.stringify(schema), JSON.stringify(confirmRelation(base, confirmArgs(candidate)).schema));
+  const panel = await readFile(new URL('../src/table-link-panel.js', import.meta.url), 'utf8');
+  assert.match(panel, /data-action': 'preview-merge'/u);
+  assert.doesNotMatch(panel, /mergePreviewView[^\n]*apply\(/u);
 });

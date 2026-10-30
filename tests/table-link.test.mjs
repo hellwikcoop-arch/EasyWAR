@@ -14,6 +14,7 @@ import {
   keyConflicts,
   linkCoverage,
   linkIssues,
+  mergePreview,
   suggestRelations,
   tableFromSchema,
 } from '../src/table-link-core.js';
@@ -600,4 +601,41 @@ test('linkCoverage: усічене читання позначається, по
   assert.equal(linkCoverage(tables[0], tables[1], ['date'], ['event']).complete, false);
   assert.equal(linkCoverage(tables[0], tables[1], ['date'], []).code, 'bad_key');
   assert.equal(linkCoverage(tables[0], tables[1], ['nope'], ['event']).code, 'bad_key');
+});
+
+test('mergePreview: стовпці, підсумок рядків і зразок; рядки без пари лишаються з порожніми клітинками', () => {
+  const specs = planAndFlights();
+  specs[0].rows.push({ date: day(20), unit: 'Ехо', goal: 'без пари' });
+  specs[1].rows.push({ event: day(21), part: 'Фокстрот', tail: '999' });
+  const { tables } = build(specs);
+  const merged = mergePreview(tables[0], tables[1], ['date', 'unit'], ['event', 'part'], { sample: 3 });
+  assert.ok(merged.ok, merged.message);
+  assert.deepEqual(merged.columns.map(column => [column.header, column.from]), [['Дата', 'key'], ['Підрозділ', 'key'], ['Ціль', 'left'], ['Борт', 'right']]);
+  // 24 пари план↔виліт ×2, рядок плану без вильотів, виліт без плану.
+  assert.deepEqual([merged.rowCount, merged.matched, merged.onlyLeft, merged.onlyRight, merged.complete], [50, 48, 1, 1, true]);
+  assert.equal(merged.sample.length, 3);
+  assert.deepEqual(merged.sample[0].length, 4);
+  // Без пари: порожні клітинки іншої таблиці.
+  const full = mergePreview(tables[0], tables[1], ['date', 'unit'], ['event', 'part'], { sample: 1000 });
+  assert.ok(full.sample.some(row => row[2] === 'без пари' && row[3] === ''));
+  assert.ok(full.sample.some(row => row[1] === 'Фокстрот' && row[2] === '' && row[3] === '999'));
+});
+
+test('mergePreview: однакові підписи розрізняються назвою таблиці; ключ не унікальний ніде — відмова; поганий ключ — помилка', () => {
+  const left = { sourceId: 'a', title: 'Ліва', columns: [col('k', 'Код'), col('name', 'Назва')], roles: {}, rows: [{ k: '1', name: 'x' }, { k: '1', name: 'y' }] };
+  const right = { sourceId: 'b', title: 'Права', columns: [col('k', 'Код'), col('name', 'Назва')], roles: {}, rows: [{ k: '1', name: 'p' }, { k: '1', name: 'q' }] };
+  assert.equal(mergePreview(left, right, ['k'], ['k']).code, 'many_many');
+  assert.equal(mergePreview(left, right, ['k'], []).code, 'bad_key');
+  right.rows = [{ k: '1', name: 'p' }, { k: '2', name: 'q' }];
+  const merged = mergePreview(left, right, ['k'], ['k']);
+  assert.ok(merged.ok, merged.message);
+  assert.deepEqual(merged.columns.map(column => column.header), ['Код', 'Назва (Ліва)', 'Назва (Права)']);
+  assert.deepEqual([merged.rowCount, merged.matched, merged.onlyLeft, merged.onlyRight], [3, 2, 0, 1]);
+});
+
+test('mergePreview: усічене читання позначається', () => {
+  const specs = planAndFlights();
+  specs[1].truncated = true;
+  const { tables } = build(specs);
+  assert.equal(mergePreview(tables[0], tables[1], ['date', 'unit'], ['event', 'part']).complete, false);
 });
