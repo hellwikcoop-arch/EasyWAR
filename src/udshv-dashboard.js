@@ -10,6 +10,7 @@ import {
   parseUdshvWorkbook,
   periodRange,
   pivotRows,
+  rawSheetGrid,
   shiftAnchor,
   toCsv,
   unitFreshness,
@@ -23,7 +24,7 @@ import { crestImg } from './unit-emblems.js';
 /** Емблема підрозділу або порожнє місце такого ж розміру (назви стоять рівно). */
 const crest = (name, cls = 'ud-crest') => crestImg(name, cls, true);
 
-const state = { workbook: null, view: 'summary', preset: 'week', anchor: '', from: '', to: '', units: [], unitsOpen: false, focusUnit: null, ovt: 'destroyed', sort: 'personnel' };
+const state = { workbook: null, view: 'summary', preset: 'week', anchor: '', from: '', to: '', units: [], unitsOpen: false, focusUnit: null, ovt: 'destroyed', sort: 'personnel', baseSheet: 0, baseQ: '', baseLimit: 200 };
 
 const number = value => Math.round(Number(value) || 0).toLocaleString('uk-UA');
 const decimal = value => (Number(value) || 0).toLocaleString('uk-UA', { maximumFractionDigits: 1 });
@@ -309,6 +310,39 @@ function tablePage(model) {
       h('tfoot', {}, h('tr', {}, h('th', { text: 'Разом' }), groups.flatMap(g => g.metrics.map(m => h('td', { class: 'ud-num', text: number(pivot.totals[m.id]) })))))))));
 }
 
+/** «База даних»: аркуші файлу в тому вигляді, як імпортовані (без підрахунків і правок), із пошуком по рядках. */
+function basePage(workbook, go) {
+  const sheets = (workbook.raw || []).filter(sheet => rawSheetGrid(sheet).rows.length);
+  if (!sheets.length) return h('div', { class: 'ud-page' }, section('База даних', '', h('p', { class: 'ud-empty', text: 'У файлі немає аркушів із даними.' })));
+  if (state.baseSheet >= sheets.length) state.baseSheet = 0;
+  const sheet = sheets[state.baseSheet], grid = rawSheetGrid(sheet);
+  const headRows = grid.rows.slice(0, grid.head), bodyRows = grid.rows.slice(grid.head);
+  const info = h('span', { class: 'ud-base-info' }), host = h('div', { class: 'ud-scroll ud-scroll-tall ud-base-scroll' });
+  const hay = new WeakMap();
+  const text = row => hay.get(row) || (hay.set(row, row.cells.join(' ').toLowerCase()), hay.get(row));
+  const paint = () => {
+    const q = state.baseQ.trim().toLowerCase();
+    const shown = q ? bodyRows.filter(row => text(row).includes(q)) : bodyRows, vis = shown.slice(0, state.baseLimit);
+    info.textContent = `Показано ${number(vis.length)} з ${number(shown.length)}${shown.length !== bodyRows.length ? ` (усього на аркуші: ${number(bodyRows.length)})` : ''}`;
+    const line = (row, tag) => h('tr', {}, h(tag, { class: 'ud-rowno', text: row.r }), row.cells.map(value => h(tag === 'th' ? 'th' : 'td', { text: value })));
+    host.textContent = '';
+    host.append(vis.length || headRows.length
+      ? h('table', { class: 'ud-table ud-base-table' }, headRows.length ? h('thead', {}, headRows.map(row => line(row, 'th'))) : null, h('tbody', {}, vis.map(row => line(row, 'td'))))
+      : h('p', { class: 'ud-empty', text: 'Нічого не знайдено — змініть пошук.' }));
+    if (!vis.length && headRows.length) host.append(h('p', { class: 'ud-empty', text: 'Нічого не знайдено — змініть пошук.' }));
+    if (shown.length > vis.length) host.append(h('div', { class: 'ud-base-more' },
+      h('button', { class: 'ud-btn', type: 'button', onclick: () => { state.baseLimit += 200; paint(); }, text: `Показати ще ${Math.min(200, shown.length - vis.length)}` }),
+      h('button', { class: 'ud-btn quiet', type: 'button', onclick: () => { state.baseLimit = shown.length; paint(); }, text: `Показати всі ${number(shown.length)}` })));
+  };
+  const search = h('input', { type: 'search', class: 'ud-base-search', placeholder: 'Пошук по рядках аркуша…', value: state.baseQ, 'aria-label': 'Пошук по базі', oninput: ev => { state.baseQ = ev.target.value; state.baseLimit = 200; paint(); } });
+  const exportCsv = () => download(`УДШВ_база_${sheet.name.replace(/[^\wА-Яа-яІіЇїЄєҐґ-]+/g, '_')}.csv`, grid.rows.map(row => row.cells));
+  paint();
+  return h('div', { class: 'ud-page' }, section('База даних', `${sheets.length} ${sheets.length === 1 ? 'аркуш' : 'аркуші(в)'} · лише читання`,
+    h('div', { class: 'ud-base-sheets', role: 'group', 'aria-label': 'Аркуші файлу' }, sheets.map((item, i) => h('button', { type: 'button', class: 'ud-chip', 'aria-pressed': String(i === state.baseSheet), title: item.template ? 'Порожній шаблон місяця' : null, onclick: () => { state.baseSheet = i; state.baseLimit = 200; go(); }, text: item.template ? `${item.name} · шаблон` : item.name }))),
+    h('div', { class: 'ud-base-tools' }, search, info, h('button', { class: 'ud-btn', type: 'button', onclick: exportCsv, text: 'Експорт CSV' })),
+    host));
+}
+
 const agoText = lag => {
   if (lag == null) return 'даних немає';
   if (lag === 0) return 'актуально';
@@ -437,10 +471,11 @@ export function render(host, workbook, options = {}) {
   const range = currentRange();
   const model = createDashboardModel(workbook, { range, unit: state.units, preset: state.preset });
   // «Наші втрати» — окрема таблиця з власним файлом і періодом: потребує читача xlsx від модуля.
-  const nav = [['summary', 'Дашборд УДШВ'], ['units', 'Підрозділи'], ['personnel', 'Втрати о/с'], ...(options.readSheets ? [['own', 'Наші втрати']] : []), ['ovt', 'ОВТ'], ['ammo', 'Витрата БК'], ['freshness', 'Актуальність'], ['table', 'Зведена таблиця'], ['quality', 'Перевірка даних'], personalNavItem()].filter(Boolean);
+  const nav = [['summary', 'Дашборд УДШВ'], ['units', 'Підрозділи'], ['personnel', 'Втрати о/с'], ...(options.readSheets ? [['own', 'Наші втрати']] : []), ['ovt', 'ОВТ'], ['ammo', 'Витрата БК'], ['freshness', 'Актуальність'], ['table', 'Зведена таблиця'], ['base', 'База даних'], ['quality', 'Перевірка даних'], personalNavItem()].filter(Boolean);
   if (!nav.some(([k]) => k === state.view)) state.view = 'summary';
   const own = state.view === 'own';
   const mine = state.view === MINE_VIEW;
+  const base = state.view === 'base';
   const page = own ? h('div', { class: 'ud-page' }, ownLossesPage({ scope: 'dshv', readSheets: options.readSheets, rerender: go }))
     : mine ? h('div', { class: 'ud-page ud-mine', [MINE_SLOT]: '' })
     : state.view === 'units' ? unitsPage(model, go)
@@ -449,6 +484,7 @@ export function render(host, workbook, options = {}) {
         : state.view === 'ammo' ? ammoPage(model, go)
           : state.view === 'freshness' ? freshnessPage(go)
           : state.view === 'table' ? tablePage(model)
+            : state.view === 'base' ? basePage(workbook, go)
             : state.view === 'quality' ? qualityPage()
               : summaryPage(model, go);
   const compare = model.hasPrevious ? `порівняння з ${dateLabel(model.previousRange.from)} – ${dateLabel(model.previousRange.to)}` : 'попереднього періоду в таблиці немає';
@@ -463,8 +499,8 @@ export function render(host, workbook, options = {}) {
         options.readSheets ? h('button', { class: 'ud-btn', type: 'button', onclick: async () => (await import('./presentation-ui.js')).openPresentationDialog(workbook, options), text: 'Презентація' }) : null,
         options.canRefresh ? h('button', { class: 'ud-btn', type: 'button', onclick: () => options.refresh?.(), text: 'Оновити з файлу' }) : null)),
     // Період і підрозділи основної таблиці не стосуються вкладки «Наші втрати»: вона має власні.
-    own || mine ? null : periodControls(range, go),
-    own || mine ? null : h('div', { class: 'ud-context' },
+    own || mine || base ? null : periodControls(range, go),
+    own || mine || base ? null : h('div', { class: 'ud-context' },
       h('span', { text: `${periodTitle(range)}${unitsLabel(state.units, ' · ')}` }),
       h('span', { text: `${model.activeDays} з ${model.days} днів із даними · ${compare}` }),
       state.units.length ? h('button', { type: 'button', class: 'ud-link', onclick: () => { state.units = []; go(); }, text: '× усі підрозділи' }) : null,
