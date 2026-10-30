@@ -68,10 +68,10 @@ function legend(series, colorOf = item => slotColor(item.slot)) {
     el('span', { text: item.name }))));
 }
 
-function figure(kind, model, content, { legendItems = null, footer = null, compact = false } = {}) {
+function figure(kind, model, content, { legendItems = null, legendColor = undefined, footer = null, compact = false } = {}) {
   return el('figure', { class: `ewmc-chart ewmc-chart-${kind}${compact ? ' compact' : ''}`, role: 'img', 'aria-label': chartSummary(model) },
     content,
-    legendItems && legendItems.length > 1 ? legend(legendItems) : null,
+    legendItems && legendItems.length > 1 ? legend(legendItems, legendColor) : null,
     footer);
 }
 
@@ -584,7 +584,7 @@ function mapChart(model, width, height, { compact }) {
   const labelled = model.points.length <= 8;
   const points = model.points.map(point => {
     const position = project(point.longitude, point.latitude);
-    const radius = 4 + point.weight * (compact ? 5 : 8);
+    const radius = model.points.length > 12 ? 2.5 + point.weight * (compact ? 2 : 4) : 4 + point.weight * (compact ? 5 : 8);
     return svg('g', {},
       svg('circle', { cx: fixed(position.x), cy: fixed(position.y), r: fixed(radius + 2), class: 'ewmc-dot-ring' }),
       svg('circle', { cx: fixed(position.x), cy: fixed(position.y), r: fixed(radius), fill: toneColor(point.tone) ?? slotColor(1), class: 'ewmc-dot', title: `${point.label || 'Точка'}${point.valueText !== '—' ? `: ${point.valueText}` : ''}${point.status ? ` · ${point.status}` : ''}` }),
@@ -592,7 +592,7 @@ function mapChart(model, width, height, { compact }) {
   });
   const body = svg('svg', { viewBox: `0 0 ${width} ${height}`, width, height, class: 'ewmc-svg' }, outline, points);
   const footer = model.skipped && !compact ? el('p', { class: 'ewmc-chart-foot', text: `Без координат: ${model.skipped}` }) : null;
-  return figure('map', model, body, { compact, footer });
+  return figure('map', model, body, { compact, footer, legendItems: model.legend, legendColor: item => toneColor(item.tone) ?? slotColor(1) });
 }
 
 function activity(model, width, height, { compact }) {

@@ -6,7 +6,7 @@ import { planAddColumns } from './module-add-columns-core.js';
 import { blockRequirements, hasBlockCard, placeBlockCard } from './module-block-card-core.js';
 
 const KPI = ['launches', 'munitions', 'destroyed', 'damaged', 'miss', 'unknown'].map(id => `legacy:rv-kpi-${id}`);
-const BLOCKS = ['result-dynamics', 'result-distribution', 'activity-by-day', 'platform-types', 'munition-use', 'firing-units',
+const BLOCKS = ['strike-map', 'result-dynamics', 'result-distribution', 'activity-by-day', 'platform-types', 'munition-use', 'firing-units',
   'top-units', 'target-types', 'repeat-targets', 'hour-of-day', 'records-journal', 'data-quality'].map(id => `legacy:${id}`);
 
 // Прості об'єкти без `Object.freeze`: виклик на верхньому рівні не вилучається зі збірки ПВК-lite.

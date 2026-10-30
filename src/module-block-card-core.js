@@ -5,6 +5,7 @@
 
 import { agg, computeRvKpis, eff, resKind, rocketOutcome, shareOfOps } from './module-adapters/rv-kpi-core.js';
 import { chartModel } from './dashboard-module-charts-core.js';
+import { parseCoordinates } from './coordinates-core.js';
 import { availability, readRow } from './profile-schema-core.js';
 import { addInstance, moveInstance, resizeInstance } from './module-instance-core.js';
 
@@ -43,6 +44,21 @@ const counted = (label, pick) => ({
 // Описи будуються під час першого звертання: виклики `textField`/`counted` на верхньому рівні лишилися б у збірці ПВК-lite.
 let chartSpecs = null;
 const charts = () => (chartSpecs ??= {
+  // Карта: кожна розпізнана точка координат запису — точка на карті, колір — результат. Записи без координат
+  // (або з нерозпізнаними) рахуються в підписі «Без координат».
+  'legacy:strike-map': {
+    kind: 'map',
+    fields: [
+      { key: 'latitude', label: 'Широта', dataType: 'number', role: 'latitude', aggregation: 'none' },
+      { key: 'longitude', label: 'Довгота', dataType: 'number', role: 'longitude', aggregation: 'none' },
+      textField('label', 'Ціль', 'label'), textField('status', 'Результат', 'status'),
+    ],
+    rows: list => list.flatMap(row => {
+      const points = parseCoordinates(row.coords);
+      if (!points.length) return [{}];
+      return points.map(point => ({ latitude: point.lat, longitude: point.lon, label: row.targetId, status: resultLabel(row) }));
+    }),
+  },
   'legacy:result-distribution': { kind: 'donut', fields: [textField('category', 'Результат'), sumField('value', 'Записи')], rows: list => list.map(row => one(resultLabel(row))) },
   'legacy:result-dynamics': {
     kind: 'stacked-columns', fields: [DAY, textField('series', 'Результат', 'series'), sumField('value', 'Записи')],
@@ -116,6 +132,7 @@ export function rvRow(byRole) {
     aircraft: text(byRole['platform-type']),
     firingUnit: text(byRole['firing-unit']),
     targetId: text(byRole['target-id']),
+    coords: text(byRole.coordinates),
     munition: text(byRole['munition-type']).toUpperCase(),
     unit: text(byRole.unit),
     types: text(byRole['target-type']).split(/\s*,\s*/).filter(Boolean),
@@ -136,7 +153,7 @@ const VIEW_GROUPS = { combo: ['combo', 'columns', 'line'], 'stacked-columns': ['
 /** Види діаграми блока для вибору: `[{ id, label }]`, типовий першим; порожньо для показників і невідомих блоків. */
 export function chartViews(definitionId) {
   const spec = Object.hasOwn(charts(), definitionId) ? charts()[definitionId] : null;
-  if (!spec) return [];
+  if (!spec || spec.kind === 'map') return [];
   const group = VIEW_GROUPS[spec.kind] || [spec.kind, ...['donut', 'horizontal-bar', 'columns'].filter(kind => kind !== spec.kind)];
   return group.map(id => ({ id, label: VIEW_LABELS[id] }));
 }
@@ -160,6 +177,15 @@ function resultColors(model) {
   if (Array.isArray(model.slices)) return { ...model, slices: model.slices.map(item => ({ ...item, slot: slot(item.label, item.slot) })) };
   if (Array.isArray(model.series)) return { ...model, series: model.series.map(item => ({ ...item, slot: slot(item.name, item.slot) })) };
   return model;
+}
+
+// Точки карти: колір — за результатом, як на вкладках; легенда — лише результати, що трапились.
+const POINT_TONES = { Знищено: 'good', Уражено: 'good', Пошкоджено: 'warn', Подавлено: 'warn', 'Не уражено': 'bad' };
+function resultPoints(model) {
+  const points = model.points.map(point => ({ ...point, tone: POINT_TONES[point.status] || '' }));
+  const names = new Map();
+  for (const point of points) if (point.status) names.set(point.tone, [...(names.get(point.tone) || []), point.status].filter((name, i, all) => all.indexOf(name) === i));
+  return { ...model, points, legend: [...names].map(([tone, list]) => ({ name: list.join(' / '), tone })) };
 }
 
 // ---- блоки-переліки ----
@@ -265,6 +291,7 @@ export function blockCardModel({ definition, schema, sourceId, rows, view = '', 
     const kind = chartViews(definition.definitionId).some(item => item.id === view) ? view : chart.kind;
     const module = { id: definition.definitionId, templateId: definition.definitionId, visualKind: kind, fields: chart.fields.map((field, position) => ({ ...field, position })) };
     const model = chartModel(module, chart.rows(list));
+    if (kind === 'map') return { ok: true, kind, model: resultPoints(model) };
     return { ok: true, kind, model: RESULT_CHARTS.has(definition.definitionId) ? resultColors(model) : model };
   }
   const A = agg(list);
@@ -306,7 +333,7 @@ export function blockCardModel({ definition, schema, sourceId, rows, view = '', 
  * Повертає `{ ok, layout }` ядра розкладки.
  */
 export function placeBlockCard(layout, { definition, sourceId, freshTable = false }) {
-  const added = addInstance(layout, { definitionId: definition.definitionId, sourceId, title: definition.title, size: definition.visual === 'kpi' ? { w: 4, h: 2 } : { w: 6, h: 4 } });
+  const added = addInstance(layout, { definitionId: definition.definitionId, sourceId, title: definition.title, size: definition.visual === 'kpi' ? { w: 4, h: 2 } : definition.visual === 'map' ? { w: 6, h: 5 } : { w: 6, h: 4 } });
   const table = added.ok && added.layout.instances.find(item => item.sourceId === sourceId && !hasBlockCard(item.definitionId));
   if (!table) return added;
   const card = added.layout.instances.find(item => !layout.instances.some(old => old.id === item.id));
