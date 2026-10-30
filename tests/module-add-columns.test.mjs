@@ -210,3 +210,12 @@ test('реєстр: кнопка стовпців підключена, а ко�
   // Верхній рівень ядра без Object.freeze: інакше виклик лишається у збірці ПВК-lite (ліміт 5 МБ).
   assert.ok(!/^(?:export )?const \w+ = Object\.freeze/m.test(core));
 });
+
+test('клієнт: без нових стовпців (лише зіставлення) команда запису не викликається', async () => {
+  const module = table([field('c1', 'Дата події', 'date')]);
+  const plan = planAddColumns({ definition: byId('rv-kpi-launches'), schema: schemaOf(module), module });
+  assert.deepEqual(plan.fields, []);
+  const { invoke, calls } = fakeInvoke();
+  assert.equal(await saveBlockColumns(invoke, { branch: 'rocket', module, plan }), module);
+  assert.equal(calls.length, 0);
+});

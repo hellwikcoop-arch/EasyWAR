@@ -48,7 +48,7 @@ import { mountChart } from './dashboard-module-charts.js';
 import { columnPicker } from './dashboard-module-picker.js';
 import { forgetProfileSchemaModule, loadProfileSchema, syncProfileSchemaModules, updateProfileSchema } from './profile-schema-client.js';
 import { loadDashboardLayout, updateDashboardLayout } from './dashboard-layout-client.js';
-import { duplicateInstance, moveInstance, removeInstance, resizeInstance, setSharedPeriod, updateInstance } from './module-instance-core.js';
+import { addInstance, duplicateInstance, moveInstance, removeInstance, resizeInstance, setSharedPeriod, updateInstance } from './module-instance-core.js';
 import { ensureModuleInstances, forgetModuleInstances } from './module-instance-modules-core.js';
 import { cardModel, cardStyle, orderedCards } from './dashboard-layout-view-core.js';
 import { instanceBar, sharedPeriodBar } from './dashboard-layout-panel.js';
@@ -62,6 +62,7 @@ import { registryPanel } from './module-registry-panel.js';
 import { addColumnsPanel } from './module-add-columns-panel.js';
 import { supportsColumns, userTables } from './module-add-columns-core.js';
 import { bindBlockColumns, saveBlockColumns } from './module-add-columns-client.js';
+import { blockCardModel, hasBlockCard } from './module-block-card-core.js';
 import { linkPanel } from './table-link-panel.js';
 import { snapshotPanel } from './table-link-snapshot-panel.js';
 import { snapshotInfo } from './table-link-snapshot-core.js';
@@ -319,7 +320,7 @@ function initialize() {
 
   // Блок реєстру → основна таблиця (E5): стовпці, яких блоку бракує, додаються в таблицю (або створюється основна таблиця
   // гілки), потім ролі блока зіставляються з її стовпцями. Збій зіставлення не псує додані стовпці: їх видно в схемі профілю.
-  async function addBlockColumns({ plan, module }) {
+  async function addBlockColumns({ definition, plan, module }) {
     if (state.busy) return { ok: false, message: 'Зачекайте: інша дія ще триває.' };
     state.busy = true;
     try {
@@ -329,11 +330,20 @@ function initialize() {
       await state.syncing;
       const bound = await bindBlockColumns(invoke, { module: saved, plan, at: new Date().toISOString() });
       if (bound.ok) state.schema = bound.schema;
-      const table = `таблицю «${saved.title}»`;
-      showToast(`Стовпці додано в ${table}.`);
-      return bound.ok
-        ? { ok: true, message: `Готово: стовпці додано в ${table}, ролі блока зіставлено.` }
-        : { ok: true, message: `Стовпці додано в ${table}, але ролі не зіставлено (${bound.message || 'збій схеми'}): зіставте їх у «Схемі профілю».` };
+      const done = [];
+      if (plan.fields.length) done.push(`стовпці додано в таблицю «${saved.title}»`);
+      if (plan.bindings.length) done.push(bound.ok ? 'ролі блока зіставлено' : `ролі не зіставлено (${bound.message || 'збій схеми'}): зіставте їх у «Ролях стовпців»`);
+      // Блок, що вміє рахуватися з основної таблиці, стає карткою «Мого дашборда» на цій таблиці (E5, крок 4).
+      if (bound.ok && hasBlockCard(definition.definitionId)) {
+        const sourceId = moduleSourceId(saved.id);
+        const count = () => state.layout?.instances.filter(item => item.definitionId === definition.definitionId && item.sourceId === sourceId).length ?? 0;
+        const before = count();
+        await changeLayout(layout => addInstance(layout, { definitionId: definition.definitionId, sourceId, title: definition.title, size: { w: 4, h: 2 } }));
+        done.push(count() > before ? `картку «${definition.title}» поставлено на «Мій дашборд»` : 'картку не поставлено');
+      }
+      const line = done.join(', ') || 'нічого не змінено';
+      showToast(`${line[0].toUpperCase()}${line.slice(1)}.`, !bound.ok);
+      return { ok: true, message: `${bound.ok ? 'Готово' : 'Частково'}: ${line}.` };
     } catch (error) {
       return { ok: false, message: String(error || 'Не вдалося додати стовпці.') };
     } finally {
@@ -512,6 +522,11 @@ function initialize() {
     // Картка розкладки показує рядки свого періоду; без розкладки — усі, як раніше.
     const rows = placed?.model.ok ? placed.model.rows : allRows;
     const failed = readState === 'failed';
+    // Картка блока реєстру (E5): рахується з рядків основної таблиці за підтвердженими ролями, а не діаграмою шаблону.
+    const definitionId = placed?.instance.definitionId;
+    const block = hasBlockCard(definitionId)
+      ? blockCardModel({ definition: registryDefinitions().find(item => item.definitionId === definitionId), schema: state.schema, sourceId: placed.instance.sourceId, rows })
+      : null;
     // Видалення питає підтвердження прямо в картці: модуль зникає разом зі своєю таблицею SQLite.
     const removeButton = el('button', {
       type: 'button',
@@ -540,7 +555,7 @@ function initialize() {
     const card = el('article', {
       class: placed ? 'ewmc-module' : `ewmc-module span-${module.defaultSpan === 2 ? 2 : 1}`,
       style: placed ? { gridColumn: `span ${placed.width}` } : null,
-      'data-kind': module.visualKind,
+      'data-kind': block ? 'kpi' : module.visualKind,
       'data-style': shownStyle,
       'data-branch': module.branch,
       'data-instance-id': placed?.instance.id,
@@ -567,8 +582,8 @@ function initialize() {
         ? el('div', { class: 'ewmc-visual ewmc-read-failed', role: 'alert' },
           el('p', { text: `${CARD_FAILED_TEXT}. Показник не можна вважати нульовим: записи в таблиці збережені.` }),
           el('button', { type: 'button', class: 'btn quiet', text: 'Прочитати знову', 'data-action': 'retry-read', 'data-module-id': module.id, onclick: event => retryRead(module, event.currentTarget) }))
-        : visual(module, rows),
-      failed ? null : takeoffVisual(module, rows),
+        : block ? blockVisual(block) : visual(module, rows),
+      failed || block ? null : takeoffVisual(module, rows),
       relatedNote(module),
       el('div', { class: 'ewmc-module-actions' },
         el('button', {
@@ -591,8 +606,9 @@ function initialize() {
           disabled: !rows.length,
           onclick: event => openRelief(module, rows, event.currentTarget),
         }) : null,
-        removeButton),
-      confirmBox,
+        // Картка блока лише показує таблицю: видалення таблиці лишається на її власній картці («Прибрати картку» — у смужці).
+        block ? null : removeButton),
+      block ? null : confirmBox,
       el('details', { class: 'ewmc-schema' },
         el('summary', { text: 'Структура таблиці' }),
         el('code', { text: module.storageTable }),
@@ -678,17 +694,22 @@ function initialize() {
   // Екран «Усі визначення» (реєстр E1): шаблони «Мого дашборда», картки ПС і блоки вкладок з описом потрібних даних.
   // Додати одним натисканням можна лише шаблон «Мого дашборда»: це той самий `create_dashboard_module`, що й у формі
   // створення (назва шаблону, стиль «Звичайний», без підтягування з таблиці); картку на дашборді ставить розкладка E4.
-  function showRegistry() {
+  function registryDefinitions() {
     if (!state.registry) {
       state.registry = buildRegistry({ rustTemplates: state.catalog, catalogs: [PS_CATALOG], catalogUsage: psCatalogUsage(KPI_TILES, VIEW_BY_BLOCK) });
       if (state.registry.problems.length) console.warn('Реєстр визначень модулів:', state.registry.problems.join('; '));
     }
+    return state.registry.definitions;
+  }
+
+  function showRegistry() {
+    registryDefinitions();
     const available = new Set(state.catalog.map(item => item.id));
     const panel = registryPanel({
       el, definitions: state.registry.definitions, available, branch: state.branch, branchLabel: BRANCH_LABELS[state.branch] || '',
       onBack: showCatalog,
       columnsBox: definition => !supportsColumns(definition) ? null : addColumnsPanel({
-        el, definition, schema: () => state.schema, apply: addBlockColumns,
+        el, definition, schema: () => state.schema, apply: addBlockColumns, placeable: hasBlockCard(definition.definitionId),
         tables: () => userTables(state.modules).filter(module => module.branch === state.branch),
       }),
       onAdd: async definition => {
@@ -2014,6 +2035,15 @@ function takeoffVisual(module, rows) {
   const host = el('div', { class: 'ewmc-chart-host' });
   const box = el('div', { class: 'ewmc-visual ewmc-visual-extra', 'data-visual': 'ridgeline' }, host);
   mountChart(host, takeoffHoursModel(module, rows), { height: 150 });
+  return box;
+}
+
+/** Картка блока з основної таблиці: показник тим самим малюнком «Ключовий показник»; без ролей — пояснення. */
+function blockVisual(block) {
+  if (!block.ok) return el('div', { class: 'ewmc-visual', 'data-visual': 'kpi' }, el('p', { class: 'ewmc-empty', text: block.message }));
+  const host = el('div', { class: 'ewmc-chart-host' });
+  const box = el('div', { class: 'ewmc-visual', 'data-visual': 'kpi' }, host);
+  mountChart(host, block.model, { height: chartHeight('kpi', false) });
   return box;
 }
 

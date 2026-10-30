@@ -787,6 +787,11 @@ v1 і блоки вкладок через `listDefinitions` + `validateRegistry
 зіставлення ролей одним записом). `module-add-columns-panel.js` — DOM: `<details class="ewmc-update ewmc-addcols">` на картці реєстру (кнопки `add-columns`,
 `confirm-add-columns`, галочка `with-optional`; наявні класи, нового CSS немає). Каталог передає в `registryPanel` `columnsBox` і виконує `addBlockColumns`.
 Тести — `tests/module-add-columns.test.mjs`.
+Картка блока з основної таблиці (E5, крок 4): `module-block-card-core.js` (чисте) — `hasBlockCard` (поки шість карток РВ `legacy:rv-kpi-*`), `rvRow` (значення за ролями →
+рядок моделі РВ), `blockCardModel` (перевірка ролей через `availability`, числа — `agg`/`resKind`/`shareOfOps` з `module-adapters/rv-kpi-core.js`, модель виду `kpi` для
+`mountChart`). Після додавання блока каталог ставить картку розкладки (`addInstance` з `definitionId` блока і `sourceId` основної таблиці); `renderModule` для такої картки
+малює `blockVisual` замість діаграми шаблону і не показує «Видалити модуль і дані». `resKind` перенесено в ядро дослівно з rocket.html (тест порівнює текст).
+Тести — `tests/module-block-card.test.mjs`.
 CSS — `.ewmc-links*` у `dashboard-module-catalog.css`. Тести — `tests/table-link-view.test.mjs`
 (логіка й текстові контракти: імпорт, відсутність `invoke`, `innerHTML`, запису схеми).
 

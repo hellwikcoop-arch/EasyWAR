@@ -5,10 +5,16 @@ import { updateProfileSchema } from './profile-schema-client.js';
 import { syncModuleSources } from './profile-schema-modules-core.js';
 import { addFieldsRequest, bindingsAfterAdd, confirmPlanBindings, createUserTableRequest } from './module-add-columns-core.js';
 
-/** Додає стовпці плану в таблицю `module` або створює основну таблицю гілки. Повертає модуль із відповіді команди. */
-export const saveBlockColumns = (invoke, { branch, module, plan }) => (module
-  ? invoke('add_dashboard_module_fields', addFieldsRequest(module, plan))
-  : invoke('create_dashboard_module', createUserTableRequest(branch, plan)));
+/**
+ * Додає стовпці плану в таблицю `module` або створює основну таблицю гілки. Повертає модуль із відповіді команди;
+ * без нових стовпців (лише зіставлення наявних) нічого не викликає й повертає `module` як є.
+ */
+export async function saveBlockColumns(invoke, { branch, module, plan }) {
+  if (module && !plan.fields.length) return module;
+  return module
+    ? invoke('add_dashboard_module_fields', addFieldsRequest(module, plan))
+    : invoke('create_dashboard_module', createUserTableRequest(branch, plan));
+}
 
 /**
  * Зіставляє ролі блока зі стовпцями таблиці після запису: ключі нових стовпців беруться з відповіді команди. Схема
