@@ -1784,8 +1784,10 @@ async fn collective_status(
     webview: tauri::Webview,
     session: tauri::State<'_, ProfileSession>,
     collectives: tauri::State<'_, CollectiveStore>,
+    handles: tauri::State<'_, office_files::OfficeFileHandles>,
 ) -> Result<collective_store::CollectiveStatus, String> {
-    office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
+    office_files::ensure_collectives_editor(webview.label(), &handles)
+        .map_err(|error| error.to_string())?;
     let profile_id = active_profile_id(&session)?;
     collectives
         .status(&profile_id)
@@ -1800,9 +1802,11 @@ async fn collective_create_identity(
     profiles: tauri::State<'_, LocalProfileStore>,
     session: tauri::State<'_, ProfileSession>,
     collectives: tauri::State<'_, CollectiveStore>,
+    handles: tauri::State<'_, office_files::OfficeFileHandles>,
     password: String,
 ) -> Result<collective_store::CreatedIdentity, String> {
-    office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
+    office_files::ensure_collectives_editor(webview.label(), &handles)
+        .map_err(|error| error.to_string())?;
     let password = zeroize::Zeroizing::new(password);
     let profile_id = active_profile_id(&session)?;
     if !profiles
@@ -1826,10 +1830,12 @@ async fn collective_create(
     profiles: tauri::State<'_, LocalProfileStore>,
     session: tauri::State<'_, ProfileSession>,
     collectives: tauri::State<'_, CollectiveStore>,
+    handles: tauri::State<'_, office_files::OfficeFileHandles>,
     password: String,
     name: String,
 ) -> Result<collective_store::CollectiveSummary, String> {
-    office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
+    office_files::ensure_collectives_editor(webview.label(), &handles)
+        .map_err(|error| error.to_string())?;
     let password = zeroize::Zeroizing::new(password);
     let profile_id = active_profile_id(&session)?;
     verify_library_password(&profiles, &profile_id, &password).await?;
