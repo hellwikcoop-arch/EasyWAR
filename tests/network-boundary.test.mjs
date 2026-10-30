@@ -154,12 +154,13 @@ test('network_policy.rs — чиста функція без мережі й б�
 test('перелік призначень Purpose збігається з розділом 1 ADR', async () => {
   const policy = await read('src-tauri/src/network_policy.rs');
   const names = [...policy.matchAll(/=> "([a-z0-9_]+)",/g)].map(match => match[1]);
-  const expected = ['weather_online', 'model_install', 'app_update', 'signal_daemon', 'collective_lan', 'collective_base44'];
+  const expected = ['weather_online', 'model_install', 'app_update', 'signal_daemon', 'collective_lan', 'collective_base44', 'collective_peer_wan'];
   assert.deepEqual(names, expected);
   const adr = await read('docs/adr/network-and-secret-boundaries.md');
   for (const name of expected) assert.match(adr, new RegExp(`\\| \`${name}\``), `ADR, розділ 1: ${name}`);
   assert.match(adr, /collective_lan[^\n]*відхилено завжди/);
   assert.match(adr, /collective_base44[^\n]*відхилено завжди/);
+  assert.match(adr, /collective_peer_wan[^\n]*відхилено завжди/);
 });
 
 test('вікно редактора без мережі, webview без HTTP/shell-плагінів', async () => {
