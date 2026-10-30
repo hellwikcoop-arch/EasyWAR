@@ -76,7 +76,7 @@ test('захищені колективи: стани ключа, межі па�
 
 import {
   CLASS_OPTIONS, PURPOSE_OPTIONS, TRANSPORT_OPTIONS, checkHours, checkOperation, detailLine,
-  expectText, memberLine, preparedText, reportText, tableLine, textKind, transportNote,
+  expectText, memberInitials, memberLine, membersCount, membersWord, pickCollective, preparedText, reportText, tableLine, textKind, transportNote,
 } from '../src/workspace/collectives/secure-core.js';
 
 test('обмін у колективі: підписи класу, транспорту, відмов і перевірки форм', () => {
@@ -118,4 +118,20 @@ test('обмін у колективі: підписи класу, трансп�
 test('учасник колективу показується з ім’ям, яке він вказав сам', () => {
   assert.equal(memberLine({ fingerprint: 'ABCDEFGHIJ', name: 'Синтетик Петро' }), 'Синтетик Петро · ABCDEFGHIJ');
   assert.equal(memberLine({ fingerprint: 'ABCDEFGHIJ', name: null }), 'ABCDEFGHIJ');
+});
+
+test('кількість учасників узгоджується з числом, ініціали й вибір колективу', () => {
+  assert.deepEqual([1, 2, 4, 5, 11, 12, 21, 22, 25, 101, 111].map(membersCount), [
+    '1 учасник', '2 учасники', '4 учасники', '5 учасників', '11 учасників', '12 учасників',
+    '21 учасник', '22 учасники', '25 учасників', '101 учасник', '111 учасників',
+  ]);
+  assert.equal(membersWord(0), 'учасників');
+  assert.equal(memberInitials('Синтетик Петро'), 'СП');
+  assert.equal(memberInitials('  іван  '), 'І');
+  assert.equal(memberInitials(null), '?');
+  const list = [{ fingerprint: 'AAAAAAAAAA' }, { fingerprint: 'BBBBBBBBBB' }];
+  assert.equal(pickCollective(list, ''), 'AAAAAAAAAA');
+  assert.equal(pickCollective(list, 'BBBBBBBBBB'), 'BBBBBBBBBB');
+  assert.equal(pickCollective(list, 'ZZZZZZZZZZ'), 'AAAAAAAAAA');
+  assert.equal(pickCollective([], 'AAAAAAAAAA'), '');
 });

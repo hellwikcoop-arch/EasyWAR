@@ -99,6 +99,10 @@ pub struct CollectiveDetail {
 pub struct MemberSummary {
     pub fingerprint: String,
     pub name: Option<String>,
+    /// Це ви (профіль цього вузла).
+    pub me: bool,
+    /// Перший запис `Join` журналу — той, хто створив колектив.
+    pub founder: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -389,7 +393,7 @@ impl CollectiveStore {
                 _ => None,
             })
             .filter(|bound| membership.revoked_at(&bound.member_id()).is_none())
-            .map(|bound| member_summary(&membership, &bound.member_id()))
+            .map(|bound| member_summary(&membership, &bound.member_id(), &me.member_id))
             .collect();
         members.dedup();
         let tables = self
@@ -715,7 +719,7 @@ impl CollectiveStore {
                 MembershipRecord::Join(binding) => binding
                     .verify(&collective_id)
                     .ok()
-                    .map(|bound| member_summary(&membership, &bound.member_id())),
+                    .map(|bound| member_summary(&membership, &bound.member_id(), &me.member_id)),
                 _ => None,
             })
             .collect();
@@ -1105,10 +1109,23 @@ fn poisoned() -> CollectiveStoreError {
     CollectiveStoreError::Io("сховище намірів пошкоджене".into())
 }
 
-fn member_summary(membership: &InMemoryMembership, member: &MemberId) -> MemberSummary {
+fn member_summary(
+    membership: &InMemoryMembership,
+    member: &MemberId,
+    me: &MemberId,
+) -> MemberSummary {
+    let founder = membership.records().iter().find_map(|record| match record {
+        MembershipRecord::Join(binding) => binding
+            .verify(membership.collective_id())
+            .ok()
+            .map(|bound| bound.member_id()),
+        _ => None,
+    });
     MemberSummary {
         fingerprint: fingerprint(member),
         name: membership.member_name(member).map(str::to_owned),
+        me: member == me,
+        founder: founder.as_ref() == Some(member),
     }
 }
 
@@ -1649,10 +1666,14 @@ mod tests {
             MemberSummary {
                 fingerprint: owner_fp,
                 name: Some("Синтетик Власник".into()),
+                me: false,
+                founder: true,
             },
             MemberSummary {
                 fingerprint: guest_fp,
                 name: Some("Синтетик Гість".into()),
+                me: true,
+                founder: false,
             },
         ];
         assert_eq!(joined.members, expected);

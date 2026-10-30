@@ -61,12 +61,40 @@ const KIND_NAMES = Object.freeze({ invitation: 'запрошення', request: 
 
 const purposeLabel = value => PURPOSE_OPTIONS.find(option => option.value === value)?.label ?? 'Невідоме призначення';
 
-/** Рядок про таблицю колективу. Різниця між вказаним і чинним класом пояснюється. */
-// Учасник у списку: ім’я, яке він вказав сам, і відбиток; без імені — лише відбиток.
+/** Учасник у списку: ім’я, яке він вказав сам, і відбиток; без імені — лише відбиток. */
 export function memberLine(member) {
   return member?.name ? `${member.name} · ${member.fingerprint}` : String(member?.fingerprint ?? '');
 }
 
+/** Слово «учасник» у потрібній формі для числа: 1 учасник, 2 учасники, 5 учасників. */
+export function membersWord(count) {
+  const n = Math.abs(Math.trunc(Number(count) || 0));
+  const tens = n % 100;
+  const ones = n % 10;
+  if (tens >= 11 && tens <= 14) return 'учасників';
+  if (ones === 1) return 'учасник';
+  if (ones >= 2 && ones <= 4) return 'учасники';
+  return 'учасників';
+}
+export function membersCount(count) {
+  return `${Math.trunc(Number(count) || 0)} ${membersWord(count)}`;
+}
+
+/** Ініціали для кружка учасника: перші літери двох слів імені; без імені — «?». */
+export function memberInitials(name) {
+  const words = String(name ?? '').trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return '?';
+  return words.slice(0, 2).map(word => Array.from(word)[0].toUpperCase()).join('');
+}
+
+/** Обраний колектив лишається, якщо ще є; інакше — перший зі списку (або жоден). */
+export function pickCollective(collectives, current) {
+  const list = collectives ?? [];
+  if (current && list.some(item => item.fingerprint === current)) return current;
+  return list[0]?.fingerprint ?? '';
+}
+
+/** Рядок про таблицю колективу. Різниця між вказаним і чинним класом пояснюється. */
 export function tableLine(table) {
   const parts = [`клас ${table.class}`];
   if (table.declaredClass !== table.class) parts[0] += ` (вказано ${table.declaredClass}; діє D, бо дані не підтверджені як облік після факту)`;
