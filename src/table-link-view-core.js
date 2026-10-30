@@ -3,7 +3,7 @@
 // людські тексти й стан рішень (B3). Нічого не зберігає: рішення людини ухвалює і записує викликач через
 // `confirmRelation`/`rejectRelation`/`clearRelation` ядра схеми.
 
-import { CARDINALITY_LABELS, LINK_LIMITS, connectedGroups, describeCandidate, linkCoverage, tableFromSchema } from './table-link-core.js';
+import { CARDINALITY_LABELS, LINK_LIMITS, connectedGroups, describeCandidate, linkCoverage, mergePreview, tableFromSchema } from './table-link-core.js';
 import { moduleSourceId } from './profile-schema-modules-core.js';
 import { LIMITS, groupsOf, relationId, relationsOf, staleRelations } from './profile-schema-core.js';
 
@@ -264,4 +264,41 @@ export function linkCoverageViews(schema, sourceId, modules, data) {
     views.push({ relationId: relation.id, text, warn: lone > 0 || loneOther > 0 || !cover.complete });
   }
   return views;
+}
+
+// ─── Перегляд об'єднання (B5, лише показ) ──────────────────────────────────────────────────────────────
+
+const rowsWord = n => (n % 10 === 1 && n % 100 !== 11 ? 'рядок' : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? 'рядки' : 'рядків');
+
+/**
+ * Що дало б об'єднання двох таблиць за підтвердженим зв'язком: стовпці, підсумок рядків і кілька перших рядків.
+ * Нічого не створює. `{ ok: true, title, summary, notes, columns, sample }` або `{ ok: false, message }`.
+ */
+export function mergePreviewView(schema, relationId, modules, data) {
+  const relation = relationsOf(schema).find(item => item.id === relationId && item.status === 'confirmed');
+  if (!relation) return { ok: false, message: 'Такого підтвердженого зв’язку немає.' };
+  if (staleRelations(schema).includes(relation.id)) return { ok: false, message: 'Зв’язок треба перевірити: стовпець ключа змінився.' };
+  const tableOf = id => {
+    const module = (Array.isArray(modules) ? modules : []).find(item => moduleSourceId(item.id) === id);
+    const payload = module ? (data instanceof Map ? data.get(module.id) : data?.[module.id]) : null;
+    if (!payload || payload.failed === true || !Array.isArray(payload.rows)) return null;
+    const made = tableFromSchema(schema, id, payload.rows.slice(0, LINK_LIMITS.maxRows), { truncated: payload.truncated === true || payload.rows.length > LINK_LIMITS.maxRows });
+    return made.ok ? made.table : null;
+  };
+  const left = tableOf(relation.left.sourceId);
+  const right = tableOf(relation.right.sourceId);
+  if (!left || !right) return { ok: false, message: 'Дані однієї з таблиць не прочитано.' };
+  const merged = mergePreview(left, right, relation.left.columns, relation.right.columns);
+  if (!merged.ok) return { ok: false, message: merged.message };
+  const notes = [];
+  if (!merged.complete) notes.push('Таблицю прочитано не повністю: підсумок за прочитаним.');
+  if (merged.onlyLeft || merged.onlyRight) notes.push(`Рядки без пари лишаються з порожніми стовпцями іншої таблиці: ${merged.onlyLeft} з «${left.title}», ${merged.onlyRight} з «${right.title}».`);
+  return {
+    ok: true,
+    title: `${left.title} + ${right.title}`,
+    summary: `Об’єднана таблиця мала б ${merged.rowCount} ${rowsWord(merged.rowCount)} і ${merged.columns.length} стовпців; з парою: ${merged.matched}.`,
+    notes,
+    columns: merged.columns.map(column => column.header),
+    sample: merged.sample,
+  };
 }

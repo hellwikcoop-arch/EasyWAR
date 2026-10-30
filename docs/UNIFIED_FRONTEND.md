@@ -729,6 +729,10 @@ v1 і блоки вкладок через `listDefinitions` + `validateRegistry
 для усіченого читання) і `linkCoverageViews` (`table-link-view-core.js`: текст по кожному підтвердженому зв'язку; «перевірте» й непрочитані дані
 пропускаються з поясненням). У картці `ul.ewmc-related-stats[data-related-stats-for]` заповнює `fillCoverage` через `setTimeout(0)` після малювання
 і з `refreshRelatedLines`; тільки підрахунок, без фільтра й без змін у картках. `removeSource` розпускає групу, що лишилась з однієї таблиці.
+Перегляд об'єднання (B5, перший крок): `mergePreview` (`table-link-core.js`: повне зовнішнє з'єднання двох профільних таблиць за ключем,
+помилки `bad_key`/`many_many`, дублі заголовків із суфіксом « (Назва таблиці)», перші `sample` рядків) і `mergePreviewView`
+(`table-link-view-core.js`: підсумок і зразок для екрана). Кнопка `preview-merge` біля підтвердженого зв'язку (`togglePreview`, `mergeNode`
+у `table-link-panel.js`) лише показує блок `.ewmc-links-merge`; жодного `apply`/запису схеми й жодного нового модуля.
 CSS — `.ewmc-links*` у `dashboard-module-catalog.css`. Тести — `tests/table-link-view.test.mjs`
 (логіка й текстові контракти: імпорт, відсутність `invoke`, `innerHTML`, запису схеми).
 
