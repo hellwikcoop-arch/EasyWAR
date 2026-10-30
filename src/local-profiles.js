@@ -1,4 +1,5 @@
 import './local-profiles.css';
+import { PASSWORD_MIN } from './profile-gate-core.js';
 import {
   activateLocalProfile,
   activeProfileLabel,
@@ -35,7 +36,7 @@ import {
 } from './local-profiles-core.js';
 import { createProfileGate } from './profile-gate.js';
 import { requestSplashSkip } from './startup-splash-core.js';
-import { GATE_MODULES, modulesError, moduleVisible } from './profile-gate-core.js';
+import { GATE_MODULES, SOON_MODULES, modulesError, modulesForRows, moduleVisible } from './profile-gate-core.js';
 import { createAssistantUI } from './assistant/assistant-ui.js';
 import { getDatabaseStatus } from './backup-core.js';
 import { appUpdateState } from './app-update-state-core.js';
@@ -329,15 +330,48 @@ function initializeLocalProfiles() {
   function applyModules() {
     const profile = activeProfile();
     const signedIn = Boolean(profile) && !isProfileLocked(profile, sessionProfileId);
-    for (const module of GATE_MODULES) {
-      const visible = !signedIn || moduleVisible(module.id, profile);
-      for (const selector of [module.card, module.tile]) {
-        if (selector) document.querySelector(selector)?.classList.toggle('ew-module-off', !visible);
+    for (const row of GATE_MODULES) {
+      // Рядок «Командування військ» вмикає обидві плитки; профіль, створений раніше лише з ПВК,
+      // бачить лише її: кожна картка йде за своїм модулем.
+      const selectors = row.modules.map((id, index) => [row.cards[index], row.tiles[index], id]);
+      for (const [card, tile, id] of selectors) {
+        const visible = !signedIn || moduleVisible(id, profile);
+        for (const selector of [card, tile]) {
+          const node = selector ? document.querySelector(selector) : null;
+          node?.classList.toggle('ew-module-off', !visible);
+          // Слот командування ховається разом зі своєю карткою, інакше лишається порожня клітинка сітки.
+          node?.closest('.cmd-slot')?.classList.toggle('ew-module-off', !visible);
+        }
       }
     }
-    // Коли частини карток немає, решта стає по центру, а не липне до лівого краю.
-    const trimmed = Boolean(document.querySelector('.branch-cards .ew-module-off'));
-    document.querySelector('.branch-cards')?.classList.toggle('ew-modules-trimmed', trimmed);
+    // Модулі в розробці не обираються: профіль, що увійшов, їхніх карток не бачить.
+    for (const row of SOON_MODULES) {
+      for (const selector of row.cards) {
+        const node = document.querySelector(selector);
+        node?.classList.toggle('ew-module-off', signedIn);
+        node?.classList.toggle('ew-soon-off', signedIn);
+      }
+    }
+    layoutStartCards();
+  }
+
+  // Стартовий екран показує лише модулі профілю: порожні розділи («Командування», «Роди військ»)
+  // ховаються, а решта карток розтягується на всю ширину сітки.
+  function layoutStartCards() {
+    const grid = document.querySelector('.branch-cards');
+    if (!grid) return;
+    const shown = node => !node.classList.contains('ew-module-off');
+    const slots = [...grid.querySelectorAll('.cmd-slot')].filter(shown).length;
+    const cards = [...grid.querySelectorAll('.branch-card:not(.cmd-card)')].filter(shown).length;
+    // Схована картка модуля в розробці не робить екран «урізаним»: без неї сітка лишається звичайною.
+    const trimmed = Boolean(grid.querySelector('.ew-module-off:not(.ew-soon-off)'));
+    grid.classList.toggle('ew-modules-trimmed', trimmed);
+    grid.classList.toggle('ew-no-command', trimmed && slots === 0);
+    grid.classList.toggle('ew-no-branches', trimmed && cards === 0);
+    // Кожна картка роду займає дві колонки, слот командування — половину або всю ширину.
+    const columns = Math.max(1, cards) * 2;
+    grid.style.setProperty('--ew-cols', String(columns));
+    grid.style.setProperty('--ew-cmd-span', String(slots > 1 ? columns / 2 : columns));
   }
 
   function render() {
@@ -450,19 +484,20 @@ function initializeLocalProfiles() {
     const boxes = GATE_MODULES.map(module => el('input', {
       type: 'checkbox',
       value: module.id,
-      checked: moduleVisible(module.id, profile),
+      checked: module.modules.some(id => moduleVisible(id, profile)),
       'aria-label': `${module.title} — профіль ${profile.displayName}`,
     }));
     return el('div', { class: 'ew-profile-modules' },
       el('span', { class: 'ew-profile-field-caption', text: 'Модулі на стартовому екрані' }),
       el('div', { class: 'ew-profile-module-list' },
-        GATE_MODULES.map((module, index) => el('label', { class: 'ew-profile-module' }, boxes[index], el('span', { text: module.title })))),
+        [...GATE_MODULES.map((module, index) => el('label', { class: 'ew-profile-module' }, boxes[index], el('span', { text: module.title }))),
+          ...SOON_MODULES.map(module => el('label', { class: 'ew-profile-module is-soon' }, el('input', { type: 'checkbox', disabled: true, 'aria-label': `${module.title}: у розробці` }), el('span', { text: `${module.title} (у розробці)` })))]),
       el('button', {
         type: 'button',
         class: 'btn',
         text: 'Зберегти модулі',
         onclick: () => {
-          const chosen = boxes.filter(box => box.checked).map(box => box.value);
+          const chosen = modulesForRows(boxes.filter(box => box.checked).map(box => box.value));
           const problem = modulesError(chosen);
           if (problem) {
             status.textContent = problem;
@@ -590,7 +625,7 @@ function initializeLocalProfiles() {
       title: `Пароль для профілю «${profile.displayName}»`,
       submitLabel: 'Захистити',
       fields: [
-        { label: 'Новий пароль (від 6 символів)', autocomplete: 'new-password' },
+        { label: `Новий пароль (від ${PASSWORD_MIN} символів)`, autocomplete: 'new-password' },
         { label: 'Повторіть пароль', autocomplete: 'new-password', confirms: 0 },
       ],
     });
@@ -606,7 +641,7 @@ function initializeLocalProfiles() {
       submitLabel: 'Змінити',
       fields: [
         { label: 'Поточний пароль' },
-        { label: 'Новий пароль (від 6 символів)', autocomplete: 'new-password' },
+        { label: `Новий пароль (від ${PASSWORD_MIN} символів)`, autocomplete: 'new-password' },
         { label: 'Повторіть новий пароль', autocomplete: 'new-password', confirms: 1 },
       ],
     });

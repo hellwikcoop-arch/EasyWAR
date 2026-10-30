@@ -148,6 +148,7 @@ export function setLocalProfilePassword(profileId, currentPassword, newPassword,
  */
 export const PROFILE_BRANCHES = [
   { branch: 'air', short: 'ПС', title: 'Повітряні Сили', table: 'Таблиця Повітряних Сил' },
+  { branch: 'army', short: 'АА', title: 'Армійська авіація', table: 'Таблиця армійської авіації' },
   { branch: 'pvk', short: 'ПВК', title: 'Повітряне командування (дашборд ПВК)', table: 'Таблиця ПВК' },
   { branch: 'rocket', short: 'РВ', title: 'Ракетні війська', table: 'Таблиця Ракетних військ' },
   { branch: 'dshv', short: 'УДШВ', title: 'Командування ДШВ (дашборд УДШВ)', table: 'Таблиця УДШВ' },
@@ -172,6 +173,7 @@ export const ownLossesBranch = command => `${command}_losses`;
 /** Порожні базові таблиці, з яких можна почати. `branch` — модуль, що їх відкриває. */
 export const BASE_TABLES = [
   { key: 'air', branch: 'air', label: 'ПС — базова таблиця' },
+  { key: 'army', branch: 'army', label: 'АА — базова таблиця (структура ПС)' },
   { key: 'pvk', branch: 'pvk', label: 'ПС рівня ПВК (ТАБЛ 2-3)' },
   { key: 'rvia', branch: 'rocket', label: 'РВ — базова таблиця' },
 ];
