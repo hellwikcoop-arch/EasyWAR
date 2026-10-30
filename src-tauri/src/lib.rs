@@ -21,6 +21,7 @@ pub mod office_files;
 pub mod office_library;
 pub mod office_sources;
 pub mod pair_relay;
+pub mod pair_session;
 pub mod phone_export;
 pub mod position_templates;
 pub mod profile_schema;
