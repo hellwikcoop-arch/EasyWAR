@@ -17,8 +17,6 @@ export const PASSWORD_MAX = 128;
  * стартового екрана, які рядок показує або ховає. «Командування військ» — обидва дашборди
  * командувань (ПВК і УДШВ) разом. «Власний модуль» не прив'язаний до роду військ: сторінка
  * custom.html, яку користувач наповнює модулями каталогу і «Моїм дашбордом» на свій розсуд.
- * `soon` — модуль у розробці («Сили спеціальних операцій»): його можна обрати, але на стартовому
- * екрані він лише картка «У розробці», що не відкривається.
  */
 export const GATE_MODULES = Object.freeze([
   Object.freeze({
@@ -54,15 +52,6 @@ export const GATE_MODULES = Object.freeze([
     tiles: Object.freeze([null]),
   }),
   Object.freeze({
-    id: 'sso',
-    title: 'Сили спеціальних операцій',
-    hint: 'У розробці: поки лише картка на стартовому екрані, модуль ще не відкривається',
-    soon: true,
-    modules: Object.freeze(['sso']),
-    cards: Object.freeze(['.branch-card[data-branch="sso"]']),
-    tiles: Object.freeze([]),
-  }),
-  Object.freeze({
     id: 'command',
     title: 'Командування військ',
     hint: 'Дашборди ПВК і УДШВ з вкладками «Наші втрати»',
@@ -83,8 +72,19 @@ export const GATE_MODULES = Object.freeze([
 /** Ключі модулів профілю так, як їх зберігає ядро (`MODULES` у local_profiles.rs), у порядку показу. */
 export const MODULE_IDS = Object.freeze(GATE_MODULES.flatMap(row => row.modules));
 
-/** Модулі в розробці: їх можна обрати, але вони лише показують картку «У розробці». */
-export const SOON_MODULE_IDS = Object.freeze(GATE_MODULES.filter(row => row.soon).flatMap(row => row.modules));
+/**
+ * Модулі в розробці. У переліку реєстрації вони показані як «У розробці» без прапорця: обрати їх
+ * не можна, у профілі вони не зберігаються, а їхня картка на стартовому екрані профілю, що увійшов,
+ * схована (там лише обрані модулі).
+ */
+export const SOON_MODULES = Object.freeze([
+  Object.freeze({
+    id: 'sso',
+    title: 'Сили спеціальних операцій',
+    hint: 'У розробці',
+    cards: Object.freeze(['.branch-card[data-branch="sso"]']),
+  }),
+]);
 
 const codePoints = value => [...String(value ?? '')].length;
 const squash = value => String(value ?? '').split(/\s+/).filter(Boolean).join(' ');
@@ -146,9 +146,7 @@ export function recoveryFailure(text) {
 /** Другий крок: щонайменше один відомий модуль. */
 export function modulesError(modules) {
   const chosen = normalizeModules(modules);
-  if (!chosen.length) return 'Оберіть щонайменше один модуль.';
-  // Модуль у розробці не відкривається: з ним одним на стартовому екрані не було б із чим працювати.
-  return chosen.some(id => !SOON_MODULE_IDS.includes(id)) ? null : 'Оберіть щонайменше один робочий модуль: «Сили спеціальних операцій» ще в розробці.';
+  return chosen.length ? null : 'Оберіть щонайменше один модуль.';
 }
 
 /** Відомі модулі без дублікатів у порядку стартового екрана. */

@@ -179,12 +179,6 @@ copied first for the same foreign-key reason as in 0021; rows, ids and indexes a
 kept. Existing profiles do NOT get the `army` row: the start screen shows only the
 modules a profile chose, and «Армійська авіація» is switched on in «Профілі».
 
-`0023_special_operations.sql` adds the module `sso` («Сили спеціальних операцій») to
-`local_profile_modules` only. The module is in development: on the start screen it is a
-«У розробці» card that opens nothing, so it has no profile table and no dashboard modules.
-The leaf table is rebuilt for the new `CHECK`; rows are kept and existing profiles do not
-get the `sso` row.
-
 The `dashboard_data_<id>` tables of user-created dashboard modules are not
 migration objects: Rust creates them at runtime from a validated catalog
 template and adds columns that later appear in a template with `ALTER TABLE`,

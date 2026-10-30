@@ -20,7 +20,7 @@ import {
   passwordError,
   recoveryFailure,
   rowChosen,
-  SOON_MODULE_IDS,
+  SOON_MODULES,
   slotsForModules,
   validateProfileStep,
   validateRecoveryStep,
@@ -59,8 +59,8 @@ test('profile step checks name, uniqueness, lengths and password confirmation', 
 });
 
 test('at least one known module must be chosen; unknown ids are dropped', () => {
-  assert.deepEqual(MODULE_IDS, ['air', 'rocket', 'artillery', 'army', 'sso', 'pvk', 'dshv', 'custom']);
-  assert.deepEqual(GATE_MODULES.map(row => row.id), ['air', 'rocket', 'artillery', 'army', 'sso', 'command', 'custom']);
+  assert.deepEqual(MODULE_IDS, ['air', 'rocket', 'artillery', 'army', 'pvk', 'dshv', 'custom']);
+  assert.deepEqual(GATE_MODULES.map(row => row.id), ['air', 'rocket', 'artillery', 'army', 'command', 'custom']);
   assert.ok(modulesError([]));
   assert.ok(modulesError(['unknown']));
   assert.ok(modulesError(null));
@@ -73,22 +73,23 @@ test('module titles in the registration carry no beta label', () => {
   assert.ok(GATE_MODULES.every(module => !/beta|бета/i.test(module.title)));
 });
 
-test('«Сили спеціальних операцій» — модуль у розробці: обирається, але не сам і без таблиці', async () => {
-  assert.deepEqual(SOON_MODULE_IDS, ['sso']);
-  const sso = GATE_MODULES.find(row => row.id === 'sso');
-  assert.equal(sso.soon, true);
-  assert.match(sso.hint, /У розробці/);
-  assert.ok(modulesError(['sso']), 'лише модуль у розробці не дає робочого стартового екрана');
-  assert.equal(modulesError(['sso', 'air']), null);
-  assert.deepEqual(slotsForModules(['sso']), [], 'таблиці профілю в ССО немає');
+test('«Сили спеціальних операцій» — у розробці: видно в переліку, не обирається, на екрані профілю схована', async () => {
+  assert.deepEqual(SOON_MODULES.map(row => row.id), ['sso']);
+  assert.ok(!MODULE_IDS.includes('sso'), 'модуль у розробці не зберігається в профілі');
+  assert.equal(normalizeModules(['sso', 'air']).join(), 'air');
   const html = await read('index.html');
   const card = html.match(/<button class="branch-card branch-card-soon" data-branch="sso"[^>]*>[\s\S]*?<\/button>/);
-  assert.ok(card, 'картка ССО є на стартовому екрані і не має класу branch-card-live');
+  assert.ok(card, 'картка ССО є в розмітці і не має класу branch-card-live');
   assert.match(card[0], /aria-disabled="true"/);
   assert.match(card[0], /<h3>Сили спеціальних операцій<\/h3>/);
   assert.match(card[0], /<span class="bc-soon">У розробці<\/span>/);
   assert.match(card[0], /data:image\/webp;base64,/, 'тризуб ССО вбудовано у файл');
   assert.doesNotMatch(html, /MODULE_SRC = \{[^}]*sso:/, 'картка нікуди не веде');
+  const profiles = await read('local-profiles.js');
+  assert.match(profiles, /for \(const row of SOON_MODULES\)[\s\S]*?classList\.toggle\('ew-module-off', signedIn\)/, 'профіль, що увійшов, картки не бачить');
+  assert.match(profiles, /\.ew-module-off:not\(\.ew-soon-off\)/, 'схована картка не перемикає сітку в «урізаний» вигляд');
+  const gate = await read('profile-gate.js');
+  assert.match(gate, /SOON_MODULES\.map\(module => el\('label', \{ class: 'ew-gate-module is-soon' \},\s*el\('input', \{ type: 'checkbox', disabled: true/);
 });
 
 test('table slots follow the chosen modules; artillery has no own slot', () => {
