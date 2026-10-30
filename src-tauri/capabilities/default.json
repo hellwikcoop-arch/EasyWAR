@@ -17,6 +17,7 @@
     "allow-read-module-source-sheet",
     "allow-get-dashboard-module-data",
     "allow-replace-dashboard-module-rows",
+    "allow-add-dashboard-module-fields",
     "allow-set-dashboard-module-style",
     "allow-get-profile-schema",
     "allow-save-profile-schema",
