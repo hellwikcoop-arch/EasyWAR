@@ -102,22 +102,26 @@ function xLabels(frame, labels, slotWidth, { centered = true } = {}) {
   }) : null)));
 }
 
-/** Стовпчик із заокругленим кінцем даних і прямою основою; від'ємний — вниз від нуля. */
-function columnPath(x, yZero, yValue, width, radius = 4) {
-  const r = Math.min(radius, width / 2, Math.abs(yZero - yValue));
-  if (yValue <= yZero) {
-    return `M${fixed(x)} ${fixed(yZero)} V${fixed(yValue + r)} Q${fixed(x)} ${fixed(yValue)} ${fixed(x + r)} ${fixed(yValue)} H${fixed(x + width - r)} Q${fixed(x + width)} ${fixed(yValue)} ${fixed(x + width)} ${fixed(yValue + r)} V${fixed(yZero)} Z`;
-  }
-  return `M${fixed(x)} ${fixed(yZero)} V${fixed(yValue - r)} Q${fixed(x)} ${fixed(yValue)} ${fixed(x + r)} ${fixed(yValue)} H${fixed(x + width - r)} Q${fixed(x + width)} ${fixed(yValue)} ${fixed(x + width)} ${fixed(yValue - r)} V${fixed(yZero)} Z`;
+// Заокруглення кінця даних: дуга кола, не більше половини товщини, 8 px і самої довжини стовпчика.
+const ROUND = 8;
+const cornerRadius = (thickness, length, radius) => Math.max(0, Math.min(radius, thickness / 2, Math.abs(length)));
+
+/** Стовпчик із заокругленою верхівкою (кінцем даних) і прямою основою; від'ємний — вниз від нуля. `radius` 0 — без заокруглення. */
+export function columnPath(x, yZero, yValue, width, radius = ROUND) {
+  const r = cornerRadius(width, yZero - yValue, radius);
+  const up = yValue <= yZero;
+  const edge = up ? yValue + r : yValue - r;
+  const sweep = up ? 1 : 0;
+  return `M${fixed(x)} ${fixed(yZero)} V${fixed(edge)} A${fixed(r)} ${fixed(r)} 0 0 ${sweep} ${fixed(x + r)} ${fixed(yValue)} H${fixed(x + width - r)} A${fixed(r)} ${fixed(r)} 0 0 ${sweep} ${fixed(x + width)} ${fixed(edge)} V${fixed(yZero)} Z`;
 }
 
 /** Горизонтальна смуга від нуля з заокругленим кінцем даних. */
-function barPath(xZero, xValue, y, height, radius = 4) {
-  const r = Math.min(radius, height / 2, Math.abs(xValue - xZero));
-  if (xValue >= xZero) {
-    return `M${fixed(xZero)} ${fixed(y)} H${fixed(xValue - r)} Q${fixed(xValue)} ${fixed(y)} ${fixed(xValue)} ${fixed(y + r)} V${fixed(y + height - r)} Q${fixed(xValue)} ${fixed(y + height)} ${fixed(xValue - r)} ${fixed(y + height)} H${fixed(xZero)} Z`;
-  }
-  return `M${fixed(xZero)} ${fixed(y)} H${fixed(xValue + r)} Q${fixed(xValue)} ${fixed(y)} ${fixed(xValue)} ${fixed(y + r)} V${fixed(y + height - r)} Q${fixed(xValue)} ${fixed(y + height)} ${fixed(xValue + r)} ${fixed(y + height)} H${fixed(xZero)} Z`;
+export function barPath(xZero, xValue, y, height, radius = ROUND) {
+  const r = cornerRadius(height, xValue - xZero, radius);
+  const right = xValue >= xZero;
+  const edge = right ? xValue - r : xValue + r;
+  const sweep = right ? 1 : 0;
+  return `M${fixed(xZero)} ${fixed(y)} H${fixed(edge)} A${fixed(r)} ${fixed(r)} 0 0 ${sweep} ${fixed(xValue)} ${fixed(y + r)} V${fixed(y + height - r)} A${fixed(r)} ${fixed(r)} 0 0 ${sweep} ${fixed(edge)} ${fixed(y + height)} H${fixed(xZero)} Z`;
 }
 
 function arcPath(cx, cy, r, startAngle, endAngle) {
@@ -228,7 +232,11 @@ function columns(model, width, height, { compact }) {
     if (stacked) {
       let positive = 0;
       let negative = 0;
-      barSeries.forEach(series => {
+      // Заокруглюється лише верхній (і нижній від'ємний) відрізок стовпця: середина накопичення лишається прямою.
+      const values = barSeries.map(series => series.values[index]);
+      const top = values.findLastIndex(value => value > 0);
+      const bottom = values.findLastIndex(value => value < 0);
+      barSeries.forEach((series, order) => {
         const value = series.values[index];
         if (value == null || value === 0) return;
         const from = value > 0 ? positive : negative;
@@ -238,7 +246,7 @@ function columns(model, width, height, { compact }) {
         const yTo = frame.y(to);
         const inset = from === 0 ? 0 : GAP;
         bars.push(svg('path', {
-          d: value > 0 ? columnPath(left, yFrom - inset, yTo, barWidth) : columnPath(left, yFrom + inset, yTo, barWidth),
+          d: columnPath(left, value > 0 ? yFrom - inset : yFrom + inset, yTo, barWidth, order === top || order === bottom ? ROUND : 0),
           fill: slotColor(series.slot), class: 'ewmc-bar', title: `${category} · ${series.name}: ${model.valueText(value)}`,
         }));
       });

@@ -602,3 +602,19 @@ test('плавна лінія не вигадує горбів: між точк�
   // Пласка ділянка лишається пласкою.
   assert.deepEqual(segments[1].filter((_, i) => i % 2 === 1), [10, 10, 10]);
 });
+
+test('стовпчики й смуги мають заокруглений кінець даних дугою, основа — пряма', async () => {
+  const { barPath, columnPath } = await import('../src/dashboard-module-charts.js');
+  // Ширина 20: радіус 8 (межа), верхівка — дві дуги, основа на нулі пряма.
+  assert.equal(columnPath(10, 100, 40, 20), 'M10 100 V48 A8 8 0 0 1 18 40 H22 A8 8 0 0 1 30 48 V100 Z');
+  // Вузький стовпчик заокруглюється півколом, низький — не більше своєї висоти.
+  assert.match(columnPath(0, 100, 50, 6), /A3 3 0 0 1 3 50 H3 A3 3/);
+  assert.match(columnPath(0, 100, 98, 20), /^M0 100 V100 A2 2 /);
+  // Від'ємний — вниз від нуля, дуги в інший бік; радіус 0 — прямий відрізок (середина накопиченого стовпця).
+  assert.equal(columnPath(0, 50, 80, 20), 'M0 50 V72 A8 8 0 0 0 8 80 H12 A8 8 0 0 0 20 72 V50 Z');
+  assert.match(columnPath(0, 100, 40, 20, 0), /A0 0 0 0 1 0 40 H20 A0 0/);
+  // Смуга висотою 14 — капсула з радіусом 7 праворуч.
+  assert.equal(barPath(0, 100, 10, 14), 'M0 10 H93 A7 7 0 0 1 100 17 V17 A7 7 0 0 1 93 24 H0 Z');
+  const source = await readFile(new URL('../src/dashboard-module-charts.js', import.meta.url), 'utf8');
+  assert.match(source, /order === top \|\| order === bottom \? ROUND : 0/, 'у накопиченому стовпці заокруглюється лише крайній відрізок');
+});
