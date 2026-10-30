@@ -749,6 +749,14 @@ v1 і блоки вкладок через `listDefinitions` + `validateRegistry
 на сторінці таблиці-знімка (кнопки `check-snapshot`, `apply-snapshot`, `confirm-snapshot`); `table-link-snapshot-client.js` — `replaceSnapshotRows` (та сама
 `replace_dashboard_module_rows` з `expectedUpdatedAt`). Каталог перед перевіркою читає обидві вихідні таблиці наново (`readSnapshotSources`) і після заміни оновлює дату
 знімка. Тести — `tests/table-link-snapshot.test.mjs`.
+
+Блок реєстру → основна таблиця (E5): `module-add-columns-core.js` (чисте, без `Object.freeze` на верхньому рівні — інакше виклик лишається у збірці ПВК-lite):
+`planAddColumns` (які ролі блоку є, які зіставити з наявним стовпцем за підписом, які додати; ключі `c{n}` далі за наявними; ліміт 64), `bindingsAfterAdd`
+(ключі нових стовпців — з відповіді команди за підписом), `confirmPlanBindings`, `addFieldsRequest`, `createUserTableRequest`, `userTables`.
+`module-add-columns-client.js` — `saveBlockColumns` (`add_dashboard_module_fields` чи `create_dashboard_module` для `user-table`) і `bindBlockColumns` (синхронізація схеми +
+зіставлення ролей одним записом). `module-add-columns-panel.js` — DOM: `<details class="ewmc-update ewmc-addcols">` на картці реєстру (кнопки `add-columns`,
+`confirm-add-columns`, галочка `with-optional`; наявні класи, нового CSS немає). Каталог передає в `registryPanel` `columnsBox` і виконує `addBlockColumns`.
+Тести — `tests/module-add-columns.test.mjs`.
 CSS — `.ewmc-links*` у `dashboard-module-catalog.css`. Тести — `tests/table-link-view.test.mjs`
 (логіка й текстові контракти: імпорт, відсутність `invoke`, `innerHTML`, запису схеми).
 
