@@ -247,7 +247,7 @@ fn dashboard_branch(branch: &str) -> Result<Option<Branch>, String> {
         return Ok(None);
     }
     match Branch::parse(branch) {
-        Ok(parsed @ (Branch::Air | Branch::Rocket | Branch::Pvk | Branch::Dshv)) => {
+        Ok(parsed @ (Branch::Air | Branch::Rocket | Branch::Army | Branch::Pvk | Branch::Dshv)) => {
             Ok(Some(parsed))
         }
         _ => Err(dashboard_modules::DashboardModuleError::InvalidBranch.to_string()),

@@ -23,7 +23,15 @@ const MIN_PASSWORD_CHARS: usize = 6;
 
 /// Модулі, які користувач обирає при реєстрації, у порядку показу на стартовому екрані.
 /// `custom` — «Власний модуль» без прив'язки до роду військ (міграція 0021).
-pub const MODULES: [&str; 6] = ["air", "rocket", "artillery", "pvk", "dshv", "custom"];
+pub const MODULES: [&str; 7] = [
+    "air",
+    "rocket",
+    "artillery",
+    "army",
+    "pvk",
+    "dshv",
+    "custom",
+];
 const MAX_PASSWORD_CHARS: usize = 128;
 
 /// Argon2id хеша входу — той самий, що в ключа обгортки бібліотеки (64 МіБ, 3 проходи):
@@ -55,6 +63,8 @@ pub struct LocalProfileStore {
 pub enum Branch {
     Air,
     Rocket,
+    /// Армійська авіація: сторінка ПС у власному режимі з власною таблицею (міграція 0022).
+    Army,
     Pvk,
     Dshv,
     #[serde(rename = "pvk_losses")]
@@ -68,6 +78,7 @@ impl Branch {
         match self {
             Branch::Air => "air",
             Branch::Rocket => "rocket",
+            Branch::Army => "army",
             Branch::Pvk => "pvk",
             Branch::Dshv => "dshv",
             Branch::PvkLosses => "pvk_losses",
@@ -80,6 +91,7 @@ impl Branch {
         match self {
             Branch::Air => "Повітряних Сил",
             Branch::Rocket => "Ракетних військ",
+            Branch::Army => "армійської авіації",
             Branch::Pvk => "Повітряного командування (ПВК)",
             Branch::Dshv => "Командування ДШВ (УДШВ)",
             Branch::PvkLosses => "«Наші втрати» Повітряного командування (ПВК)",
@@ -91,6 +103,7 @@ impl Branch {
         match value {
             "air" => Ok(Branch::Air),
             "rocket" => Ok(Branch::Rocket),
+            "army" => Ok(Branch::Army),
             "pvk" => Ok(Branch::Pvk),
             "dshv" => Ok(Branch::Dshv),
             "pvk_losses" => Ok(Branch::PvkLosses),
@@ -105,6 +118,7 @@ impl Branch {
 pub struct ProfileTables {
     pub air: Option<String>,
     pub rocket: Option<String>,
+    pub army: Option<String>,
     pub pvk: Option<String>,
     pub dshv: Option<String>,
     pub pvk_losses: Option<String>,
@@ -116,6 +130,7 @@ impl ProfileTables {
         match branch {
             Branch::Air => &mut self.air,
             Branch::Rocket => &mut self.rocket,
+            Branch::Army => &mut self.army,
             Branch::Pvk => &mut self.pvk,
             Branch::Dshv => &mut self.dshv,
             Branch::PvkLosses => &mut self.pvk_losses,
@@ -1168,7 +1183,7 @@ pub(crate) fn validate_profile_id(id: &str) -> Result<(), LocalProfileError> {
 mod tests {
     use super::*;
     use crate::database::{
-        COMMAND_TABLES_SQL, CUSTOM_MODULE_SQL, DASHBOARD_MODULES_SQL,
+        ARMY_AVIATION_SQL, COMMAND_TABLES_SQL, CUSTOM_MODULE_SQL, DASHBOARD_MODULES_SQL,
         DASHBOARD_MODULE_CORRECTIONS_SQL, DASHBOARD_MODULE_CORRECTION_STATUS_SQL,
         DASHBOARD_MODULE_STYLE_SQL, INITIAL_SCHEMA_SQL, LOCAL_PROFILES_SQL, OWN_LOSSES_TABLES_SQL,
         PROFILE_BRANCH_TABLES_SQL, PROFILE_DETAILS_SQL, PROFILE_MODULES_SQL,
@@ -1227,6 +1242,7 @@ mod tests {
             DASHBOARD_MODULE_STYLE_SQL,
             DASHBOARD_MODULE_CORRECTION_STATUS_SQL,
             CUSTOM_MODULE_SQL,
+            ARMY_AVIATION_SQL,
         ] {
             sqlx::raw_sql(migration).execute(&pool).await.unwrap();
         }
@@ -1774,6 +1790,7 @@ mod tests {
             serde_json::to_value(&state.profiles[0]).unwrap()["tables"],
             serde_json::json!({
                 "air": "/synthetic/air.xlsx",
+                "army": null,
                 "rocket": "/synthetic/rocket.xlsx",
                 "pvk": null,
                 "dshv": null,
@@ -1822,6 +1839,8 @@ mod tests {
             Err(LocalProfileError::ProfileNotFound)
         ));
         assert_eq!(Branch::parse("rocket").unwrap(), Branch::Rocket);
+        assert_eq!(Branch::parse("army").unwrap(), Branch::Army);
+        assert_eq!(Branch::Army.as_str(), "army");
         assert_eq!(Branch::parse("pvk").unwrap(), Branch::Pvk);
         assert_eq!(Branch::parse("dshv").unwrap(), Branch::Dshv);
         assert_eq!(Branch::parse("pvk_losses").unwrap(), Branch::PvkLosses);
@@ -1829,7 +1848,7 @@ mod tests {
         assert_eq!(Branch::PvkLosses.as_str(), "pvk_losses");
         assert_eq!(Branch::DshvLosses.as_str(), "dshv_losses");
         assert!(matches!(
-            Branch::parse("army"),
+            Branch::parse("navy"),
             Err(LocalProfileError::InvalidBranch)
         ));
 
@@ -2288,7 +2307,7 @@ mod tests {
                 .await,
             Err(LocalProfileError::InvalidModules)
         ));
-        let unknown = modules(&["air", "army"]);
+        let unknown = modules(&["air", "navy"]);
         assert!(matches!(
             store
                 .register(
@@ -2400,7 +2419,7 @@ mod tests {
         ));
         assert!(matches!(
             store
-                .set_modules(&profile, &modules(&["army"]), NOW_2)
+                .set_modules(&profile, &modules(&["navy"]), NOW_2)
                 .await,
             Err(LocalProfileError::InvalidModules)
         ));
@@ -2464,7 +2483,10 @@ mod tests {
             .unwrap();
         let state = LocalProfileStore::new(pool.clone()).list().await.unwrap();
         // До 0021 профіль має п'ять модулів; `custom` додає міграція 0021.
-        assert_eq!(state.profiles[0].modules, &MODULES[..5]);
+        assert_eq!(
+            state.profiles[0].modules,
+            ["air", "rocket", "artillery", "pvk", "dshv"]
+        );
         // Невідомий модуль схема відхиляє.
         assert!(sqlx::query(
             "INSERT INTO local_profile_modules (profile_id, module) VALUES (?, 'army')"

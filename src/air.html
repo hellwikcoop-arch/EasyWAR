@@ -4,7 +4,10 @@
 <script id="easywar-command-mode">
 /* Командний режим: лончер відкриває цю сторінку як окреме вікно дашборда (?command=pvk) з власною прив'язкою таблиці. */
 (function () {
-  try { if (new URLSearchParams(location.search).get('command') === 'pvk') document.documentElement.dataset.command = 'pvk'; } catch (e) {}
+  try {
+    if (new URLSearchParams(location.search).get('command') === 'pvk') document.documentElement.dataset.command = 'pvk';
+    if (new URLSearchParams(location.search).get('module') === 'army') document.documentElement.dataset.module = 'army'; /* армійська авіація */
+  } catch (e) {}
 })();
 </script>
 <style id="easywar-command-mode-css">
@@ -14,6 +17,28 @@ html[data-command="pvk"] #tab-entry, html[data-command="pvk"] #tab-ref, html[dat
 @media (max-width: 640px) {
   html[data-command="pvk"] #ewx-open, html[data-command="pvk"] #dashboardSourceToggle, html[data-command="pvk"] #motionBtn { display: none !important; }
 }
+</style>
+<script id="easywar-army-aviation-mode">
+/* Режим армійської авіації: назва вікна, підпис емблеми й сама емблема (береться з картки лончера, тому в файл не вшивається). */
+document.addEventListener('DOMContentLoaded', function () {
+  if (document.documentElement.dataset.module !== 'army') return;
+  document.title = 'easyWAR — Армійська авіація';
+  const small = document.querySelector('.brand small');
+  if (small) small.textContent = 'Армійська авіація';
+  const mark = document.querySelector('.brand .branch-service-mark');
+  if (!mark) return;
+  mark.alt = 'Армійська авіація';
+  try {
+    const parentCard = window.parent && window.parent !== window ? window.parent.document.querySelector('.branch-card[data-branch="army"] .bc-icon img') : null;
+    if (parentCard && parentCard.src) mark.src = parentCard.src;
+  } catch (e) { /* поза лончером лишається емблема ПС */ }
+});
+</script>
+<style id="easywar-army-aviation-css">
+/* Армійська авіація: колір роду військ (зелений) замість блакитного ПС; решта сторінки без змін. */
+html[data-module="army"] { --accent: #8fcf4a; --accent-ink: #0b1a06; --accent-soft: #1c3312; --line-strong: #2f4a2a; --surface-2: #122414; }
+html[data-module="army"][data-theme="light"] { --accent: #3f7a1c; --accent-ink: #ffffff; --accent-soft: #e2f0d6; --line-strong: #a9bca0; --surface-2: #f1f6ec; }
+html[data-module="army"] .brand .branch-service-mark { height: 38px; width: auto; }
 </style>
 <script id="easywar-desktop-frame-bridge">
 (function(){
@@ -32,8 +57,9 @@ html[data-command="pvk"] #tab-entry, html[data-command="pvk"] #tab-ref, html[dat
 <script>
 (function(){
   'use strict';
-  const NS = 'easywar.air::';
-  window.__EASYWAR_MODULE__ = 'air';
+  const ARMY = document.documentElement.dataset.module === 'army';
+  const NS = ARMY ? 'easywar.army::' : 'easywar.air::';
+  window.__EASYWAR_MODULE__ = ARMY ? 'army' : 'air';
   // Isolate this module's localStorage keys from the other embedded database.
   try {
     const P = Storage.prototype;

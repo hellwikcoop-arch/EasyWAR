@@ -58,8 +58,8 @@ test('profile step checks name, uniqueness, lengths and password confirmation', 
 });
 
 test('at least one known module must be chosen; unknown ids are dropped', () => {
-  assert.deepEqual(MODULE_IDS, ['air', 'rocket', 'artillery', 'pvk', 'dshv', 'custom']);
-  assert.deepEqual(GATE_MODULES.map(row => row.id), ['air', 'rocket', 'artillery', 'command', 'custom']);
+  assert.deepEqual(MODULE_IDS, ['air', 'rocket', 'artillery', 'army', 'pvk', 'dshv', 'custom']);
+  assert.deepEqual(GATE_MODULES.map(row => row.id), ['air', 'rocket', 'artillery', 'army', 'command', 'custom']);
   assert.ok(modulesError([]));
   assert.ok(modulesError(['unknown']));
   assert.ok(modulesError(null));
@@ -76,8 +76,9 @@ test('table slots follow the chosen modules; artillery has no own slot', () => {
   assert.deepEqual(slotsForModules(['air']).map(s => s.branch), ['air']);
   assert.deepEqual(slotsForModules(['artillery']), []);
   assert.deepEqual(slotsForModules(['pvk', 'air']).map(s => s.branch), ['air', 'pvk', 'pvk_losses']);
+  assert.deepEqual(slotsForModules(['army']).map(s => s.branch), ['army'], 'армійська авіація має власну таблицю');
   assert.deepEqual(slotsForModules(MODULE_IDS).map(s => s.branch),
-    ['air', 'rocket', 'pvk', 'pvk_losses', 'dshv', 'dshv_losses']);
+    ['air', 'rocket', 'army', 'pvk', 'pvk_losses', 'dshv', 'dshv_losses']);
   assert.deepEqual(slotsForModules(['custom']), [], 'власний модуль таблиці не має');
 });
 

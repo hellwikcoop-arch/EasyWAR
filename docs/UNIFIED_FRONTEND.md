@@ -168,6 +168,19 @@ ends, and the launcher stays `inert` until sign-in.
   one disappears from `index.html`, so re-check it after
   `script/import_unified_html.mjs`. The splash tiles (`startup-splash-core.js`)
   follow the same rows: «Командування військ» and «Власний модуль».
+- «Армійська авіація» (`army`): the launcher card `[data-branch="army"]` opens
+  `src/air.html?module=army` in `#frame-army`. The Air Force page sets
+  `html[data-module="army"]` from that query (`easywar-command-mode` script), takes
+  the green accent tokens from `<style id="easywar-army-aviation-css">`, keeps its
+  own storage namespace `easywar.army::` (prefs, theme, IndexedDB cache) and, in
+  `<script id="easywar-army-aviation-mode">`, sets the window title, the brand
+  caption and the emblem (copied at runtime from the launcher card, so it is not
+  embedded twice). Profile slot `army` (`local-profiles-core.js` `PROFILE_BRANCHES`,
+  Rust `Branch::Army`, base table `BaseTable::Army` = the Air Force base workbook),
+  module catalog branch `army` (`branchFromLocation` reads `?module=army` on
+  `air.html` only). `script/build_standalone.mjs` strips the army style, script and
+  probe from the command-mode (ПВК) file, which sits ~70 bytes under its 5 MB test
+  budget: any further growth of `air.html` needs a slimming first.
 - «Власний модуль» (`custom`): a launcher card `[data-branch="custom"]` opens
   `src/custom.html` in `#frame-custom` (`MODULE_SRC`, `BRANCH_TITLE`, Vite input
   `custom`). The page (`custom.css` tokens with a teal accent, `custom-app.js`

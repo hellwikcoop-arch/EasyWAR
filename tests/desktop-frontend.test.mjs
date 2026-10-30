@@ -20,25 +20,32 @@ test('launcher opens both branch modules as same-origin pages', async () => {
   const html = await read('index.html');
   assert.match(html, /<iframe class="module-frame" id="frame-air"/);
   assert.match(html, /<iframe class="module-frame" id="frame-rocket"/);
-  assert.match(html, /const MODULE_SRC = \{air:'\.\/air\.html', rocket:'\.\/rocket\.html', artillery:'\.\/artillery\.html', pvk:'\.\/air\.html\?command=pvk', dshv:'\.\/rocket\.html\?command=dshv', custom:'\.\/custom\.html'\};/);
+  assert.match(html, /const MODULE_SRC = \{air:'\.\/air\.html', rocket:'\.\/rocket\.html', artillery:'\.\/artillery\.html', pvk:'\.\/air\.html\?command=pvk', dshv:'\.\/rocket\.html\?command=dshv', custom:'\.\/custom\.html', army:'\.\/air\.html\?module=army'\};/);
   assert.match(html, /frame\.src = MODULE_SRC\[branch\];/);
   assert.doesNotMatch(html, /application\/x-easywar-module/, 'base64 module payloads must not be shipped');
   assert.doesNotMatch(html, /\.srcdoc\s*=/);
 });
 
-test('army aviation is a dimmed branch block that does not open a module yet', async () => {
+test('army aviation is a live branch card that opens the Air Force page in army mode', async () => {
   const html = await read('index.html');
-  const card = html.match(/<div class="branch-card branch-card-soon"[^>]*>[\s\S]*?<\/h3>\s*<span class="bc-soon">([^<]+)<\/span>/);
+  const card = html.match(/<button class="branch-card branch-card-soon branch-card-live" data-branch="army"[^>]*>[\s\S]*?<\/button>/);
   assert.ok(card, 'army aviation card is on the start screen');
-  assert.match(card[0], /aria-disabled="true"/);
+  assert.doesNotMatch(card[0], /aria-disabled|bc-soon|У розробці/, 'the module opens now');
   assert.match(card[0], /<h3>Армійська Авіація<\/h3>/);
-  assert.equal(card[1], 'У розробці');
-  assert.doesNotMatch(card[0], /data-branch=/, 'no module behind it yet');
+  assert.match(html, /army:'\.\/air\.html\?module=army'/);
+  assert.match(html, /<iframe class="module-frame" id="frame-army"/);
+  assert.match(html, /army:\['Армійська авіація · окрема база','easyWAR — Армійська авіація'\]/);
+  assert.doesNotMatch(html, /data-soon=/, 'no dimmed blocks are left');
   assert.match(html, /querySelectorAll\('\.branch-card\[data-branch\]'\)/, 'only real branches get a click handler');
   assert.match(html, /\.branch-card\.branch-card-soon\{[^}]*opacity:\.42[^}]*pointer-events:none/);
+  const air = await read('air.html');
+  assert.match(air, /get\('module'\) === 'army'\) document\.documentElement\.dataset\.module = 'army'/);
+  assert.match(air, /const NS = ARMY \? 'easywar\.army::' : 'easywar\.air::';/, 'army keeps its own storage namespace');
+  assert.match(air, /html\[data-module="army"\] \{ --accent: #8fcf4a;/, 'army accent colour');
+  assert.match(air, /document\.title = 'easyWAR — Армійська авіація';/);
 });
 
-test('artillery is a live block next to the dimmed army aviation, and the rocket card is just «Ракетні Війська»', async () => {
+test('artillery is a live block next to army aviation, and the rocket card is just «Ракетні Війська»', async () => {
   const html = await read('index.html');
   const card = html.match(/<button class="branch-card branch-card-soon branch-card-live" data-branch="artillery"[^>]*>[\s\S]*?<\/button>/);
   assert.ok(card, 'artillery card is on the start screen');
@@ -47,7 +54,6 @@ test('artillery is a live block next to the dimmed army aviation, and the rocket
   assert.doesNotMatch(card[0], /aria-disabled/, 'the module opens now');
   assert.match(html, /artillery:'\.\/artillery\.html'/);
   assert.match(html, /<iframe class="module-frame" id="frame-artillery"/);
-  assert.match(html, /<div class="branch-card branch-card-soon" data-soon="army-aviation"[^>]*aria-disabled="true"/, 'army aviation is still dimmed');
   assert.match(html, /<h3>Ракетні Війська<\/h3>/);
   assert.doesNotMatch(html, /Війська і Артилерія/);
   assert.match(html, /\.branch-card\.branch-card-soon\{grid-column:auto;/);
@@ -58,7 +64,7 @@ test('artillery is a live block next to the dimmed army aviation, and the rocket
 test('air module keeps desktop integrations and v3.1 isolation', async () => {
   const html = await read('air.html');
   const bridge = html.indexOf('id="easywar-desktop-frame-bridge"');
-  const namespace = html.indexOf("const NS = 'easywar.air::';");
+  const namespace = html.indexOf("const NS = ARMY ? 'easywar.army::' : 'easywar.air::';");
   assert.ok(bridge > 0 && namespace > bridge, 'IPC bridge must run before module code');
   assert.ok(html.indexOf('<meta charset="utf-8">') > namespace);
   for (const script of ['xlsx-inspection', 'sqlite-dashboard-source']) {
