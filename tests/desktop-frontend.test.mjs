@@ -80,6 +80,22 @@ test('rocket module is the v3.1 branch module plus the module editor only', asyn
   assert.match(html, /window\.__EW_EDITOR_HOOKS__/);
 });
 
+test('rocket module has the «База даних» tab: sheet columns as imported, hidden in the DShV command mode', async () => {
+  const html = await read('rocket.html');
+  assert.match(html, /id="tab-base"[^>]*>База даних<\/button>/);
+  assert.match(html, /<main id="view-base" class="dash basev"/);
+  assert.match(html, /const VORDER = \['dash', 'base', 'entry', 'ref'\];/);
+  assert.match(html, /if \(v === 'base'\) renderBase\(\);/);
+  assert.match(html, /onclick: \(\) => showView\('base'\) \}, icon\('db'\), h\('span', \{ text: 'База даних' \}\)/);
+  assert.match(html, /class: 'snav-b snav-entry2', onclick: \(\) => showView\('entry'\)/);
+  // Table = FIELD_ORDER columns that exist in the file, headers from FIELD_HEADERS, raw record values.
+  assert.match(html, /const fields = window\.AVCORE\.FIELD_ORDER\.filter\(f => wb\.colByField\[f\]\)/);
+  assert.match(html, /\[fields\.map\(f => window\.AVCORE\.FIELD_HEADERS\[f\]\)\]/);
+  assert.match(html, /html\[data-command="dshv"\] #tab-base, html\[data-command="dshv"\] \.snav-entry2/);
+  // «Мій дашборд» is still inserted before the first separator entry (now «База даних»).
+  assert.match(await read('dashboard-module-catalog.js'), /nav\.querySelector\(':scope > \.snav-entry'\)/);
+});
+
 test('desktop bridge reuses the parent Tauri IPC inside the iframe', async () => {
   const html = await read('air.html');
   const start = html.indexOf('<script id="easywar-desktop-frame-bridge">');
