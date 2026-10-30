@@ -2230,16 +2230,23 @@ mod tests {
             let table = owner_table(&store, &collective).await;
             let intent = prepare(&store, &collective, &table.fingerprint).await;
             let store = std::sync::Arc::new(store);
-            let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(CALLERS));
+            // Кожен виклик — на власному потоці ОС: усі 16 блокуються на бар'єрі одночасно, тож
+            // потоки неминуче різні, і замок наміру береться з різних потоків.
+            let barrier = std::sync::Arc::new(std::sync::Barrier::new(CALLERS));
+            let runtime = tokio::runtime::Handle::current();
             let mut handles = Vec::new();
             for _ in 0..CALLERS {
-                let (store, barrier, intent) = (store.clone(), barrier.clone(), intent.clone());
-                handles.push(tokio::spawn(async move {
-                    barrier.wait().await;
+                let (store, barrier, intent, runtime) = (
+                    store.clone(),
+                    barrier.clone(),
+                    intent.clone(),
+                    runtime.clone(),
+                );
+                handles.push(tokio::task::spawn_blocking(move || {
+                    barrier.wait();
                     let thread = std::thread::current().id();
-                    let outcome = store
-                        .report_confirm(OWNER, password(), &intent, UNIX + 1)
-                        .await
+                    let outcome = runtime
+                        .block_on(store.report_confirm(OWNER, password(), &intent, UNIX + 1))
                         .unwrap();
                     (outcome.code, thread)
                 }));
@@ -2256,7 +2263,7 @@ mod tests {
                 }
             }
             assert_eq!(queued, 1, "раунд {round}");
-            assert!(threads.len() > 1, "виклики справді йшли з різних потоків");
+            assert_eq!(threads.len(), CALLERS, "кожен виклик — з власного потоку");
             assert_eq!(
                 store.detail(OWNER, &collective, UNIX).await.unwrap().outbox,
                 1,
