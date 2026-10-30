@@ -1293,14 +1293,14 @@ mod tests {
                 .unwrap();
         assert_eq!(leftovers, 0);
 
-        // Наявний профіль отримує модуль army (custom лишається з 0021); army приймається всюди.
+        // Наявний профіль модуля army сам не отримує (лише вибрані модулі; custom лишається з 0021); army приймається всюди.
         let modules: Vec<String> = sqlx::query_scalar(
             "SELECT module FROM local_profile_modules WHERE profile_id = 'profile-c0c0c0c0c0c0c0c0c0c0c0c0' ORDER BY module",
         )
         .fetch_all(&pool)
         .await
         .unwrap();
-        assert_eq!(modules, vec!["army".to_owned(), "custom".to_owned()]);
+        assert_eq!(modules, vec!["custom".to_owned()]);
         sqlx::query("INSERT INTO local_profile_tables (profile_id, branch, path, updated_at) VALUES ('profile-c0c0c0c0c0c0c0c0c0c0c0c0', 'army', '/synthetic/army.xlsx', '2026-01-01T00:00:00Z')")
             .execute(&pool)
             .await

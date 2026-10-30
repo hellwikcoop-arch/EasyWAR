@@ -35,10 +35,8 @@ SELECT profile_id, module FROM local_profile_modules;
 DROP TABLE local_profile_modules;
 ALTER TABLE local_profile_modules_new RENAME TO local_profile_modules;
 
--- Профілі, створені до цієї версії, одразу бачать картку «Армійська авіація»; вимкнути її можна
--- у «Профілях», як і будь-який інший модуль.
-INSERT INTO local_profile_modules (profile_id, module)
-SELECT id, 'army' FROM local_profiles;
+-- Модуль `army` наявним профілям не додається: стартовий екран показує лише вибрані модулі,
+-- а «Армійську авіацію» вмикають у «Профілях», як і будь-який інший модуль.
 
 -- 3. Модулі дашборда (0010, стовпець `style` з 0012, перебудова 0021) і їхні дочірні таблиці. Зовнішні ключі
 -- увімкнено, а DROP TABLE батьківської таблиці виконує неявний DELETE з каскадом, тому спершу

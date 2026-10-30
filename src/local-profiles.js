@@ -336,13 +336,32 @@ function initializeLocalProfiles() {
       for (const [card, tile, id] of selectors) {
         const visible = !signedIn || moduleVisible(id, profile);
         for (const selector of [card, tile]) {
-          if (selector) document.querySelector(selector)?.classList.toggle('ew-module-off', !visible);
+          const node = selector ? document.querySelector(selector) : null;
+          node?.classList.toggle('ew-module-off', !visible);
+          // Слот командування ховається разом зі своєю карткою, інакше лишається порожня клітинка сітки.
+          node?.closest('.cmd-slot')?.classList.toggle('ew-module-off', !visible);
         }
       }
     }
-    // Коли частини карток немає, решта стає по центру, а не липне до лівого краю.
-    const trimmed = Boolean(document.querySelector('.branch-cards .ew-module-off'));
-    document.querySelector('.branch-cards')?.classList.toggle('ew-modules-trimmed', trimmed);
+    layoutStartCards();
+  }
+
+  // Стартовий екран показує лише модулі профілю: порожні розділи («Командування», «Роди військ»)
+  // ховаються, а решта карток розтягується на всю ширину сітки.
+  function layoutStartCards() {
+    const grid = document.querySelector('.branch-cards');
+    if (!grid) return;
+    const shown = node => !node.classList.contains('ew-module-off');
+    const slots = [...grid.querySelectorAll('.cmd-slot')].filter(shown).length;
+    const cards = [...grid.querySelectorAll('.branch-card:not(.cmd-card)')].filter(shown).length;
+    const trimmed = Boolean(grid.querySelector('.ew-module-off'));
+    grid.classList.toggle('ew-modules-trimmed', trimmed);
+    grid.classList.toggle('ew-no-command', trimmed && slots === 0);
+    grid.classList.toggle('ew-no-branches', trimmed && cards === 0);
+    // Кожна картка роду займає дві колонки, слот командування — половину або всю ширину.
+    const columns = Math.max(1, cards) * 2;
+    grid.style.setProperty('--ew-cols', String(columns));
+    grid.style.setProperty('--ew-cmd-span', String(slots > 1 ? columns / 2 : columns));
   }
 
   function render() {

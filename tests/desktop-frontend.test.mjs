@@ -45,6 +45,19 @@ test('army aviation is a live branch card that opens the Air Force page in army 
   assert.match(air, /document\.title = 'easyWAR — Армійська авіація';/);
 });
 
+test('army aviation replaces Air Force art and labels only in army mode', async () => {
+  const air = await read('air.html');
+  const art = air.match(/<script id="easywar-army-aviation-mode">[\s\S]*?<\/script>/);
+  assert.ok(art, 'army block is present');
+  assert.match(art[0], /get\('module'\) === 'army'\) window\.__EW_ARMY_ART = \{\n  heli: 'data:image\/webp;base64,/, 'helicopter art only for ?module=army');
+  assert.match(art[0], /poster: 'data:image\/jpeg;base64,/, 'Army Aviation poster instead of Air Force');
+  assert.match(air, /const AF_LOGO = \(window\.__EW_ARMY_ART && window\.__EW_ARMY_ART\.poster\) \|\| 'data:image\/jpeg;base64,/);
+  for (const cls of ['kh-jet', 'dh-jet', 'kc-photo']) assert.match(air, new RegExp(`class: '${cls}', src: \\(window\\.__EW_ARMY_ART && window\\.__EW_ARMY_ART\\.heli\\) \\|\\|`), cls);
+  assert.match(air, /const NAV = \[\['p-kpis', \(window\.__EASYWAR_MODULE__ === 'army' \? 'Дашборд АА' : 'Дашборд ПС'\)/);
+  assert.match(air, /const CC = \{ blue: window\.__EASYWAR_MODULE__ === 'army' \? '#8fcf4a' : '#4aa8ff'/);
+  assert.match(air, /html\[data-module="army"\]:not\(\[data-theme="light"\]\) \{ --nav-hi: #b4ec7a !important;/, 'green side-menu capsule');
+});
+
 test('artillery is a live block next to army aviation, and the rocket card is just «Ракетні Війська»', async () => {
   const html = await read('index.html');
   const card = html.match(/<button class="branch-card branch-card-soon branch-card-live" data-branch="artillery"[^>]*>[\s\S]*?<\/button>/);
@@ -239,4 +252,15 @@ test('ПС і РВ: сторінка «Перевірка даних» — за�
     const html = await read(page);
     assert.match(html, /\.dmain-in\[data-view="quality"\] #p-quality \{ flex-direction: column; \}/, page);
   }
+});
+
+test('start screen keeps only the profile modules: empty sections hide and cards stretch', async () => {
+  const js = await read('local-profiles.js');
+  assert.match(js, /node\?\.closest\('\.cmd-slot'\)\?\.classList\.toggle\('ew-module-off', !visible\)/, 'command slot hides with its card');
+  assert.match(js, /grid\.classList\.toggle\('ew-no-command', trimmed && slots === 0\)/);
+  assert.match(js, /grid\.classList\.toggle\('ew-no-branches', trimmed && cards === 0\)/);
+  assert.match(js, /grid\.style\.setProperty\('--ew-cols', String\(columns\)\)/);
+  const css = await read('profile-gate.css');
+  assert.match(css, /\.branch-cards\.ew-modules-trimmed \{\n  grid-template-columns: repeat\(var\(--ew-cols, 2\), minmax\(0, 1fr\)\) !important;/, 'remaining cards fill the width');
+  assert.match(css, /\.branch-cards\.ew-no-command::before,\n#view-start \.branch-cards\.ew-no-branches::after \{ display: none !important; \}/, 'empty section headers hide');
 });

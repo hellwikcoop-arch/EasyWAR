@@ -123,7 +123,7 @@ the `custom` module row, as `0009` once gave them all modules. Migration
 own mode, `air.html?module=army`, with its own profile table) to the `CHECK`s of
 `local_profile_tables`, `local_profile_modules` and `dashboard_modules`, rebuilding
 the three tables the same way as `0007`/`0008` and `0021` (dashboard children copied
-first, ids and indexes kept); existing profiles get the `army` module row. Migrations
+first, ids and indexes kept); existing profiles do not get the `army` module row (it is switched on in «Профілі»). Migrations
 contain no operational fixtures and create no external integration.
 
 ## Provenance layers

@@ -176,8 +176,8 @@ its own profile table of the same structure as the Air Force one) to
 and to `dashboard_modules` (modules created on that page). The three tables are
 rebuilt because SQLite cannot change a `CHECK` in place; the dashboard children are
 copied first for the same foreign-key reason as in 0021; rows, ids and indexes are
-kept. Profiles that exist before this migration get the `army` row so the new card
-is visible; it can be switched off in «Профілі».
+kept. Existing profiles do NOT get the `army` row: the start screen shows only the
+modules a profile chose, and «Армійська авіація» is switched on in «Профілі».
 
 The `dashboard_data_<id>` tables of user-created dashboard modules are not
 migration objects: Rust creates them at runtime from a validated catalog

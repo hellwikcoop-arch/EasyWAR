@@ -179,8 +179,12 @@ ends, and the launcher stays `inert` until sign-in.
   Rust `Branch::Army`, base table `BaseTable::Army` = the Air Force base workbook),
   module catalog branch `army` (`branchFromLocation` reads `?module=army` on
   `air.html` only). `script/build_standalone.mjs` strips the army style, script and
-  probe from the command-mode (ПВК) file, which sits ~70 bytes under its 5 MB test
-  budget: any further growth of `air.html` needs a slimming first.
+  probe from the command-mode (ПВК) file. In army mode that head script also defines
+  `window.__EW_ARMY_ART` (helicopter banner rendered from `src/models/mi-8tv.glb` without
+  livery, and the «Army Aviation» poster); the page uses it instead of the jet photos
+  (`kh-jet`, `dh-jet`, `kc-photo`, `a2-hc`) and `AF_LOGO`, and switches «Дашборд ПС»,
+  the blue KPI tone (`CC.blue`, `KCOL`) and the side-menu capsule to green. The test budget of that file was raised
+  from 5 MB to 10 MB on the owner's decision (2026-10-30); it is ≈5 MB now.
 - «Власний модуль» (`custom`): a launcher card `[data-branch="custom"]` opens
   `src/custom.html` in `#frame-custom` (`MODULE_SRC`, `BRANCH_TITLE`, Vite input
   `custom`). The page (`custom.css` tokens with a teal accent, `custom-app.js`
