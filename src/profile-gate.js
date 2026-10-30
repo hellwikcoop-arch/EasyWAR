@@ -15,6 +15,7 @@ import {
 } from './local-profiles-core.js';
 import {
   GATE_MODULES,
+  SOON_MODULES,
   NAME_MAX,
   PASSWORD_MAX,
   PASSWORD_MIN,
@@ -410,6 +411,12 @@ export function createProfileGate({ el, avatar, readAvatar }) {
           el('div', { class: 'ew-gate-modules' },
             GATE_MODULES.map((module, index) => el('label', { class: 'ew-gate-module' },
               boxes[index],
+              el('span', {},
+                el('strong', { text: module.title }),
+                el('small', { text: module.hint })))),
+            // Модулі в розробці видно в переліку, але обрати їх ще не можна.
+            SOON_MODULES.map(module => el('label', { class: 'ew-gate-module is-soon' },
+              el('input', { type: 'checkbox', disabled: true, 'aria-label': `${module.title}: у розробці` }),
               el('span', {},
                 el('strong', { text: module.title }),
                 el('small', { text: module.hint }))))),

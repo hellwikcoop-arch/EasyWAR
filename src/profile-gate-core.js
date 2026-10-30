@@ -72,6 +72,20 @@ export const GATE_MODULES = Object.freeze([
 /** Ключі модулів профілю так, як їх зберігає ядро (`MODULES` у local_profiles.rs), у порядку показу. */
 export const MODULE_IDS = Object.freeze(GATE_MODULES.flatMap(row => row.modules));
 
+/**
+ * Модулі в розробці. У переліку реєстрації вони показані як «У розробці» без прапорця: обрати їх
+ * не можна, у профілі вони не зберігаються, а їхня картка на стартовому екрані профілю, що увійшов,
+ * схована (там лише обрані модулі).
+ */
+export const SOON_MODULES = Object.freeze([
+  Object.freeze({
+    id: 'sso',
+    title: 'Сили спеціальних операцій',
+    hint: 'У розробці',
+    cards: Object.freeze(['.branch-card[data-branch="sso"]']),
+  }),
+]);
+
 const codePoints = value => [...String(value ?? '')].length;
 const squash = value => String(value ?? '').split(/\s+/).filter(Boolean).join(' ');
 

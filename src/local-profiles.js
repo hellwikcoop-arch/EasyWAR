@@ -36,7 +36,7 @@ import {
 } from './local-profiles-core.js';
 import { createProfileGate } from './profile-gate.js';
 import { requestSplashSkip } from './startup-splash-core.js';
-import { GATE_MODULES, modulesError, modulesForRows, moduleVisible } from './profile-gate-core.js';
+import { GATE_MODULES, SOON_MODULES, modulesError, modulesForRows, moduleVisible } from './profile-gate-core.js';
 import { createAssistantUI } from './assistant/assistant-ui.js';
 import { getDatabaseStatus } from './backup-core.js';
 import { appUpdateState } from './app-update-state-core.js';
@@ -344,6 +344,14 @@ function initializeLocalProfiles() {
         }
       }
     }
+    // Модулі в розробці не обираються: профіль, що увійшов, їхніх карток не бачить.
+    for (const row of SOON_MODULES) {
+      for (const selector of row.cards) {
+        const node = document.querySelector(selector);
+        node?.classList.toggle('ew-module-off', signedIn);
+        node?.classList.toggle('ew-soon-off', signedIn);
+      }
+    }
     layoutStartCards();
   }
 
@@ -355,7 +363,8 @@ function initializeLocalProfiles() {
     const shown = node => !node.classList.contains('ew-module-off');
     const slots = [...grid.querySelectorAll('.cmd-slot')].filter(shown).length;
     const cards = [...grid.querySelectorAll('.branch-card:not(.cmd-card)')].filter(shown).length;
-    const trimmed = Boolean(grid.querySelector('.ew-module-off'));
+    // Схована картка модуля в розробці не робить екран «урізаним»: без неї сітка лишається звичайною.
+    const trimmed = Boolean(grid.querySelector('.ew-module-off:not(.ew-soon-off)'));
     grid.classList.toggle('ew-modules-trimmed', trimmed);
     grid.classList.toggle('ew-no-command', trimmed && slots === 0);
     grid.classList.toggle('ew-no-branches', trimmed && cards === 0);
@@ -481,7 +490,8 @@ function initializeLocalProfiles() {
     return el('div', { class: 'ew-profile-modules' },
       el('span', { class: 'ew-profile-field-caption', text: 'Модулі на стартовому екрані' }),
       el('div', { class: 'ew-profile-module-list' },
-        GATE_MODULES.map((module, index) => el('label', { class: 'ew-profile-module' }, boxes[index], el('span', { text: module.title })))),
+        [...GATE_MODULES.map((module, index) => el('label', { class: 'ew-profile-module' }, boxes[index], el('span', { text: module.title }))),
+          ...SOON_MODULES.map(module => el('label', { class: 'ew-profile-module is-soon' }, el('input', { type: 'checkbox', disabled: true, 'aria-label': `${module.title}: у розробці` }), el('span', { text: `${module.title} (у розробці)` })))]),
       el('button', {
         type: 'button',
         class: 'btn',

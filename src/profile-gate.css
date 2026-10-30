@@ -133,6 +133,8 @@ html.ew-locked, html.ew-locked body { overflow: hidden; }
 .ew-gate-module input { margin-top: 3px; accent-color: var(--gate-accent); }
 .ew-gate-module span { display: grid; gap: 2px; }
 .ew-gate-module small { color: var(--gate-muted); font-size: 12px; }
+/* Модуль у розробці: видно, але не обирається. */
+.ew-gate-module.is-soon { cursor: not-allowed; opacity: .55; border-style: dashed; }
 
 /* Таблиці */
 .ew-gate-slots { display: grid; gap: 8px; }
