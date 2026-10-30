@@ -20,7 +20,7 @@ test('launcher opens both branch modules as same-origin pages', async () => {
   const html = await read('index.html');
   assert.match(html, /<iframe class="module-frame" id="frame-air"/);
   assert.match(html, /<iframe class="module-frame" id="frame-rocket"/);
-  assert.match(html, /const MODULE_SRC = \{air:'\.\/air\.html', rocket:'\.\/rocket\.html', artillery:'\.\/artillery\.html', pvk:'\.\/air\.html\?command=pvk', dshv:'\.\/rocket\.html\?command=dshv'\};/);
+  assert.match(html, /const MODULE_SRC = \{air:'\.\/air\.html', rocket:'\.\/rocket\.html', artillery:'\.\/artillery\.html', pvk:'\.\/air\.html\?command=pvk', dshv:'\.\/rocket\.html\?command=dshv', custom:'\.\/custom\.html'\};/);
   assert.match(html, /frame\.src = MODULE_SRC\[branch\];/);
   assert.doesNotMatch(html, /application\/x-easywar-module/, 'base64 module payloads must not be shipped');
   assert.doesNotMatch(html, /\.srcdoc\s*=/);

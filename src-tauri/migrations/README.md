@@ -155,6 +155,20 @@ input of the Rust send gate; unconfirmed or planned means class D) and
 `(profile_id, collective_id)` and cascade with the collective. Number 0020 was the
 next free one on main.
 
+`0021_custom_module.sql` adds the profile module `custom` («Власний модуль»: a
+module without a service branch and without a profile XLSX table; its page
+`custom.html` hosts the module catalog and «Мій дашборд») to
+`local_profile_modules`, and the dashboard branch `custom` to `dashboard_modules`.
+Both tables are rebuilt because SQLite cannot change a `CHECK` in place. Foreign
+keys are on while migrations run and `DROP TABLE` of a parent cascades into its
+children, so the migration first creates `dashboard_module_fields_new` and
+`dashboard_module_corrections_new` referencing `dashboard_modules_new`, copies all
+rows (corrections with their ids), drops the old tables children first, renames
+the new ones (which rewrites the references) and recreates the two indexes;
+`dashboard_data_<id>` tables are not touched. Profiles that exist before this
+migration get the `custom` row so the new card is visible; it can be switched off
+in «Профілі». Number 0021 was the next free one on main (0020 is E8 sync).
+
 The `dashboard_data_<id>` tables of user-created dashboard modules are not
 migration objects: Rust creates them at runtime from a validated catalog
 template and adds columns that later appear in a template with `ALTER TABLE`,

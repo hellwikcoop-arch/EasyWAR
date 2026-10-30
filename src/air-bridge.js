@@ -5,9 +5,9 @@
 // Forces Command) run in their own frames too: the same pages in command mode,
 // each with its own bound table.
 
-export const BRANCHES = ['air', 'rocket', 'pvk', 'dshv'];
+export const BRANCHES = ['air', 'rocket', 'pvk', 'dshv', 'custom'];
 
-const FRAME_IDS = { air: 'frame-air', rocket: 'frame-rocket', pvk: 'frame-pvk', dshv: 'frame-dshv' };
+const FRAME_IDS = { air: 'frame-air', rocket: 'frame-rocket', pvk: 'frame-pvk', dshv: 'frame-dshv', custom: 'frame-custom' };
 
 /** The window hosting a branch module (the launcher's iframe), or null. */
 export function moduleWindow(branch) {

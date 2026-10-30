@@ -109,6 +109,7 @@ test('branch follows command dashboards and module pages', () => {
   assert.equal(branchFromLocation('/air.html', '?command=pvk'), 'pvk');
   assert.equal(branchFromLocation('/rocket.html', ''), 'rocket');
   assert.equal(branchFromLocation('/rocket.html', '?command=dshv'), 'dshv');
+  assert.equal(branchFromLocation('/custom.html', ''), 'custom');
 });
 
 test('catalog normalization preserves the exact flight-hours schema', () => {
@@ -160,7 +161,7 @@ test('module style survives normalization and unknown styles fall back to standa
 test('module styles are the three names Rust and the migration accept, with a label for every branch', async () => {
   assert.deepEqual(MODULE_STYLES.map(item => item.id), ['standard', 'branch', 'heightwell']);
   for (const item of MODULE_STYLES) assert.ok(item.label && item.hint, item.id);
-  assert.deepEqual(Object.keys(BRANCH_LABELS).sort(), ['air', 'dshv', 'pvk', 'rocket']);
+  assert.deepEqual(Object.keys(BRANCH_LABELS).sort(), ['air', 'custom', 'dshv', 'pvk', 'rocket']);
   const migration = await readFile(new URL('../src-tauri/migrations/0012_dashboard_module_style.sql', import.meta.url), 'utf8');
   assert.match(migration, /CHECK \(style IN \('standard', 'branch', 'heightwell'\)\)/);
   const rust = await readFile(new URL('../src-tauri/src/dashboard_modules.rs', import.meta.url), 'utf8');

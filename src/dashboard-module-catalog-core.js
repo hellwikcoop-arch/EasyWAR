@@ -1,4 +1,5 @@
-const BRANCHES = new Set(['air', 'rocket', 'pvk', 'dshv']);
+// «custom» — «Власний модуль» (custom.html): модулі без роду військ, той самий каталог і «Мій дашборд».
+const BRANCHES = new Set(['air', 'rocket', 'pvk', 'dshv', 'custom']);
 const VISUAL_KINDS = new Set([
   'kpi', 'line', 'area', 'columns', 'horizontal-bar', 'grouped-columns', 'donut',
   'radial-progress', 'multi-ring', 'radar', 'gauge', 'progress-bars', 'calendar',
@@ -15,6 +16,7 @@ const finite = value => typeof value === 'number' && Number.isFinite(value);
 export function branchFromLocation(pathname = '', search = '') {
   const command = new URLSearchParams(search).get('command');
   if (command === 'pvk' || command === 'dshv') return command;
+  if (/custom\.html$/i.test(pathname)) return 'custom';
   return /rocket\.html$/i.test(pathname) ? 'rocket' : 'air';
 }
 
@@ -83,7 +85,7 @@ export const MODULE_STYLES = Object.freeze([
   Object.freeze({ id: 'heightwell', label: 'Пункт керування', hint: 'Нічна картка: темне полотно, світло роду військ, шрифти Space Grotesk та IBM Plex Mono.' }),
 ]);
 const STYLE_IDS = new Set(MODULE_STYLES.map(item => item.id));
-export const BRANCH_LABELS = Object.freeze({ air: 'ПС', rocket: 'РВ', pvk: 'ПВК', dshv: 'УДШВ' });
+export const BRANCH_LABELS = Object.freeze({ air: 'ПС', rocket: 'РВ', pvk: 'ПВК', dshv: 'УДШВ', custom: 'Власний' });
 
 /** Невідомий або відсутній стиль (старий модуль, стара відповідь Rust) показується як звичайний. */
 export function normalizeStyle(value) {
