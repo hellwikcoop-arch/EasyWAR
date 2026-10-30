@@ -583,3 +583,22 @@ test('a real series named «Інші» stays apart from the folded series', () =
   assert.equal(sum, rows.reduce((acc, row) => acc + row.value, 0), 'every source value is counted exactly once');
   assert.equal(model.series.find(series => series.name === OTHER_LABEL).values[0], 100);
 });
+
+test('плавна лінія не вигадує горбів: між точками крива не виходить за їхні значення', async () => {
+  const { monotonePath } = await import('../src/dashboard-module-charts.js');
+  assert.equal(monotonePath([]), '');
+  assert.equal(monotonePath([{ x: 0, y: 5 }]), 'M0 5');
+  const points = [{ x: 0, y: 50 }, { x: 10, y: 10 }, { x: 20, y: 10 }, { x: 30, y: 40 }];
+  const d = monotonePath(points);
+  assert.match(d, /^M0 50 C/u);
+  // Кожна контрольна точка лежить між значеннями сусідніх точок (монотонність, без викидів за межі даних).
+  const segments = d.split(' C').slice(1).map(part => part.split(' ').map(Number));
+  segments.forEach(([, c1y, , c2y, , y], index) => {
+    const lo = Math.min(points[index].y, y);
+    const hi = Math.max(points[index].y, y);
+    assert.ok(c1y >= lo - 1e-9 && c1y <= hi + 1e-9, `сегмент ${index}: перша контрольна точка в межах`);
+    assert.ok(c2y >= lo - 1e-9 && c2y <= hi + 1e-9, `сегмент ${index}: друга контрольна точка в межах`);
+  });
+  // Пласка ділянка лишається пласкою.
+  assert.deepEqual(segments[1].filter((_, i) => i % 2 === 1), [10, 10, 10]);
+});

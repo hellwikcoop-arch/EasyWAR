@@ -6,7 +6,10 @@ import { listDefinitions } from '../src/module-definition-core.js';
 import { confirmBinding, emptySchema } from '../src/profile-schema-core.js';
 import { moduleSourceId, syncModuleSources } from '../src/profile-schema-modules-core.js';
 import { RV_KPI_DEFINITIONS, agg, resKind } from '../src/module-adapters/rv-kpi-core.js';
-import { blockCardModel, hasBlockCard, rvRow } from '../src/module-block-card-core.js';
+import { CARD_PALETTES, blockCardModel, chartViews, hasBlockCard, placeBlockCard, rvRow } from '../src/module-block-card-core.js';
+import { deltaTone } from '../src/module-block-card-view.js';
+import { addInstance, emptyLayout, orderedIds } from '../src/module-instance-core.js';
+import { ensureModuleInstances } from '../src/module-instance-modules-core.js';
 
 // Лише синтетичні дані: вигадані записи, жодних реальних таблиць.
 
@@ -57,6 +60,27 @@ test('числа карток збігаються з ядром РВ на ти�
   assert.deepEqual(munitions.history, [3, 7, 1], 'міні-графік — за днями');
 });
 
+test('картка показника має тон, кільце частки й плитки, як на вкладці РВ', () => {
+  const schema = boundSchema();
+  const card = id => blockCardModel({ definition: byId(id), schema, sourceId: SOURCE, rows }).model;
+  const destroyed = card('legacy:rv-kpi-destroyed');
+  assert.equal(destroyed.tone, 'green');
+  assert.equal(destroyed.share, 33);
+  assert.deepEqual(destroyed.tiles, [['Від пусків', '33%'], ['Макс. за добу', '1']]);
+  const launches = card('legacy:rv-kpi-launches');
+  assert.equal(launches.tone, 'blue');
+  assert.equal(launches.share, null, 'у пусків немає кільця частки');
+  assert.deepEqual(launches.tiles, [['Сер. за добу', '2,0'], ['Макс. за добу', '2']]);
+  assert.equal(card('legacy:rv-kpi-miss').tone, 'red');
+  assert.equal(card('legacy:rv-kpi-unknown').tone, 'grey');
+  // Зміна «на краще»: для «Не уражено» краще, коли менше; «Не відомо» — нейтрально.
+  assert.equal(deltaTone({ tone: 'green', delta: 20 }), 'good');
+  assert.equal(deltaTone({ tone: 'red', delta: 20 }), 'bad');
+  assert.equal(deltaTone({ tone: 'red', delta: -20 }), 'good');
+  assert.equal(deltaTone({ tone: 'grey', delta: 20 }), 'neutral');
+  assert.equal(deltaTone({ tone: 'blue', delta: null }), 'neutral');
+});
+
 test('без зіставлених ролей картка пояснює, чого бракує, і нічого не вигадує', () => {
   const schema = boundSchema({ c1: 'event-date' });
   const result = blockCardModel({ definition: byId('legacy:rv-kpi-destroyed'), schema, sourceId: SOURCE, rows });
@@ -96,9 +120,40 @@ test('resKind ядра — дослівно та сама функція, що �
 
 test('каталог малює картку блока з основної таблиці й ставить її після додавання', async () => {
   const catalog = await readFile(new URL('../src/dashboard-module-catalog.js', import.meta.url), 'utf8');
-  assert.match(catalog, /block \? blockVisual\(block\) : visual\(module, rows\)/);
-  assert.match(catalog, /addInstance\(layout, \{ definitionId: definition\.definitionId, sourceId/);
+  assert.match(catalog, /return dropTarget\(blockCardView\(\{/);
+  assert.match(catalog, /placeBlockCard\(layout, \{ definition, sourceId, freshTable: !module \}\)/);
+  // Налаштування звичайної картки на «Моєму дашборді» — за «⋯» разом із видаленням і структурою таблиці.
+  assert.match(catalog, /el\('div', \{ class: 'ewmc-card-menu' \}, cardTools\(module, placed\), removeButton, confirmBox, schemaBox\)/);
+  assert.match(catalog, /tools \? null : removeButton/);
+  // Мала картка показника («Мала», 2 колонки з 12): лише підпис і число.
+  const view = await readFile(new URL('../src/module-block-card-view.js', import.meta.url), 'utf8');
+  assert.match(view, /const compact = kpi && placed\.width <= 3;/);
+  assert.match(view, /kpiNode\(el, block\.model, palette, \{ compact, tools: toolsMenu\(el, tools\), period \}\)/);
   assert.match(catalog, /placeable: hasBlockCard\(definition\.definitionId\)/);
+});
+
+test('картка блока стає перед своєю основною таблицею; нова таблиця — на всю ширину', () => {
+  const table = { id: 'main', templateId: 'user-table', title: 'Основна таблиця', defaultSpan: 1 };
+  const other = { id: 'plan', templateId: 'custom', title: 'План', defaultSpan: 1 };
+  const sourceId = moduleSourceId('main');
+  let layout = ensureModuleInstances(emptyLayout('p1'), [other, table]).layout;
+  const kpi = { definitionId: 'legacy:rv-kpi-launches', title: 'Пуски', visual: 'kpi' };
+  const chart = { definitionId: 'legacy:result-distribution', title: 'Розподіл результатів', visual: 'donut' };
+  let step = placeBlockCard(layout, { definition: kpi, sourceId, freshTable: true });
+  assert.equal(step.ok, true);
+  layout = step.layout;
+  const tableId = layout.instances.find(item => item.sourceId === sourceId && item.definitionId !== kpi.definitionId).id;
+  const width = id => layout.placements.find(item => item.instanceId === id).w;
+  assert.deepEqual(orderedIds(layout).slice(-2), ['legacy:rv-kpi-launches#1', tableId]);
+  assert.equal(width(tableId), 12);
+  assert.equal(width('legacy:rv-kpi-launches#1'), 4);
+  step = placeBlockCard(layout, { definition: chart, sourceId });
+  layout = step.layout;
+  assert.deepEqual(orderedIds(layout).slice(-3), ['legacy:rv-kpi-launches#1', 'legacy:result-distribution#1', tableId]);
+  assert.equal(width('legacy:result-distribution#1'), 6);
+  // Без картки таблиці в розкладці блок просто додається в кінець.
+  const bare = placeBlockCard(emptyLayout('p1'), { definition: kpi, sourceId });
+  assert.deepEqual(orderedIds(bare.layout), orderedIds(addInstance(emptyLayout('p1'), { definitionId: kpi.definitionId, sourceId, title: kpi.title }).layout));
 });
 
 // ---- блоки-діаграми спільних вкладок ПС і РВ ----
@@ -141,6 +196,24 @@ test('спільні блоки ПС і РВ малюються тими сам�
   const repeat = chart('legacy:repeat-targets').model;
   assert.equal(repeat.categories.length, 4);
   assert.equal(chart('legacy:activity-by-day').model.kind, 'combo');
+});
+
+test('вид діаграми й колір картки вибираються; результати мають свої кольори', () => {
+  assert.deepEqual(chartViews('legacy:result-distribution').map(item => item.id), ['donut', 'horizontal-bar', 'columns']);
+  assert.deepEqual(chartViews('legacy:munition-use').map(item => item.id), ['horizontal-bar', 'donut', 'columns']);
+  assert.deepEqual(chartViews('legacy:result-dynamics').map(item => item.label), ['Стовпчики', 'Лінії', 'Області']);
+  assert.deepEqual(chartViews('legacy:activity-by-day').map(item => item.id), ['combo', 'columns', 'line']);
+  assert.deepEqual(chartViews('legacy:rv-kpi-destroyed'), [], 'у показника вибору виду немає');
+  assert.deepEqual(CARD_PALETTES.map(item => item.id), ['', 'branch', 'blue', 'green', 'amber', 'red']);
+  const schema = boundSchema();
+  const build = view => blockCardModel({ definition: byId('legacy:result-distribution'), schema, sourceId: SOURCE, rows, view });
+  assert.equal(build('').kind, 'donut');
+  assert.equal(build('columns').kind, 'columns');
+  assert.equal(build('columns').model.kind, 'columns');
+  assert.equal(build('radar').kind, 'donut', 'невідомий вид — типовий');
+  // Знищено — зелений (3), не уражено — червоний (8), пошкоджено — бурштиновий (2), подавлено — жовтий (5).
+  const slots = Object.fromEntries(build('').model.slices.map(slice => [slice.label, slice.slot]));
+  assert.deepEqual(slots, { Знищено: 3, Пошкоджено: 2, 'Не уражено': 8, Подавлено: 5, 'Не відомо': 4 });
 });
 
 test('топ підрозділів: ефективність як на вкладках, лише підрозділи з 5+ записами', () => {
