@@ -97,6 +97,21 @@ confirmed by the table owner, or planned, is class D) and `collective_invitation
 (nonces of invitations that already admitted a member; each admits exactly one). Epoch keys
 live in the secret store file, the local send queue in `collective-outbox/*.queue`; neither
 is in the database.
+Migration `0023_collective_table_data.sql` (owner decision 2026-10-30, «Змінити дані» /
+«Оновити таблицю» without network) adds `collective_tables.columns` (a JSON array of column
+names set by the table owner, `[]` by default, at most 32 names of 1–40 characters checked in
+Rust) and `collective_table_ops`: one row per «Доповісти», keyed by
+`(profile_id, collective_id, envelope_id)` with the table id, the **sealed envelope** (signed
+by the device, encrypted with the epoch key; up to 1 MiB) and `recorded_at`; it cascades with
+the table. No plaintext row values are stored: «Оновити таблицю» opens the envelopes with the
+profile password and re-checks each one with `collective::replay::receive` (signature, device
+and write right at `membership_seq`, epoch, revocation, replays). The change format inside an
+envelope is `{"v":1,"rows":[{"key","kind":"upsert"|"delete","values"}]}`. The same migration adds `collective_tables.record`: the table record
+signed by the owner (`collective::table_record`: title, columns, class, purpose, writers —
+empty means every member, owner decision 2026-10-30). The owner's node signs it at «Пакет
+оновлення»; received tables keep the owner's bytes so any member can relay them. The
+`EWSYNC1.` update package (journal, table records, envelopes, encrypted with the epoch key)
+is never stored; only what passes verification on import is written.
 Migration
 `0012_dashboard_module_style.sql` adds `dashboard_modules.style` — the look chosen
 when the module was created: `standard` (default for existing modules), `branch`

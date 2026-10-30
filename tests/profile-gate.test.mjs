@@ -85,6 +85,7 @@ test('«Сили спеціальних операцій» — у розробц
   assert.match(card[0], /<span class="bc-soon">У розробці<\/span>/);
   assert.match(card[0], /data:image\/webp;base64,/, 'тризуб ССО вбудовано у файл');
   assert.doesNotMatch(html, /MODULE_SRC = \{[^}]*sso:/, 'картка нікуди не веде');
+  assert.match(html, /\.branch-card\[data-branch="sso"\]::before \{\s*background-image:[^;]*url\('\.\/brand-art\/sso\.webp'\)/, 'фон картки — фото ССО');
   const profiles = await read('local-profiles.js');
   assert.match(profiles, /for \(const row of SOON_MODULES\)[\s\S]*?classList\.toggle\('ew-module-off', signedIn\)/, 'профіль, що увійшов, картки не бачить');
   assert.match(profiles, /\.ew-module-off:not\(\.ew-soon-off\)/, 'схована картка не перемикає сітку в «урізаний» вигляд');

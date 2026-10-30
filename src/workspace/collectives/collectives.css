@@ -33,3 +33,59 @@
 .ec-area{min-height:72px;font-family:var(--mono,ui-monospace,monospace);font-size:13px;resize:vertical;overflow-wrap:anywhere}
 .ec-check{display:flex;align-items:center;gap:8px;font-size:14px}
 @media(max-width:580px){.ec-root{padding:22px 12px}.ec-row{flex-wrap:wrap}.ec-row .ec-input{margin-left:0}.ec-toolbar .ec-btn{flex:1}}
+.ec-with-error{display:grid;gap:6px}
+
+/* Мої колективи: картки з кількістю учасників і склад обраного колективу. */
+.ec-me{display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid var(--line-2);border-radius:10px;background:var(--raised)}
+.ec-me-text{display:grid;gap:2px;min-width:0}
+.ec-avatar{flex:none;display:grid;place-items:center;width:40px;height:40px;border-radius:50%;background:var(--bg);border:1px solid var(--interactive-line);color:var(--text);font:700 14px var(--sans);letter-spacing:.02em}
+.ec-avatar[data-me="true"]{border-color:var(--accent);color:var(--accent)}
+.ec-empty{margin:0;padding:18px;border:1px dashed var(--interactive-line);border-radius:10px;color:var(--muted);text-align:center}
+.ec-coll-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
+.ec-coll-card{display:grid;gap:6px;text-align:left;padding:14px 16px;border:1px solid var(--line-2);border-radius:12px;background:var(--raised);color:var(--text);font:inherit;cursor:pointer}
+.ec-coll-card:hover{border-color:var(--accent)}
+.ec-coll-card:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.ec-coll-card[aria-pressed="true"]{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.ec-coll-name{font-weight:700;font-size:15px;overflow-wrap:anywhere}
+.ec-coll-count{display:flex;align-items:baseline;gap:6px;color:var(--muted);font-size:13px}
+.ec-coll-count strong{font-size:26px;line-height:1;color:var(--text)}
+.ec-coll-fp{font-family:var(--mono,ui-monospace,monospace);font-size:12px;color:var(--muted);letter-spacing:.06em}
+.ec-coll-warn{font-size:12px;color:var(--danger)}
+.ec-coll-panel{display:grid;gap:14px;padding:18px;border:1px solid var(--accent);border-radius:12px;background:var(--panel)}
+.ec-coll-head{display:flex;justify-content:space-between;align-items:center;gap:16px}
+.ec-coll-head h3{margin:0 0 4px;font-size:18px;overflow-wrap:anywhere}
+.ec-coll-big{display:grid;justify-items:end;line-height:1}
+.ec-coll-big strong{font-size:40px;color:var(--accent)}
+.ec-coll-big span{font-size:12px;color:var(--muted);margin-top:4px}
+.ec-people{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:8px}
+.ec-person-card{display:flex;align-items:center;gap:12px;padding:10px 12px;border:1px solid var(--line-2);border-radius:10px;background:var(--raised);min-width:0}
+.ec-person-card[data-me="true"]{border-color:var(--accent)}
+.ec-person-text{display:grid;gap:3px;min-width:0}
+.ec-person-name{margin:0;display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-weight:600;overflow-wrap:anywhere}
+.ec-person-fp{font-family:var(--mono,ui-monospace,monospace);font-size:12px;color:var(--muted);letter-spacing:.06em}
+.ec-badge{font-size:11px;font-weight:700;padding:2px 7px;border-radius:999px;border:1px solid var(--interactive-line);color:var(--muted)}
+.ec-badge-me{border-color:var(--accent);color:var(--accent)}
+.ec-sections{display:grid;gap:8px}
+.ec-section{border:1px solid var(--line-2);border-radius:10px;background:var(--raised)}
+.ec-section>*:not(summary){margin:0 14px 12px}
+.ec-section-head{display:flex;align-items:center;gap:8px;padding:12px 14px;cursor:pointer;font-weight:600;list-style-position:inside}
+.ec-section-head:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:10px}
+.ec-count-chip{font-size:12px;padding:1px 8px;border-radius:999px;background:var(--bg);color:var(--muted)}
+@media(max-width:580px){.ec-coll-head{align-items:flex-start}.ec-coll-big strong{font-size:32px}}
+.ec-coll-title{display:flex;align-items:center;gap:8px}
+/* Дані таблиці колективу: сітка клітинок, «хто змінив» і перегляд «було → стане». */
+.ec-row .ec-btn[data-active="true"]{border-color:var(--accent);color:var(--accent)}
+.ec-row .ec-person .ec-caption{margin-top:2px}
+.ec-grid-wrap{overflow-x:auto;border:1px solid var(--line-2);border-radius:10px;background:var(--raised)}
+.ec-grid{width:100%;border-collapse:collapse;font-size:13px}
+.ec-grid th{position:sticky;top:0;text-align:left;padding:9px 10px;background:var(--panel);color:var(--muted);font-weight:600;font-size:12px;border-bottom:1px solid var(--line-2);white-space:nowrap}
+.ec-grid td{padding:6px 8px;border-bottom:1px solid var(--line-2);vertical-align:middle;overflow-wrap:anywhere}
+.ec-grid tr:last-child td{border-bottom:0}
+.ec-grid .ec-cell{min-height:36px;padding:7px 9px;min-width:110px}
+.ec-grid-by{color:var(--muted);font-size:12px;white-space:nowrap}
+.ec-grid-del{min-height:34px;padding:4px 10px;font-size:16px;line-height:1}
+.ec-preview{display:grid;gap:8px;padding:14px 16px;border:1px solid var(--accent);border-radius:10px;background:var(--raised)}
+.ec-preview-list{margin:0;padding-left:18px;display:grid;gap:6px;font-size:13px;line-height:1.45}
+.ec-preview-list li[data-kind="deleted"] strong{color:var(--danger)}
+.ec-preview-list li[data-kind="new"] strong{color:var(--accent)}
+.ec-secure,.ec-coll-panel,.ec-sections,.ec-section,.ec-grid-wrap{min-width:0;max-width:100%}
