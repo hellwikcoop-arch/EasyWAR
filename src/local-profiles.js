@@ -480,7 +480,7 @@ function initializeLocalProfiles() {
     return el('div', { class: 'ew-profile-modules' },
       el('span', { class: 'ew-profile-field-caption', text: 'Модулі на стартовому екрані' }),
       el('div', { class: 'ew-profile-module-list' },
-        GATE_MODULES.map((module, index) => el('label', { class: 'ew-profile-module' }, boxes[index], el('span', { text: module.title })))),
+        GATE_MODULES.map((module, index) => el('label', { class: 'ew-profile-module' }, boxes[index], el('span', { text: module.soon ? `${module.title} (у розробці)` : module.title })))),
       el('button', {
         type: 'button',
         class: 'btn',

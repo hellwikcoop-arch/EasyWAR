@@ -112,6 +112,8 @@ pub(crate) const COLLECTIVES_SQL: &str = include_str!("../migrations/0019_collec
 pub(crate) const COLLECTIVE_SYNC_SQL: &str = include_str!("../migrations/0020_collective_sync.sql");
 pub(crate) const CUSTOM_MODULE_SQL: &str = include_str!("../migrations/0021_custom_module.sql");
 pub(crate) const ARMY_AVIATION_SQL: &str = include_str!("../migrations/0022_army_aviation.sql");
+pub(crate) const SPECIAL_OPERATIONS_SQL: &str =
+    include_str!("../migrations/0023_special_operations.sql");
 
 pub fn migrations() -> Vec<Migration> {
     vec![
@@ -247,6 +249,12 @@ pub fn migrations() -> Vec<Migration> {
             sql: ARMY_AVIATION_SQL,
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 23,
+            description: "add_special_operations",
+            sql: SPECIAL_OPERATIONS_SQL,
+            kind: MigrationKind::Up,
+        },
     ]
 }
 
@@ -319,7 +327,8 @@ mod tests {
         DASHBOARD_MODULE_STYLE_SQL, DATABASE_URL, DOCUMENT_LINKS_SQL, EMBEDDED_MIGRATOR,
         INITIAL_SCHEMA_SQL, LIBRARY_BLOB_REPAIR_SQL, LOCAL_PROFILES_SQL, OFFICE_LIBRARY_SQL,
         OWN_LOSSES_TABLES_SQL, PROFILE_BRANCH_TABLES_SQL, PROFILE_DETAILS_SQL, PROFILE_MODULES_SQL,
-        PROFILE_SCHEMAS_SQL, WORKSPACE_TEMPLATES_SQL, XLSX_DUPLICATE_LINKS_SQL,
+        PROFILE_SCHEMAS_SQL, SPECIAL_OPERATIONS_SQL, WORKSPACE_TEMPLATES_SQL,
+        XLSX_DUPLICATE_LINKS_SQL,
     };
     use super::{live_connect_options, writable_connect_options};
     use sqlx::{sqlite::SqlitePoolOptions, Row};
@@ -330,7 +339,7 @@ mod tests {
         assert_eq!(DATABASE_URL, "sqlite:easywar.db");
         assert!(include_str!("../tauri.conf.json").contains(DATABASE_URL));
         let registered = migrations();
-        assert_eq!(registered.len(), 22);
+        assert_eq!(registered.len(), 23);
         assert_eq!(registered[0].version, 1);
         assert_eq!(registered[0].description, "create_provenance_schema");
         assert_eq!(registered[1].version, 2);
@@ -377,6 +386,9 @@ mod tests {
         assert_eq!(registered[18].description, "add_collectives");
         assert_eq!(registered[19].version, 20);
         assert_eq!(registered[19].description, "add_collective_sync");
+        assert_eq!(registered[21].description, "add_army_aviation");
+        assert_eq!(registered[22].version, 23);
+        assert_eq!(registered[22].description, "add_special_operations");
         assert_eq!(
             EMBEDDED_MIGRATOR
                 .iter()
@@ -397,7 +409,7 @@ mod tests {
                 .map(|migration| migration.sql)
                 .collect::<Vec<_>>()
         );
-        assert_eq!(super::latest_schema_version(), Some(22));
+        assert_eq!(super::latest_schema_version(), Some(23));
     }
 
     #[tokio::test]
@@ -409,9 +421,9 @@ mod tests {
             DatabaseStatusStore::new(pool.clone()).load().await.unwrap(),
             super::DatabaseStatus {
                 app_version: env!("CARGO_PKG_VERSION").to_owned(),
-                schema_version: 22,
-                supported_schema_version: 22,
-                migration_count: 22,
+                schema_version: 23,
+                supported_schema_version: 23,
+                migration_count: 23,
                 migration_state: DatabaseMigrationState::Current,
             }
         );
@@ -430,11 +442,10 @@ mod tests {
 
     async fn migrated_pool() -> sqlx::SqlitePool {
         let pool = migrated_pool_before_custom_module().await;
-        for migration in [CUSTOM_MODULE_SQL, ARMY_AVIATION_SQL] {
-            sqlx::raw_sql(migration)
-                .execute(&pool)
-                .await
-                .expect("custom module and army aviation migrations must apply");
+        for migration in [CUSTOM_MODULE_SQL, ARMY_AVIATION_SQL, SPECIAL_OPERATIONS_SQL] {
+            sqlx::raw_sql(migration).execute(&pool).await.expect(
+                "custom module, army aviation and special operations migrations must apply",
+            );
         }
         pool
     }
@@ -1347,6 +1358,65 @@ mod tests {
         }
         pool.close().await;
     }
+    #[tokio::test]
+    async fn special_operations_migration_admits_sso_module_only() {
+        let pool = migrated_pool_before_custom_module().await;
+        module_with_corrections(&pool).await;
+        for migration in [CUSTOM_MODULE_SQL, ARMY_AVIATION_SQL] {
+            sqlx::raw_sql(migration).execute(&pool).await.unwrap();
+        }
+        sqlx::query("INSERT INTO local_profile_modules (profile_id, module) VALUES ('profile-c0c0c0c0c0c0c0c0c0c0c0c0', 'army')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let insert_sso = "INSERT INTO local_profile_modules (profile_id, module) VALUES ('profile-c0c0c0c0c0c0c0c0c0c0c0c0', 'sso')";
+        assert!(
+            sqlx::query(insert_sso).execute(&pool).await.is_err(),
+            "до 0023 модуль sso не приймається"
+        );
+        sqlx::raw_sql(SPECIAL_OPERATIONS_SQL)
+            .execute(&pool)
+            .await
+            .expect("special operations migration must apply");
+
+        // Наявні рядки переносяться, sso сам не додається, а потім приймається.
+        let modules: Vec<String> = sqlx::query_scalar(
+            "SELECT module FROM local_profile_modules WHERE profile_id = 'profile-c0c0c0c0c0c0c0c0c0c0c0c0' ORDER BY module",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(modules, vec!["army".to_owned(), "custom".to_owned()]);
+        sqlx::query(insert_sso)
+            .execute(&pool)
+            .await
+            .expect("sso is a profile module after 0023");
+        // Таблиці профілю й модулів дашборда в sso немає.
+        assert!(sqlx::query("INSERT INTO local_profile_tables (profile_id, branch, path, updated_at) VALUES ('profile-c0c0c0c0c0c0c0c0c0c0c0c0', 'sso', '/x.xlsx', '2026-01-01T00:00:00Z')")
+            .execute(&pool)
+            .await
+            .is_err());
+        let leftovers: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM sqlite_master WHERE name LIKE '%_new'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(leftovers, 0);
+        sqlx::query("DELETE FROM local_profiles WHERE id = 'profile-c0c0c0c0c0c0c0c0c0c0c0c0'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let left: i64 = sqlx::query_scalar("SELECT count(*) FROM local_profile_modules")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            left, 0,
+            "каскад профіль → модулі працює на перебудованій таблиці"
+        );
+        pool.close().await;
+    }
+
     #[tokio::test]
     async fn all_embedded_migrations_apply_to_a_new_file_with_the_corrections_table() {
         let directory = tempfile::tempdir().unwrap();

@@ -22,12 +22,14 @@ const MAX_AVATAR_BYTES: usize = 400_000;
 const MIN_PASSWORD_CHARS: usize = 6;
 
 /// Модулі, які користувач обирає при реєстрації, у порядку показу на стартовому екрані.
-/// `custom` — «Власний модуль» без прив'язки до роду військ (міграція 0021).
-pub const MODULES: [&str; 7] = [
+/// `custom` — «Власний модуль» без прив'язки до роду військ (міграція 0021);
+/// `sso` — «Сили спеціальних операцій», поки лише картка «У розробці» (міграція 0023).
+pub const MODULES: [&str; 8] = [
     "air",
     "rocket",
     "artillery",
     "army",
+    "sso",
     "pvk",
     "dshv",
     "custom",
@@ -1187,7 +1189,7 @@ mod tests {
         DASHBOARD_MODULE_CORRECTIONS_SQL, DASHBOARD_MODULE_CORRECTION_STATUS_SQL,
         DASHBOARD_MODULE_STYLE_SQL, INITIAL_SCHEMA_SQL, LOCAL_PROFILES_SQL, OWN_LOSSES_TABLES_SQL,
         PROFILE_BRANCH_TABLES_SQL, PROFILE_DETAILS_SQL, PROFILE_MODULES_SQL,
-        XLSX_DUPLICATE_LINKS_SQL,
+        SPECIAL_OPERATIONS_SQL, XLSX_DUPLICATE_LINKS_SQL,
     };
     use sqlx::sqlite::SqlitePoolOptions;
 
@@ -1243,6 +1245,7 @@ mod tests {
             DASHBOARD_MODULE_CORRECTION_STATUS_SQL,
             CUSTOM_MODULE_SQL,
             ARMY_AVIATION_SQL,
+            SPECIAL_OPERATIONS_SQL,
         ] {
             sqlx::raw_sql(migration).execute(&pool).await.unwrap();
         }
