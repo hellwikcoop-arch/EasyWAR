@@ -17,7 +17,7 @@ const yieldToPage = () => new Promise(resolve => setTimeout(resolve, 0));
  * `schema`, `modules`, `data` — функції, що повертають поточний стан дашборда. `apply(change)` записує зміну схеми
  * профілю (`change(schema)` → результат ядра) і повертає `{ ok, schema?, message? }`; `onChange()` кличеться після
  * успішного запису; `download(filename, text)` віддає користувачу новий файл (за замовчуванням — завантаження через браузер);
- * `createModule(request)` створює модуль з об'єднаної таблиці (`create_dashboard_module`) і повертає `{ ok, message? }`; без нього кнопки «Створити таблицю» немає. Без `apply` панель лише показує підказки. Повертає `<details>`.
+ * `createModule(request, { relationId, rowCount })` створює модуль з об'єднаної таблиці (`create_dashboard_module`) і повертає `{ ok, message? }`; без нього кнопки «Створити таблицю» немає. Без `apply` панель лише показує підказки. Повертає `<details>`.
  */
 export function linkPanel({ el, schema, modules, data, apply = null, onChange = () => {}, now = () => new Date().toISOString(), download = downloadText, createModule = null }) {
   const status = el('p', { class: 'ewmc-links-status', role: 'status' });
@@ -128,7 +128,7 @@ export function linkPanel({ el, schema, modules, data, apply = null, onChange = 
     if (!made.ok) { note(made.message); return; }
     button.disabled = true;
     try {
-      const result = await createModule(made.request);
+      const result = await createModule(made.request, { relationId, rowCount: made.rowCount });
       if (!result?.ok) note(result?.message || 'Не вдалося створити модуль.');
     } finally {
       button.disabled = false;
