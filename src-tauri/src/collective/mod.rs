@@ -16,6 +16,7 @@ pub mod invite;
 pub mod pairing;
 pub mod relay;
 pub mod relay_auth;
+pub mod rendezvous;
 pub mod replay;
 pub mod secret_store;
 pub mod send_gate;

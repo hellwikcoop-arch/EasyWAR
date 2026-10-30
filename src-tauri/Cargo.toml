@@ -39,7 +39,7 @@ tauri-plugin-dialog = "2"
 tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 tempfile = "3"
 thiserror = "2"
-tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "signal", "sync", "time"] }
 zip = { version = "4", default-features = false, features = ["deflate"] }
 zeroize = "1"
 tauri-plugin-updater = "2"
@@ -47,6 +47,9 @@ rustls = { version = "0.23", default-features = false, features = ["ring"] }
 ed25519-dalek = { version = "2.2", features = ["rand_core", "zeroize"] }
 x25519-dalek = { version = "2.0", features = ["static_secrets", "zeroize"] }
 spake2 = "0.4"
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6"

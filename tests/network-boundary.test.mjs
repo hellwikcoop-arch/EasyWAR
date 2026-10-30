@@ -110,6 +110,7 @@ const RUST_NETWORK_ALLOWLIST = new Set([
   'signal_session.rs',  // сеанс signal-cli
   'weather_online.rs',  // Open-Meteo
   'app_update.rs',      // tauri-plugin-updater (endpoint з tauri.conf.json)
+  'pair_relay.rs',      // сервер зустрічі для вступу за кодом; клієнт лише з дозволом WAN
 ]);
 const RUST_NETWORK = /\breqwest\b|\bstd::net\b|\btokio::net\b|TcpListener|TcpStream|UdpSocket/;
 
