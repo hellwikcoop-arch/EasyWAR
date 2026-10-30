@@ -193,20 +193,36 @@ export function createHost({
     ? Object.freeze({
       status: () => invoke('collective_status'),
       createIdentity: password => invoke('collective_create_identity', { password: String(password ?? '') }),
-      create: (password, name) => invoke('collective_create', { password: String(password ?? ''), name: String(name ?? '') }),
+      // Ім'я в колективі вказує сам учасник; воно йде в журнал складу під його підписом.
+      create: (password, name, memberName) => invoke('collective_create', {
+        password: String(password ?? ''), name: String(name ?? ''), memberName: String(memberName ?? ''),
+      }),
       // Обмін (C3b, другий зріз): тексти запрошень і ключів люди пересилають самі,
       // «Підготувати» лишає намір у Rust, «Доповісти» підтверджує його паролем (SEC-003);
       // прапорця «переглянуто» з JS немає. Конверт іде лише в локальну чергу.
       detail: collective => invoke('collective_detail', { collective: String(collective ?? '') }),
-      setTable: ({ collective, table = null, title, cls, purpose }) => invoke('collective_table_set', {
+      // `columns: null` залишає стовпці таблиці як є.
+      setTable: ({ collective, table = null, title, cls, purpose, columns = null }) => invoke('collective_table_set', {
         collective: String(collective ?? ''), table: table == null ? null : String(table),
         title: String(title ?? ''), class: String(cls ?? ''), purpose: String(purpose ?? ''),
+        columns: Array.isArray(columns) ? columns.map(String) : null,
+      }),
+      // «Оновити таблицю»: Rust відкриває збережені пакети змін паролем і перевіряє кожен.
+      tableRead: (password, collective, table) => invoke('collective_table_read', {
+        password: String(password ?? ''), collective: String(collective ?? ''), table: String(table ?? ''),
+      }),
+      // Пакет оновлення `EWSYNC1.`: текст люди передають самі, мережі немає.
+      syncExport: (password, collective) => invoke('collective_sync_export', {
+        password: String(password ?? ''), collective: String(collective ?? ''),
+      }),
+      syncImport: (password, text) => invoke('collective_sync_import', {
+        password: String(password ?? ''), text: String(text ?? ''),
       }),
       inviteCreate: (password, collective, hours) => invoke('collective_invite_create', {
         password: String(password ?? ''), collective: String(collective ?? ''), hours: Number(hours),
       }),
-      joinRequest: (password, invitation) => invoke('collective_join_request', {
-        password: String(password ?? ''), invitation: String(invitation ?? ''),
+      joinRequest: (password, invitation, memberName) => invoke('collective_join_request', {
+        password: String(password ?? ''), invitation: String(invitation ?? ''), memberName: String(memberName ?? ''),
       }),
       inviteAdmit: (password, collective, request) => invoke('collective_invite_admit', {
         password: String(password ?? ''), collective: String(collective ?? ''), request: String(request ?? ''),

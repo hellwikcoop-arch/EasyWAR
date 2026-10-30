@@ -64,6 +64,8 @@ import { supportsColumns, userTables } from './module-add-columns-core.js';
 import { bindBlockColumns, saveBlockColumns } from './module-add-columns-client.js';
 import { blockCardModel, chartViews, hasBlockCard, placeBlockCard } from './module-block-card-core.js';
 import { blockCardView, blockChoices } from './module-block-card-view.js';
+import { placePreset, presetsFor } from './module-preset-core.js';
+import { presetPanel } from './module-preset-panel.js';
 import { linkPanel } from './table-link-panel.js';
 import { snapshotPanel } from './table-link-snapshot-panel.js';
 import { snapshotInfo } from './table-link-snapshot-core.js';
@@ -352,6 +354,36 @@ function initialize() {
     }
   }
 
+  // «Зібрати за шаблоном» (E5): бракуючі стовпці всіх блоків шаблону — одним записом у основну таблицю, ролі — одним
+  // записом схеми, картки — однією зміною розкладки. Збій зіставлення не псує додані стовпці, як і в `addBlockColumns`.
+  async function assemblePreset({ preset, plan, definitions, module }) {
+    if (state.busy) return { ok: false, message: 'Зачекайте: інша дія ще триває.' };
+    state.busy = true;
+    try {
+      const saved = normalizeModules([await saveBlockColumns(invoke, { branch: state.branch, module, plan })])[0];
+      if (!saved) return { ok: false, message: 'Таблицю збережено, але відповідь не прочитано. Закрийте вікно й відкрийте знову.' };
+      await loadModules();
+      await state.syncing;
+      const bound = await bindBlockColumns(invoke, { module: saved, plan, at: new Date().toISOString() });
+      if (bound.ok) state.schema = bound.schema;
+      else return { ok: false, message: `Стовпці додано в таблицю «${saved.title}», але ролі не зіставлено (${bound.message || 'збій схеми'}). Зіставте їх у «Ролях стовпців» і зберіть ще раз.` };
+      const sourceId = moduleSourceId(saved.id);
+      let placed = 0;
+      await changeLayout(layout => {
+        const result = placePreset(layout, { preset, definitions, sourceId, freshTable: !module });
+        placed = result.placed || 0;
+        return result;
+      });
+      const line = `шаблон ${preset.title}: ${plan.fields.length ? `стовпців додано — ${plan.fields.length}, ` : ''}карток поставлено — ${placed}`;
+      showToast(`Зібрано — ${line}.`);
+      return { ok: true, message: `Готово, ${line}.` };
+    } catch (error) {
+      return { ok: false, message: String(error || 'Не вдалося зібрати дашборд.') };
+    } finally {
+      state.busy = false;
+    }
+  }
+
   // Вихідні таблиці знімка читаються наново з SQLite (не з кешу сторінки), щоб оновлення спиралося на актуальні дані.
   async function readSnapshotSources(module) {
     const info = state.schema ? snapshotInfo(state.schema, module) : null;
@@ -556,7 +588,7 @@ function initialize() {
     // Картка блока реєстру (E5): рахується з рядків основної таблиці за підтвердженими ролями, а не діаграмою шаблону.
     const definitionId = placed?.instance.definitionId;
     const block = hasBlockCard(definitionId)
-      ? blockCardModel({ definition: registryDefinitions().find(item => item.definitionId === definitionId), schema: state.schema, sourceId: placed.instance.sourceId, rows, view: placed.instance.style?.view })
+      ? blockCardModel({ definition: registryDefinitions().find(item => item.definitionId === definitionId), schema: state.schema, sourceId: placed.instance.sourceId, rows, view: placed.instance.style?.view, title: placed.instance.title })
       : null;
     // Картка блока — компактна, у дусі вкладок ПС і РВ; налаштування за «⋯», без дій над таблицею.
     if (block) {
@@ -717,6 +749,10 @@ function initialize() {
         el('button', { value: 'cancel', class: 'ewmc-close', 'aria-label': 'Закрити', text: '×' })),
       el('div', { class: 'ewmc-catalog-tools' }, search,
         el('button', { type: 'button', class: 'btn quiet', text: 'Усі визначення', 'data-action': 'show-registry', title: 'Усі блоки дашбордів і шаблони з описом потрібних даних', onclick: showRegistry })),
+      presetPanel({
+        el, presets: presetsFor(state.branch), definitions: registryDefinitions, schema: () => state.schema, layout: () => state.layout, apply: assemblePreset,
+        tables: () => userTables(state.modules).filter(module => module.branch === state.branch),
+      }),
       list,
     );
     paint();

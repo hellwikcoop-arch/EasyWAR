@@ -11,7 +11,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use super::codec::{Reader, Writer};
 use super::envelope::{self, Envelope, SignedPayload};
 use super::epoch::{CollectiveId, EpochKey};
-use super::identity::{BoundMember, DeviceRecord, ExchangeBinding, MemberId};
+use super::identity::{BoundMember, DeviceRecord, ExchangeBinding, MemberId, NameRecord};
 use super::{Reason, ID_LEN, KEY_LEN};
 
 /// Правило для операцій, створених до відкликання й доставлених після (підпитання JE-16):
@@ -263,6 +263,8 @@ pub enum MembershipRecord {
     },
     AddDevice(DeviceRecord),
     Revoke(MemberId),
+    /// Ім'я учасника, підписане ним самим; новіше (більший `issued_at`) замінює попереднє.
+    SetName(NameRecord),
 }
 
 impl MembershipRecord {
@@ -271,6 +273,7 @@ impl MembershipRecord {
     const GRANT_TABLE: u8 = 3;
     const ADD_DEVICE: u8 = 4;
     const REVOKE: u8 = 5;
+    const SET_NAME: u8 = 6;
 
     /// Канонічне кодування для сховища (C3b): байт виду і поля фіксованої довжини.
     pub fn to_bytes(&self) -> Vec<u8> {
@@ -290,6 +293,9 @@ impl MembershipRecord {
             }
             MembershipRecord::Revoke(member) => {
                 w.u8(Self::REVOKE).fixed(member);
+            }
+            MembershipRecord::SetName(record) => {
+                w.u8(Self::SET_NAME).fixed(&record.to_bytes());
             }
         }
         w.finish()
@@ -319,6 +325,7 @@ impl MembershipRecord {
                 r.finish()?;
                 Ok(MembershipRecord::Revoke(member))
             }
+            Self::SET_NAME => Ok(MembershipRecord::SetName(NameRecord::from_bytes(rest)?)),
             _ => Err(Reason::Malformed),
         }
     }
@@ -342,6 +349,8 @@ struct MemberState {
     revoked_at: Option<u64>,
     tables: Vec<([u8; ID_LEN], u64)>,
     devices: Vec<([u8; KEY_LEN], u64)>,
+    /// Чинне ім'я і його `issued_at`.
+    name: Option<(String, i64)>,
 }
 
 impl InMemoryMembership {
@@ -438,6 +447,7 @@ impl InMemoryMembership {
                         revoked_at: None,
                         tables: Vec::new(),
                         devices: Vec::new(),
+                        name: None,
                     },
                 );
             }
@@ -473,6 +483,24 @@ impl InMemoryMembership {
                     state.revoked_at = Some(seq);
                 }
                 self.epochs.push(seq);
+            }
+            MembershipRecord::SetName(name) => {
+                let state = self
+                    .members
+                    .get_mut(&name.member_id)
+                    .ok_or(Reason::ExchangeNotBound)?;
+                if state.revoked_at.is_some() {
+                    return Err(Reason::MemberRevoked);
+                }
+                name.verify(state.bound.public(), &self.collective_id)?;
+                if state
+                    .name
+                    .as_ref()
+                    .is_some_and(|(_, at)| name.issued_at <= *at)
+                {
+                    return Err(Reason::BindingNotNewer);
+                }
+                state.name = Some((name.name.clone(), name.issued_at));
             }
         }
         self.log.push(record);
@@ -540,12 +568,32 @@ impl InMemoryMembership {
         self.append(MembershipRecord::AddDevice(*record))
     }
 
+    /// Ім'я учасника входить у журнал лише з його власним підписом для цього колективу.
+    pub fn set_name(&mut self, record: &NameRecord) -> Result<u64, Reason> {
+        self.append(MembershipRecord::SetName(record.clone()))
+    }
+
+    /// Чинне ім'я учасника за журналом (ім'я вказав сам учасник).
+    pub fn member_name(&self, member: &MemberId) -> Option<&str> {
+        self.members
+            .get(member)
+            .and_then(|state| state.name.as_ref())
+            .map(|(name, _)| name.as_str())
+    }
+
     /// Відкликання: новий запис і нова епоха (ADR, 2.3).
     pub fn revoke(&mut self, member: &MemberId) -> (u64, u32) {
         let seq = self
             .append(MembershipRecord::Revoke(*member))
             .expect("запис відкликання не відхиляється");
         (seq, self.current_epoch())
+    }
+
+    /// Учасник у колективі на `seq`: вступив не пізніше й не відкликаний до `seq`.
+    pub fn member_active_at(&self, seq: u64, member: &MemberId) -> bool {
+        self.members
+            .get(member)
+            .is_some_and(|state| Self::active_at(state, seq))
     }
 
     pub fn current_epoch(&self) -> u32 {
@@ -1282,5 +1330,41 @@ mod tests {
             Err(Reason::BindingNotNewer)
         );
         assert_eq!(world.membership.latest_seq(), latest);
+    }
+    #[test]
+    fn member_name_is_self_signed_newer_wins_and_round_trips() {
+        let mut w = World::new();
+        let alice = w.alice.member_id();
+        assert_eq!(w.membership.member_name(&alice), None);
+        let first = w.alice.name_record(w.collective, "Синтетик А", 10).unwrap();
+        let seq = w.membership.set_name(&first).unwrap();
+        assert_eq!(w.membership.member_name(&alice), Some("Синтетик А"));
+        let stored =
+            MembershipRecord::from_bytes(&w.membership.records()[seq as usize - 1].to_bytes())
+                .unwrap();
+        assert_eq!(stored, MembershipRecord::SetName(first.clone()));
+        // Старий запис повторно не застосовується.
+        assert_eq!(w.membership.set_name(&first), Err(Reason::BindingNotNewer));
+        let renamed = w.alice.name_record(w.collective, "Синтетик Б", 11).unwrap();
+        w.membership.set_name(&renamed).unwrap();
+        assert_eq!(w.membership.member_name(&alice), Some("Синтетик Б"));
+        // Ім'я від чужого ключа, для іншого колективу чи для невідомого учасника — відмова.
+        let mallory = MemberIdentity::generate();
+        let mut forged = mallory.name_record(w.collective, "Синтетик В", 12).unwrap();
+        assert_eq!(
+            w.membership.set_name(&forged),
+            Err(Reason::ExchangeNotBound)
+        );
+        forged.member_id = alice;
+        assert_eq!(w.membership.set_name(&forged), Err(Reason::BadSignature));
+        let foreign = w.alice.name_record([9; ID_LEN], "Синтетик Г", 13).unwrap();
+        assert_eq!(
+            w.membership.set_name(&foreign),
+            Err(Reason::ExchangeNotBound)
+        );
+        // Відкликаний учасник ім'я не змінює.
+        w.membership.revoke(&alice);
+        let late = w.alice.name_record(w.collective, "Синтетик Д", 14).unwrap();
+        assert_eq!(w.membership.set_name(&late), Err(Reason::MemberRevoked));
     }
 }
