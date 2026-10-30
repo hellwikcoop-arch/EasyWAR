@@ -14,10 +14,12 @@ import {
   gateScreen,
   loginCardNote,
   modulesError,
+  modulesForRows,
   moduleVisible,
   normalizeModules,
   passwordError,
   recoveryFailure,
+  rowChosen,
   slotsForModules,
   validateProfileStep,
   validateRecoveryStep,
@@ -56,7 +58,8 @@ test('profile step checks name, uniqueness, lengths and password confirmation', 
 });
 
 test('at least one known module must be chosen; unknown ids are dropped', () => {
-  assert.deepEqual(MODULE_IDS, ['air', 'rocket', 'artillery', 'pvk', 'dshv']);
+  assert.deepEqual(MODULE_IDS, ['air', 'rocket', 'artillery', 'pvk', 'dshv', 'custom']);
+  assert.deepEqual(GATE_MODULES.map(row => row.id), ['air', 'rocket', 'artillery', 'command', 'custom']);
   assert.ok(modulesError([]));
   assert.ok(modulesError(['unknown']));
   assert.ok(modulesError(null));
@@ -75,6 +78,23 @@ test('table slots follow the chosen modules; artillery has no own slot', () => {
   assert.deepEqual(slotsForModules(['pvk', 'air']).map(s => s.branch), ['air', 'pvk', 'pvk_losses']);
   assert.deepEqual(slotsForModules(MODULE_IDS).map(s => s.branch),
     ['air', 'rocket', 'pvk', 'pvk_losses', 'dshv', 'dshv_losses']);
+  assert.deepEqual(slotsForModules(['custom']), [], 'власний модуль таблиці не має');
+});
+
+test('«Командування військ» є одним рядком для ПВК і УДШВ; «Власний модуль» — без роду військ', () => {
+  const command = GATE_MODULES.find(row => row.id === 'command');
+  assert.equal(command.title, 'Командування військ');
+  assert.deepEqual(command.modules, ['pvk', 'dshv']);
+  assert.deepEqual(modulesForRows(['command']), ['pvk', 'dshv']);
+  assert.deepEqual(modulesForRows(['custom', 'air']), ['air', 'custom']);
+  assert.deepEqual(modulesForRows(['nope']), []);
+  assert.equal(rowChosen(command, ['pvk']), true, 'рядок відмічено, якщо обрано хоч один із його модулів');
+  assert.equal(rowChosen(command, new Set(['dshv'])), true);
+  assert.equal(rowChosen(command, ['air', 'custom']), false);
+  const custom = GATE_MODULES.find(row => row.id === 'custom');
+  assert.equal(custom.title, 'Власний модуль');
+  assert.deepEqual(custom.modules, ['custom']);
+  assert.equal(modulesError(['custom']), null);
 });
 
 test('start screen shows only chosen modules; a profile without a list sees all', () => {
@@ -122,10 +142,14 @@ test('login card says whether the password must still be set', () => {
 test('every gate module points to an element that exists on the start screen', async () => {
   const html = await read('index.html');
   for (const module of GATE_MODULES) {
-    const attr = module.card.match(/\[([\w-]+)="([^"]+)"\]/);
-    assert.ok(attr, `${module.id}: card selector`);
-    assert.ok(html.includes(`${attr[1]}="${attr[2]}"`), `${module.id}: ${module.card} exists in index.html`);
-    if (module.tile) assert.ok(html.includes(`id="${module.tile.slice(1)}"`), `${module.id}: ${module.tile} exists`);
+    assert.equal(module.cards.length, module.modules.length, `${module.id}: одна картка на модуль`);
+    module.cards.forEach((card, index) => {
+      const attr = card.match(/\[([\w-]+)="([^"]+)"\]/);
+      assert.ok(attr, `${module.id}: card selector`);
+      assert.ok(html.includes(`${attr[1]}="${attr[2]}"`), `${module.id}: ${card} exists in index.html`);
+      const tile = module.tiles?.[index];
+      if (tile) assert.ok(html.includes(`id="${tile.slice(1)}"`), `${module.id}: ${tile} exists`);
+    });
   }
 });
 

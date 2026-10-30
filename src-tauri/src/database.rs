@@ -110,6 +110,7 @@ pub(crate) const DASHBOARD_LAYOUTS_SQL: &str =
     include_str!("../migrations/0018_dashboard_layouts.sql");
 pub(crate) const COLLECTIVES_SQL: &str = include_str!("../migrations/0019_collectives.sql");
 pub(crate) const COLLECTIVE_SYNC_SQL: &str = include_str!("../migrations/0020_collective_sync.sql");
+pub(crate) const CUSTOM_MODULE_SQL: &str = include_str!("../migrations/0021_custom_module.sql");
 
 pub fn migrations() -> Vec<Migration> {
     vec![
@@ -233,6 +234,12 @@ pub fn migrations() -> Vec<Migration> {
             sql: COLLECTIVE_SYNC_SQL,
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 21,
+            description: "add_custom_module",
+            sql: CUSTOM_MODULE_SQL,
+            kind: MigrationKind::Up,
+        },
     ]
 }
 
@@ -300,12 +307,12 @@ mod tests {
     use super::{
         create_migrated_database, migrations, DatabaseMigrationState, DatabaseStatusError,
         DatabaseStatusStore, COLLECTIVES_SQL, COLLECTIVE_SYNC_SQL, COMMAND_TABLES_SQL,
-        DASHBOARD_LAYOUTS_SQL, DASHBOARD_MODULES_SQL, DASHBOARD_MODULE_CORRECTIONS_SQL,
-        DASHBOARD_MODULE_CORRECTION_STATUS_SQL, DASHBOARD_MODULE_STYLE_SQL, DATABASE_URL,
-        DOCUMENT_LINKS_SQL, EMBEDDED_MIGRATOR, INITIAL_SCHEMA_SQL, LIBRARY_BLOB_REPAIR_SQL,
-        LOCAL_PROFILES_SQL, OFFICE_LIBRARY_SQL, OWN_LOSSES_TABLES_SQL, PROFILE_BRANCH_TABLES_SQL,
-        PROFILE_DETAILS_SQL, PROFILE_MODULES_SQL, PROFILE_SCHEMAS_SQL, WORKSPACE_TEMPLATES_SQL,
-        XLSX_DUPLICATE_LINKS_SQL,
+        CUSTOM_MODULE_SQL, DASHBOARD_LAYOUTS_SQL, DASHBOARD_MODULES_SQL,
+        DASHBOARD_MODULE_CORRECTIONS_SQL, DASHBOARD_MODULE_CORRECTION_STATUS_SQL,
+        DASHBOARD_MODULE_STYLE_SQL, DATABASE_URL, DOCUMENT_LINKS_SQL, EMBEDDED_MIGRATOR,
+        INITIAL_SCHEMA_SQL, LIBRARY_BLOB_REPAIR_SQL, LOCAL_PROFILES_SQL, OFFICE_LIBRARY_SQL,
+        OWN_LOSSES_TABLES_SQL, PROFILE_BRANCH_TABLES_SQL, PROFILE_DETAILS_SQL, PROFILE_MODULES_SQL,
+        PROFILE_SCHEMAS_SQL, WORKSPACE_TEMPLATES_SQL, XLSX_DUPLICATE_LINKS_SQL,
     };
     use super::{live_connect_options, writable_connect_options};
     use sqlx::{sqlite::SqlitePoolOptions, Row};
@@ -316,7 +323,7 @@ mod tests {
         assert_eq!(DATABASE_URL, "sqlite:easywar.db");
         assert!(include_str!("../tauri.conf.json").contains(DATABASE_URL));
         let registered = migrations();
-        assert_eq!(registered.len(), 20);
+        assert_eq!(registered.len(), 21);
         assert_eq!(registered[0].version, 1);
         assert_eq!(registered[0].description, "create_provenance_schema");
         assert_eq!(registered[1].version, 2);
@@ -383,7 +390,7 @@ mod tests {
                 .map(|migration| migration.sql)
                 .collect::<Vec<_>>()
         );
-        assert_eq!(super::latest_schema_version(), Some(20));
+        assert_eq!(super::latest_schema_version(), Some(21));
     }
 
     #[tokio::test]
@@ -395,9 +402,9 @@ mod tests {
             DatabaseStatusStore::new(pool.clone()).load().await.unwrap(),
             super::DatabaseStatus {
                 app_version: env!("CARGO_PKG_VERSION").to_owned(),
-                schema_version: 20,
-                supported_schema_version: 20,
-                migration_count: 20,
+                schema_version: 21,
+                supported_schema_version: 21,
+                migration_count: 21,
                 migration_state: DatabaseMigrationState::Current,
             }
         );
@@ -415,6 +422,16 @@ mod tests {
     }
 
     async fn migrated_pool() -> sqlx::SqlitePool {
+        let pool = migrated_pool_before_custom_module().await;
+        sqlx::raw_sql(CUSTOM_MODULE_SQL)
+            .execute(&pool)
+            .await
+            .expect("custom module migration must apply");
+        pool
+    }
+
+    /// База до 0021: щоб тест міграції «Власного модуля» наповнив старі таблиці й застосував її сам.
+    async fn migrated_pool_before_custom_module() -> sqlx::SqlitePool {
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
             .connect("sqlite::memory:")
@@ -1035,6 +1052,180 @@ mod tests {
             .await;
             assert_eq!(result.is_ok(), accepted, "стиль «{value}»");
         }
+    }
+
+    #[tokio::test]
+    async fn custom_module_migration_keeps_modules_fields_and_corrections_and_admits_custom() {
+        let pool = migrated_pool_before_custom_module().await;
+        module_with_corrections(&pool).await;
+        sqlx::query(
+            "INSERT INTO dashboard_module_fields
+             (module_id, field_key, label, data_type, field_role, aggregation, required, position)
+             VALUES ('dashboard-corrections-01', 'takeoff_time', 'Зліт', 'datetime', 'dimension', 'none', 1, 0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "UPDATE dashboard_modules SET style = 'heightwell' WHERE id = 'dashboard-corrections-01'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        for (table, column) in [
+            ("local_profile_modules", "module"),
+            ("dashboard_modules", "branch"),
+        ] {
+            let message = sqlx::query(&format!(
+                "SELECT count(*) FROM {table} WHERE {column} = 'custom'"
+            ))
+            .execute(&pool)
+            .await;
+            assert!(message.is_ok(), "{table}: таблиця є до міграції");
+        }
+        assert!(
+            sqlx::query("INSERT INTO local_profile_modules (profile_id, module) VALUES ('profile-c0c0c0c0c0c0c0c0c0c0c0c0', 'custom')")
+                .execute(&pool)
+                .await
+                .is_err(),
+            "до 0021 модуль custom не приймається"
+        );
+
+        sqlx::raw_sql(CUSTOM_MODULE_SQL)
+            .execute(&pool)
+            .await
+            .expect("custom module migration must apply");
+
+        // Наявні рядки на місці: модуль зі стилем, поле, обидва виправлення з їхніми номерами.
+        let (style, branch): (String, String) = sqlx::query_as(
+            "SELECT style, branch FROM dashboard_modules WHERE id = 'dashboard-corrections-01'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!((style.as_str(), branch.as_str()), ("heightwell", "air"));
+        let fields: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM dashboard_module_fields WHERE module_id = 'dashboard-corrections-01'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(fields, 1);
+        let corrections: Vec<(i64, String, Option<String>)> = sqlx::query_as(
+            "SELECT id, corrected_text, stored_value FROM dashboard_module_corrections ORDER BY id",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            corrections,
+            vec![(1, "14:25".to_owned(), None), (2, "300 м".to_owned(), None)]
+        );
+        let violations: i64 = sqlx::query_scalar("SELECT count(*) FROM pragma_foreign_key_check")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(violations, 0, "зовнішні ключі переписано на нові таблиці");
+        let (modules_index, corrections_index): (i64, i64) = (
+            sqlx::query_scalar("SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_dashboard_modules_profile_branch' AND tbl_name = 'dashboard_modules'")
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            sqlx::query_scalar("SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_dashboard_module_corrections_module' AND tbl_name = 'dashboard_module_corrections'")
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+        );
+        assert_eq!((modules_index, corrections_index), (1, 1));
+        let leftovers: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM sqlite_master WHERE name LIKE '%_new'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(leftovers, 0);
+
+        // Наявний профіль отримує власний модуль; невідоме значення, як і раніше, відхиляється.
+        let custom_rows: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM local_profile_modules
+             WHERE profile_id = 'profile-c0c0c0c0c0c0c0c0c0c0c0c0' AND module = 'custom'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(custom_rows, 1, "профіль до 0021 отримує модуль custom");
+        assert!(
+            sqlx::query("INSERT INTO local_profile_modules (profile_id, module) VALUES ('profile-c0c0c0c0c0c0c0c0c0c0c0c0', 'navy')")
+                .execute(&pool)
+                .await
+                .is_err()
+        );
+        sqlx::query(
+            "INSERT INTO dashboard_modules
+             (id, profile_id, branch, template_id, visual_kind, title, storage_table, created_at, updated_at)
+             VALUES ('dashboard-custom-000001', 'profile-c0c0c0c0c0c0c0c0c0c0c0c0', 'custom', 'flight-hours', 'kpi',
+                     'Власний', 'dashboard_data_000000000000000000000002', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .expect("custom is a dashboard branch after 0021");
+        assert!(
+            sqlx::query(
+                "INSERT INTO dashboard_modules
+                 (id, profile_id, branch, template_id, visual_kind, title, storage_table, created_at, updated_at)
+                 VALUES ('dashboard-navy-00000001', 'profile-c0c0c0c0c0c0c0c0c0c0c0c0', 'navy', 'flight-hours', 'kpi',
+                         'Флот', 'dashboard_data_000000000000000000000003', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            )
+            .execute(&pool)
+            .await
+            .is_err()
+        );
+        // Автоінкремент виправлень продовжує нумерацію, а не починає з 1.
+        sqlx::query(
+            "INSERT INTO dashboard_module_corrections
+             (module_id, row_id, field_key, source_file, source_sheet, source_row, source_column,
+              raw_text, corrected_text, reason, created_at)
+             VALUES ('dashboard-custom-000001', 1, 'value', 'x.xlsx', 'A', 1, 'B', '?', '1', '', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let last: i64 = sqlx::query_scalar("SELECT max(id) FROM dashboard_module_corrections")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(last, 3);
+
+        // Каскади живі: модуль забирає поля й виправлення, профіль — модулі.
+        sqlx::query("DELETE FROM dashboard_modules WHERE id = 'dashboard-corrections-01'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let (fields, corrections): (i64, i64) = (
+            sqlx::query_scalar("SELECT count(*) FROM dashboard_module_fields")
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            sqlx::query_scalar("SELECT count(*) FROM dashboard_module_corrections")
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+        );
+        assert_eq!((fields, corrections), (0, 1));
+        sqlx::query("DELETE FROM local_profiles WHERE id = 'profile-c0c0c0c0c0c0c0c0c0c0c0c0'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let (modules, profile_modules): (i64, i64) = (
+            sqlx::query_scalar("SELECT count(*) FROM dashboard_modules")
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            sqlx::query_scalar("SELECT count(*) FROM local_profile_modules")
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+        );
+        assert_eq!((modules, profile_modules), (0, 0));
     }
 
     #[tokio::test]

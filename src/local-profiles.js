@@ -36,7 +36,7 @@ import {
 } from './local-profiles-core.js';
 import { createProfileGate } from './profile-gate.js';
 import { requestSplashSkip } from './startup-splash-core.js';
-import { GATE_MODULES, modulesError, moduleVisible } from './profile-gate-core.js';
+import { GATE_MODULES, modulesError, modulesForRows, moduleVisible } from './profile-gate-core.js';
 import { createAssistantUI } from './assistant/assistant-ui.js';
 import { getDatabaseStatus } from './backup-core.js';
 import { appUpdateState } from './app-update-state-core.js';
@@ -330,10 +330,15 @@ function initializeLocalProfiles() {
   function applyModules() {
     const profile = activeProfile();
     const signedIn = Boolean(profile) && !isProfileLocked(profile, sessionProfileId);
-    for (const module of GATE_MODULES) {
-      const visible = !signedIn || moduleVisible(module.id, profile);
-      for (const selector of [module.card, module.tile]) {
-        if (selector) document.querySelector(selector)?.classList.toggle('ew-module-off', !visible);
+    for (const row of GATE_MODULES) {
+      // Рядок «Командування військ» вмикає обидві плитки; профіль, створений раніше лише з ПВК,
+      // бачить лише її: кожна картка йде за своїм модулем.
+      const selectors = row.modules.map((id, index) => [row.cards[index], row.tiles[index], id]);
+      for (const [card, tile, id] of selectors) {
+        const visible = !signedIn || moduleVisible(id, profile);
+        for (const selector of [card, tile]) {
+          if (selector) document.querySelector(selector)?.classList.toggle('ew-module-off', !visible);
+        }
       }
     }
     // Коли частини карток немає, решта стає по центру, а не липне до лівого краю.
@@ -451,7 +456,7 @@ function initializeLocalProfiles() {
     const boxes = GATE_MODULES.map(module => el('input', {
       type: 'checkbox',
       value: module.id,
-      checked: moduleVisible(module.id, profile),
+      checked: module.modules.some(id => moduleVisible(id, profile)),
       'aria-label': `${module.title} — профіль ${profile.displayName}`,
     }));
     return el('div', { class: 'ew-profile-modules' },
@@ -463,7 +468,7 @@ function initializeLocalProfiles() {
         class: 'btn',
         text: 'Зберегти модулі',
         onclick: () => {
-          const chosen = boxes.filter(box => box.checked).map(box => box.value);
+          const chosen = modulesForRows(boxes.filter(box => box.checked).map(box => box.value));
           const problem = modulesError(chosen);
           if (problem) {
             status.textContent = problem;

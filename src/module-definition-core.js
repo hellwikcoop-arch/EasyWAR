@@ -19,8 +19,8 @@ import { blockColumns, tileColumns } from './catalog-core.js';
 
 export const REGISTRY_VERSION = 1;
 export const SOURCE_CATALOGS = Object.freeze(['rust-template', 'catalog-v1', 'legacy']);
-/** Роди військ так, як їх зберігає Rust (`valid_branch`): ПС, РВ, ПВК, УДШВ. */
-export const BRANCHES = Object.freeze(['air', 'rocket', 'pvk', 'dshv']);
+/** Гілки так, як їх зберігає Rust (`valid_branch`): ПС, РВ, ПВК, УДШВ і «Власний модуль» (без роду військ). */
+export const BRANCHES = Object.freeze(['air', 'rocket', 'pvk', 'dshv', 'custom']);
 
 /** Де стоїть модуль. file — файл, у якому живе його код (по ньому тест шукає якорі). */
 export const SURFACES = Object.freeze({

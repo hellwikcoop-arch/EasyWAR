@@ -157,15 +157,27 @@ ends, and the launcher stays `inert` until sign-in.
 
 | File | Role |
 | --- | --- |
-| `src/profile-gate-core.js` | pure rules: form validation, module list, table slots per module, retry delay, which screen to show (tested in `tests/profile-gate.test.mjs`) |
+| `src/profile-gate-core.js` | pure rules: form validation, module rows (`GATE_MODULES`: one row may enable several modules — «Командування військ» = `pvk` + `dshv`; `modulesForRows`, `rowChosen`), table slots per module (`slotsForModules`), retry delay, which screen to show (tested in `tests/profile-gate.test.mjs`) |
 | `src/profile-gate.js` | DOM: login, three-step registration (profile → modules → tables), error screen; `html.ew-locked` + `inert` on the page; no network, no browser storage |
 | `src/profile-gate.css` | gate styles; `.ew-module-off` hides unchosen module cards (selectors carry `#view-start` because `index.html` uses `!important` ids) |
 | `src/local-profiles.js` | creates the gate, hides unchosen modules (`applyModules`), keeps the profile dialog; sign-out sets the splash skip flag and reloads |
 | `src/startup-splash-core.js` | `requestSplashSkip` / `consumeSplashSkip`: one-shot `sessionStorage` flag so sign-out does not replay the video |
 
-- `src/index.html` is unchanged. Module cards and tiles are found by the selectors
-  in `GATE_MODULES`; `tests/profile-gate.test.mjs` fails if one disappears from
-  `index.html`, so re-check it after `script/import_unified_html.mjs`.
+- Module cards and tiles are found by the selectors in `GATE_MODULES` (`cards`
+  and `tiles`, one per module of the row); `tests/profile-gate.test.mjs` fails if
+  one disappears from `index.html`, so re-check it after
+  `script/import_unified_html.mjs`. The splash tiles (`startup-splash-core.js`)
+  follow the same rows: «Командування військ» and «Власний модуль».
+- «Власний модуль» (`custom`): a launcher card `[data-branch="custom"]` opens
+  `src/custom.html` in `#frame-custom` (`MODULE_SRC`, `BRANCH_TITLE`, Vite input
+  `custom`). The page (`custom.css` tokens with a teal accent, `custom-app.js`
+  for the shared theme switch and the hint) has only an app bar with the
+  «Каталог модулів» button and a `#view-dash` host with `[data-ewmc-slot]`, so
+  `dashboard-module-catalog.js` works there unchanged with branch `custom`
+  (`branchFromLocation`, `BRANCH_LABELS`; colour in `public/module-styles.css`).
+  Rust accepts `custom` in `dashboard_modules.branch` (migration 0021) and
+  `lib.rs::dashboard_branch` maps it to no profile table slot, so XLSX-linked
+  sources are refused for it.
 - Outside Tauri (plain browser, `npm run dev`) there is no profile backend, so no
   gate is shown.
 - The gate is a UI barrier plus the Rust unlock check of data commands, not
