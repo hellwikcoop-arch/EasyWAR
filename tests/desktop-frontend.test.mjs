@@ -49,10 +49,11 @@ test('army aviation replaces Air Force art and labels only in army mode', async 
   const air = await read('air.html');
   const art = air.match(/<script id="easywar-army-aviation-mode">[\s\S]*?<\/script>/);
   assert.ok(art, 'army block is present');
-  assert.match(art[0], /get\('module'\) === 'army'\) window\.__EW_ARMY_ART = \{\n  heli: 'data:image\/webp;base64,/, 'helicopter art only for ?module=army');
+  assert.match(art[0], /get\('module'\) === 'army'\) window\.__EW_ARMY_ART = \{\n  card: 'data:image\/webp;base64,/, 'helicopter art only for ?module=army');
+  for (const key of ['kpi', 'chart', 'db']) assert.match(art[0], new RegExp(`\\n  ${key}: 'data:image\\/webp;base64,`), key);
   assert.match(art[0], /poster: 'data:image\/jpeg;base64,/, 'Army Aviation poster instead of Air Force');
   assert.match(air, /const AF_LOGO = \(window\.__EW_ARMY_ART && window\.__EW_ARMY_ART\.poster\) \|\| 'data:image\/jpeg;base64,/);
-  for (const cls of ['kh-jet', 'dh-jet', 'kc-photo']) assert.match(air, new RegExp(`class: '${cls}', src: \\(window\\.__EW_ARMY_ART && window\\.__EW_ARMY_ART\\.heli\\) \\|\\|`), cls);
+  for (const [cls, key] of [['kh-jet', 'kpi'], ['dh-jet', 'db'], ['kc-photo', 'card']]) assert.match(air, new RegExp(`class: '${cls}', src: \\(window\\.__EW_ARMY_ART && window\\.__EW_ARMY_ART\\.${key}\\) \\|\\|`), cls);
   assert.match(air, /const NAV = \[\['p-kpis', \(window\.__EASYWAR_MODULE__ === 'army' \? 'Дашборд АА' : 'Дашборд ПС'\)/);
   assert.match(air, /const CC = \{ blue: window\.__EASYWAR_MODULE__ === 'army' \? '#8fcf4a' : '#4aa8ff'/);
   assert.match(air, /html\[data-module="army"\]:not\(\[data-theme="light"\]\) \{ --nav-hi: #b4ec7a !important;/, 'green side-menu capsule');
