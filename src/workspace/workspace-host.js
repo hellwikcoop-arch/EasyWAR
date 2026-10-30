@@ -201,9 +201,15 @@ export function createHost({
       // «Підготувати» лишає намір у Rust, «Доповісти» підтверджує його паролем (SEC-003);
       // прапорця «переглянуто» з JS немає. Конверт іде лише в локальну чергу.
       detail: collective => invoke('collective_detail', { collective: String(collective ?? '') }),
-      setTable: ({ collective, table = null, title, cls, purpose }) => invoke('collective_table_set', {
+      // `columns: null` залишає стовпці таблиці як є.
+      setTable: ({ collective, table = null, title, cls, purpose, columns = null }) => invoke('collective_table_set', {
         collective: String(collective ?? ''), table: table == null ? null : String(table),
         title: String(title ?? ''), class: String(cls ?? ''), purpose: String(purpose ?? ''),
+        columns: Array.isArray(columns) ? columns.map(String) : null,
+      }),
+      // «Оновити таблицю»: Rust відкриває збережені пакети змін паролем і перевіряє кожен.
+      tableRead: (password, collective, table) => invoke('collective_table_read', {
+        password: String(password ?? ''), collective: String(collective ?? ''), table: String(table ?? ''),
       }),
       inviteCreate: (password, collective, hours) => invoke('collective_invite_create', {
         password: String(password ?? ''), collective: String(collective ?? ''), hours: Number(hours),

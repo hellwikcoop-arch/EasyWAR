@@ -110,6 +110,8 @@ pub(crate) const DASHBOARD_LAYOUTS_SQL: &str =
     include_str!("../migrations/0018_dashboard_layouts.sql");
 pub(crate) const COLLECTIVES_SQL: &str = include_str!("../migrations/0019_collectives.sql");
 pub(crate) const COLLECTIVE_SYNC_SQL: &str = include_str!("../migrations/0020_collective_sync.sql");
+pub(crate) const COLLECTIVE_TABLE_DATA_SQL: &str =
+    include_str!("../migrations/0024_collective_table_data.sql");
 
 pub fn migrations() -> Vec<Migration> {
     vec![
@@ -233,6 +235,12 @@ pub fn migrations() -> Vec<Migration> {
             sql: COLLECTIVE_SYNC_SQL,
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 24,
+            description: "add_collective_table_data",
+            sql: COLLECTIVE_TABLE_DATA_SQL,
+            kind: MigrationKind::Up,
+        },
     ]
 }
 
@@ -299,13 +307,13 @@ pub(crate) async fn create_migrated_database(
 mod tests {
     use super::{
         create_migrated_database, migrations, DatabaseMigrationState, DatabaseStatusError,
-        DatabaseStatusStore, COLLECTIVES_SQL, COLLECTIVE_SYNC_SQL, COMMAND_TABLES_SQL,
-        DASHBOARD_LAYOUTS_SQL, DASHBOARD_MODULES_SQL, DASHBOARD_MODULE_CORRECTIONS_SQL,
-        DASHBOARD_MODULE_CORRECTION_STATUS_SQL, DASHBOARD_MODULE_STYLE_SQL, DATABASE_URL,
-        DOCUMENT_LINKS_SQL, EMBEDDED_MIGRATOR, INITIAL_SCHEMA_SQL, LIBRARY_BLOB_REPAIR_SQL,
-        LOCAL_PROFILES_SQL, OFFICE_LIBRARY_SQL, OWN_LOSSES_TABLES_SQL, PROFILE_BRANCH_TABLES_SQL,
-        PROFILE_DETAILS_SQL, PROFILE_MODULES_SQL, PROFILE_SCHEMAS_SQL, WORKSPACE_TEMPLATES_SQL,
-        XLSX_DUPLICATE_LINKS_SQL,
+        DatabaseStatusStore, COLLECTIVES_SQL, COLLECTIVE_SYNC_SQL, COLLECTIVE_TABLE_DATA_SQL,
+        COMMAND_TABLES_SQL, DASHBOARD_LAYOUTS_SQL, DASHBOARD_MODULES_SQL,
+        DASHBOARD_MODULE_CORRECTIONS_SQL, DASHBOARD_MODULE_CORRECTION_STATUS_SQL,
+        DASHBOARD_MODULE_STYLE_SQL, DATABASE_URL, DOCUMENT_LINKS_SQL, EMBEDDED_MIGRATOR,
+        INITIAL_SCHEMA_SQL, LIBRARY_BLOB_REPAIR_SQL, LOCAL_PROFILES_SQL, OFFICE_LIBRARY_SQL,
+        OWN_LOSSES_TABLES_SQL, PROFILE_BRANCH_TABLES_SQL, PROFILE_DETAILS_SQL, PROFILE_MODULES_SQL,
+        PROFILE_SCHEMAS_SQL, WORKSPACE_TEMPLATES_SQL, XLSX_DUPLICATE_LINKS_SQL,
     };
     use super::{live_connect_options, writable_connect_options};
     use sqlx::{sqlite::SqlitePoolOptions, Row};
@@ -316,7 +324,7 @@ mod tests {
         assert_eq!(DATABASE_URL, "sqlite:easywar.db");
         assert!(include_str!("../tauri.conf.json").contains(DATABASE_URL));
         let registered = migrations();
-        assert_eq!(registered.len(), 20);
+        assert_eq!(registered.len(), 21);
         assert_eq!(registered[0].version, 1);
         assert_eq!(registered[0].description, "create_provenance_schema");
         assert_eq!(registered[1].version, 2);
@@ -363,6 +371,8 @@ mod tests {
         assert_eq!(registered[18].description, "add_collectives");
         assert_eq!(registered[19].version, 20);
         assert_eq!(registered[19].description, "add_collective_sync");
+        assert_eq!(registered[20].version, 24);
+        assert_eq!(registered[20].description, "add_collective_table_data");
         assert_eq!(
             EMBEDDED_MIGRATOR
                 .iter()
@@ -383,7 +393,7 @@ mod tests {
                 .map(|migration| migration.sql)
                 .collect::<Vec<_>>()
         );
-        assert_eq!(super::latest_schema_version(), Some(20));
+        assert_eq!(super::latest_schema_version(), Some(24));
     }
 
     #[tokio::test]
@@ -395,9 +405,9 @@ mod tests {
             DatabaseStatusStore::new(pool.clone()).load().await.unwrap(),
             super::DatabaseStatus {
                 app_version: env!("CARGO_PKG_VERSION").to_owned(),
-                schema_version: 20,
-                supported_schema_version: 20,
-                migration_count: 20,
+                schema_version: 24,
+                supported_schema_version: 24,
+                migration_count: 21,
                 migration_state: DatabaseMigrationState::Current,
             }
         );
@@ -501,6 +511,10 @@ mod tests {
             .execute(&pool)
             .await
             .expect("collective sync migration must apply");
+        sqlx::raw_sql(COLLECTIVE_TABLE_DATA_SQL)
+            .execute(&pool)
+            .await
+            .expect("collective table data migration must apply");
 
         pool
     }

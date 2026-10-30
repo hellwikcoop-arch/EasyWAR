@@ -533,6 +533,8 @@ test('host.collectives: команди обміну передають лише 
   await host.collectives.detail('ABCDEFGHIJ');
   await host.collectives.setTable({ collective: 'ABCDEFGHIJ', title: 'Облік', cls: 'C', purpose: 'after-fact' });
   await host.collectives.setTable({ collective: 'ABCDEFGHIJ', table: 'KLMNOPQRST', title: 'Облік', cls: 'D', purpose: 'planned' });
+  await host.collectives.setTable({ collective: 'ABCDEFGHIJ', table: 'KLMNOPQRST', title: 'Облік', cls: 'C', purpose: 'after-fact', columns: ['Стан', 7] });
+  await host.collectives.tableRead('пароль-профілю', 'ABCDEFGHIJ', 'KLMNOPQRST');
   await host.collectives.inviteCreate('пароль-профілю', 'ABCDEFGHIJ', '24');
   await host.collectives.joinRequest('пароль-профілю', 'EWINV1.x', 'Синтетик');
   await host.collectives.inviteAdmit('пароль-профілю', 'ABCDEFGHIJ', 'EWJOIN1.x');
@@ -542,8 +544,10 @@ test('host.collectives: команди обміну передають лише 
   await host.collectives.reportConfirm('пароль-профілю', '00112233445566778899aabbccddeeff');
   assert.deepEqual(calls, [
     ['collective_detail', { collective: 'ABCDEFGHIJ' }],
-    ['collective_table_set', { collective: 'ABCDEFGHIJ', table: null, title: 'Облік', class: 'C', purpose: 'after-fact' }],
-    ['collective_table_set', { collective: 'ABCDEFGHIJ', table: 'KLMNOPQRST', title: 'Облік', class: 'D', purpose: 'planned' }],
+    ['collective_table_set', { collective: 'ABCDEFGHIJ', table: null, title: 'Облік', class: 'C', purpose: 'after-fact', columns: null }],
+    ['collective_table_set', { collective: 'ABCDEFGHIJ', table: 'KLMNOPQRST', title: 'Облік', class: 'D', purpose: 'planned', columns: null }],
+    ['collective_table_set', { collective: 'ABCDEFGHIJ', table: 'KLMNOPQRST', title: 'Облік', class: 'C', purpose: 'after-fact', columns: ['Стан', '7'] }],
+    ['collective_table_read', { password: 'пароль-профілю', collective: 'ABCDEFGHIJ', table: 'KLMNOPQRST' }],
     ['collective_invite_create', { password: 'пароль-профілю', collective: 'ABCDEFGHIJ', hours: 24 }],
     ['collective_join_request', { password: 'пароль-профілю', invitation: 'EWINV1.x', memberName: 'Синтетик' }],
     ['collective_invite_admit', { password: 'пароль-профілю', collective: 'ABCDEFGHIJ', request: 'EWJOIN1.x' }],

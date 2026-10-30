@@ -66,6 +66,7 @@ const COMMANDS: &[&str] = &[
     "collective_join_accept",
     "collective_report_prepare",
     "collective_report_confirm",
+    "collective_table_read",
     "clear_profile_database",
     "read_profile_database",
     "write_profile_database",

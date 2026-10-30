@@ -1833,7 +1833,7 @@ async fn collective_detail(
         .map_err(|error| error.to_string())
 }
 
-/// Нова таблиця колективу або зміна класу й призначення своєї таблиці.
+/// Нова таблиця колективу або зміна класу, призначення й стовпців своєї таблиці.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 async fn collective_table_set(
@@ -1845,6 +1845,7 @@ async fn collective_table_set(
     title: String,
     class: String,
     purpose: String,
+    columns: Option<Vec<String>>,
 ) -> Result<collective_sync::TableSummary, String> {
     office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
     let profile_id = active_profile_id(&session)?;
@@ -1856,8 +1857,30 @@ async fn collective_table_set(
             &title,
             &class,
             &purpose,
+            columns.as_deref(),
             &library_now(),
         )
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// «Оновити таблицю»: стовпці й перевірені пакети змін таблиці колективу на цьому вузлі.
+/// Конверти відкриваються ключами епох, тому потрібен пароль профілю.
+#[tauri::command]
+async fn collective_table_read(
+    webview: tauri::Webview,
+    profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
+    collectives: tauri::State<'_, CollectiveStore>,
+    password: String,
+    collective: String,
+    table: String,
+) -> Result<collective_sync::TableData, String> {
+    office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
+    let profile_id = active_profile_id(&session)?;
+    let password = collective_password(&profiles, &profile_id, password).await?;
+    collectives
+        .read_table(&profile_id, password, &collective, &table)
         .await
         .map_err(|error| error.to_string())
 }
@@ -4535,6 +4558,7 @@ pub fn run() {
             collective_join_accept,
             collective_report_prepare,
             collective_report_confirm,
+            collective_table_read,
             clear_profile_database,
             read_profile_database,
             write_profile_database,

@@ -111,7 +111,10 @@ mod tests {
                 .unwrap();
             assert_eq!(created.path, destination.to_string_lossy());
             assert_eq!(created.template_key, key);
-            assert_eq!(created.schema_version, database::migrations().len() as i64);
+            assert_eq!(
+                Some(created.schema_version),
+                database::latest_schema_version()
+            );
             assert!(created.profile_display_name.starts_with("Робоче місце — "));
             assert_eq!(
                 restore::inspect_backup(&destination)

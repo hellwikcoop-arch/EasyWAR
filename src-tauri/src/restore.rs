@@ -770,7 +770,7 @@ mod tests {
 
         assert_eq!(
             inspect_backup(&backup).await.unwrap(),
-            BackupInspection { schema_version: 20 }
+            BackupInspection { schema_version: 24 }
         );
         assert_eq!(std::fs::read(&backup).unwrap(), before);
     }
@@ -1087,7 +1087,7 @@ mod tests {
     #[tokio::test]
     async fn a_newer_backup_is_still_rejected_and_extra_tables_are_still_accepted() {
         let dir = tempfile::tempdir().unwrap();
-        let newer = database::migrations().len() as i64 + 1;
+        let newer = database::latest_schema_version().unwrap() + 1;
         let result = inspect_damaged(
             dir.path(),
             "newer",
@@ -1114,7 +1114,7 @@ mod tests {
         assert_eq!(
             result.unwrap(),
             BackupInspection {
-                schema_version: database::migrations().len() as i64
+                schema_version: database::latest_schema_version().unwrap()
             }
         );
     }
@@ -1199,7 +1199,7 @@ mod tests {
 
         assert_eq!(
             stage_backup(&source, &live).await.unwrap(),
-            BackupInspection { schema_version: 20 }
+            BackupInspection { schema_version: 24 }
         );
         assert_eq!(std::fs::read(&source).unwrap(), before);
         assert_eq!(
@@ -1267,7 +1267,7 @@ mod tests {
         stage_backup(&source, &live).await.unwrap();
         assert_eq!(
             swap_staged_backup_offline(&live).await.unwrap(),
-            BackupInspection { schema_version: 20 }
+            BackupInspection { schema_version: 24 }
         );
         assert_eq!(fs::read(&live).unwrap(), new_bytes);
         assert_eq!(
@@ -1391,14 +1391,14 @@ mod tests {
         stage_backup(&source, &live).await.unwrap();
         assert_eq!(
             request_staged_restore(&live).await.unwrap(),
-            BackupInspection { schema_version: 20 }
+            BackupInspection { schema_version: 24 }
         );
         assert!(restore_request_path(&live).unwrap().exists());
         assert_eq!(
             process_requested_restore(&live).await.unwrap(),
             RestoreStartupReport {
                 outcome: RestoreStartupOutcome::Applied,
-                schema_version: Some(20),
+                schema_version: Some(24),
                 pending_restore_available: false,
                 previous_backup_retained: true,
                 detail: None,
@@ -1435,7 +1435,7 @@ mod tests {
             process_requested_restore(&live).await.unwrap(),
             RestoreStartupReport {
                 outcome: RestoreStartupOutcome::RolledBack,
-                schema_version: Some(20),
+                schema_version: Some(24),
                 pending_restore_available: true,
                 previous_backup_retained: false,
                 detail: None,
@@ -1590,7 +1590,7 @@ mod tests {
         assert!(!journal.exists());
         assert_eq!(
             inspect_backup(&crashed).await.unwrap(),
-            BackupInspection { schema_version: 20 }
+            BackupInspection { schema_version: 24 }
         );
         assert_eq!(synthetic_payloads(&crashed).await, (1500, 1500));
     }
@@ -1615,7 +1615,7 @@ mod tests {
         assert!(!journal.exists());
         assert_eq!(
             inspect_backup(&live).await.unwrap(),
-            BackupInspection { schema_version: 20 }
+            BackupInspection { schema_version: 24 }
         );
         assert_eq!(synthetic_payloads(&live).await, (20, 20));
     }
@@ -1655,7 +1655,7 @@ mod tests {
         }
         assert_eq!(
             inspect_backup(&crashed).await.unwrap(),
-            BackupInspection { schema_version: 20 }
+            BackupInspection { schema_version: 24 }
         );
         assert_eq!(synthetic_payloads(&crashed).await, (40, 40));
     }

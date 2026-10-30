@@ -155,6 +155,14 @@ input of the Rust send gate; unconfirmed or planned means class D) and
 `(profile_id, collective_id)` and cascade with the collective. Number 0020 was the
 next free one on main.
 
+`0024_collective_table_data.sql` (owner decision 2026-10-30, «Так, починай») adds
+`collective_tables.columns` (JSON array of column names, `[]` by default) and
+`collective_table_ops` (one sealed envelope per «Доповісти», keyed by
+`envelope_id`, cascading with the table). Row values are never stored in clear;
+Rust rebuilds the table by opening and re-verifying the envelopes. Numbers
+0021–0023 are taken by open module branches; this file does not depend on them,
+and the registration test checks the version list, not a contiguous count.
+
 The `dashboard_data_<id>` tables of user-created dashboard modules are not
 migration objects: Rust creates them at runtime from a validated catalog
 template and adds columns that later appear in a template with `ALTER TABLE`,
