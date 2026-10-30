@@ -1,4 +1,4 @@
-// «Зібрати як РВ / ПС» (E5): чиста логіка без DOM і Tauri. Зразок — перелік блоків реєстру в порядку дашборда
+// «Зібрати за шаблоном» (E5): чиста логіка без DOM і Tauri. Шаблон — перелік блоків реєстру в порядку дашборда
 // РВ чи ПС; одним підтвердженням основна таблиця дістає всі бракуючі стовпці цих блоків, а «Мій дашборд» — їхні
 // картки (показники зверху, під ними діаграми, перелік записів — нижче). Нічого не записує: запис — у викликача.
 
@@ -11,31 +11,31 @@ const CHARTS = ['result-dynamics', 'result-distribution', 'activity-by-day', 'pl
 
 // Прості об'єкти без `Object.freeze`: виклик на верхньому рівні не вилучається зі збірки ПВК-lite.
 /**
- * Зразки. `titles` — підписи карток, що відрізняються від зразка РВ (у ПС пуск — це виліт). Карта, глибина,
- * журнал і «Потребує перевірки» поки не рахуються з основної таблиці, тож у зразок не входять.
+ * Шаблони. `titles` — підписи карток, що відрізняються від шаблону РВ (у ПС пуск — це виліт). Карта, глибина,
+ * журнал і «Потребує перевірки» поки не рахуються з основної таблиці, тож у шаблон не входять.
  */
 export const PRESETS = {
-  rv: { id: 'rv', label: 'Як РВ', title: 'РВ', blocks: [...KPI, ...CHARTS], titles: {} },
-  ps: { id: 'ps', label: 'Як ПС', title: 'ПС', blocks: [...KPI, ...CHARTS.filter(id => id !== 'legacy:firing-units')], titles: { 'legacy:rv-kpi-launches': 'Вильоти' } },
+  rv: { id: 'rv', label: 'Шаблон РВ', title: 'РВ', blocks: [...KPI, ...CHARTS], titles: {} },
+  ps: { id: 'ps', label: 'Шаблон ПС', title: 'ПС', blocks: [...KPI, ...CHARTS.filter(id => id !== 'legacy:firing-units')], titles: { 'legacy:rv-kpi-launches': 'Вильоти' } },
 };
 
-/** Зразки для роду військ: «свій» — першим (ПС для авіації, РВ для решти). */
+/** Шаблони для роду військ: «свій» — першим (ПС для авіації, РВ для решти). */
 export const presetsFor = branch => (branch === 'air' ? [PRESETS.ps, PRESETS.rv] : [PRESETS.rv, PRESETS.ps]);
 
-/** Блоки зразка, знайдені в реєстрі й здатні бути карткою з основної таблиці, у порядку зразка. */
+/** Блоки шаблону, знайдені в реєстрі й здатні бути карткою з основної таблиці, у порядку шаблону. */
 export function presetDefinitions(preset, definitions) {
   const byId = new Map((Array.isArray(definitions) ? definitions : []).map(item => [item.definitionId, item]));
   return (preset?.blocks || []).map(id => byId.get(id)).filter(item => item && hasBlockCard(item.definitionId));
 }
 
 /**
- * Що зробить зразок: один план стовпців на всі блоки (обов'язкові ролі без повторів, порядок — за першим блоком,
+ * Що зробить шаблон: один план стовпців на всі блоки (обов'язкові ролі без повторів, порядок — за першим блоком,
  * що їх вимагає) і скільки карток ще не стоїть на цій таблиці. `layout` — розкладка «Мого дашборда» або `null`.
  * Повертає `{ ok: true, plan, definitions, missing, summary }` або `{ ok: false, message }`.
  */
 export function planPreset({ preset, definitions, schema = null, module = null, layout = null, sourceId = '' }) {
   const blocks = presetDefinitions(preset, definitions);
-  if (!blocks.length) return { ok: false, message: 'У реєстрі немає блоків цього зразка.' };
+  if (!blocks.length) return { ok: false, message: 'У реєстрі немає блоків цього шаблону.' };
   const requirements = [];
   const roles = new Set();
   for (const block of blocks) {
@@ -56,7 +56,7 @@ export function planPreset({ preset, definitions, schema = null, module = null, 
 }
 
 /**
- * Ставить картки зразка, яких ще немає на таблиці `sourceId`, у порядку зразка. Кожна стає перед карткою таблиці,
+ * Ставить картки шаблону, яких ще немає на таблиці `sourceId`, у порядку шаблону. Кожна стає перед карткою таблиці,
  * тож порядок зберігається, а таблиця лишається під ними. Перша відмова ядра розкладки зупиняє решту.
  * Повертає `{ ok, layout, placed }`.
  */

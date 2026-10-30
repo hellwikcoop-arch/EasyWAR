@@ -354,7 +354,7 @@ function initialize() {
     }
   }
 
-  // «Зібрати як РВ / ПС» (E5): бракуючі стовпці всіх блоків зразка — одним записом у основну таблицю, ролі — одним
+  // «Зібрати за шаблоном» (E5): бракуючі стовпці всіх блоків шаблону — одним записом у основну таблицю, ролі — одним
   // записом схеми, картки — однією зміною розкладки. Збій зіставлення не псує додані стовпці, як і в `addBlockColumns`.
   async function assemblePreset({ preset, plan, definitions, module }) {
     if (state.busy) return { ok: false, message: 'Зачекайте: інша дія ще триває.' };
@@ -374,7 +374,7 @@ function initialize() {
         placed = result.placed || 0;
         return result;
       });
-      const line = `зразок ${preset.title}: ${plan.fields.length ? `стовпців додано — ${plan.fields.length}, ` : ''}карток поставлено — ${placed}`;
+      const line = `шаблон ${preset.title}: ${plan.fields.length ? `стовпців додано — ${plan.fields.length}, ` : ''}карток поставлено — ${placed}`;
       showToast(`Зібрано — ${line}.`);
       return { ok: true, message: `Готово, ${line}.` };
     } catch (error) {

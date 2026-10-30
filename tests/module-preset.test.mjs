@@ -16,7 +16,7 @@ const definitions = listDefinitions();
 const SOURCE = moduleSourceId('main');
 const tableModule = (fields = []) => ({ id: 'main', branch: 'rocket', templateId: 'user-table', title: 'Основна таблиця', fields });
 
-test('зразки містять лише блоки, що рахуються з основної таблиці, у порядку дашборда', () => {
+test('шаблони містять лише блоки, що рахуються з основної таблиці, у порядку дашборда', () => {
   for (const preset of Object.values(PRESETS)) {
     for (const id of preset.blocks) assert.equal(hasBlockCard(id), true, id);
     assert.equal(presetDefinitions(preset, definitions).length, preset.blocks.length, `${preset.id}: усі блоки є в реєстрі`);
@@ -30,7 +30,7 @@ test('зразки містять лише блоки, що рахуються �
   assert.deepEqual(presetDefinitions(PRESETS.rv, []), []);
 });
 
-test('без основної таблиці зразок РВ створює її з усіма обов’язковими стовпцями без повторів', () => {
+test('без основної таблиці шаблон РВ створює її з усіма обов’язковими стовпцями без повторів', () => {
   const result = planPreset({ preset: PRESETS.rv, definitions });
   assert.equal(result.ok, true);
   assert.equal(result.missing.length, 16);
@@ -64,7 +64,7 @@ test('наявні стовпці зіставляються, а вже пост
   assert.equal(placed.placed, 16);
   layout = placed.layout;
   const order = orderedIds(layout);
-  assert.deepEqual(order.slice(0, 16).map(id => id.replace(/#\d+$/u, '')), PRESETS.rv.blocks, 'картки в порядку зразка, таблиця — під ними');
+  assert.deepEqual(order.slice(0, 16).map(id => id.replace(/#\d+$/u, '')), PRESETS.rv.blocks, 'картки в порядку шаблону, таблиця — під ними');
   assert.equal(order.length, 17);
   const width = id => layout.placements.find(item => item.instanceId === id).w;
   assert.equal(width(order[0]), 4);
@@ -77,7 +77,7 @@ test('наявні стовпці зіставляються, а вже пост
   assert.equal(planPreset({ preset: PRESETS.ps, definitions, schema, module, layout, sourceId: SOURCE }).done, true);
 });
 
-test('у зразку ПС картка пусків підписана «Вильоти»', () => {
+test('у шаблоні ПС картка пусків підписана «Вильоти»', () => {
   const ps = planPreset({ preset: PRESETS.ps, definitions });
   const placed = placePreset(emptyLayout('p1'), { preset: PRESETS.ps, definitions: ps.definitions, sourceId: SOURCE });
   const launches = placed.layout.instances.find(item => item.definitionId === 'legacy:rv-kpi-launches');
@@ -94,7 +94,7 @@ test('у зразку ПС картка пусків підписана «Вил
   assert.equal(blockCardModel({ definition, schema, sourceId: SOURCE, rows }).model.label, 'Пуски');
 });
 
-test('каталог показує розділ зразків і збирає одним записом стовпців і розкладки', async () => {
+test('каталог показує розділ шаблонів і збирає одним записом стовпців і розкладки', async () => {
   const catalog = await readFile(new URL('../src/dashboard-module-catalog.js', import.meta.url), 'utf8');
   assert.match(catalog, /presetPanel\(\{\n\s+el, presets: presetsFor\(state\.branch\)/);
   assert.match(catalog, /placePreset\(layout, \{ preset, definitions, sourceId, freshTable: !module \}\)/);
