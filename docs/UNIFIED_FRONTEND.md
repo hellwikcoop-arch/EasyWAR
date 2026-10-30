@@ -791,6 +791,9 @@ v1 і блоки вкладок через `listDefinitions` + `validateRegistry
 рядок моделі РВ), `blockCardModel` (перевірка ролей через `availability`, числа — `agg`/`resKind`/`shareOfOps` з `module-adapters/rv-kpi-core.js`, модель виду `kpi` для
 `mountChart`). Після додавання блока каталог ставить картку розкладки (`addInstance` з `definitionId` блока і `sourceId` основної таблиці); `renderModule` для такої картки
 малює `blockVisual` замість діаграми шаблону і не показує «Видалити модуль і дані». `resKind` перенесено в ядро дослівно з rocket.html (тест порівнює текст).
+Блоки-діаграми спільних вкладок ПС/РВ (розподіл і динаміка результатів, час доби, активність за днями, тип носія/цілі, боєприпаси, топ-5 підрозділів, повторні цілі,
+вогневі бригади): рядки моделі РВ зводяться до рядків службового модуля з полями `category`/`day`/`series`/`value`, малюнок — `chartModel` (ті самі види, що й шаблони).
+Описи діаграм будуються ліниво (`charts()`), бо виклики на верхньому рівні лишилися б у збірці ПВК-lite.
 Тести — `tests/module-block-card.test.mjs`.
 CSS — `.ewmc-links*` у `dashboard-module-catalog.css`. Тести — `tests/table-link-view.test.mjs`
 (логіка й текстові контракти: імпорт, відсутність `invoke`, `innerHTML`, запису схеми).
