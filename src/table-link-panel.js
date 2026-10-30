@@ -8,7 +8,7 @@ import { clearRelation, clearRelations, confirmRelation, rejectRelation, setGrou
 import { linkIssues, suggestRelations } from './table-link-core.js';
 import {
   confirmArgs, confirmBlock, decisionOf, groupsNeedSaving, linkInputs, pairView, rejectArgs, rejectedRelationViews, savedGroupViews,
-  savedRelationViews, suggestedGroups, summaryLine,
+  mergeDownloadView, mergeModuleView, mergePreviewView, savedRelationViews, suggestedGroups, summaryLine,
 } from './table-link-view-core.js';
 
 const yieldToPage = () => new Promise(resolve => setTimeout(resolve, 0));
@@ -16,9 +16,10 @@ const yieldToPage = () => new Promise(resolve => setTimeout(resolve, 0));
 /**
  * `schema`, `modules`, `data` — функції, що повертають поточний стан дашборда. `apply(change)` записує зміну схеми
  * профілю (`change(schema)` → результат ядра) і повертає `{ ok, schema?, message? }`; `onChange()` кличеться після
- * успішного запису. Без `apply` панель лише показує підказки. Повертає `<details>`.
+ * успішного запису; `download(filename, text)` віддає користувачу новий файл (за замовчуванням — завантаження через браузер);
+ * `createModule(request, { relationId, rowCount })` створює модуль з об'єднаної таблиці (`create_dashboard_module`) і повертає `{ ok, message? }`; без нього кнопки «Створити таблицю» немає. Без `apply` панель лише показує підказки. Повертає `<details>`.
  */
-export function linkPanel({ el, schema, modules, data, apply = null, onChange = () => {}, now = () => new Date().toISOString() }) {
+export function linkPanel({ el, schema, modules, data, apply = null, onChange = () => {}, now = () => new Date().toISOString(), download = downloadText, createModule = null }) {
   const status = el('p', { class: 'ewmc-links-status', role: 'status' });
   const output = el('div', { class: 'ewmc-links-out' });
   const saved = el('div', { class: 'ewmc-links-saved' });
@@ -57,6 +58,7 @@ export function linkPanel({ el, schema, modules, data, apply = null, onChange = 
           el('span', { text: view.text }),
           el('span', { class: 'ewmc-links-basis', text: ` · ${view.basis}` }),
           view.stale ? el('span', { class: 'ewmc-links-stale', text: ' · перевірте: стовпець ключа змінився' }) : null,
+          el('button', { type: 'button', class: 'btn quiet', text: 'Переглянути об’єднання', 'data-action': 'preview-merge', onclick: event => togglePreview(view.id, event.currentTarget) }),
           apply ? el('button', { type: 'button', class: 'btn quiet', text: 'Зняти', 'data-action': 'clear-relation', onclick: () => decide(value => clearRelation(value, view.id), 'Зв’язок знято: пару знову пропонуватимуть.') }) : null))));
     }
     if (rejected.length) {
@@ -97,6 +99,41 @@ export function linkPanel({ el, schema, modules, data, apply = null, onChange = 
     return el('div', { class: 'ewmc-links-reset' }, ask, box);
   }
   renderSaved();
+
+  // Перегляд об'єднання (B5): лише показ перших рядків, нічого не створюється й не записується.
+  function togglePreview(relationId, button) {
+    const item = button.closest('li');
+    const open = item.querySelector('.ewmc-links-merge');
+    if (open) { open.remove(); return; }
+    const view = mergePreviewView(schema(), relationId, modules(), data());
+    item.append(mergeNode(el, view, { download: () => saveMerge(relationId, item), create: createModule ? button => makeModule(relationId, item, button) : null }));
+  }
+
+  // Новий CSV з об'єднаною таблицею: вихідні таблиці й профіль не змінюються, нічого не записується.
+  function saveMerge(relationId, item) {
+    item.querySelector('.ewmc-links-merge-result')?.remove();
+    const file = mergeDownloadView(schema(), relationId, modules(), data(), now);
+    if (file.ok) download(file.filename, file.text);
+    const text = file.ok ? `Файл «${file.filename}» створено: ${file.rowCount} рядків. Вихідні таблиці не змінено.` : file.message;
+    item.querySelector('.ewmc-links-merge')?.append(el('p', { class: 'ewmc-links-merge-result ewmc-links-block', role: 'status', text }));
+  }
+
+  // Нова таблиця в профілі: окремий модуль «Мого дашборда» з усіма рядками; вихідні таблиці не змінюються.
+  async function makeModule(relationId, item, button) {
+    item.querySelector('.ewmc-links-merge-result')?.remove();
+    const note = text => {
+      if (item.isConnected) item.querySelector('.ewmc-links-merge')?.append(el('p', { class: 'ewmc-links-merge-result ewmc-links-block', role: 'status', text }));
+    };
+    const made = mergeModuleView(schema(), relationId, modules(), data());
+    if (!made.ok) { note(made.message); return; }
+    button.disabled = true;
+    try {
+      const result = await createModule(made.request, { relationId, rowCount: made.rowCount });
+      if (!result?.ok) note(result?.message || 'Не вдалося створити модуль.');
+    } finally {
+      button.disabled = false;
+    }
+  }
 
   function renderOutput() {
     output.replaceChildren(...shown.map(view => pairNode(el, view, schema(), { apply: Boolean(apply), decide, now })));
@@ -195,4 +232,26 @@ function pairNode(el, view, current, tools) {
     el('p', { class: view.exhaustive ? 'ewmc-links-full' : 'ewmc-links-partial', text: view.completeness }),
     view.reasons.length ? el('ul', { class: 'ewmc-links-reasons' }, view.reasons.map(text => el('li', { text }))) : null,
     view.exclusions.length ? el('details', { class: 'ewmc-links-excl' }, el('summary', { text: `Не брались за ключ: ${view.exclusions.length}` }), el('ul', {}, view.exclusions.map(text => el('li', { text })))) : null);
+}
+
+function mergeNode(el, view, { download, create }) {
+  if (!view.ok) return el('p', { class: 'ewmc-links-merge ewmc-links-block', text: view.message });
+  return el('div', { class: 'ewmc-links-merge' },
+    el('p', { class: 'ewmc-links-hint', text: `${view.summary} Вихідні таблиці не змінюються: результат можна лише завантажити новим файлом або створити з нього окремий модуль.` }),
+    ...view.notes.map(text => el('p', { class: 'ewmc-links-block', text })),
+    view.downloadable && create ? el('button', { type: 'button', class: 'btn quiet', text: 'Створити таблицю в профілі', 'data-action': 'create-merged-module', onclick: event => create(event.currentTarget) }) : null,
+    view.downloadable ? el('button', { type: 'button', class: 'btn quiet', text: 'Завантажити CSV', 'data-action': 'download-merge', onclick: download }) : null,
+    el('div', { class: 'ewmc-links-merge-scroll' }, el('table', { class: 'ewmc-links-merge-table' },
+      el('thead', {}, el('tr', {}, view.columns.map(header => el('th', { text: header })))),
+      el('tbody', {}, view.sample.map(row => el('tr', {}, row.map(value => el('td', { text: value }))))))));
+}
+
+/** Звичайне завантаження файлу через браузер (як решта вивантажень застосунку). */
+function downloadText(filename, text) {
+  const anchor = document.createElement('a');
+  anchor.href = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' }));
+  anchor.download = filename;
+  document.body.append(anchor);
+  anchor.click();
+  setTimeout(() => { URL.revokeObjectURL(anchor.href); anchor.remove(); }, 1000);
 }

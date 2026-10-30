@@ -194,6 +194,34 @@ export function createHost({
       status: () => invoke('collective_status'),
       createIdentity: password => invoke('collective_create_identity', { password: String(password ?? '') }),
       create: (password, name) => invoke('collective_create', { password: String(password ?? ''), name: String(name ?? '') }),
+      // Обмін (C3b, другий зріз): тексти запрошень і ключів люди пересилають самі,
+      // «Підготувати» лишає намір у Rust, «Доповісти» підтверджує його паролем (SEC-003);
+      // прапорця «переглянуто» з JS немає. Конверт іде лише в локальну чергу.
+      detail: collective => invoke('collective_detail', { collective: String(collective ?? '') }),
+      setTable: ({ collective, table = null, title, cls, purpose }) => invoke('collective_table_set', {
+        collective: String(collective ?? ''), table: table == null ? null : String(table),
+        title: String(title ?? ''), class: String(cls ?? ''), purpose: String(purpose ?? ''),
+      }),
+      inviteCreate: (password, collective, hours) => invoke('collective_invite_create', {
+        password: String(password ?? ''), collective: String(collective ?? ''), hours: Number(hours),
+      }),
+      joinRequest: (password, invitation) => invoke('collective_join_request', {
+        password: String(password ?? ''), invitation: String(invitation ?? ''),
+      }),
+      inviteAdmit: (password, collective, request) => invoke('collective_invite_admit', {
+        password: String(password ?? ''), collective: String(collective ?? ''), request: String(request ?? ''),
+      }),
+      joinAccept: (password, keys) => invoke('collective_join_accept', {
+        password: String(password ?? ''), keys: String(keys ?? ''),
+      }),
+      reportPrepare: ({ collective, table, transport, explicitWan, operation }) => invoke('collective_report_prepare', {
+        collective: String(collective ?? ''), table: String(table ?? ''),
+        transport: String(transport ?? ''), explicitWan: explicitWan === true,
+        operation: String(operation ?? ''),
+      }),
+      reportConfirm: (password, intent) => invoke('collective_report_confirm', {
+        password: String(password ?? ''), intent: String(intent ?? ''),
+      }),
     })
     : null;
 

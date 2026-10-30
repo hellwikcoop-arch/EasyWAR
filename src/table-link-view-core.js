@@ -3,7 +3,7 @@
 // людські тексти й стан рішень (B3). Нічого не зберігає: рішення людини ухвалює і записує викликач через
 // `confirmRelation`/`rejectRelation`/`clearRelation` ядра схеми.
 
-import { CARDINALITY_LABELS, LINK_LIMITS, connectedGroups, describeCandidate, linkCoverage, tableFromSchema } from './table-link-core.js';
+import { CARDINALITY_LABELS, LINK_LIMITS, connectedGroups, describeCandidate, linkCoverage, mergePreview, tableFromSchema } from './table-link-core.js';
 import { moduleSourceId } from './profile-schema-modules-core.js';
 import { LIMITS, groupsOf, relationId, relationsOf, staleRelations } from './profile-schema-core.js';
 
@@ -264,4 +264,149 @@ export function linkCoverageViews(schema, sourceId, modules, data) {
     views.push({ relationId: relation.id, text, warn: lone > 0 || loneOther > 0 || !cover.complete });
   }
   return views;
+}
+
+// ─── Перегляд об'єднання (B5, лише показ) ──────────────────────────────────────────────────────────────
+
+const rowsWord = n => (n % 10 === 1 && n % 100 !== 11 ? 'рядок' : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? 'рядки' : 'рядків');
+
+/** Підтверджений зв'язок, обидві таблиці з даних дашборда й результат об'єднання (`sample` рядків). */
+function mergeOf(schema, relationId, modules, data, sample) {
+  const relation = relationsOf(schema).find(item => item.id === relationId && item.status === 'confirmed');
+  if (!relation) return { ok: false, message: 'Такого підтвердженого зв’язку немає.' };
+  if (staleRelations(schema).includes(relation.id)) return { ok: false, message: 'Зв’язок треба перевірити: стовпець ключа змінився.' };
+  const tableOf = id => {
+    const module = (Array.isArray(modules) ? modules : []).find(item => moduleSourceId(item.id) === id);
+    const payload = module ? (data instanceof Map ? data.get(module.id) : data?.[module.id]) : null;
+    if (!payload || payload.failed === true || !Array.isArray(payload.rows)) return null;
+    const made = tableFromSchema(schema, id, payload.rows.slice(0, LINK_LIMITS.maxRows), { truncated: payload.truncated === true || payload.rows.length > LINK_LIMITS.maxRows });
+    return made.ok ? made.table : null;
+  };
+  const left = tableOf(relation.left.sourceId);
+  const right = tableOf(relation.right.sourceId);
+  if (!left || !right) return { ok: false, message: 'Дані однієї з таблиць не прочитано.' };
+  const merged = mergePreview(left, right, relation.left.columns, relation.right.columns, { sample });
+  if (!merged.ok) return { ok: false, message: merged.message };
+  return { ok: true, left, right, merged };
+}
+
+/**
+ * Що дало б об'єднання двох таблиць за підтвердженим зв'язком: стовпці, підсумок рядків і кілька перших рядків.
+ * Нічого не створює. `{ ok: true, title, summary, notes, columns, sample }` або `{ ok: false, message }`.
+ */
+export function mergePreviewView(schema, relationId, modules, data) {
+  const made = mergeOf(schema, relationId, modules, data, 5);
+  if (!made.ok) return made;
+  const { left, right, merged } = made;
+  const notes = [];
+  if (!merged.complete) notes.push('Таблицю прочитано не повністю: підсумок за прочитаним, а файл завантажити не можна.');
+  if (merged.onlyLeft || merged.onlyRight) notes.push(`Рядки без пари лишаються з порожніми стовпцями іншої таблиці: ${merged.onlyLeft} з «${left.title}», ${merged.onlyRight} з «${right.title}».`);
+  return {
+    ok: true,
+    title: `${left.title} + ${right.title}`,
+    summary: `Об’єднана таблиця мала б ${merged.rowCount} ${rowsWord(merged.rowCount)} і ${merged.columns.length} стовпців; з парою: ${merged.matched}.`,
+    notes,
+    columns: merged.columns.map(column => column.header),
+    sample: merged.sample,
+    downloadable: merged.complete,
+  };
+}
+
+/** CSV у вигляді решти вивантажень застосунку: крапка з комою, BOM для Excel, CRLF; лапки подвоєно. */
+export function tableCsv(rows) {
+  const escape = value => {
+    const text = String(value ?? '');
+    return /[";\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+  };
+  return `\uFEFF${rows.map(row => row.map(escape).join(';')).join('\r\n')}`;
+}
+
+/**
+ * Файл з об'єднаною таблицею для завантаження: новий CSV, вихідні таблиці не змінюються. Неповно прочитану таблицю
+ * не віддаємо (файл мовчки втратив би рядки). `{ ok: true, filename, text, rowCount }` або `{ ok: false, message }`.
+ */
+export function mergeDownloadView(schema, relationId, modules, data, now = () => new Date().toISOString()) {
+  const made = mergeOf(schema, relationId, modules, data, Infinity);
+  if (!made.ok) return made;
+  const { merged } = made;
+  if (!merged.complete) return { ok: false, message: 'Таблицю прочитано не повністю: файл був би неповним. Файл не створено.' };
+  const stamp = String(now()).slice(0, 10).replaceAll('-', '');
+  return {
+    ok: true,
+    filename: `eW_obyednana_${stamp}.csv`,
+    text: tableCsv([merged.columns.map(column => column.header), ...merged.sample]),
+    rowCount: merged.rowCount,
+  };
+}
+
+// ─── Об'єднана таблиця як модуль профілю (B5, запис) ────────────────────────────────────────────────
+
+/** Службовий «шаблон» модуля з довільними стовпцями; збігається з `MERGED_TEMPLATE_ID` у `dashboard_modules.rs`. */
+export const MERGED_TEMPLATE_ID = 'merged-table';
+const MODULE_ROW_LIMIT = 10_000;
+const MODULE_FIELD_LIMIT = 64;
+const MODULE_TEXT_LIMIT = 4096;
+const MODULE_LABEL_LIMIT = 80;
+
+const isCalendarDate = text => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (!match) return false;
+  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+};
+
+/** Вид стовпця за його значеннями: усі непорожні — цілі, дробові, дати ISO, інакше текст (нічого не округлюється). */
+function columnKind(values) {
+  const filled = values.filter(value => value !== '');
+  if (!filled.length) return 'text';
+  if (filled.every(value => /^-?(0|[1-9]\d*)$/.test(value) && Number.isSafeInteger(Number(value)))) return 'integer';
+  if (filled.every(value => /^-?(0|[1-9]\d*)(\.\d+)?$/.test(value) && Number.isFinite(Number(value)))) return 'real';
+  if (filled.every(isCalendarDate)) return 'date';
+  return 'text';
+}
+
+/**
+ * Запит на створення модуля з об'єднаної таблиці (`create_dashboard_module` із `customFields`): усі рядки, типи стовпців
+ * визначено за значеннями, ключі стовпців `c1`, `c2`, … дає Rust. Нічого не змінює: це лише побудова запиту.
+ * `{ ok: true, request, rowCount, columnCount }` або `{ ok: false, message }`. Неповно прочитане, понад 10 000 рядків,
+ * понад 64 стовпці чи клітинка понад 4096 символів не віддаються (інакше дані мовчки загубилися б).
+ */
+export function mergeModuleView(schema, relationId, modules, data) {
+  const made = mergeOf(schema, relationId, modules, data, Infinity);
+  if (!made.ok) return made;
+  const { left, merged } = made;
+  if (!merged.complete) return { ok: false, message: 'Таблицю прочитано не повністю: модуль був би неповним. Модуль не створено.' };
+  if (merged.rowCount > MODULE_ROW_LIMIT) return { ok: false, message: `В об’єднаній таблиці ${merged.rowCount} рядків, а в модуль вміщається до ${MODULE_ROW_LIMIT}. Модуль не створено.` };
+  if (merged.columns.length > MODULE_FIELD_LIMIT) return { ok: false, message: `В об’єднаній таблиці ${merged.columns.length} стовпців, а в модуль вміщається до ${MODULE_FIELD_LIMIT}. Модуль не створено.` };
+  if (merged.sample.some(row => row.some(value => value.length > MODULE_TEXT_LIMIT))) return { ok: false, message: `Є клітинка довша за ${MODULE_TEXT_LIMIT} символів. Модуль не створено.` };
+  const module = (Array.isArray(modules) ? modules : []).find(item => moduleSourceId(item.id) === left.sourceId);
+  const kinds = merged.columns.map((_, index) => columnKind(merged.sample.map(row => row[index])));
+  const customFields = merged.columns.map((column, index) => {
+    const numeric = kinds[index] === 'integer' || kinds[index] === 'real';
+    const header = String(column.header || '').trim() || `Стовпець ${index + 1}`;
+    return {
+      label: header.length > MODULE_LABEL_LIMIT ? `${header.slice(0, MODULE_LABEL_LIMIT - 1)}…` : header,
+      dataType: kinds[index],
+      role: numeric ? 'metric' : 'dimension',
+      aggregation: numeric ? 'sum' : 'none',
+    };
+  });
+  const rows = merged.sample.map(row => Object.fromEntries(row.map((value, index) => [
+    `c${index + 1}`,
+    value === '' ? null : kinds[index] === 'integer' || kinds[index] === 'real' ? Number(value) : value,
+  ])));
+  const title = `${left.title} + ${made.right.title}`;
+  return {
+    ok: true,
+    rowCount: merged.rowCount,
+    columnCount: merged.columns.length,
+    request: {
+      branch: module?.branch || 'air',
+      templateId: MERGED_TEMPLATE_ID,
+      title: title.length > 80 ? `${title.slice(0, 79)}…` : title,
+      rows,
+      customFields,
+    },
+  };
 }

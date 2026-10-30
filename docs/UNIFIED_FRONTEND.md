@@ -729,6 +729,26 @@ v1 і блоки вкладок через `listDefinitions` + `validateRegistry
 для усіченого читання) і `linkCoverageViews` (`table-link-view-core.js`: текст по кожному підтвердженому зв'язку; «перевірте» й непрочитані дані
 пропускаються з поясненням). У картці `ul.ewmc-related-stats[data-related-stats-for]` заповнює `fillCoverage` через `setTimeout(0)` після малювання
 і з `refreshRelatedLines`; тільки підрахунок, без фільтра й без змін у картках. `removeSource` розпускає групу, що лишилась з однієї таблиці.
+Перегляд об'єднання (B5, перший крок): `mergePreview` (`table-link-core.js`: повне зовнішнє з'єднання двох профільних таблиць за ключем,
+помилки `bad_key`/`many_many`, дублі заголовків із суфіксом « (Назва таблиці)», перші `sample` рядків) і `mergePreviewView`
+(`table-link-view-core.js`: підсумок і зразок для екрана). Кнопка `preview-merge` біля підтвердженого зв'язку (`togglePreview`, `mergeNode`
+у `table-link-panel.js`) лише показує блок `.ewmc-links-merge`; жодного `apply`/запису схеми й жодного нового модуля.
+Завантаження об'єднаної таблиці: `mergeDownloadView` (усі рядки через `mergePreview` з `sample: Infinity`; неповно прочитане не віддається) і
+`tableCsv` (`;`, BOM, CRLF, як в інших вивантаженнях) у `table-link-view-core.js`; кнопка `download-merge` у панелі викликає `download(filename, text)`
+(за замовчуванням `downloadText`: blob-посилання, без Tauri). Нічого не пишеться в схему профілю й у таблиці модулів.
+Модуль з об'єднаної таблиці: `mergeModuleView` (`table-link-view-core.js`) будує запит `create_dashboard_module` з `templateId: 'merged-table'`
+(`MERGED_TEMPLATE_ID`, збігається з Rust) і `customFields` (`label`, `dataType`: `integer`/`real`/`date`/`text` за значеннями, `role`, `aggregation`);
+рядки ключуються `c1`, `c2`, …, порожнє — `null`; відмовляє при неповному читанні, >10 000 рядків, >64 стовпців, клітинці >4096. Кнопка
+`create-merged-module` у панелі викликає `createModule(request)`, який передає `createMergedModule` каталогу: той самий `invoke('create_dashboard_module', request)`,
+далі `loadModules()` (розкладка E4 ставить картку) і сповіщення. Лише `invoke` у каталозі, панель і ядро його не викликають. Нових команд і capabilities немає:
+у наявної команди з'явився необов'язковий `customFields`.
+Оновлення знімка: `createMergedModule(request, { relationId, rowCount })` після створення чекає `state.syncing` (синхронізацію джерел схеми) і пише знімок
+`setSnapshot` (`profile-schema-core.js`, поле `snapshots` схеми профілю: `sourceId`, `relationId`, `builtAt`, `rowCount`; без міграції й команд).
+`table-link-snapshot-core.js` (чисте): `snapshotInfo`, `refreshView` (перебудова з поточних вихідних через `mergeModuleView`, порівняння стовпців знімка за назвою й типом,
+`countChanges` — додано/зникне/без змін, запит із повною заміною рядків без `rowId`), `refreshSummary`. `table-link-snapshot-panel.js` — DOM: `<details class="ewmc-update ewmc-snapshot">`
+на сторінці таблиці-знімка (кнопки `check-snapshot`, `apply-snapshot`, `confirm-snapshot`); `table-link-snapshot-client.js` — `replaceSnapshotRows` (та сама
+`replace_dashboard_module_rows` з `expectedUpdatedAt`). Каталог перед перевіркою читає обидві вихідні таблиці наново (`readSnapshotSources`) і після заміни оновлює дату
+знімка. Тести — `tests/table-link-snapshot.test.mjs`.
 CSS — `.ewmc-links*` у `dashboard-module-catalog.css`. Тести — `tests/table-link-view.test.mjs`
 (логіка й текстові контракти: імпорт, відсутність `invoke`, `innerHTML`, запису схеми).
 

@@ -687,6 +687,81 @@ export function linkCoverage(leftTable, rightTable, leftColumns, rightColumns) {
   return { ok: true, leftRows: left.rows, leftMatched, rightRows: right.rows, rightMatched, complete: !left.truncated && !right.truncated };
 }
 
+/**
+ * Перегляд об'єднання двох таблиць за підтвердженим ключем (B5, лише показ): які стовпці й скільки рядків дало б об'єднання.
+ * Нічого не створює й не записує. Ключ має бути унікальним хоча б в одній таблиці (інакше рядків стало б удвічі більше
+ * через добуток, `many_many`). Усі рядки зберігаються: рядок без пари лишається з порожніми стовпцями іншої таблиці
+ * (повне зовнішнє з'єднання). Стовпці: ключ (один раз), решта лівої, решта правої; однакові підписи розрізняються назвою таблиці.
+ * Повертає `{ ok, columns: [{ header, from: 'key'|'left'|'right' }], rowCount, matched, onlyLeft, onlyRight, sample: string[][],
+ * complete }`. `sample` — перші `sample` рядків для показу в сесії; ключі пар порівнюються тими самими нормалізованими значеннями, що й пошук.
+ */
+export function mergePreview(leftTable, rightTable, leftColumns, rightColumns, { sample = 5 } = {}) {
+  const linker = createLinker();
+  const left = profileTable(leftTable, linker);
+  const right = profileTable(rightTable, linker);
+  const lc = (leftColumns || []).map(key => left.byKey.get(key));
+  const rc = (rightColumns || []).map(key => right.byKey.get(key));
+  if (!lc.length || lc.length !== rc.length || lc.length > LINK_LIMITS.maxKeyColumns || lc.includes(undefined) || rc.includes(undefined)) {
+    return fail('bad_key', 'Ключ — від одного до трьох стовпців з кожного боку, однакова кількість.');
+  }
+  const keyAt = (columns, i) => {
+    const key = columns.map(column => column.values[i]);
+    return key.includes('') ? null : key.join(SEP);
+  };
+  const index = (columns, rows) => {
+    const map = new Map();
+    for (let i = 0; i < rows; i += 1) {
+      const key = keyAt(columns, i);
+      if (key === null) continue;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(i);
+    }
+    return map;
+  };
+  const leftIndex = index(lc, left.rows);
+  const rightIndex = index(rc, right.rows);
+  const unique = map => [...map.values()].every(list => list.length === 1);
+  if (!unique(leftIndex) && !unique(rightIndex)) return fail('many_many', 'Ключ не унікальний у жодній таблиці: об’єднання дало б добуток рядків.');
+  const leftKeys = new Set(leftColumns);
+  const rightKeys = new Set(rightColumns);
+  const leftCols = (Array.isArray(leftTable.columns) ? leftTable.columns : []).filter(column => !leftKeys.has(column.key));
+  const rightCols = (Array.isArray(rightTable.columns) ? rightTable.columns : []).filter(column => !rightKeys.has(column.key));
+  const keyCols = leftColumns.map(key => (leftTable.columns || []).find(column => column.key === key));
+  const headers = [...keyCols.map(column => column.header), ...leftCols.map(column => column.header), ...rightCols.map(column => column.header)];
+  const seen = new Map();
+  for (const header of headers) seen.set(header, (seen.get(header) || 0) + 1);
+  const columns = [
+    ...keyCols.map(column => ({ header: column.header, from: 'key' })),
+    ...leftCols.map(column => ({ header: seen.get(column.header) > 1 ? `${column.header} (${left.title})` : column.header, from: 'left' })),
+    ...rightCols.map(column => ({ header: seen.get(column.header) > 1 ? `${column.header} (${right.title})` : column.header, from: 'right' })),
+  ];
+  const cell = (row, key) => { const value = row?.[key]; return value === null || value === undefined ? '' : String(value); };
+  const leftRows = (Array.isArray(leftTable.rows) ? leftTable.rows : []).slice(0, left.rows);
+  const rightRows = (Array.isArray(rightTable.rows) ? rightTable.rows : []).slice(0, right.rows);
+  const blankLeft = leftCols.map(() => '');
+  const blankRight = rightCols.map(() => '');
+  const out = [];
+  let rowCount = 0;
+  let matched = 0;
+  let onlyLeft = 0;
+  let onlyRight = 0;
+  const push = row => { rowCount += 1; if (out.length < sample) out.push(row); };
+  const used = new Set();
+  for (let i = 0; i < left.rows; i += 1) {
+    const key = keyAt(lc, i);
+    const pairs = key === null ? [] : rightIndex.get(key) || [];
+    const base = [...leftColumns.map(column => cell(leftRows[i], column)), ...leftCols.map(column => cell(leftRows[i], column.key))];
+    if (!pairs.length) { onlyLeft += 1; push([...base, ...blankRight]); continue; }
+    for (const j of pairs) { used.add(j); matched += 1; push([...base, ...rightCols.map(column => cell(rightRows[j], column.key))]); }
+  }
+  for (let j = 0; j < right.rows; j += 1) {
+    if (used.has(j)) continue;
+    onlyRight += 1;
+    push([...rightColumns.map(column => cell(rightRows[j], column)), ...blankLeft, ...rightCols.map(column => cell(rightRows[j], column.key))]);
+  }
+  return { ok: true, columns, rowCount, matched, onlyLeft, onlyRight, sample: out, complete: !left.truncated && !right.truncated };
+}
+
 /** Короткий підпис кандидата для списку: «Дата + Підрозділ ↔ Дата події + Підрозділ · 1 : N · збіг 96 %». */
 export function describeCandidate(candidate) {
   const side = headers => headers.join(' + ');

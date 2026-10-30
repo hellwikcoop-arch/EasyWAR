@@ -6,6 +6,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 const MAX_MODULES_PER_BRANCH: i64 = 64;
 const MAX_ROWS_PER_WRITE: usize = 10_000;
+const MAX_CUSTOM_FIELDS: usize = 64;
+/// Ідентифікатор «шаблону» модулів з довільними стовпцями (об'єднана таблиця); у каталозі його немає.
+pub const MERGED_TEMPLATE_ID: &str = "merged-table";
 const MAX_ROWS_PER_READ: i64 = 10_000;
 const MAX_TEXT_LENGTH: usize = 4096;
 /// Службове поле рядка: ідентифікатор запису, який клієнт отримав від `get_data`.
@@ -106,6 +109,16 @@ pub struct NewImportCorrection {
     pub reason: String,
 }
 
+/// Стовпець модуля з довільною таблицею (об'єднання): ключ сервер дає сам, лише підпис і вигляд.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NewCustomField {
+    pub label: String,
+    pub data_type: String,
+    pub role: String,
+    pub aggregation: String,
+}
+
 /// Збережене виправлення значення запису модуля (таблиця `dashboard_module_corrections`).
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, sqlx::FromRow)]
 #[serde(rename_all = "camelCase")]
@@ -168,6 +181,8 @@ pub enum DashboardModuleError {
     InvalidCorrection,
     #[error("невідомий стиль оформлення модуля")]
     InvalidStyle,
+    #[error("стовпці об'єднаної таблиці задано неправильно: від 1 до 64, підпис до 80 символів")]
+    InvalidCustomFields,
     #[error("немає позначки версії таблиці; відкрийте модуль знову")]
     VersionRequired,
 }
@@ -1093,6 +1108,102 @@ impl DashboardModuleStore {
                 position: position as i64,
             })
             .collect::<Vec<_>>();
+        self.insert_module(
+            profile_id,
+            branch,
+            selected.id,
+            selected.visual_kind,
+            &title,
+            style,
+            template_fields,
+            rows,
+            corrections,
+            created_at,
+        )
+        .await
+    }
+
+    /// Модуль з довільними стовпцями (об'єднана таблиця): поля описує сам виклик, а не каталог.
+    /// Ключі полів генерує сервер (`c1`, `c2`, …), підписи беруться із заголовків. Типи значень
+    /// перевіряються так само, як у шаблонних модулів; виправлень імпорту тут немає.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_custom(
+        &self,
+        profile_id: &str,
+        branch: &str,
+        requested_title: Option<&str>,
+        requested_style: Option<&str>,
+        fields: Vec<NewCustomField>,
+        rows: Vec<Map<String, Value>>,
+        created_at: &str,
+    ) -> Result<DashboardModule, DashboardModuleError> {
+        if !valid_branch(branch) {
+            return Err(DashboardModuleError::InvalidBranch);
+        }
+        let style = requested_style.unwrap_or(DEFAULT_MODULE_STYLE);
+        if !valid_style(style) {
+            return Err(DashboardModuleError::InvalidStyle);
+        }
+        let title = normalized_title(requested_title, "Об'єднана таблиця")?;
+        if fields.is_empty() || fields.len() > MAX_CUSTOM_FIELDS {
+            return Err(DashboardModuleError::InvalidCustomFields);
+        }
+        let mut custom = Vec::with_capacity(fields.len());
+        for (position, item) in fields.into_iter().enumerate() {
+            let label = item.label.trim();
+            let valid = !label.is_empty()
+                && label.chars().count() <= 80
+                && matches!(
+                    item.data_type.as_str(),
+                    "text" | "integer" | "real" | "date"
+                )
+                && matches!(item.role.as_str(), "dimension" | "metric" | "label")
+                && matches!(item.aggregation.as_str(), "none" | "sum");
+            if !valid {
+                return Err(DashboardModuleError::InvalidCustomFields);
+            }
+            custom.push(DashboardModuleField {
+                key: format!("c{}", position + 1),
+                label: label.to_owned(),
+                data_type: item.data_type,
+                role: item.role,
+                aggregation: item.aggregation,
+                required: false,
+                position: position as i64,
+            });
+        }
+        self.insert_module(
+            profile_id,
+            branch,
+            MERGED_TEMPLATE_ID,
+            "table",
+            &title,
+            style,
+            custom,
+            rows,
+            Vec::new(),
+            created_at,
+        )
+        .await
+    }
+
+    /// Спільна частина створення: перевірка рядків, межа модулів, запис модуля, його полів, таблиці
+    /// даних і рядків однією транзакцією.
+    #[allow(clippy::too_many_arguments)]
+    async fn insert_module(
+        &self,
+        profile_id: &str,
+        branch: &str,
+        template_id: &str,
+        visual_kind: &str,
+        title: &str,
+        style: &str,
+        fields: Vec<DashboardModuleField>,
+        rows: Vec<Map<String, Value>>,
+        corrections: Vec<NewImportCorrection>,
+        created_at: &str,
+    ) -> Result<DashboardModule, DashboardModuleError> {
+        let template_fields = fields;
         validate_new_rows(&template_fields, &rows)?;
         validate_corrections(&template_fields, &rows, &corrections)?;
 
@@ -1108,7 +1219,7 @@ impl DashboardModuleStore {
         }
 
         let (id, storage_table) =
-            generated_identity(profile_id, branch, selected.id, &title, created_at);
+            generated_identity(profile_id, branch, template_id, title, created_at);
         let mut transaction = self.pool.begin().await?;
         sqlx::query(
             "INSERT INTO dashboard_modules
@@ -1118,9 +1229,9 @@ impl DashboardModuleStore {
         .bind(&id)
         .bind(profile_id)
         .bind(branch)
-        .bind(selected.id)
-        .bind(selected.visual_kind)
-        .bind(&title)
+        .bind(template_id)
+        .bind(visual_kind)
+        .bind(title)
         .bind(style)
         .bind(&storage_table)
         .bind(created_at)
@@ -1128,8 +1239,8 @@ impl DashboardModuleStore {
         .execute(&mut *transaction)
         .await?;
 
-        for (position, item) in selected.fields.iter().enumerate() {
-            if !valid_identifier(item.key) {
+        for item in &template_fields {
+            if !valid_identifier(&item.key) {
                 return Err(DashboardModuleError::InvalidStoredSchema);
             }
             sqlx::query(
@@ -1138,18 +1249,18 @@ impl DashboardModuleStore {
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(&id)
-            .bind(item.key)
-            .bind(item.label)
-            .bind(item.data_type)
-            .bind(item.role)
-            .bind(item.aggregation)
+            .bind(&item.key)
+            .bind(&item.label)
+            .bind(&item.data_type)
+            .bind(&item.role)
+            .bind(&item.aggregation)
             .bind(item.required)
-            .bind(position as i64)
+            .bind(item.position)
             .execute(&mut *transaction)
             .await?;
         }
 
-        create_data_table(&mut transaction, &storage_table, &selected.fields).await?;
+        create_data_table(&mut transaction, &storage_table, &template_fields).await?;
         let row_ids = insert_rows(
             &mut transaction,
             &storage_table,
@@ -1778,7 +1889,7 @@ pub(crate) async fn drop_profile_data_tables(
 async fn create_data_table(
     transaction: &mut Transaction<'_, Sqlite>,
     storage_table: &str,
-    fields: &[DashboardModuleFieldTemplate],
+    fields: &[DashboardModuleField],
 ) -> Result<(), DashboardModuleError> {
     if !valid_storage_table(storage_table) {
         return Err(DashboardModuleError::InvalidStoredSchema);
@@ -1790,8 +1901,8 @@ async fn create_data_table(
     for field in fields {
         columns.push(format!(
             "{} {}{}",
-            quoted_identifier(field.key)?,
-            sql_type(field.data_type)?,
+            quoted_identifier(&field.key)?,
+            sql_type(&field.data_type)?,
             if field.required { " NOT NULL" } else { "" }
         ));
     }
@@ -2563,6 +2674,138 @@ mod tests {
         // Поля, яких немає в таблиці користувача, лишаються порожніми колонками модуля.
         assert_eq!(data.rows[0]["crew_lsh"], Value::Null);
         assert!(data.rows[0]["rowId"].as_i64() < data.rows[1]["rowId"].as_i64());
+    }
+
+    fn custom_field(label: &str, data_type: &str) -> NewCustomField {
+        let metric = matches!(data_type, "integer" | "real");
+        NewCustomField {
+            label: label.to_owned(),
+            data_type: data_type.to_owned(),
+            role: if metric { "metric" } else { "dimension" }.to_owned(),
+            aggregation: if metric { "sum" } else { "none" }.to_owned(),
+        }
+    }
+
+    #[tokio::test]
+    async fn create_custom_makes_a_module_with_the_given_columns_and_rows() {
+        let store = store().await;
+        let profile = "profile-111111111111111111111111";
+        let mut first = Map::new();
+        first.insert("c1".to_owned(), Value::String("2026-09-01".to_owned()));
+        first.insert("c2".to_owned(), Value::String("Альфа".to_owned()));
+        first.insert("c3".to_owned(), Value::Number(3.into()));
+        let mut second = Map::new();
+        second.insert("c1".to_owned(), Value::String("2026-09-02".to_owned()));
+        second.insert("c2".to_owned(), Value::Null);
+        let module = store
+            .create_custom(
+                profile,
+                "air",
+                Some("План + Вильоти"),
+                None,
+                vec![
+                    custom_field("Дата", "date"),
+                    custom_field("Підрозділ", "text"),
+                    custom_field("Борт (Вильоти)", "integer"),
+                ],
+                vec![first, second],
+                "2026-01-01T00:00:01Z",
+            )
+            .await
+            .unwrap();
+        assert_eq!(module.template_id, MERGED_TEMPLATE_ID);
+        assert_eq!(module.visual_kind, "table");
+        assert_eq!(module.default_span, 1);
+        assert_eq!(module.row_count, 2);
+        assert_eq!(
+            module
+                .fields
+                .iter()
+                .map(|f| f.key.as_str())
+                .collect::<Vec<_>>(),
+            ["c1", "c2", "c3"]
+        );
+        assert_eq!(module.fields[2].label, "Борт (Вильоти)");
+        assert_eq!(module.fields[2].aggregation, "sum");
+        // Модуль читається, оновлюється, з'являється в переліку й видаляється, як шаблонний.
+        let listed = store.list(profile, "air").await.unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, module.id);
+        let data = store.get_data(profile, &module.id).await.unwrap();
+        assert_eq!(data.rows[0]["c2"], "Альфа");
+        assert_eq!(data.rows[0]["c3"], 3);
+        assert_eq!(data.rows[1]["c2"], Value::Null);
+        let mut edited = Map::new();
+        edited.insert("c2".to_owned(), Value::String("Браво".to_owned()));
+        let saved = store
+            .replace_rows(
+                profile,
+                &module.id,
+                vec![edited],
+                &module.updated_at,
+                "2026-01-01T00:00:02Z",
+            )
+            .await
+            .unwrap();
+        assert_eq!(saved.rows.len(), 1);
+        assert_eq!(saved.rows[0]["c2"], "Браво");
+        store
+            .delete(profile, &module.id, Some("2026-01-01T00:00:02Z"))
+            .await
+            .unwrap();
+        assert!(store.list(profile, "air").await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn create_custom_rejects_bad_columns_values_and_foreign_keys() {
+        let store = store().await;
+        let profile = "profile-111111111111111111111111";
+        let create = |fields: Vec<NewCustomField>, rows: Vec<Map<String, Value>>| {
+            store.create_custom(
+                profile,
+                "air",
+                None,
+                None,
+                fields,
+                rows,
+                "2026-01-01T00:00:01Z",
+            )
+        };
+        assert!(matches!(
+            create(Vec::new(), Vec::new()).await,
+            Err(DashboardModuleError::InvalidCustomFields)
+        ));
+        assert!(matches!(
+            create(vec![custom_field("   ", "text")], Vec::new()).await,
+            Err(DashboardModuleError::InvalidCustomFields)
+        ));
+        assert!(matches!(
+            create(vec![custom_field("Х", "boolean")], Vec::new()).await,
+            Err(DashboardModuleError::InvalidCustomFields)
+        ));
+        assert!(matches!(
+            create(
+                (0..65)
+                    .map(|index| custom_field(&format!("П{index}"), "text"))
+                    .collect(),
+                Vec::new()
+            )
+            .await,
+            Err(DashboardModuleError::InvalidCustomFields)
+        ));
+        let mut wrong_type = Map::new();
+        wrong_type.insert("c1".to_owned(), Value::String("не число".to_owned()));
+        assert!(matches!(
+            create(vec![custom_field("Число", "integer")], vec![wrong_type]).await,
+            Err(DashboardModuleError::InvalidValue(..))
+        ));
+        let mut foreign = Map::new();
+        foreign.insert("created_at".to_owned(), Value::String("x".to_owned()));
+        assert!(matches!(
+            create(vec![custom_field("Х", "text")], vec![foreign]).await,
+            Err(DashboardModuleError::UnknownField(_))
+        ));
+        assert!(store.list(profile, "air").await.unwrap().is_empty());
     }
 
     #[tokio::test]
