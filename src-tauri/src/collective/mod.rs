@@ -15,6 +15,7 @@ pub mod identity;
 pub mod relay;
 pub mod replay;
 pub mod secret_store;
+pub mod send_gate;
 
 #[cfg(test)]
 mod vectors;

@@ -128,3 +128,17 @@ test('AC14: статуси для людини розрізняють «збер
   assert.equal(Object.values(STATUS_LABELS).some(l => /з усіма/iu.test(l)), false);
   assert.ok(Object.isFrozen(STATUS_LABELS));
 });
+
+test('Rust-допуск перед відправкою повторює коди JS-ядра (send_gate.rs)', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const gate = await readFile(new URL('../src-tauri/src/collective/send_gate.rs', import.meta.url), 'utf8');
+  // Кожен крок, який JS лише підказує, у Rust перевіряється з власного стану під тим самим кодом.
+  const shared = ['class-d-cloud', 'class-d-wan', 'wan-class-unapproved', 'wan-needs-user-choice',
+    'wan-not-ready', 'OwnerDecisionRequired', 'no-write-right', 'needs-report-review'];
+  for (const code of shared) assert.match(gate, new RegExp(`"${code}"`), code);
+  // Прапорці «вже перевірено» з JS у Rust не приймаються: таких полів у запиті немає.
+  for (const flag of ['membershipVerified', 'relayOpaqueVerified', 'transportSecurityApproved', 'membership_verified'])
+    assert.doesNotMatch(gate, new RegExp(flag), flag);
+  // Чинна політика: жоден віддалений транспорт не прийнятий.
+  assert.match(gate, /wan_transport_accepted: false,\s*base44_accepted: false,/);
+});
