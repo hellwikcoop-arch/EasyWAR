@@ -6,7 +6,7 @@ import { listDefinitions } from '../src/module-definition-core.js';
 import { confirmBinding, emptySchema } from '../src/profile-schema-core.js';
 import { moduleSourceId, syncModuleSources } from '../src/profile-schema-modules-core.js';
 import { RV_KPI_DEFINITIONS, agg, resKind } from '../src/module-adapters/rv-kpi-core.js';
-import { CARD_PALETTES, blockCardModel, chartViews, hasBlockCard, placeBlockCard, rvRow } from '../src/module-block-card-core.js';
+import { CARD_PALETTES, blockCardModel, blockRequirements, chartViews, hasBlockCard, placeBlockCard, recordIssues, rvRow, withBlockRequirements } from '../src/module-block-card-core.js';
 import { deltaTone } from '../src/module-block-card-view.js';
 import { addInstance, emptyLayout, orderedIds } from '../src/module-instance-core.js';
 import { ensureModuleInstances } from '../src/module-instance-modules-core.js';
@@ -181,7 +181,7 @@ test('спільні блоки ПС і РВ малюються тими сам�
   for (const id of ['legacy:result-distribution', 'legacy:result-dynamics', 'legacy:platform-types', 'legacy:munition-use', 'legacy:top-units', 'legacy:activity-by-day', 'legacy:hour-of-day', 'legacy:repeat-targets', 'legacy:target-types', 'legacy:firing-units']) {
     assert.equal(hasBlockCard(id), true, id);
   }
-  for (const id of ['legacy:strike-map', 'legacy:strike-depth', 'legacy:data-quality', 'legacy:records-journal']) assert.equal(hasBlockCard(id), false, id);
+  for (const id of ['legacy:strike-map', 'legacy:strike-depth']) assert.equal(hasBlockCard(id), false, id);
   const donut = chart('legacy:result-distribution');
   assert.equal(donut.kind, 'donut');
   assert.equal(donut.model.total, 12);
@@ -229,4 +229,73 @@ test('блок-діаграма без потрібної ролі поясню�
   const result = blockCardModel({ definition: byId('legacy:firing-units'), schema: wideSchema(), sourceId: SOURCE, rows: wideRows });
   assert.equal(result.ok, false);
   assert.match(result.message, /Вогнева бригада/);
+});
+
+// ---- блоки-переліки: журнал і «Потребує перевірки» ----
+
+test('журнал записів показує останні записи першими з результатом, БП і тоном', () => {
+  const schema = boundSchema();
+  const block = blockCardModel({ definition: byId('legacy:records-journal'), schema, sourceId: SOURCE, rows: rows.map((row, index) => ({ ...row, rowId: index + 1 })) });
+  assert.equal(block.ok, true);
+  assert.equal(block.kind, 'list');
+  const { model } = block;
+  assert.equal(model.variant, 'journal');
+  assert.equal(model.total, 6);
+  assert.equal(model.summary, 'Останні 6 з 6 записів');
+  assert.deepEqual(model.items.map(item => item.date), ['03.09.2026', '03.09.2026', '02.09.2026', '02.09.2026', '01.09.2026', '01.09.2026']);
+  const first = model.items.find(item => item.number === 5);
+  assert.deepEqual([first.title, first.tone, first.detail], ['Знищено', 'green', '× 1']);
+  assert.equal(model.items.find(item => item.number === 3).tone, 'red');
+  assert.equal(model.items.find(item => item.number === 6).title, 'Не відомо');
+  const many = Array.from({ length: 12 }, (_, index) => ({ c1: `2026-09-${String(index + 1).padStart(2, '0')}`, c2: 'Знищено', c3: 1 }));
+  const long = blockCardModel({ definition: byId('legacy:records-journal'), schema, sourceId: SOURCE, rows: many }).model;
+  assert.equal(long.items.length, 8);
+  assert.equal(long.items[0].date, '12.09.2026');
+  assert.equal(long.summary, 'Останні 8 з 12 записів');
+  assert.equal(blockCardModel({ definition: byId('legacy:records-journal'), schema, sourceId: SOURCE, rows: [] }).model.emptyText, 'Записів за період немає.');
+});
+
+test('«Потребує перевірки» дивиться лише на зіставлені ролі й не потребує стовпця зауважень', () => {
+  const schema = boundSchema();
+  const quality = byId('legacy:data-quality');
+  assert.deepEqual(blockRequirements(quality), [{ role: 'event-date', required: true }]);
+  assert.deepEqual(withBlockRequirements(quality).requirements, [{ role: 'event-date', required: true }]);
+  assert.equal(withBlockRequirements(byId('legacy:records-journal')), byId('legacy:records-journal'));
+  const bad = [
+    { rowId: 1, c1: '2026-09-01', c2: 'Знищено', c3: 2 },
+    { rowId: 2, c1: 'вчора', c2: 'щось дивне', c3: 'два' },
+    { rowId: 3, c1: '2026-09-02', c2: '', c3: '' },
+  ];
+  const block = blockCardModel({ definition: quality, schema, sourceId: SOURCE, rows: bad });
+  assert.equal(block.ok, true);
+  const { model } = block;
+  assert.equal(model.variant, 'quality');
+  assert.equal(model.bad, 2);
+  assert.equal(model.summary, '2 записи з 3');
+  assert.deepEqual(model.items.map(item => `${item.number}: ${item.title}`), [
+    '2: Дату не розпізнано: «вчора»',
+    '2: Кількість БП не число: «два»',
+    '2: Результат не розпізнано: «щось дивне»',
+    '3: Не вказано кількість БП',
+    '3: Не вказано результат ураження',
+  ]);
+  assert.deepEqual(model.categories.map(item => `${item.label} ${item.count}`), ['Дату не розпізнано 1', 'Кількість БП не число 1', 'Результат не розпізнано 1', 'Не вказано кількість БП 1', 'Не вказано результат ураження 1']);
+  // Ролі без стовпця (тип цілі, підрозділ) не перевіряються.
+  assert.equal(model.items.some(item => /тип цілі|підрозділ/.test(item.title)), false);
+  const clean = blockCardModel({ definition: quality, schema, sourceId: SOURCE, rows: [bad[0]] }).model;
+  assert.equal(clean.summary, 'усе гаразд');
+  assert.equal(clean.items.length, 0);
+  // Без зіставленої дати картка пише, чого бракує.
+  const noDate = blockCardModel({ definition: quality, schema: boundSchema({ c2: 'strike-result' }), sourceId: SOURCE, rows: bad });
+  assert.equal(noDate.ok, false);
+  assert.match(noDate.message, /Дата події/);
+});
+
+test('зауваження запису збігаються з правилами вкладок ПС і РВ', () => {
+  assert.deepEqual(recordIssues({ 'event-date': '2026-09-01', 'strike-result': 'Відбій', 'munition-count': '', 'munition-type': '' }), []);
+  assert.deepEqual(recordIssues({ 'event-time': '25 год', unit: '', 'target-id': '', 'target-type': '', 'platform-type': '', 'firing-unit': '' }), [
+    'Час не розпізнано: «25 год»', 'Не вказано підрозділ', 'Немає номера цілі', 'Не вказано тип цілі', 'Не вказано тип носія', 'Не вказано вогневу бригаду',
+  ]);
+  assert.deepEqual(recordIssues({ 'munition-count': '4.0', 'event-time': '09:15' }), []);
+  assert.match(recordIssues({ 'strike-result': 'x'.repeat(80) })[0], /…»$/);
 });

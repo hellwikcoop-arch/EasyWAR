@@ -48,6 +48,15 @@ html .ewmc-dashboard-grid[data-layout] .ewmc-module:not([data-style=heightwell])
 html .ewmc-dashboard-grid[data-layout] .ewmc-module:not([data-style=heightwell]):hover{border-color:rgba(148,170,204,.26)}
 /* Легенда серій — угорі праворуч над малюнком, круглі позначки (як на сучасних аналітичних панелях). */
 .ewmc-dashboard-grid[data-layout] .ewmc-chart>.ewmc-legend{order:-1;justify-content:flex-end;gap:4px 12px;margin-top:-2px}.ewmc-dashboard-grid[data-layout] .ewmc-chart>.ewmc-legend i{width:8px;height:8px;border-radius:50%}
+/* Блоки-переліки: журнал записів і «Потребує перевірки». Тон запису — кольорова позначка ліворуч. */
+.ewmc-bl{display:grid;gap:8px;align-content:start;min-height:0}.ewmc-bl-summary{margin:0;color:#ffcf6e;font-size:12px;font-weight:700}.ewmc-bl-summary.ok,[data-visual=journal] .ewmc-bl-summary{color:var(--ewmc-muted,#9fb0c4);font-weight:600}
+.ewmc-bl-cats{display:flex;flex-wrap:wrap;gap:6px}.ewmc-bl-cats span{padding:3px 8px;border:1px solid rgba(148,170,204,.18);border-radius:999px;color:var(--ewmc-muted,#9fb0c4);font-size:10px}.ewmc-bl-cats b{color:var(--ewmc-ink,#e8eef7)}
+.ewmc-bl-list{display:grid;gap:2px;margin:0;padding:0;list-style:none}.ewmc-bl-list li{display:grid;grid-template-columns:minmax(92px,auto) minmax(0,1fr);gap:2px 12px;align-items:baseline;padding:7px 10px 7px 14px;border-radius:10px;position:relative}.ewmc-bl-list li:nth-child(odd){background:rgba(255,255,255,.025)}
+.ewmc-bl-list li::before{content:"";position:absolute;left:4px;top:11px;width:6px;height:6px;border-radius:50%;background:var(--bl-tone,#8b98ab);box-shadow:0 0 6px var(--bl-tone,#8b98ab)}
+.ewmc-bl-list li[data-tone=green]{--bl-tone:#2bd48f}.ewmc-bl-list li[data-tone=amber]{--bl-tone:#f2b23a}.ewmc-bl-list li[data-tone=red]{--bl-tone:#ff6b6b}.ewmc-bl-list li[data-tone=grey]{--bl-tone:#8b98ab}
+.ewmc-bl-when{display:flex;gap:6px;color:var(--ewmc-muted,#9fb0c4);font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap}.ewmc-bl-when b{color:var(--ewmc-ink,#e8eef7)}.ewmc-bl-title{font-size:12px;font-weight:700;min-width:0;overflow-wrap:anywhere}.ewmc-bl-detail{grid-column:2;color:var(--ewmc-muted,#9fb0c4);font-size:11px;min-width:0;overflow-wrap:anywhere}
+.ewmc-bl-empty,.ewmc-bl-more{margin:0;color:var(--ewmc-muted,#9fb0c4);font-size:11px}
+:root[data-theme=light] .ewmc-bl-list li:nth-child(odd){background:rgba(19,33,58,.04)}:root[data-theme=light] .ewmc-bl-summary{color:#9a6200}:root[data-theme=light] .ewmc-bl-cats span{border-color:rgba(31,75,110,.18)}
 .ewmc-dashboard-grid .ewmc-module.ewmc-block{display:flex;flex-direction:column;gap:12px;padding:16px 18px}
 .ewmc-block.is-kpi:not(.is-compact){position:relative}.ewmc-block.is-kpi:not(.is-compact) .ewmc-bk-top>.ewmc-block-tools{position:absolute;top:10px;right:10px}
 .ewmc-block .ewmc-module-head{margin:0;align-items:flex-start}.ewmc-block .ewmc-module-head h3{font-size:14px;font-weight:700;letter-spacing:.01em}.ewmc-block .ewmc-module-head p{font-size:11px}

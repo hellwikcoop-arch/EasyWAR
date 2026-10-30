@@ -3,20 +3,20 @@
 // картки (показники зверху, під ними діаграми, перелік записів — нижче). Нічого не записує: запис — у викликача.
 
 import { planAddColumns } from './module-add-columns-core.js';
-import { hasBlockCard, placeBlockCard } from './module-block-card-core.js';
+import { blockRequirements, hasBlockCard, placeBlockCard } from './module-block-card-core.js';
 
 const KPI = ['launches', 'munitions', 'destroyed', 'damaged', 'miss', 'unknown'].map(id => `legacy:rv-kpi-${id}`);
-const CHARTS = ['result-dynamics', 'result-distribution', 'activity-by-day', 'platform-types', 'munition-use', 'firing-units',
-  'top-units', 'target-types', 'repeat-targets', 'hour-of-day'].map(id => `legacy:${id}`);
+const BLOCKS = ['result-dynamics', 'result-distribution', 'activity-by-day', 'platform-types', 'munition-use', 'firing-units',
+  'top-units', 'target-types', 'repeat-targets', 'hour-of-day', 'records-journal', 'data-quality'].map(id => `legacy:${id}`);
 
 // Прості об'єкти без `Object.freeze`: виклик на верхньому рівні не вилучається зі збірки ПВК-lite.
 /**
- * Шаблони. `titles` — підписи карток, що відрізняються від шаблону РВ (у ПС пуск — це виліт). Карта, глибина,
- * журнал і «Потребує перевірки» поки не рахуються з основної таблиці, тож у шаблон не входять.
+ * Шаблони. `titles` — підписи карток, що відрізняються від шаблону РВ (у ПС пуск — це виліт). Журнал записів
+ * і «Потребує перевірки» стоять останніми; карта й глибина (потрібен знімок ЛБЗ) у шаблон поки не входять.
  */
 export const PRESETS = {
-  rv: { id: 'rv', label: 'Шаблон РВ', title: 'РВ', blocks: [...KPI, ...CHARTS], titles: {} },
-  ps: { id: 'ps', label: 'Шаблон ПС', title: 'ПС', blocks: [...KPI, ...CHARTS.filter(id => id !== 'legacy:firing-units')], titles: { 'legacy:rv-kpi-launches': 'Вильоти' } },
+  rv: { id: 'rv', label: 'Шаблон РВ', title: 'РВ', blocks: [...KPI, ...BLOCKS], titles: {} },
+  ps: { id: 'ps', label: 'Шаблон ПС', title: 'ПС', blocks: [...KPI, ...BLOCKS.filter(id => id !== 'legacy:firing-units')], titles: { 'legacy:rv-kpi-launches': 'Вильоти' } },
 };
 
 /** Шаблони для роду військ: «свій» — першим (ПС для авіації, РВ для решти). */
@@ -39,7 +39,7 @@ export function planPreset({ preset, definitions, schema = null, module = null, 
   const requirements = [];
   const roles = new Set();
   for (const block of blocks) {
-    for (const requirement of block.requirements) {
+    for (const requirement of blockRequirements(block)) {
       if (!requirement.required || roles.has(requirement.role)) continue;
       roles.add(requirement.role);
       requirements.push({ role: requirement.role, required: true });

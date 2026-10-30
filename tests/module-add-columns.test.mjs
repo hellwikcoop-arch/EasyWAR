@@ -199,7 +199,7 @@ test('реєстр: кнопка стовпців підключена, а ко�
     'src/dashboard-module-catalog.js', 'src/module-registry-panel.js', 'src/module-add-columns-client.js', 'src/module-add-columns-panel.js',
     'src-tauri/build.rs', 'src-tauri/capabilities/default.json', 'src/module-add-columns-core.js',
   ].map(path => readFile(new URL(`../${path}`, import.meta.url), 'utf8')));
-  assert.match(catalog, /columnsBox: definition =>/);
+  assert.match(catalog, /columnsBox: original =>/);
   assert.match(registry, /columnsBox\(definition\)/);
   assert.equal((client.match(/invoke\('add_dashboard_module_fields'/g) || []).length, 1);
   assert.ok(!catalog.includes("'add_dashboard_module_fields'"), 'команду викликає лише клієнт');

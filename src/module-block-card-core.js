@@ -84,7 +84,18 @@ const charts = () => (chartSpecs ??= {
 });
 
 /** Чи вміє визначення бути карткою з основної таблиці. */
-export const hasBlockCard = definitionId => Object.hasOwn(CARDS, definitionId) || Object.hasOwn(charts(), definitionId);
+export const hasBlockCard = definitionId => Object.hasOwn(CARDS, definitionId) || Object.hasOwn(charts(), definitionId) || LIST_IDS.includes(definitionId);
+
+// Блоки-переліки: «Журнал записів» (останні записи) і «Потребує перевірки» (записи з порожніми чи нерозпізнаними
+// полями). Перевірка дивиться лише на ролі, зіставлені в таблиці, тож окремого стовпця зауважень їй не треба:
+// для додавання й доступності вона вимагає тільки дату події.
+const LIST_IDS = ['legacy:records-journal', 'legacy:data-quality'];
+const LIST_REQUIREMENTS = { 'legacy:data-quality': [{ role: 'event-date', required: true }] };
+
+/** Вимоги блока до стовпців основної таблиці (для «Перевірки» — лише дата, а не стовпець зауважень). */
+export const blockRequirements = definition => LIST_REQUIREMENTS[definition?.definitionId] || definition?.requirements || [];
+/** Визначення з вимогами `blockRequirements` — для плану стовпців і перевірки доступності. */
+export const withBlockRequirements = definition => (definition && LIST_REQUIREMENTS[definition.definitionId] ? { ...definition, requirements: LIST_REQUIREMENTS[definition.definitionId] } : definition);
 
 const text = value => (value == null ? '' : String(value).trim());
 const NO_FLAG = /^(?:|ні|нет|no|false|0|-|—)$/i;
@@ -151,19 +162,105 @@ function resultColors(model) {
   return model;
 }
 
+// ---- блоки-переліки ----
+const RESULT_TONES = { Знищено: 'green', Уражено: 'green', Пошкоджено: 'amber', Подавлено: 'amber', 'Не уражено': 'red' };
+const dmy = day => (day ? `${day.slice(8, 10)}.${day.slice(5, 7)}.${day.slice(0, 4)}` : '');
+const quoted = raw => `«${raw.length > 60 ? `${raw.slice(0, 57)}…` : raw}»`;
+const timeOf = row => /^(\d{1,2}):(\d{2})/.exec(row.time);
+const sortKey = row => `${row.date || '0000-00-00'} ${(timeOf(row)?.[0] || '00:00').padStart(5, '0')}`;
+const JOURNAL_SIZE = 8;
+const QUALITY_SIZE = 10;
+
+/** Зауваження до запису за зіставленими ролями (`byRole` має лише їх), як у «Потребує перевірки» вкладок ПС і РВ. */
+export function recordIssues(byRole, row = rvRow(byRole)) {
+  const has = role => Object.hasOwn(byRole, role);
+  const raw = role => text(byRole[role]);
+  const issues = [];
+  if (has('event-date') && !row.date) issues.push(raw('event-date') ? `Дату не розпізнано: ${quoted(raw('event-date'))}` : 'Не вказано дату');
+  if (has('event-time') && raw('event-time') && !timeOf(row)) issues.push(`Час не розпізнано: ${quoted(raw('event-time'))}`);
+  if (has('munition-count') && !/^\d+(?:\.0+)?$/.test(raw('munition-count')) && !(row.abort && !raw('munition-count'))) {
+    issues.push(raw('munition-count') ? `Кількість БП не число: ${quoted(raw('munition-count'))}` : 'Не вказано кількість БП');
+  }
+  if (has('strike-result') && row.kind === 'unk' && !row.abort) issues.push(row.resRaw ? `Результат не розпізнано: ${quoted(row.resRaw)}` : 'Не вказано результат ураження');
+  if (has('unit') && !row.unit) issues.push('Не вказано підрозділ');
+  if (has('target-id') && !row.targetId) issues.push('Немає номера цілі');
+  if (has('target-type') && !row.types.length) issues.push('Не вказано тип цілі');
+  if (has('platform-type') && !row.aircraft) issues.push('Не вказано тип носія');
+  if (has('munition-type') && !row.munition && !row.abort) issues.push('Не вказано тип БП');
+  if (has('firing-unit') && !row.firingUnit) issues.push('Не вказано вогневу бригаду');
+  return issues;
+}
+
+const plural = (n, [one, few, many]) => {
+  const tail = n % 100;
+  if (tail >= 11 && tail <= 14) return many;
+  return n % 10 === 1 ? one : n % 10 >= 2 && n % 10 <= 4 ? few : many;
+};
+const recordsLabel = n => `${number(n)} ${plural(n, ['запис', 'записи', 'записів'])}`;
+
+function journalModel(entries) {
+  const sorted = [...entries].sort((a, b) => sortKey(b.row).localeCompare(sortKey(a.row)));
+  const items = sorted.slice(0, JOURNAL_SIZE).map(({ row, number: n }) => {
+    const label = resultLabel(row);
+    const munition = [row.munition, row.count ? `× ${row.count}` : ''].filter(Boolean).join(' ');
+    return {
+      key: String(n), number: n, date: dmy(row.date) || '—', time: timeOf(row)?.[0] || '',
+      title: row.abort ? 'Відбій' : label, tone: row.abort ? 'grey' : RESULT_TONES[label] || 'grey',
+      detail: [munition, row.targetId ? `ціль ${row.targetId}` : '', row.unit].filter(Boolean).join(' · '),
+    };
+  });
+  return {
+    kind: 'list', variant: 'journal', items, total: entries.length,
+    summary: entries.length ? `Останні ${number(items.length)} з ${recordsLabel(entries.length)}` : '',
+    emptyText: 'Записів за період немає.',
+  };
+}
+
+function qualityModel(entries) {
+  const found = [];
+  const categories = new Map();
+  let bad = 0;
+  for (const { row, byRole, number: n } of entries) {
+    const issues = recordIssues(byRole, row);
+    if (!issues.length) continue;
+    bad += 1;
+    for (const issue of issues) {
+      found.push({ key: `${n}:${found.length}`, number: n, date: dmy(row.date) || '—', title: issue, tone: 'amber' });
+      const category = issue.replace(/:.*$/u, '');
+      categories.set(category, (categories.get(category) || 0) + 1);
+    }
+  }
+  return {
+    kind: 'list', variant: 'quality', items: found.slice(0, QUALITY_SIZE), total: found.length, bad,
+    categories: [...categories].sort((a, b) => b[1] - a[1]).map(([label, count]) => ({ label, count })),
+    summary: bad ? `${recordsLabel(bad)} з ${number(entries.length)}` : 'усе гаразд',
+    more: found.length > QUALITY_SIZE ? `і ще ${number(found.length - QUALITY_SIZE)} ${plural(found.length - QUALITY_SIZE, ['зауваження', 'зауваження', 'зауважень'])}` : '',
+    emptyText: entries.length ? 'У таблиці за період немає записів із порожніми чи нерозпізнаними полями.' : 'Записів за період немає.',
+  };
+}
+
 // `title` — назва картки на дашборді: відмінна від назви визначення (зразок ПС: «Вильоти») стає підписом показника.
 export function blockCardModel({ definition, schema, sourceId, rows, view = '', title = '' }) {
   const card = CARDS[definition?.definitionId];
   const chart = Object.hasOwn(charts(), definition?.definitionId) ? charts()[definition.definitionId] : null;
-  if (!card && !chart) return { ok: false, message: 'Цей блок ще не вміє рахуватися з основної таблиці.' };
+  const isList = LIST_IDS.includes(definition?.definitionId);
+  if (!card && !chart && !isList) return { ok: false, message: 'Цей блок ще не вміє рахуватися з основної таблиці.' };
   if (!schema) return { ok: false, message: 'Схему профілю не прочитано: ролі стовпців невідомі.' };
-  const verdict = availability([definition], schema, sourceId);
+  const verdict = availability([withBlockRequirements(definition)], schema, sourceId);
   if (!verdict.ok) return { ok: false, message: verdict.message };
   const status = verdict.definitions[0];
   if (status.status !== 'available') {
     return { ok: false, message: `Бракує зіставлених ролей: ${status.adds.join(', ') || 'невідомо'}. Зіставте їх у «Ролях стовпців» основної таблиці.` };
   }
-  const list = (Array.isArray(rows) ? rows : []).map(row => rvRow(readRow(schema, sourceId, row).byRole || {}));
+  const entries = (Array.isArray(rows) ? rows : []).map((row, index) => {
+    const byRole = readRow(schema, sourceId, row).byRole || {};
+    return { byRole, row: rvRow(byRole), number: row?.rowId ?? index + 1 };
+  });
+  if (isList) {
+    const model = definition.definitionId === 'legacy:data-quality' ? qualityModel(entries) : journalModel(entries);
+    return { ok: true, kind: 'list', model: { ...model, label: title || definition.title } };
+  }
+  const list = entries.map(entry => entry.row);
   if (chart) {
     const kind = chartViews(definition.definitionId).some(item => item.id === view) ? view : chart.kind;
     const module = { id: definition.definitionId, templateId: definition.definitionId, visualKind: kind, fields: chart.fields.map((field, position) => ({ ...field, position })) };
