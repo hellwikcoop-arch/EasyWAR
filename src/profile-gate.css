@@ -157,9 +157,21 @@ html.ew-locked, html.ew-locked body { overflow: hidden; }
 #pvk-tile.ew-module-off,
 #dshv-tile.ew-module-off { display: none !important; }
 #view-start .branch-cards.ew-modules-trimmed {
-  grid-template-columns: repeat(auto-fit, minmax(0, 264px)) !important;
-  justify-content: center !important;
+  grid-template-columns: repeat(var(--ew-cols, 2), minmax(0, 1fr)) !important;
+  justify-content: stretch !important;
 }
+#view-start .branch-cards.ew-modules-trimmed .branch-card:not(.cmd-card) { grid-column: span 2 !important; width: auto !important; }
+#view-start .branch-cards.ew-modules-trimmed .cmd-slot { grid-column: span var(--ew-cmd-span, 2) !important; }
+#view-start .branch-cards.ew-modules-trimmed .branch-col { display: contents !important; }
+#view-start .branch-cards.ew-modules-trimmed .cmd-slot { order: 1 !important; }
+#view-start .branch-cards.ew-modules-trimmed .branch-card:not(.cmd-card) { order: 4 !important; }
+@media (max-width: 640px) {
+  #view-start .branch-cards.ew-modules-trimmed { grid-template-columns: minmax(0, 1fr) !important; }
+  #view-start .branch-cards.ew-modules-trimmed .branch-card:not(.cmd-card),
+  #view-start .branch-cards.ew-modules-trimmed .cmd-slot { grid-column: auto !important; }
+}
+#view-start .branch-cards.ew-no-command::before,
+#view-start .branch-cards.ew-no-branches::after { display: none !important; }
 
 @media (prefers-reduced-motion: no-preference) {
   .ew-gate-inner { animation: ew-gate-in .35s cubic-bezier(.16, 1, .3, 1); }
