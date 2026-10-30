@@ -18,6 +18,7 @@ pub mod relay_auth;
 pub mod replay;
 pub mod secret_store;
 pub mod send_gate;
+pub mod table_record;
 
 #[cfg(test)]
 mod vectors;
@@ -51,6 +52,8 @@ pub mod labels {
     pub const OPERATION: &[u8] = b"easywar/collective/v1/op";
     pub const SECRET_KEYRING: &[u8] = b"easywar/collective/v1/keyring";
     pub const SECRET_ENTRY: &[u8] = b"easywar/collective/v1/secret";
+    pub const TABLE_RECORD: &[u8] = b"easywar/collective/v1/table";
+    pub const SYNC_PACKAGE: &[u8] = b"easywar/collective/v1/sync-package";
 }
 
 /// Причина відмови — лише для локального журналу. Назовні всі варіанти стають одним

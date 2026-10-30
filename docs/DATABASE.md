@@ -106,7 +106,12 @@ by the device, encrypted with the epoch key; up to 1 MiB) and `recorded_at`; it 
 the table. No plaintext row values are stored: «Оновити таблицю» opens the envelopes with the
 profile password and re-checks each one with `collective::replay::receive` (signature, device
 and write right at `membership_seq`, epoch, revocation, replays). The change format inside an
-envelope is `{"v":1,"rows":[{"key","kind":"upsert"|"delete","values"}]}`.
+envelope is `{"v":1,"rows":[{"key","kind":"upsert"|"delete","values"}]}`. The same migration adds `collective_tables.record`: the table record
+signed by the owner (`collective::table_record`: title, columns, class, purpose, writers —
+empty means every member, owner decision 2026-10-30). The owner's node signs it at «Пакет
+оновлення»; received tables keep the owner's bytes so any member can relay them. The
+`EWSYNC1.` update package (journal, table records, envelopes, encrypted with the epoch key)
+is never stored; only what passes verification on import is written.
 Migration
 `0012_dashboard_module_style.sql` adds `dashboard_modules.style` — the look chosen
 when the module was created: `standard` (default for existing modules), `branch`

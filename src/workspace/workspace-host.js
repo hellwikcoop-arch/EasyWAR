@@ -211,6 +211,13 @@ export function createHost({
       tableRead: (password, collective, table) => invoke('collective_table_read', {
         password: String(password ?? ''), collective: String(collective ?? ''), table: String(table ?? ''),
       }),
+      // Пакет оновлення `EWSYNC1.`: текст люди передають самі, мережі немає.
+      syncExport: (password, collective) => invoke('collective_sync_export', {
+        password: String(password ?? ''), collective: String(collective ?? ''),
+      }),
+      syncImport: (password, text) => invoke('collective_sync_import', {
+        password: String(password ?? ''), text: String(text ?? ''),
+      }),
       inviteCreate: (password, collective, hours) => invoke('collective_invite_create', {
         password: String(password ?? ''), collective: String(collective ?? ''), hours: Number(hours),
       }),

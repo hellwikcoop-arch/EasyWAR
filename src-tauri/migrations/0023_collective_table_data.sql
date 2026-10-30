@@ -10,6 +10,12 @@ ALTER TABLE collective_tables
     ADD COLUMN columns TEXT NOT NULL DEFAULT '[]'
         CHECK (json_valid(columns) AND json_type(columns) = 'array');
 
+-- Підписаний власником запис таблиці (`collective::table_record`): назва, стовпці, клас,
+-- призначення і хто може писати. У своїх таблицях з'являється під час «Пакета оновлення»,
+-- у чужих — з пакета; з ним таблицю бачать і перевіряють інші учасники.
+ALTER TABLE collective_tables
+    ADD COLUMN record BLOB CHECK (record IS NULL OR length(record) BETWEEN 1 AND 65536);
+
 CREATE TABLE collective_table_ops (
     profile_id TEXT NOT NULL,
     collective_id BLOB NOT NULL,

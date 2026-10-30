@@ -2081,6 +2081,46 @@ async fn collective_report_confirm(
         .map_err(|error| error.to_string())
 }
 
+/// «Пакет оновлення» (рішення власника 30.10.2026): текст `EWSYNC1.` із журналом складу,
+/// підписаними записами таблиць і пакетами змін, зашифрований ключем епохи. Мережі немає:
+/// текст людина передає сама.
+#[tauri::command]
+async fn collective_sync_export(
+    webview: tauri::Webview,
+    profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
+    collectives: tauri::State<'_, CollectiveStore>,
+    password: String,
+    collective: String,
+) -> Result<collective_sync::SyncText, String> {
+    office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
+    let profile_id = active_profile_id(&session)?;
+    let password = collective_password(&profiles, &profile_id, password).await?;
+    collectives
+        .sync_export(&profile_id, password, &collective, Utc::now().timestamp())
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// Приймання пакета оновлення: кожна частина перевіряється, що не пройшло — відкидається.
+#[tauri::command]
+async fn collective_sync_import(
+    webview: tauri::Webview,
+    profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
+    collectives: tauri::State<'_, CollectiveStore>,
+    password: String,
+    text: String,
+) -> Result<collective_sync::SyncOutcome, String> {
+    office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
+    let profile_id = active_profile_id(&session)?;
+    let password = collective_password(&profiles, &profile_id, password).await?;
+    collectives
+        .sync_import(&profile_id, password, &text, Utc::now().timestamp())
+        .await
+        .map_err(|error| error.to_string())
+}
+
 // --- Захищена бібліотека «Офісу» (office_library, контракт library_*) -------------------
 //
 // Усі команди — лише з головного вікна (capability `default.json`). Крім стану, створення,
@@ -4612,6 +4652,8 @@ pub fn run() {
             collective_report_prepare,
             collective_report_confirm,
             collective_table_read,
+            collective_sync_export,
+            collective_sync_import,
             clear_profile_database,
             read_profile_database,
             write_profile_database,

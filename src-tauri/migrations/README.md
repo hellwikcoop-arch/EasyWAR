@@ -183,7 +183,9 @@ modules a profile chose, and «Армійська авіація» is switched o
 `collective_tables.columns` (JSON array of column names, `[]` by default) and
 `collective_table_ops` (one sealed envelope per «Доповісти», keyed by
 `envelope_id`, cascading with the table). Row values are never stored in clear;
-Rust rebuilds the table by opening and re-verifying the envelopes.
+Rust rebuilds the table by opening and re-verifying the envelopes. It also adds
+`collective_tables.record`, the owner-signed table record that other members
+receive in the `EWSYNC1.` update package.
 
 The `dashboard_data_<id>` tables of user-created dashboard modules are not
 migration objects: Rust creates them at runtime from a validated catalog

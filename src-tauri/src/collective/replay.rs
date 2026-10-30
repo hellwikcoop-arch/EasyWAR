@@ -589,6 +589,13 @@ impl InMemoryMembership {
         (seq, self.current_epoch())
     }
 
+    /// Учасник у колективі на `seq`: вступив не пізніше й не відкликаний до `seq`.
+    pub fn member_active_at(&self, seq: u64, member: &MemberId) -> bool {
+        self.members
+            .get(member)
+            .is_some_and(|state| Self::active_at(state, seq))
+    }
+
     pub fn current_epoch(&self) -> u32 {
         (self.epochs.len() - 1) as u32
     }

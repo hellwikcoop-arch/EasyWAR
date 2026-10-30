@@ -68,6 +68,8 @@ const COMMANDS: &[&str] = &[
     "collective_report_prepare",
     "collective_report_confirm",
     "collective_table_read",
+    "collective_sync_export",
+    "collective_sync_import",
     "clear_profile_database",
     "read_profile_database",
     "write_profile_database",

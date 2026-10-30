@@ -77,6 +77,7 @@ test('захищені колективи: стани ключа, межі па�
 import {
   CLASS_OPTIONS, PURPOSE_OPTIONS, TRANSPORT_OPTIONS, checkHours, checkOperation, detailLine,
   expectText, memberInitials, memberLine, membersCount, membersWord, pickCollective, preparedText, reportText, tableLine, textKind, transportNote,
+  syncExportText, syncImportText,
 } from '../src/workspace/collectives/secure-core.js';
 
 test('обмін у колективі: підписи класу, транспорту, відмов і перевірки форм', () => {
@@ -109,6 +110,8 @@ test('обмін у колективі: підписи класу, трансп�
   assert.equal(textKind(' EWINV1.abc\n'), 'invitation');
   assert.equal(textKind('EWJOIN1.abc'), 'request');
   assert.equal(textKind('EWKEYS1.abc'), 'keys');
+  assert.equal(textKind('EWSYNC1.abc'), 'sync');
+  assert.throws(() => expectText('EWSYNC1.x', 'keys'), /Вставлено пакет оновлення/);
   assert.equal(textKind('щось інше'), null);
   assert.throws(() => expectText('EWKEYS1.x', 'invitation'), /Вставлено пакет ключів/);
   assert.throws(() => expectText('', 'keys'), /EWKEYS1\./);
@@ -134,4 +137,12 @@ test('кількість учасників узгоджується з числ
   assert.equal(pickCollective(list, 'BBBBBBBBBB'), 'BBBBBBBBBB');
   assert.equal(pickCollective(list, 'ZZZZZZZZZZ'), 'AAAAAAAAAA');
   assert.equal(pickCollective([], 'AAAAAAAAAA'), '');
+});
+
+test('пакет оновлення: підсумки створення й приймання', () => {
+  assert.equal(syncExportText({ records: 6, tables: 1, changes: 2 }),
+    'Журнал складу: 6 записів, таблиць: 1, пакетів змін: 2. Передайте текст учасникам колективу самі; прочитати його можуть лише учасники.');
+  assert.equal(syncImportText({ newRecords: 0, tables: 1, newChanges: 2, knownChanges: 1, rejected: 0 }),
+    'Пакет прийнято: нових записів журналу: 0, таблиць нових або оновлених: 1, нових пакетів змін: 2, вже були: 1.');
+  assert.match(syncImportText({ newRecords: 1, tables: 0, newChanges: 0, knownChanges: 0, rejected: 2 }), /не пройшли перевірку й не збережені: 2\.$/);
 });

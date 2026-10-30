@@ -7,7 +7,7 @@ import {
   CLASS_OPTIONS, PURPOSE_OPTIONS, canCreateCollective, canCreateIdentity,
   checkHours, checkPassword, detailLine, expectText, keyStoreText,
   memberInitials, memberLine, membersWord, pickCollective, preparedText, reportText,
-  tableLine,
+  syncExportText, syncImportText, tableLine,
 } from './secure-core.js';
 import {
   authorLine, buildTable, changeOperation, changeTime, diffTable, emptyValues, newRowKey,
@@ -103,6 +103,8 @@ export async function mount(container, host) {
   let openTable = null;
   // «Було → стане» перед «Підготувати доповідь».
   let tablePreview = null;
+  // Підсумок останнього «Прийняти пакет».
+  let syncResult = '';
   // Підготовлена доповідь: лише ідентифікатор наміру в Rust і підсумок для показу.
   let prepared = null;
   function passwordInput() {
@@ -163,7 +165,7 @@ export async function mount(container, host) {
   }
   function selectCollective(fp) {
     if (fp === exchangeFp) return;
-    exchangeFp = fp; openTable = null; tablePreview = null; prepared = null;
+    exchangeFp = fp; openTable = null; tablePreview = null; prepared = null; syncResult = '';
     secureAction(async () => {});
   }
   function renderSecure() {
@@ -416,6 +418,7 @@ export async function mount(container, host) {
 
     const current = openTable && detail.tables.find(table => table.fingerprint === openTable.fp);
     if (current) actions.append(section('data', `Дані: ${current.title}`, tableDataBody(current), { open: true }));
+    actions.append(section('sync', 'Пакет оновлення', syncBody()));
     actions.append(section('tech', 'Технічні дані', [$('p', 'ec-caption', detailLine(detail))]));
     panel.append(actions);
     secure.append(panel);
@@ -433,16 +436,48 @@ export async function mount(container, host) {
     };
     tablePreview = null;
   }
+  // «Оновити таблицю»: якщо вставлено пакет оновлення від учасника, спершу Rust його
+  // перевіряє й приймає, потім таблиця збирається заново.
   function refreshForm(fp) {
-    return passwordForm('Оновити таблицю', [], async password => {
+    const pack = area('Пакет оновлення від учасника (EWSYNC1.…), якщо отримали');
+    return passwordForm('Оновити таблицю', [field('Пакет оновлення', pack)], async password => {
       if (openTable?.data && diffTable(openTable.base, openTable.edit, openTable.data.columns).length
         && !window.confirm('Є недоповідені зміни. Оновити таблицю й відкинути їх?')) return;
+      let imported = '';
+      if (pack.value.trim()) {
+        expectText(pack.value, 'sync');
+        imported = syncImportText(await host.collectives.syncImport(password, pack.value));
+      }
       await loadTable(password, fp);
+      if (imported) openTable.message = `${imported} ${openTable.message}`;
     }, 'data');
+  }
+  // Пакет оновлення для інших учасників і приймання пакета без відкритої таблиці.
+  function syncBody() {
+    const pack = area('EWSYNC1.…');
+    return [
+      $('p', 'ec-caption', 'Поки немає передачі локальною мережею, зміни доходять до учасників пакетом оновлення: у ньому склад колективу, таблиці й усі пакети змін. Прочитати його можуть лише учасники. Передайте текст самі, як запрошення.'),
+      withError(passwordForm('Створити пакет', [], async password => {
+        const made = await host.collectives.syncExport(password, exchangeFp);
+        shared = { title: 'ПАКЕТ ОНОВЛЕННЯ', text: made.text, hint: syncExportText(made) };
+        syncResult = '';
+      }, 'sync-export'), 'sync-export'),
+      $('p', 'ec-caption', 'Отримали пакет від учасника? Вставте його тут або в «Оновити таблицю».'),
+      withError(passwordForm('Прийняти пакет', [field('Пакет оновлення', pack)], async password => {
+        expectText(pack.value, 'sync');
+        const got = await host.collectives.syncImport(password, pack.value);
+        pack.value = '';
+        if (openTable?.data) await loadTable(password, openTable.fp);
+        shared = null;
+        syncResult = syncImportText(got);
+        if (got.tables || got.newChanges) openSections.add('table');
+      }, 'sync-import'), 'sync-import'),
+      ...(syncResult ? [$('p', 'ec-status', syncResult)] : []),
+    ];
   }
   function tableDataBody(table) {
     const body = [];
-    const note = $('p', 'ec-caption', 'Таблиця збирається з пакетів змін, збережених на цьому комп’ютері. Пакети інших учасників з’являться після кроку передачі локальною мережею (окреме рішення).');
+    const note = $('p', 'ec-caption', 'Пакети змін інших учасників приходять пакетом оновлення: вставте його в поле вище й натисніть «Оновити таблицю». Після кроку передачі локальною мережею це відбуватиметься само.');
     if (!table.columns.length) {
       if (!table.mine) return [$('p', 'ec-caption', 'Власник таблиці ще не задав стовпці.')];
       const columns = input('Підрозділ, Стан, Примітка');

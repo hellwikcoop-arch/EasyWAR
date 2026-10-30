@@ -56,8 +56,8 @@ export const TRANSPORT_OPTIONS = Object.freeze([
   Object.freeze({ value: 'base44', label: 'Base44 власника' }),
 ]);
 export const MAX_OPERATION_BYTES = 64 * 1024;
-const TEXT_KINDS = Object.freeze({ 'EWINV1.': 'invitation', 'EWJOIN1.': 'request', 'EWKEYS1.': 'keys' });
-const KIND_NAMES = Object.freeze({ invitation: 'запрошення', request: 'відповідь на запрошення', keys: 'пакет ключів' });
+const TEXT_KINDS = Object.freeze({ 'EWINV1.': 'invitation', 'EWJOIN1.': 'request', 'EWKEYS1.': 'keys', 'EWSYNC1.': 'sync' });
+const KIND_NAMES = Object.freeze({ invitation: 'запрошення', request: 'відповідь на запрошення', keys: 'пакет ключів', sync: 'пакет оновлення' });
 
 const purposeLabel = value => PURPOSE_OPTIONS.find(option => option.value === value)?.label ?? 'Невідоме призначення';
 
@@ -164,4 +164,19 @@ export function expectText(text, kind) {
   throw new Error(actual
     ? `Вставлено ${KIND_NAMES[actual]}, а тут потрібно вставити: ${KIND_NAMES[kind]}.`
     : `Вставте повністю: ${KIND_NAMES[kind]} (текст починається з ${Object.keys(TEXT_KINDS).find(p => TEXT_KINDS[p] === kind)}).`);
+}
+
+/** Підсумок «Пакет оновлення»: що в тексті, який передають учасникам. */
+export function syncExportText(made) {
+  return `Журнал складу: ${made.records} записів, таблиць: ${made.tables}, пакетів змін: ${made.changes}. `
+    + 'Передайте текст учасникам колективу самі; прочитати його можуть лише учасники.';
+}
+
+/** Підсумок приймання пакета оновлення. */
+export function syncImportText(got) {
+  const parts = [`нових записів журналу: ${got.newRecords}`, `таблиць нових або оновлених: ${got.tables}`,
+    `нових пакетів змін: ${got.newChanges}`];
+  if (got.knownChanges) parts.push(`вже були: ${got.knownChanges}`);
+  if (got.rejected) parts.push(`не пройшли перевірку й не збережені: ${got.rejected}`);
+  return `Пакет прийнято: ${parts.join(', ')}.`;
 }

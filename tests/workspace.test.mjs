@@ -535,6 +535,8 @@ test('host.collectives: команди обміну передають лише 
   await host.collectives.setTable({ collective: 'ABCDEFGHIJ', table: 'KLMNOPQRST', title: 'Облік', cls: 'D', purpose: 'planned' });
   await host.collectives.setTable({ collective: 'ABCDEFGHIJ', table: 'KLMNOPQRST', title: 'Облік', cls: 'C', purpose: 'after-fact', columns: ['Стан', 7] });
   await host.collectives.tableRead('пароль-профілю', 'ABCDEFGHIJ', 'KLMNOPQRST');
+  await host.collectives.syncExport('пароль-профілю', 'ABCDEFGHIJ');
+  await host.collectives.syncImport('пароль-профілю', 'EWSYNC1.x');
   await host.collectives.inviteCreate('пароль-профілю', 'ABCDEFGHIJ', '24');
   await host.collectives.joinRequest('пароль-профілю', 'EWINV1.x', 'Синтетик');
   await host.collectives.inviteAdmit('пароль-профілю', 'ABCDEFGHIJ', 'EWJOIN1.x');
@@ -548,6 +550,8 @@ test('host.collectives: команди обміну передають лише 
     ['collective_table_set', { collective: 'ABCDEFGHIJ', table: 'KLMNOPQRST', title: 'Облік', class: 'D', purpose: 'planned', columns: null }],
     ['collective_table_set', { collective: 'ABCDEFGHIJ', table: 'KLMNOPQRST', title: 'Облік', class: 'C', purpose: 'after-fact', columns: ['Стан', '7'] }],
     ['collective_table_read', { password: 'пароль-профілю', collective: 'ABCDEFGHIJ', table: 'KLMNOPQRST' }],
+    ['collective_sync_export', { password: 'пароль-профілю', collective: 'ABCDEFGHIJ' }],
+    ['collective_sync_import', { password: 'пароль-профілю', text: 'EWSYNC1.x' }],
     ['collective_invite_create', { password: 'пароль-профілю', collective: 'ABCDEFGHIJ', hours: 24 }],
     ['collective_join_request', { password: 'пароль-профілю', invitation: 'EWINV1.x', memberName: 'Синтетик' }],
     ['collective_invite_admit', { password: 'пароль-профілю', collective: 'ABCDEFGHIJ', request: 'EWJOIN1.x' }],
