@@ -6,7 +6,6 @@ PRAGMA foreign_keys = ON;
 -- Рядків тут немає: кожна зміна даних — підписаний пристроєм і запечатаний ключем епохи
 -- конверт у `collective_table_ops`. Відкритий текст змін у базі не лежить; стан таблиці
 -- Rust відновлює, відкриваючи конверти паролем учасника й перевіряючи журнал складу.
--- Номери 0021–0023 зайняті відкритими гілками модулів; цей файл від них не залежить.
 ALTER TABLE collective_tables
     ADD COLUMN columns TEXT NOT NULL DEFAULT '[]'
         CHECK (json_valid(columns) AND json_type(columns) = 'array');

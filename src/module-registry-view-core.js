@@ -111,7 +111,7 @@ export function definitionView(definition, { available = new Set(), definitions 
 /** Запит на створення модуля з шаблону «Мого дашборда» (`create_dashboard_module`); `null`, якщо додати не можна. */
 export function addRequest(definition, branch, { available = new Set() } = {}) {
   if (definition?.sourceCatalog !== 'rust-template' || !available.has(definition.sourceId)) return null;
-  if (!['air', 'rocket', 'pvk', 'dshv'].includes(branch)) return null;
+  if (!['air', 'rocket', 'army', 'pvk', 'dshv', 'custom'].includes(branch)) return null;
   return { branch, templateId: definition.sourceId, title: definition.title, style: 'standard' };
 }
 

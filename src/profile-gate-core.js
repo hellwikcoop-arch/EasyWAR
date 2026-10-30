@@ -10,51 +10,81 @@ export const PASSWORD_MIN = 8;
 export const PASSWORD_MAX = 128;
 
 /**
- * Модулі, які користувач обирає при реєстрації. `slots` — слоти таблиць профілю, які
- * можна прив'язати (див. PROFILE_SLOTS). Артилерія працює зі спільною таблицею бригад
- * і власного слота в профілі не має. `card` і `tile` — елементи стартового екрана.
+ * Рядки екрана вибору модулів (реєстрація, крок 2, і «Профілі»). Один рядок вмикає один або
+ * кілька модулів профілю (`modules` — ключі, що зберігаються в базі; порядок як у MODULE_IDS).
+ * `slots` — слоти таблиць профілю, які можна прив'язати (див. PROFILE_SLOTS). Артилерія працює
+ * зі спільною таблицею бригад і власного слота в профілі не має. `cards` і `tiles` — елементи
+ * стартового екрана, які рядок показує або ховає. «Командування військ» — обидва дашборди
+ * командувань (ПВК і УДШВ) разом. «Власний модуль» не прив'язаний до роду військ: сторінка
+ * custom.html, яку користувач наповнює модулями каталогу і «Моїм дашбордом» на свій розсуд.
  */
 export const GATE_MODULES = Object.freeze([
   Object.freeze({
     id: 'air',
     title: 'Повітряні Сили',
     hint: 'База даних доповідей, карта, довідник, презентації',
-    slots: Object.freeze(['air']),
-    card: '.branch-card[data-branch="air"]',
+    modules: Object.freeze(['air']),
+    cards: Object.freeze(['.branch-card[data-branch="air"]']),
+    tiles: Object.freeze([]),
   }),
   Object.freeze({
     id: 'rocket',
     title: 'Ракетні Війська',
     hint: 'РСЗВ і ОТРК: доповіді, карта, довідник машин',
-    slots: Object.freeze(['rocket']),
-    card: '.branch-card[data-branch="rocket"]',
+    modules: Object.freeze(['rocket']),
+    cards: Object.freeze(['.branch-card[data-branch="rocket"]']),
+    tiles: Object.freeze([]),
   }),
   Object.freeze({
     id: 'artillery',
     title: 'Артилерія',
     hint: 'Витрата й залишок боєприпасів бригад у спільній таблиці',
-    slots: Object.freeze([]),
-    card: '.branch-card[data-branch="artillery"]',
+    modules: Object.freeze(['artillery']),
+    cards: Object.freeze(['.branch-card[data-branch="artillery"]']),
+    tiles: Object.freeze([]),
   }),
   Object.freeze({
-    id: 'pvk',
-    title: 'Повітряне командування',
-    hint: 'Дашборд ПВК і вкладка «Наші втрати»',
-    slots: Object.freeze(['pvk', 'pvk_losses']),
-    card: '.branch-card[aria-controls="pvk-tile"]',
-    tile: '#pvk-tile',
+    id: 'army',
+    title: 'Армійська авіація',
+    hint: 'Модуль на основі ПС у кольорі армійської авіації: своя таблиця, карта, довідник',
+    modules: Object.freeze(['army']),
+    cards: Object.freeze(['.branch-card[data-branch="army"]']),
+    tiles: Object.freeze([null]),
   }),
   Object.freeze({
-    id: 'dshv',
-    title: 'Командування ДШВ',
-    hint: 'Дашборд УДШВ і вкладка «Наші втрати»',
-    slots: Object.freeze(['dshv', 'dshv_losses']),
-    card: '.branch-card[aria-controls="dshv-tile"]',
-    tile: '#dshv-tile',
+    id: 'command',
+    title: 'Командування військ',
+    hint: 'Дашборди ПВК і УДШВ з вкладками «Наші втрати»',
+    modules: Object.freeze(['pvk', 'dshv']),
+    cards: Object.freeze(['.branch-card[aria-controls="pvk-tile"]', '.branch-card[aria-controls="dshv-tile"]']),
+    tiles: Object.freeze(['#pvk-tile', '#dshv-tile']),
+  }),
+  Object.freeze({
+    id: 'custom',
+    title: 'Власний модуль',
+    hint: 'Без прив\'язки до роду військ: модулі каталогу і «Мій дашборд» на ваш розсуд',
+    modules: Object.freeze(['custom']),
+    cards: Object.freeze(['.branch-card[data-branch="custom"]']),
+    tiles: Object.freeze([]),
   }),
 ]);
 
-export const MODULE_IDS = Object.freeze(GATE_MODULES.map(module => module.id));
+/** Ключі модулів профілю так, як їх зберігає ядро (`MODULES` у local_profiles.rs), у порядку показу. */
+export const MODULE_IDS = Object.freeze(GATE_MODULES.flatMap(row => row.modules));
+
+/**
+ * Модулі в розробці. У переліку реєстрації вони показані як «У розробці» без прапорця: обрати їх
+ * не можна, у профілі вони не зберігаються, а їхня картка на стартовому екрані профілю, що увійшов,
+ * схована (там лише обрані модулі).
+ */
+export const SOON_MODULES = Object.freeze([
+  Object.freeze({
+    id: 'sso',
+    title: 'Сили спеціальних операцій',
+    hint: 'У розробці',
+    cards: Object.freeze(['.branch-card[data-branch="sso"]']),
+  }),
+]);
 
 const codePoints = value => [...String(value ?? '')].length;
 const squash = value => String(value ?? '').split(/\s+/).filter(Boolean).join(' ');
@@ -125,10 +155,20 @@ export function normalizeModules(modules) {
   return MODULE_IDS.filter(id => wanted.has(id));
 }
 
+/** Слоти таблиць кожного модуля: ПС і РВ — одна таблиця, ПВК/УДШВ — основна і «Наші втрати»,
+    артилерія і власний модуль таблиць профілю не мають. */
+const MODULE_SLOTS = Object.freeze([
+  ['air', ['air']],
+  ['rocket', ['rocket']],
+  ['army', ['army']],
+  ['pvk', ['pvk', 'pvk_losses']],
+  ['dshv', ['dshv', 'dshv_losses']],
+]);
+
 /** Слоти таблиць, які має сенс запропонувати для обраних модулів, у порядку модулів. */
 export function slotsForModules(modules, slots = PROFILE_SLOTS) {
   const chosen = new Set(normalizeModules(modules));
-  const wanted = GATE_MODULES.filter(module => chosen.has(module.id)).flatMap(module => module.slots);
+  const wanted = MODULE_SLOTS.filter(([id]) => chosen.has(id)).flatMap(([, branches]) => branches);
   return wanted.map(branch => slots.find(slot => slot.branch === branch)).filter(Boolean);
 }
 
@@ -136,6 +176,18 @@ export function slotsForModules(modules, slots = PROFILE_SLOTS) {
 export function moduleVisible(moduleId, profile) {
   if (!Array.isArray(profile?.modules) || profile.modules.length === 0) return true;
   return profile.modules.includes(moduleId);
+}
+
+/** Чи обрано рядок екрана вибору: досить одного з його модулів (профіль міг мати лише ПВК). */
+export function rowChosen(row, modules) {
+  const chosen = modules instanceof Set ? modules : new Set(modules || []);
+  return row.modules.some(id => chosen.has(id));
+}
+
+/** Модулі профілю за відміченими рядками екрана вибору, у порядку MODULE_IDS. */
+export function modulesForRows(rowIds) {
+  const wanted = new Set(rowIds || []);
+  return normalizeModules(GATE_MODULES.filter(row => wanted.has(row.id)).flatMap(row => row.modules));
 }
 
 /**

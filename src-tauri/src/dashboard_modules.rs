@@ -9,6 +9,8 @@ const MAX_ROWS_PER_WRITE: usize = 10_000;
 const MAX_CUSTOM_FIELDS: usize = 64;
 /// Ідентифікатор «шаблону» модулів з довільними стовпцями (об'єднана таблиця); у каталозі його немає.
 pub const MERGED_TEMPLATE_ID: &str = "merged-table";
+/// Службова «основна таблиця» користувача: стовпці задає сам користувач і дописують блоки реєстру.
+pub const USER_TABLE_TEMPLATE_ID: &str = "user-table";
 const MAX_ROWS_PER_READ: i64 = 10_000;
 const MAX_TEXT_LENGTH: usize = 4096;
 /// Службове поле рядка: ідентифікатор запису, який клієнт отримав від `get_data`.
@@ -185,6 +187,10 @@ pub enum DashboardModuleError {
     InvalidCustomFields,
     #[error("немає позначки версії таблиці; відкрийте модуль знову")]
     VersionRequired,
+    #[error(
+        "стовпці можна додавати лише до власної основної таблиці, а не до шаблонної чи об'єднаної"
+    )]
+    NotExtendable,
 }
 
 fn field(
@@ -886,8 +892,12 @@ pub fn catalog() -> Vec<DashboardModuleTemplate> {
     ]
 }
 
+/// Гілка модуля: рід військ, командування або «Власний модуль» (`custom`, без таблиці профілю).
 fn valid_branch(branch: &str) -> bool {
-    matches!(branch, "air" | "rocket" | "pvk" | "dshv")
+    matches!(
+        branch,
+        "air" | "rocket" | "army" | "pvk" | "dshv" | "custom"
+    )
 }
 
 fn valid_style(style: &str) -> bool {
@@ -922,6 +932,40 @@ fn sql_type(data_type: &str) -> Result<&'static str, DashboardModuleError> {
         "real" => Ok("REAL"),
         _ => Err(DashboardModuleError::InvalidStoredSchema),
     }
+}
+
+/// Поля модуля з довільною таблицею: ключі `c{n}` від `first_number`, позиції від `first_position`. Підпис —
+/// від 1 до 80 символів; тип, роль і агрегація з обмеженого набору (як для об'єднаної таблиці).
+fn custom_module_fields(
+    fields: Vec<NewCustomField>,
+    first_number: usize,
+    first_position: i64,
+) -> Result<Vec<DashboardModuleField>, DashboardModuleError> {
+    let mut custom = Vec::with_capacity(fields.len());
+    for (offset, item) in fields.into_iter().enumerate() {
+        let label = item.label.trim();
+        let valid = !label.is_empty()
+            && label.chars().count() <= 80
+            && matches!(
+                item.data_type.as_str(),
+                "text" | "integer" | "real" | "date"
+            )
+            && matches!(item.role.as_str(), "dimension" | "metric" | "label")
+            && matches!(item.aggregation.as_str(), "none" | "sum");
+        if !valid {
+            return Err(DashboardModuleError::InvalidCustomFields);
+        }
+        custom.push(DashboardModuleField {
+            key: format!("c{}", first_number + offset),
+            label: label.to_owned(),
+            data_type: item.data_type,
+            role: item.role,
+            aggregation: item.aggregation,
+            required: false,
+            position: first_position + offset as i64,
+        });
+    }
+    Ok(custom)
 }
 
 fn normalized_title(value: Option<&str>, fallback: &str) -> Result<String, DashboardModuleError> {
@@ -1137,6 +1181,60 @@ impl DashboardModuleStore {
         rows: Vec<Map<String, Value>>,
         created_at: &str,
     ) -> Result<DashboardModule, DashboardModuleError> {
+        self.create_custom_template(
+            profile_id,
+            branch,
+            MERGED_TEMPLATE_ID,
+            "Об'єднана таблиця",
+            requested_title,
+            requested_style,
+            fields,
+            rows,
+            created_at,
+        )
+        .await
+    }
+
+    /// Основна таблиця користувача: така сама, як об'єднана, але службовий шаблон `user-table` дозволяє
+    /// згодом дописувати стовпці (`add_fields`).
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_user_table(
+        &self,
+        profile_id: &str,
+        branch: &str,
+        requested_title: Option<&str>,
+        requested_style: Option<&str>,
+        fields: Vec<NewCustomField>,
+        rows: Vec<Map<String, Value>>,
+        created_at: &str,
+    ) -> Result<DashboardModule, DashboardModuleError> {
+        self.create_custom_template(
+            profile_id,
+            branch,
+            USER_TABLE_TEMPLATE_ID,
+            "Основна таблиця",
+            requested_title,
+            requested_style,
+            fields,
+            rows,
+            created_at,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn create_custom_template(
+        &self,
+        profile_id: &str,
+        branch: &str,
+        template_id: &str,
+        fallback_title: &str,
+        requested_title: Option<&str>,
+        requested_style: Option<&str>,
+        fields: Vec<NewCustomField>,
+        rows: Vec<Map<String, Value>>,
+        created_at: &str,
+    ) -> Result<DashboardModule, DashboardModuleError> {
         if !valid_branch(branch) {
             return Err(DashboardModuleError::InvalidBranch);
         }
@@ -1144,38 +1242,15 @@ impl DashboardModuleStore {
         if !valid_style(style) {
             return Err(DashboardModuleError::InvalidStyle);
         }
-        let title = normalized_title(requested_title, "Об'єднана таблиця")?;
+        let title = normalized_title(requested_title, fallback_title)?;
         if fields.is_empty() || fields.len() > MAX_CUSTOM_FIELDS {
             return Err(DashboardModuleError::InvalidCustomFields);
         }
-        let mut custom = Vec::with_capacity(fields.len());
-        for (position, item) in fields.into_iter().enumerate() {
-            let label = item.label.trim();
-            let valid = !label.is_empty()
-                && label.chars().count() <= 80
-                && matches!(
-                    item.data_type.as_str(),
-                    "text" | "integer" | "real" | "date"
-                )
-                && matches!(item.role.as_str(), "dimension" | "metric" | "label")
-                && matches!(item.aggregation.as_str(), "none" | "sum");
-            if !valid {
-                return Err(DashboardModuleError::InvalidCustomFields);
-            }
-            custom.push(DashboardModuleField {
-                key: format!("c{}", position + 1),
-                label: label.to_owned(),
-                data_type: item.data_type,
-                role: item.role,
-                aggregation: item.aggregation,
-                required: false,
-                position: position as i64,
-            });
-        }
+        let custom = custom_module_fields(fields, 1, 0)?;
         self.insert_module(
             profile_id,
             branch,
-            MERGED_TEMPLATE_ID,
+            template_id,
             "table",
             &title,
             style,
@@ -1185,6 +1260,100 @@ impl DashboardModuleStore {
             created_at,
         )
         .await
+    }
+
+    /// Дописує стовпці до основної таблиці (`user-table`): нові поля й фізичні колонки, наявні рядки
+    /// лишаються з порожніми значеннями нових стовпців. Ключі йдуть далі за найбільшим наявним (`c{n}`) і
+    /// ніколи не використовуються повторно. Версія таблиці звіряється (`expected_updated_at`), як у
+    /// `replace_rows`; підпис, що вже є в таблиці, відхиляється. Шаблонні й об'єднані таблиці не змінюються.
+    pub async fn add_fields(
+        &self,
+        profile_id: &str,
+        module_id: &str,
+        fields: Vec<NewCustomField>,
+        expected_updated_at: &str,
+        updated_at: &str,
+    ) -> Result<DashboardModule, DashboardModuleError> {
+        if expected_updated_at.trim().is_empty() {
+            return Err(DashboardModuleError::VersionRequired);
+        }
+        if fields.is_empty() {
+            return Err(DashboardModuleError::InvalidCustomFields);
+        }
+        let module = self.get_for_profile(profile_id, module_id).await?;
+        if module.template_id != USER_TABLE_TEMPLATE_ID {
+            return Err(DashboardModuleError::NotExtendable);
+        }
+        if module.fields.len() + fields.len() > MAX_CUSTOM_FIELDS {
+            return Err(DashboardModuleError::InvalidCustomFields);
+        }
+        let next_number = module
+            .fields
+            .iter()
+            .filter_map(|item| item.key.strip_prefix('c')?.parse::<usize>().ok())
+            .max()
+            .unwrap_or(0)
+            + 1;
+        let first_position = module
+            .fields
+            .iter()
+            .map(|item| item.position)
+            .max()
+            .map_or(0, |position| position + 1);
+        let added = custom_module_fields(fields, next_number, first_position)?;
+        let mut labels = module
+            .fields
+            .iter()
+            .map(|item| item.label.trim().to_lowercase())
+            .collect::<BTreeSet<_>>();
+        if added
+            .iter()
+            .any(|item| !labels.insert(item.label.to_lowercase()))
+        {
+            return Err(DashboardModuleError::InvalidCustomFields);
+        }
+        let table = quoted_identifier(&module.storage_table)?;
+        let mut transaction = self.pool.begin().await?;
+        let claimed = sqlx::query(
+            "UPDATE dashboard_modules SET updated_at = ?
+             WHERE id = ? AND profile_id = ? AND updated_at = ?",
+        )
+        .bind(updated_at)
+        .bind(module_id)
+        .bind(profile_id)
+        .bind(expected_updated_at)
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+        if claimed != 1 {
+            return Err(DashboardModuleError::Conflict);
+        }
+        for item in &added {
+            sqlx::query(
+                "INSERT INTO dashboard_module_fields
+                 (module_id, field_key, label, data_type, field_role, aggregation, required, position)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind(module_id)
+            .bind(&item.key)
+            .bind(&item.label)
+            .bind(&item.data_type)
+            .bind(&item.role)
+            .bind(&item.aggregation)
+            .bind(item.required)
+            .bind(item.position)
+            .execute(&mut *transaction)
+            .await?;
+            sqlx::query(&format!(
+                "ALTER TABLE {table} ADD COLUMN {} {}",
+                quoted_identifier(&item.key)?,
+                sql_type(&item.data_type)?
+            ))
+            .execute(&mut *transaction)
+            .await?;
+        }
+        transaction.commit().await?;
+        self.get_for_profile(profile_id, module_id).await
     }
 
     /// Спільна частина створення: перевірка рядків, межа модулів, запис модуля, його полів, таблиці
@@ -2228,10 +2397,11 @@ impl DashboardModuleStore {
 mod tests {
     use super::*;
     use crate::database::{
-        COMMAND_TABLES_SQL, DASHBOARD_MODULES_SQL, DASHBOARD_MODULE_CORRECTIONS_SQL,
-        DASHBOARD_MODULE_CORRECTION_STATUS_SQL, DASHBOARD_MODULE_STYLE_SQL, INITIAL_SCHEMA_SQL,
-        LOCAL_PROFILES_SQL, OWN_LOSSES_TABLES_SQL, PROFILE_BRANCH_TABLES_SQL, PROFILE_DETAILS_SQL,
-        PROFILE_MODULES_SQL, WORKSPACE_TEMPLATES_SQL, XLSX_DUPLICATE_LINKS_SQL,
+        ARMY_AVIATION_SQL, COMMAND_TABLES_SQL, CUSTOM_MODULE_SQL, DASHBOARD_MODULES_SQL,
+        DASHBOARD_MODULE_CORRECTIONS_SQL, DASHBOARD_MODULE_CORRECTION_STATUS_SQL,
+        DASHBOARD_MODULE_STYLE_SQL, INITIAL_SCHEMA_SQL, LOCAL_PROFILES_SQL, OWN_LOSSES_TABLES_SQL,
+        PROFILE_BRANCH_TABLES_SQL, PROFILE_DETAILS_SQL, PROFILE_MODULES_SQL,
+        WORKSPACE_TEMPLATES_SQL, XLSX_DUPLICATE_LINKS_SQL,
     };
     use serde_json::json;
     use sqlx::sqlite::SqlitePoolOptions;
@@ -2361,6 +2531,8 @@ mod tests {
             DASHBOARD_MODULE_CORRECTIONS_SQL,
             DASHBOARD_MODULE_STYLE_SQL,
             DASHBOARD_MODULE_CORRECTION_STATUS_SQL,
+            CUSTOM_MODULE_SQL,
+            ARMY_AVIATION_SQL,
         ] {
             sqlx::raw_sql(migration).execute(&pool).await.unwrap();
         }
@@ -2754,6 +2926,249 @@ mod tests {
             .await
             .unwrap();
         assert!(store.list(profile, "air").await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn user_table_gets_new_columns_and_keeps_its_rows() {
+        let store = store().await;
+        let profile = "profile-111111111111111111111111";
+        let mut first = Map::new();
+        first.insert("c1".to_owned(), Value::String("2026-09-01".to_owned()));
+        first.insert("c2".to_owned(), Value::String("Альфа".to_owned()));
+        let table = store
+            .create_user_table(
+                profile,
+                "air",
+                None,
+                None,
+                vec![
+                    custom_field("Дата", "date"),
+                    custom_field("Підрозділ", "text"),
+                ],
+                vec![first],
+                "2026-01-01T00:00:01Z",
+            )
+            .await
+            .unwrap();
+        assert_eq!(table.template_id, USER_TABLE_TEMPLATE_ID);
+        assert_eq!(table.title, "Основна таблиця");
+        let extended = store
+            .add_fields(
+                profile,
+                &table.id,
+                vec![
+                    custom_field("Результат", "text"),
+                    custom_field("Кількість БП", "integer"),
+                ],
+                &table.updated_at,
+                "2026-01-01T00:00:02Z",
+            )
+            .await
+            .unwrap();
+        assert_eq!(extended.updated_at, "2026-01-01T00:00:02Z");
+        assert_eq!(
+            extended
+                .fields
+                .iter()
+                .map(|f| (f.key.as_str(), f.label.as_str(), f.position))
+                .collect::<Vec<_>>(),
+            [
+                ("c1", "Дата", 0),
+                ("c2", "Підрозділ", 1),
+                ("c3", "Результат", 2),
+                ("c4", "Кількість БП", 3)
+            ]
+        );
+        assert_eq!(extended.fields[3].aggregation, "sum");
+        // Наявний рядок цілий, нові стовпці в ньому порожні; їх можна заповнити.
+        let data = store.get_data(profile, &table.id).await.unwrap();
+        assert_eq!(data.rows[0]["c2"], "Альфа");
+        assert_eq!(data.rows[0]["c3"], Value::Null);
+        assert_eq!(data.rows[0]["c4"], Value::Null);
+        let mut filled = Map::new();
+        filled.insert("rowId".to_owned(), data.rows[0]["rowId"].clone());
+        filled.insert("c1".to_owned(), Value::String("2026-09-01".to_owned()));
+        filled.insert("c3".to_owned(), Value::String("Знищено".to_owned()));
+        filled.insert("c4".to_owned(), Value::Number(4.into()));
+        let saved = store
+            .replace_rows(
+                profile,
+                &table.id,
+                vec![filled],
+                &extended.updated_at,
+                "2026-01-01T00:00:03Z",
+            )
+            .await
+            .unwrap();
+        assert_eq!(saved.rows[0]["c3"], "Знищено");
+        assert_eq!(saved.rows[0]["c4"], 4);
+        // Наступний стовпець отримує наступний ключ, c5.
+        let again = store
+            .add_fields(
+                profile,
+                &table.id,
+                vec![custom_field("Борт", "text")],
+                &saved.module.updated_at,
+                "2026-01-01T00:00:04Z",
+            )
+            .await
+            .unwrap();
+        assert_eq!(again.fields.last().unwrap().key, "c5");
+    }
+
+    #[tokio::test]
+    async fn add_fields_refuses_foreign_tables_stale_versions_and_bad_columns() {
+        let store = store().await;
+        let profile = "profile-111111111111111111111111";
+        let other = "profile-222222222222222222222222";
+        let user = store
+            .create_user_table(
+                profile,
+                "air",
+                Some("Моя"),
+                None,
+                vec![custom_field("Дата", "date")],
+                Vec::new(),
+                "2026-01-01T00:00:01Z",
+            )
+            .await
+            .unwrap();
+        let merged = store
+            .create_custom(
+                profile,
+                "air",
+                None,
+                None,
+                vec![custom_field("Дата", "date")],
+                Vec::new(),
+                "2026-01-01T00:00:01Z",
+            )
+            .await
+            .unwrap();
+        let templated = store
+            .create_styled(
+                profile,
+                "air",
+                "kpi",
+                None,
+                None,
+                Vec::new(),
+                Vec::new(),
+                "2026-01-01T00:00:01Z",
+            )
+            .await
+            .unwrap();
+        async fn add(
+            store: &DashboardModuleStore,
+            id: &str,
+            fields: Vec<NewCustomField>,
+            version: &str,
+        ) -> Result<DashboardModule, DashboardModuleError> {
+            store
+                .add_fields(
+                    "profile-111111111111111111111111",
+                    id,
+                    fields,
+                    version,
+                    "2026-01-01T00:00:09Z",
+                )
+                .await
+        }
+        for id in [&merged.id, &templated.id] {
+            let version = store.get_data(profile, id).await.unwrap().module.updated_at;
+            assert!(matches!(
+                add(&store, id, vec![custom_field("Х", "text")], &version).await,
+                Err(DashboardModuleError::NotExtendable)
+            ));
+        }
+        assert!(matches!(
+            add(&store, &user.id, vec![custom_field("Х", "text")], "").await,
+            Err(DashboardModuleError::VersionRequired)
+        ));
+        assert!(matches!(
+            add(
+                &store,
+                &user.id,
+                vec![custom_field("Х", "text")],
+                "2020-01-01T00:00:00Z"
+            )
+            .await,
+            Err(DashboardModuleError::Conflict)
+        ));
+        assert!(matches!(
+            add(&store, &user.id, Vec::new(), &user.updated_at).await,
+            Err(DashboardModuleError::InvalidCustomFields)
+        ));
+        assert!(matches!(
+            add(
+                &store,
+                &user.id,
+                vec![custom_field("  ", "text")],
+                &user.updated_at
+            )
+            .await,
+            Err(DashboardModuleError::InvalidCustomFields)
+        ));
+        assert!(matches!(
+            add(
+                &store,
+                &user.id,
+                vec![custom_field("Х", "boolean")],
+                &user.updated_at
+            )
+            .await,
+            Err(DashboardModuleError::InvalidCustomFields)
+        ));
+        // Підпис, що вже є (без урахування регістру), і повтор у самому запиті.
+        assert!(matches!(
+            add(
+                &store,
+                &user.id,
+                vec![custom_field("дата", "text")],
+                &user.updated_at
+            )
+            .await,
+            Err(DashboardModuleError::InvalidCustomFields)
+        ));
+        assert!(matches!(
+            add(
+                &store,
+                &user.id,
+                vec![custom_field("Нове", "text"), custom_field("нове", "text")],
+                &user.updated_at
+            )
+            .await,
+            Err(DashboardModuleError::InvalidCustomFields)
+        ));
+        // Понад 64 стовпці не вміщується.
+        assert!(matches!(
+            add(
+                &store,
+                &user.id,
+                (0..64)
+                    .map(|i| custom_field(&format!("П{i}"), "text"))
+                    .collect(),
+                &user.updated_at
+            )
+            .await,
+            Err(DashboardModuleError::InvalidCustomFields)
+        ));
+        // Чужий профіль таблиці не бачить; після відмов таблиця не змінилася.
+        assert!(matches!(
+            store
+                .add_fields(
+                    other,
+                    &user.id,
+                    vec![custom_field("Х", "text")],
+                    &user.updated_at,
+                    "2026-01-01T00:00:09Z"
+                )
+                .await,
+            Err(DashboardModuleError::ModuleNotFound)
+        ));
+        let after = store.get_data(profile, &user.id).await.unwrap();
+        assert_eq!(after.module.fields.len(), 1);
+        assert_eq!(after.module.updated_at, user.updated_at);
     }
 
     #[tokio::test]

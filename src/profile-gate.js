@@ -15,16 +15,19 @@ import {
 } from './local-profiles-core.js';
 import {
   GATE_MODULES,
+  SOON_MODULES,
+  NAME_MAX,
   PASSWORD_MAX,
   PASSWORD_MIN,
   POSITION_MAX,
-  NAME_MAX,
-  registerLoginFailure,
   gateScreen,
   loginCardNote,
   modulesError,
+  modulesForRows,
   passwordError,
   recoveryFailure,
+  registerLoginFailure,
+  rowChosen,
   slotsForModules,
   validateProfileStep,
   validateRecoveryStep,
@@ -399,7 +402,7 @@ export function createProfileGate({ el, avatar, readAvatar }) {
         const boxes = GATE_MODULES.map(module => el('input', {
           type: 'checkbox',
           value: module.id,
-          checked: data.modules.includes(module.id),
+          checked: rowChosen(module, data.modules),
           'aria-label': module.title,
         }));
         const error = el('p', { class: 'ew-gate-message', role: 'alert' });
@@ -410,12 +413,18 @@ export function createProfileGate({ el, avatar, readAvatar }) {
               boxes[index],
               el('span', {},
                 el('strong', { text: module.title }),
+                el('small', { text: module.hint })))),
+            // Модулі в розробці видно в переліку, але обрати їх ще не можна.
+            SOON_MODULES.map(module => el('label', { class: 'ew-gate-module is-soon' },
+              el('input', { type: 'checkbox', disabled: true, 'aria-label': `${module.title}: у розробці` }),
+              el('span', {},
+                el('strong', { text: module.title }),
                 el('small', { text: module.hint }))))),
           error,
           el('div', { class: 'ew-gate-actions' },
             el('button', { type: 'button', class: 'ew-gate-link', text: 'Назад', onclick: () => { data.modules = chosen(); stepProfile(); } }),
             create));
-        const chosen = () => boxes.filter(box => box.checked).map(box => box.value);
+        const chosen = () => modulesForRows(boxes.filter(box => box.checked).map(box => box.value));
         boxes[0].setAttribute('data-autofocus', '');
 
         form.addEventListener('submit', async event => {

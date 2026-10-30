@@ -7,6 +7,8 @@
 :is(.ewmc-module,.ewmc-style-preview,.ewmc-style-option,.ewmc-dialog)[data-branch=pvk]{--ewmc-branch:#4b7bec;--ewmc-branch-night:#7aa7ff}
 :is(.ewmc-module,.ewmc-style-preview,.ewmc-style-option,.ewmc-dialog)[data-branch=rocket]{--ewmc-branch:#c9971a;--ewmc-branch-night:#ffc83d}
 :is(.ewmc-module,.ewmc-style-preview,.ewmc-style-option,.ewmc-dialog)[data-branch=dshv]{--ewmc-branch:#a3263b;--ewmc-branch-night:#ff5c7a}
+:is(.ewmc-module,.ewmc-style-preview,.ewmc-style-option,.ewmc-dialog)[data-branch=army]{--ewmc-branch:#6fae3a;--ewmc-branch-night:#9be35a}
+:is(.ewmc-module,.ewmc-style-preview,.ewmc-style-option,.ewmc-dialog)[data-branch=custom]{--ewmc-branch:#3fbfb0;--ewmc-branch-night:#5ff0df}
 .ewmc-style-preview{display:block;border-radius:14px;transition:background-color .2s,border-color .2s,padding .2s}
 .ewmc-style-preview:is([data-style=branch],[data-style=heightwell]){padding:8px}
 :is(.ewmc-module,.ewmc-style-preview)[data-style=branch]{border:1px solid color-mix(in srgb,var(--ewmc-branch) 55%,var(--line,#26364a));border-top:3px solid var(--ewmc-branch);background:color-mix(in srgb,var(--surface-2,#142238) 88%,var(--ewmc-branch) 12%)}

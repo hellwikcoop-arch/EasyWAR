@@ -155,13 +155,35 @@ input of the Rust send gate; unconfirmed or planned means class D) and
 `(profile_id, collective_id)` and cascade with the collective. Number 0020 was the
 next free one on main.
 
-`0024_collective_table_data.sql` (owner decision 2026-10-30, «Так, починай») adds
+`0021_custom_module.sql` adds the profile module `custom` («Власний модуль»: a
+module without a service branch and without a profile XLSX table; its page
+`custom.html` hosts the module catalog and «Мій дашборд») to
+`local_profile_modules`, and the dashboard branch `custom` to `dashboard_modules`.
+Both tables are rebuilt because SQLite cannot change a `CHECK` in place. Foreign
+keys are on while migrations run and `DROP TABLE` of a parent cascades into its
+children, so the migration first creates `dashboard_module_fields_new` and
+`dashboard_module_corrections_new` referencing `dashboard_modules_new`, copies all
+rows (corrections with their ids), drops the old tables children first, renames
+the new ones (which rewrites the references) and recreates the two indexes;
+`dashboard_data_<id>` tables are not touched. Profiles that exist before this
+migration get the `custom` row so the new card is visible; it can be switched off
+in «Профілі». Number 0021 was the next free one on main (0020 is E8 sync).
+
+`0022_army_aviation.sql` adds the branch `army` («Армійська авіація»: the Air Force
+page opened by the launcher as `air.html?module=army`, in its own colour and with
+its own profile table of the same structure as the Air Force one) to
+`local_profile_tables`, to `local_profile_modules` (as a module of the start screen)
+and to `dashboard_modules` (modules created on that page). The three tables are
+rebuilt because SQLite cannot change a `CHECK` in place; the dashboard children are
+copied first for the same foreign-key reason as in 0021; rows, ids and indexes are
+kept. Existing profiles do NOT get the `army` row: the start screen shows only the
+modules a profile chose, and «Армійська авіація» is switched on in «Профілі».
+
+`0023_collective_table_data.sql` (owner decision 2026-10-30, «Так, починай») adds
 `collective_tables.columns` (JSON array of column names, `[]` by default) and
 `collective_table_ops` (one sealed envelope per «Доповісти», keyed by
 `envelope_id`, cascading with the table). Row values are never stored in clear;
-Rust rebuilds the table by opening and re-verifying the envelopes. Numbers
-0021–0023 are taken by open module branches; this file does not depend on them,
-and the registration test checks the version list, not a contiguous count.
+Rust rebuilds the table by opening and re-verifying the envelopes.
 
 The `dashboard_data_<id>` tables of user-created dashboard modules are not
 migration objects: Rust creates them at runtime from a validated catalog
