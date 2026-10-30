@@ -56,10 +56,43 @@ export const TRANSPORT_OPTIONS = Object.freeze([
   Object.freeze({ value: 'base44', label: 'Base44 власника' }),
 ]);
 export const MAX_OPERATION_BYTES = 64 * 1024;
-const TEXT_KINDS = Object.freeze({ 'EWINV1.': 'invitation', 'EWJOIN1.': 'request', 'EWKEYS1.': 'keys' });
-const KIND_NAMES = Object.freeze({ invitation: 'запрошення', request: 'відповідь на запрошення', keys: 'пакет ключів' });
+const TEXT_KINDS = Object.freeze({ 'EWINV1.': 'invitation', 'EWJOIN1.': 'request', 'EWKEYS1.': 'keys', 'EWSYNC1.': 'sync' });
+const KIND_NAMES = Object.freeze({ invitation: 'запрошення', request: 'відповідь на запрошення', keys: 'пакет ключів', sync: 'пакет оновлення' });
 
 const purposeLabel = value => PURPOSE_OPTIONS.find(option => option.value === value)?.label ?? 'Невідоме призначення';
+
+/** Учасник у списку: ім’я, яке він вказав сам, і відбиток; без імені — лише відбиток. */
+export function memberLine(member) {
+  return member?.name ? `${member.name} · ${member.fingerprint}` : String(member?.fingerprint ?? '');
+}
+
+/** Слово «учасник» у потрібній формі для числа: 1 учасник, 2 учасники, 5 учасників. */
+export function membersWord(count) {
+  const n = Math.abs(Math.trunc(Number(count) || 0));
+  const tens = n % 100;
+  const ones = n % 10;
+  if (tens >= 11 && tens <= 14) return 'учасників';
+  if (ones === 1) return 'учасник';
+  if (ones >= 2 && ones <= 4) return 'учасники';
+  return 'учасників';
+}
+export function membersCount(count) {
+  return `${Math.trunc(Number(count) || 0)} ${membersWord(count)}`;
+}
+
+/** Ініціали для кружка учасника: перші літери двох слів імені; без імені — «?». */
+export function memberInitials(name) {
+  const words = String(name ?? '').trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return '?';
+  return words.slice(0, 2).map(word => Array.from(word)[0].toUpperCase()).join('');
+}
+
+/** Обраний колектив лишається, якщо ще є; інакше — перший зі списку (або жоден). */
+export function pickCollective(collectives, current) {
+  const list = collectives ?? [];
+  if (current && list.some(item => item.fingerprint === current)) return current;
+  return list[0]?.fingerprint ?? '';
+}
 
 /** Рядок про таблицю колективу. Різниця між вказаним і чинним класом пояснюється. */
 export function tableLine(table) {
@@ -131,4 +164,19 @@ export function expectText(text, kind) {
   throw new Error(actual
     ? `Вставлено ${KIND_NAMES[actual]}, а тут потрібно вставити: ${KIND_NAMES[kind]}.`
     : `Вставте повністю: ${KIND_NAMES[kind]} (текст починається з ${Object.keys(TEXT_KINDS).find(p => TEXT_KINDS[p] === kind)}).`);
+}
+
+/** Підсумок «Пакет оновлення»: що в тексті, який передають учасникам. */
+export function syncExportText(made) {
+  return `Журнал складу: ${made.records} записів, таблиць: ${made.tables}, пакетів змін: ${made.changes}. `
+    + 'Передайте текст учасникам колективу самі; прочитати його можуть лише учасники.';
+}
+
+/** Підсумок приймання пакета оновлення. */
+export function syncImportText(got) {
+  const parts = [`нових записів журналу: ${got.newRecords}`, `таблиць нових або оновлених: ${got.tables}`,
+    `нових пакетів змін: ${got.newChanges}`];
+  if (got.knownChanges) parts.push(`вже були: ${got.knownChanges}`);
+  if (got.rejected) parts.push(`не пройшли перевірку й не збережені: ${got.rejected}`);
+  return `Пакет прийнято: ${parts.join(', ')}.`;
 }

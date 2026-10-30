@@ -516,11 +516,11 @@ test('host.collectives є лише в застосунку «Колективи�
   const host = createHost({ appEntry: appById('collectives'), invoke });
   assert.deepEqual(await host.collectives.status(), { keyStore: 'absent' });
   await host.collectives.createIdentity('пароль-профілю');
-  await host.collectives.create('пароль-профілю', 'Група');
+  await host.collectives.create('пароль-профілю', 'Група', 'Синтетик');
   assert.deepEqual(calls, [
     ['collective_status', undefined],
     ['collective_create_identity', { password: 'пароль-профілю' }],
-    ['collective_create', { password: 'пароль-профілю', name: 'Група' }],
+    ['collective_create', { password: 'пароль-профілю', name: 'Група', memberName: 'Синтетик' }],
   ]);
   assert.equal(createHost({ appEntry: appById('collectives') }).collectives, null, 'без Tauri');
   assert.equal(createHost({ appEntry: appById('easygreen'), invoke }).collectives, null, 'інший застосунок');
@@ -530,25 +530,33 @@ test('host.collectives: команди обміну передають лише 
   const calls = [];
   const invoke = async (command, args) => { calls.push([command, args]); return {}; };
   const host = createHost({ appEntry: appById('collectives'), invoke });
-  await host.collectives.detail('ABCDE-FGHIJ');
-  await host.collectives.setTable({ collective: 'ABCDE-FGHIJ', title: 'Облік', cls: 'C', purpose: 'after-fact' });
-  await host.collectives.setTable({ collective: 'ABCDE-FGHIJ', table: 'KLMNO-PQRST', title: 'Облік', cls: 'D', purpose: 'planned' });
-  await host.collectives.inviteCreate('пароль-профілю', 'ABCDE-FGHIJ', '24');
-  await host.collectives.joinRequest('пароль-профілю', 'EWINV1.x');
-  await host.collectives.inviteAdmit('пароль-профілю', 'ABCDE-FGHIJ', 'EWJOIN1.x');
+  await host.collectives.detail('ABCDEFGHIJ');
+  await host.collectives.setTable({ collective: 'ABCDEFGHIJ', title: 'Облік', cls: 'C', purpose: 'after-fact' });
+  await host.collectives.setTable({ collective: 'ABCDEFGHIJ', table: 'KLMNOPQRST', title: 'Облік', cls: 'D', purpose: 'planned' });
+  await host.collectives.setTable({ collective: 'ABCDEFGHIJ', table: 'KLMNOPQRST', title: 'Облік', cls: 'C', purpose: 'after-fact', columns: ['Стан', 7] });
+  await host.collectives.tableRead('пароль-профілю', 'ABCDEFGHIJ', 'KLMNOPQRST');
+  await host.collectives.syncExport('пароль-профілю', 'ABCDEFGHIJ');
+  await host.collectives.syncImport('пароль-профілю', 'EWSYNC1.x');
+  await host.collectives.inviteCreate('пароль-профілю', 'ABCDEFGHIJ', '24');
+  await host.collectives.joinRequest('пароль-профілю', 'EWINV1.x', 'Синтетик');
+  await host.collectives.inviteAdmit('пароль-профілю', 'ABCDEFGHIJ', 'EWJOIN1.x');
   await host.collectives.joinAccept('пароль-профілю', 'EWKEYS1.x');
-  await host.collectives.reportPrepare({ collective: 'ABCDE-FGHIJ', table: 'KLMNO-PQRST',
+  await host.collectives.reportPrepare({ collective: 'ABCDEFGHIJ', table: 'KLMNOPQRST',
     transport: 'lan', explicitWan: 'так', reviewed: true, operation: '{"row":"synthetic"}' });
   await host.collectives.reportConfirm('пароль-профілю', '00112233445566778899aabbccddeeff');
   assert.deepEqual(calls, [
-    ['collective_detail', { collective: 'ABCDE-FGHIJ' }],
-    ['collective_table_set', { collective: 'ABCDE-FGHIJ', table: null, title: 'Облік', class: 'C', purpose: 'after-fact' }],
-    ['collective_table_set', { collective: 'ABCDE-FGHIJ', table: 'KLMNO-PQRST', title: 'Облік', class: 'D', purpose: 'planned' }],
-    ['collective_invite_create', { password: 'пароль-профілю', collective: 'ABCDE-FGHIJ', hours: 24 }],
-    ['collective_join_request', { password: 'пароль-профілю', invitation: 'EWINV1.x' }],
-    ['collective_invite_admit', { password: 'пароль-профілю', collective: 'ABCDE-FGHIJ', request: 'EWJOIN1.x' }],
+    ['collective_detail', { collective: 'ABCDEFGHIJ' }],
+    ['collective_table_set', { collective: 'ABCDEFGHIJ', table: null, title: 'Облік', class: 'C', purpose: 'after-fact', columns: null }],
+    ['collective_table_set', { collective: 'ABCDEFGHIJ', table: 'KLMNOPQRST', title: 'Облік', class: 'D', purpose: 'planned', columns: null }],
+    ['collective_table_set', { collective: 'ABCDEFGHIJ', table: 'KLMNOPQRST', title: 'Облік', class: 'C', purpose: 'after-fact', columns: ['Стан', '7'] }],
+    ['collective_table_read', { password: 'пароль-профілю', collective: 'ABCDEFGHIJ', table: 'KLMNOPQRST' }],
+    ['collective_sync_export', { password: 'пароль-профілю', collective: 'ABCDEFGHIJ' }],
+    ['collective_sync_import', { password: 'пароль-профілю', text: 'EWSYNC1.x' }],
+    ['collective_invite_create', { password: 'пароль-профілю', collective: 'ABCDEFGHIJ', hours: 24 }],
+    ['collective_join_request', { password: 'пароль-профілю', invitation: 'EWINV1.x', memberName: 'Синтетик' }],
+    ['collective_invite_admit', { password: 'пароль-профілю', collective: 'ABCDEFGHIJ', request: 'EWJOIN1.x' }],
     ['collective_join_accept', { password: 'пароль-профілю', keys: 'EWKEYS1.x' }],
-    ['collective_report_prepare', { collective: 'ABCDE-FGHIJ', table: 'KLMNO-PQRST',
+    ['collective_report_prepare', { collective: 'ABCDEFGHIJ', table: 'KLMNOPQRST',
       transport: 'lan', explicitWan: false, operation: '{"row":"synthetic"}' }],
     ['collective_report_confirm', { password: 'пароль-профілю', intent: '00112233445566778899aabbccddeeff' }],
   ], 'явний вибір WAN — лише true; прапорець reviewed з JS не передається (SEC-003)');
