@@ -72,12 +72,22 @@ export function checkPolicyValue(direction, policy) {
 
 /**
  * Чи можна відправити зміни цієї таблиці зараз.
- * ctx: { policy, tableClass, transport, endToEnd, authorId, writers, reviewedByHuman }
+ * ctx: { policy, tableClass, transport, endToEnd, authorId, writers, reviewedByHuman,
+ *        confirmedAfterFact, membershipVerified, explicitUserChoice, relayOpaqueVerified,
+ *        transportSecurityApproved }
+ * WAN прапорці — лише для підказки; авторитетний Rust виконує ті самі перевірки незалежно.
  * reviewedByHuman — людина переглянула «було → стане» й натиснула «Доповісти» (Q10г).
  */
 export function evaluateOutbound(ctx) {
   const c = opts(ctx);
-  const route = routeFor(c.tableClass, c.transport, { endToEnd: c.endToEnd === true });
+  const route = routeFor(c.tableClass, c.transport, {
+    endToEnd: c.endToEnd === true,
+    confirmedAfterFact: c.confirmedAfterFact === true,
+    membershipVerified: c.membershipVerified === true,
+    explicitUserChoice: c.explicitUserChoice === true,
+    relayOpaqueVerified: c.relayOpaqueVerified === true,
+    transportSecurityApproved: c.transportSecurityApproved === true,
+  });
   if (!route.allowed) return decision(false, route.code, route.reason);
   const p = checkPolicyValue('outbound', c.policy);
   if (!p.allowed) return p;

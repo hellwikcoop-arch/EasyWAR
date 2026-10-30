@@ -34,17 +34,20 @@ pub enum Purpose {
     CollectiveLan,
     /// Транспорт Base44 колективу (C4). До C3b і G01–G05 — завжди відхилено.
     CollectiveBase44,
+    /// WAN Pair Mesh через інший EasyWAR/relay. До C8 і безпекових gates — відхилено.
+    CollectivePeerWan,
 }
 
 impl Purpose {
     /// Усі відомі призначення в порядку таблиці ADR (для тестів і діагностики).
-    pub const ALL: [Purpose; 6] = [
+    pub const ALL: [Purpose; 7] = [
         Purpose::WeatherOnline,
         Purpose::ModelInstall,
         Purpose::AppUpdate { manual: true },
         Purpose::SignalDaemon { loopback: true },
         Purpose::CollectiveLan,
         Purpose::CollectiveBase44,
+        Purpose::CollectivePeerWan,
     ];
 
     /// Ім'я призначення, як воно записане в ADR і в журналі.
@@ -56,6 +59,7 @@ impl Purpose {
             Purpose::SignalDaemon { .. } => "signal_daemon",
             Purpose::CollectiveLan => "collective_lan",
             Purpose::CollectiveBase44 => "collective_base44",
+            Purpose::CollectivePeerWan => "collective_peer_wan",
         }
     }
 
@@ -70,13 +74,17 @@ impl Purpose {
             "signal_daemon" => Some(Purpose::SignalDaemon { loopback: false }),
             "collective_lan" => Some(Purpose::CollectiveLan),
             "collective_base44" => Some(Purpose::CollectiveBase44),
+            "collective_peer_wan" => Some(Purpose::CollectivePeerWan),
             _ => None,
         }
     }
 
     /// Чи призначення належить майбутньому колективу (E8): до C3b відхиляється завжди.
     pub fn is_collective(self) -> bool {
-        matches!(self, Purpose::CollectiveLan | Purpose::CollectiveBase44)
+        matches!(
+            self,
+            Purpose::CollectiveLan | Purpose::CollectiveBase44 | Purpose::CollectivePeerWan
+        )
     }
 }
 
@@ -197,11 +205,15 @@ pub fn network_policy(context: &NetworkContext<'_>, purpose: Purpose) -> Verdict
             Some(Denied::IntegrationDisabled)
         }
         Purpose::SignalDaemon { loopback: true } => None,
-        Purpose::CollectiveLan | Purpose::CollectiveBase44 if !context.profile_has_password => {
+        Purpose::CollectiveLan | Purpose::CollectiveBase44 | Purpose::CollectivePeerWan
+            if !context.profile_has_password =>
+        {
             Some(Denied::ProfileWithoutPassword)
         }
         // До C3b жоден транспорт колективу не дозволений, хай би які були налаштування.
-        Purpose::CollectiveLan | Purpose::CollectiveBase44 => Some(Denied::StageNotAuthorized),
+        Purpose::CollectiveLan | Purpose::CollectiveBase44 | Purpose::CollectivePeerWan => {
+            Some(Denied::StageNotAuthorized)
+        }
     };
     match denied {
         Some(reason) => Verdict::Denied(reason),
@@ -318,7 +330,11 @@ mod tests {
     #[test]
     fn collective_transports_stay_denied_until_c3b() {
         let mut context = open_main();
-        for purpose in [Purpose::CollectiveLan, Purpose::CollectiveBase44] {
+        for purpose in [
+            Purpose::CollectiveLan,
+            Purpose::CollectiveBase44,
+            Purpose::CollectivePeerWan,
+        ] {
             assert_eq!(
                 network_policy(&context, purpose),
                 Verdict::Denied(Denied::ProfileWithoutPassword),
@@ -329,7 +345,11 @@ mod tests {
         context.profile_has_password = true;
         context.weather_online_enabled = true;
         context.auto_update_enabled = true;
-        for purpose in [Purpose::CollectiveLan, Purpose::CollectiveBase44] {
+        for purpose in [
+            Purpose::CollectiveLan,
+            Purpose::CollectiveBase44,
+            Purpose::CollectivePeerWan,
+        ] {
             assert_eq!(
                 network_policy(&context, purpose),
                 Verdict::Denied(Denied::StageNotAuthorized),

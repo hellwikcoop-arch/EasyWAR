@@ -49,9 +49,21 @@ test('порядок перевірки: маршрут і право запис
   assert.equal(evaluateOutbound({ ...ok, tableClass: 'D' }).code, 'class-d-cloud');
   assert.equal(evaluateOutbound({ ...ok, tableClass: 'D', transport: 'lan' }).allowed, true);
   assert.equal(evaluateOutbound({ ...ok, endToEnd: false }).code, 'no-e2e');
-  assert.equal(evaluateOutbound({ ...ok, transport: 'peer_wan' }).code, 'peer-wan-forbidden');
+  assert.equal(evaluateOutbound({ ...ok, transport: 'peer_wan' }).code, 'wan-purpose-unconfirmed');
   assert.equal(evaluateOutbound({ ...ok, authorId: 'member-synthetic-reader' }).code, 'no-write-right');
   assert.equal(evaluateOutbound(null).allowed, false);
+});
+
+test('WAN: «Доповісти» і право запису залишаються обов’язковими при всіх дозволах транспорту', () => {
+  const approved = { ...ok, transport: 'peer_wan', confirmedAfterFact: true,
+    membershipVerified: true, explicitUserChoice: true, relayOpaqueVerified: true,
+    transportSecurityApproved: true };
+  assert.equal(evaluateOutbound(approved).allowed, true);
+  assert.equal(evaluateOutbound({ ...approved, reviewedByHuman: false }).code, 'needs-report-review');
+  assert.equal(evaluateOutbound({ ...approved, writers: [] }).code, 'no-write-right');
+  assert.equal(evaluateOutbound({ ...approved, tableClass: 'D' }).code, 'class-d-wan');
+  assert.equal(evaluateOutbound({ ...approved, transportSecurityApproved: false }).code, 'wan-not-ready');
+  assert.equal(evaluateOutbound({ ...approved, policy: 'AUTO_AFTER_LOCAL_APPROVAL' }).code, 'OwnerDecisionRequired');
 });
 
 test('S10: перевірка перед відправкою бере чинну політику, а не ту, що була при постановці в чергу', () => {
@@ -115,4 +127,18 @@ test('AC14: статуси для людини розрізняють «збер
   assert.equal(STATUS_LABELS.applied_here, 'Застосовано на цьому пристрої');
   assert.equal(Object.values(STATUS_LABELS).some(l => /з усіма/iu.test(l)), false);
   assert.ok(Object.isFrozen(STATUS_LABELS));
+});
+
+test('Rust-допуск перед відправкою повторює коди JS-ядра (send_gate.rs)', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const gate = await readFile(new URL('../src-tauri/src/collective/send_gate.rs', import.meta.url), 'utf8');
+  // Кожен крок, який JS лише підказує, у Rust перевіряється з власного стану під тим самим кодом.
+  const shared = ['class-d-cloud', 'class-d-wan', 'wan-class-unapproved', 'wan-needs-user-choice',
+    'wan-not-ready', 'OwnerDecisionRequired', 'no-write-right', 'needs-report-review'];
+  for (const code of shared) assert.match(gate, new RegExp(`"${code}"`), code);
+  // Прапорці «вже перевірено» з JS у Rust не приймаються: таких полів у запиті немає.
+  for (const flag of ['membershipVerified', 'relayOpaqueVerified', 'transportSecurityApproved', 'membership_verified'])
+    assert.doesNotMatch(gate, new RegExp(flag), flag);
+  // Чинна політика: жоден віддалений транспорт не прийнятий.
+  assert.match(gate, /wan_transport_accepted: false,\s*base44_accepted: false,/);
 });
