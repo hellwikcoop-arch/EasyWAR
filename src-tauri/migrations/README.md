@@ -169,6 +169,16 @@ the new ones (which rewrites the references) and recreates the two indexes;
 migration get the `custom` row so the new card is visible; it can be switched off
 in «Профілі». Number 0021 was the next free one on main (0020 is E8 sync).
 
+`0022_army_aviation.sql` adds the branch `army` («Армійська авіація»: the Air Force
+page opened by the launcher as `air.html?module=army`, in its own colour and with
+its own profile table of the same structure as the Air Force one) to
+`local_profile_tables`, to `local_profile_modules` (as a module of the start screen)
+and to `dashboard_modules` (modules created on that page). The three tables are
+rebuilt because SQLite cannot change a `CHECK` in place; the dashboard children are
+copied first for the same foreign-key reason as in 0021; rows, ids and indexes are
+kept. Existing profiles do NOT get the `army` row: the start screen shows only the
+modules a profile chose, and «Армійська авіація» is switched on in «Профілі».
+
 The `dashboard_data_<id>` tables of user-created dashboard modules are not
 migration objects: Rust creates them at runtime from a validated catalog
 template and adds columns that later appear in a template with `ALTER TABLE`,

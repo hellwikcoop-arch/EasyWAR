@@ -225,3 +225,4 @@
 .ew-profile-modules { display: grid; gap: 8px; margin-top: 10px; }
 .ew-profile-module-list { display: flex; flex-wrap: wrap; gap: 6px 16px; }
 .ew-profile-module { display: inline-flex; align-items: center; gap: 6px; }
+.ew-profile-module.is-soon { opacity: .55; cursor: not-allowed; }

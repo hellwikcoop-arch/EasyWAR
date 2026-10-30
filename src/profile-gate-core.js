@@ -44,6 +44,14 @@ export const GATE_MODULES = Object.freeze([
     tiles: Object.freeze([]),
   }),
   Object.freeze({
+    id: 'army',
+    title: 'Армійська авіація',
+    hint: 'Модуль на основі ПС у кольорі армійської авіації: своя таблиця, карта, довідник',
+    modules: Object.freeze(['army']),
+    cards: Object.freeze(['.branch-card[data-branch="army"]']),
+    tiles: Object.freeze([null]),
+  }),
+  Object.freeze({
     id: 'command',
     title: 'Командування військ',
     hint: 'Дашборди ПВК і УДШВ з вкладками «Наші втрати»',
@@ -63,6 +71,20 @@ export const GATE_MODULES = Object.freeze([
 
 /** Ключі модулів профілю так, як їх зберігає ядро (`MODULES` у local_profiles.rs), у порядку показу. */
 export const MODULE_IDS = Object.freeze(GATE_MODULES.flatMap(row => row.modules));
+
+/**
+ * Модулі в розробці. У переліку реєстрації вони показані як «У розробці» без прапорця: обрати їх
+ * не можна, у профілі вони не зберігаються, а їхня картка на стартовому екрані профілю, що увійшов,
+ * схована (там лише обрані модулі).
+ */
+export const SOON_MODULES = Object.freeze([
+  Object.freeze({
+    id: 'sso',
+    title: 'Сили спеціальних операцій',
+    hint: 'У розробці',
+    cards: Object.freeze(['.branch-card[data-branch="sso"]']),
+  }),
+]);
 
 const codePoints = value => [...String(value ?? '')].length;
 const squash = value => String(value ?? '').split(/\s+/).filter(Boolean).join(' ');
@@ -138,6 +160,7 @@ export function normalizeModules(modules) {
 const MODULE_SLOTS = Object.freeze([
   ['air', ['air']],
   ['rocket', ['rocket']],
+  ['army', ['army']],
   ['pvk', ['pvk', 'pvk_losses']],
   ['dshv', ['dshv', 'dshv_losses']],
 ]);
