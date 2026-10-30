@@ -631,7 +631,7 @@ body[data-active-branch="air"] #branch-controls,body[data-active-branch="pvk"] #
     linear-gradient(180deg,#06101c 0,rgba(6,16,28,0) 9%,rgba(6,16,28,0) 90%,#06101c 100%),
     radial-gradient(60% 55% at 50% 42%,rgba(6,12,22,.38),transparent 75%),
     linear-gradient(180deg,rgba(6,12,22,.12),rgba(6,12,22,.34)),
-    url('./launcher-bg.webp') center 42%/contain no-repeat,
+    url('./brand-art/start-background.webp') center 42%/contain no-repeat,
     #06101c !important;
 }
 @media(max-aspect-ratio:1/1){#view-start{background-size:auto,auto,auto,cover,auto !important}}
@@ -643,7 +643,7 @@ body[data-active-branch="air"] #branch-controls,body[data-active-branch="pvk"] #
     linear-gradient(180deg,#06101c 0,#06101c var(--bg-gap,0px),rgba(6,16,28,0) calc(var(--bg-gap,0px) + 120px),rgba(6,16,28,0) 90%,#06101c 100%),
     radial-gradient(60% 55% at 50% 42%,rgba(6,12,22,.38),transparent 75%),
     linear-gradient(180deg,rgba(6,12,22,.12),rgba(6,12,22,.34)),
-    url('./launcher-bg.webp') var(--bg-pos,center 30%) / var(--bg-size,cover) no-repeat,
+    url('./brand-art/start-background.webp') var(--bg-pos,center 30%) / var(--bg-size,cover) no-repeat,
     #06101c !important}
 @media(min-width:1000px) and (min-aspect-ratio:3/2){
   #view-start > .start-box{width:min(1100px,100%) !important;--branch-card-height:196px}
@@ -988,7 +988,7 @@ body[data-active-branch="air"] #branch-controls,body[data-active-branch="pvk"] #
     if (!art) return;
     const r = art.getBoundingClientRect();
     if (!r.width) return;
-    const IW = 1376, IH = 768, RX = 690, RY = 150;          // розмір фонового зображення й центр його кільця
+    const IW = 1280, IH = 720, RX = 640, RY = 260;          // розмір фонового зображення й центр його кільця
     const tx = r.left + r.width / 2, ty = r.top + r.height * 0.376;
     const vw = host.clientWidth, vh = host.clientHeight;
     const k = Math.max(vw / IW, tx / RX, (vw - tx) / (IW - RX), (vh - ty) / (IH - RY));
