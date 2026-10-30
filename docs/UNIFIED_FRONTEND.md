@@ -733,6 +733,9 @@ v1 і блоки вкладок через `listDefinitions` + `validateRegistry
 помилки `bad_key`/`many_many`, дублі заголовків із суфіксом « (Назва таблиці)», перші `sample` рядків) і `mergePreviewView`
 (`table-link-view-core.js`: підсумок і зразок для екрана). Кнопка `preview-merge` біля підтвердженого зв'язку (`togglePreview`, `mergeNode`
 у `table-link-panel.js`) лише показує блок `.ewmc-links-merge`; жодного `apply`/запису схеми й жодного нового модуля.
+Завантаження об'єднаної таблиці: `mergeDownloadView` (усі рядки через `mergePreview` з `sample: Infinity`; неповно прочитане не віддається) і
+`tableCsv` (`;`, BOM, CRLF, як в інших вивантаженнях) у `table-link-view-core.js`; кнопка `download-merge` у панелі викликає `download(filename, text)`
+(за замовчуванням `downloadText`: blob-посилання, без Tauri). Нічого не пишеться в схему профілю й у таблиці модулів.
 CSS — `.ewmc-links*` у `dashboard-module-catalog.css`. Тести — `tests/table-link-view.test.mjs`
 (логіка й текстові контракти: імпорт, відсутність `invoke`, `innerHTML`, запису схеми).
 
