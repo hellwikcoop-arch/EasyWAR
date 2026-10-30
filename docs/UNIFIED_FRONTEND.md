@@ -800,6 +800,10 @@ v1 і блоки вкладок через `listDefinitions` + `validateRegistry
 `computeRvKpis`). `placeBlockCard` ставить нову картку перед карткою основної таблиці, нову таблицю розтягує на 12 колонок. Звичайна картка розкладки ховає `instanceBar`, «Видалити модуль
 і дані» й «Структуру таблиці» в те саме меню «⋯» (`.ewmc-card-menu`). Розмір «Мала» (`SIZE_CHOICES`, 2 колонки) малює показник компактно (`.ewmc-block.is-compact`: підпис і число). Вид діаграми й колір картки блока зберігаються в `instance.style.view` і `instance.style.accent` (поля розкладки вже були, міграції немає): `chartViews(definitionId)` дає варіанти виду, `CARD_PALETTES` — кольори (`data-palette` на картці перевизначає `--ewmc-s1…8`, у показника — тон); `blockChoices` малює обидва вибори в «⋯». Діаграми результатів беруть колір за змістом (`RESULT_SLOTS`). Лінії діаграм (`line`, `area`, лінія в `combo`) — плавні: `monotonePath` у `dashboard-module-charts.js` (монотонна кубічна інтерполяція, крива не виходить за значення сусідніх точок); область заливається градієнтом до прозорого (`.ewmc-area-fade`). Стилі — `public/module-styles.css` (у ПВК-lite не вбудовуються).
 Тести — `tests/module-block-card.test.mjs`.
+Шаблони «Зібрати за шаблоном» (E5, крок 7): `module-preset-core.js` (чисте) — `PRESETS` (блоки в порядку дашборда, підписи карток, що відрізняються від РВ), `presetsFor(branch)`,
+`planPreset` (один `planAddColumns` на об'єднані обов'язкові ролі всіх блоків і картки, яких ще немає на таблиці), `placePreset` (по черзі `placeBlockCard`, без повторів);
+`module-preset-panel.js` — розділ `details.ewmc-preset` у вікні «Каталог модулів» (наявні класи `ewmc-update`, без нового CSS); запис — `assemblePreset` у `dashboard-module-catalog.js`
+(стовпці → ролі → одна зміна розкладки). Назва картки (`instance.title`), відмінна від назви визначення, стає підписом показника (`blockCardModel({ title })`). Тести — `tests/module-preset.test.mjs`.
 CSS — `.ewmc-links*` у `dashboard-module-catalog.css`. Тести — `tests/table-link-view.test.mjs`
 (логіка й текстові контракти: імпорт, відсутність `invoke`, `innerHTML`, запису схеми).
 
