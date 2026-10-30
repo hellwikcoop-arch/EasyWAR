@@ -736,6 +736,12 @@ v1 і блоки вкладок через `listDefinitions` + `validateRegistry
 Завантаження об'єднаної таблиці: `mergeDownloadView` (усі рядки через `mergePreview` з `sample: Infinity`; неповно прочитане не віддається) і
 `tableCsv` (`;`, BOM, CRLF, як в інших вивантаженнях) у `table-link-view-core.js`; кнопка `download-merge` у панелі викликає `download(filename, text)`
 (за замовчуванням `downloadText`: blob-посилання, без Tauri). Нічого не пишеться в схему профілю й у таблиці модулів.
+Модуль з об'єднаної таблиці: `mergeModuleView` (`table-link-view-core.js`) будує запит `create_dashboard_module` з `templateId: 'merged-table'`
+(`MERGED_TEMPLATE_ID`, збігається з Rust) і `customFields` (`label`, `dataType`: `integer`/`real`/`date`/`text` за значеннями, `role`, `aggregation`);
+рядки ключуються `c1`, `c2`, …, порожнє — `null`; відмовляє при неповному читанні, >10 000 рядків, >64 стовпців, клітинці >4096. Кнопка
+`create-merged-module` у панелі викликає `createModule(request)`, який передає `createMergedModule` каталогу: той самий `invoke('create_dashboard_module', request)`,
+далі `loadModules()` (розкладка E4 ставить картку) і сповіщення. Лише `invoke` у каталозі, панель і ядро його не викликають. Нових команд і capabilities немає:
+у наявної команди з'явився необов'язковий `customFields`.
 CSS — `.ewmc-links*` у `dashboard-module-catalog.css`. Тести — `tests/table-link-view.test.mjs`
 (логіка й текстові контракти: імпорт, відсутність `invoke`, `innerHTML`, запису схеми).
 

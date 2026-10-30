@@ -286,6 +286,23 @@ function initialize() {
     return result;
   }
 
+  // Об'єднана таблиця стає окремим модулем «Мого дашборда» (той самий `create_dashboard_module`, стовпці задає запит);
+  // вихідні таблиці не змінюються. Після успіху панель перемальовується разом зі списком модулів.
+  async function createMergedModule(request) {
+    if (state.busy) return { ok: false, message: 'Зачекайте: інша дія ще триває.' };
+    state.busy = true;
+    try {
+      await invoke('create_dashboard_module', request);
+      await loadModules();
+      showToast(`Модуль «${request.title}» створено: ${rowCountLabel(request.rows.length)}.`);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, message: String(error || 'Не вдалося створити модуль.') };
+    } finally {
+      state.busy = false;
+    }
+  }
+
   // Рядок «Зв'язано з: …» на картках оновлюється на місці, щоб не перемальовувати панель під час роботи з нею.
   function refreshRelatedLines() {
     for (const node of host.querySelectorAll('[data-related-for]')) {
@@ -359,7 +376,7 @@ function initialize() {
       for (const module of state.modules) grid.append(renderModule(module, state.data.get(module.id)));
     }
     // Зв'язки між таблицями (E3б, B1/B3): підказки й рішення людини; потрібні щонайменше дві таблиці.
-    if (state.modules.length >= 2 && state.schema) host.append(linkPanel({ el, schema: () => state.schema, modules: () => state.modules, data: () => state.data, apply: applyLinkChange, onChange: refreshRelatedLines }));
+    if (state.modules.length >= 2 && state.schema) host.append(linkPanel({ el, schema: () => state.schema, modules: () => state.modules, data: () => state.data, apply: applyLinkChange, onChange: refreshRelatedLines, createModule: createMergedModule }));
     host.append(grid, ticker(tickerItems(state.modules, state.data)));
   }
 

@@ -187,7 +187,8 @@ async fn list_dashboard_modules(
 
 /// `rows` — дані, підтягнуті з таблиці користувача: модуль створюється разом із ними
 /// однією транзакцією. Без `rows` таблиця модуля порожня. `style` — стиль оформлення,
-/// обраний у вікні створення (без нього — звичайний).
+/// обраний у вікні створення (без нього — звичайний). `custom_fields` — лише для службового шаблону
+/// `merged-table` (об'єднана таблиця з довільними стовпцями): `rows` ключуються службовими `c1`, `c2`, …
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 async fn create_dashboard_module(
@@ -199,8 +200,31 @@ async fn create_dashboard_module(
     style: Option<String>,
     rows: Option<Vec<serde_json::Map<String, Value>>>,
     corrections: Option<Vec<NewImportCorrection>>,
+    custom_fields: Option<Vec<dashboard_modules::NewCustomField>>,
 ) -> Result<DashboardModule, String> {
     let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
+    // Об'єднана таблиця: стовпці задає виклик (`custom_fields`), шаблон — службовий `merged-table`;
+    // для шаблонних модулів `custom_fields` не допускається.
+    let merged = template_id == dashboard_modules::MERGED_TEMPLATE_ID;
+    if merged != custom_fields.is_some()
+        || (merged && corrections.as_ref().is_some_and(|items| !items.is_empty()))
+    {
+        return Err(dashboard_modules::DashboardModuleError::InvalidCustomFields.to_string());
+    }
+    if let Some(fields) = custom_fields {
+        return modules
+            .create_custom(
+                &active_profile_id(&session)?,
+                &branch,
+                title.as_deref(),
+                style.as_deref(),
+                fields,
+                rows.unwrap_or_default(),
+                &now,
+            )
+            .await
+            .map_err(|error| error.to_string());
+    }
     modules
         .create_styled(
             &active_profile_id(&session)?,

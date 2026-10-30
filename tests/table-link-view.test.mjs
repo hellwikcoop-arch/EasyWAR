@@ -8,7 +8,7 @@ import { linkIssues, suggestRelations } from '../src/table-link-core.js';
 import { confirmRelation, rejectRelation, clearRelation, clearRelations, setGroups, groupsOf, relationsOf, removeSource } from '../src/profile-schema-core.js';
 import {
   EXCLUSION_TEXT, REASON_TEXT, confirmArgs, confirmBlock, decisionOf, issueText, linkInputs, pairView, rejectArgs,
-  rejectedRelationViews, relatedLine, savedRelationViews, summaryLine, suggestedGroups, groupsNeedSaving, savedGroupViews, deleteLinksNote, linkCoverageViews, mergePreviewView, mergeDownloadView, tableCsv,
+  rejectedRelationViews, relatedLine, savedRelationViews, summaryLine, suggestedGroups, groupsNeedSaving, savedGroupViews, deleteLinksNote, linkCoverageViews, mergePreviewView, mergeDownloadView, mergeModuleView, tableCsv, MERGED_TEMPLATE_ID,
 } from '../src/table-link-view-core.js';
 
 // Лише синтетичні дані: вигадані підрозділи, жодних реальних таблиць.
@@ -136,7 +136,8 @@ test('summaryLine рахує пари, варіанти й неповні пош
 test('панель підключена до «Мого дашборда», нічого не зберігає й не виходить за межі пристрою', async () => {
   const page = await readFile(new URL('../src/dashboard-module-catalog.js', import.meta.url), 'utf8');
   assert.match(page, /import \{ linkPanel \} from '\.\/table-link-panel\.js';/u);
-  assert.match(page, /linkPanel\(\{ el, schema: \(\) => state\.schema, modules: \(\) => state\.modules, data: \(\) => state\.data, apply: applyLinkChange, onChange: refreshRelatedLines \}\)/u);
+  assert.match(page, /linkPanel\(\{ el, schema: \(\) => state\.schema, modules: \(\) => state\.modules, data: \(\) => state\.data, apply: applyLinkChange, onChange: refreshRelatedLines, createModule: createMergedModule \}\)/u);
+  assert.match(page, /async function createMergedModule[\s\S]*invoke\('create_dashboard_module', request\)/u);
   assert.match(page, /updateProfileSchema\(invoke, change\)/u);
   assert.match(page, /state\.modules\.length >= 2 && state\.schema/u);
   const panel = await readFile(new URL('../src/table-link-panel.js', import.meta.url), 'utf8');
@@ -365,4 +366,53 @@ test('mergeDownloadView віддає повний CSV нового файлу й
 
 test('tableCsv екранує роздільник, лапки й переноси', () => {
   assert.equal(tableCsv([['a;b', 'c"d'], ['e\nf', null, 'ok']]), '\uFEFF"a;b";"c""d"\r\n"e\nf";;ok');
+});
+
+test('mergeModuleView будує запит на модуль: типи за значеннями, усі рядки, відмови без втрат', async () => {
+  const { schema: base, data } = setup();
+  const modules = [{ ...modulePlan, branch: 'rocket' }, moduleFlights];
+  const found = await suggestRelations(linkInputs(base, modules, data).tables, {});
+  const candidate = found.pairs[0].candidates.find(item => item.left.columns.length === 2);
+  const schema = confirmRelation(base, confirmArgs(candidate)).schema;
+  const before = JSON.stringify(schema);
+  const relationId = relationsOf(schema)[0].id;
+  const made = mergeModuleView(schema, relationId, modules, data);
+  assert.ok(made.ok, made.message);
+  assert.equal(made.rowCount, 48);
+  assert.equal(made.columnCount, 4);
+  const { request } = made;
+  assert.equal(request.templateId, MERGED_TEMPLATE_ID);
+  assert.equal(request.branch, 'rocket');
+  assert.equal(request.title, 'План + Вильоти');
+  assert.equal(request.rows.length, 48);
+  assert.deepEqual(request.customFields.map(field => [field.label, field.dataType, field.role, field.aggregation]), [
+    ['Дата', 'date', 'dimension', 'none'],
+    ['Підрозділ', 'text', 'dimension', 'none'],
+    ['Ціль', 'text', 'dimension', 'none'],
+    ['Борт', 'integer', 'metric', 'sum'],
+  ]);
+  assert.deepEqual(request.rows[0], { c1: '2026-09-01', c2: 'Альфа', c3: 'ціль-0-Альфа', c4: 100 });
+  assert.equal(JSON.stringify(schema), before, 'схема профілю не змінюється');
+  // Рядок без пари дає порожні (null) значення, а не вигадані.
+  const odd = new Map(data);
+  odd.set('plan', { rows: [...data.get('plan').rows, { date: day(20), unit: 'Ехо', goal: 'без пари' }] });
+  const withOdd = mergeModuleView(schema, relationId, modules, odd);
+  assert.ok(withOdd.ok);
+  assert.equal(withOdd.request.rows.at(-1).c4, null);
+  // Відмови: неповне читання, відсутні дані, невідомий зв'язок.
+  const cut = new Map(data);
+  cut.set('plan', { rows: data.get('plan').rows, truncated: true });
+  assert.match(mergeModuleView(schema, relationId, modules, cut).message, /не повністю/u);
+  assert.match(mergeModuleView(schema, relationId, modules, new Map()).message, /не прочитано/u);
+  assert.match(mergeModuleView(schema, 'rel:нема', modules, data).message, /немає/u);
+  // Клітинка довша за межу Rust не віддається.
+  const long = new Map(data);
+  long.set('plan', { rows: data.get('plan').rows.map((row, i) => (i === 0 ? { ...row, goal: 'я'.repeat(5000) } : row)) });
+  assert.match(mergeModuleView(schema, relationId, modules, long).message, /довша/u);
+  // Числа з нулями попереду лишаються текстом (нічого не губиться).
+  const zeros = new Map(data);
+  zeros.set('flights', { rows: data.get('flights').rows.map((row, i) => ({ ...row, tail: i === 0 ? '007' : row.tail })) });
+  assert.equal(mergeModuleView(schema, relationId, modules, zeros).request.customFields[3].dataType, 'text');
+  const panel = await readFile(new URL('../src/table-link-panel.js', import.meta.url), 'utf8');
+  assert.match(panel, /data-action': 'create-merged-module'/u);
 });
