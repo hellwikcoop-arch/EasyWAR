@@ -58,6 +58,7 @@ test('army aviation replaces Air Force art and labels only in army mode', async 
   assert.match(air, /const CC = \{ blue: window\.__EASYWAR_MODULE__ === 'army' \? '#8fcf4a' : '#4aa8ff'/);
   assert.match(air, /html\[data-module="army"\]:not\(\[data-theme="light"\]\) \{ --nav-hi: #b4ec7a !important;/, 'green side-menu capsule');
   assert.match(air, /\n\.kc > \.kc-art\.kc-art-bg, \.kc > \.kc-art\.kc-art-photo \{ inset: 0 !important;/, 'KPI card photos fill the whole card in ПС and army aviation');
+  assert.match(air, /tone === 'amber'\) box\.append\(h\('img', \{ class: 'kc-photo', src: KC_MUN_BG,/, 'own background for the munitions card');
 });
 
 test('artillery is a live block next to army aviation, and the rocket card is just «Ракетні Війська»', async () => {
