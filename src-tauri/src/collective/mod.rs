@@ -12,6 +12,7 @@ pub mod codec;
 pub mod envelope;
 pub mod epoch;
 pub mod identity;
+pub mod invite;
 pub mod relay;
 pub mod replay;
 pub mod secret_store;
@@ -37,6 +38,8 @@ pub mod labels {
     pub const MEMBER_ID: &[u8] = b"easywar/collective/v1/member-id";
     pub const DEVICE_RECORD: &[u8] = b"easywar/collective/v1/device";
     pub const EXCHANGE_BINDING: &[u8] = b"easywar/collective/v1/exchange-binding";
+    pub const INVITATION: &[u8] = b"easywar/collective/v1/invitation";
+    pub const JOIN_REQUEST: &[u8] = b"easywar/collective/v1/join-request";
     pub const EPOCH_WRAP: &[u8] = b"easywar/collective/v1/epoch-wrap";
     pub const OPERATION: &[u8] = b"easywar/collective/v1/op";
     pub const SECRET_KEYRING: &[u8] = b"easywar/collective/v1/keyring";
@@ -80,6 +83,10 @@ pub enum Reason {
     /// Відкладення неможливе: `membership_seq` за горизонтом, черга відкладених повна або
     /// конверт пролежав довше TTL (G12, N1).
     DeferLimit,
+    /// Строк запрошення минув.
+    InvitationExpired,
+    /// Талон запрошення вже впустив учасника (одноразовий).
+    InvitationUsed,
 }
 
 impl Reason {
@@ -103,6 +110,8 @@ impl Reason {
             Reason::DeferLimit => {
                 "конверт не може чекати журналу складу (горизонт, черга або строк)"
             }
+            Reason::InvitationExpired => "строк запрошення минув",
+            Reason::InvitationUsed => "запрошення вже використано",
         }
     }
 }
