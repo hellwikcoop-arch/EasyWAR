@@ -59,6 +59,9 @@ import { psCatalogUsage } from './module-definition-core.js';
 import { CATALOG as PS_CATALOG, KPI_TILES, VIEW_BY_BLOCK } from './ps-kpi.js';
 import { addRequest, buildRegistry } from './module-registry-view-core.js';
 import { registryPanel } from './module-registry-panel.js';
+import { addColumnsPanel } from './module-add-columns-panel.js';
+import { supportsColumns, userTables } from './module-add-columns-core.js';
+import { bindBlockColumns, saveBlockColumns } from './module-add-columns-client.js';
 import { linkPanel } from './table-link-panel.js';
 import { snapshotPanel } from './table-link-snapshot-panel.js';
 import { snapshotInfo } from './table-link-snapshot-core.js';
@@ -309,6 +312,30 @@ function initialize() {
       return { ok: true };
     } catch (error) {
       return { ok: false, message: String(error || 'Не вдалося створити модуль.') };
+    } finally {
+      state.busy = false;
+    }
+  }
+
+  // Блок реєстру → основна таблиця (E5): стовпці, яких блоку бракує, додаються в таблицю (або створюється основна таблиця
+  // гілки), потім ролі блока зіставляються з її стовпцями. Збій зіставлення не псує додані стовпці: їх видно в схемі профілю.
+  async function addBlockColumns({ plan, module }) {
+    if (state.busy) return { ok: false, message: 'Зачекайте: інша дія ще триває.' };
+    state.busy = true;
+    try {
+      const saved = normalizeModules([await saveBlockColumns(invoke, { branch: state.branch, module, plan })])[0];
+      if (!saved) return { ok: false, message: 'Таблицю збережено, але відповідь не прочитано. Закрийте вікно й відкрийте знову.' };
+      await loadModules();
+      await state.syncing;
+      const bound = await bindBlockColumns(invoke, { module: saved, plan, at: new Date().toISOString() });
+      if (bound.ok) state.schema = bound.schema;
+      const table = `таблицю «${saved.title}»`;
+      showToast(`Стовпці додано в ${table}.`);
+      return bound.ok
+        ? { ok: true, message: `Готово: стовпці додано в ${table}, ролі блока зіставлено.` }
+        : { ok: true, message: `Стовпці додано в ${table}, але ролі не зіставлено (${bound.message || 'збій схеми'}): зіставте їх у «Схемі профілю».` };
+    } catch (error) {
+      return { ok: false, message: String(error || 'Не вдалося додати стовпці.') };
     } finally {
       state.busy = false;
     }
@@ -660,6 +687,10 @@ function initialize() {
     const panel = registryPanel({
       el, definitions: state.registry.definitions, available, branch: state.branch, branchLabel: BRANCH_LABELS[state.branch] || '',
       onBack: showCatalog,
+      columnsBox: definition => !supportsColumns(definition) ? null : addColumnsPanel({
+        el, definition, schema: () => state.schema, apply: addBlockColumns,
+        tables: () => userTables(state.modules).filter(module => module.branch === state.branch),
+      }),
       onAdd: async definition => {
         const request = addRequest(definition, state.branch, { available });
         if (!request || state.busy) return;
