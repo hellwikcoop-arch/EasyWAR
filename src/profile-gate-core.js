@@ -6,7 +6,7 @@ import { PROFILE_SLOTS } from './local-profiles-core.js';
 // Межі збігаються з Rust-ядром (local_profiles.rs); ядро перевіряє їх ще раз.
 export const NAME_MAX = 80;
 export const POSITION_MAX = 120;
-export const PASSWORD_MIN = 6;
+export const PASSWORD_MIN = 8;
 export const PASSWORD_MAX = 128;
 
 /**

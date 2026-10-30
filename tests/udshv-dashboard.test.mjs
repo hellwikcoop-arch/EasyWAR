@@ -10,6 +10,7 @@ import {
   normalizeUnits,
   parseUdshvWorkbook,
   periodRange,
+  rawSheetGrid,
   shiftAnchor,
   unitName,
   validateWorkbook,
@@ -162,6 +163,40 @@ test('the РВ module opens UDSHV tables read-only in its own dashboard', async 
   assert.match(html, /<main id="view-udshv"/);
   assert.match(html, /async function readAllSheets\(u8\)/);
   assert.match(html, /const ud = await openUdshv\(u8, name\);\s*if \(!ud\) throw standardError;/);
+});
+
+test('«База даних» УДШВ: аркуші файлу як є — шапка з підшапкою, дати Excel у ДД.ММ.РРРР, порожні рядки пропущено', () => {
+  const wb = parseUdshvWorkbook(WORKBOOK, 'udshv.xlsx');
+  // Усі аркуші файлу, разом із порожнім шаблоном, — без жодних підрахунків.
+  assert.deepEqual(wb.raw.map(s => [s.name, s.template]), [['СЕРПЕНЬ-26', false], ['ВЕРЕСЕНЬ-26', false], ['ЧИСТИЙ', true]]);
+  const grid = rawSheetGrid(wb.raw[0]);
+  assert.equal(grid.head, 3, 'заголовок листа, шапка й підшапка');
+  assert.deepEqual(grid.rows.slice(0, 3).map(r => r.r), [1, 2, 3]);
+  assert.equal(grid.columns[0], 'A');
+  const ci = letter => grid.columns.indexOf(letter);
+  assert.equal(grid.rows[1].cells[ci('D')], 'Підрозділ');
+  const first = grid.rows[3];
+  assert.equal(first.r, 5, 'порожній рядок 4 пропущено');
+  assert.equal(first.cells[ci('C')], '01.08.2026', 'число Excel у стовпці «Дата»');
+  assert.equal(first.cells[ci('D')], 'АГ 148 оабр');
+  assert.equal(first.cells[ci('E')], '10');
+  const text = grid.rows.find(r => r.cells[ci('D')] === 'АГ 148 оабр' && r.cells[ci('C')].startsWith('02.'));
+  assert.equal(text.cells[ci('C')], '02.08.2026', 'текстову дату теж подано однаково');
+  // Підсумок декади лишається у базі: це те, що є у файлі.
+  assert.ok(grid.rows.some(r => r.cells[ci('B')] === '01-10.08.26'));
+  assert.deepEqual(rawSheetGrid({ name: 'x', rows: [{ r: 1, cells: { A: '' } }] }), { columns: [], head: 0, rows: [] });
+});
+
+test('«База даних» є в меню дашборда УДШВ і ПВК', async () => {
+  const ud = await readFile(new URL('../src/udshv-dashboard.js', import.meta.url), 'utf8');
+  assert.match(ud, /\['table', 'Зведена таблиця'\], \['base', 'База даних'\]/);
+  assert.match(ud, /state\.view === 'base' \? basePage\(workbook, go\)/);
+  assert.match(ud, /rawSheetGrid\(/);
+  const pvk = await readFile(new URL('../src/pvk-dashboard.js', import.meta.url), 'utf8');
+  assert.match(pvk, /options\.openBase && \['base', 'База даних'\]/);
+  assert.match(pvk, /if \(key === 'base'\) options\.openBase\(\)/);
+  const air = await readFile(new URL('../src/air.html', import.meta.url), 'utf8');
+  assert.match(air, /openBase: \(\) => showView\('base'\)/);
 });
 
 test('фон дашборда УДШВ: один суцільний колір у темній і світлій темі, без картинки й градієнта', async () => {

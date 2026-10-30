@@ -36,12 +36,12 @@ test('first screen after the splash: registration without profiles, login with a
   assert.equal(gateScreen({ profiles: [{ id: 'profile-1' }] }), 'login');
 });
 
-test('password is mandatory, at least 6 characters, counted by code points', () => {
-  assert.equal(PASSWORD_MIN, 6);
-  assert.match(passwordError(''), /щонайменше 6/);
-  assert.match(passwordError('12345'), /щонайменше 6/);
-  assert.equal(passwordError('123456'), null);
-  assert.equal(passwordError('😀'.repeat(6)), null);
+test('password is mandatory, at least 8 characters, counted by code points', () => {
+  assert.equal(PASSWORD_MIN, 8);
+  assert.match(passwordError(''), /щонайменше 8/);
+  assert.match(passwordError('1234567'), /щонайменше 8/);
+  assert.equal(passwordError('12345678'), null);
+  assert.equal(passwordError('😀'.repeat(8)), null);
   assert.equal(passwordError('a'.repeat(PASSWORD_MAX)), null);
   assert.match(passwordError('a'.repeat(PASSWORD_MAX + 1)), /не більше/);
 });

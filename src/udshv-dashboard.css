@@ -283,3 +283,15 @@ html body.udshv-open, html.rocket-ref24 body.udshv-open, html:root body.udshv-op
   --ol-line: var(--ud-line);
   --ol-track: var(--ud-track);
 }
+
+/* «База даних»: аркуші файлу як імпортовано */
+.ud-base-sheets { display: flex; flex-wrap: wrap; gap: 6px; }
+.ud-chip { border: 1px solid var(--ud-line); background: transparent; color: inherit; border-radius: 999px; padding: 5px 12px; font-size: 13px; font-weight: 600; cursor: pointer; }
+.ud-chip[aria-pressed="true"] { background: color-mix(in srgb, var(--ud-green) 22%, var(--ud-panel)); border-color: var(--ud-green); }
+.ud-chip:focus-visible, .ud-base-search:focus-visible { outline: 2px solid var(--ud-green); outline-offset: 2px; }
+.ud-base-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.ud-base-search { flex: 1 1 260px; min-width: 200px; max-width: 460px; border: 1px solid var(--ud-line); background: var(--ud-panel); color: inherit; border-radius: 10px; padding: 7px 12px; font: inherit; }
+.ud-base-info { color: var(--ud-muted); font-size: 13px; margin-left: auto; }
+.ud-base-table td, .ud-base-table th { max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
+.ud-base-table .ud-rowno { color: var(--ud-muted); font-size: 11px; text-align: right; font-weight: 600; position: sticky; left: 0; background: var(--ud-panel); }
+.ud-base-more { display: flex; gap: 8px; justify-content: center; padding: 12px; }
