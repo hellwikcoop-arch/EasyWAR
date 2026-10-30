@@ -808,14 +808,8 @@ async fn activate_local_profile(
     }
     // Ключ даних профілю виводиться з пароля тут, під час входу: «відкрив, авторизувався —
     // і все, всі дані доступні». Невдача не зупиняє вхід: програми покажуть причину.
-    let data_keys = unlock_profile_data(
-        &profiles,
-        &data_store,
-        &data,
-        &profile_id,
-        &password,
-    )
-    .await;
+    let data_keys =
+        unlock_profile_data(&profiles, &data_store, &data, &profile_id, &password).await;
     let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
     let state = profiles
         .activate(&profile_id, &now)
