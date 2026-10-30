@@ -46,6 +46,8 @@ html[data-motion=off] .ewmc-style-preview{transition:none}
 /* Усі картки «Мого дашборда» (крім стилю «Пункт керування») — одна тонка рамка без кутиків. */
 html .ewmc-dashboard-grid[data-layout] .ewmc-module:not([data-style=heightwell]){border:1px solid rgba(148,170,204,.14);border-radius:16px;background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(255,255,255,0) 60%),#121b2b;box-shadow:0 10px 26px rgba(0,0,0,.28)}
 html .ewmc-dashboard-grid[data-layout] .ewmc-module:not([data-style=heightwell]):hover{border-color:rgba(148,170,204,.26)}
+/* Легенда серій — угорі праворуч над малюнком, круглі позначки (як на сучасних аналітичних панелях). */
+.ewmc-dashboard-grid[data-layout] .ewmc-chart>.ewmc-legend{order:-1;justify-content:flex-end;gap:4px 12px;margin-top:-2px}.ewmc-dashboard-grid[data-layout] .ewmc-chart>.ewmc-legend i{width:8px;height:8px;border-radius:50%}
 .ewmc-dashboard-grid .ewmc-module.ewmc-block{display:flex;flex-direction:column;gap:12px;padding:16px 18px}
 .ewmc-block.is-kpi:not(.is-compact){position:relative}.ewmc-block.is-kpi:not(.is-compact) .ewmc-bk-top>.ewmc-block-tools{position:absolute;top:10px;right:10px}
 .ewmc-block .ewmc-module-head{margin:0;align-items:flex-start}.ewmc-block .ewmc-module-head h3{font-size:14px;font-weight:700;letter-spacing:.01em}.ewmc-block .ewmc-module-head p{font-size:11px}
