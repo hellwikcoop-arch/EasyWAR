@@ -38,3 +38,27 @@ html[data-motion=off] .ewmc-style-preview{transition:none}
 .ewmc-style-switch select:focus-visible{outline:2px solid var(--ewmc-branch,var(--accent,#28b8ff));outline-offset:2px}
 .ewmc-dialog[data-style=heightwell] .ewmc-style-switch select{border-color:#2e3d62;background:#0d1324;color:#eaf1ff}
 @media(max-width:640px){.ewmc-style-switch{order:2}}
+/* Картка блока з основної таблиці (E5, module-block-card-view.js): компактна, у дусі карток вкладок ПС і РВ. Тон — за змістом показника. */
+.ewmc-dashboard-grid[data-layout]{align-items:stretch}.ewmc-block[data-kind=kpi]{align-self:start}
+.ewmc-block{display:flex;flex-direction:column;gap:10px;padding:14px 16px}
+.ewmc-block .ewmc-module-head{margin:0;align-items:center}.ewmc-block .ewmc-module-head h3{font-size:14px;letter-spacing:.01em}
+.ewmc-block>.ewmc-visual{flex:1;margin:0}
+.ewmc-block-tools{position:relative}.ewmc-block-tools>summary{list-style:none;display:grid;place-items:center;width:30px;height:30px;border:1px solid var(--line,#26364a);border-radius:9px;color:var(--muted,#9fb0c4);cursor:pointer;font-size:16px;line-height:1}
+.ewmc-block-tools>summary::-webkit-details-marker{display:none}.ewmc-block-tools[open]>summary{color:var(--ink,#eaf1ff);border-color:var(--ewmc-branch,#2f8cff)}
+.ewmc-head-side{display:flex;align-items:center;gap:8px}.ewmc-card-menu{display:grid;gap:10px}.ewmc-card-menu .ewmc-danger{justify-self:start}.ewmc-card-menu .ewmc-instance-bar{margin:0}.ewmc-card-menu .ewmc-module-confirm{margin:0}
+.ewmc-block-tools>.ewmc-instance-bar,.ewmc-block-tools>.ewmc-card-menu{position:absolute;right:0;top:36px;z-index:5;width:min(420px,80vw);padding:10px;border:1px solid var(--line,#26364a);border-radius:12px;background:var(--surface-2,#142238);box-shadow:0 14px 32px rgba(0,0,0,.35)}
+.ewmc-bk{--bk:#4aa8ff;display:flex;flex-direction:column;gap:10px;padding:14px;border:1px solid color-mix(in srgb,var(--bk) 30%,var(--line,#26364a));border-left:3px solid var(--bk);border-radius:12px;background:linear-gradient(160deg,color-mix(in srgb,var(--bk) 12%,transparent),transparent 65%),var(--ewmc-surface,#0f1b2d)}
+.ewmc-bk[data-tone=amber]{--bk:#f2b544}.ewmc-bk[data-tone=green]{--bk:#33d17a}.ewmc-bk[data-tone=red]{--bk:#f05a5a}.ewmc-bk[data-tone=grey]{--bk:#a3aec2}
+.ewmc-bk-top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.ewmc-bk-label{color:var(--bk);font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+.ewmc-bk-delta{padding:2px 7px;border-radius:999px;font-size:11px;font-weight:750;background:rgba(163,174,194,.12);color:#a3aec2}.ewmc-bk-delta.good{background:rgba(51,209,122,.12);color:#33d17a}.ewmc-bk-delta.bad{background:rgba(240,90,90,.12);color:#f05a5a}
+.ewmc-bk-row{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:52px}
+.ewmc-bk-value{font-size:40px;line-height:1;font-weight:800;font-variant-numeric:tabular-nums;color:var(--ink,#eaf1ff)}
+.ewmc-bk-ring{--p:0;display:grid;place-items:center;width:52px;height:52px;border-radius:50%;background:radial-gradient(closest-side,var(--ewmc-surface,#0f1b2d) 72%,transparent 74%),conic-gradient(var(--bk) calc(var(--p)*1%),rgba(163,174,194,.16) 0)}
+.ewmc-bk-ring b{font-size:12px;font-variant-numeric:tabular-nums;color:var(--ink,#eaf1ff)}
+.ewmc-bk-spark{width:100%;height:34px}.ewmc-bk-spark polyline{fill:none;stroke:var(--bk);stroke-width:2;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+.ewmc-bk-tiles{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:0}.ewmc-bk-tiles div{padding:7px 9px;border-radius:9px;background:rgba(163,174,194,.07)}
+.ewmc-bk-tiles dt{color:var(--muted,#9fb0c4);font-size:10.5px}.ewmc-bk-tiles dd{margin:2px 0 0;font-size:15px;font-weight:750;font-variant-numeric:tabular-nums;color:var(--ink,#eaf1ff)}
+.ewmc-bk-missing,.ewmc-bk-note{margin:0;color:var(--muted,#9fb0c4);font-size:12px;line-height:1.45}
+:root[data-theme=light] .ewmc-bk{background:linear-gradient(160deg,color-mix(in srgb,var(--bk) 10%,transparent),transparent 65%),var(--ewmc-surface,#fff)}
+:root[data-theme=light] .ewmc-bk-value,:root[data-theme=light] .ewmc-bk-tiles dd,:root[data-theme=light] .ewmc-bk-ring b{color:#13213a}

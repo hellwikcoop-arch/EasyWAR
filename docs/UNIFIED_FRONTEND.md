@@ -760,10 +760,14 @@ v1 і блоки вкладок через `listDefinitions` + `validateRegistry
 Картка блока з основної таблиці (E5, крок 4): `module-block-card-core.js` (чисте) — `hasBlockCard` (поки шість карток РВ `legacy:rv-kpi-*`), `rvRow` (значення за ролями →
 рядок моделі РВ), `blockCardModel` (перевірка ролей через `availability`, числа — `agg`/`resKind`/`shareOfOps` з `module-adapters/rv-kpi-core.js`, модель виду `kpi` для
 `mountChart`). Після додавання блока каталог ставить картку розкладки (`addInstance` з `definitionId` блока і `sourceId` основної таблиці); `renderModule` для такої картки
-малює `blockVisual` замість діаграми шаблону і не показує «Видалити модуль і дані». `resKind` перенесено в ядро дослівно з rocket.html (тест порівнює текст).
+малює картку блока (`blockCardView`, див. нижче) і не показує «Видалити модуль і дані». `resKind` перенесено в ядро дослівно з rocket.html (тест порівнює текст).
 Блоки-діаграми спільних вкладок ПС/РВ (розподіл і динаміка результатів, час доби, активність за днями, тип носія/цілі, боєприпаси, топ-5 підрозділів, повторні цілі,
 вогневі бригади): рядки моделі РВ зводяться до рядків службового модуля з полями `category`/`day`/`series`/`value`, малюнок — `chartModel` (ті самі види, що й шаблони).
 Описи діаграм будуються ліниво (`charts()`), бо виклики на верхньому рівні лишилися б у збірці ПВК-lite.
+Вигляд карток блоків (E5, крок 6): `module-block-card-view.js` — `blockCardView` (окремий `<article class="ewmc-module ewmc-block">` з налаштуваннями за `details.ewmc-block-tools`
+«⋯»), `kpiNode` (тон `data-tone`, кільце частки через `--p`, міні-графік SVG, плитки `dl`), `deltaTone`. Модель показника в ядрі доповнено `tone`, `share`, `tiles`, `delta` (зміна з
+`computeRvKpis`). `placeBlockCard` ставить нову картку перед карткою основної таблиці, нову таблицю розтягує на 12 колонок. Звичайна картка розкладки ховає `instanceBar`, «Видалити модуль
+і дані» й «Структуру таблиці» в те саме меню «⋯» (`.ewmc-card-menu`). Стилі — `public/module-styles.css` (у ПВК-lite не вбудовуються).
 Тести — `tests/module-block-card.test.mjs`.
 CSS — `.ewmc-links*` у `dashboard-module-catalog.css`. Тести — `tests/table-link-view.test.mjs`
 (логіка й текстові контракти: імпорт, відсутність `invoke`, `innerHTML`, запису схеми).

@@ -48,7 +48,7 @@ import { mountChart } from './dashboard-module-charts.js';
 import { columnPicker } from './dashboard-module-picker.js';
 import { forgetProfileSchemaModule, loadProfileSchema, syncProfileSchemaModules, updateProfileSchema } from './profile-schema-client.js';
 import { loadDashboardLayout, updateDashboardLayout } from './dashboard-layout-client.js';
-import { addInstance, duplicateInstance, moveInstance, removeInstance, resizeInstance, setSharedPeriod, updateInstance } from './module-instance-core.js';
+import { duplicateInstance, moveInstance, removeInstance, resizeInstance, setSharedPeriod, updateInstance } from './module-instance-core.js';
 import { ensureModuleInstances, forgetModuleInstances } from './module-instance-modules-core.js';
 import { cardModel, cardStyle, orderedCards } from './dashboard-layout-view-core.js';
 import { instanceBar, sharedPeriodBar } from './dashboard-layout-panel.js';
@@ -62,7 +62,8 @@ import { registryPanel } from './module-registry-panel.js';
 import { addColumnsPanel } from './module-add-columns-panel.js';
 import { supportsColumns, userTables } from './module-add-columns-core.js';
 import { bindBlockColumns, saveBlockColumns } from './module-add-columns-client.js';
-import { blockCardModel, hasBlockCard } from './module-block-card-core.js';
+import { blockCardModel, hasBlockCard, placeBlockCard } from './module-block-card-core.js';
+import { blockCardView } from './module-block-card-view.js';
 import { linkPanel } from './table-link-panel.js';
 import { snapshotPanel } from './table-link-snapshot-panel.js';
 import { snapshotInfo } from './table-link-snapshot-core.js';
@@ -338,7 +339,7 @@ function initialize() {
         const sourceId = moduleSourceId(saved.id);
         const count = () => state.layout?.instances.filter(item => item.definitionId === definition.definitionId && item.sourceId === sourceId).length ?? 0;
         const before = count();
-        await changeLayout(layout => addInstance(layout, { definitionId: definition.definitionId, sourceId, title: definition.title, size: definition.visual === 'kpi' ? { w: 4, h: 2 } : { w: 6, h: 4 } }));
+        await changeLayout(layout => placeBlockCard(layout, { definition, sourceId, freshTable: !module }));
         done.push(count() > before ? `картку «${definition.title}» поставлено на «Мій дашборд»` : 'картку не поставлено');
       }
       const line = done.join(', ') || 'нічого не змінено';
@@ -517,6 +518,36 @@ function initialize() {
     }, 0);
   }
 
+  // Смужка налаштувань картки розкладки: період, копія, прибрати, розмір, стиль, порядок.
+  function cardTools(module, placed) {
+    return instanceBar({
+      el,
+      instance: placed.instance,
+      model: placed.model,
+      onPeriod: period => changeLayout(layout => updateInstance(layout, placed.instance.id, { period })),
+      onDuplicate: () => changeLayout(layout => duplicateInstance(layout, placed.instance.id), 'Картку скопійовано: змініть їй період.'),
+      onRemove: () => changeLayout(layout => removeInstance(layout, placed.instance.id), 'Картку прибрано; таблиця й дані модуля лишились.'),
+      width: placed.width,
+      canEarlier: Boolean(placed.before),
+      canLater: Boolean(placed.after),
+      onSize: width => changeLayout(layout => resizeInstance(layout, placed.instance.id, width)),
+      style: cardStyle(module.style, placed.instance),
+      onStyle: background => changeLayout(layout => updateInstance(layout, placed.instance.id, { style: { background } })),
+      onMove: direction => changeLayout(layout => moveInstance(layout, placed.instance.id, direction < 0 ? placed.before : placed.after)),
+    });
+  }
+
+  // Картку можна кинути на іншу: вона стає на її місце (ручка перетягування — в смужці картки).
+  function dropTarget(card, placed) {
+    card.addEventListener('dragover', event => event.preventDefault());
+    card.addEventListener('drop', event => {
+      event.preventDefault();
+      const draggedId = event.dataTransfer?.getData('text/plain');
+      if (draggedId && draggedId !== placed.instance.id) changeLayout(layout => moveInstance(layout, draggedId, placed.instance.id));
+    });
+    return card;
+  }
+
   function renderModule(module, payload, placed = null) {
     const { state: readState, rows: allRows } = cardReadState(payload);
     // Картка розкладки показує рядки свого періоду; без розкладки — усі, як раніше.
@@ -527,6 +558,17 @@ function initialize() {
     const block = hasBlockCard(definitionId)
       ? blockCardModel({ definition: registryDefinitions().find(item => item.definitionId === definitionId), schema: state.schema, sourceId: placed.instance.sourceId, rows })
       : null;
+    // Картка блока — компактна, у дусі вкладок ПС і РВ; налаштування за «⋯», без дій над таблицею.
+    if (block) {
+      const style = cardStyle(module.style, placed.instance);
+      loadStyleFonts(style);
+      return dropTarget(blockCardView({
+        el, module, placed, block, style, failed,
+        tools: placed.model.ok ? cardTools(module, placed) : null,
+        visual: blockVisual,
+        retry: event => retryRead(module, event.currentTarget),
+      }), placed);
+    }
     // Видалення питає підтвердження прямо в картці: модуль зникає разом зі своєю таблицею SQLite.
     const removeButton = el('button', {
       type: 'button',
@@ -552,38 +594,35 @@ function initialize() {
     confirmButton.addEventListener('click', () => deleteModule(module, [keepButton, confirmButton]));
     const shownStyle = placed ? cardStyle(module.style, placed.instance) : module.style;
     loadStyleFonts(shownStyle);
+    const schemaBox = el('details', { class: 'ewmc-schema' },
+      el('summary', { text: 'Структура таблиці' }),
+      el('code', { text: module.storageTable }),
+      el('p', { text: schemaSummary(module.fields) }));
+    // На «Моєму дашборді» налаштування картки, видалення й структура таблиці сховані за «⋯», як у карток блоків.
+    const tools = placed?.model.ok
+      ? el('details', { class: 'ewmc-block-tools' },
+        el('summary', { text: '⋯', title: 'Налаштувати картку', 'aria-label': 'Налаштувати картку' }),
+        el('div', { class: 'ewmc-card-menu' }, cardTools(module, placed), removeButton, confirmBox, schemaBox))
+      : null;
     const card = el('article', {
       class: placed ? 'ewmc-module' : `ewmc-module span-${module.defaultSpan === 2 ? 2 : 1}`,
       style: placed ? { gridColumn: `span ${placed.width}` } : null,
-      'data-kind': block ? block.kind || 'kpi' : module.visualKind,
+      'data-kind': module.visualKind,
       'data-style': shownStyle,
       'data-branch': module.branch,
       'data-instance-id': placed?.instance.id,
     },
       el('header', { class: 'ewmc-module-head' },
         el('div', {}, el('h3', { text: placed?.instance.title || module.title }), el('p', { text: `${rowCountLabel(module.rowCount)} · локальна SQLite${placed?.model.ok ? ` · ${placed.model.periodLabel}` : ''}` })),
-        el('span', { class: `ewmc-live${failed ? ' is-failed' : ''}`, text: failed ? 'Не прочитано' : module.rowCount ? 'Дані' : 'Створено' })),
-      placed?.model.ok ? instanceBar({
-        el,
-        instance: placed.instance,
-        model: placed.model,
-        onPeriod: period => changeLayout(layout => updateInstance(layout, placed.instance.id, { period })),
-        onDuplicate: () => changeLayout(layout => duplicateInstance(layout, placed.instance.id), 'Картку скопійовано: змініть їй період.'),
-        onRemove: () => changeLayout(layout => removeInstance(layout, placed.instance.id), 'Картку прибрано; таблиця й дані модуля лишились.'),
-        width: placed.width,
-        canEarlier: Boolean(placed.before),
-        canLater: Boolean(placed.after),
-        onSize: width => changeLayout(layout => resizeInstance(layout, placed.instance.id, width)),
-        style: cardStyle(module.style, placed.instance),
-        onStyle: background => changeLayout(layout => updateInstance(layout, placed.instance.id, { style: { background } })),
-        onMove: direction => changeLayout(layout => moveInstance(layout, placed.instance.id, direction < 0 ? placed.before : placed.after)),
-      }) : null,
+        el('div', { class: 'ewmc-head-side' },
+          el('span', { class: `ewmc-live${failed ? ' is-failed' : ''}`, text: failed ? 'Не прочитано' : module.rowCount ? 'Дані' : 'Створено' }),
+          tools)),
       failed
         ? el('div', { class: 'ewmc-visual ewmc-read-failed', role: 'alert' },
           el('p', { text: `${CARD_FAILED_TEXT}. Показник не можна вважати нульовим: записи в таблиці збережені.` }),
           el('button', { type: 'button', class: 'btn quiet', text: 'Прочитати знову', 'data-action': 'retry-read', 'data-module-id': module.id, onclick: event => retryRead(module, event.currentTarget) }))
-        : block ? blockVisual(block) : visual(module, rows),
-      failed || block ? null : takeoffVisual(module, rows),
+        : visual(module, rows),
+      failed ? null : takeoffVisual(module, rows),
       relatedNote(module),
       el('div', { class: 'ewmc-module-actions' },
         el('button', {
@@ -606,25 +645,12 @@ function initialize() {
           disabled: !rows.length,
           onclick: event => openRelief(module, rows, event.currentTarget),
         }) : null,
-        // Картка блока лише показує таблицю: видалення таблиці лишається на її власній картці («Прибрати картку» — у смужці).
-        block ? null : removeButton),
-      block ? null : confirmBox,
-      el('details', { class: 'ewmc-schema' },
-        el('summary', { text: 'Структура таблиці' }),
-        el('code', { text: module.storageTable }),
-        el('p', { text: schemaSummary(module.fields) })),
+        tools ? null : removeButton),
+      tools ? null : confirmBox,
+      tools ? null : schemaBox,
     );
     if (readState === 'empty') card.querySelector('.ewmc-visual')?.append(el('p', { class: 'ewmc-no-data', text: 'Таблиця готова · даних ще немає' }));
-    if (placed) {
-      // Картку можна кинути на іншу: вона стає на її місце (ручка перетягування — в смужці картки).
-      card.addEventListener('dragover', event => event.preventDefault());
-      card.addEventListener('drop', event => {
-        event.preventDefault();
-        const draggedId = event.dataTransfer?.getData('text/plain');
-        if (draggedId && draggedId !== placed.instance.id) changeLayout(layout => moveInstance(layout, draggedId, placed.instance.id));
-      });
-    }
-    return card;
+    return placed ? dropTarget(card, placed) : card;
   }
 
   async function deleteModule(module, buttons) {
