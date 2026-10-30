@@ -338,7 +338,7 @@ function initialize() {
         const sourceId = moduleSourceId(saved.id);
         const count = () => state.layout?.instances.filter(item => item.definitionId === definition.definitionId && item.sourceId === sourceId).length ?? 0;
         const before = count();
-        await changeLayout(layout => addInstance(layout, { definitionId: definition.definitionId, sourceId, title: definition.title, size: { w: 4, h: 2 } }));
+        await changeLayout(layout => addInstance(layout, { definitionId: definition.definitionId, sourceId, title: definition.title, size: definition.visual === 'kpi' ? { w: 4, h: 2 } : { w: 6, h: 4 } }));
         done.push(count() > before ? `картку «${definition.title}» поставлено на «Мій дашборд»` : 'картку не поставлено');
       }
       const line = done.join(', ') || 'нічого не змінено';
@@ -555,7 +555,7 @@ function initialize() {
     const card = el('article', {
       class: placed ? 'ewmc-module' : `ewmc-module span-${module.defaultSpan === 2 ? 2 : 1}`,
       style: placed ? { gridColumn: `span ${placed.width}` } : null,
-      'data-kind': block ? 'kpi' : module.visualKind,
+      'data-kind': block ? block.kind || 'kpi' : module.visualKind,
       'data-style': shownStyle,
       'data-branch': module.branch,
       'data-instance-id': placed?.instance.id,
@@ -2038,12 +2038,12 @@ function takeoffVisual(module, rows) {
   return box;
 }
 
-/** Картка блока з основної таблиці: показник тим самим малюнком «Ключовий показник»; без ролей — пояснення. */
+/** Картка блока з основної таблиці: показник чи діаграма тими самими малюнками, що й шаблони; без ролей — пояснення. */
 function blockVisual(block) {
   if (!block.ok) return el('div', { class: 'ewmc-visual', 'data-visual': 'kpi' }, el('p', { class: 'ewmc-empty', text: block.message }));
   const host = el('div', { class: 'ewmc-chart-host' });
-  const box = el('div', { class: 'ewmc-visual', 'data-visual': 'kpi' }, host);
-  mountChart(host, block.model, { height: chartHeight('kpi', false) });
+  const box = el('div', { class: 'ewmc-visual', 'data-visual': block.kind }, host);
+  mountChart(host, block.model, { height: chartHeight(block.kind, false) });
   return box;
 }
 
