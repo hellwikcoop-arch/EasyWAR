@@ -77,6 +77,26 @@ export function kpiNode(el, model, palette = '', { compact = false, tools = null
     side ? el('div', { class: 'ewmc-bk-side' }, side) : null);
 }
 
+/**
+ * Перелік блока: «Журнал записів» (дата й час, результат з тоном, БП і ціль) або «Потребує перевірки» (підсумок,
+ * категорії зауважень і перші зауваження з номером запису). Лише `textContent`.
+ */
+export function listNode(el, model) {
+  const quality = model.variant === 'quality';
+  const head = model.summary ? el('p', { class: `ewmc-bl-summary${quality && !model.bad ? ' ok' : ''}`, text: model.summary }) : null;
+  const categories = quality && model.categories?.length > 1
+    ? el('div', { class: 'ewmc-bl-cats' }, model.categories.map(item => el('span', {}, item.label, el('b', { text: ` ${item.count}` }))))
+    : null;
+  const items = model.items.length
+    ? el('ul', { class: 'ewmc-bl-list' }, model.items.map(item => el('li', { 'data-tone': item.tone },
+      el('span', { class: 'ewmc-bl-when' }, quality ? el('b', { text: `№${item.number}` }) : null, el('span', { text: item.time ? `${item.date} ${item.time}` : item.date })),
+      el('span', { class: 'ewmc-bl-title', text: item.title }),
+      item.detail ? el('span', { class: 'ewmc-bl-detail', text: item.detail }) : null)))
+    : el('p', { class: 'ewmc-bl-empty', text: model.emptyText });
+  return el('div', { class: 'ewmc-visual ewmc-bl', 'data-visual': model.variant }, head, categories, items,
+    model.more ? el('p', { class: 'ewmc-bl-more', text: model.more }) : null);
+}
+
 function toolsMenu(el, tools) {
   return el('details', { class: 'ewmc-block-tools' },
     el('summary', { text: '⋯', title: 'Налаштувати картку', 'aria-label': 'Налаштувати картку' }),

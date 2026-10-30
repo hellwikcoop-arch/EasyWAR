@@ -62,8 +62,8 @@ import { registryPanel } from './module-registry-panel.js';
 import { addColumnsPanel } from './module-add-columns-panel.js';
 import { supportsColumns, userTables } from './module-add-columns-core.js';
 import { bindBlockColumns, saveBlockColumns } from './module-add-columns-client.js';
-import { blockCardModel, chartViews, hasBlockCard, placeBlockCard } from './module-block-card-core.js';
-import { blockCardView, blockChoices } from './module-block-card-view.js';
+import { blockCardModel, chartViews, hasBlockCard, placeBlockCard, withBlockRequirements } from './module-block-card-core.js';
+import { blockCardView, blockChoices, listNode } from './module-block-card-view.js';
 import { placePreset, presetsFor } from './module-preset-core.js';
 import { presetPanel } from './module-preset-panel.js';
 import { linkPanel } from './table-link-panel.js';
@@ -778,10 +778,13 @@ function initialize() {
     const panel = registryPanel({
       el, definitions: state.registry.definitions, available, branch: state.branch, branchLabel: BRANCH_LABELS[state.branch] || '',
       onBack: showCatalog,
-      columnsBox: definition => !supportsColumns(definition) ? null : addColumnsPanel({
-        el, definition, schema: () => state.schema, apply: addBlockColumns, placeable: hasBlockCard(definition.definitionId),
-        tables: () => userTables(state.modules).filter(module => module.branch === state.branch),
-      }),
+      columnsBox: original => {
+        const definition = withBlockRequirements(original);
+        return !supportsColumns(definition) ? null : addColumnsPanel({
+          el, definition, schema: () => state.schema, apply: addBlockColumns, placeable: hasBlockCard(definition.definitionId),
+          tables: () => userTables(state.modules).filter(module => module.branch === state.branch),
+        });
+      },
       onAdd: async definition => {
         const request = addRequest(definition, state.branch, { available });
         if (!request || state.busy) return;
@@ -2111,6 +2114,7 @@ function takeoffVisual(module, rows) {
 /** Картка блока з основної таблиці: показник чи діаграма тими самими малюнками, що й шаблони; без ролей — пояснення. */
 function blockVisual(block) {
   if (!block.ok) return el('div', { class: 'ewmc-visual', 'data-visual': 'kpi' }, el('p', { class: 'ewmc-empty', text: block.message }));
+  if (block.kind === 'list') return listNode(el, block.model);
   const host = el('div', { class: 'ewmc-chart-host' });
   const box = el('div', { class: 'ewmc-visual', 'data-visual': block.kind }, host);
   mountChart(host, block.model, { height: chartHeight(block.kind, false) });
