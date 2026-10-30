@@ -4,10 +4,15 @@ import {
   encodeCollective, removeParticipant, renameCollective,
 } from './collectives-core.js';
 import {
-  CLASS_OPTIONS, PURPOSE_OPTIONS, TRANSPORT_OPTIONS, canCreateCollective, canCreateIdentity,
-  checkHours, checkOperation, checkPassword, collectiveLine, detailLine, expectText, keyStoreText,
-  preparedText, reportText, tableLine, transportNote,
+  CLASS_OPTIONS, PURPOSE_OPTIONS, canCreateCollective, canCreateIdentity,
+  checkHours, checkPassword, detailLine, expectText, keyStoreText,
+  memberInitials, memberLine, membersWord, pickCollective, preparedText, reportText,
+  syncExportText, syncImportText, tableLine,
 } from './secure-core.js';
+import {
+  authorLine, buildTable, changeOperation, changeTime, diffTable, emptyValues, newRowKey,
+  parseColumns, previewSummary, refreshText,
+} from './table-data-core.js';
 import './collectives.css';
 
 export const contract = 1;
@@ -93,7 +98,13 @@ export async function mount(container, host) {
   let exchangeFp = '';
   let detail = null;
   let shared = null;
-  let reportResult = '';
+  // Відкрита таблиця колективу: перевірені Rust пакети змін, стан із них (`base`) і робоча
+  // копія, яку людина редагує (`edit`). `message` — відповідь «Оновити таблицю» чи «Доповісти».
+  let openTable = null;
+  // «Було → стане» перед «Підготувати доповідь».
+  let tablePreview = null;
+  // Підсумок останнього «Прийняти пакет».
+  let syncResult = '';
   // Підготовлена доповідь: лише ідентифікатор наміру в Rust і підсумок для показу.
   let prepared = null;
   function passwordInput() {
@@ -104,19 +115,61 @@ export async function mount(container, host) {
     e.placeholder = 'Пароль профілю';
     return e;
   }
-  async function secureAction(fn) {
+  // Помилка показується під тією формою, яка її спричинила (`secureErrorAt`), а не під першою.
+  let secureErrorAt = '';
+  function memberNameInput() {
+    const e = input('Як вас бачитимуть учасники');
+    e.maxLength = 40;
+    e.autocomplete = 'name';
+    return e;
+  }
+  async function secureAction(fn, at = '') {
     if (secureBusy) return;
-    secureBusy = true; secureError = ''; renderSecure();
+    secureBusy = true; secureError = ''; secureErrorAt = ''; renderSecure();
     try {
       await fn();
       secureState = await host.collectives.status();
+      exchangeFp = pickCollective(secureState.collectives, exchangeFp);
       detail = exchangeFp ? await host.collectives.detail(exchangeFp).catch(() => null) : null;
     }
-    catch (error) { secureError = String(error?.message || error || 'Не вдалося виконати дію.'); }
+    catch (error) { secureError = String(error?.message || error || 'Не вдалося виконати дію.'); secureErrorAt = at; }
     finally { secureBusy = false; renderSecure(); }
   }
+  function errorAt(at) {
+    if (!secureError || secureErrorAt !== at) return [];
+    const err = $('p', 'ec-status', secureError);
+    err.dataset.error = 'true';
+    err.dataset.at = at;
+    return [err];
+  }
+  // Розділи, які людина розгорнула; переживають перемальовування після кожної дії.
+  const openSections = new Set();
+  function section(key, title, body, { open = false, count = null } = {}) {
+    const box = $('details', 'ec-section');
+    box.dataset.section = key;
+    const summary = $('summary', 'ec-section-head');
+    summary.append($('span', '', title));
+    if (count !== null) summary.append($('span', 'ec-count-chip', String(count)));
+    box.append(summary, ...body);
+    box.open = open || openSections.has(key) || secureErrorAt === key;
+    box.addEventListener('toggle', () => {
+      if (box.open) openSections.add(key); else openSections.delete(key);
+    });
+    return box;
+  }
+  function avatar(name, me) {
+    const e = $('span', 'ec-avatar', memberInitials(name));
+    if (me) e.dataset.me = 'true';
+    e.setAttribute('aria-hidden', 'true');
+    return e;
+  }
+  function selectCollective(fp) {
+    if (fp === exchangeFp) return;
+    exchangeFp = fp; openTable = null; tablePreview = null; prepared = null; syncResult = '';
+    secureAction(async () => {});
+  }
   function renderSecure() {
-    secure.replaceChildren($('p', 'ec-label', 'ЗАХИЩЕНИЙ КОЛЕКТИВ'), $('h2', '', 'Ключ учасника і захищені колективи'));
+    secure.replaceChildren($('p', 'ec-label', 'ЗАХИЩЕНИЙ КОЛЕКТИВ'), $('h2', '', 'Мої колективи'));
     if (!host.collectives) {
       secure.append($('p', 'ec-caption', 'Доступно лише в настільному застосунку EasyWAR: ключ зберігається на цьому комп’ютері під паролем профілю.'));
       return;
@@ -125,12 +178,20 @@ export async function mount(container, host) {
       secure.append($('p', 'ec-caption', secureError || 'Читаю стан…'));
       return;
     }
-    secure.append($('p', 'ec-caption', keyStoreText(secureState)));
     if (secureState.identity) {
-      const id = $('p', 'ec-fingerprint');
-      id.append($('span', 'ec-label', 'Ваш відбиток: '), $('code', '', secureState.identity.fingerprint),
-        $('span', 'ec-label', '  Пристрій: '), $('code', '', secureState.identity.deviceFingerprint));
+      const id = $('div', 'ec-me');
+      const text = $('div', 'ec-me-text');
+      const line = $('p', 'ec-fingerprint');
+      line.append($('span', 'ec-label', 'Ваш відбиток '), $('code', '', secureState.identity.fingerprint),
+        $('span', 'ec-label', ' · пристрій '), $('code', '', secureState.identity.deviceFingerprint));
+      text.append(line, $('p', 'ec-caption', keyStoreText(secureState)));
+      const badge = $('span', 'ec-avatar', 'Ви');
+      badge.dataset.me = 'true';
+      badge.setAttribute('aria-hidden', 'true');
+      id.append(badge, text);
       secure.append(id);
+    } else {
+      secure.append($('p', 'ec-caption', keyStoreText(secureState)));
     }
     if (recoveryKey) {
       const box = $('div', 'ec-recovery');
@@ -156,41 +217,82 @@ export async function mount(container, host) {
           const created = await host.collectives.createIdentity(pass.value);
           pass.value = '';
           recoveryKey = created.recoveryKey;
-        });
+        }, 'identity');
       });
-      secure.append(form);
+      secure.append(form, ...errorAt('identity'));
     }
-    const list = $('div', 'ec-list');
-    for (const item of secureState.collectives) {
-      const row = $('div', 'ec-row');
-      row.append($('span', 'ec-person', item.name), $('code', '', item.fingerprint), $('span', 'ec-caption', collectiveLine(item)));
-      list.append(row);
+    secure.append(...errorAt(''));
+    if (!secureState.identity) return;
+
+    // Колективи — картки з кількістю учасників; обрана розгортається складом нижче.
+    const collectives = secureState.collectives;
+    if (collectives.length) {
+      const grid = $('div', 'ec-coll-grid');
+      grid.setAttribute('role', 'list');
+      for (const item of collectives) {
+        const card = $('button', 'ec-coll-card');
+        card.type = 'button';
+        card.setAttribute('role', 'listitem');
+        card.setAttribute('aria-pressed', String(item.fingerprint === exchangeFp));
+        const count = $('span', 'ec-coll-count');
+        count.append($('strong', '', String(item.members)), $('span', '', membersWord(item.members)));
+        card.append($('span', 'ec-coll-name', item.name), count, $('code', 'ec-coll-fp', item.fingerprint));
+        if (item.rejectedRecords > 0) card.append($('span', 'ec-coll-warn', `відхилених записів: ${item.rejectedRecords}`));
+        card.addEventListener('click', () => selectCollective(item.fingerprint));
+        grid.append(card);
+      }
+      const heading = $('h3', 'ec-coll-title');
+      heading.append($('span', '', 'Ваші колективи'), $('span', 'ec-count-chip', `${collectives.length} з 20`));
+      secure.append(heading, grid);
+    } else {
+      secure.append($('p', 'ec-empty', 'Колективів ще немає. Створіть свій або вступіть за запрошенням — нижче.'));
     }
-    if (secureState.collectives.length) secure.append($('h3', '', `Ваші колективи (${secureState.collectives.length}/20)`), list);
+    const shown = sharedBox();
+    if (shown) secure.append(shown);
+    if (exchangeFp && detail) renderDetail();
+
+    const more = $('div', 'ec-sections');
     if (canCreateCollective(secureState)) {
       const form = $('form', 'ec-inline');
       const name = input('Назва колективу');
+      const me = memberNameInput();
       const pass = passwordInput();
       const submit = button('Створити захищений колектив');
       submit.type = 'submit';
       submit.disabled = secureBusy;
-      form.append(field('Назва', name), field('Пароль профілю', pass), submit);
+      form.append(field('Назва', name), field('Ваше ім’я в колективі', me), field('Пароль профілю', pass), submit);
       form.addEventListener('submit', event => {
         event.preventDefault();
         secureAction(async () => {
           checkPassword(pass.value);
-          await host.collectives.create(pass.value, name.value);
-          pass.value = ''; name.value = '';
-        });
+          await host.collectives.create(pass.value, name.value, me.value);
+          pass.value = ''; name.value = ''; me.value = '';
+        }, 'create');
       });
-      secure.append(form);
+      more.append(section('create', 'Створити новий колектив', [form, ...errorAt('create')], { open: !collectives.length }));
     }
-    if (secureError) {
-      const err = $('p', 'ec-status', secureError);
-      err.dataset.error = 'true';
-      secure.append(err);
-    }
-    if (secureState.identity) renderExchange();
+    const invitation = area('EWINV1.…');
+    const me = memberNameInput();
+    const keys = area('EWKEYS1.…');
+    more.append(section('join-request', 'Вступити в колектив за запрошенням', [
+      $('p', 'ec-caption', 'Крок 1. Вставте запрошення й вкажіть своє ім’я: з’явиться відповідь для запрошувача.'),
+      withError(passwordForm('Підготувати відповідь', [field('Текст запрошення', invitation), field('Ваше ім’я в колективі', me)], async password => {
+        expectText(invitation.value, 'invitation');
+        const made = await host.collectives.joinRequest(password, invitation.value, me.value);
+        shared = { title: 'ВІДПОВІДЬ НА ЗАПРОШЕННЯ', text: made.text,
+          hint: `Колектив ${made.collectiveFingerprint}, запросив ${made.inviterFingerprint}. Звірте відбиток із запрошувачем особисто, при зустрічі, й передайте йому цей текст.` };
+      }, 'join-request'), 'join-request'),
+      $('p', 'ec-caption', 'Крок 2. Вставте пакет ключів, який повернув запрошувач.'),
+      withError(passwordForm('Прийняти й вступити', [field('Пакет ключів', keys)], async password => {
+        expectText(keys.value, 'keys');
+        const joined = await host.collectives.joinAccept(password, keys.value);
+        exchangeFp = joined.collective.fingerprint;
+        shared = { title: 'ВИ В КОЛЕКТИВІ', text: joined.members.map(memberLine).join('\n'),
+          hint: `«${joined.collective.name}»: відбитки учасників за перевіреним журналом. Звірте їх із запрошувачем.` };
+        keys.value = '';
+      }, 'join-accept'), 'join-accept'),
+    ], { open: secureErrorAt === 'join-accept' }));
+    secure.append(more);
     secure.append($('p', 'ec-caption', 'Обмін іде лише через тексти, які ви пересилаєте самі, і локальну чергу відправки. Мережі на цьому етапі немає.'));
   }
 
@@ -206,7 +308,7 @@ export async function mount(container, host) {
     box.append($('p', 'ec-label', shared.title), $('p', 'ec-caption', shared.hint), text, hide);
     return box;
   }
-  function passwordForm(submitText, fields, run) {
+  function passwordForm(submitText, fields, run, at = '') {
     const form = $('form', 'ec-inline');
     const pass = passwordInput();
     const submit = button(submitText);
@@ -219,134 +321,309 @@ export async function mount(container, host) {
         checkPassword(pass.value);
         await run(pass.value);
         pass.value = '';
-      });
+      }, at);
     });
     return form;
   }
-  function renderExchange() {
-    const box = $('div', 'ec-exchange');
-    box.append($('h3', '', 'Обмін у колективі'));
-    if (secureState.collectives.length) {
-      const choose = select([{ value: '', label: 'Оберіть колектив' },
-        ...secureState.collectives.map(item => ({ value: item.fingerprint, label: `${item.name} · ${item.fingerprint}` }))]);
-      choose.value = exchangeFp;
-      choose.addEventListener('change', () => {
-        exchangeFp = choose.value; reportResult = ''; prepared = null;
-        secureAction(async () => {});
-      });
-      box.append(field('Колектив', choose));
-    }
-    if (exchangeFp && detail) renderDetail(box);
-    const shown = sharedBox();
-    if (shown) box.append(shown);
-    const invitation = area('EWINV1.…');
-    box.append($('p', 'ec-label', 'ВСТУПИТИ ЗА ЗАПРОШЕННЯМ'), passwordForm('Підготувати відповідь', [field('Текст запрошення', invitation)], async password => {
-      expectText(invitation.value, 'invitation');
-      const made = await host.collectives.joinRequest(password, invitation.value);
-      shared = { title: 'ВІДПОВІДЬ НА ЗАПРОШЕННЯ', text: made.text,
-        hint: `Колектив ${made.collectiveFingerprint}, запросив ${made.inviterFingerprint}. Звірте відбиток із запрошувачем голосом чи особисто й передайте йому цей текст.` };
-    }));
-    const keys = area('EWKEYS1.…');
-    box.append($('p', 'ec-label', 'ПРИЙНЯТИ ПАКЕТ КЛЮЧІВ'), passwordForm('Прийняти й вступити', [field('Пакет ключів', keys)], async password => {
-      expectText(keys.value, 'keys');
-      const joined = await host.collectives.joinAccept(password, keys.value);
-      exchangeFp = joined.collective.fingerprint;
-      shared = { title: 'ВИ В КОЛЕКТИВІ', text: joined.members.join('\n'),
-        hint: `«${joined.collective.name}»: відбитки учасників за перевіреним журналом. Звірте їх із запрошувачем.` };
-      keys.value = '';
-    }));
-    secure.append(box);
+  function withError(form, at) {
+    const wrap = $('div', 'ec-with-error');
+    wrap.append(form, ...errorAt(at));
+    return wrap;
   }
-  function renderDetail(box) {
-    box.append($('p', 'ec-caption', detailLine(detail)));
-    const members = $('div', 'ec-list');
+  function renderDetail() {
+    const panel = $('section', 'ec-coll-panel');
+    panel.setAttribute('aria-label', `Склад колективу «${detail.name}»`);
+    const head = $('div', 'ec-coll-head');
+    const title = $('div', '');
+    title.append($('h3', '', detail.name), $('p', 'ec-caption', 'Склад за підписаним журналом складу'));
+    const big = $('div', 'ec-coll-big');
+    big.append($('strong', '', String(detail.members.length)), $('span', '', membersWord(detail.members.length)));
+    head.append(title, big);
+    panel.append(head);
+
+    const people = $('ul', 'ec-people');
     for (const member of detail.members) {
-      const row = $('div', 'ec-row');
-      row.append($('span', 'ec-label', 'Учасник'), $('code', '', member));
-      members.append(row);
+      const row = $('li', 'ec-person-card');
+      if (member.me) row.dataset.me = 'true';
+      const text = $('div', 'ec-person-text');
+      const nameLine = $('p', 'ec-person-name');
+      nameLine.append($('span', '', member.name || 'Учасник без імені'));
+      if (member.me) nameLine.append($('span', 'ec-badge ec-badge-me', 'Ви'));
+      if (member.founder) nameLine.append($('span', 'ec-badge', 'Засновник'));
+      text.append(nameLine, $('code', 'ec-person-fp', member.fingerprint));
+      row.append(avatar(member.name, member.me), text);
+      people.append(row);
     }
-    box.append(members);
+    panel.append(people, $('p', 'ec-caption', 'Ім’я кожен учасник вказує сам; особу підтверджує відбиток — звіряйте його особисто, при зустрічі.'));
+
+    const hours = input('24');
+    hours.value = '24';
+    const request = area('EWJOIN1.…');
+    const actions = $('div', 'ec-sections');
+    actions.append(section('invite', 'Запросити учасника', [
+      $('p', 'ec-caption', 'Крок 1. Створіть одноразове запрошення й передайте його поза EasyWAR.'),
+      withError(passwordForm('Створити запрошення', [field('Строк, годин', hours)], async password => {
+        const made = await host.collectives.inviteCreate(password, exchangeFp, checkHours(hours.value));
+        shared = { title: 'ЗАПРОШЕННЯ', text: made.text,
+          hint: 'Одноразове. Передайте текст запрошеному поза EasyWAR; він поверне відповідь, яку ви вставите в «Запросити учасника» → крок 2.' };
+      }, 'invite'), 'invite'),
+      $('p', 'ec-caption', 'Крок 2. Вставте відповідь запрошеного, щоб впустити його.'),
+      withError(passwordForm('Впустити', [field('Відповідь запрошеного', request)], async password => {
+        expectText(request.value, 'request');
+        const admitted = await host.collectives.inviteAdmit(password, exchangeFp, request.value);
+        shared = { title: 'ПАКЕТ КЛЮЧІВ ДЛЯ НОВОГО УЧАСНИКА', text: admitted.text,
+          hint: `Учасник ${admitted.memberName ? `«${admitted.memberName}» ` : ''}${admitted.memberFingerprint} у журналі. Ім’я учасник вказав сам: звірте відбиток. Передайте йому цей текст; відкритих ключів у ньому немає.` };
+        request.value = '';
+      }, 'admit'), 'admit'),
+    ], { open: secureErrorAt === 'admit' }));
 
     const tables = $('div', 'ec-list');
     for (const table of detail.tables) {
       const row = $('div', 'ec-row');
-      row.append($('span', 'ec-person', table.title), $('code', '', table.fingerprint), $('span', 'ec-caption', tableLine(table)));
+      const text = $('div', 'ec-person');
+      text.append($('span', '', table.title), $('p', 'ec-caption', `${tableLine(table)} · пакетів змін: ${table.changes}`));
+      const open = button(table.canWrite ? 'Змінити дані' : 'Переглянути');
+      open.disabled = secureBusy;
+      if (openTable?.fp === table.fingerprint) open.dataset.active = 'true';
+      open.addEventListener('click', () => {
+        if (openTable?.fp !== table.fingerprint) { openTable = { fp: table.fingerprint, data: null }; tablePreview = null; prepared = null; }
+        openSections.add('data');
+        renderSecure();
+      });
+      row.append(text, $('code', '', table.fingerprint), open);
       tables.append(row);
     }
-    if (detail.tables.length) box.append($('p', 'ec-label', 'ТАБЛИЦІ КОЛЕКТИВУ'), tables);
-
     const tableForm = $('form', 'ec-inline');
-    const title = input('Назва таблиці');
+    const tableTitle = input('Назва таблиці');
+    const tableColumns = input('Підрозділ, Стан, Примітка');
+    tableColumns.maxLength = 1400;
     const cls = select(CLASS_OPTIONS);
     const purpose = select(PURPOSE_OPTIONS);
     const add = button('Додати таблицю');
     add.type = 'submit';
     add.disabled = secureBusy;
-    tableForm.append(field('Назва', title), field('Клас', cls), field('Призначення', purpose), add);
+    tableForm.append(field('Назва', tableTitle), field('Стовпці (через кому)', tableColumns), field('Клас', cls), field('Призначення', purpose), add);
     tableForm.addEventListener('submit', event => {
       event.preventDefault();
       secureAction(async () => {
-        await host.collectives.setTable({ collective: exchangeFp, title: title.value, cls: cls.value, purpose: purpose.value });
-      });
+        const columns = parseColumns(tableColumns.value);
+        await host.collectives.setTable({ collective: exchangeFp, title: tableTitle.value, cls: cls.value, purpose: purpose.value, columns });
+      }, 'table');
     });
-    box.append($('p', 'ec-label', 'НОВА ТАБЛИЦЯ (КЛАС ПІДТВЕРДЖУЄТЕ ВИ ЯК ВЛАСНИК)'), tableForm);
+    actions.append(section('table', 'Таблиці колективу', [
+      ...(detail.tables.length ? [tables] : [$('p', 'ec-caption', 'Таблиць ще немає.')]),
+      $('p', 'ec-label', 'НОВА ТАБЛИЦЯ (КЛАС ПІДТВЕРДЖУЄТЕ ВИ ЯК ВЛАСНИК)'),
+      withError(tableForm, 'table'),
+    ], { count: detail.tables.length, open: Boolean(openTable) }));
 
-    const hours = input('24');
-    hours.value = '24';
-    box.append($('p', 'ec-label', 'ЗАПРОСИТИ УЧАСНИКА'), passwordForm('Створити запрошення', [field('Строк, годин', hours)], async password => {
-      const made = await host.collectives.inviteCreate(password, exchangeFp, checkHours(hours.value));
-      shared = { title: 'ЗАПРОШЕННЯ', text: made.text,
-        hint: 'Одноразове. Передайте текст запрошеному поза EasyWAR; він поверне відповідь, яку ви вставите нижче.' };
-    }));
-    const request = area('EWJOIN1.…');
-    box.append($('p', 'ec-label', 'ВПУСТИТИ ЗА ВІДПОВІДДЮ'), passwordForm('Впустити', [field('Відповідь запрошеного', request)], async password => {
-      expectText(request.value, 'request');
-      const admitted = await host.collectives.inviteAdmit(password, exchangeFp, request.value);
-      shared = { title: 'ПАКЕТ КЛЮЧІВ ДЛЯ НОВОГО УЧАСНИКА', text: admitted.text,
-        hint: `Учасник ${admitted.memberFingerprint} у журналі. Передайте йому цей текст; відкритих ключів у ньому немає.` };
-      request.value = '';
-    }));
+    const current = openTable && detail.tables.find(table => table.fingerprint === openTable.fp);
+    if (current) actions.append(section('data', `Дані: ${current.title}`, tableDataBody(current), { open: true }));
+    actions.append(section('sync', 'Пакет оновлення', syncBody()));
+    actions.append(section('tech', 'Технічні дані', [$('p', 'ec-caption', detailLine(detail))]));
+    panel.append(actions);
+    secure.append(panel);
+  }
 
-    const writable = detail.tables.filter(table => table.canWrite);
-    if (!writable.length) return;
-    const table = select(writable.map(item => ({ value: item.fingerprint, label: `${item.title} · клас ${item.class}` })));
-    const transport = select(TRANSPORT_OPTIONS);
-    const note = $('p', 'ec-caption', transportNote(detail, transport.value));
-    transport.addEventListener('change', () => { note.textContent = transportNote(detail, transport.value); });
-    box.append($('p', 'ec-label', 'ДОПОВІСТИ'));
-    if (prepared) {
-      // Крок 2: людина бачить підсумок, сформований у Rust, і підтверджує паролем.
-      const cancel = button('Скасувати');
-      cancel.disabled = secureBusy;
-      cancel.addEventListener('click', () => { prepared = null; reportResult = ''; renderSecure(); });
-      box.append($('p', 'ec-status', prepared.text), passwordForm('Доповісти', [], async password => {
-        const intent = prepared.intent;
-        prepared = null;
-        reportResult = reportText(await host.collectives.reportConfirm(password, intent));
-      }), cancel);
-    } else {
-      // Крок 1: Rust перевіряє маршрут і права й запам'ятовує намір на 60 секунд.
-      const wan = checkbox('Явно обираю передачу через інтернет');
-      const operation = area('Зміна рядка (синтетичний приклад: {"row":"…"})');
+  // «Оновити таблицю»: Rust відкриває збережені пакети змін паролем і перевіряє кожен.
+  async function loadTable(password, fp) {
+    const data = await host.collectives.tableRead(password, exchangeFp, fp);
+    const seen = openTable?.fp === fp && openTable.data ? openTable.data.changes.length : null;
+    const built = buildTable(data);
+    openTable = {
+      fp, data, base: built.rows,
+      edit: built.rows.map(row => ({ key: row.key, values: { ...row.values }, by: row.by })),
+      message: refreshText(data, seen),
+    };
+    tablePreview = null;
+  }
+  // «Оновити таблицю»: якщо вставлено пакет оновлення від учасника, спершу Rust його
+  // перевіряє й приймає, потім таблиця збирається заново.
+  function refreshForm(fp) {
+    const pack = area('Пакет оновлення від учасника (EWSYNC1.…), якщо отримали');
+    return passwordForm('Оновити таблицю', [field('Пакет оновлення', pack)], async password => {
+      if (openTable?.data && diffTable(openTable.base, openTable.edit, openTable.data.columns).length
+        && !window.confirm('Є недоповідені зміни. Оновити таблицю й відкинути їх?')) return;
+      let imported = '';
+      if (pack.value.trim()) {
+        expectText(pack.value, 'sync');
+        imported = syncImportText(await host.collectives.syncImport(password, pack.value));
+      }
+      await loadTable(password, fp);
+      if (imported) openTable.message = `${imported} ${openTable.message}`;
+    }, 'data');
+  }
+  // Пакет оновлення для інших учасників і приймання пакета без відкритої таблиці.
+  function syncBody() {
+    const pack = area('EWSYNC1.…');
+    return [
+      $('p', 'ec-caption', 'Поки немає передачі локальною мережею, зміни доходять до учасників пакетом оновлення: у ньому склад колективу, таблиці й усі пакети змін. Прочитати його можуть лише учасники. Передайте текст самі, як запрошення.'),
+      withError(passwordForm('Створити пакет', [], async password => {
+        const made = await host.collectives.syncExport(password, exchangeFp);
+        shared = { title: 'ПАКЕТ ОНОВЛЕННЯ', text: made.text, hint: syncExportText(made) };
+        syncResult = '';
+      }, 'sync-export'), 'sync-export'),
+      $('p', 'ec-caption', 'Отримали пакет від учасника? Вставте його тут або в «Оновити таблицю».'),
+      withError(passwordForm('Прийняти пакет', [field('Пакет оновлення', pack)], async password => {
+        expectText(pack.value, 'sync');
+        const got = await host.collectives.syncImport(password, pack.value);
+        pack.value = '';
+        if (openTable?.data) await loadTable(password, openTable.fp);
+        shared = null;
+        syncResult = syncImportText(got);
+        if (got.tables || got.newChanges) openSections.add('table');
+      }, 'sync-import'), 'sync-import'),
+      ...(syncResult ? [$('p', 'ec-status', syncResult)] : []),
+    ];
+  }
+  function tableDataBody(table) {
+    const body = [];
+    const note = $('p', 'ec-caption', 'Пакети змін інших учасників приходять пакетом оновлення: вставте його в поле вище й натисніть «Оновити таблицю». Після кроку передачі локальною мережею це відбуватиметься само.');
+    if (!table.columns.length) {
+      if (!table.mine) return [$('p', 'ec-caption', 'Власник таблиці ще не задав стовпці.')];
+      const columns = input('Підрозділ, Стан, Примітка');
+      columns.maxLength = 1400;
       const form = $('form', 'ec-inline');
-      const submit = button('Підготувати');
-      submit.type = 'submit';
-      submit.disabled = secureBusy;
-      form.append(field('Таблиця', table), field('Транспорт', transport), wan.label, field('Операція', operation), submit);
+      const save = button('Зберегти стовпці');
+      save.type = 'submit';
+      save.disabled = secureBusy;
+      form.append(field('Стовпці (через кому)', columns), save);
       form.addEventListener('submit', event => {
         event.preventDefault();
         secureAction(async () => {
-          checkOperation(operation.value);
-          const outcome = await host.collectives.reportPrepare({ collective: exchangeFp, table: table.value,
-            transport: transport.value, explicitWan: wan.box.checked, operation: operation.value });
-          reportResult = '';
-          if (outcome.allowed) prepared = { intent: outcome.intent, text: preparedText(outcome) };
-          else reportResult = reportText(outcome);
-        });
+          await host.collectives.setTable({ collective: exchangeFp, table: table.fingerprint, title: table.title,
+            cls: table.declaredClass, purpose: table.purpose, columns: parseColumns(columns.value) });
+        }, 'data');
       });
-      box.append(note, form);
+      return [$('p', 'ec-caption', 'Спершу задайте стовпці таблиці: їх бачитимуть усі учасники.'), withError(form, 'data')];
     }
-    if (reportResult) box.append($('p', 'ec-status', reportResult));
+    if (!openTable.data) {
+      body.push($('p', 'ec-caption', 'Щоб побачити дані, натисніть «Оновити таблицю»: пакети змін відкриваються паролем профілю.'),
+        withError(refreshForm(table.fingerprint), 'data'), note);
+      return body;
+    }
+    const columns = openTable.data.columns;
+    const locked = !table.canWrite || Boolean(tablePreview) || Boolean(prepared);
+    const baseKeys = new Set(openTable.base.map(row => row.key));
+    const wrap = $('div', 'ec-grid-wrap');
+    const grid = $('table', 'ec-grid');
+    const head = $('tr', '');
+    for (const column of columns) head.append($('th', '', column));
+    head.append($('th', '', 'Хто змінив'));
+    if (!locked) head.append($('th', '', ''));
+    const thead = $('thead', '');
+    thead.append(head);
+    const tbody = $('tbody', '');
+    openTable.edit.forEach((row, index) => {
+      const tr = $('tr', '');
+      for (const column of columns) {
+        const td = $('td', '');
+        if (locked) td.textContent = row.values[column] ?? '';
+        else {
+          const cell = $('input', 'ec-input ec-cell');
+          cell.type = 'text';
+          cell.maxLength = 1000;
+          cell.value = row.values[column] ?? '';
+          cell.setAttribute('aria-label', column);
+          cell.addEventListener('input', () => { row.values[column] = cell.value; });
+          td.append(cell);
+        }
+        tr.append(td);
+      }
+      const by = baseKeys.has(row.key) ? `${authorLine(row.by)}, ${changeTime(row.by?.clientTime)}` : 'новий рядок';
+      tr.append($('td', 'ec-grid-by', by));
+      if (!locked) {
+        const del = button('×');
+        del.className = 'ec-btn ec-grid-del';
+        del.setAttribute('aria-label', 'Видалити рядок');
+        del.addEventListener('click', () => { openTable.edit.splice(index, 1); renderSecure(); });
+        const td = $('td', '');
+        td.append(del);
+        tr.append(td);
+      }
+      tbody.append(tr);
+    });
+    grid.append(thead, tbody);
+    wrap.append(grid);
+    body.push(wrap);
+    if (!openTable.edit.length) body.push($('p', 'ec-caption', table.canWrite ? 'Рядків ще немає: додайте перший.' : 'Рядків ще немає.'));
+
+    if (tablePreview) body.push(...previewBody(table, columns));
+    else if (!locked) {
+      const actionsRow = $('div', 'ec-inline');
+      const addRow = button('Додати рядок');
+      addRow.disabled = secureBusy;
+      addRow.addEventListener('click', () => {
+        const taken = new Set(openTable.edit.map(row => row.key));
+        openTable.edit.push({ key: newRowKey(n => crypto.getRandomValues(new Uint8Array(n)), taken), values: emptyValues(columns), by: null });
+        renderSecure();
+      });
+      const report = button('Доповісти');
+      report.disabled = secureBusy;
+      report.addEventListener('click', () => {
+        tablePreview = diffTable(openTable.base, openTable.edit, columns);
+        if (!tablePreview.length) { tablePreview = null; openTable.message = 'Змін немає: змініть клітинки, додайте або видаліть рядок.'; }
+        else openTable.message = '';
+        renderSecure();
+      });
+      actionsRow.append(addRow, report);
+      body.push(actionsRow);
+    }
+    if (openTable.message) body.push($('p', 'ec-status', openTable.message));
+    if (!tablePreview && !prepared) body.push(withError(refreshForm(table.fingerprint), 'data'));
+    body.push(note);
+    return body;
+  }
+  // Перегляд «було → стане», потім Rust-намір (60 с) і підтвердження паролем.
+  function previewBody(table, columns) {
+    const box = $('div', 'ec-preview');
+    box.append($('p', 'ec-label', `ДОПОВІДЬ: ${previewSummary(tablePreview).toUpperCase()}`));
+    const list = $('ul', 'ec-preview-list');
+    for (const item of tablePreview) {
+      const li = $('li', '');
+      li.dataset.kind = item.kind;
+      if (item.kind === 'deleted') {
+        li.append($('strong', '', 'Видалено: '), $('span', '', columns.map(c => item.before[c]).filter(Boolean).join(' · ') || item.key));
+      } else if (item.kind === 'new') {
+        li.append($('strong', '', 'Новий рядок: '), $('span', '', item.changed.map(c => `${c}: ${item.after[c]}`).join(' · ')));
+      } else {
+        li.append($('strong', '', 'Змінено: '), $('span', '', item.changed.map(c => `${c}: «${item.before[c] ?? ''}» → «${item.after[c] ?? ''}»`).join(' · ')));
+      }
+      list.append(li);
+    }
+    box.append(list, $('p', 'ec-caption', 'У пакет іде весь рядок, навіть якщо змінено лише кілька клітинок. Адресати: усі учасники колективу.'));
+    const out = [box];
+    if (prepared) {
+      const cancel = button('Скасувати');
+      cancel.disabled = secureBusy;
+      cancel.addEventListener('click', () => { prepared = null; renderSecure(); });
+      out.push($('p', 'ec-status', prepared.text), withError(passwordForm('Доповісти', [], async password => {
+        const intent = prepared.intent;
+        prepared = null;
+        const outcome = await host.collectives.reportConfirm(password, intent);
+        if (outcome.allowed) {
+          await loadTable(password, table.fingerprint);
+          openTable.message = reportText(outcome);
+        } else openTable.message = reportText(outcome);
+      }, 'data'), 'data'), cancel);
+      return out;
+    }
+    const row = $('div', 'ec-inline');
+    const back = button('Назад до редагування');
+    back.disabled = secureBusy;
+    back.addEventListener('click', () => { tablePreview = null; renderSecure(); });
+    const go = button('Підготувати доповідь');
+    go.disabled = secureBusy;
+    go.addEventListener('click', () => secureAction(async () => {
+      // Rust перевіряє зміну, маршрут і права й запам'ятовує намір на 60 секунд.
+      const operation = changeOperation(tablePreview, columns);
+      const outcome = await host.collectives.reportPrepare({ collective: exchangeFp, table: table.fingerprint,
+        transport: 'lan', explicitWan: false, operation });
+      if (outcome.allowed) prepared = { intent: outcome.intent, text: preparedText(outcome) };
+      else openTable.message = reportText(outcome);
+    }, 'data'));
+    row.append(back, go);
+    out.push(withError(row, 'data'));
+    return out;
   }
   renderSecure();
   if (host.collectives) secureAction(async () => {});

@@ -151,7 +151,8 @@ function resultColors(model) {
   return model;
 }
 
-export function blockCardModel({ definition, schema, sourceId, rows, view = '' }) {
+// `title` — назва картки на дашборді: відмінна від назви визначення (зразок ПС: «Вильоти») стає підписом показника.
+export function blockCardModel({ definition, schema, sourceId, rows, view = '', title = '' }) {
   const card = CARDS[definition?.definitionId];
   const chart = Object.hasOwn(charts(), definition?.definitionId) ? charts()[definition.definitionId] : null;
   if (!card && !chart) return { ok: false, message: 'Цей блок ще не вміє рахуватися з основної таблиці.' };
@@ -184,7 +185,7 @@ export function blockCardModel({ definition, schema, sourceId, rows, view = '' }
     model: {
       kind: 'kpi',
       empty: !list.length,
-      label: card.label,
+      label: title && title !== definition.title ? title : card.label,
       value,
       valueText: number(value),
       unit: list.length ? card.note(A) : '',

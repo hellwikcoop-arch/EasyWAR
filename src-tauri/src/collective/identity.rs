@@ -121,6 +121,29 @@ impl MemberIdentity {
         self.sign_binding(exchange_pub, collective_id, issued_at)
     }
 
+    /// Учасник підписує своє ім'я в колективі: `member_id ‖ collective_id ‖ issued_at ‖ ім'я`
+    /// під міткою `easywar/collective/v1/member-name`. Ім'я вказує сам учасник; воно лише
+    /// підпис для людей, ідентичністю лишається відбиток.
+    pub fn name_record(
+        &self,
+        collective_id: [u8; ID_LEN],
+        name: &str,
+        issued_at: i64,
+    ) -> Result<NameRecord, Reason> {
+        if !valid_member_name(name) {
+            return Err(Reason::Malformed);
+        }
+        let mut record = NameRecord {
+            member_id: self.member_id(),
+            collective_id,
+            name: name.to_owned(),
+            issued_at,
+            signature: [0u8; SIGNATURE_LEN],
+        };
+        record.signature = self.signing.sign(&record.signed_bytes()).to_bytes();
+        Ok(record)
+    }
+
     /// Учасник підтверджує пристрій (ADR, 2.2): `{device_pub, member_id, issued_at}` під
     /// підписом учасника.
     pub fn issue_device(&self, device: &DevicePublic, issued_at: i64) -> DeviceRecord {
@@ -330,9 +353,146 @@ impl DeviceRecord {
     }
 }
 
+/// Найдовше ім'я учасника в символах.
+pub const MAX_MEMBER_NAME_CHARS: usize = 40;
+
+/// Ім'я учасника в каноничному вигляді: 1..=40 символів, без пробілів на краях і подвійних
+/// пробілів, без керівних знаків і знаків форматування (зокрема перемикачів напрямку тексту).
+pub fn valid_member_name(name: &str) -> bool {
+    let chars = name.chars().count();
+    (1..=MAX_MEMBER_NAME_CHARS).contains(&chars)
+        && name.split_whitespace().collect::<Vec<_>>().join(" ") == name
+        && !name.chars().any(|c| {
+            c.is_control()
+                || matches!(c, '\u{00AD}' | '\u{061C}' | '\u{180E}' | '\u{FEFF}')
+                || ('\u{200B}'..='\u{200F}').contains(&c)
+                || ('\u{202A}'..='\u{202E}').contains(&c)
+                || ('\u{2060}'..='\u{2064}').contains(&c)
+                || ('\u{2066}'..='\u{2069}').contains(&c)
+        })
+}
+
+/// Ім'я учасника в колективі, підписане самим учасником.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NameRecord {
+    pub member_id: MemberId,
+    pub collective_id: [u8; ID_LEN],
+    pub name: String,
+    pub issued_at: i64,
+    pub signature: [u8; SIGNATURE_LEN],
+}
+
+impl NameRecord {
+    fn signed_bytes(&self) -> Vec<u8> {
+        let mut w = Writer::with_capacity(labels::MEMBER_NAME.len() + 64 + self.name.len());
+        w.fixed(labels::MEMBER_NAME)
+            .fixed(&self.member_id)
+            .fixed(&self.collective_id)
+            .i64(self.issued_at)
+            .var(self.name.as_bytes());
+        w.finish()
+    }
+
+    /// Ім'я підписане саме цим учасником, для цього колективу і в каноничному вигляді.
+    pub fn verify(
+        &self,
+        member: &MemberPublic,
+        collective_id: &[u8; ID_LEN],
+    ) -> Result<(), Reason> {
+        if self.member_id != member.member_id() || &self.collective_id != collective_id {
+            return Err(Reason::ExchangeNotBound);
+        }
+        if !valid_member_name(&self.name) {
+            return Err(Reason::Malformed);
+        }
+        verify(&member.sign, &self.signed_bytes(), &self.signature)
+            .map_err(|_| Reason::BadSignature)
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut w =
+            Writer::with_capacity(KEY_LEN + ID_LEN + 8 + 4 + self.name.len() + SIGNATURE_LEN);
+        w.fixed(&self.member_id)
+            .fixed(&self.collective_id)
+            .i64(self.issued_at)
+            .var(self.name.as_bytes())
+            .fixed(&self.signature);
+        w.finish()
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, Reason> {
+        let mut r = Reader::new(bytes);
+        let member_id = r.fixed()?;
+        let collective_id = r.fixed()?;
+        let issued_at = r.i64()?;
+        let name = String::from_utf8(r.var()?.to_vec()).map_err(|_| Reason::Malformed)?;
+        let signature = r.fixed()?;
+        r.finish()?;
+        if !valid_member_name(&name) {
+            return Err(Reason::Malformed);
+        }
+        Ok(Self {
+            member_id,
+            collective_id,
+            name,
+            issued_at,
+            signature,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn name_record_round_trips_and_binds_member_and_collective() {
+        let member = MemberIdentity::generate();
+        let other = MemberIdentity::generate();
+        let collective = [7u8; ID_LEN];
+        let record = member
+            .name_record(collective, "Синтетик Петро", 10)
+            .unwrap();
+        let parsed = NameRecord::from_bytes(&record.to_bytes()).unwrap();
+        assert_eq!(parsed, record);
+        assert_eq!(parsed.verify(&member.public(), &collective), Ok(()));
+        assert_eq!(
+            parsed.verify(&other.public(), &collective),
+            Err(Reason::ExchangeNotBound)
+        );
+        assert_eq!(
+            parsed.verify(&member.public(), &[8u8; ID_LEN]),
+            Err(Reason::ExchangeNotBound)
+        );
+        let mut forged = parsed.clone();
+        forged.name = "Синтетик Іван".to_owned();
+        assert_eq!(
+            forged.verify(&member.public(), &collective),
+            Err(Reason::BadSignature)
+        );
+    }
+
+    #[test]
+    fn member_name_must_be_canonical() {
+        assert!(valid_member_name("Петро"));
+        assert!(valid_member_name(&"я".repeat(MAX_MEMBER_NAME_CHARS)));
+        for bad in [
+            "",
+            " Петро",
+            "Петро ",
+            "Пет  ро",
+            "Пет\nро",
+            "Пет\u{202E}ро",
+        ] {
+            assert!(!valid_member_name(bad), "{bad:?}");
+        }
+        assert!(!valid_member_name(&"я".repeat(MAX_MEMBER_NAME_CHARS + 1)));
+        let member = MemberIdentity::generate();
+        assert_eq!(
+            member.name_record([1; ID_LEN], " ", 1),
+            Err(Reason::Malformed)
+        );
+    }
 
     #[test]
     fn member_id_is_hash_of_label_and_signing_key() {

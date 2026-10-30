@@ -46,6 +46,8 @@ pub enum CollectiveStoreError {
     StoreDamaged,
     #[error("назва колективу: від 1 до 80 символів без керівних знаків")]
     InvalidName,
+    #[error("ваше ім'я в колективі: від 1 до 40 символів без керівних знаків")]
+    InvalidMemberName,
     #[error("гранична кількість захищених колективів — 20")]
     TooManyCollectives,
     #[error("колектив не знайдено в цьому профілі")]
@@ -68,6 +70,14 @@ pub enum CollectiveStoreError {
     InvalidInvitationHours,
     #[error("операція порожня або більша за 64 КіБ")]
     OperationSize,
+    #[error("стовпці таблиці: до 32 різних назв, кожна від 1 до 40 символів без керівних знаків")]
+    InvalidColumns,
+    #[error("зміна таблиці пошкоджена: невідомий стовпець, порожній чи повторений ключ рядка або задовге значення")]
+    InvalidTableChange,
+    #[error("пакет оновлення більший за 4 МіБ: передайте зміни кількома пакетами")]
+    SyncTooLarge,
+    #[error("журнал складу в пакеті розходиться з вашим: попросіть пакет у того, хто впускав учасників останнім")]
+    JournalDiverged,
     #[error("ключ епохи відсутній: колектив створено попередньою версією, створіть його знову")]
     EpochKeyMissing,
     #[error("відмова: {0}")]
@@ -343,12 +353,14 @@ impl CollectiveStore {
         profile_id: &str,
         password: Zeroizing<String>,
         name: &str,
+        member_name: &str,
         now: &str,
         now_unix: i64,
     ) -> Result<CollectiveSummary, CollectiveStoreError> {
         check_password(&password)?;
         let retry = password.clone();
         let name = collective_name(name)?;
+        let member_name = normalize_member_name(member_name)?;
         let row = sqlx::query(
             "SELECT sign_pub, exchange_pub, device_pub FROM collective_identities WHERE profile_id = ?",
         )
@@ -384,6 +396,12 @@ impl CollectiveStore {
                 .map_err(|_| CollectiveStoreError::StoreDamaged)?;
             membership
                 .add_device(&member.issue_device(&device.public(), now_unix))
+                .map_err(|_| CollectiveStoreError::StoreDamaged)?;
+            let named = member
+                .name_record(collective_id, &member_name, now_unix)
+                .map_err(|_| CollectiveStoreError::InvalidMemberName)?;
+            membership
+                .set_name(&named)
                 .map_err(|_| CollectiveStoreError::StoreDamaged)?;
             // Після автентифікації прибрати осиротілі ключі цього профілю (SEC-004). Невдале
             // прибирання зупиняє операцію до будь-якого запису: нічого не створено.
@@ -483,6 +501,17 @@ pub(crate) fn collective_name(name: &str) -> Result<String, CollectiveStoreError
     Ok(name)
 }
 
+/// Ім'я учасника, яке він вказує сам: пробіли згортаються, далі правила
+/// [`crate::collective::identity::valid_member_name`].
+pub(crate) fn normalize_member_name(name: &str) -> Result<String, CollectiveStoreError> {
+    let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
+    if crate::collective::identity::valid_member_name(&name) {
+        Ok(name)
+    } else {
+        Err(CollectiveStoreError::InvalidMemberName)
+    }
+}
+
 /// Керівні знаки (Cc) і знаки форматування (Cf), зокрема перемикачі напрямку тексту.
 fn is_control_or_format(c: char) -> bool {
     c.is_control()
@@ -557,10 +586,14 @@ pub(crate) fn base32(bytes: &[u8]) -> String {
     out
 }
 
-/// Відбиток для інтерфейсу: перші 10 символів base32, `ABCDE-FGHIJ`.
+/// Відбиток для інтерфейсу: перші 10 символів base32 без роздільника, `ABCDEFGHIJ`
+/// (50 біт; коротший відбиток зробив би підбір ключа з тим самим відбитком дешевшим).
+pub const FINGERPRINT_LEN: usize = 10;
+
 pub fn fingerprint(bytes: &[u8]) -> String {
-    let text = base32(bytes);
-    format!("{}-{}", &text[..5], &text[5..10])
+    let mut text = base32(bytes);
+    text.truncate(FINGERPRINT_LEN);
+    text
 }
 
 /// Ключ відновлення для показу: base32 групами по чотири.
@@ -627,7 +660,7 @@ mod tests {
         assert_eq!(base32(b""), "");
         assert_eq!(base32(b"f"), "MY");
         assert_eq!(base32(b"foobar"), "MZXW6YTBOI");
-        assert_eq!(fingerprint(b"foobar"), "MZXW6-YTBOI");
+        assert_eq!(fingerprint(b"foobar"), "MZXW6YTBOI");
         let recovery = recovery_text(&[0u8; KEY_LEN]);
         assert_eq!(recovery.len(), 52 + 12);
         assert!(recovery.starts_with("AAAA-AAAA-"));
@@ -667,7 +700,7 @@ mod tests {
             .create_identity(PROFILE, password("синтетичний-пароль"), T1)
             .await
             .unwrap();
-        assert_eq!(created.identity.fingerprint.len(), 11);
+        assert_eq!(created.identity.fingerprint.len(), FINGERPRINT_LEN);
         assert_eq!(created.recovery_key.len(), 64);
         let status = store.status(PROFILE).await.unwrap();
         assert_eq!(status.key_store, "locked");
@@ -721,11 +754,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn owner_creates_a_collective_with_a_verified_two_record_journal() {
+    async fn owner_creates_a_collective_with_a_verified_three_record_journal() {
         let (store, _dir) = store().await;
         assert!(matches!(
             store
-                .create_collective(PROFILE, password("синтетичний-пароль"), "Група", T1, UNIX)
+                .create_collective(
+                    PROFILE,
+                    password("синтетичний-пароль"),
+                    "Група",
+                    "Синтетик Власник",
+                    T1,
+                    UNIX
+                )
                 .await,
             Err(CollectiveStoreError::IdentityMissing)
         ));
@@ -735,34 +775,55 @@ mod tests {
             .unwrap();
         assert!(matches!(
             store
-                .create_collective(PROFILE, password("не-той-пароль"), "Група", T1, UNIX)
+                .create_collective(
+                    PROFILE,
+                    password("не-той-пароль"),
+                    "Група",
+                    "Синтетик Власник",
+                    T1,
+                    UNIX
+                )
                 .await,
             Err(CollectiveStoreError::WrongPassword)
+        ));
+        assert!(matches!(
+            store
+                .create_collective(
+                    PROFILE,
+                    password("синтетичний-пароль"),
+                    "Група",
+                    " \u{202E} ",
+                    T1,
+                    UNIX
+                )
+                .await,
+            Err(CollectiveStoreError::InvalidMemberName)
         ));
         let created = store
             .create_collective(
                 PROFILE,
                 password("синтетичний-пароль"),
                 " Навчальна  група ",
+                "Синтетик Власник",
                 T1,
                 UNIX,
             )
             .await
             .unwrap();
         assert_eq!(created.name, "Навчальна група");
-        assert_eq!((created.members, created.latest_seq), (1, 2));
+        assert_eq!((created.members, created.latest_seq), (1, 3));
 
         let status = store.status(PROFILE).await.unwrap();
         assert_eq!(status.collectives, vec![created.clone()]);
         assert!(store.status(OTHER).await.unwrap().collectives.is_empty());
 
-        // Журнал у базі — підписані записи: вступ власника і його пристрій.
+        // Журнал у базі — підписані записи: вступ власника, його пристрій і ім'я.
         let records: Vec<Vec<u8>> =
             sqlx::query_scalar("SELECT record FROM collective_membership_log ORDER BY seq")
                 .fetch_all(&store.pool)
                 .await
                 .unwrap();
-        assert_eq!(records.len(), 2);
+        assert_eq!(records.len(), 3);
         assert!(matches!(
             MembershipRecord::from_bytes(&records[0]).unwrap(),
             MembershipRecord::Join(_)
@@ -770,6 +831,10 @@ mod tests {
         assert!(matches!(
             MembershipRecord::from_bytes(&records[1]).unwrap(),
             MembershipRecord::AddDevice(_)
+        ));
+        assert!(matches!(
+            MembershipRecord::from_bytes(&records[2]).unwrap(),
+            MembershipRecord::SetName(ref name) if name.name == "Синтетик Власник"
         ));
     }
 
@@ -781,7 +846,14 @@ mod tests {
             .await
             .unwrap();
         store
-            .create_collective(PROFILE, password("синтетичний-пароль"), "Група", T1, UNIX)
+            .create_collective(
+                PROFILE,
+                password("синтетичний-пароль"),
+                "Група",
+                "Синтетик Власник",
+                T1,
+                UNIX,
+            )
             .await
             .unwrap();
         let mut join: Vec<u8> =
@@ -804,7 +876,7 @@ mod tests {
                 summary.latest_seq,
                 summary.rejected_records
             ),
-            (0, 0, 2)
+            (0, 0, 3)
         );
     }
 
@@ -829,7 +901,14 @@ mod tests {
         }
         assert!(matches!(
             store
-                .create_collective(PROFILE, password("синтетичний-пароль"), "Ще один", T1, UNIX)
+                .create_collective(
+                    PROFILE,
+                    password("синтетичний-пароль"),
+                    "Ще один",
+                    "Синтетик Власник",
+                    T1,
+                    UNIX
+                )
                 .await,
             Err(CollectiveStoreError::TooManyCollectives)
         ));
@@ -847,7 +926,14 @@ mod tests {
             .await
             .unwrap();
         store
-            .create_collective(PROFILE, password("синтетичний-пароль"), "Група", T1, UNIX)
+            .create_collective(
+                PROFILE,
+                password("синтетичний-пароль"),
+                "Група",
+                "Синтетик Власник",
+                T1,
+                UNIX,
+            )
             .await
             .unwrap();
         sqlx::query("DELETE FROM local_profiles WHERE id = ?")

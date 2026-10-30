@@ -1829,6 +1829,7 @@ async fn collective_create(
     collectives: tauri::State<'_, CollectiveStore>,
     password: String,
     name: String,
+    member_name: String,
 ) -> Result<collective_store::CollectiveSummary, String> {
     office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
     let password = zeroize::Zeroizing::new(password);
@@ -1839,6 +1840,7 @@ async fn collective_create(
             &profile_id,
             password,
             &name,
+            &member_name,
             &library_now(),
             Utc::now().timestamp(),
         )
@@ -1884,7 +1886,7 @@ async fn collective_detail(
         .map_err(|error| error.to_string())
 }
 
-/// Нова таблиця колективу або зміна класу й призначення своєї таблиці.
+/// Нова таблиця колективу або зміна класу, призначення й стовпців своєї таблиці.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 async fn collective_table_set(
@@ -1896,6 +1898,7 @@ async fn collective_table_set(
     title: String,
     class: String,
     purpose: String,
+    columns: Option<Vec<String>>,
 ) -> Result<collective_sync::TableSummary, String> {
     office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
     let profile_id = active_profile_id(&session)?;
@@ -1907,8 +1910,30 @@ async fn collective_table_set(
             &title,
             &class,
             &purpose,
+            columns.as_deref(),
             &library_now(),
         )
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// «Оновити таблицю»: стовпці й перевірені пакети змін таблиці колективу на цьому вузлі.
+/// Конверти відкриваються ключами епох, тому потрібен пароль профілю.
+#[tauri::command]
+async fn collective_table_read(
+    webview: tauri::Webview,
+    profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
+    collectives: tauri::State<'_, CollectiveStore>,
+    password: String,
+    collective: String,
+    table: String,
+) -> Result<collective_sync::TableData, String> {
+    office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
+    let profile_id = active_profile_id(&session)?;
+    let password = collective_password(&profiles, &profile_id, password).await?;
+    collectives
+        .read_table(&profile_id, password, &collective, &table)
         .await
         .map_err(|error| error.to_string())
 }
@@ -1946,12 +1971,19 @@ async fn collective_join_request(
     collectives: tauri::State<'_, CollectiveStore>,
     password: String,
     invitation: String,
+    member_name: String,
 ) -> Result<collective_sync::JoinRequestText, String> {
     office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
     let profile_id = active_profile_id(&session)?;
     let password = collective_password(&profiles, &profile_id, password).await?;
     collectives
-        .join_request(&profile_id, password, &invitation, Utc::now().timestamp())
+        .join_request(
+            &profile_id,
+            password,
+            &invitation,
+            &member_name,
+            Utc::now().timestamp(),
+        )
         .await
         .map_err(|error| error.to_string())
 }
@@ -2046,6 +2078,46 @@ async fn collective_report_confirm(
     let password = collective_password(&profiles, &profile_id, password).await?;
     collectives
         .report_confirm(&profile_id, password, &intent, Utc::now().timestamp())
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// «Пакет оновлення» (рішення власника 30.10.2026): текст `EWSYNC1.` із журналом складу,
+/// підписаними записами таблиць і пакетами змін, зашифрований ключем епохи. Мережі немає:
+/// текст людина передає сама.
+#[tauri::command]
+async fn collective_sync_export(
+    webview: tauri::Webview,
+    profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
+    collectives: tauri::State<'_, CollectiveStore>,
+    password: String,
+    collective: String,
+) -> Result<collective_sync::SyncText, String> {
+    office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
+    let profile_id = active_profile_id(&session)?;
+    let password = collective_password(&profiles, &profile_id, password).await?;
+    collectives
+        .sync_export(&profile_id, password, &collective, Utc::now().timestamp())
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// Приймання пакета оновлення: кожна частина перевіряється, що не пройшло — відкидається.
+#[tauri::command]
+async fn collective_sync_import(
+    webview: tauri::Webview,
+    profiles: tauri::State<'_, LocalProfileStore>,
+    session: tauri::State<'_, ProfileSession>,
+    collectives: tauri::State<'_, CollectiveStore>,
+    password: String,
+    text: String,
+) -> Result<collective_sync::SyncOutcome, String> {
+    office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
+    let profile_id = active_profile_id(&session)?;
+    let password = collective_password(&profiles, &profile_id, password).await?;
+    collectives
+        .sync_import(&profile_id, password, &text, Utc::now().timestamp())
         .await
         .map_err(|error| error.to_string())
 }
@@ -4580,6 +4652,9 @@ pub fn run() {
             collective_join_accept,
             collective_report_prepare,
             collective_report_confirm,
+            collective_table_read,
+            collective_sync_export,
+            collective_sync_import,
             clear_profile_database,
             read_profile_database,
             write_profile_database,

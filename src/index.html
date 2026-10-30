@@ -692,6 +692,11 @@ body[data-active-branch="air"] #branch-controls,body[data-active-branch="pvk"] #
   background-image: linear-gradient(180deg, rgba(8,16,28,.42), rgba(8,16,28,.78)), url('./brand-art/artillery-gun.webp');
   background-size: 100% 100%, cover; background-position: 0 0, 50% 55%;
 }
+/* ССО: на фоні фото групи ССО (src/brand-art/sso.webp), бійці праворуч від центру. */
+#view-start .branch-cards .branch-card[data-branch="sso"]::before {
+  background-image: linear-gradient(180deg, rgba(8,16,28,.42), rgba(8,16,28,.8)), url('./brand-art/sso.webp');
+  background-size: 100% 100%, cover; background-position: 0 0, 58% 35%;
+}
 
 #view-start .cmd-slot[data-cmd="pvk"] .cmd-card { --sl-x: 100%; --sl-y: 30%; border-color: rgba(61,155,255,.5) !important; }
 #view-start .cmd-slot[data-cmd="dshv"] .cmd-card { --sl-x: 2%; --sl-y: 47%; border-color: rgba(232,93,70,.5) !important; }
