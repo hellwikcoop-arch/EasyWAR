@@ -117,7 +117,7 @@ pub struct InvitationText {
 pub struct JoinRequestText {
     pub text: String,
     pub collective_fingerprint: String,
-    /// Відбиток запрошувача: звірте його голосом чи особисто.
+    /// Відбиток запрошувача: звірте його особисто.
     pub inviter_fingerprint: String,
 }
 

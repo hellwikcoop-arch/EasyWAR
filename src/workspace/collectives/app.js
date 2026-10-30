@@ -270,7 +270,7 @@ export async function mount(container, host) {
         expectText(invitation.value, 'invitation');
         const made = await host.collectives.joinRequest(password, invitation.value, me.value);
         shared = { title: 'ВІДПОВІДЬ НА ЗАПРОШЕННЯ', text: made.text,
-          hint: `Колектив ${made.collectiveFingerprint}, запросив ${made.inviterFingerprint}. Звірте відбиток із запрошувачем голосом чи особисто й передайте йому цей текст.` };
+          hint: `Колектив ${made.collectiveFingerprint}, запросив ${made.inviterFingerprint}. Звірте відбиток із запрошувачем особисто, при зустрічі, й передайте йому цей текст.` };
       }, 'join-request'), 'join-request'),
       $('p', 'ec-caption', 'Крок 2. Вставте пакет ключів, який повернув запрошувач.'),
       withError(passwordForm('Прийняти й вступити', [field('Пакет ключів', keys)], async password => {
@@ -344,7 +344,7 @@ export async function mount(container, host) {
       row.append(avatar(member.name, member.me), text);
       people.append(row);
     }
-    panel.append(people, $('p', 'ec-caption', 'Ім’я кожен учасник вказує сам; особу підтверджує відбиток — звіряйте його голосом.'));
+    panel.append(people, $('p', 'ec-caption', 'Ім’я кожен учасник вказує сам; особу підтверджує відбиток — звіряйте його особисто, при зустрічі.'));
 
     const hours = input('24');
     hours.value = '24';
