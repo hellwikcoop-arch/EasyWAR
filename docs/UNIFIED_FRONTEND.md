@@ -7,8 +7,8 @@ application as three same-origin pages:
 | File | Source | Notes |
 | --- | --- | --- |
 | `src/index.html` | launcher from the unified HTML | payloads removed; iframes load `./air.html` / `./rocket.html`; Air controls aligned with the desktop toolbar |
-| `src/rocket.html` | «Ракетні Війська» module | v3.1 plus the module-editor hook and scripts; tab and side-menu entry «База даних» (`#view-base`, `renderBase`, table of the «Зведена» columns as imported, hidden in `data-command="dshv"`) |
-| `src/air.html` | previous desktop frontend + v3.1 Air changes | storage namespace `easywar.air::`, branch brand styles/mark, updated F-16 image; keeps «База даних», Signal, SQLite, XLSX, backup and profiles |
+| `src/rocket.html` | «Ракетні Війська» module | v3.1 plus the module-editor hook and scripts; tab and side-menu entry «База даних» (`#view-base`, `renderBase`, table of the «Зведена» columns as imported, hidden in `data-command="dshv"`, where the УДШВ dashboard has its own «База даних» menu item: `basePage` in `src/udshv-dashboard.js` over `workbook.raw` / `rawSheetGrid`) |
+| `src/air.html` | previous desktop frontend + v3.1 Air changes | storage namespace `easywar.air::`, branch brand styles/mark, updated F-16 image; keeps «База даних» (in `data-command="pvk"` the PVK dashboard menu item «База даних» calls `openBase` → `showView('base')`), Signal, SQLite, XLSX, backup and profiles |
 | `src/aircraft-viewer.html` | interactive aircraft viewer for the Air «Довідник» tab | classic (non-module) page opened in an `iframe` by `ref-wiki.js` as `aircraft-viewer.html?embed=1&a=<key>`; three r128, GLTFLoader and the meshopt decoder plus the model data live in `src/public/aircraft-3d/` (no CDN, no network); `embed` hides the aircraft row and hotkeys so the article chooses the aircraft; kept out of the phone offline cache |
 
 Each module isolates its `localStorage` keys and IndexedDB names by prefix
