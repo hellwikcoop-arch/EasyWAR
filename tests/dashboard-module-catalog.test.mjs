@@ -1397,3 +1397,8 @@ test('the module page shows the module card live while a record is typed, and ne
   assert.match(css, /\.ewmc-live-card/);
   assert.doesNotMatch(css, /\.ewmc-data-scroll[^{]*\{[^}]*max-height/, 'the table still takes the page height');
 });
+
+test('легенда серій на «Моєму дашборді» стоїть угорі праворуч над малюнком', async () => {
+  const css = await readFile(new URL('../src/public/module-styles.css', import.meta.url), 'utf8');
+  assert.match(css, /\.ewmc-dashboard-grid\[data-layout\] \.ewmc-chart>\.ewmc-legend\{order:-1;justify-content:flex-end;/);
+});
