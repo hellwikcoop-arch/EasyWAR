@@ -8,7 +8,7 @@ import { clearRelation, clearRelations, confirmRelation, rejectRelation, setGrou
 import { linkIssues, suggestRelations } from './table-link-core.js';
 import {
   confirmArgs, confirmBlock, decisionOf, groupsNeedSaving, linkInputs, pairView, rejectArgs, rejectedRelationViews, savedGroupViews,
-  savedRelationViews, suggestedGroups, summaryLine,
+  mergePreviewView, savedRelationViews, suggestedGroups, summaryLine,
 } from './table-link-view-core.js';
 
 const yieldToPage = () => new Promise(resolve => setTimeout(resolve, 0));
@@ -57,6 +57,7 @@ export function linkPanel({ el, schema, modules, data, apply = null, onChange = 
           el('span', { text: view.text }),
           el('span', { class: 'ewmc-links-basis', text: ` · ${view.basis}` }),
           view.stale ? el('span', { class: 'ewmc-links-stale', text: ' · перевірте: стовпець ключа змінився' }) : null,
+          el('button', { type: 'button', class: 'btn quiet', text: 'Переглянути об’єднання', 'data-action': 'preview-merge', onclick: event => togglePreview(view.id, event.currentTarget) }),
           apply ? el('button', { type: 'button', class: 'btn quiet', text: 'Зняти', 'data-action': 'clear-relation', onclick: () => decide(value => clearRelation(value, view.id), 'Зв’язок знято: пару знову пропонуватимуть.') }) : null))));
     }
     if (rejected.length) {
@@ -97,6 +98,15 @@ export function linkPanel({ el, schema, modules, data, apply = null, onChange = 
     return el('div', { class: 'ewmc-links-reset' }, ask, box);
   }
   renderSaved();
+
+  // Перегляд об'єднання (B5): лише показ перших рядків, нічого не створюється й не записується.
+  function togglePreview(relationId, button) {
+    const item = button.closest('li');
+    const open = item.querySelector('.ewmc-links-merge');
+    if (open) { open.remove(); return; }
+    const view = mergePreviewView(schema(), relationId, modules(), data());
+    item.append(mergeNode(el, view));
+  }
 
   function renderOutput() {
     output.replaceChildren(...shown.map(view => pairNode(el, view, schema(), { apply: Boolean(apply), decide, now })));
@@ -195,4 +205,14 @@ function pairNode(el, view, current, tools) {
     el('p', { class: view.exhaustive ? 'ewmc-links-full' : 'ewmc-links-partial', text: view.completeness }),
     view.reasons.length ? el('ul', { class: 'ewmc-links-reasons' }, view.reasons.map(text => el('li', { text }))) : null,
     view.exclusions.length ? el('details', { class: 'ewmc-links-excl' }, el('summary', { text: `Не брались за ключ: ${view.exclusions.length}` }), el('ul', {}, view.exclusions.map(text => el('li', { text })))) : null);
+}
+
+function mergeNode(el, view) {
+  if (!view.ok) return el('p', { class: 'ewmc-links-merge ewmc-links-block', text: view.message });
+  return el('div', { class: 'ewmc-links-merge' },
+    el('p', { class: 'ewmc-links-hint', text: `${view.summary} Це лише перегляд: таблиця не створюється, дані не змінюються.` }),
+    ...view.notes.map(text => el('p', { class: 'ewmc-links-block', text })),
+    el('div', { class: 'ewmc-links-merge-scroll' }, el('table', { class: 'ewmc-links-merge-table' },
+      el('thead', {}, el('tr', {}, view.columns.map(header => el('th', { text: header })))),
+      el('tbody', {}, view.sample.map(row => el('tr', {}, row.map(value => el('td', { text: value }))))))));
 }
