@@ -172,7 +172,7 @@ mod tests {
     use super::*;
     use crate::{
         database::{
-            COMMAND_TABLES_SQL, CUSTOM_MODULE_SQL, DASHBOARD_MODULES_SQL,
+            ARMY_AVIATION_SQL, COMMAND_TABLES_SQL, CUSTOM_MODULE_SQL, DASHBOARD_MODULES_SQL,
             DASHBOARD_MODULE_CORRECTIONS_SQL, DASHBOARD_MODULE_CORRECTION_STATUS_SQL,
             DASHBOARD_MODULE_STYLE_SQL, INITIAL_SCHEMA_SQL, LOCAL_PROFILES_SQL,
             PROFILE_BRANCH_TABLES_SQL, PROFILE_DETAILS_SQL, PROFILE_MODULES_SQL,
@@ -206,6 +206,7 @@ mod tests {
             DASHBOARD_MODULE_STYLE_SQL,
             DASHBOARD_MODULE_CORRECTION_STATUS_SQL,
             CUSTOM_MODULE_SQL,
+            ARMY_AVIATION_SQL,
         ] {
             sqlx::raw_sql(migration).execute(&pool).await.unwrap();
         }

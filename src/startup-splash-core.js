@@ -24,6 +24,7 @@ export const SPLASH_TILES = Object.freeze([
   Object.freeze({ id: 'air', label: 'Повітряні Сили' }),
   Object.freeze({ id: 'rocket', label: 'Ракетні Війська' }),
   Object.freeze({ id: 'artillery', label: 'Артилерія' }),
+  Object.freeze({ id: 'army', label: 'Армійська авіація' }),
   Object.freeze({ id: 'command', label: 'Командування військ' }),
   Object.freeze({ id: 'custom', label: 'Власний модуль' }),
 ]);

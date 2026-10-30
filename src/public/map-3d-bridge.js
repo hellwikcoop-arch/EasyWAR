@@ -5,7 +5,8 @@
 (function () {
   'use strict';
   var KEY = 'aviahub.map3d';           // '0' = користувач обрав 2D; решта = 3D
-  var SRC = './map.html?embed=1';
+  // Армійська авіація (air.html?module=army) передає карті свій режим: зелене тло й сітка замість синіх.
+  var SRC = './map.html?embed=1' + (document.documentElement.dataset.module === 'army' ? '&module=army' : '');
   var HINT = '3D-карта працює без інтернету. Зони ураження, зони відповідальності, шари GeoJSON і онлайн-підкладки — в режимі «2D карта». Дані: рельєф — Mapzen Terrain (SRTM), знімки — Esri World Imagery, кордони — geoBoundaries і OpenStreetMap, лінія зіткнення — DeepStateMap.';
 
   function store(v) { try { if (v === undefined) return localStorage.getItem(KEY); localStorage.setItem(KEY, v); } catch (e) { /* сховище недоступне */ } return null; }

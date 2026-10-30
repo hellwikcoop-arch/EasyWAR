@@ -18,8 +18,8 @@ import {
 const read = (name) => readFile(new URL(`../src/${name}`, import.meta.url), 'utf8');
 
 test('splash lists the same branches and commands as the start screen, in Ukrainian', async () => {
-  assert.deepEqual(SPLASH_TILES.map(t => t.id), ['air', 'rocket', 'artillery', 'command', 'custom']);
-  assert.deepEqual(SPLASH_TILES.map(t => t.label), ['Повітряні Сили', 'Ракетні Війська', 'Артилерія', 'Командування військ', 'Власний модуль']);
+  assert.deepEqual(SPLASH_TILES.map(t => t.id), ['air', 'rocket', 'artillery', 'army', 'command', 'custom']);
+  assert.deepEqual(SPLASH_TILES.map(t => t.label), ['Повітряні Сили', 'Ракетні Війська', 'Артилерія', 'Армійська авіація', 'Командування військ', 'Власний модуль']);
   const html = await read('index.html');
   for (const label of ['Повітряні Сили', 'Ракетні Війська', 'Артилерія', 'Власний модуль']) {
     assert.ok(html.includes(`<h3>${label}</h3>`), `${label} is a launcher card`);

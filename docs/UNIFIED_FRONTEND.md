@@ -168,6 +168,24 @@ ends, and the launcher stays `inert` until sign-in.
   one disappears from `index.html`, so re-check it after
   `script/import_unified_html.mjs`. The splash tiles (`startup-splash-core.js`)
   follow the same rows: «Командування військ» and «Власний модуль».
+- «Армійська авіація» (`army`): the launcher card `[data-branch="army"]` opens
+  `src/air.html?module=army` in `#frame-army`. The Air Force page sets
+  `html[data-module="army"]` from that query (`easywar-command-mode` script), takes
+  the green accent tokens from `<style id="easywar-army-aviation-css">`, keeps its
+  own storage namespace `easywar.army::` (prefs, theme, IndexedDB cache) and, in
+  `<script id="easywar-army-aviation-mode">`, sets the window title, the brand
+  caption and the emblem (copied at runtime from the launcher card, so it is not
+  embedded twice). Profile slot `army` (`local-profiles-core.js` `PROFILE_BRANCHES`,
+  Rust `Branch::Army`, base table `BaseTable::Army` = the Air Force base workbook),
+  module catalog branch `army` (`branchFromLocation` reads `?module=army` on
+  `air.html` only). `script/build_standalone.mjs` strips the army style, script and
+  probe from the command-mode (ПВК) file. In army mode that head script also defines
+  `window.__EW_ARMY_ART` (`card`, `kpi`, `chart`, `db`: Mi-8 photos supplied by the owner on
+  2026-10-30, graded dark green; `poster`: «Army Aviation»); the page uses it instead of the jet
+  photos (`kc-photo`, `kh-jet`, `a2-hc`, `dh-jet`) and `AF_LOGO`, takes green `--bg`/`--surface`
+  tokens, opens the 3D map as `map.html?embed=1&module=army` (green `--bg`/`--grid` in `map.css`), and switches «Дашборд ПС»,
+  the blue KPI tone (`CC.blue`, `KCOL`) and the side-menu capsule to green. The test budget of that file was raised
+  from 5 MB to 10 MB on the owner's decision (2026-10-30); it is ≈5 MB now.
 - «Власний модуль» (`custom`): a launcher card `[data-branch="custom"]` opens
   `src/custom.html` in `#frame-custom` (`MODULE_SRC`, `BRANCH_TITLE`, Vite input
   `custom`). The page (`custom.css` tokens with a teal accent, `custom-app.js`
