@@ -742,6 +742,13 @@ v1 і блоки вкладок через `listDefinitions` + `validateRegistry
 `create-merged-module` у панелі викликає `createModule(request)`, який передає `createMergedModule` каталогу: той самий `invoke('create_dashboard_module', request)`,
 далі `loadModules()` (розкладка E4 ставить картку) і сповіщення. Лише `invoke` у каталозі, панель і ядро його не викликають. Нових команд і capabilities немає:
 у наявної команди з'явився необов'язковий `customFields`.
+Оновлення знімка: `createMergedModule(request, { relationId, rowCount })` після створення чекає `state.syncing` (синхронізацію джерел схеми) і пише знімок
+`setSnapshot` (`profile-schema-core.js`, поле `snapshots` схеми профілю: `sourceId`, `relationId`, `builtAt`, `rowCount`; без міграції й команд).
+`table-link-snapshot-core.js` (чисте): `snapshotInfo`, `refreshView` (перебудова з поточних вихідних через `mergeModuleView`, порівняння стовпців знімка за назвою й типом,
+`countChanges` — додано/зникне/без змін, запит із повною заміною рядків без `rowId`), `refreshSummary`. `table-link-snapshot-panel.js` — DOM: `<details class="ewmc-update ewmc-snapshot">`
+на сторінці таблиці-знімка (кнопки `check-snapshot`, `apply-snapshot`, `confirm-snapshot`); `table-link-snapshot-client.js` — `replaceSnapshotRows` (та сама
+`replace_dashboard_module_rows` з `expectedUpdatedAt`). Каталог перед перевіркою читає обидві вихідні таблиці наново (`readSnapshotSources`) і після заміни оновлює дату
+знімка. Тести — `tests/table-link-snapshot.test.mjs`.
 CSS — `.ewmc-links*` у `dashboard-module-catalog.css`. Тести — `tests/table-link-view.test.mjs`
 (логіка й текстові контракти: імпорт, відсутність `invoke`, `innerHTML`, запису схеми).
 

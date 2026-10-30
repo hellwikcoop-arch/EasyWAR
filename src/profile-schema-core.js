@@ -17,7 +17,9 @@
 //   - перед видаленням стовпця показуємо, що від нього залежить, нічого не забороняючи;
 //   - зв'язки між таблицями (E3б, B2) — лише імена стовпців, без значень: `relations` (підтверджені й відхилені
 //     людиною пари ключів, не більш як один підтверджений на пару таблиць) і `groups` (результат «розділити по
-//     ключах»). Обидва поля необов'язкові: схема без них читається й не переписується без змін.
+//     ключах»). Обидва поля необов'язкові: схема без них читається й не переписується без змін;
+//   - знімки об'єднання (E3б, B5): `snapshots` — яка таблиця-модуль утворена з якого підтвердженого зв'язку й коли
+//     (лише ідентифікатори, лічильник і час, без значень), щоб таблицю можна було оновити з вихідних. Теж необов'язкове поле.
 //
 // Схема нічого не знає про Rust і SQLite: зберігання — наступний блок E3 (міграція й команди), тому
 // тут є лише серіалізація й перевірка (`serializeSchema`, `parseSchema`). Усі функції повертають нові
@@ -45,6 +47,7 @@ export const LIMITS = Object.freeze({
   maxBindings: 2000,
   maxRelations: 256,
   maxGroups: 64,
+  maxSnapshots: 64,
   maxRelationColumns: 3,
   textLength: 200,
 });
@@ -209,6 +212,7 @@ export function removeSource(schema, sourceId) {
       return [];
     });
   }
+  if (Array.isArray(next.snapshots)) next.snapshots = next.snapshots.filter(item => item.sourceId !== sourceId);
   return done(bump(next), { removedRelations, dissolvedGroups });
 }
 
@@ -433,6 +437,7 @@ export function relationId(left, right) {
   return `rel:${JSON.stringify([sideMark(left), sideMark(right)].sort())}`;
 }
 
+const SNAPSHOT_RELATION_LENGTH = 2000;
 const pairMark = (a, b) => JSON.stringify([a, b].sort());
 
 function normalizeSide(schema, side) {
@@ -521,6 +526,30 @@ export function clearRelations(schema) {
   const next = fresh(schema);
   next.relations = [];
   next.groups = [];
+  return done(bump(next));
+}
+
+/** Знімки об'єднання схеми (поле необов'язкове). */
+export const snapshotsOf = schema => (Array.isArray(schema?.snapshots) ? schema.snapshots : []);
+
+/** Знімок таблиці-модуля з її `sourceId` або `null`. */
+export const snapshotOf = (schema, sourceId) => snapshotsOf(schema).find(item => item.sourceId === sourceId) || null;
+
+/**
+ * Запам'ятовує, що таблиця `sourceId` утворена з підтвердженого зв'язку `relationId` (`builtAt` — час останнього
+ * оновлення, `rowCount` — скільки рядків було). Знімок на таблицю один: новий замінює попередній. Значень клітинок
+ * не зберігає. Зв'язок тут не вимагається: його могли зняти, тоді оновлення просто недоступне.
+ */
+export function setSnapshot(schema, { sourceId, relationId: relation, builtAt = '', rowCount = 0 }) {
+  if (!findSource(schema, sourceId)) return fail('unknown_source', `Джерела «${sourceId}» немає.`);
+  if (typeof relation !== 'string' || !relation || relation.length > SNAPSHOT_RELATION_LENGTH) return fail('bad_snapshot', 'Зв’язок знімка некоректний.');
+  if (!Number.isSafeInteger(rowCount) || rowCount < 0) return fail('bad_snapshot', 'Кількість рядків знімка некоректна.');
+  const entry = { sourceId, relationId: relation, builtAt: text(builtAt, 40), rowCount };
+  const list = snapshotsOf(schema).filter(item => item.sourceId !== sourceId);
+  if (list.length + 1 > LIMITS.maxSnapshots) return fail('too_many_snapshots', 'Забагато знімків у схемі профілю.');
+  if (JSON.stringify(snapshotOf(schema, sourceId)) === JSON.stringify(entry)) return done(fresh(schema));
+  const next = fresh(schema);
+  next.snapshots = [...list, entry];
   return done(bump(next));
 }
 
@@ -678,6 +707,23 @@ function validateRelations(value, sources, err) {
   }
 }
 
+/** Перевірка `snapshots` (необов'язкове поле): джерело існує, одне джерело — один знімок, ліміти. */
+function validateSnapshots(value, sources, err) {
+  if (value.snapshots === undefined) return;
+  if (!Array.isArray(value.snapshots)) { err('bad_shape', 'Поле snapshots має бути масивом.'); return; }
+  if (value.snapshots.length > LIMITS.maxSnapshots) { err('too_many_snapshots', 'Забагато знімків.'); return; }
+  const seen = new Set();
+  for (const item of value.snapshots) {
+    const sourceId = typeof item?.sourceId === 'string' ? item.sourceId : '';
+    if (!sources.has(sourceId)) { err('unknown_source', `Знімок посилається на невідоме джерело «${sourceId}».`); continue; }
+    if (seen.has(sourceId)) err('duplicate_snapshot', `Для джерела «${sourceId}» кілька знімків.`);
+    seen.add(sourceId);
+    if (typeof item.relationId !== 'string' || !item.relationId || item.relationId.length > SNAPSHOT_RELATION_LENGTH) err('bad_snapshot', `Зв’язок знімка «${sourceId}» некоректний.`);
+    if (!Number.isSafeInteger(item.rowCount) || item.rowCount < 0) err('bad_snapshot', `Кількість рядків знімка «${sourceId}» некоректна.`);
+    if (item.builtAt !== undefined && typeof item.builtAt !== 'string') err('bad_snapshot', `Час знімка «${sourceId}» некоректний.`);
+  }
+}
+
 /**
  * Читає й перевіряє збережену схему (текст чи об'єкт). Схему новішої версії не читає й не зберігає
  * поверх — користувач не втратить рішення через старий застосунок. Помилки — список із кодами.
@@ -729,6 +775,7 @@ export function parseSchema(input) {
     }
   }
   validateRelations(value, sources, err);
+  validateSnapshots(value, sources, err);
   if (errors.length) return { ok: false, errors, schema: null };
   return { ok: true, errors: [], schema: deepFreeze(fresh(value)) };
 }
