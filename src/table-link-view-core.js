@@ -1,9 +1,11 @@
 // Підказки зв'язків між таблицями для «Мого дашборда» (E3б, B1 → екран): чиста логіка без DOM, сховищ і
 // мережі. Ядро пошуку — table-link-core.js; тут лише добір таблиць зі схеми профілю й прочитаних рядків та
-// людські тексти. Нічого не зберігає і нічого не підтверджує: це підказки, рішення за людиною.
+// людські тексти й стан рішень (B3). Нічого не зберігає: рішення людини ухвалює і записує викликач через
+// `confirmRelation`/`rejectRelation`/`clearRelation` ядра схеми.
 
-import { LINK_LIMITS, describeCandidate, tableFromSchema } from './table-link-core.js';
+import { CARDINALITY_LABELS, LINK_LIMITS, connectedGroups, describeCandidate, linkCoverage, tableFromSchema } from './table-link-core.js';
 import { moduleSourceId } from './profile-schema-modules-core.js';
+import { LIMITS, groupsOf, relationId, relationsOf, staleRelations } from './profile-schema-core.js';
 
 export const REASON_TEXT = Object.freeze({
   'columns-limited': `Розглянуто не всі стовпці (понад ${LINK_LIMITS.maxColumns}).`,
@@ -74,6 +76,7 @@ export function pairView(pair, titles, issuesOf = () => []) {
     text: describeCandidate(candidate),
     basis: candidate.basis === 'roles' ? 'за підтвердженими ролями' : 'за збігом значень',
     match: percent(candidate.containment),
+    candidate,
     issues: issuesOf(candidate).map(issue => issueText(issue, titles)),
   }));
   return {
@@ -96,4 +99,169 @@ export function summaryLine(views) {
   const parts = [`Пар таблиць: ${views.length}`, `з варіантами: ${found}`];
   if (partial) parts.push(`пошук неповний у ${partial}`);
   return parts.join(' · ');
+}
+
+// ─── Рішення людини (B3) ───────────────────────────────────────────────────────────────────────────────
+
+const sidesOf = candidate => ({
+  left: { sourceId: candidate.left.sourceId, columns: [...candidate.left.columns] },
+  right: { sourceId: candidate.right.sourceId, columns: [...candidate.right.columns] },
+});
+
+/**
+ * Стан рішення про кандидата у схемі профілю: `confirmed` (цей ключ підтверджено), `rejected` («це не ключ»),
+ * `taken` (пара вже має інший підтверджений ключ; `takenBy` — його id) або `open`.
+ */
+export function decisionOf(schema, candidate) {
+  const { left, right } = sidesOf(candidate);
+  const id = relationId(left, right);
+  const list = relationsOf(schema);
+  const same = list.find(relation => relation.id === id);
+  if (same) return { state: same.status, id };
+  const other = list.find(relation => relation.status === 'confirmed'
+    && [relation.left.sourceId, relation.right.sourceId].sort().join('\u001f') === [left.sourceId, right.sourceId].sort().join('\u001f'));
+  return other ? { state: 'taken', id, takenBy: other.id } : { state: 'open', id };
+}
+
+/** Чи можна підтвердити кандидата: дати з припущеним порядком «день/місяць» автоматично не підтверджуються. */
+export function confirmBlock(candidate) {
+  return candidate.caution?.includes('date-order-assumed')
+    ? 'Порядок «день/місяць» у датах ключа лише припущено. Перевірте дати на сторінці «Перевірка» й повторіть пошук: такий зв’язок тут не підтверджується.'
+    : '';
+}
+
+/** Аргументи `confirmRelation` для кандидата; `replace` — замінити інший підтверджений ключ цієї пари. */
+export function confirmArgs(candidate, { at = '', replace = false } = {}) {
+  return { ...sidesOf(candidate), cardinality: candidate.cardinality, basis: candidate.basis === 'roles' ? 'roles' : 'values', replace, at };
+}
+
+/** Аргументи `rejectRelation` для кандидата. */
+export function rejectArgs(candidate, { at = '' } = {}) {
+  return { ...sidesOf(candidate), at };
+}
+
+const headerOf = (schema, side) => {
+  const source = (schema?.sources || []).find(item => item.id === side.sourceId);
+  return side.columns.map(key => source?.columns.find(column => column.key === key)?.header || key).join(' + ');
+};
+const titleOf = (schema, sourceId) => (schema?.sources || []).find(item => item.id === sourceId)?.title || sourceId;
+
+/** Текст збереженого зв'язку: «План: Підрозділ ↔ Вильоти: Підрозділ · 1 : N». */
+export function relationText(schema, relation) {
+  return `${titleOf(schema, relation.left.sourceId)}: ${headerOf(schema, relation.left)} ↔ ${titleOf(schema, relation.right.sourceId)}: ${headerOf(schema, relation.right)} · ${CARDINALITY_LABELS[relation.cardinality] || relation.cardinality}`;
+}
+
+/** Підтверджені зв'язки для показу: текст, чи треба перевірити (стовпець ключа змінився), основа. */
+export function savedRelationViews(schema) {
+  const stale = new Set(staleRelations(schema));
+  return relationsOf(schema).filter(relation => relation.status === 'confirmed').map(relation => ({
+    id: relation.id,
+    text: relationText(schema, relation),
+    basis: relation.basis === 'roles' ? 'за підтвердженими ролями' : relation.basis === 'manual' ? 'вказано вручну' : 'за збігом значень',
+    stale: stale.has(relation.id),
+  }));
+}
+
+/** Відхилені пари для показу з можливістю повернути пропозицію. */
+export function rejectedRelationViews(schema) {
+  return relationsOf(schema).filter(relation => relation.status === 'rejected').map(relation => ({
+    id: relation.id,
+    text: `${titleOf(schema, relation.left.sourceId)}: ${headerOf(schema, relation.left)} ↔ ${titleOf(schema, relation.right.sourceId)}: ${headerOf(schema, relation.right)}`,
+  }));
+}
+
+/** Рядок для картки модуля: «Зв'язано з: Вильоти (Підрозділ) …»; порожній, якщо зв'язків немає. */
+export function relatedLine(schema, sourceId) {
+  const stale = new Set(staleRelations(schema));
+  const parts = relationsOf(schema)
+    .filter(relation => relation.status === 'confirmed' && (relation.left.sourceId === sourceId || relation.right.sourceId === sourceId))
+    .map(relation => {
+      const mine = relation.left.sourceId === sourceId ? relation.left : relation.right;
+      const other = relation.left.sourceId === sourceId ? relation.right : relation.left;
+      return `${titleOf(schema, other.sourceId)} (за «${headerOf(schema, mine)}»)${stale.has(relation.id) ? ' — перевірте' : ''}`;
+    });
+  return parts.length ? `Зв’язано з: ${parts.join('; ')}` : '';
+}
+
+// ─── Групи таблиць і попередження (B4) ─────────────────────────────────────────────────────────────────
+
+const clip = (value, max) => (value.length > max ? `${value.slice(0, max - 1)}…` : value);
+
+/**
+ * «Розділити по ключах»: групи з двох і більше таблиць, з'єднаних підтвердженими зв'язками. Таблиці без
+ * зв'язків у групи не потрапляють. Порядок і ідентифікатори (`g1`, `g2`…) стабільні для тих самих зв'язків.
+ */
+export function suggestedGroups(schema) {
+  const confirmed = relationsOf(schema).filter(relation => relation.status === 'confirmed');
+  const involved = [...new Set(confirmed.flatMap(relation => [relation.left.sourceId, relation.right.sourceId]))];
+  const links = confirmed.map(relation => ({ leftId: relation.left.sourceId, rightId: relation.right.sourceId }));
+  return connectedGroups(involved, links)
+    .filter(ids => ids.length >= 2)
+    .map(ids => ids.slice().sort())
+    .sort((a, b) => b.length - a.length || a[0].localeCompare(b[0]))
+    .map((ids, index) => ({ id: `g${index + 1}`, title: clip(ids.map(id => titleOf(schema, id)).join(' + '), LIMITS.textLength), sourceIds: ids }));
+}
+
+/** Чи пропоновані групи відрізняються від збережених (за складом, не за назвою). */
+export function groupsNeedSaving(schema) {
+  const mark = groups => JSON.stringify(groups.map(group => group.sourceIds.slice().sort()).sort());
+  return mark(suggestedGroups(schema)) !== mark(groupsOf(schema));
+}
+
+/** Збережені групи для показу: назва й таблиці. */
+export function savedGroupViews(schema) {
+  return groupsOf(schema).map(group => ({ id: group.id, title: group.title, tables: group.sourceIds.map(id => titleOf(schema, id)) }));
+}
+
+/** Попередження перед видаленням модуля: які зв'язки зникнуть разом із ним; порожній рядок, якщо зв'язків немає. */
+export function deleteLinksNote(schema, sourceId) {
+  const others = relationsOf(schema)
+    .filter(relation => relation.status === 'confirmed' && (relation.left.sourceId === sourceId || relation.right.sourceId === sourceId))
+    .map(relation => titleOf(schema, relation.left.sourceId === sourceId ? relation.right.sourceId : relation.left.sourceId));
+  if (!others.length) return '';
+  const names = [...new Set(others)].map(name => `«${name}»`).join(', ');
+  return `Зникне й підтверджений зв’язок із ${names}; решта модулів лишиться без змін.`;
+}
+
+// ─── Читання за зв'язком (покриття) ────────────────────────────────────────────────────────────────────
+
+// «з N рядків»: родовий відмінок, окрема форма лише для 1, 21, 31… (крім 11).
+const rows = n => (n % 10 === 1 && n % 100 !== 11 ? 'рядка' : 'рядків');
+
+/**
+ * Що дає підтверджений зв'язок для картки модуля: для кожного чинного зв'язку — скільки рядків цієї й пов'язаної таблиці
+ * мають пару. Зв'язок із позначкою «перевірте» і зв'язок, чию іншу таблицю не прочитано, пропускаються з поясненням.
+ * Повертає масив `{ relationId, text, warn }`; значень клітинок немає.
+ */
+export function linkCoverageViews(schema, sourceId, modules, data) {
+  const stale = new Set(staleRelations(schema));
+  const byId = new Map();
+  const tableOf = id => {
+    if (byId.has(id)) return byId.get(id);
+    const module = (Array.isArray(modules) ? modules : []).find(item => moduleSourceId(item.id) === id);
+    const payload = module ? (data instanceof Map ? data.get(module.id) : data?.[module.id]) : null;
+    const rows = Array.isArray(payload?.rows) ? payload.rows : null;
+    const made = rows && payload.failed !== true ? tableFromSchema(schema, id, rows.slice(0, LINK_LIMITS.maxRows), { truncated: payload.truncated === true || rows.length > LINK_LIMITS.maxRows }) : null;
+    const table = made?.ok ? made.table : null;
+    byId.set(id, table);
+    return table;
+  };
+  const views = [];
+  for (const relation of relationsOf(schema)) {
+    if (relation.status !== 'confirmed' || (relation.left.sourceId !== sourceId && relation.right.sourceId !== sourceId)) continue;
+    const mine = relation.left.sourceId === sourceId ? relation.left : relation.right;
+    const other = relation.left.sourceId === sourceId ? relation.right : relation.left;
+    const name = titleOf(schema, other.sourceId);
+    if (stale.has(relation.id)) { views.push({ relationId: relation.id, text: `«${name}»: зв’язок треба перевірити, рахунок пропущено.`, warn: true }); continue; }
+    const left = tableOf(mine.sourceId);
+    const right = tableOf(other.sourceId);
+    if (!left || !right) { views.push({ relationId: relation.id, text: `«${name}»: дані не прочитано, рахунок пропущено.`, warn: true }); continue; }
+    const cover = linkCoverage(left, right, mine.columns, other.columns);
+    if (!cover.ok) { views.push({ relationId: relation.id, text: `«${name}»: ${cover.message}`, warn: true }); continue; }
+    const lone = cover.leftRows - cover.leftMatched;
+    const loneOther = cover.rightRows - cover.rightMatched;
+    const text = `«${name}»: пару має ${cover.leftMatched} з ${cover.leftRows} ${rows(cover.leftRows)} тут і ${cover.rightMatched} з ${cover.rightRows} там; без пари: ${lone} тут, ${loneOther} там.${cover.complete ? '' : ' Таблицю прочитано не повністю: рахунок за прочитаним.'}`;
+    views.push({ relationId: relation.id, text, warn: lone > 0 || loneOther > 0 || !cover.complete });
+  }
+  return views;
 }

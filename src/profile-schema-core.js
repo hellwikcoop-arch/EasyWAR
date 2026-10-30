@@ -14,7 +14,10 @@
 //   - оновлення шаблону модуля додає нові стовпці, але не стирає підтверджене зіставлення, порядок і
 //     підписи користувача (`updateSourceColumns`); стовпець із зіставленням не зникає мовчки;
 //   - різні одиниці одного числового показника мовчки не об'єднуються;
-//   - перед видаленням стовпця показуємо, що від нього залежить, нічого не забороняючи.
+//   - перед видаленням стовпця показуємо, що від нього залежить, нічого не забороняючи;
+//   - зв'язки між таблицями (E3б, B2) — лише імена стовпців, без значень: `relations` (підтверджені й відхилені
+//     людиною пари ключів, не більш як один підтверджений на пару таблиць) і `groups` (результат «розділити по
+//     ключах»). Обидва поля необов'язкові: схема без них читається й не переписується без змін.
 //
 // Схема нічого не знає про Rust і SQLite: зберігання — наступний блок E3 (міграція й команди), тому
 // тут є лише серіалізація й перевірка (`serializeSchema`, `parseSchema`). Усі функції повертають нові
@@ -32,11 +35,17 @@ export const SOURCE_TYPES = Object.freeze({
 });
 
 export const BINDING_STATUSES = Object.freeze(['confirmed', 'rejected']);
+export const RELATION_STATUSES = BINDING_STATUSES;
+export const RELATION_CARDINALITIES = Object.freeze(['one-one', 'one-many', 'many-one', 'many-many']);
+export const RELATION_BASES = Object.freeze(['roles', 'values', 'manual']);
 
 export const LIMITS = Object.freeze({
   maxSources: 256,
   maxColumns: 200,
   maxBindings: 2000,
+  maxRelations: 256,
+  maxGroups: 64,
+  maxRelationColumns: 3,
   textLength: 200,
 });
 
@@ -158,6 +167,10 @@ export function updateSourceColumns(schema, sourceId, columns) {
   const target = findSource(next, sourceId);
   const incomingKeys = new Set(incoming.map(column => column.key));
   const bound = new Set(next.bindings.filter(binding => binding.sourceId === sourceId).map(binding => binding.columnKey));
+  // Стовпець зв'язку (підтвердженого чи відхиленого) теж не зникає мовчки: схема з посиланням на відсутній стовпець не читається.
+  for (const relation of next.relations || []) {
+    for (const side of [relation.left, relation.right]) if (side.sourceId === sourceId) for (const key of side.columns) bound.add(key);
+  }
   const kept = target.columns
     .filter(column => incomingKeys.has(column.key) || bound.has(column.key))
     .map(({ orphan, ...rest }) => (incomingKeys.has(rest.key)
@@ -166,6 +179,7 @@ export function updateSourceColumns(schema, sourceId, columns) {
   const have = new Set(kept.map(column => column.key));
   const added = incoming.filter(column => !have.has(column.key));
   const merged = [...kept, ...added];
+  if (merged.length > LIMITS.maxColumns) return fail('bad_columns', 'Після оновлення стовпців стало б більш як 200: стовпці зв’язків і зіставлень лишаються.');
   const changed = JSON.stringify(merged) !== JSON.stringify(target.columns);
   if (!changed) return done(next, { added: [], orphaned: [] });
   target.columns = merged;
@@ -178,11 +192,24 @@ export function updateSourceColumns(schema, sourceId, columns) {
 
 /** Прибирає джерело разом із його зіставленнями (наприклад, після видалення модуля). Невідоме джерело — не помилка. */
 export function removeSource(schema, sourceId) {
-  if (!findSource(schema, sourceId)) return done(fresh(schema));
+  if (!findSource(schema, sourceId)) return done(fresh(schema), { removedRelations: [], dissolvedGroups: [] });
   const next = fresh(schema);
   next.sources = next.sources.filter(source => source.id !== sourceId);
   next.bindings = next.bindings.filter(binding => binding.sourceId !== sourceId);
-  return done(bump(next));
+  // Зв'язки джерела зникають разом із ним; група, що без нього розпалась чи лишилась з однієї таблиці, розпускається (її можна скласти знову).
+  const removedRelations = (next.relations || []).filter(relation => relation.left.sourceId === sourceId || relation.right.sourceId === sourceId).map(relation => relation.id);
+  const dissolvedGroups = [];
+  if (Array.isArray(next.relations)) next.relations = next.relations.filter(relation => !removedRelations.includes(relation.id));
+  if (Array.isArray(next.groups)) {
+    next.groups = next.groups.flatMap(group => {
+      const rest = group.sourceIds.filter(id => id !== sourceId);
+      if (rest.length === group.sourceIds.length) return [group];
+      if (rest.length >= 2 && groupConnected(rest, next.relations || [])) return [{ ...group, sourceIds: rest }];
+      dissolvedGroups.push(group.id);
+      return [];
+    });
+  }
+  return done(bump(next), { removedRelations, dissolvedGroups });
 }
 
 /** Назва джерела (наприклад, модуль перейменовано). Без змін — та сама схема й ревізія. */
@@ -376,6 +403,9 @@ export function availability(definitions, schema, sourceId) {
 export function columnDependents(definitions, schema, sourceId, columnKey, placedIds = []) {
   if (!findSource(schema, sourceId)) return fail('unknown_source', `Джерела «${sourceId}» немає.`);
   const roles = decisions(schema, sourceId, 'confirmed').filter(binding => binding.columnKey === columnKey).map(binding => binding.role);
+  const relations = relationsOf(schema)
+    .filter(relation => relation.status === 'confirmed' && [relation.left, relation.right].some(side => side.sourceId === sourceId && side.columns.includes(columnKey)))
+    .map(relation => relation.id);
   const placed = new Set(placedIds);
   const lose = [];
   const degrade = [];
@@ -385,12 +415,267 @@ export function columnDependents(definitions, schema, sourceId, columnKey, place
     if (needs.some(requirement => requirement.required)) lose.push(definition.definitionId);
     else if (needs.length) degrade.push(definition.definitionId);
   }
-  return { ok: true, roles, lose, degrade };
+  return { ok: true, roles, lose, degrade, relations };
+}
+
+// ─── Зв'язки між таблицями (E3б, B2) ───────────────────────────────────────────────────────────────────
+
+/** Зв'язки схеми (поле необов'язкове: старі схеми його не мають). */
+export const relationsOf = schema => (Array.isArray(schema?.relations) ? schema.relations : []);
+/** Групи таблиць схеми (поле необов'язкове). */
+export const groupsOf = schema => (Array.isArray(schema?.groups) ? schema.groups : []);
+
+// Метки без роздільників у рядку: імена з будь-якими символами не збігаються в різних парах.
+const sideMark = side => JSON.stringify([side.sourceId, side.columns]);
+
+/** Ідентифікатор зв'язку не залежить від того, яку таблицю названо першою: однакова пара ключів — однаковий `id`. */
+export function relationId(left, right) {
+  return `rel:${JSON.stringify([sideMark(left), sideMark(right)].sort())}`;
+}
+
+const pairMark = (a, b) => JSON.stringify([a, b].sort());
+
+function normalizeSide(schema, side) {
+  const source = findSource(schema, text(side?.sourceId));
+  if (!source) return fail('unknown_source', `Джерела «${side?.sourceId}» немає.`);
+  const columns = Array.isArray(side.columns) ? side.columns.map(key => text(key)) : [];
+  if (!columns.length || columns.length > LIMITS.maxRelationColumns || columns.some(key => !key) || new Set(columns).size !== columns.length) {
+    return fail('bad_relation_columns', 'Ключ зв’язку — від одного до трьох різних стовпців.');
+  }
+  const unknown = columns.find(key => !source.columns.some(column => column.key === key));
+  if (unknown) return fail('unknown_column', `Стовпця «${unknown}» немає в джерелі «${source.id}».`);
+  return { ok: true, side: { sourceId: source.id, columns }, source };
+}
+
+function relationSides(schema, left, right) {
+  const a = normalizeSide(schema, left);
+  if (!a.ok) return a;
+  const b = normalizeSide(schema, right);
+  if (!b.ok) return b;
+  if (a.side.sourceId === b.side.sourceId) return fail('same_source', 'Зв’язок з’єднує дві різні таблиці.');
+  if (a.side.columns.length !== b.side.columns.length) return fail('bad_relation_columns', 'З обох боків має бути однакова кількість стовпців ключа.');
+  return { ok: true, left: a.side, right: b.side, leftSource: a.source, rightSource: b.source };
+}
+
+/** Типи стовпців ключа на момент рішення: за ними зв'язок позначається «перевірте», якщо стовпець змінився (`staleRelations`). */
+const typesOf = (source, columns) => columns.map(key => source.columns.find(column => column.key === key)?.type || '');
+
+/**
+ * Підтвердження людини: ці стовпці двох таблиць — ключ зв'язку. Не більш як один підтверджений зв'язок на пару
+ * таблиць (інший ключ тієї ж пари — `pair_taken`, якщо не передано `replace: true`). «Багато до багатьох» лише
+ * вручну (`basis: 'manual'`) і з `acceptManyToMany: true`: сама пропозиція такого зв'язку не робиться.
+ * Значень клітинок схема не зберігає: лише імена стовпців, кардинальність і основа.
+ */
+export function confirmRelation(schema, { left, right, cardinality, basis, replace = false, acceptManyToMany = false, at = '' }) {
+  const sides = relationSides(schema, left, right);
+  if (!sides.ok) return sides;
+  if (!RELATION_CARDINALITIES.includes(cardinality)) return fail('bad_cardinality', `Кардинальність «${cardinality}» невідома.`);
+  if (!RELATION_BASES.includes(basis)) return fail('bad_basis', `Основа «${basis}» невідома.`);
+  if (cardinality === 'many-many' && !(basis === 'manual' && acceptManyToMany === true)) {
+    return fail('many_many_unconfirmed', 'Зв’язок «багато до багатьох» можна лише вказати вручну й підтвердити застереження.');
+  }
+  const id = relationId(sides.left, sides.right);
+  const mark = pairMark(sides.left.sourceId, sides.right.sourceId);
+  const taken = relationsOf(schema).find(relation => relation.status === 'confirmed' && relation.id !== id
+    && pairMark(relation.left.sourceId, relation.right.sourceId) === mark);
+  if (taken && !replace) return fail('pair_taken', 'Для цієї пари таблиць уже підтверджено інший ключ.', { takenBy: taken.id });
+  const next = fresh(schema);
+  const list = relationsOf(next).filter(relation => relation.id !== id && !(taken && relation.id === taken.id));
+  list.push({
+    id, status: 'confirmed', left: sides.left, right: sides.right, cardinality, basis,
+    versions: { left: sides.leftSource.version, right: sides.rightSource.version },
+    types: { left: typesOf(sides.leftSource, sides.left.columns), right: typesOf(sides.rightSource, sides.right.columns) },
+    decidedAtRevision: next.revision + 1, at: text(at, 40),
+  });
+  if (list.length > LIMITS.maxRelations) return fail('too_many_relations', 'Забагато зв’язків у схемі профілю.');
+  next.relations = list;
+  return done(bump(next), { id, replaced: taken ? taken.id : '' });
+}
+
+/** «Ні, це не ключ»: така пара стовпців більше не пропонується; підтверджений зв'язок цієї пари ключів знімається. */
+export function rejectRelation(schema, { left, right, at = '' }) {
+  const sides = relationSides(schema, left, right);
+  if (!sides.ok) return sides;
+  const id = relationId(sides.left, sides.right);
+  const next = fresh(schema);
+  const list = relationsOf(next).filter(relation => relation.id !== id);
+  list.push({ id, status: 'rejected', left: sides.left, right: sides.right, decidedAtRevision: next.revision + 1, at: text(at, 40) });
+  if (list.length > LIMITS.maxRelations) return fail('too_many_relations', 'Забагато зв’язків у схемі профілю.');
+  next.relations = list;
+  const dissolved = dropBrokenGroups(next);
+  return done(bump(next), { id, dissolvedGroups: dissolved });
+}
+
+/** Знімає рішення про зв'язок (підтверджене чи відхилене): пару знову пропонуватимуть. Невідомий `id` — без змін. */
+export function clearRelation(schema, id) {
+  if (!relationsOf(schema).some(relation => relation.id === id)) return done(fresh(schema), { dissolvedGroups: [] });
+  const next = fresh(schema);
+  next.relations = relationsOf(next).filter(relation => relation.id !== id);
+  const dissolved = dropBrokenGroups(next);
+  return done(bump(next), { dissolvedGroups: dissolved });
+}
+
+/** «Скинути зв'язки»: прибирає `relations` і `groups`; джерела й зіставлення ролей цілі. Без зв'язків — без змін. */
+export function clearRelations(schema) {
+  if (!relationsOf(schema).length && !groupsOf(schema).length) return done(fresh(schema));
+  const next = fresh(schema);
+  next.relations = [];
+  next.groups = [];
+  return done(bump(next));
+}
+
+/** Чи з'єднані ВСІ ці таблиці підтвердженими зв'язками (порожній чи одноелементний набір — так). */
+function groupConnected(sourceIds, relations) {
+  const ids = new Set(sourceIds);
+  if (ids.size < 2) return true;
+  const edges = relations.filter(relation => relation.status === 'confirmed' && ids.has(relation.left.sourceId) && ids.has(relation.right.sourceId));
+  const seen = new Set([sourceIds[0]]);
+  const queue = [sourceIds[0]];
+  while (queue.length) {
+    const at = queue.pop();
+    for (const edge of edges) {
+      const other = edge.left.sourceId === at ? edge.right.sourceId : edge.right.sourceId === at ? edge.left.sourceId : '';
+      if (other && !seen.has(other)) { seen.add(other); queue.push(other); }
+    }
+  }
+  return seen.size === ids.size;
+}
+
+/** Після зняття зв'язку розпускає групи, які вже не з'єднані; повертає їхні `id`. Змінює `next` на місці. */
+function dropBrokenGroups(next) {
+  if (!Array.isArray(next.groups) || !next.groups.length) return [];
+  const dissolved = next.groups.filter(group => !groupConnected(group.sourceIds, relationsOf(next))).map(group => group.id);
+  if (dissolved.length) next.groups = next.groups.filter(group => !dissolved.includes(group.id));
+  return dissolved;
+}
+
+/**
+ * Результат «розділити по ключах»: групи таблиць, які людина лишила. Кожна група — з'єднані підтвердженими
+ * зв'язками таблиці; таблиця входить не більш як в одну групу. Замінює всі наявні групи.
+ */
+export function setGroups(schema, groups) {
+  const list = Array.isArray(groups) ? groups : [];
+  if (list.length > LIMITS.maxGroups) return fail('too_many_groups', 'Забагато груп у схемі профілю.');
+  const seenId = new Set();
+  const seenSource = new Set();
+  const out = [];
+  for (const group of list) {
+    const id = text(group?.id, 80);
+    const title = text(group?.title);
+    const sourceIds = Array.isArray(group?.sourceIds) ? group.sourceIds.map(item => text(item)) : [];
+    if (!id || !title || !sourceIds.length) return fail('bad_group', 'Група має ідентифікатор, назву й хоча б одну таблицю.');
+    if (seenId.has(id)) return fail('bad_group', `Група «${id}» повторена.`);
+    seenId.add(id);
+    if (new Set(sourceIds).size !== sourceIds.length) return fail('bad_group', `У групі «${title}» таблицю названо двічі.`);
+    for (const sourceId of sourceIds) {
+      if (!findSource(schema, sourceId)) return fail('unknown_source', `Джерела «${sourceId}» немає.`);
+      if (seenSource.has(sourceId)) return fail('source_in_two_groups', `Таблиця «${sourceId}» уже є в іншій групі.`);
+      seenSource.add(sourceId);
+    }
+    if (!groupConnected(sourceIds, relationsOf(schema))) return fail('group_not_connected', `У групі «${title}» є таблиці без підтвердженого зв’язку між собою.`);
+    out.push({ id, title, sourceIds });
+  }
+  if (JSON.stringify(out) === JSON.stringify(groupsOf(schema))) return done(fresh(schema));
+  const next = fresh(schema);
+  next.groups = out;
+  return done(bump(next));
+}
+
+/**
+ * Підтверджені зв'язки таблиці для читання (майбутній перехресний фільтр, пропозиції модулів): з якою таблицею,
+ * якими стовпцями, яка кардинальність. `stale` — стовпець ключа змінився після рішення, зв'язок треба перевірити.
+ */
+export function relatedSources(schema, sourceId) {
+  const stale = new Set(staleRelations(schema));
+  return relationsOf(schema)
+    .filter(relation => relation.status === 'confirmed' && (relation.left.sourceId === sourceId || relation.right.sourceId === sourceId))
+    .map(relation => {
+      const mine = relation.left.sourceId === sourceId ? relation.left : relation.right;
+      const other = relation.left.sourceId === sourceId ? relation.right : relation.left;
+      return { relationId: relation.id, sourceId: other.sourceId, columns: mine.columns, otherColumns: other.columns, cardinality: relation.cardinality, basis: relation.basis, stale: stale.has(relation.id) };
+    });
+}
+
+/** `id` підтверджених зв'язків, у яких стовпець ключа зник (`orphan`) чи змінив тип після рішення: їх треба перевірити. */
+export function staleRelations(schema) {
+  const out = [];
+  for (const relation of relationsOf(schema)) {
+    if (relation.status !== 'confirmed') continue;
+    const moved = ['left', 'right'].some(name => {
+      const side = relation[name];
+      const source = findSource(schema, side.sourceId);
+      if (!source) return true;
+      const types = typesOf(source, side.columns);
+      return side.columns.some(key => source.columns.find(column => column.key === key)?.orphan) || JSON.stringify(types) !== JSON.stringify(relation.types?.[name] || types);
+    });
+    if (moved) out.push(relation.id);
+  }
+  return out;
 }
 
 /** Серіалізація схеми для збереження. Текст стабільний: ті самі дані дають той самий текст. */
 export function serializeSchema(schema) {
   return JSON.stringify(schema);
+}
+
+/** Перевірка `relations` і `groups` (обидва поля необов'язкові): джерела й стовпці існують, ліміти, одна пара — один підтверджений зв'язок. */
+function validateRelations(value, sources, err) {
+  for (const name of ['relations', 'groups']) {
+    if (value[name] !== undefined && !Array.isArray(value[name])) err('bad_shape', `Поле ${name} має бути масивом.`);
+  }
+  const relations = Array.isArray(value.relations) ? value.relations : [];
+  const groups = Array.isArray(value.groups) ? value.groups : [];
+  if (relations.length > LIMITS.maxRelations) err('too_many_relations', 'Забагато зв’язків.');
+  if (groups.length > LIMITS.maxGroups) err('too_many_groups', 'Забагато груп.');
+  if (relations.length > LIMITS.maxRelations || groups.length > LIMITS.maxGroups) return;
+  const seen = new Set();
+  const confirmedPairs = new Set();
+  const checkSide = (side, id) => {
+    const keys = sources.get(side?.sourceId);
+    const columns = Array.isArray(side?.columns) ? side.columns : [];
+    if (!keys) { err('unknown_source', `Зв’язок «${id}» посилається на невідоме джерело «${side?.sourceId}».`); return false; }
+    if (!columns.length || columns.length > LIMITS.maxRelationColumns || new Set(columns).size !== columns.length) { err('bad_relation_columns', `Ключ зв’язку «${id}» некоректний.`); return false; }
+    for (const key of columns) if (!keys.has(key)) err('unknown_column', `Зв’язок «${id}» посилається на невідомий стовпець «${key}».`);
+    return true;
+  };
+  for (const relation of relations) {
+    const id = typeof relation?.id === 'string' ? relation.id : '';
+    if (!id) { err('bad_relation', 'У зв’язку немає ідентифікатора.'); continue; }
+    if (seen.has(id)) err('duplicate_relation', `Зв’язок «${id}» повторено.`);
+    seen.add(id);
+    if (!RELATION_STATUSES.includes(relation.status)) err('bad_status', `Стан зв’язку «${id}» невідомий.`);
+    const okLeft = checkSide(relation.left, id);
+    const okRight = checkSide(relation.right, id);
+    if (okLeft && okRight) {
+      if (relation.left.sourceId === relation.right.sourceId) err('same_source', `Зв’язок «${id}» з’єднує таблицю саму з собою.`);
+      if (relation.left.columns.length !== relation.right.columns.length) err('bad_relation_columns', `У зв’язку «${id}» різна кількість стовпців ключа.`);
+      if (relation.status === 'confirmed') {
+        if (!RELATION_CARDINALITIES.includes(relation.cardinality)) err('bad_cardinality', `Кардинальність зв’язку «${id}» невідома.`);
+        if (!RELATION_BASES.includes(relation.basis)) err('bad_basis', `Основа зв’язку «${id}» невідома.`);
+        if (relation.cardinality === 'many-many' && relation.basis !== 'manual') err('many_many_unconfirmed', `Зв’язок «${id}» «багато до багатьох» не з ручним вибором.`);
+        const mark = pairMark(relation.left.sourceId, relation.right.sourceId);
+        if (confirmedPairs.has(mark)) err('pair_taken', `Для пари таблиць зв’язку «${id}» підтверджено кілька ключів.`);
+        confirmedPairs.add(mark);
+      }
+    }
+  }
+  const inGroup = new Set();
+  const groupIds = new Set();
+  for (const group of groups) {
+    const id = text(group?.id, 80);
+    const ids = Array.isArray(group?.sourceIds) ? group.sourceIds : [];
+    if (!id || !text(group?.title) || !ids.length) { err('bad_group', 'Група має ідентифікатор, назву й таблиці.'); continue; }
+    if (groupIds.has(id)) err('bad_group', `Групу «${id}» повторено.`);
+    groupIds.add(id);
+    for (const sourceId of ids) {
+      if (!sources.has(sourceId)) err('unknown_source', `Група «${id}» посилається на невідоме джерело «${sourceId}».`);
+      if (inGroup.has(sourceId)) err('source_in_two_groups', `Таблиця «${sourceId}» у двох групах.`);
+      inGroup.add(sourceId);
+    }
+    if (ids.every(sourceId => sources.has(sourceId)) && !groupConnected(ids, relations.filter(item => item?.left && item?.right))) {
+      err('group_not_connected', `У групі «${id}» є таблиці без підтвердженого зв’язку.`);
+    }
+  }
 }
 
 /**
@@ -443,6 +728,7 @@ export function parseSchema(input) {
       if (NUMERIC_ROLES.includes(binding.role) && !text(binding.unit, 40)) err('unit_required', `Числова роль «${binding.role}» без одиниці.`);
     }
   }
+  validateRelations(value, sources, err);
   if (errors.length) return { ok: false, errors, schema: null };
   return { ok: true, errors: [], schema: deepFreeze(fresh(value)) };
 }

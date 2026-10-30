@@ -5,12 +5,15 @@
 // (стан — library_status і подія `library-state`). Список із пошуком за назвою, «Додати
 // файли…» (системне вікно, зашифрована копія в теку), «Відкрити» у вікні редактора для
 // форматів застосунків модуля, «Зберегти копію…» (розшифрована) на диск і «Видалити» з
-// підтвердженням. Усі виклики Tauri — через filesApi (files-core.js); помилка «бібліотека
+// підтвердженням. Окремий розділ «Таблиці дашбордів» показує зашифровані таблиці профілю
+// (workspace_tables.rs) лише для перегляду: «Зберегти копію…» і «Видалити» для таблиці, не
+// прив'язаної до жодного профілю; відкривати й змінювати їх можна лише через дашборд.
+// Усі виклики Tauri — через filesApi (files-core.js); помилка «бібліотека
 // заблокована…» повертає на екран пояснення. На `office-editor-closed`, повернення фокусу й
 // видимості список перечитується (файл могли змінити в редакторі). DOM лише через
 // createElement і textContent.
 import { findInvoke, listenTauriEvent } from './workspace-host.js';
-import { addSummary, appName, errorText, filesApi, filterFiles, isLockedError, metaLine, sortFiles, storeScreen } from './files-core.js';
+import { addSummary, appName, errorText, filesApi, filterFiles, isLockedError, metaLine, sortFiles, storeScreen, tableDeletable, tableMetaLine } from './files-core.js';
 
 const BUSY_TEXT = 'Зачекайте: попередня дія ще виконується.';
 const SEARCH_DELAY_MS = 150;
@@ -42,6 +45,7 @@ export function mountFiles(root, { invoke = findInvoke(window), listen = listenT
   const state = {
     root: '',
     items: [],
+    tables: [], // таблиці дашбордів у сховищі (окремий розділ)
     query: '',
     confirmDelete: null, // id файлу, видалення якого чекає підтвердження
     loaded: false,
@@ -68,10 +72,15 @@ export function mountFiles(root, { invoke = findInvoke(window), listen = listenT
 
   const pathNote = el('p', { class: 'ws-lib-meta ws-files-path' });
   const list = el('div', { class: 'ws-lib-list', 'aria-label': 'Файли сховища' });
+  const tablesList = el('div', { class: 'ws-lib-list', 'aria-label': 'Таблиці дашбордів у сховищі' });
+  const tablesSection = el('section', { class: 'ws-files-tables', 'aria-labelledby': 'ws-files-tables-title' },
+    el('h3', { class: 'ws-lib-title', id: 'ws-files-tables-title', text: 'Таблиці дашбордів' }),
+    el('p', { class: 'ws-lib-meta', text: 'Таблиці, які дашборди читають і записують у зашифрованому сховищі («Профілі» → «У сховище» або «Створити у сховищі»). Тут лише перегляд і копія на диск; змінюються вони через дашборд. Видалити можна тільки таблицю, не прив’язану до жодного профілю.' }),
+    tablesList);
   const toolbar = el('div', { class: 'ws-lib-toolbar', role: 'toolbar', 'aria-label': 'Дії сховища файлів' },
     button('Додати файли…', () => addFiles(), { class: 'ws-btn ws-primary' }),
     button('Оновити список', () => refresh({ force: true })));
-  const unlocked = el('div', { class: 'ws-files-unlocked' }, toolbar, el('div', { class: 'ws-lib-searchbar' }, search), message, list);
+  const unlocked = el('div', { class: 'ws-files-unlocked' }, toolbar, el('div', { class: 'ws-lib-searchbar' }, search), message, list, tablesSection);
   const gateText = el('p', { class: 'ws-lib-notice' });
   const gate = el('div', { class: 'ws-files-gate', hidden: true }, gateText,
     el('div', { class: 'ws-lib-actions' }, button('Перейти до бібліотеки', () => document.getElementById('ws-tab-library')?.click())));
@@ -91,9 +100,11 @@ export function mountFiles(root, { invoke = findInvoke(window), listen = listenT
     unlocked.hidden = screen !== 'unlocked';
     if (screen !== 'unlocked') {
       state.items = [];
+      state.tables = [];
       state.loaded = false;
       state.confirmDelete = null;
       list.replaceChildren();
+      tablesList.replaceChildren();
       say('');
     }
   }
@@ -143,9 +154,20 @@ export function mountFiles(root, { invoke = findInvoke(window), listen = listenT
     state.root = listing?.root ?? '';
     state.items = sortFiles(listing?.items);
     state.loaded = true;
-    if (state.confirmDelete && !state.items.some(file => file.id === state.confirmDelete)) state.confirmDelete = null;
+    const known = id => state.items.some(file => file.id === id) || state.tables.some(table => table.id === id);
+    if (state.confirmDelete && !known(state.confirmDelete)) state.confirmDelete = null;
     pathNote.textContent = state.root ? `Тека: ${state.root}` : '';
     renderList();
+    // Таблиці дашбордів — окремим викликом: їхня помилка не ховає список файлів.
+    try {
+      state.tables = sortFiles(await api.listTables());
+    } catch (error) {
+      if (isLockedError(error)) throw error;
+      state.tables = [];
+      say(`Не вдалося прочитати таблиці дашбордів: ${errorText(error)}`, 'error');
+    }
+    if (state.confirmDelete && !known(state.confirmDelete)) state.confirmDelete = null;
+    renderTables();
   }
 
   async function refresh({ force = false } = {}) {
@@ -227,6 +249,51 @@ export function mountFiles(root, { invoke = findInvoke(window), listen = listenT
         app ? null : el('span', { class: 'ws-lib-badge', text: 'без редактора' })),
       el('p', { class: 'ws-lib-meta', text: metaLine(file, { offsetMinutes: localOffset() }) }),
       state.confirmDelete === file.id ? deleteConfirm(file) : actions);
+  }
+
+  function exportTable(table) {
+    run(async () => {
+      const path = await api.exportTable(table.id);
+      say(path ? `Копію таблиці збережено: ${path}` : '', path ? 'ok' : '');
+    });
+  }
+
+  function deleteTable(table) {
+    run(async () => {
+      await api.removeTable(table.id);
+      state.confirmDelete = null;
+      await load();
+      say(`Таблицю «${table.name}» видалено зі сховища.`, 'ok');
+    });
+  }
+
+  function tableDeleteConfirm(table) {
+    return el('div', { class: 'ws-lib-confirm', role: 'alertdialog', 'aria-label': 'Видалити таблицю' },
+      el('span', { text: `Видалити «${table.name}» зі сховища назавжди разом із попередньою копією? Кошика немає.` }),
+      button('Скасувати', () => { state.confirmDelete = null; renderTables(); }),
+      button('Видалити', () => deleteTable(table), { class: 'ws-btn ws-danger' }));
+  }
+
+  function tableCard(table) {
+    const badge = table.damaged
+      ? el('span', { class: 'ws-lib-badge', 'data-tone': 'danger', text: 'пошкоджено' })
+      : el('span', { class: 'ws-lib-badge', text: table.bound ? 'прив’язана до профілю' : 'не прив’язана' });
+    const actions = el('div', { class: 'ws-lib-actions' },
+      table.damaged ? null : button('Зберегти копію…', () => exportTable(table)),
+      tableDeletable(table) ? button('Видалити', () => { state.confirmDelete = table.id; renderTables(); }) : null);
+    return el('article', { class: 'ws-lib-item ws-files-item ws-files-table' },
+      el('div', { class: 'ws-lib-item-head' }, el('h3', { class: 'ws-lib-name', text: table.name }), badge),
+      el('p', { class: 'ws-lib-meta', text: tableMetaLine(table, { offsetMinutes: localOffset() }) }),
+      state.confirmDelete === table.id ? tableDeleteConfirm(table) : actions);
+  }
+
+  function renderTables() {
+    if (!state.loaded) return;
+    if (!state.tables.length) {
+      tablesList.replaceChildren(el('p', { class: 'ws-lib-empty', text: 'У сховищі ще немає таблиць дашбордів.' }));
+      return;
+    }
+    tablesList.replaceChildren(...state.tables.map(tableCard));
   }
 
   function renderList() {
