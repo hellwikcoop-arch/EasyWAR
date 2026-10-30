@@ -22,7 +22,7 @@ const MAX_AVATAR_BYTES: usize = 400_000;
 const MIN_PASSWORD_CHARS: usize = 6;
 
 /// Модулі, які користувач обирає при реєстрації, у порядку показу на стартовому екрані.
-pub const MODULES: [&str; 5] = ["air", "rocket", "artillery", "pvk", "dshv"];
+pub const MODULES: [&str; 6] = ["air", "rocket", "artillery", "pvk", "dshv", "custom"];
 const MAX_PASSWORD_CHARS: usize = 128;
 
 /// Argon2id хеша входу — той самий, що в ключа обгортки бібліотеки (64 МіБ, 3 проходи):
@@ -1182,8 +1182,10 @@ pub(crate) fn validate_profile_id(id: &str) -> Result<(), LocalProfileError> {
 mod tests {
     use super::*;
     use crate::database::{
-        COMMAND_TABLES_SQL, DASHBOARD_MODULES_SQL, INITIAL_SCHEMA_SQL, LOCAL_PROFILES_SQL,
-        OWN_LOSSES_TABLES_SQL, PROFILE_BRANCH_TABLES_SQL, PROFILE_DETAILS_SQL, PROFILE_MODULES_SQL,
+        COMMAND_TABLES_SQL, CUSTOM_MODULE_SQL, DASHBOARD_MODULES_SQL,
+        DASHBOARD_MODULE_CORRECTIONS_SQL, DASHBOARD_MODULE_CORRECTION_STATUS_SQL,
+        DASHBOARD_MODULE_STYLE_SQL, INITIAL_SCHEMA_SQL, LOCAL_PROFILES_SQL, OWN_LOSSES_TABLES_SQL,
+        PROFILE_BRANCH_TABLES_SQL, PROFILE_DETAILS_SQL, PROFILE_MODULES_SQL,
         XLSX_DUPLICATE_LINKS_SQL,
     };
     use sqlx::sqlite::SqlitePoolOptions;
@@ -1233,10 +1235,15 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        sqlx::raw_sql(DASHBOARD_MODULES_SQL)
-            .execute(&pool)
-            .await
-            .unwrap();
+        for sql in [
+            DASHBOARD_MODULES_SQL,
+            DASHBOARD_MODULE_CORRECTIONS_SQL,
+            DASHBOARD_MODULE_STYLE_SQL,
+            DASHBOARD_MODULE_CORRECTION_STATUS_SQL,
+            CUSTOM_MODULE_SQL,
+        ] {
+            sqlx::raw_sql(sql).execute(&pool).await.unwrap();
+        }
         pool
     }
 
@@ -2470,7 +2477,8 @@ mod tests {
             .await
             .unwrap();
         let state = LocalProfileStore::new(pool.clone()).list().await.unwrap();
-        assert_eq!(state.profiles[0].modules, MODULES);
+        // До міграції «Власного модуля» профіль бачить п'ять модулів; шостий з'являється з 0020.
+        assert_eq!(state.profiles[0].modules, &MODULES[..5]);
         // Невідомий модуль схема відхиляє.
         assert!(sqlx::query(
             "INSERT INTO local_profile_modules (profile_id, module) VALUES (?, 'army')"

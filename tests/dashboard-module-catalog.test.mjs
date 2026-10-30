@@ -109,6 +109,7 @@ test('branch follows command dashboards and module pages', () => {
   assert.equal(branchFromLocation('/air.html', '?command=pvk'), 'pvk');
   assert.equal(branchFromLocation('/rocket.html', ''), 'rocket');
   assert.equal(branchFromLocation('/rocket.html', '?command=dshv'), 'dshv');
+  assert.equal(branchFromLocation('/custom.html', ''), 'custom');
 });
 
 test('catalog normalization preserves the exact flight-hours schema', () => {
@@ -160,7 +161,7 @@ test('module style survives normalization and unknown styles fall back to standa
 test('module styles are the three names Rust and the migration accept, with a label for every branch', async () => {
   assert.deepEqual(MODULE_STYLES.map(item => item.id), ['standard', 'branch', 'heightwell']);
   for (const item of MODULE_STYLES) assert.ok(item.label && item.hint, item.id);
-  assert.deepEqual(Object.keys(BRANCH_LABELS).sort(), ['air', 'dshv', 'pvk', 'rocket']);
+  assert.deepEqual(Object.keys(BRANCH_LABELS).sort(), ['air', 'custom', 'dshv', 'pvk', 'rocket']);
   const migration = await readFile(new URL('../src-tauri/migrations/0012_dashboard_module_style.sql', import.meta.url), 'utf8');
   assert.match(migration, /CHECK \(style IN \('standard', 'branch', 'heightwell'\)\)/);
   const rust = await readFile(new URL('../src-tauri/src/dashboard_modules.rs', import.meta.url), 'utf8');
@@ -1393,4 +1394,22 @@ test('the module page shows the module card live while a record is typed, and ne
   assert.match(css, /\.ewmc-preview\[hidden\]\s*\{\s*display:\s*none/);
   assert.match(css, /\.ewmc-live-card/);
   assert.doesNotMatch(css, /\.ewmc-data-scroll[^{]*\{[^}]*max-height/, 'the table still takes the page height');
+});
+
+test('«Власний модуль»: окрема сторінка на каталозі без прив\'язки до роду військ і до таблиці профілю', async () => {
+  const page = await readFile(new URL('../src/custom.html', import.meta.url), 'utf8');
+  // Каталог чекає панель інструментів, дашборд #view-dash і слот, куди переносить свою секцію.
+  assert.match(page, /<div class="appbar-right"><\/div>/);
+  assert.match(page, /<main id="view-dash"/);
+  assert.match(page, /data-ewmc-slot/);
+  assert.match(page, /<script type="module" src="\.\/dashboard-module-catalog\.js"><\/script>/);
+  assert.match(page, /<link rel="stylesheet" href="\.\/dashboard-module-catalog\.css">/);
+  assert.doesNotMatch(page, /\bfetch\s*\(|XMLHttpRequest|WebSocket/, 'сторінка нічого не передає в мережу');
+  const config = await readFile(new URL('../vite.config.js', import.meta.url), 'utf8');
+  assert.match(config, /custom: fileURLToPath\(new URL\("\.\/src\/custom\.html"/);
+  // Таблиці профілю у власного модуля немає: каталог не просить Rust про прив'язану таблицю цієї гілки.
+  const ui = await readFile(new URL('../src/dashboard-module-catalog.js', import.meta.url), 'utf8');
+  assert.match(ui, /if \(state\.branch === 'custom'\) \{\s*setPhase\('none'\);\s*return;\s*\}/);
+  const css = await readFile(new URL('../src/public/module-styles.css', import.meta.url), 'utf8');
+  assert.match(css, /\[data-branch=custom\]\{--ewmc-branch:#[0-9a-f]{6};--ewmc-branch-night:#[0-9a-f]{6}\}/);
 });

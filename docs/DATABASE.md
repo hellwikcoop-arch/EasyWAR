@@ -82,6 +82,18 @@ profile created: random 16-byte id, name) and `collective_membership_log` (the
 applied contiguous prefix of the signed membership journal, one canonical
 `MembershipRecord` blob per `seq`; Rust re-verifies and re-applies the journal on
 every read, so a tampered row grants nothing). No network touches these rows.
+Migration `0020_custom_module.sql` adds the sixth profile module and the fifth module
+branch, `custom` («Власний модуль», no service branch and no bound table). SQLite cannot
+alter a `CHECK`, so `local_profile_modules` (`module IN (… 'custom')`) and
+`dashboard_modules` (`branch IN ('air','rocket','pvk','dshv','custom')`) are rebuilt and
+their rows copied unchanged. Profiles that already had all five modules also get
+`custom`; profiles with a chosen subset do not. `dashboard_module_fields` and
+`dashboard_module_corrections` reference `dashboard_modules` with `ON DELETE CASCADE`, and
+sqlx runs a migration in a transaction (so `PRAGMA foreign_keys` cannot be switched off):
+the migration copies their rows into temporary `*_backup` tables, drops them, rebuilds the
+parent, recreates both children with the same columns and constraints, refills them and
+removes the backups. Stored ids stay `pvk` and `dshv` separately; the registration screen
+shows them as one row «Командування військ» (`GATE_CHOICES` in `src/profile-gate-core.js`).
 Migration
 `0012_dashboard_module_style.sql` adds `dashboard_modules.style` — the look chosen
 when the module was created: `standard` (default for existing modules), `branch`

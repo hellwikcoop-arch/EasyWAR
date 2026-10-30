@@ -109,6 +109,7 @@ pub(crate) const PROFILE_SCHEMAS_SQL: &str = include_str!("../migrations/0017_pr
 pub(crate) const DASHBOARD_LAYOUTS_SQL: &str =
     include_str!("../migrations/0018_dashboard_layouts.sql");
 pub(crate) const COLLECTIVES_SQL: &str = include_str!("../migrations/0019_collectives.sql");
+pub(crate) const CUSTOM_MODULE_SQL: &str = include_str!("../migrations/0020_custom_module.sql");
 
 pub fn migrations() -> Vec<Migration> {
     vec![
@@ -226,6 +227,12 @@ pub fn migrations() -> Vec<Migration> {
             sql: COLLECTIVES_SQL,
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 20,
+            description: "add_custom_module",
+            sql: CUSTOM_MODULE_SQL,
+            kind: MigrationKind::Up,
+        },
     ]
 }
 
@@ -292,8 +299,8 @@ pub(crate) async fn create_migrated_database(
 mod tests {
     use super::{
         create_migrated_database, migrations, DatabaseMigrationState, DatabaseStatusError,
-        DatabaseStatusStore, COLLECTIVES_SQL, COMMAND_TABLES_SQL, DASHBOARD_LAYOUTS_SQL,
-        DASHBOARD_MODULES_SQL, DASHBOARD_MODULE_CORRECTIONS_SQL,
+        DatabaseStatusStore, COLLECTIVES_SQL, COMMAND_TABLES_SQL, CUSTOM_MODULE_SQL,
+        DASHBOARD_LAYOUTS_SQL, DASHBOARD_MODULES_SQL, DASHBOARD_MODULE_CORRECTIONS_SQL,
         DASHBOARD_MODULE_CORRECTION_STATUS_SQL, DASHBOARD_MODULE_STYLE_SQL, DATABASE_URL,
         DOCUMENT_LINKS_SQL, EMBEDDED_MIGRATOR, INITIAL_SCHEMA_SQL, LIBRARY_BLOB_REPAIR_SQL,
         LOCAL_PROFILES_SQL, OFFICE_LIBRARY_SQL, OWN_LOSSES_TABLES_SQL, PROFILE_BRANCH_TABLES_SQL,
@@ -309,7 +316,7 @@ mod tests {
         assert_eq!(DATABASE_URL, "sqlite:easywar.db");
         assert!(include_str!("../tauri.conf.json").contains(DATABASE_URL));
         let registered = migrations();
-        assert_eq!(registered.len(), 19);
+        assert_eq!(registered.len(), 20);
         assert_eq!(registered[0].version, 1);
         assert_eq!(registered[0].description, "create_provenance_schema");
         assert_eq!(registered[1].version, 2);
@@ -354,6 +361,8 @@ mod tests {
         assert_eq!(registered[17].description, "add_dashboard_layouts");
         assert_eq!(registered[18].version, 19);
         assert_eq!(registered[18].description, "add_collectives");
+        assert_eq!(registered[19].version, 20);
+        assert_eq!(registered[19].description, "add_custom_module");
         assert_eq!(
             EMBEDDED_MIGRATOR
                 .iter()
@@ -374,7 +383,7 @@ mod tests {
                 .map(|migration| migration.sql)
                 .collect::<Vec<_>>()
         );
-        assert_eq!(super::latest_schema_version(), Some(19));
+        assert_eq!(super::latest_schema_version(), Some(20));
     }
 
     #[tokio::test]
@@ -386,9 +395,9 @@ mod tests {
             DatabaseStatusStore::new(pool.clone()).load().await.unwrap(),
             super::DatabaseStatus {
                 app_version: env!("CARGO_PKG_VERSION").to_owned(),
-                schema_version: 19,
-                supported_schema_version: 19,
-                migration_count: 19,
+                schema_version: 20,
+                supported_schema_version: 20,
+                migration_count: 20,
                 migration_state: DatabaseMigrationState::Current,
             }
         );
@@ -488,6 +497,10 @@ mod tests {
             .execute(&pool)
             .await
             .expect("collectives migration must apply");
+        sqlx::raw_sql(CUSTOM_MODULE_SQL)
+            .execute(&pool)
+            .await
+            .expect("custom module migration must apply");
 
         pool
     }
@@ -914,6 +927,228 @@ mod tests {
             assert_eq!(stored, None);
             assert_eq!(superseded, None);
         }
+    }
+
+    #[tokio::test]
+    async fn custom_module_migration_keeps_every_module_field_and_correction() {
+        // База зі схемою 19 і даними: після 0020 нічого не зникає (каскадні таблиці перебудовано
+        // разом із батьківською), а «custom» стає дозволеним і для модулів профілю, і для гілки.
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        for sql in [
+            INITIAL_SCHEMA_SQL,
+            XLSX_DUPLICATE_LINKS_SQL,
+            LOCAL_PROFILES_SQL,
+            WORKSPACE_TEMPLATES_SQL,
+            PROFILE_DETAILS_SQL,
+            PROFILE_BRANCH_TABLES_SQL,
+            COMMAND_TABLES_SQL,
+            OWN_LOSSES_TABLES_SQL,
+            PROFILE_MODULES_SQL,
+            DASHBOARD_MODULES_SQL,
+            DASHBOARD_MODULE_CORRECTIONS_SQL,
+            DASHBOARD_MODULE_STYLE_SQL,
+            OFFICE_LIBRARY_SQL,
+            DOCUMENT_LINKS_SQL,
+            LIBRARY_BLOB_REPAIR_SQL,
+            DASHBOARD_MODULE_CORRECTION_STATUS_SQL,
+            PROFILE_SCHEMAS_SQL,
+            DASHBOARD_LAYOUTS_SQL,
+            COLLECTIVES_SQL,
+        ] {
+            sqlx::raw_sql(sql).execute(&pool).await.unwrap();
+        }
+        module_with_corrections(&pool).await;
+        let now = "2026-01-01T00:00:00Z";
+        sqlx::query(
+            "INSERT INTO local_profiles (id, display_name, name_key, created_at, updated_at)
+             VALUES ('profile-d1d1d1d1d1d1d1d1d1d1d1d1', 'Вибірковий', 'вибірковий', ?, ?)",
+        )
+        .bind(now)
+        .bind(now)
+        .execute(&pool)
+        .await
+        .unwrap();
+        for module in ["air", "pvk"] {
+            sqlx::query(
+                "INSERT INTO local_profile_modules (profile_id, module)
+                 VALUES ('profile-d1d1d1d1d1d1d1d1d1d1d1d1', ?)",
+            )
+            .bind(module)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        sqlx::query(
+            "INSERT INTO local_profiles (id, display_name, name_key, created_at, updated_at)
+             VALUES ('profile-e2e2e2e2e2e2e2e2e2e2e2e2', 'Повний', 'повний', ?, ?)",
+        )
+        .bind(now)
+        .bind(now)
+        .execute(&pool)
+        .await
+        .unwrap();
+        for module in ["air", "rocket", "artillery", "pvk", "dshv"] {
+            sqlx::query(
+                "INSERT INTO local_profile_modules (profile_id, module)
+                 VALUES ('profile-e2e2e2e2e2e2e2e2e2e2e2e2', ?)",
+            )
+            .bind(module)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        sqlx::query("UPDATE dashboard_modules SET style = 'heightwell'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        for (position, key) in ["takeoff_time", "flight_altitude"].into_iter().enumerate() {
+            sqlx::query(
+                "INSERT INTO dashboard_module_fields
+                 (module_id, field_key, label, data_type, field_role, aggregation, required, position)
+                 VALUES ('dashboard-corrections-01', ?, 'Поле', 'text', 'dimension', 'none', 1, ?)",
+            )
+            .bind(key)
+            .bind(position as i64)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        sqlx::query(
+            "UPDATE dashboard_module_corrections SET stored_value = '\"14:25\"' WHERE id = 1",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::raw_sql(CUSTOM_MODULE_SQL)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let module: (String, String, String) =
+            sqlx::query_as("SELECT id, branch, style FROM dashboard_modules")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            module,
+            (
+                "dashboard-corrections-01".to_owned(),
+                "air".to_owned(),
+                "heightwell".to_owned()
+            )
+        );
+        let fields: i64 = sqlx::query_scalar("SELECT count(*) FROM dashboard_module_fields")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(fields, 2);
+        let corrections: Vec<(i64, String, Option<String>)> = sqlx::query_as(
+            "SELECT id, raw_text, stored_value FROM dashboard_module_corrections ORDER BY id",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            corrections,
+            [
+                (1, "25:00".to_owned(), Some("\"14:25\"".to_owned())),
+                (2, "0,3".to_owned(), None)
+            ]
+        );
+        let modules_of = |profile: &'static str| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query_scalar::<_, String>(
+                    "SELECT module FROM local_profile_modules WHERE profile_id = ? ORDER BY module",
+                )
+                .bind(profile)
+                .fetch_all(&pool)
+                .await
+                .unwrap()
+            }
+        };
+        // Профіль, що мав усі п'ять модулів, бачить і новий; вибірковий лишається як був.
+        assert_eq!(
+            modules_of("profile-d1d1d1d1d1d1d1d1d1d1d1d1").await,
+            ["air", "pvk"]
+        );
+        assert_eq!(
+            modules_of("profile-e2e2e2e2e2e2e2e2e2e2e2e2").await,
+            ["air", "artillery", "custom", "dshv", "pvk", "rocket"]
+        );
+        let defaults = modules_of("profile-c0c0c0c0c0c0c0c0c0c0c0c0").await;
+        assert!(
+            defaults.is_empty(),
+            "у синтетичного профілю модулів не було"
+        );
+
+        // Нова гілка й новий модуль профілю дозволені, чужі значення — ні.
+        sqlx::query(
+            "INSERT INTO dashboard_modules
+             (id, profile_id, branch, template_id, visual_kind, title, storage_table, created_at, updated_at)
+             VALUES ('dashboard-custom-0000001', 'profile-c0c0c0c0c0c0c0c0c0c0c0c0', 'custom', 'flight-hours',
+                     'horizontal-bar', 'Власний', 'dashboard_data_000000000000000000000002', ?, ?)",
+        )
+        .bind(now)
+        .bind(now)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO local_profile_modules (profile_id, module)
+             VALUES ('profile-c0c0c0c0c0c0c0c0c0c0c0c0', 'custom')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert!(sqlx::query(
+            "INSERT INTO dashboard_modules
+             (id, profile_id, branch, template_id, visual_kind, title, storage_table, created_at, updated_at)
+             VALUES ('dashboard-other-00000001', 'profile-c0c0c0c0c0c0c0c0c0c0c0c0', 'navy', 'flight-hours',
+                     'horizontal-bar', 'Чужий', 'dashboard_data_000000000000000000000003', ?, ?)",
+        )
+        .bind(now)
+        .bind(now)
+        .execute(&pool)
+        .await
+        .is_err());
+        assert!(sqlx::query(
+            "INSERT INTO local_profile_modules (profile_id, module)
+             VALUES ('profile-c0c0c0c0c0c0c0c0c0c0c0c0', 'navy')",
+        )
+        .execute(&pool)
+        .await
+        .is_err());
+
+        // Зв'язки на місці: видалення модуля забирає його поля й виправлення, база без порушень.
+        sqlx::query("DELETE FROM dashboard_modules WHERE id = 'dashboard-corrections-01'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        for table in ["dashboard_module_fields", "dashboard_module_corrections"] {
+            let left: i64 = sqlx::query_scalar(&format!("SELECT count(*) FROM {table}"))
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+            assert_eq!(left, 0, "{table}");
+        }
+        let violations = sqlx::query("PRAGMA foreign_key_check")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert!(violations.is_empty());
+        let leftovers: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM sqlite_master WHERE name LIKE '%\\_backup' ESCAPE '\\' OR name LIKE '%\\_new' ESCAPE '\\'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(leftovers, 0);
     }
 
     #[tokio::test]

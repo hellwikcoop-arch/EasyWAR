@@ -14,15 +14,17 @@ import {
   signInLocalProfile,
 } from './local-profiles-core.js';
 import {
-  GATE_MODULES,
+  GATE_CHOICES,
   PASSWORD_MAX,
   PASSWORD_MIN,
   POSITION_MAX,
   NAME_MAX,
   registerLoginFailure,
   gateScreen,
+  choiceChecked,
   loginCardNote,
   modulesError,
+  modulesFromChoices,
   passwordError,
   recoveryFailure,
   slotsForModules,
@@ -396,26 +398,26 @@ export function createProfileGate({ el, avatar, readAvatar }) {
 
       // Крок 2: модулі. Профіль створюється наприкінці цього кроку.
       function stepModules() {
-        const boxes = GATE_MODULES.map(module => el('input', {
+        const boxes = GATE_CHOICES.map(choice => el('input', {
           type: 'checkbox',
-          value: module.id,
-          checked: data.modules.includes(module.id),
-          'aria-label': module.title,
+          value: choice.id,
+          checked: choiceChecked(choice, data.modules),
+          'aria-label': choice.title,
         }));
         const error = el('p', { class: 'ew-gate-message', role: 'alert' });
         const create = el('button', { type: 'submit', class: 'ew-gate-button', text: 'Створити профіль' });
         const form = el('form', { class: 'ew-gate-form', novalidate: true },
           el('div', { class: 'ew-gate-modules' },
-            GATE_MODULES.map((module, index) => el('label', { class: 'ew-gate-module' },
+            GATE_CHOICES.map((choice, index) => el('label', { class: 'ew-gate-module' },
               boxes[index],
               el('span', {},
-                el('strong', { text: module.title }),
-                el('small', { text: module.hint }))))),
+                el('strong', { text: choice.title }),
+                el('small', { text: choice.hint }))))),
           error,
           el('div', { class: 'ew-gate-actions' },
             el('button', { type: 'button', class: 'ew-gate-link', text: 'Назад', onclick: () => { data.modules = chosen(); stepProfile(); } }),
             create));
-        const chosen = () => boxes.filter(box => box.checked).map(box => box.value);
+        const chosen = () => modulesFromChoices(boxes.filter(box => box.checked).map(box => box.value), data.modules);
         boxes[0].setAttribute('data-autofocus', '');
 
         form.addEventListener('submit', async event => {

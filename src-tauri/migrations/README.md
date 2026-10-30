@@ -148,6 +148,17 @@ membership journal, one canonical record blob per `seq`, re-verified on read).
 Commands `collective_*` are allowed only to the editor window where the
 «Колективи» screen runs; there is no network.
 
+`0020_custom_module.sql` adds the profile module and the dashboard-module branch
+`custom` («Власний модуль»). Both `CHECK` lists are fixed in the table definition, so
+`local_profile_modules` and `dashboard_modules` are rebuilt (create `_new`, copy, drop,
+rename). The children `dashboard_module_fields` and `dashboard_module_corrections` hold
+`ON DELETE CASCADE` foreign keys to `dashboard_modules`; a migration runs inside a
+transaction, where `PRAGMA foreign_keys` cannot be turned off, so dropping the parent
+would wipe them. The migration therefore parks their rows in `*_backup` tables, drops the
+children, rebuilds the parent and the children, restores the rows and drops the backups.
+A profile that had all five modules gets `custom` too. Covered by
+`custom_module_migration_keeps_every_module_field_and_correction` in `database.rs`.
+
 The `dashboard_data_<id>` tables of user-created dashboard modules are not
 migration objects: Rust creates them at runtime from a validated catalog
 template and adds columns that later appear in a template with `ALTER TABLE`,

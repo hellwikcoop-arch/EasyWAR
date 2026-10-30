@@ -99,6 +99,8 @@ export default defineConfig({
         air: fileURLToPath(new URL("./src/air.html", import.meta.url)),
         rocket: fileURLToPath(new URL("./src/rocket.html", import.meta.url)),
         artillery: fileURLToPath(new URL("./src/artillery.html", import.meta.url)),
+        // «Власний модуль»: сторінка без прив'язки до роду військ на каталозі користувацьких модулів.
+        custom: fileURLToPath(new URL("./src/custom.html", import.meta.url)),
         map: fileURLToPath(new URL("./src/map.html", import.meta.url)),
         viewer: fileURLToPath(new URL("./src/viewer.html", import.meta.url)),
         // Літаки у вкладці «Довідник» (ПС): окрема сторінка зі своєю сценою, відкривається в кадрі.

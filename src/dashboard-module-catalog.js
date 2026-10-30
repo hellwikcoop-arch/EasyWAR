@@ -308,7 +308,7 @@ function initialize() {
       el('header', { class: 'ewmc-host-head' },
         el('div', {},
           el('p', { class: 'ewmc-eyebrow', text: 'Користувацькі модулі' }),
-          el('h2', { id: 'ewmc-host-title', text: 'Мій дашборд' }),
+          el('h2', { id: 'ewmc-host-title', text: state.branch === 'custom' ? 'Власні модулі' : 'Мій дашборд' }),
           el('p', { class: 'ewmc-sub', text: 'Кожен модуль має власну локальну таблицю SQLite з перевіреними колонками.' })),
         el('button', { type: 'button', class: 'btn primary ewmc-add', text: '+ Додати модуль', onclick: openButton.click.bind(openButton) })),
     );
@@ -737,6 +737,11 @@ function initialize() {
         setPhase('ready');
         return;
       }
+      // «Власний модуль» не прив'язаний до роду військ, а отже й до таблиці профілю: файл завжди обирають самі.
+      if (state.branch === 'custom') {
+        setPhase('none');
+        return;
+      }
       setPhase('loading');
       try {
         const workbook = await invoke('inspect_linked_module_source', { branch: state.branch });
@@ -868,7 +873,9 @@ function initialize() {
           nodes.push(fileLine(), el('p', { text: `Читаю аркуш «${model.message}»…` }));
           break;
         case 'none':
-          nodes.push(el('p', { text: 'До профілю не підключено таблицю. Щоб підтягнути записи, оберіть файл XLSX.' }),
+          nodes.push(el('p', { text: state.branch === 'custom'
+            ? 'Власний модуль не прив\'язаний до таблиці роду військ. Щоб підтягнути записи, оберіть файл XLSX; без файла модуль створюється порожнім.'
+            : 'До профілю не підключено таблицю. Щоб підтягнути записи, оберіть файл XLSX.' }),
             el('div', { class: 'ewmc-source-actions' }, pickButton('Обрати файл XLSX…', true)));
           break;
         case 'error':

@@ -52,9 +52,52 @@ export const GATE_MODULES = Object.freeze([
     card: '.branch-card[aria-controls="dshv-tile"]',
     tile: '#dshv-tile',
   }),
+  Object.freeze({
+    id: 'custom',
+    title: 'Власний модуль',
+    hint: 'Модулі й таблиці без прив’язки до роду військ',
+    slots: Object.freeze([]),
+    card: '.branch-card[data-branch="custom"]',
+  }),
 ]);
 
 export const MODULE_IDS = Object.freeze(GATE_MODULES.map(module => module.id));
+
+/**
+ * Рядки вибору модулів (реєстрація й налаштування профілю). Один рядок може означати кілька
+ * збережених модулів: «Командування військ» — це дашборди ПВК і УДШВ разом. У профілі, як і
+ * раніше, зберігаються окремі ключі з GATE_MODULES, тож картки стартового екрана й слоти таблиць
+ * не змінюються.
+ */
+export const GATE_CHOICES = Object.freeze([
+  Object.freeze({ id: 'air', title: 'Повітряні Сили', hint: 'База даних доповідей, карта, довідник, презентації', modules: Object.freeze(['air']) }),
+  Object.freeze({ id: 'rocket', title: 'Ракетні Війська', hint: 'РСЗВ і ОТРК: доповіді, карта, довідник машин', modules: Object.freeze(['rocket']) }),
+  Object.freeze({ id: 'artillery', title: 'Артилерія', hint: 'Витрата й залишок боєприпасів бригад у спільній таблиці', modules: Object.freeze(['artillery']) }),
+  Object.freeze({ id: 'commands', title: 'Командування військ', hint: 'Дашборди ПВК і УДШВ та вкладки «Наші втрати»', modules: Object.freeze(['pvk', 'dshv']) }),
+  Object.freeze({ id: 'custom', title: 'Власний модуль', hint: 'Без прив’язки до роду військ: ваші модулі та таблиці, налаштовані як вам потрібно', modules: Object.freeze(['custom']) }),
+]);
+
+/** Чи позначений рядок вибору для збережених модулів профілю (достатньо одного з його модулів). */
+export function choiceChecked(choice, modules) {
+  const have = new Set(modules || []);
+  return choice.modules.some(id => have.has(id));
+}
+
+/**
+ * Збережені модулі за позначеними рядками. Рядок, що вже був частково обраний (наприклад,
+ * профіль лише з ПВК), лишається таким, поки його не вимкнуть і не ввімкнуть знову.
+ */
+export function modulesFromChoices(choiceIds, current = []) {
+  const picked = new Set(choiceIds || []);
+  const have = new Set(current || []);
+  const out = [];
+  for (const choice of GATE_CHOICES) {
+    if (!picked.has(choice.id)) continue;
+    const kept = choice.modules.filter(id => have.has(id));
+    out.push(...(kept.length ? kept : choice.modules));
+  }
+  return normalizeModules(out);
+}
 
 const codePoints = value => [...String(value ?? '')].length;
 const squash = value => String(value ?? '').split(/\s+/).filter(Boolean).join(' ');

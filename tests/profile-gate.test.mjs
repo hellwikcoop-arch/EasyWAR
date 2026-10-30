@@ -2,18 +2,21 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {
+  GATE_CHOICES,
   GATE_MODULES,
   MODULE_IDS,
   NAME_MAX,
   PASSWORD_MAX,
   PASSWORD_MIN,
   POSITION_MAX,
+  choiceChecked,
   failureDelayMs,
   loginFailure,
   registerLoginFailure,
   gateScreen,
   loginCardNote,
   modulesError,
+  modulesFromChoices,
   moduleVisible,
   normalizeModules,
   passwordError,
@@ -56,12 +59,28 @@ test('profile step checks name, uniqueness, lengths and password confirmation', 
 });
 
 test('at least one known module must be chosen; unknown ids are dropped', () => {
-  assert.deepEqual(MODULE_IDS, ['air', 'rocket', 'artillery', 'pvk', 'dshv']);
+  assert.deepEqual(MODULE_IDS, ['air', 'rocket', 'artillery', 'pvk', 'dshv', 'custom']);
   assert.ok(modulesError([]));
   assert.ok(modulesError(['unknown']));
   assert.ok(modulesError(null));
   assert.equal(modulesError(['rocket']), null);
   assert.deepEqual(normalizeModules(['dshv', 'air', 'air', 'x']), ['air', 'dshv']);
+});
+
+test('вибір модулів: ПВК і ДШВ — один рядок «Командування військ», є «Власний модуль»', () => {
+  assert.deepEqual(GATE_CHOICES.map(choice => choice.title), ['Повітряні Сили', 'Ракетні Війська', 'Артилерія', 'Командування військ', 'Власний модуль']);
+  assert.deepEqual(GATE_CHOICES.find(choice => choice.id === 'commands').modules, ['pvk', 'dshv']);
+  // Кожен збережений модуль доступний рівно з одного рядка вибору.
+  assert.deepEqual(GATE_CHOICES.flatMap(choice => choice.modules).sort(), [...MODULE_IDS].sort());
+  const commands = GATE_CHOICES.find(choice => choice.id === 'commands');
+  assert.equal(choiceChecked(commands, ['dshv']), true);
+  assert.equal(choiceChecked(commands, ['air']), false);
+  assert.deepEqual(modulesFromChoices(['commands']), ['pvk', 'dshv']);
+  assert.deepEqual(modulesFromChoices(['custom', 'air']), ['air', 'custom']);
+  // Профіль лише з ПВК не розширюється до ДШВ, поки рядок не вимикали.
+  assert.deepEqual(modulesFromChoices(['commands'], ['pvk']), ['pvk']);
+  assert.deepEqual(modulesFromChoices([], ['pvk']), []);
+  assert.ok(modulesError(modulesFromChoices([])));
 });
 
 test('module titles in the registration carry no beta label', () => {

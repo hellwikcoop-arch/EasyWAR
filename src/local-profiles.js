@@ -32,7 +32,7 @@ import {
 } from './local-profiles-core.js';
 import { createProfileGate } from './profile-gate.js';
 import { requestSplashSkip } from './startup-splash-core.js';
-import { GATE_MODULES, modulesError, moduleVisible } from './profile-gate-core.js';
+import { GATE_CHOICES, GATE_MODULES, MODULE_IDS, modulesError, modulesFromChoices, moduleVisible } from './profile-gate-core.js';
 import { createAssistantUI } from './assistant/assistant-ui.js';
 import { getDatabaseStatus } from './backup-core.js';
 import { appUpdateState } from './app-update-state-core.js';
@@ -441,22 +441,22 @@ function initializeLocalProfiles() {
 
   /** Модулі профілю: які картки показує стартовий екран. Потрібен щонайменше один. */
   function renderModules(profile) {
-    const boxes = GATE_MODULES.map(module => el('input', {
+    const boxes = GATE_CHOICES.map(choice => el('input', {
       type: 'checkbox',
-      value: module.id,
-      checked: moduleVisible(module.id, profile),
-      'aria-label': `${module.title} — профіль ${profile.displayName}`,
+      value: choice.id,
+      checked: choice.modules.some(id => moduleVisible(id, profile)),
+      'aria-label': `${choice.title} — профіль ${profile.displayName}`,
     }));
     return el('div', { class: 'ew-profile-modules' },
       el('span', { class: 'ew-profile-field-caption', text: 'Модулі на стартовому екрані' }),
       el('div', { class: 'ew-profile-module-list' },
-        GATE_MODULES.map((module, index) => el('label', { class: 'ew-profile-module' }, boxes[index], el('span', { text: module.title })))),
+        GATE_CHOICES.map((choice, index) => el('label', { class: 'ew-profile-module' }, boxes[index], el('span', { text: choice.title })))),
       el('button', {
         type: 'button',
         class: 'btn',
         text: 'Зберегти модулі',
         onclick: () => {
-          const chosen = boxes.filter(box => box.checked).map(box => box.value);
+          const chosen = modulesFromChoices(boxes.filter(box => box.checked).map(box => box.value), Array.isArray(profile.modules) && profile.modules.length ? profile.modules : MODULE_IDS);
           const problem = modulesError(chosen);
           if (problem) {
             status.textContent = problem;

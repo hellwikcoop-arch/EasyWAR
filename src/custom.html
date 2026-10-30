@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="uk" data-ew-module="custom">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>easyWAR — Власний модуль</title>
+<script>try { document.documentElement.dataset.theme = localStorage.getItem('aviahub.theme') === 'light' ? 'light' : 'dark'; } catch (e) { document.documentElement.dataset.theme = 'dark'; }</script>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 100 100%27%3E%3Crect width=%27100%27 height=%27100%27 rx=%2722%27 fill=%27%23121b27%27/%3E%3Crect x=%2722%27 y=%2722%27 width=%2724%27 height=%2724%27 rx=%276%27 fill=%27none%27 stroke=%27%233fb8a8%27 stroke-width=%278%27/%3E%3Crect x=%2754%27 y=%2754%27 width=%2724%27 height=%2724%27 rx=%276%27 fill=%27none%27 stroke=%27%233fb8a8%27 stroke-width=%278%27/%3E%3C/svg%3E">
+<link rel="stylesheet" href="./custom.css">
+<link rel="stylesheet" href="./dashboard-module-catalog.css">
+<link rel="stylesheet" href="./ui-kit.css">
+<script src="./ui-kit.js" defer></script>
+</head>
+<body>
+<!-- Власний модуль: сторінка без прив’язки до роду військ. Усе, що на ній з’являється, будує каталог
+     користувацьких модулів (dashboard-module-catalog.js) — той самий, що живе у вкладці «Мій дашборд» ПС, РВ, ПВК і УДШВ. -->
+<header class="appbar">
+  <div class="brand">
+    <svg class="brand-mark" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="6" width="15" height="15" rx="3.5"/><rect x="27" y="6" width="15" height="15" rx="3.5"/><rect x="6" y="27" width="15" height="15" rx="3.5"/><path d="M34.5 27v15M27 34.5h15"/></svg>
+    <div><h1>Власний модуль</h1><p>БЕЗ ПРИВ’ЯЗКИ ДО РОДУ ВІЙСЬК</p></div>
+  </div>
+  <div class="appbar-right"></div>
+</header>
+<main id="view-dash" class="dmain">
+  <p class="custom-intro">Створюйте власні показники та дашборди зі своїх таблиць XLSX. Модулі зберігаються локально в профілі й не залежать від ПС, РВ, ПВК чи УДШВ.</p>
+  <div data-ewmc-slot></div>
+</main>
+<script type="module" src="./dashboard-module-catalog.js"></script>
+</body>
+</html>

@@ -32,7 +32,7 @@ test('кожен шаблон Rust — одне визначення з тими
     const columns = requirementsFor(definitions, `rust-template:${template.id}`).map(item => item.column);
     assert.deepEqual(columns, template.fields.map(field => field.key), template.id);
   }
-  for (const item of fromRust) assert.deepEqual(item.branchTags, ['air', 'rocket', 'pvk', 'dshv'], 'шаблони універсальні');
+  for (const item of fromRust) assert.deepEqual(item.branchTags, ['air', 'rocket', 'pvk', 'dshv', 'custom'], 'шаблони універсальні');
 });
 
 test('шість карток основних показників ПС — шість визначень каталогу v1, усі на p-kpis', () => {
