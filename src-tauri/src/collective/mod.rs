@@ -13,6 +13,7 @@ pub mod envelope;
 pub mod epoch;
 pub mod identity;
 pub mod invite;
+pub mod pairing;
 pub mod relay;
 pub mod relay_auth;
 pub mod replay;
@@ -50,6 +51,16 @@ pub mod labels {
     pub const OPERATION: &[u8] = b"easywar/collective/v1/op";
     pub const SECRET_KEYRING: &[u8] = b"easywar/collective/v1/keyring";
     pub const SECRET_ENTRY: &[u8] = b"easywar/collective/v1/secret";
+    pub const PAIR_CODE: &[u8] = b"easywar/collective/v1/pair-code";
+    pub const PAIR_HOST: &[u8] = b"easywar/collective/v1/pair-host";
+    pub const PAIR_GUEST: &[u8] = b"easywar/collective/v1/pair-guest";
+    pub const PAIR_TRANSCRIPT: &[u8] = b"easywar/collective/v1/pair-transcript";
+    pub const PAIR_CONFIRM_HOST: &[u8] = b"easywar/collective/v1/pair-confirm-host";
+    pub const PAIR_CONFIRM_GUEST: &[u8] = b"easywar/collective/v1/pair-confirm-guest";
+    pub const PAIR_HOST_TO_GUEST: &[u8] = b"easywar/collective/v1/pair-host-to-guest";
+    pub const PAIR_GUEST_TO_HOST: &[u8] = b"easywar/collective/v1/pair-guest-to-host";
+    pub const PAIR_FRAME: &[u8] = b"easywar/collective/v1/pair-frame";
+    pub const PAIR_SAFETY: &[u8] = b"easywar/collective/v1/pair-safety";
 }
 
 /// Причина відмови — лише для локального журналу. Назовні всі варіанти стають одним
