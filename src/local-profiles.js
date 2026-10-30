@@ -1,4 +1,5 @@
 import './local-profiles.css';
+import { PASSWORD_MIN } from './profile-gate-core.js';
 import {
   activateLocalProfile,
   activeProfileLabel,
@@ -595,7 +596,7 @@ function initializeLocalProfiles() {
       title: `Пароль для профілю «${profile.displayName}»`,
       submitLabel: 'Захистити',
       fields: [
-        { label: 'Новий пароль (від 6 символів)', autocomplete: 'new-password' },
+        { label: `Новий пароль (від ${PASSWORD_MIN} символів)`, autocomplete: 'new-password' },
         { label: 'Повторіть пароль', autocomplete: 'new-password', confirms: 0 },
       ],
     });
@@ -611,7 +612,7 @@ function initializeLocalProfiles() {
       submitLabel: 'Змінити',
       fields: [
         { label: 'Поточний пароль' },
-        { label: 'Новий пароль (від 6 символів)', autocomplete: 'new-password' },
+        { label: `Новий пароль (від ${PASSWORD_MIN} символів)`, autocomplete: 'new-password' },
         { label: 'Повторіть новий пароль', autocomplete: 'new-password', confirms: 1 },
       ],
     });

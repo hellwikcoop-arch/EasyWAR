@@ -19,6 +19,7 @@ const MAX_COLUMNS_PER_SOURCE: usize = 200;
 const MAX_BINDINGS: usize = 2000;
 const MAX_RELATIONS: usize = 256;
 const MAX_GROUPS: usize = 64;
+const MAX_SNAPSHOTS: usize = 64;
 
 #[derive(Clone, Debug)]
 pub struct ProfileSchemaStore {
@@ -234,8 +235,12 @@ fn validate_envelope(schema: &Value, profile_id: &str) -> Result<i64, ProfileSch
     if sources.len() > MAX_SOURCES || bindings.len() > MAX_BINDINGS {
         return Err(ProfileSchemaError::TooLarge);
     }
-    // Зв'язки між таблицями й групи — необов'язкові поля: схеми без них лишаються чинними.
-    for (key, limit) in [("relations", MAX_RELATIONS), ("groups", MAX_GROUPS)] {
+    // Зв'язки між таблицями, групи й знімки об'єднання — необов'язкові поля: схеми без них лишаються чинними.
+    for (key, limit) in [
+        ("relations", MAX_RELATIONS),
+        ("groups", MAX_GROUPS),
+        ("snapshots", MAX_SNAPSHOTS),
+    ] {
         match object.get(key) {
             None => {}
             Some(Value::Array(items)) if items.len() <= limit => {}
@@ -466,7 +471,11 @@ mod tests {
             store.save(PROFILE, &many, 0, T1).await,
             Err(ProfileSchemaError::TooLarge)
         ));
-        for (key, limit) in [("relations", MAX_RELATIONS), ("groups", MAX_GROUPS)] {
+        for (key, limit) in [
+            ("relations", MAX_RELATIONS),
+            ("groups", MAX_GROUPS),
+            ("snapshots", MAX_SNAPSHOTS),
+        ] {
             let mut over = schema(PROFILE, 1);
             over[key] = json!(vec![json!({}); limit + 1]);
             assert!(matches!(
@@ -477,6 +486,7 @@ mod tests {
         let mut within = schema(PROFILE, 1);
         within["relations"] = json!(vec![json!({}); MAX_RELATIONS]);
         within["groups"] = json!(vec![json!({}); MAX_GROUPS]);
+        within["snapshots"] = json!(vec![json!({}); MAX_SNAPSHOTS]);
         store.save(PROFILE, &within, 0, T1).await.unwrap();
         let mut broken = schema(PROFILE, 2);
         broken["relations"] = json!({"a": 1});
