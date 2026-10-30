@@ -81,6 +81,15 @@ Logical domains that are deliberately not tables:
 
 Schema details are versioned through migrations.
 
+Profile-bound application data (EasyFLY, easyPay, «Сонце і Місяць», «Погода», the fire-crew
+list in РВ) is **not** in SQLite. It lives encrypted in the hidden application folder
+(`<app local data>/profile-data/<profile id>/`, `src-tauri/src/profile_data.rs`): a random data
+key wrapped by the profile password (Argon2id + XChaCha20-Poly1305) and, optionally, by the
+library key; one authenticated file per record. The data key is unwrapped at login and held only in
+memory until the profile is locked. The SQLite backup (`backup.rs`) does not include these files;
+the profile data has its own archive, `.ewpdb` (`src-tauri/src/profile_data/archive.rs`, commands
+`profile_data_backup_create` / `profile_data_backup_restore`, main window only). Contract and window isolation: [`WORKSPACE.md`](WORKSPACE.md), «Дані профілю».
+
 The implemented schema and its invariants are documented in
 [`DATABASE.md`](DATABASE.md). The provenance layer comes first; domain
 repositories are added incrementally.

@@ -110,6 +110,8 @@ const RUST_NETWORK_ALLOWLIST = new Set([
   'signal_session.rs',  // сеанс signal-cli
   'weather_online.rs',  // Open-Meteo
   'app_update.rs',      // tauri-plugin-updater (endpoint з tauri.conf.json)
+  'pair_relay.rs',      // сервер зустрічі для вступу за кодом; клієнт лише з дозволом WAN
+  'pair_session.rs',    // сеанс вступу за кодом: тільки тести на localhost (tokio::net), мережі в коді немає
 ]);
 const RUST_NETWORK = /\breqwest\b|\bstd::net\b|\btokio::net\b|TcpListener|TcpStream|UdpSocket/;
 
@@ -168,8 +170,9 @@ test('вікно редактора без мережі, webview без HTTP/she
   for (const permission of editor.permissions) {
     const id = typeof permission === 'string' ? permission : permission.identifier;
     // Лише власні локальні команди: файли «Офісу» й колективи (E8 C3b: ключ учасника,
-    // створення колективу — без мережі, пароль профілю через обмежувач спроб).
-    assert.match(id, /^allow-(office|collective)-/, `редактор: ${id}`);
+    // створення колективу — без мережі, пароль профілю через обмежувач спроб) і дані профілю
+    // свого застосунку (profile_data_get/set/remove/list, простір імен перевіряє Rust).
+    assert.match(id, /^allow-(office|collective|profile-data)-/, `редактор: ${id}`);
   }
   const main = JSON.parse(await read('src-tauri/capabilities/default.json'));
   for (const permission of main.permissions) {

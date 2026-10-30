@@ -139,6 +139,13 @@ const COMMANDS: &[&str] = &[
     "workspace_files_delete_table",
     "move_profile_database_to_store",
     "create_profile_base_table_in_store",
+    "profile_data_status",
+    "profile_data_get",
+    "profile_data_set",
+    "profile_data_remove",
+    "profile_data_list",
+    "profile_data_backup_create",
+    "profile_data_backup_restore",
 ];
 
 fn main() {

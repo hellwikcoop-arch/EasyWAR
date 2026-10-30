@@ -54,14 +54,14 @@ test('розділ «Офіс» має EasyGreen, EasyDoc, EasySlide, «Особ
   assert.deepEqual(OFFICE_APPS.map(app => app.title), ['EasyGreen', 'EasyDoc', 'EasySlide']);
   assert.deepEqual(WORKSPACE_SECTIONS.map(section => section.title), ['Офіс', 'Обстановка', 'Колективи', 'Особисте', 'Авіація']);
   assert.deepEqual(WORKSPACE_SECTIONS[0].apps, ['easygreen', 'easydoc', 'easyslide']);
-  assert.deepEqual(WORKSPACE_SECTIONS[1].apps, ['weather']);
+  assert.deepEqual(WORKSPACE_SECTIONS[1].apps, ['weather', 'sun']);
   assert.deepEqual(WORKSPACE_SECTIONS[2].apps, ['collectives']);
   assert.deepEqual(WORKSPACE_SECTIONS[3].apps, ['easypay']);
   assert.deepEqual(WORKSPACE_SECTIONS[4].apps, ['easyfly']);
   assert.deepEqual(AVIATION_APPS.map(app => app.id), ['easyfly']);
   assert.deepEqual(PERSONAL_APPS.map(app => app.id), ['easypay']);
   assert.deepEqual(COLLECTIVE_APPS.map(app => app.id), ['collectives']);
-  assert.deepEqual(WORKSPACE_APPS.map(app => app.id), ['easygreen', 'easydoc', 'easyslide', 'weather', 'collectives', 'easypay', 'easyfly']);
+  assert.deepEqual(WORKSPACE_APPS.map(app => app.id), ['easygreen', 'easydoc', 'easyslide', 'weather', 'sun', 'collectives', 'easypay', 'easyfly']);
   assert.equal(appById('easypay').title, 'easyPay');
   assert.deepEqual(dialogOptions(appById('easypay')).extensions, ['easypay']);
   assert.deepEqual(dialogOptions(appById('collectives')).extensions, ['ewcoll']);
@@ -318,6 +318,8 @@ test('модуль підключено в лаунчері, у збірці й 
 
   const dir = new URL('src/workspace/', root);
   for (const file of (await readdir(dir)).filter(name => /\.(js|html)$/.test(name))) {
+    // profile-store.js — єдине місце, де є запасний режим на localStorage (лише без Tauri, див. docs/WORKSPACE.md).
+    if (file === 'profile-store.js') continue;
     // Простір імен SVG (createElementNS) — не мережеве посилання.
     const text = (await read(`src/workspace/${file}`)).replaceAll("'http://www.w3.org/2000/svg'", '');
     assert.doesNotMatch(text, /https?:\/\/|fetch\(|XMLHttpRequest|WebSocket|localStorage|sessionStorage|indexedDB/, `${file}: без мережі й сховищ браузера`);

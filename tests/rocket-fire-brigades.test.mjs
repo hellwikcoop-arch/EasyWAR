@@ -1,5 +1,5 @@
 // РВ, «Зведення»: блок «Вогневі бригади» — скільки БП випустила кожна бригада (107 реабр, 148 оабр)
-// і скільки з цього на виконавців РУК та ГРВ. Логіка живе в legacy-сторінці rocket.html, тому чисті
+// і скільки з цього на підрозділи 7, 8 і 9 реабатр (перелік змінюється в картці й зберігається). Логіка живе в legacy-сторінці rocket.html, тому чисті
 // функції дістаються з її тексту й виконуються ізольовано. Дані лише синтетичні.
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
@@ -19,15 +19,15 @@ const code = [
   take(/const LAT2UK = \{[^\n]*\n/, 'LAT2UK'),
   take(/const crewKey = [^\n]*\n/, 'crewKey'),
   take(/const brigadeKey = [^\n]*\n/, 'brigadeKey'),
-  take(/const FIRE_CREWS = [^\n]*\n/, 'FIRE_CREWS'),
-  take(/function fireByBrigade\(rows\) \{[\s\S]*?\n\}\n/, 'fireByBrigade'),
+  'const mem = {}; function store(k, v) { if (v === undefined) return k in mem ? mem[k] : null; mem[k] = v; return null; }\n',
+  take(/const FIRE_CREWS_DEFAULT = [\s\S]*?function fireByBrigade\(rows, crews\) \{[\s\S]*?\n\}\n/, 'FIRE_CREWS_DEFAULT…fireByBrigade'),
   take(/const LAY_IDS = \[[^\n]*\n/, 'LAY_IDS'),
   take(/const LAY_MAXCOLS = [^\n]*\n/, 'LAY_MAXCOLS'),
   take(/const layDefault = \(\) => \(\{ rows: \[[\s\S]*?\], h: \{\} \}\);\n/, 'layDefault'),
   take(/function layValid\(m\) \{[\s\S]*?\n\}\n/, 'layValid'),
   take(/function layUpgrade\(m\) \{[\s\S]*?\n\}\n/, 'layUpgrade')
 ].join('');
-const api = vm.runInNewContext(`${code}; ({ crewKey, brigadeKey, fireByBrigade, layDefault, layValid, layUpgrade, LAY_IDS })`);
+const api = vm.runInNewContext(`${code}; ({ mem, store, crewCmp, cleanFireCrews, loadFireCrews, saveFireCrews, FIRE_CREWS_KEY, FIRE_CREWS_DEFAULT, get crews() { return FIRE_CREWS; }, crewKey, brigadeKey, fireByBrigade, layDefault, layValid, layUpgrade, LAY_IDS })`);
 
 // Об'єкти з vm мають інший Object.prototype, тому для deepEqual їх спершу переводимо в звичайний JSON.
 const J = v => (v === undefined ? v : JSON.parse(JSON.stringify(v)));
@@ -54,25 +54,58 @@ test('вогнева бригада: «УДШВ 148оабр», «УДШВ 148 о
   assert.equal(api.brigadeKey(undefined), '');
 });
 
-test('зведення по бригадах: БП й операції по РУК, ГРВ та решті, сума збігається із загальною', () => {
+test('підрозділи за замовчуванням — РУК, ГРВ, 7, 8 і 9 реабатр, усі рівнозначні', () => {
+  const def = ['РУК', 'ГРВ', '7 реабатр', '8 реабатр', '9 реабатр'];
+  assert.deepEqual(J(api.crews), def);
+  assert.deepEqual(J(api.loadFireCrews()), def);
+  const [g] = J(api.fireByBrigade([row('148 оабр', 'рук', 1), row('148 оабр', 'ГРВ', 2), row('148 оабр', '7 реабатр', 3), row('148 оабр', '9 РЕАБАТР', 4), row('148 оабр', 'ЗСУ', 5)]));
+  assert.deepEqual(g.by.map(c => c.mun), [1, 2, 3, 0, 4], 'усі п\'ять рядків рахуються однаково');
+  assert.deepEqual(g.other, { n: 1, mun: 5 });
+});
+
+test('зведення по бригадах: БП й операції по 7/8/9 реабатр та решті, сума збігається із загальною', () => {
   const rows = [
-    row('УДШВ 148 оабр', 'РУК', 6), row('УДШВ 148оабр', 'ГРВ', 4), row('УДШВ 148 оабр', 'руК', 2),
-    row('УДШВ 107 реабр', 'ГРВ', 5), row('УДШВ 107 реабр', 'РУК', 1),
-    row('УДШВ 107 реабр', 'ЗСУ', 3), row('', '', 7), row('УДШВ 148 оабр', 'ГРВ', '3')
+    row('УДШВ 148 оабр', '7 реабатр', 6), row('УДШВ 148оабр', '8 РЕАБАТР', 4), row('УДШВ 148 оабр', '7реабатр', 2),
+    row('УДШВ 107 реабр', '9 реабатр', 5), row('УДШВ 107 реабр', '7 реабатр', 1),
+    row('УДШВ 107 реабр', 'ЗСУ', 3), row('', '', 7), row('УДШВ 148 оабр', '8 реабатр', '3')
   ];
-  const out = J(api.fireByBrigade(rows));
+  const out = J(api.fireByBrigade(rows, ['7 реабатр', '8 реабатр', '9 реабатр']));
   assert.deepEqual(out.map(g => g.key), ['148 оабр', '107 реабр', 'Не вказано'], 'за БП спадно, «Не вказано» — останнім');
   const [a, b, none] = out;
   assert.deepEqual({ n: a.n, mun: a.mun }, { n: 4, mun: 15 });
-  assert.deepEqual(a.by['РУК'], { n: 2, mun: 8 });
-  assert.deepEqual(a.by['ГРВ'], { n: 2, mun: 7 }, 'рядкове число «3» теж рахується');
-  assert.deepEqual(a.by.other, { n: 0, mun: 0 });
+  assert.deepEqual(a.by, [{ n: 2, mun: 8 }, { n: 2, mun: 7 }, { n: 0, mun: 0 }], 'рядкове число «3» теж рахується; регістр і пробіли не мають значення');
+  assert.deepEqual(a.other, { n: 0, mun: 0 });
   assert.deepEqual({ n: b.n, mun: b.mun }, { n: 3, mun: 9 });
-  assert.deepEqual(b.by.other, { n: 1, mun: 3 }, 'чужий виконавець іде в «інші»');
+  assert.deepEqual(b.by, [{ n: 1, mun: 1 }, { n: 0, mun: 0 }, { n: 1, mun: 5 }]);
+  assert.deepEqual(b.other, { n: 1, mun: 3 }, 'чужий підрозділ іде в «інші»');
   assert.deepEqual({ n: none.n, mun: none.mun }, { n: 1, mun: 7 });
-  assert.deepEqual(none.by.other, { n: 1, mun: 7 });
+  assert.deepEqual(none.other, { n: 1, mun: 7 });
   assert.equal(out.reduce((s, g) => s + g.mun, 0), rows.reduce((s, r) => s + (+r.count || 0), 0));
-  for (const g of out) assert.equal(g.mun, g.by['РУК'].mun + g.by['ГРВ'].mun + g.by.other.mun, `${g.key}: частини дорівнюють цілому`);
+  for (const g of out) assert.equal(g.mun, g.by.reduce((s, c) => s + c.mun, 0) + g.other.mun, `${g.key}: частини дорівнюють цілому`);
+});
+
+test('зведення по бригадах: власний перелік підрозділів (у т.ч. старі РУК / ГРВ) працює так само', () => {
+  const rows = [row('148 оабр', 'РУК', 2), row('148 оабр', 'грв', 3), row('148 оабр', '7 реабатр', 4)];
+  const [g] = J(api.fireByBrigade(rows, ['РУК', 'ГРВ']));
+  assert.deepEqual(g.by, [{ n: 1, mun: 2 }, { n: 1, mun: 3 }]);
+  assert.deepEqual(g.other, { n: 1, mun: 4 });
+  const [h] = J(api.fireByBrigade(rows, []));
+  assert.deepEqual(h.by, []);
+  assert.deepEqual(h.other, { n: 3, mun: 9 }, 'порожній перелік: усе в «інші»');
+});
+
+test('перелік підрозділів: чиститься, зберігається й відновлюється', () => {
+  assert.deepEqual(J(api.cleanFireCrews([' 7  реабатр ', '7РЕАБАТР', '', null, 'РУК'])), ['7 реабатр', 'РУК'], 'дублікати за ключем і порожні відкидаються');
+  assert.deepEqual(J(api.cleanFireCrews('x')), []);
+  assert.equal(api.cleanFireCrews(Array.from({ length: 20 }, (_, i) => 'п' + i)).length, 8, 'не більше 8 рядків');
+  assert.equal(api.cleanFireCrews(['а'.repeat(60)])[0].length, 24, 'назва обрізається до 24 символів');
+  assert.deepEqual(J(api.saveFireCrews(['10 реабатр', 'ГРВ'])), ['10 реабатр', 'ГРВ']);
+  assert.deepEqual(J(api.crews), ['10 реабатр', 'ГРВ']);
+  assert.deepEqual(JSON.parse(api.mem[api.FIRE_CREWS_KEY]), ['10 реабатр', 'ГРВ']);
+  assert.deepEqual(J(api.loadFireCrews()), ['10 реабатр', 'ГРВ'], 'після перезавантаження сторінки перелік той самий');
+  assert.deepEqual(J(api.saveFireCrews([' ', ''])), ['РУК', 'ГРВ', '7 реабатр', '8 реабатр', '9 реабатр'], 'порожній перелік повертає типовий');
+  api.mem[api.FIRE_CREWS_KEY] = '{зіпсовано';
+  assert.deepEqual(J(api.loadFireCrews()), ['РУК', 'ГРВ', '7 реабатр', '8 реабатр', '9 реабатр'], 'зіпсоване сховище не ламає картку');
 });
 
 test('зведення по бригадах: порожні дані й рядки без кількості не ламають підрахунок', () => {
@@ -86,9 +119,9 @@ test('модель рядка несе виконавця й бригаду, р�
   const build = html.slice(html.indexOf('function buildModel(records)'));
   assert.match(build.slice(0, 3000), /crew: crewKey\(r\.crew\), firingUnit: brigadeKey\(r\.firingUnit\),/);
   assert.match(html, /firingUnit: \{ label: 'Вогнева бригада', keys: r => \[r\.firingUnit \|\| 'Не вказано'\] \}/);
-  assert.match(html, /crew: \{ label: 'Виконавець \(РУК \/ ГРВ\)', keys: r => \[r\.crew \|\| 'Не вказано'\] \}/);
+  assert.match(html, /crew: \{ label: 'Підрозділ \(від кого машина\)', keys: r => \[r\.crew \|\| 'Не вказано'\] \}/);
   assert.match(html, /\['p-fire', 'units', 'firingUnit'\]/, '«Докладніше →» відкриває розріз за бригадами');
-  assert.match(html, /\['units', 'Вогневі бригади', 'shield', 'firingUnit'\], \['units', 'Виконавці', 'rocket', 'crew'\]/, 'вкладки розрізів у «Докладніше»');
+  assert.match(html, /\['units', 'Вогневі бригади', 'shield', 'firingUnit'\], \['units', 'Підрозділи \(машини\)', 'rocket', 'crew'\]/, 'вкладки розрізів у «Докладніше»');
 });
 
 test('панель p-fire є в зведенні, малюється при кожному рендері й має стилі', () => {
@@ -97,6 +130,17 @@ test('панель p-fire є в зведенні, малюється при ко
   assert.match(html, /function renderFirePanel\(A\) \{/);
   assert.match(html, /<style id="fire-brigades-css">/);
   assert.match(html, /\.fb-card\[role="button"\]:hover/);
+});
+
+test('картка має редактор підрозділів: кнопка «Змінити», збереження, скидання, Escape', () => {
+  assert.match(html, /function fireCrewTools\(A\) \{/);
+  assert.match(html, /box\.append\(fireCrewTools\(A\)\);/, 'редактор доступний і коли даних за період немає');
+  assert.match(html, /'Змінити'\)\);/);
+  assert.match(html, /saveFireCrews\(read\(\)\)/);
+  assert.match(html, /'За замовчуванням'/);
+  assert.match(html, /e\.key === 'Escape'/);
+  assert.match(html, /\.fb-edit \{/);
+  assert.doesNotMatch(html, /crewRow\('РУК'|crewRow\('ГРВ'|fb-ruk|fb-grv/, 'жорстко закодованих РУК / ГРВ у картці більше немає');
 });
 
 test('розташування блоків: p-fire у типовій розкладці під плитками «Ракетні удари»', () => {
@@ -128,4 +172,93 @@ test('розташування блоків: без p-kpis новий рядок
   assert.deepEqual(J(api.layUpgrade(noKpis)).rows.map(r => r.cols[0].cards[0]), ['p-map', 'p-mun', 'p-fire', 'p-ops']);
   const bare = { rows: [{ cols: [{ w: 1, cards: ['p-ops'] }] }] };
   assert.deepEqual(J(api.layUpgrade(bare)).rows.map(r => r.cols[0].cards[0]), ['p-ops', 'p-fire']);
+});
+
+// ---- Перелік підрозділів належить профілю: команди profile_data_*, перенесення зі старого localStorage ----
+function profileContext({ invoke, legacy = {} }) {
+  const local = { ...legacy };
+  const events = [];
+  const toasts = [];
+  const win = { __TAURI_INTERNALS__: invoke ? { invoke } : undefined };
+  win.parent = win;
+  const ctx = vm.createContext({
+    window: win,
+    document: { dispatchEvent: e => events.push(e.type) },
+    Event: class { constructor(type) { this.type = type; } },
+    AV: { toast: text => toasts.push(text) },
+    localStorage: {
+      getItem: k => (k in local ? local[k] : null),
+      setItem: (k, v) => { local[k] = String(v); },
+      removeItem: k => { delete local[k]; },
+    },
+  });
+  const profileCode = code.replace(/const mem = \{\};[^\n]*\n/, 'function store(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) {} return null; }\n');
+  const exposed = vm.runInContext(`${profileCode}; ({ saveFireCrews, loadFireCrews, loadFireCrewsFromProfile, FIRE_CREWS_KEY, get crews() { return FIRE_CREWS; } })`, ctx);
+  return { api: exposed, local, events, toasts };
+}
+function fakeProfile() {
+  const records = new Map();
+  const calls = [];
+  const invoke = async (cmd, args) => {
+    calls.push([cmd, args.key]);
+    if (cmd === 'profile_data_get') return records.has(args.key) ? { key: args.key, value: records.get(args.key), modified: 'm' } : null;
+    if (cmd === 'profile_data_set') { records.set(args.key, args.value); return 'm'; }
+    throw new Error(`невідома команда ${cmd}`);
+  };
+  return { invoke, records, calls };
+}
+
+test('профіль: збереження переліку йде в profile_data_set, а не в localStorage', async () => {
+  const p = fakeProfile();
+  const ctx = profileContext({ invoke: p.invoke });
+  ctx.api.saveFireCrews(['РУК', 'Тестовий підрозділ']);
+  await new Promise(r => setImmediate(r));
+  assert.deepEqual(JSON.parse(p.records.get('rocket.firecrews')), ['РУК', 'Тестовий підрозділ']);
+  assert.equal(ctx.local[ctx.api.FIRE_CREWS_KEY], undefined, 'у localStorage нічого не пишеться');
+});
+
+test('профіль: перелік із профілю підміняє типовий і викликає перемальовування', async () => {
+  const p = fakeProfile();
+  p.records.set('rocket.firecrews', JSON.stringify(['РУК', 'ГРВ', '10 реабатр']));
+  const ctx = profileContext({ invoke: p.invoke });
+  assert.equal(await ctx.api.loadFireCrewsFromProfile(), true);
+  assert.deepEqual(J(ctx.api.crews), ['РУК', 'ГРВ', '10 реабатр']);
+  assert.deepEqual(ctx.events, ['ew:fire-crews']);
+});
+
+test('профіль: старий перелік із localStorage переноситься один раз і прибирається після перевірки читанням', async () => {
+  const p = fakeProfile();
+  const key = 'easywar.rocket.fireCrews';
+  const ctx = profileContext({ invoke: p.invoke, legacy: { [key]: JSON.stringify(['РУК', 'Старий підрозділ']) } });
+  assert.equal(await ctx.api.loadFireCrewsFromProfile(), true);
+  assert.deepEqual(JSON.parse(p.records.get('rocket.firecrews')), ['РУК', 'Старий підрозділ']);
+  assert.equal(ctx.local[key], undefined);
+  assert.deepEqual(J(ctx.api.crews), ['РУК', 'Старий підрозділ']);
+});
+
+test('профіль: якщо в профілі вже є перелік, старий залишок у localStorage лише прибирається', async () => {
+  const p = fakeProfile();
+  p.records.set('rocket.firecrews', JSON.stringify(['Новий']));
+  const key = 'easywar.rocket.fireCrews';
+  const ctx = profileContext({ invoke: p.invoke, legacy: { [key]: JSON.stringify(['Старий']) } });
+  await ctx.api.loadFireCrewsFromProfile();
+  assert.deepEqual(J(ctx.api.crews), ['Новий']);
+  assert.equal(ctx.local[key], undefined);
+  assert.equal(p.calls.filter(c => c[0] === 'profile_data_set').length, 0, 'профіль не перезаписується');
+});
+
+test('профіль: недоступний профіль не ламає картку — лишається типовий перелік, є повідомлення, старе не видаляється', async () => {
+  const key = 'easywar.rocket.fireCrews';
+  const ctx = profileContext({ invoke: async () => { throw 'профіль заблоковано'; }, legacy: { [key]: JSON.stringify(['РУК']) } });
+  assert.equal(await ctx.api.loadFireCrewsFromProfile(), false);
+  assert.equal(ctx.local[key], JSON.stringify(['РУК']));
+  assert.match(ctx.toasts.join(' '), /не прочитано з профілю: профіль заблоковано/);
+  assert.deepEqual(ctx.events, []);
+});
+
+test('без Tauri (браузер) перелік лишається в localStorage, як і було', async () => {
+  const ctx = profileContext({ invoke: null });
+  assert.equal(await ctx.api.loadFireCrewsFromProfile(), false);
+  ctx.api.saveFireCrews(['РУК', 'ГРВ']);
+  assert.equal(ctx.local[ctx.api.FIRE_CREWS_KEY], JSON.stringify(['РУК', 'ГРВ']));
 });

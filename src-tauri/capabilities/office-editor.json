@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "office-editor",
-  "description": "Вікно редакторів «Офісу» (EasyGreen, EasyDoc, EasySlide, easyPay, EasyFLY, Колективи): відкриття, збереження й закриття файлів, закриття самого вікна і локальні команди колективів (стан, ключ учасника, створення колективу, таблиці з класом, запрошення й вступ текстом, «Підготувати» й «Доповісти» в локальну чергу без мережі, «Оновити таблицю» з локальних пакетів змін, «Пакет оновлення» текстом без мережі). Жодних інших команд EasyWAR, плагінів чи core-дозволів.",
+  "description": "Вікно редакторів «Офісу» (EasyGreen, EasyDoc, EasySlide, easyPay, EasyFLY, Колективи): відкриття, збереження й закриття файлів, закриття самого вікна і локальні команди колективів (стан, ключ учасника, створення колективу, таблиці з класом, запрошення й вступ текстом, «Підготувати» й «Доповісти» в локальну чергу без мережі, «Оновити таблицю» з локальних пакетів змін, «Пакет оновлення» текстом без мережі) і чотири команди даних профілю (читання, запис, видалення, перелік), які Rust обмежує простором імен застосунку цього вікна. Жодних інших команд EasyWAR, плагінів чи core-дозволів.",
   "windows": [
     "office-editor"
   ],
@@ -24,6 +24,10 @@
     "allow-collective-report-confirm",
     "allow-collective-table-read",
     "allow-collective-sync-export",
-    "allow-collective-sync-import"
+    "allow-collective-sync-import",
+    "allow-profile-data-get",
+    "allow-profile-data-set",
+    "allow-profile-data-remove",
+    "allow-profile-data-list"
   ]
 }
