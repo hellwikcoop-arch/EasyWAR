@@ -6,7 +6,7 @@ import {
 import {
   CLASS_OPTIONS, PURPOSE_OPTIONS, TRANSPORT_OPTIONS, canCreateCollective, canCreateIdentity,
   checkHours, checkOperation, checkPassword, collectiveLine, detailLine, expectText, keyStoreText,
-  reportText, tableLine, transportNote,
+  preparedText, reportText, tableLine, transportNote,
 } from './secure-core.js';
 import './collectives.css';
 
@@ -94,6 +94,8 @@ export async function mount(container, host) {
   let detail = null;
   let shared = null;
   let reportResult = '';
+  // Підготовлена доповідь: лише ідентифікатор наміру в Rust і підсумок для показу.
+  let prepared = null;
   function passwordInput() {
     const e = $('input', 'ec-input');
     e.type = 'password';
@@ -229,7 +231,7 @@ export async function mount(container, host) {
         ...secureState.collectives.map(item => ({ value: item.fingerprint, label: `${item.name} · ${item.fingerprint}` }))]);
       choose.value = exchangeFp;
       choose.addEventListener('change', () => {
-        exchangeFp = choose.value; reportResult = '';
+        exchangeFp = choose.value; reportResult = ''; prepared = null;
         secureAction(async () => {});
       });
       box.append(field('Колектив', choose));
@@ -311,16 +313,39 @@ export async function mount(container, host) {
     const transport = select(TRANSPORT_OPTIONS);
     const note = $('p', 'ec-caption', transportNote(detail, transport.value));
     transport.addEventListener('change', () => { note.textContent = transportNote(detail, transport.value); });
-    const wan = checkbox('Явно обираю передачу через інтернет');
-    const reviewed = checkbox('Я переглянув зміни «було → стане»');
-    const operation = area('Зміна рядка (синтетичний приклад: {"row":"…"})');
-    box.append($('p', 'ec-label', 'ДОПОВІСТИ'), note, passwordForm('Доповісти', [field('Таблиця', table), field('Транспорт', transport), wan.label, reviewed.label, field('Операція', operation)], async password => {
-      checkOperation(operation.value);
-      const outcome = await host.collectives.report({ password, collective: exchangeFp, table: table.value,
-        transport: transport.value, explicitWan: wan.box.checked, reviewed: reviewed.box.checked, operation: operation.value });
-      reportResult = reportText(outcome);
-      if (outcome.allowed) operation.value = '';
-    }));
+    box.append($('p', 'ec-label', 'ДОПОВІСТИ'));
+    if (prepared) {
+      // Крок 2: людина бачить підсумок, сформований у Rust, і підтверджує паролем.
+      const cancel = button('Скасувати');
+      cancel.disabled = secureBusy;
+      cancel.addEventListener('click', () => { prepared = null; reportResult = ''; renderSecure(); });
+      box.append($('p', 'ec-status', prepared.text), passwordForm('Доповісти', [], async password => {
+        const intent = prepared.intent;
+        prepared = null;
+        reportResult = reportText(await host.collectives.reportConfirm(password, intent));
+      }), cancel);
+    } else {
+      // Крок 1: Rust перевіряє маршрут і права й запам'ятовує намір на 60 секунд.
+      const wan = checkbox('Явно обираю передачу через інтернет');
+      const operation = area('Зміна рядка (синтетичний приклад: {"row":"…"})');
+      const form = $('form', 'ec-inline');
+      const submit = button('Підготувати');
+      submit.type = 'submit';
+      submit.disabled = secureBusy;
+      form.append(field('Таблиця', table), field('Транспорт', transport), wan.label, field('Операція', operation), submit);
+      form.addEventListener('submit', event => {
+        event.preventDefault();
+        secureAction(async () => {
+          checkOperation(operation.value);
+          const outcome = await host.collectives.reportPrepare({ collective: exchangeFp, table: table.value,
+            transport: transport.value, explicitWan: wan.box.checked, operation: operation.value });
+          reportResult = '';
+          if (outcome.allowed) prepared = { intent: outcome.intent, text: preparedText(outcome) };
+          else reportResult = reportText(outcome);
+        });
+      });
+      box.append(note, form);
+    }
     if (reportResult) box.append($('p', 'ec-status', reportResult));
   }
   renderSecure();

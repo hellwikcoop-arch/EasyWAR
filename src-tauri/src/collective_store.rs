@@ -7,6 +7,7 @@
 //! кожному читанні заново перевіряється через [`InMemoryMembership::apply`]: підмінений у базі
 //! рядок не дає ні учасника, ні прав.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
@@ -132,6 +133,7 @@ pub struct CollectiveStore {
     pub(crate) pool: SqlitePool,
     pub(crate) secrets_dir: PathBuf,
     pub(crate) params: KdfParams,
+    pub(crate) intents: crate::collective_sync::IntentStore,
 }
 
 impl CollectiveStore {
@@ -140,6 +142,7 @@ impl CollectiveStore {
             pool,
             secrets_dir,
             params: KdfParams::PRODUCTION,
+            intents: Default::default(),
         }
     }
 
@@ -149,7 +152,25 @@ impl CollectiveStore {
             pool,
             secrets_dir,
             params: KdfParams::FOR_TESTS,
+            intents: Default::default(),
         }
+    }
+
+    /// Колективи профілю за базою; `None`, якщо читання не вдалося (див.
+    /// [`orphan_epoch_purposes`]).
+    pub(crate) async fn known_collective_ids(
+        &self,
+        profile_id: &str,
+    ) -> Option<HashSet<CollectiveId>> {
+        let rows: Vec<Vec<u8>> =
+            sqlx::query_scalar("SELECT collective_id FROM collectives WHERE profile_id = ?")
+                .bind(profile_id)
+                .fetch_all(&self.pool)
+                .await
+                .ok()?;
+        rows.into_iter()
+            .map(|row| CollectiveId::try_from(row.as_slice()).ok())
+            .collect()
     }
 
     pub(crate) fn secret_store(&self, profile_id: &str) -> SecretStore {
@@ -345,6 +366,7 @@ impl CollectiveStore {
             return Err(CollectiveStoreError::TooManyCollectives);
         }
         let store = self.secret_store(profile_id);
+        let known = self.known_collective_ids(profile_id).await;
         let records = tokio::task::spawn_blocking(move || {
             let mut unlocked = store.unlock(password.as_bytes())?;
             let (member, device) = identities(&unlocked)?;
@@ -363,6 +385,12 @@ impl CollectiveStore {
             membership
                 .add_device(&member.issue_device(&device.public(), now_unix))
                 .map_err(|_| CollectiveStoreError::StoreDamaged)?;
+            // Після автентифікації прибрати осиротілі ключі цього профілю (SEC-004). Невдале
+            // прибирання зупиняє операцію до будь-якого запису: нічого не створено.
+            let orphans = orphan_epoch_purposes(unlocked.purposes(), known.as_ref());
+            unlocked
+                .delete_many(&orphans)
+                .map_err(|_| CollectiveStoreError::Rejected(ORPHAN_SWEEP_FAILED))?;
             // Ключ епохи 0 — лише у сховищі секретів; без нього колектив не запечатає жодного
             // конверта й не впустить нового учасника.
             unlocked.write(
@@ -466,6 +494,36 @@ fn is_control_or_format(c: char) -> bool {
 }
 
 /// Мітка ключа епохи у сховищі секретів профілю: `collective/epoch/<id>/<n>`.
+/// Ключі епох у сховищі профілю, для яких у базі цього профілю немає колективу
+/// (залишок аварії між записом ключів і `commit`, SEC-004). `known == None` — читання бази
+/// не вдалося: тоді не прибирається нічого, щоб не зачепити ключі чинних колективів.
+pub(crate) fn orphan_epoch_purposes<'a>(
+    purposes: impl IntoIterator<Item = &'a str>,
+    known: Option<&HashSet<CollectiveId>>,
+) -> Vec<String> {
+    let Some(known) = known else {
+        return Vec::new();
+    };
+    let keep: HashSet<String> = known
+        .iter()
+        .map(|id| id.iter().map(|b| format!("{b:02x}")).collect())
+        .collect();
+    purposes
+        .into_iter()
+        .filter(|purpose| {
+            purpose
+                .strip_prefix("collective/epoch/")
+                .and_then(|rest| rest.split('/').next())
+                .is_some_and(|id| !keep.contains(id))
+        })
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Невдале прибирання осиротілих ключів (SEC-004): операція зупиняється до запису.
+pub(crate) const ORPHAN_SWEEP_FAILED: &str =
+    "не вдалося прибрати залишкові ключі у сховищі профілю; нічого не змінено, спробуйте ще раз";
+
 pub(crate) fn epoch_purpose(collective_id: &CollectiveId, epoch: u32) -> String {
     let id: String = collective_id.iter().map(|b| format!("{b:02x}")).collect();
     format!("collective/epoch/{id}/{epoch}")

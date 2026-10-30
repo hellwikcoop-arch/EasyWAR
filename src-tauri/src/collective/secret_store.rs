@@ -478,7 +478,7 @@ fn read_slot(r: &mut Reader<'_>) -> Result<Slot, StoreError> {
     })
 }
 
-fn tmp_path(path: &Path) -> PathBuf {
+pub(crate) fn tmp_path(path: &Path) -> PathBuf {
     let mut name = path
         .file_name()
         .map(|n| n.to_os_string())

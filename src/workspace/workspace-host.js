@@ -195,7 +195,8 @@ export function createHost({
       createIdentity: password => invoke('collective_create_identity', { password: String(password ?? '') }),
       create: (password, name) => invoke('collective_create', { password: String(password ?? ''), name: String(name ?? '') }),
       // Обмін (C3b, другий зріз): тексти запрошень і ключів люди пересилають самі,
-      // «Доповісти» кладе конверт лише в локальну чергу.
+      // «Підготувати» лишає намір у Rust, «Доповісти» підтверджує його паролем (SEC-003);
+      // прапорця «переглянуто» з JS немає. Конверт іде лише в локальну чергу.
       detail: collective => invoke('collective_detail', { collective: String(collective ?? '') }),
       setTable: ({ collective, table = null, title, cls, purpose }) => invoke('collective_table_set', {
         collective: String(collective ?? ''), table: table == null ? null : String(table),
@@ -213,10 +214,13 @@ export function createHost({
       joinAccept: (password, keys) => invoke('collective_join_accept', {
         password: String(password ?? ''), keys: String(keys ?? ''),
       }),
-      report: ({ password, collective, table, transport, explicitWan, reviewed, operation }) => invoke('collective_report', {
-        password: String(password ?? ''), collective: String(collective ?? ''), table: String(table ?? ''),
-        transport: String(transport ?? ''), explicitWan: explicitWan === true, reviewed: reviewed === true,
+      reportPrepare: ({ collective, table, transport, explicitWan, operation }) => invoke('collective_report_prepare', {
+        collective: String(collective ?? ''), table: String(table ?? ''),
+        transport: String(transport ?? ''), explicitWan: explicitWan === true,
         operation: String(operation ?? ''),
+      }),
+      reportConfirm: (password, intent) => invoke('collective_report_confirm', {
+        password: String(password ?? ''), intent: String(intent ?? ''),
       }),
     })
     : null;

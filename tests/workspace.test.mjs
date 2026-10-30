@@ -537,8 +537,9 @@ test('host.collectives: команди обміну передають лише 
   await host.collectives.joinRequest('пароль-профілю', 'EWINV1.x');
   await host.collectives.inviteAdmit('пароль-профілю', 'ABCDE-FGHIJ', 'EWJOIN1.x');
   await host.collectives.joinAccept('пароль-профілю', 'EWKEYS1.x');
-  await host.collectives.report({ password: 'пароль-профілю', collective: 'ABCDE-FGHIJ', table: 'KLMNO-PQRST',
+  await host.collectives.reportPrepare({ collective: 'ABCDE-FGHIJ', table: 'KLMNO-PQRST',
     transport: 'lan', explicitWan: 'так', reviewed: true, operation: '{"row":"synthetic"}' });
+  await host.collectives.reportConfirm('пароль-профілю', '00112233445566778899aabbccddeeff');
   assert.deepEqual(calls, [
     ['collective_detail', { collective: 'ABCDE-FGHIJ' }],
     ['collective_table_set', { collective: 'ABCDE-FGHIJ', table: null, title: 'Облік', class: 'C', purpose: 'after-fact' }],
@@ -547,7 +548,9 @@ test('host.collectives: команди обміну передають лише 
     ['collective_join_request', { password: 'пароль-профілю', invitation: 'EWINV1.x' }],
     ['collective_invite_admit', { password: 'пароль-профілю', collective: 'ABCDE-FGHIJ', request: 'EWJOIN1.x' }],
     ['collective_join_accept', { password: 'пароль-профілю', keys: 'EWKEYS1.x' }],
-    ['collective_report', { password: 'пароль-профілю', collective: 'ABCDE-FGHIJ', table: 'KLMNO-PQRST',
-      transport: 'lan', explicitWan: false, reviewed: true, operation: '{"row":"synthetic"}' }],
-  ], 'явний вибір WAN — лише true, не будь-яке truthy-значення');
+    ['collective_report_prepare', { collective: 'ABCDE-FGHIJ', table: 'KLMNO-PQRST',
+      transport: 'lan', explicitWan: false, operation: '{"row":"synthetic"}' }],
+    ['collective_report_confirm', { password: 'пароль-профілю', intent: '00112233445566778899aabbccddeeff' }],
+  ], 'явний вибір WAN — лише true; прапорець reviewed з JS не передається (SEC-003)');
+  assert.equal(host.collectives.report, undefined, 'однокрокового «Доповісти» більше немає');
 });

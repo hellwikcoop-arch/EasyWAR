@@ -49,19 +49,19 @@ test('порядок перевірки: маршрут і право запис
   assert.equal(evaluateOutbound({ ...ok, tableClass: 'D' }).code, 'class-d-cloud');
   assert.equal(evaluateOutbound({ ...ok, tableClass: 'D', transport: 'lan' }).allowed, true);
   assert.equal(evaluateOutbound({ ...ok, endToEnd: false }).code, 'no-e2e');
-  assert.equal(evaluateOutbound({ ...ok, transport: 'peer_wan' }).code, 'wan-purpose-unconfirmed');
+  assert.equal(evaluateOutbound({ ...ok, transport: 'peer_wan' }).code, 'wan-membership-unverified');
   assert.equal(evaluateOutbound({ ...ok, authorId: 'member-synthetic-reader' }).code, 'no-write-right');
   assert.equal(evaluateOutbound(null).allowed, false);
 });
 
 test('WAN: «Доповісти» і право запису залишаються обов’язковими при всіх дозволах транспорту', () => {
-  const approved = { ...ok, transport: 'peer_wan', confirmedAfterFact: true,
+  const approved = { ...ok, transport: 'peer_wan',
     membershipVerified: true, explicitUserChoice: true, relayOpaqueVerified: true,
     transportSecurityApproved: true };
   assert.equal(evaluateOutbound(approved).allowed, true);
   assert.equal(evaluateOutbound({ ...approved, reviewedByHuman: false }).code, 'needs-report-review');
   assert.equal(evaluateOutbound({ ...approved, writers: [] }).code, 'no-write-right');
-  assert.equal(evaluateOutbound({ ...approved, tableClass: 'D' }).code, 'class-d-wan');
+  assert.equal(evaluateOutbound({ ...approved, tableClass: 'D' }).allowed, true, 'SEC-005: клас не блокує');
   assert.equal(evaluateOutbound({ ...approved, transportSecurityApproved: false }).code, 'wan-not-ready');
   assert.equal(evaluateOutbound({ ...approved, policy: 'AUTO_AFTER_LOCAL_APPROVAL' }).code, 'OwnerDecisionRequired');
 });
@@ -133,9 +133,11 @@ test('Rust-допуск перед відправкою повторює код�
   const { readFile } = await import('node:fs/promises');
   const gate = await readFile(new URL('../src-tauri/src/collective/send_gate.rs', import.meta.url), 'utf8');
   // Кожен крок, який JS лише підказує, у Rust перевіряється з власного стану під тим самим кодом.
-  const shared = ['class-d-cloud', 'class-d-wan', 'wan-class-unapproved', 'wan-needs-user-choice',
+  const shared = ['class-d-cloud', 'wan-needs-user-choice',
     'wan-not-ready', 'OwnerDecisionRequired', 'no-write-right', 'needs-report-review'];
   for (const code of shared) assert.match(gate, new RegExp(`"${code}"`), code);
+  // SEC-005 (JE, 30.10.2026): клас більше не блокує синхронізацію між учасниками.
+  for (const gone of ['class-d-wan', 'wan-class-unapproved']) assert.doesNotMatch(gate, new RegExp(`"${gone}"`), gone);
   // Прапорці «вже перевірено» з JS у Rust не приймаються: таких полів у запиті немає.
   for (const flag of ['membershipVerified', 'relayOpaqueVerified', 'transportSecurityApproved', 'membership_verified'])
     assert.doesNotMatch(gate, new RegExp(flag), flag);
