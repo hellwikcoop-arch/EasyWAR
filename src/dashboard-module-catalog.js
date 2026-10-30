@@ -53,11 +53,16 @@ import { ensureModuleInstances, forgetModuleInstances } from './module-instance-
 import { cardModel, cardStyle, orderedCards } from './dashboard-layout-view-core.js';
 import { instanceBar, sharedPeriodBar } from './dashboard-layout-panel.js';
 import { rolesPanel } from './profile-schema-panel.js';
+import { setSnapshot } from './profile-schema-core.js';
+import { moduleSourceId } from './profile-schema-modules-core.js';
 import { psCatalogUsage } from './module-definition-core.js';
 import { CATALOG as PS_CATALOG, KPI_TILES, VIEW_BY_BLOCK } from './ps-kpi.js';
 import { addRequest, buildRegistry } from './module-registry-view-core.js';
 import { registryPanel } from './module-registry-panel.js';
 import { linkPanel } from './table-link-panel.js';
+import { snapshotPanel } from './table-link-snapshot-panel.js';
+import { snapshotInfo } from './table-link-snapshot-core.js';
+import { replaceSnapshotRows } from './table-link-snapshot-client.js';
 import { deleteLinksNote, linkCoverageViews, relatedLine } from './table-link-view-core.js';
 import { updatePanel } from './dashboard-module-update.js';
 import {
@@ -133,7 +138,7 @@ function initialize() {
 
   // `cancelEdit` — скасування рядка, що редагується: Escape скасовує правку, а не закриває вікно разом із набраним рядком.
   // `tableViews` — пошук і група колонок сторінки кожного модуля: після збереження рядка сторінка перебудовується, а вибір лишається.
-  const state = { branch, catalog: [], modules: [], data: new Map(), busy: false, profileMissing: false, cancelEdit: null, tableViews: new Map(), leaveReview: null, layout: null, schema: null, registry: null };
+  const state = { branch, catalog: [], modules: [], data: new Map(), busy: false, profileMissing: false, cancelEdit: null, tableViews: new Map(), leaveReview: null, layout: null, schema: null, registry: null, syncing: null };
   const openButton = el('button', {
     type: 'button',
     class: 'btn quiet ewmc-open',
@@ -254,7 +259,7 @@ function initialize() {
       // Порожній набір після збою не можна редагувати: збереження стерло б наявні рядки.
       const loaded = await Promise.all(state.modules.map(async module => [module.id, await readModulePayload(invoke, module)]));
       state.data = new Map(loaded);
-      keepProfileSchema(syncProfileSchemaModules(invoke, state.modules));
+      state.syncing = keepProfileSchema(syncProfileSchemaModules(invoke, state.modules));
       await syncLayout().catch(error => { state.layout = null; console.warn('Розкладку дашборда не прочитано:', error); });
     } catch (error) {
       state.modules = [];
@@ -288,16 +293,70 @@ function initialize() {
 
   // Об'єднана таблиця стає окремим модулем «Мого дашборда» (той самий `create_dashboard_module`, стовпці задає запит);
   // вихідні таблиці не змінюються. Після успіху панель перемальовується разом зі списком модулів.
-  async function createMergedModule(request) {
+  async function createMergedModule(request, origin = null) {
     if (state.busy) return { ok: false, message: 'Зачекайте: інша дія ще триває.' };
     state.busy = true;
     try {
-      await invoke('create_dashboard_module', request);
+      const created = normalizeModules([await invoke('create_dashboard_module', request)])[0];
       await loadModules();
       showToast(`Модуль «${request.title}» створено: ${rowCountLabel(request.rows.length)}.`);
+      // Знімок запам'ятовується окремо: збій його запису не псує створений модуль, а лише забирає «Оновити з вихідних».
+      if (created && origin?.relationId) {
+        await state.syncing;
+        const saved = await applyLinkChange(schema => setSnapshot(schema, { sourceId: moduleSourceId(created.id), relationId: origin.relationId, builtAt: new Date().toISOString(), rowCount: request.rows.length }));
+        if (!saved.ok) showToast('Таблицю створено, але оновлення з вихідних для неї недоступне.', true);
+      }
       return { ok: true };
     } catch (error) {
       return { ok: false, message: String(error || 'Не вдалося створити модуль.') };
+    } finally {
+      state.busy = false;
+    }
+  }
+
+  // Вихідні таблиці знімка читаються наново з SQLite (не з кешу сторінки), щоб оновлення спиралося на актуальні дані.
+  async function readSnapshotSources(module) {
+    const info = state.schema ? snapshotInfo(state.schema, module) : null;
+    if (!info?.relation) return { ok: false, message: 'Зв’язок, з якого створено таблицю, знято або замінено. Оновлення неможливе.' };
+    const data = new Map(state.data);
+    for (const sourceId of info.sourceIds) {
+      const source = state.modules.find(item => moduleSourceId(item.id) === sourceId);
+      if (!source) return { ok: false, message: 'Вихідну таблицю видалено: оновлення неможливе.' };
+      data.set(source.id, await readModulePayload(invoke, source));
+    }
+    return { ok: true, modules: state.modules, data };
+  }
+
+  // Заміна рядків знімка: той самий запис, що й решта правок (з позначкою версії), потім знімок і сторінка перемальовуються.
+  async function applySnapshotRefresh(module, view) {
+    if (state.busy) return { ok: false, message: 'Зачекайте: інша дія ще триває.' };
+    state.busy = true;
+    try {
+      let result;
+      try {
+        result = await replaceSnapshotRows(invoke, module, view.request.rows);
+      } catch (error) {
+        if (isConflictError(error)) {
+          state.busy = false;
+          await reopenFresh(module.id, 'Таблицю змінено в іншому вікні. Показано актуальні дані — повторіть оновлення.');
+          return { ok: true };
+        }
+        return { ok: false, message: String(error?.message || error || 'Не вдалося оновити таблицю.') };
+      }
+      const updated = normalizeModules([result?.module])[0] || module;
+      state.modules = state.modules.map(item => item.id === module.id ? updated : item);
+      state.data.set(module.id, {
+        module: updated,
+        rows: Array.isArray(result?.rows) ? result.rows : [],
+        truncated: result?.truncated === true,
+        corrections: Array.isArray(result?.corrections) ? result.corrections : [],
+      });
+      const info = snapshotInfo(state.schema, module);
+      const saved = info ? await applyLinkChange(schema => setSnapshot(schema, { sourceId: moduleSourceId(module.id), relationId: info.entry.relationId, builtAt: new Date().toISOString(), rowCount: view.rowCount })) : { ok: true };
+      renderHost();
+      showModulePage(updated);
+      showToast(saved.ok ? `Таблицю оновлено з вихідних: ${rowCountLabel(view.rowCount)}.` : `Таблицю оновлено: ${rowCountLabel(view.rowCount)}, але дату оновлення не збережено.`, !saved.ok);
+      return { ok: true };
     } finally {
       state.busy = false;
     }
@@ -339,7 +398,7 @@ function initialize() {
 
   // Схема профілю (E3) допоміжна: збій її запису не повинен заважати модулям, тож лише попередження в консолі.
   function keepProfileSchema(pending) {
-    pending.then(result => {
+    return pending.then(result => {
       if (!result.ok && result.code !== 'profile_required') console.warn('Схема профілю не оновлена:', result.message);
     }).catch(error => console.warn('Схема профілю не оновлена:', error));
   }
@@ -1738,6 +1797,14 @@ function initialize() {
       el('div', { class: 'ewmc-page-body' },
         corrections.length ? correctionsList() : null,
         rolesPanel({ el, invoke, module, modules: () => state.modules }),
+        readOnly || !state.schema ? null : snapshotPanel({
+          el, module,
+          schema: () => state.schema,
+          titles: () => new Map(state.modules.map(item => [moduleSourceId(item.id), item.title])),
+          readSources: () => readSnapshotSources(module),
+          payload: () => state.data.get(module.id),
+          apply: view => applySnapshotRefresh(module, view),
+        }),
         readOnly ? null : updatePanel({
           el, invoke, module, payload,
           onApplied: result => {

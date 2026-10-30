@@ -66,9 +66,9 @@ holds no module rows and no raw XLSX values; deleting the profile removes it
 by an older application. The same document may carry optional `relations` (confirmed or
 rejected key pairs between two user tables: column keys only, cardinality, basis, the column
 types at the moment of the decision; no cell values) and `groups` (sets of tables joined by
-confirmed relations). They are part of format version 1 (no new migration and no new Tauri
+confirmed relations); an optional `snapshots` list records which table module was built from which confirmed relation (`sourceId`, `relationId`, `builtAt`, `rowCount`; no values) so that the table can be refreshed from its sources. They are part of format version 1 (no new migration and no new Tauri
 command; the old `save_profile_schema` stores them); Rust only checks that both fields, when
-present, are arrays within the limits (256 relations, 64 groups) and the JS core validates the
+present, are arrays within the limits (256 relations, 64 groups, 64 snapshots) and the JS core validates the
 content. A schema without them stays valid and is not rewritten. Migration
 `0018_dashboard_layouts.sql` adds `dashboard_layouts`: one row per profile and
 dashboard (the primary key is `(profile_id, dashboard_id)`; today only `my`, «Мій
