@@ -49,9 +49,21 @@ test('порядок перевірки: маршрут і право запис
   assert.equal(evaluateOutbound({ ...ok, tableClass: 'D' }).code, 'class-d-cloud');
   assert.equal(evaluateOutbound({ ...ok, tableClass: 'D', transport: 'lan' }).allowed, true);
   assert.equal(evaluateOutbound({ ...ok, endToEnd: false }).code, 'no-e2e');
-  assert.equal(evaluateOutbound({ ...ok, transport: 'peer_wan' }).code, 'peer-wan-forbidden');
+  assert.equal(evaluateOutbound({ ...ok, transport: 'peer_wan' }).code, 'wan-purpose-unconfirmed');
   assert.equal(evaluateOutbound({ ...ok, authorId: 'member-synthetic-reader' }).code, 'no-write-right');
   assert.equal(evaluateOutbound(null).allowed, false);
+});
+
+test('WAN: «Доповісти» і право запису залишаються обов’язковими при всіх дозволах транспорту', () => {
+  const approved = { ...ok, transport: 'peer_wan', confirmedAfterFact: true,
+    membershipVerified: true, explicitUserChoice: true, relayOpaqueVerified: true,
+    transportSecurityApproved: true };
+  assert.equal(evaluateOutbound(approved).allowed, true);
+  assert.equal(evaluateOutbound({ ...approved, reviewedByHuman: false }).code, 'needs-report-review');
+  assert.equal(evaluateOutbound({ ...approved, writers: [] }).code, 'no-write-right');
+  assert.equal(evaluateOutbound({ ...approved, tableClass: 'D' }).code, 'class-d-wan');
+  assert.equal(evaluateOutbound({ ...approved, transportSecurityApproved: false }).code, 'wan-not-ready');
+  assert.equal(evaluateOutbound({ ...approved, policy: 'AUTO_AFTER_LOCAL_APPROVAL' }).code, 'OwnerDecisionRequired');
 });
 
 test('S10: перевірка перед відправкою бере чинну політику, а не ту, що була при постановці в чергу', () => {
