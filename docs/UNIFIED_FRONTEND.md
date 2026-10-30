@@ -779,6 +779,27 @@ v1 і блоки вкладок через `listDefinitions` + `validateRegistry
 на сторінці таблиці-знімка (кнопки `check-snapshot`, `apply-snapshot`, `confirm-snapshot`); `table-link-snapshot-client.js` — `replaceSnapshotRows` (та сама
 `replace_dashboard_module_rows` з `expectedUpdatedAt`). Каталог перед перевіркою читає обидві вихідні таблиці наново (`readSnapshotSources`) і після заміни оновлює дату
 знімка. Тести — `tests/table-link-snapshot.test.mjs`.
+
+Блок реєстру → основна таблиця (E5): `module-add-columns-core.js` (чисте, без `Object.freeze` на верхньому рівні — інакше виклик лишається у збірці ПВК-lite):
+`planAddColumns` (які ролі блоку є, які зіставити з наявним стовпцем за підписом, які додати; ключі `c{n}` далі за наявними; ліміт 64), `bindingsAfterAdd`
+(ключі нових стовпців — з відповіді команди за підписом), `confirmPlanBindings`, `addFieldsRequest`, `createUserTableRequest`, `userTables`.
+`module-add-columns-client.js` — `saveBlockColumns` (`add_dashboard_module_fields` чи `create_dashboard_module` для `user-table`) і `bindBlockColumns` (синхронізація схеми +
+зіставлення ролей одним записом). `module-add-columns-panel.js` — DOM: `<details class="ewmc-update ewmc-addcols">` на картці реєстру (кнопки `add-columns`,
+`confirm-add-columns`, галочка `with-optional`; наявні класи, нового CSS немає). Каталог передає в `registryPanel` `columnsBox` і виконує `addBlockColumns`.
+Тести — `tests/module-add-columns.test.mjs`.
+Картка блока з основної таблиці (E5, крок 4): `module-block-card-core.js` (чисте) — `hasBlockCard` (поки шість карток РВ `legacy:rv-kpi-*`), `rvRow` (значення за ролями →
+рядок моделі РВ), `blockCardModel` (перевірка ролей через `availability`, числа — `agg`/`resKind`/`shareOfOps` з `module-adapters/rv-kpi-core.js`, модель виду `kpi` для
+`mountChart`). Після додавання блока каталог ставить картку розкладки (`addInstance` з `definitionId` блока і `sourceId` основної таблиці); `renderModule` для такої картки
+малює картку блока (`blockCardView`, див. нижче) і не показує «Видалити модуль і дані». `resKind` перенесено в ядро дослівно з rocket.html (тест порівнює текст).
+Блоки-діаграми спільних вкладок ПС/РВ (розподіл і динаміка результатів, час доби, активність за днями, тип носія/цілі, боєприпаси, топ-5 підрозділів, повторні цілі,
+вогневі бригади): рядки моделі РВ зводяться до рядків службового модуля з полями `category`/`day`/`series`/`value`, малюнок — `chartModel` (ті самі види, що й шаблони).
+Описи діаграм будуються ліниво (`charts()`), бо виклики на верхньому рівні лишилися б у збірці ПВК-lite.
+Вигляд карток блоків (E5, крок 6): `module-block-card-view.js` — `blockCardView` (окремий `<article class="ewmc-module ewmc-block">` з налаштуваннями за `details.ewmc-block-tools`
+«⋯»), `kpiNode` (тон `data-tone`, підпис, число, зміна, рядок плиток, праворуч кільце частки — дуга SVG без пунктиру — або міні-графік; показник займає всю картку без
+заголовка), `deltaTone`. Рамка всіх карток розкладки (крім стилю «Пункт керування») — одна тонка лінія без кутиків (`.ewmc-dashboard-grid[data-layout] .ewmc-module`). Модель показника в ядрі доповнено `tone`, `share`, `tiles`, `delta` (зміна з
+`computeRvKpis`). `placeBlockCard` ставить нову картку перед карткою основної таблиці, нову таблицю розтягує на 12 колонок. Звичайна картка розкладки ховає `instanceBar`, «Видалити модуль
+і дані» й «Структуру таблиці» в те саме меню «⋯» (`.ewmc-card-menu`). Розмір «Мала» (`SIZE_CHOICES`, 2 колонки) малює показник компактно (`.ewmc-block.is-compact`: підпис і число). Вид діаграми й колір картки блока зберігаються в `instance.style.view` і `instance.style.accent` (поля розкладки вже були, міграції немає): `chartViews(definitionId)` дає варіанти виду, `CARD_PALETTES` — кольори (`data-palette` на картці перевизначає `--ewmc-s1…8`, у показника — тон); `blockChoices` малює обидва вибори в «⋯». Діаграми результатів беруть колір за змістом (`RESULT_SLOTS`). Лінії діаграм (`line`, `area`, лінія в `combo`) — плавні: `monotonePath` у `dashboard-module-charts.js` (монотонна кубічна інтерполяція, крива не виходить за значення сусідніх точок); область заливається градієнтом до прозорого (`.ewmc-area-fade`). Стилі — `public/module-styles.css` (у ПВК-lite не вбудовуються).
+Тести — `tests/module-block-card.test.mjs`.
 CSS — `.ewmc-links*` у `dashboard-module-catalog.css`. Тести — `tests/table-link-view.test.mjs`
 (логіка й текстові контракти: імпорт, відсутність `invoke`, `innerHTML`, запису схеми).
 
