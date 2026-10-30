@@ -385,10 +385,12 @@ impl CollectiveStore {
             membership
                 .add_device(&member.issue_device(&device.public(), now_unix))
                 .map_err(|_| CollectiveStoreError::StoreDamaged)?;
-            // Після автентифікації прибрати осиротілі ключі цього профілю (SEC-004); помилка
-            // прибирання не зупиняє створення.
+            // Після автентифікації прибрати осиротілі ключі цього профілю (SEC-004). Невдале
+            // прибирання зупиняє операцію до будь-якого запису: нічого не створено.
             let orphans = orphan_epoch_purposes(unlocked.purposes(), known.as_ref());
-            let _ = unlocked.delete_many(&orphans);
+            unlocked
+                .delete_many(&orphans)
+                .map_err(|_| CollectiveStoreError::Rejected(ORPHAN_SWEEP_FAILED))?;
             // Ключ епохи 0 — лише у сховищі секретів; без нього колектив не запечатає жодного
             // конверта й не впустить нового учасника.
             unlocked.write(
@@ -517,6 +519,10 @@ pub(crate) fn orphan_epoch_purposes<'a>(
         .map(str::to_owned)
         .collect()
 }
+
+/// Невдале прибирання осиротілих ключів (SEC-004): операція зупиняється до запису.
+pub(crate) const ORPHAN_SWEEP_FAILED: &str =
+    "не вдалося прибрати залишкові ключі у сховищі профілю; нічого не змінено, спробуйте ще раз";
 
 pub(crate) fn epoch_purpose(collective_id: &CollectiveId, epoch: u32) -> String {
     let id: String = collective_id.iter().map(|b| format!("{b:02x}")).collect();

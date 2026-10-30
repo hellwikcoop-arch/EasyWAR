@@ -36,7 +36,7 @@ use crate::collective::send_gate::{
 use crate::collective::{random_array, sha256, ID_LEN, KEY_LEN};
 use crate::collective_store::{
     check_password, collective_name, epoch_purpose, fingerprint, identities, orphan_epoch_purposes,
-    CollectiveStore, CollectiveStoreError, CollectiveSummary, MAX_COLLECTIVES,
+    CollectiveStore, CollectiveStoreError, CollectiveSummary, MAX_COLLECTIVES, ORPHAN_SWEEP_FAILED,
 };
 
 const INVITE_PREFIX: &str = "EWINV1.";
@@ -713,9 +713,12 @@ impl CollectiveStore {
             });
         self.with_secrets(profile_id, password, move |unlocked, member, _| {
             let keys = invite::accept(member, &wraps).map_err(rejected)?;
-            // Після автентифікації прибрати осиротілі ключі цього профілю (SEC-004).
+            // Після автентифікації прибрати осиротілі ключі цього профілю (SEC-004). Невдале
+            // прибирання зупиняє вступ до запису ключів і рядків бази.
             let orphans = orphan_epoch_purposes(unlocked.purposes(), known.as_ref());
-            let _ = unlocked.delete_many(&orphans);
+            unlocked
+                .delete_many(&orphans)
+                .map_err(|_| CollectiveStoreError::Rejected(ORPHAN_SWEEP_FAILED))?;
             let entries: Vec<(String, &[u8])> = to_write
                 .into_iter()
                 .zip(keys.iter().map(|key| key.as_bytes().as_slice()))
@@ -2146,5 +2149,74 @@ mod tests {
         );
         let empty = std::collections::HashSet::new();
         assert_eq!(orphan_epoch_purposes(refs(), Some(&empty)).len(), 3);
+    }
+
+    /// Робить збереження сховища секретів неможливим: на місці тимчасового файлу — тека.
+    fn block_store_writes(store: &CollectiveStore, profile: &str) -> PathBuf {
+        let tmp = crate::collective::secret_store::tmp_path(store.secret_store(profile).path());
+        std::fs::create_dir(&tmp).unwrap();
+        tmp
+    }
+
+    /// SEC-004 (зауваження J5 00:45Z): невдале прибирання осиротілих ключів зупиняє і вступ, і
+    /// створення з контрольованою помилкою; нічого не записано; після усунення причини
+    /// повтор проходить і прибирає залишок.
+    #[tokio::test]
+    async fn failed_orphan_sweep_stops_join_and_create_without_writing() {
+        let (owner, _a, collective) = owner_with_collective().await;
+        let (guest, _b) = node(GUEST).await;
+        let invitation = owner
+            .create_invitation(OWNER, password(), &collective, 24, UNIX)
+            .await
+            .unwrap();
+        let request = guest
+            .join_request(GUEST, password(), &invitation.text, UNIX + 10)
+            .await
+            .unwrap();
+        let admission = owner
+            .admit(OWNER, password(), &collective, &request.text, T1, UNIX + 20)
+            .await
+            .unwrap();
+        let orphan: CollectiveId = random_array();
+        {
+            let mut unlocked = guest
+                .secret_store(GUEST)
+                .unlock(PASSWORD.as_bytes())
+                .unwrap();
+            let key = EpochKey::generate();
+            let entries = vec![(epoch_purpose(&orphan, 0), key.as_bytes().as_slice())];
+            unlocked.write_many(&entries).unwrap();
+        }
+        let blocked = block_store_writes(&guest, GUEST);
+        let failed = |result: Result<()>| match result {
+            Err(CollectiveStoreError::Rejected(message)) => message == ORPHAN_SWEEP_FAILED,
+            _ => false,
+        };
+        assert!(failed(
+            guest
+                .join_accept(GUEST, password(), &admission.text, T1)
+                .await
+                .map(|_| ())
+        ));
+        assert!(failed(
+            guest
+                .create_collective(GUEST, password(), "Група гостя", T1, UNIX)
+                .await
+                .map(|_| ())
+        ));
+        assert!(guest.status(GUEST).await.unwrap().collectives.is_empty());
+        assert_eq!(
+            epoch_secrets(&guest, GUEST),
+            vec![epoch_purpose(&orphan, 0)],
+            "ні нових ключів, ні втраченого залишку"
+        );
+        std::fs::remove_dir(blocked).unwrap();
+        guest
+            .join_accept(GUEST, password(), &admission.text, T1)
+            .await
+            .unwrap();
+        let left = epoch_secrets(&guest, GUEST);
+        assert_eq!(left.len(), 1);
+        assert!(!left.contains(&epoch_purpose(&orphan, 0)));
     }
 }
