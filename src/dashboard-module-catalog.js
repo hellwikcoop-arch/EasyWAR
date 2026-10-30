@@ -62,8 +62,8 @@ import { registryPanel } from './module-registry-panel.js';
 import { addColumnsPanel } from './module-add-columns-panel.js';
 import { supportsColumns, userTables } from './module-add-columns-core.js';
 import { bindBlockColumns, saveBlockColumns } from './module-add-columns-client.js';
-import { blockCardModel, hasBlockCard, placeBlockCard } from './module-block-card-core.js';
-import { blockCardView } from './module-block-card-view.js';
+import { blockCardModel, chartViews, hasBlockCard, placeBlockCard } from './module-block-card-core.js';
+import { blockCardView, blockChoices } from './module-block-card-view.js';
 import { linkPanel } from './table-link-panel.js';
 import { snapshotPanel } from './table-link-snapshot-panel.js';
 import { snapshotInfo } from './table-link-snapshot-core.js';
@@ -556,7 +556,7 @@ function initialize() {
     // Картка блока реєстру (E5): рахується з рядків основної таблиці за підтвердженими ролями, а не діаграмою шаблону.
     const definitionId = placed?.instance.definitionId;
     const block = hasBlockCard(definitionId)
-      ? blockCardModel({ definition: registryDefinitions().find(item => item.definitionId === definitionId), schema: state.schema, sourceId: placed.instance.sourceId, rows })
+      ? blockCardModel({ definition: registryDefinitions().find(item => item.definitionId === definitionId), schema: state.schema, sourceId: placed.instance.sourceId, rows, view: placed.instance.style?.view })
       : null;
     // Картка блока — компактна, у дусі вкладок ПС і РВ; налаштування за «⋯», без дій над таблицею.
     if (block) {
@@ -564,7 +564,15 @@ function initialize() {
       loadStyleFonts(style);
       return dropTarget(blockCardView({
         el, module, placed, block, style, failed,
-        tools: placed.model.ok ? cardTools(module, placed) : null,
+        palette: placed.instance.style?.accent || '',
+        tools: placed.model.ok ? el('div', { class: 'ewmc-card-menu' }, cardTools(module, placed), blockChoices({
+          el,
+          views: chartViews(definitionId),
+          view: placed.instance.style?.view || '',
+          palette: placed.instance.style?.accent || '',
+          onView: view => changeLayout(layout => updateInstance(layout, placed.instance.id, { style: { view } })),
+          onPalette: accent => changeLayout(layout => updateInstance(layout, placed.instance.id, { style: { accent } })),
+        })) : null,
         visual: blockVisual,
         retry: event => retryRead(module, event.currentTarget),
       }), placed);

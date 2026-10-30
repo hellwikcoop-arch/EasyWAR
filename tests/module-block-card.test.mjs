@@ -6,7 +6,7 @@ import { listDefinitions } from '../src/module-definition-core.js';
 import { confirmBinding, emptySchema } from '../src/profile-schema-core.js';
 import { moduleSourceId, syncModuleSources } from '../src/profile-schema-modules-core.js';
 import { RV_KPI_DEFINITIONS, agg, resKind } from '../src/module-adapters/rv-kpi-core.js';
-import { blockCardModel, hasBlockCard, placeBlockCard, rvRow } from '../src/module-block-card-core.js';
+import { CARD_PALETTES, blockCardModel, chartViews, hasBlockCard, placeBlockCard, rvRow } from '../src/module-block-card-core.js';
 import { deltaTone } from '../src/module-block-card-view.js';
 import { addInstance, emptyLayout, orderedIds } from '../src/module-instance-core.js';
 import { ensureModuleInstances } from '../src/module-instance-modules-core.js';
@@ -195,6 +195,24 @@ test('спільні блоки ПС і РВ малюються тими сам�
   const repeat = chart('legacy:repeat-targets').model;
   assert.equal(repeat.categories.length, 4);
   assert.equal(chart('legacy:activity-by-day').model.kind, 'combo');
+});
+
+test('вид діаграми й колір картки вибираються; результати мають свої кольори', () => {
+  assert.deepEqual(chartViews('legacy:result-distribution').map(item => item.id), ['donut', 'horizontal-bar', 'columns']);
+  assert.deepEqual(chartViews('legacy:munition-use').map(item => item.id), ['horizontal-bar', 'donut', 'columns']);
+  assert.deepEqual(chartViews('legacy:result-dynamics').map(item => item.label), ['Стовпчики', 'Лінії', 'Області']);
+  assert.deepEqual(chartViews('legacy:activity-by-day').map(item => item.id), ['combo', 'columns', 'line']);
+  assert.deepEqual(chartViews('legacy:rv-kpi-destroyed'), [], 'у показника вибору виду немає');
+  assert.deepEqual(CARD_PALETTES.map(item => item.id), ['', 'branch', 'blue', 'green', 'amber', 'red']);
+  const schema = boundSchema();
+  const build = view => blockCardModel({ definition: byId('legacy:result-distribution'), schema, sourceId: SOURCE, rows, view });
+  assert.equal(build('').kind, 'donut');
+  assert.equal(build('columns').kind, 'columns');
+  assert.equal(build('columns').model.kind, 'columns');
+  assert.equal(build('radar').kind, 'donut', 'невідомий вид — типовий');
+  // Знищено — зелений (3), не уражено — червоний (8), пошкоджено — бурштиновий (2), подавлено — жовтий (5).
+  const slots = Object.fromEntries(build('').model.slices.map(slice => [slice.label, slice.slot]));
+  assert.deepEqual(slots, { Знищено: 3, Пошкоджено: 2, 'Не уражено': 8, Подавлено: 5, 'Не відомо': 4 });
 });
 
 test('топ підрозділів: ефективність як на вкладках, лише підрозділи з 5+ записами', () => {

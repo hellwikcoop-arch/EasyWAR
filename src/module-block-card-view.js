@@ -3,7 +3,10 @@
 // малюнок, що й у шаблонах. Налаштування картки (період, розмір, стиль, порядок, копія) сховано за «⋯». Числа рахує
 // module-block-card-core.js; тут лише DOM через `textContent`. Стилі — public/module-styles.css (лише в застосунку).
 
+import { CARD_PALETTES } from './module-block-card-core.js';
+
 const SVG = 'http://www.w3.org/2000/svg';
+const PALETTE_TONES = new Set(['branch', 'blue', 'green', 'amber', 'red']);
 
 function spark(history) {
   if (!Array.isArray(history) || history.length < 2) return null;
@@ -36,8 +39,8 @@ function ring(el, share) {
 }
 
 /** Показник: число, кільце частки, міні-графік і плитки. */
-export function kpiNode(el, model) {
-  return el('div', { class: 'ewmc-bk', 'data-tone': model.tone || 'blue', role: 'img', 'aria-label': `${model.label}: ${model.valueText}${model.share != null ? `, ${model.share}% від пусків` : ''}` },
+export function kpiNode(el, model, palette = '') {
+  return el('div', { class: 'ewmc-bk', 'data-tone': PALETTE_TONES.has(palette) ? palette : model.tone || 'blue', role: 'img', 'aria-label': `${model.label}: ${model.valueText}${model.share != null ? `, ${model.share}% від пусків` : ''}` },
     el('div', { class: 'ewmc-bk-top' },
       el('span', { class: 'ewmc-bk-label', text: model.label }),
       model.deltaText ? el('span', { class: `ewmc-bk-delta ${deltaTone(model)}`, text: model.deltaText, title: model.deltaNote }) : null),
@@ -48,7 +51,7 @@ export function kpiNode(el, model) {
     el('dl', { class: 'ewmc-bk-tiles' }, (model.tiles || []).map(([label, value]) => el('div', {}, el('dt', { text: label }), el('dd', { text: value })))));
 }
 
-function compactCard({ el, module, placed, model, tools, style }) {
+function compactCard({ el, module, placed, model, tools, style, palette }) {
   return el('article', {
     class: 'ewmc-module ewmc-block is-compact',
     style: { gridColumn: `span ${placed.width}` },
@@ -58,7 +61,7 @@ function compactCard({ el, module, placed, model, tools, style }) {
     'data-instance-id': placed.instance.id,
     title: `${model.label}: ${model.valueText}${model.unit ? ` · ${model.unit}` : ''} · ${placed.model.ok ? placed.model.periodLabel : 'Увесь час'}`,
   },
-    el('div', { class: 'ewmc-bk', 'data-tone': model.tone || 'blue', role: 'img', 'aria-label': `${model.label}: ${model.valueText}` },
+    el('div', { class: 'ewmc-bk', 'data-tone': PALETTE_TONES.has(palette) ? palette : model.tone || 'blue', role: 'img', 'aria-label': `${model.label}: ${model.valueText}` },
       el('div', { class: 'ewmc-bk-top' },
         el('span', { class: 'ewmc-bk-label', text: model.label }),
         el('details', { class: 'ewmc-block-tools' },
@@ -71,21 +74,22 @@ function compactCard({ el, module, placed, model, tools, style }) {
  * Картка блока. `tools` — смужка налаштувань картки (`instanceBar`); `visual(block)` — діаграма для блоків-діаграм;
  * `failed` / `retry` — стан читання таблиці. Повертає `<article>` з тими ж атрибутами, що й картки модулів.
  */
-export function blockCardView({ el, module, placed, block, tools, visual, failed = false, retry = null, style }) {
+export function blockCardView({ el, module, placed, block, tools, visual, failed = false, retry = null, style, palette = '' }) {
   // Мала картка показника (ширина до 3 колонок): лише підпис і число, як «Знищено 4»; решта — за «⋯».
-  if (!failed && block.ok && block.kind === 'kpi' && placed.width <= 3) return compactCard({ el, module, placed, model: block.model, tools, style });
+  if (!failed && block.ok && block.kind === 'kpi' && placed.width <= 3) return compactCard({ el, module, placed, model: block.model, tools, style, palette });
   const body = failed
     ? el('div', { class: 'ewmc-visual ewmc-read-failed', role: 'alert' },
       el('p', { text: 'Основну таблицю не прочитано. Показник не можна вважати нульовим: записи збережені.' }),
       retry ? el('button', { type: 'button', class: 'btn quiet', text: 'Прочитати знову', 'data-action': 'retry-read', 'data-module-id': module.id, onclick: retry }) : null)
     : !block.ok ? el('p', { class: 'ewmc-bk-missing', text: block.message })
-      : block.kind === 'kpi' ? kpiNode(el, block.model) : visual(block);
+      : block.kind === 'kpi' ? kpiNode(el, block.model, palette) : visual(block);
   return el('article', {
     class: 'ewmc-module ewmc-block',
     style: { gridColumn: `span ${placed.width}` },
     'data-kind': block.kind || 'kpi',
     'data-style': style,
     'data-branch': module.branch,
+    'data-palette': palette || null,
     'data-instance-id': placed.instance.id,
   },
     el('header', { class: 'ewmc-module-head' },
@@ -97,4 +101,15 @@ export function blockCardView({ el, module, placed, block, tools, visual, failed
         tools)),
     body,
     placed.model.ok && placed.model.note ? el('p', { class: 'ewmc-bk-note', text: placed.model.note }) : null);
+}
+
+/** Вибір у «⋯» картки блока: вид діаграми (якщо є з чого вибрати) і кольори. */
+export function blockChoices({ el, views = [], view = '', palette = '', onView, onPalette }) {
+  const select = (label, action, items, current, onChange) => el('label', { class: 'ewmc-block-choice' },
+    el('span', { text: label }),
+    el('select', { 'data-action': action, onchange: event => onChange(event.currentTarget.value) },
+      items.map(item => el('option', { value: item.id, text: item.label, selected: item.id === current }))));
+  return el('div', { class: 'ewmc-block-choices' },
+    views.length > 1 ? select('Вид діаграми', 'card-view', views, views.some(item => item.id === view) ? view : views[0].id, onView) : null,
+    select('Колір', 'card-palette', CARD_PALETTES, palette, onPalette));
 }

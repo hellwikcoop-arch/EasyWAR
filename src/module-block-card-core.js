@@ -118,7 +118,40 @@ const number = value => new Intl.NumberFormat('uk-UA').format(value);
  * `definition` — визначення реєстру (для перевірки ролей); `rows` — рядки основної таблиці в межах періоду картки.
  * `{ ok: true, model }` або `{ ok: false, message }`, якщо ролі блока в таблиці не зіставлено.
  */
-export function blockCardModel({ definition, schema, sourceId, rows }) {
+// Вид діаграми, який людина вибирає в «⋯» (`instance.style.view`): варіанти для тих самих рядків; типовий — перший.
+const VIEW_LABELS = { donut: 'Кільце', 'horizontal-bar': 'Горизонтальні смуги', columns: 'Вертикальні стовпчики', 'stacked-columns': 'Стовпчики', line: 'Лінії', area: 'Області', combo: 'Стовпчики з лінією БП' };
+const VIEW_GROUPS = { combo: ['combo', 'columns', 'line'], 'stacked-columns': ['stacked-columns', 'line', 'area'] };
+
+/** Види діаграми блока для вибору: `[{ id, label }]`, типовий першим; порожньо для показників і невідомих блоків. */
+export function chartViews(definitionId) {
+  const spec = Object.hasOwn(charts(), definitionId) ? charts()[definitionId] : null;
+  if (!spec) return [];
+  const group = VIEW_GROUPS[spec.kind] || [spec.kind, ...['donut', 'horizontal-bar', 'columns'].filter(kind => kind !== spec.kind)];
+  return group.map(id => ({ id, label: VIEW_LABELS[id] }));
+}
+
+/** Кольори картки (`instance.style.accent`): «За змістом» — як на вкладках; решта — одна гама на всю картку. */
+export const CARD_PALETTES = [
+  { id: '', label: 'За змістом' },
+  { id: 'branch', label: 'Колір роду військ' },
+  { id: 'blue', label: 'Синій' },
+  { id: 'green', label: 'Зелений' },
+  { id: 'amber', label: 'Бурштиновий' },
+  { id: 'red', label: 'Червоний' },
+];
+
+// Результат ураження має свій колір незалежно від порядку (номер кольору палітри діаграм, `--ewmc-sN`):
+// знищено — зелений, пошкоджено — бурштиновий, подавлено — жовтий, не уражено — червоний, інше — фіолетовий.
+const RESULT_SLOTS = { Знищено: 3, Уражено: 3, Пошкоджено: 2, Подавлено: 5, 'Не уражено': 8, 'Не відомо': 4 };
+const RESULT_CHARTS = new Set(['legacy:result-distribution', 'legacy:result-dynamics', 'legacy:hour-of-day']);
+function resultColors(model) {
+  const slot = (name, fallback) => RESULT_SLOTS[name] ?? fallback;
+  if (Array.isArray(model.slices)) return { ...model, slices: model.slices.map(item => ({ ...item, slot: slot(item.label, item.slot) })) };
+  if (Array.isArray(model.series)) return { ...model, series: model.series.map(item => ({ ...item, slot: slot(item.name, item.slot) })) };
+  return model;
+}
+
+export function blockCardModel({ definition, schema, sourceId, rows, view = '' }) {
   const card = CARDS[definition?.definitionId];
   const chart = Object.hasOwn(charts(), definition?.definitionId) ? charts()[definition.definitionId] : null;
   if (!card && !chart) return { ok: false, message: 'Цей блок ще не вміє рахуватися з основної таблиці.' };
@@ -131,8 +164,10 @@ export function blockCardModel({ definition, schema, sourceId, rows }) {
   }
   const list = (Array.isArray(rows) ? rows : []).map(row => rvRow(readRow(schema, sourceId, row).byRole || {}));
   if (chart) {
-    const module = { id: definition.definitionId, templateId: definition.definitionId, visualKind: chart.kind, fields: chart.fields.map((field, position) => ({ ...field, position })) };
-    return { ok: true, kind: chart.kind, model: chartModel(module, chart.rows(list)) };
+    const kind = chartViews(definition.definitionId).some(item => item.id === view) ? view : chart.kind;
+    const module = { id: definition.definitionId, templateId: definition.definitionId, visualKind: kind, fields: chart.fields.map((field, position) => ({ ...field, position })) };
+    const model = chartModel(module, chart.rows(list));
+    return { ok: true, kind, model: RESULT_CHARTS.has(definition.definitionId) ? resultColors(model) : model };
   }
   const A = agg(list);
   const value = card.value(A);
