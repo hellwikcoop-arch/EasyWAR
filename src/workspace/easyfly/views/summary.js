@@ -1,8 +1,9 @@
 // Зведення: лічильники строків (прострочено / скоро / дійсно), перелік проблем, найближчі 30 днів.
 import { formatDate } from '../fly-core.js';
 import { effectiveSettings, pluralEvents, summaryView } from '../fly-state.js';
-import { el, emptyState, button, notice, pageHeader, select, statusChip, table, dateText } from '../ui.js';
+import { el, emptyState, button, notice, select, statusChip, table, dateText } from '../ui.js';
 import { openPilotForm } from './card.js';
+import { routeBoard } from './route-board.js';
 
 const PROBLEM_LIMIT = 8;
 let showAll = false;
@@ -25,9 +26,8 @@ export function render(ctx) {
   const { data, today } = ctx;
   const settings = effectiveSettings(data);
   const root = el('div', { class: 'ef-view' });
-  const metaParts = [formatDate(today), `${data.persons.length} ${data.persons.length === 1 ? 'пілот' : 'пілотів'}`];
-  const title = data.unit.name ? `Зведення: ${data.unit.name}` : 'Зведення частини';
-  root.append(pageHeader({ title, subtitle: metaParts.join(' • '), actions: [] }));
+  const summary = data.persons.length ? summaryView(data, today, filter) : null;
+  root.append(routeBoard(ctx, summary));
 
   if (!data.persons.length) {
     root.append(emptyState('Немає даних', 'Додайте пілотів, щоб бачити строки перевірок, або відкрийте демо-дані.',
@@ -35,7 +35,6 @@ export function render(ctx) {
     return root;
   }
 
-  const summary = summaryView(data, today, filter);
   const { counters } = summary;
 
   if (summary.blocked.length) {
