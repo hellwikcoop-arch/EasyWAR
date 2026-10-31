@@ -2,16 +2,17 @@
    Кольори беруться зі змінних теми оболонки (--ef-*) із запасними значеннями. */
 
 .nv-root {
-  --nv-bg: var(--ef-bg, #0a0f1c);
-  --nv-panel: var(--ef-panel, #0e1a2e);
-  --nv-line: var(--ef-line, #1b2c47);
-  --nv-text: var(--ef-text, #e6edf7);
-  --nv-muted: var(--ef-muted, #8fa3bf);
-  --nv-accent: var(--ef-accent, #3d9bff);
-  --nv-good: var(--ef-good, #37c77a);
-  --nv-soon: var(--ef-soon, #f4b04a);
-  --nv-bad: var(--ef-bad, #f2645a);
-  --nv-field: color-mix(in srgb, var(--nv-bg) 70%, #000);
+  --nv-bg: var(--ef-bg, #0B141B);
+  --nv-panel: var(--ef-panel, #14232D);
+  --nv-line: var(--ef-line, rgba(82, 182, 200, .18));
+  --nv-text: var(--ef-text, #EAF3F5);
+  --nv-muted: var(--ef-muted, #93A9B4);
+  --nv-accent: var(--ef-accent, #36DDB5);
+  --nv-accent-2: var(--ef-accent-2, #52B6C8);
+  --nv-good: var(--ef-good, #36DDB5);
+  --nv-soon: var(--ef-soon, #F4A64D);
+  --nv-bad: var(--ef-bad, #EF6256);
+  --nv-field: color-mix(in srgb, var(--nv-bg) 72%, #000);
   color: var(--nv-text);
   font-size: 14px;
   line-height: 1.4;
@@ -39,8 +40,8 @@
 .nv-btn:hover:not(:disabled) { border-color: var(--nv-accent); }
 .nv-btn:focus-visible, .nv-input:focus-visible, .nv-chip:focus-visible, .nv-tab:focus-visible { outline: 2px solid var(--nv-accent); outline-offset: 2px; }
 .nv-btn:disabled { opacity: .45; cursor: not-allowed; }
-.nv-btn-primary { background: var(--nv-accent); border-color: var(--nv-accent); color: #04101f; }
-.nv-btn-primary:hover:not(:disabled) { filter: brightness(1.08); }
+.nv-btn-primary { background: var(--nv-accent); border-color: var(--nv-accent); color: #062018; }
+.nv-btn-primary:hover:not(:disabled) { filter: brightness(1.06); }
 .nv-btn-ghost { background: transparent; }
 .nv-btn-sm { min-height: 32px; padding: 4px 10px; font-size: 13px; }
 .nv-btn-wide { width: 100%; }
@@ -55,7 +56,7 @@
 /* ───── сітка розрахунку ───── */
 .nv-layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 18px; align-items: start; }
 .nv-col { display: grid; gap: 14px; min-width: 0; }
-.nv-card { border: 1px solid var(--nv-line); border-radius: 14px; background: var(--nv-panel); padding: 16px 18px; min-width: 0; }
+.nv-card { border: 1px solid var(--nv-line); border-radius: 14px; background: linear-gradient(180deg, rgba(234, 243, 245, .04), rgba(234, 243, 245, 0) 40%), var(--nv-panel); padding: 16px 18px; min-width: 0; box-shadow: inset 0 1px 0 rgba(234, 243, 245, .06); }
 .nv-card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .nv-card h2 { margin: 0; font-size: 16px; font-weight: 700; }
 .nv-card-note { color: var(--nv-muted); font-size: 12px; }
@@ -122,6 +123,10 @@ select.nv-input { appearance: auto; }
 .nv-sum-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid color-mix(in srgb, var(--nv-line) 70%, transparent); font-size: 13px; }
 .nv-sum-row span:first-child { color: var(--nv-muted); }
 .nv-sum-row strong { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.nv-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 4px 0 12px; }
+.nv-metric { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 10px 10px 8px; border-radius: 10px; border: 1px solid var(--nv-line); background: color-mix(in srgb, var(--nv-bg) 55%, var(--nv-panel)); }
+.nv-metric span { font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--nv-muted); }
+.nv-metric strong { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -.02em; color: var(--nv-text); overflow-wrap: anywhere; }
 .nv-mass { margin: 14px 0 10px; }
 .nv-mass-label { color: var(--nv-muted); font-size: 12px; }
 .nv-mass-value { font-size: 38px; line-height: 1.1; font-weight: 700; font-variant-numeric: tabular-nums; }
@@ -176,6 +181,7 @@ select.nv-input { appearance: auto; }
 }
 @media (max-width: 699.98px) {
   .nv-summary { order: 0; }
+  .nv-metrics { grid-template-columns: minmax(0, 1fr); }
   .nv-root { font-size: 15px; }
   .nv-title { font-size: 22px; }
   .nv-card { padding: 14px; }

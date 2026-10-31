@@ -354,8 +354,13 @@ export function render(ctx) {
         title: s.blocking ? 'Спершу заповніть дані розрахунку' : `Переглянути: ${DOC_KINDS[id].tab}`,
         onClick: () => switchTab(id),
       })));
+      const metric = (label, value) => el('div', { class: 'nv-metric' }, el('span', { text: label }), el('strong', { text: value }));
       summaryBox.replaceChildren(...[
         el('h2', { text: 'Живий підсумок' }),
+        el('div', { class: 'nv-metrics', 'aria-label': 'Показники розрахунку' },
+          metric('Відстань', `${fmtInt(s.totalKm)} км`),
+          metric('Час у повітрі', s.airTimeMin === null ? '—' : fmtDuration(s.airTimeMin)),
+          metric('Пальне на маршрут', s.routeFuelKg === null ? '—' : `${fmtInt(s.routeFuelKg)} кг`)),
         el('div', { class: 'nv-sum-rows' },
           row('Порожнє ПС', kg(s.empty)), row('Екіпаж', kg(s.crew)), row('Пальне', kg(s.fuelKg)), row('Обладнання і вантаж', kg(s.cargo))),
         el('div', { class: 'nv-mass' },
