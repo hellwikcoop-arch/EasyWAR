@@ -1245,7 +1245,7 @@ test('«Мій дашборд» lives only on its own tab of the left menu', asy
   const source = await readFile(new URL('../src/dashboard-module-catalog.js', import.meta.url), 'utf8');
   // ПВК і УДШВ малюють гніздо самі; ПС і РВ отримують пункт бічного меню від каталогу.
   assert.match(source, /dashboard\.querySelector\(`\[\$\{MINE_SLOT\}\]`\)/);
-  assert.match(source, /nav\.insertBefore\(mineButton, nav\.querySelector\(':scope > \.snav-entry'\)\)/);
+  assert.match(source, /nav\.insertBefore\(mineButton, nav\.querySelector\(':scope > \.snav-lay'\)\)/);
   assert.match(source, /else if \(host\.isConnected\) host\.remove\(\)/, 'outside its tab the section is not on the page');
   for (const page of ['udshv-dashboard.js', 'pvk-dashboard.js']) {
     const dash = await readFile(new URL(`../src/${page}`, import.meta.url), 'utf8');

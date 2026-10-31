@@ -108,14 +108,16 @@ test('rocket module has the «База даних» tab: sheet columns as import
   assert.match(html, /<main id="view-base" class="dash basev"/);
   assert.match(html, /const VORDER = \['dash', 'base', 'entry', 'ref'\];/);
   assert.match(html, /if \(v === 'base'\) renderBase\(\);/);
-  assert.match(html, /onclick: \(\) => showView\('base'\) \}, icon\('db'\), h\('span', \{ text: 'База даних' \}\)/);
-  assert.match(html, /class: 'snav-b snav-entry2', onclick: \(\) => showView\('entry'\)/);
+  // Top tabs remain the only path to База / Внесення / Довідник; left menu keeps dashboard sections only.
+  assert.doesNotMatch(html, /class: 'snav-b snav-entry2', onclick: \(\) => showView\('entry'\)/);
+  assert.doesNotMatch(html, /class: 'snav-b snav-entry', onclick: \(\) => showView\('base'\)/);
+  assert.doesNotMatch(html, /class: 'snav-b snav-ref', onclick: \(\) => showView\('ref'\)/);
   // Table = FIELD_ORDER columns that exist in the file, headers from FIELD_HEADERS, raw record values.
   assert.match(html, /const fields = window\.AVCORE\.FIELD_ORDER\.filter\(f => wb\.colByField\[f\]\)/);
   assert.match(html, /\[fields\.map\(f => window\.AVCORE\.FIELD_HEADERS\[f\]\)\]/);
   assert.match(html, /html\[data-command="dshv"\] #tab-base, html\[data-command="dshv"\] \.snav-entry2/);
-  // «Мій дашборд» is still inserted before the first separator entry (now «База даних»).
-  assert.match(await read('dashboard-module-catalog.js'), /nav\.querySelector\(':scope > \.snav-entry'\)/);
+  // «Мій дашборд» is inserted before «Розташування блоків» after sidebar duplicates were removed.
+  assert.match(await read('dashboard-module-catalog.js'), /nav\.querySelector\(':scope > \.snav-lay'\)/);
 });
 
 test('desktop bridge reuses the parent Tauri IPC inside the iframe', async () => {
@@ -258,6 +260,11 @@ test('стартові екрани без таблиці: три кроки, п
     assert.match(html, /refresh: refreshFromDisk, resume: resumeStored \}/, page);
     assert.match(html, /S\.storedHandle = fh; if \(!S\.wb\) renderFile\(\); document\.dispatchEvent\(new Event\('ew-stored-handle'\)\);/, page);
     assert.match(html, /@media \(max-width: 900px\) \{ \.dmain > \.dpanel\.empty-state\.es \{ grid-template-columns: minmax\(0, 1fr\);[^}]*\} \.es-prev \{ display: none; \}/, page);
+    assert.match(html, /el\.profileTable = h\('button'/, page);
+    assert.match(html, /Остання таблиця профілю/, page);
+    assert.match(html, /el\.qualityRibbon = h\('button'/, page);
+    assert.match(html, /Потребує перевірки \(' \+ qn \+ '\)/, page);
+    assert.doesNotMatch(html, /class: 'snav-b snav-entry'/, page);
   }
   const app = await readFile(new URL('../src/artillery-app.js', import.meta.url), 'utf8');
   assert.match(app, /h\('section', \{ class: 'panel es' \}/);
@@ -282,4 +289,25 @@ test('start screen keeps only the profile modules: empty sections hide and cards
   const css = await read('profile-gate.css');
   assert.match(css, /\.branch-cards\.ew-modules-trimmed \{\n  grid-template-columns: repeat\(var\(--ew-cols, 2\), minmax\(0, 1fr\)\) !important;/, 'remaining cards fill the width');
   assert.match(css, /\.branch-cards\.ew-no-command::before,\n#view-start \.branch-cards\.ew-no-branches::after \{ display: none !important; \}/, 'empty section headers hide');
+});
+
+test('стартовий екран: меню «⋯» збирає Профілі / копію / оновлення / Signal; EWProfiles для порожнього дашборда', async () => {
+  const tools = await read('launcher-tools.js');
+  assert.match(tools, /import '\.\/launcher-overflow\.js'/);
+  const overflow = await read('launcher-overflow.js');
+  assert.match(overflow, /ew-tools-overflow/);
+  assert.match(overflow, /window\.__EW_TOOLS_MOUNT__/);
+  const profiles = await read('local-profiles.js');
+  assert.match(profiles, /window\.EWProfiles = \{/);
+  assert.match(profiles, /openBound\(branch\)/);
+  assert.match(profiles, /__EW_TOOLS_MOUNT__/);
+  const backup = await read('backup.js');
+  assert.match(backup, /__EW_TOOLS_MOUNT__/);
+  const signal = await read('signal-settings.js');
+  assert.match(signal, /__EW_TOOLS_MOUNT__/);
+  const kit = await read('ui-kit.css');
+  assert.match(kit, /html:not\(\[data-theme="light"\]\) \.kpipanel > \.kh::after/);
+  assert.match(kit, /html:not\(\[data-theme="light"\]\) \.kc::before/);
+  const ws = await read('workspace/workspace.css');
+  assert.match(ws, /\.ws-card:hover \.ws-card-action/);
 });
