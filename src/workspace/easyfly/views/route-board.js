@@ -1,5 +1,6 @@
-// Командна панель зведення: схема маршруту з розрахунку штурмана (курс і відстань),
-// профіль висоти й лічильники допусків. Не карта, не радар і не жива телеметрія борта.
+// Командна панель зведення у кадрі референса: схема по центру, показники зверху,
+// праворуч погода з розрахунку, порожні UKBB і зони, точки й профіль висоти.
+// Не карта, не радар, не METAR і не положення борта.
 import { calcShpp, planScheme } from '../nav-core.js';
 import { el } from '../ui.js';
 import {
@@ -58,9 +59,10 @@ function schemeOf(flight) {
     width: W,
     height: H,
     marginX: 92,
-    marginY: 78,
+    marginY: 108,
     rotationStep: 5,
     reserve: [
+      { x0: 0, y0: 0, x1: 820, y1: 118 },
       { x0: W - 120, y0: 4, x1: W - 4, y1: 120 },
       { x0: 4, y0: H - 58, x1: 250, y1: H - 4 },
     ],
@@ -287,38 +289,30 @@ function metric(label, value, unit) {
     unit ? el('small', { text: unit }) : null);
 }
 
-function donut(counters) {
-  const parts = [
-    { value: counters.valid, color: '#36DDB5', label: 'Дійсно' },
-    { value: counters.soon, color: '#F4A64D', label: 'Скоро' },
-    { value: counters.overdue, color: '#EF6256', label: 'Прострочено' },
-  ];
-  const total = parts.reduce((sum, part) => sum + part.value, 0);
-  const r = 38;
-  const c = 2 * Math.PI * r;
-  let offset = 0;
-  const rings = parts.filter(part => part.value > 0).map(part => {
-    const len = total ? (part.value / total) * c : 0;
-    const ring = svg('circle', {
-      cx: 54, cy: 54, r, fill: 'none', stroke: part.color, 'stroke-width': 10,
-      'stroke-dasharray': `${len} ${c - len}`, 'stroke-dashoffset': String(-offset),
-      transform: 'rotate(-90 54 54)',
-    });
-    offset += len;
-    return ring;
-  });
-  const picture = svg('svg', { viewBox: '0 0 108 108', class: 'ef-cmd-donut', role: 'img' }, ...rings);
-  const pct = total ? Math.round((counters.valid / total) * 100) : 0;
-  const caption = svg('text', { x: 54, y: 58, 'text-anchor': 'middle', fill: '#EAF3F5', 'font-size': '18', 'font-weight': '700' });
-  caption.textContent = `${pct}%`;
-  picture.append(caption);
-  picture.setAttribute('aria-label', `Дійсні ${counters.valid}, скоро ${counters.soon}, прострочено ${counters.overdue}`);
-  return el('div', { class: 'ef-cmd-donut-wrap' },
-    picture,
-    el('ul', { class: 'ef-cmd-legend' }, parts.map(part => el('li', {},
-      el('i', { style: `background:${part.color}` }),
-      el('span', { text: part.label }),
-      el('strong', { text: fmtInt(part.value) })))));
+function panel(title, body) {
+  return el('section', { class: 'ef-card ef-cmd-card' },
+    el('h2', { class: 'ef-card-title', text: title }),
+    body);
+}
+
+function missing(copy) {
+  return el('p', { class: 'ef-cmd-missing', text: copy });
+}
+
+function hasNum(value) {
+  return value !== null && value !== undefined && Number.isFinite(Number(value));
+}
+
+function weatherCard(flight) {
+  const rows = [];
+  if (flight?.wind) rows.push(`Вітер з розрахунку: ${courseText(flight.wind.from)} ${fmtInt(flight.wind.speedMs)} м/с`);
+  if (hasNum(flight?.qnh)) rows.push(`QNH з розрахунку: ${fmtInt(flight.qnh)} гПа`);
+  if (hasNum(flight?.qfe)) rows.push(`QFE з розрахунку: ${fmtInt(flight.qfe)} гПа`);
+  if (hasNum(flight?.t0)) rows.push(`Температура з розрахунку: ${fmtInt(flight.t0)} °C`);
+  const body = rows.length
+    ? el('ul', { class: 'ef-cmd-facts' }, rows.map(line => el('li', { text: line })))
+    : missing('У розрахунку немає вітру, QNH, QFE і температури. METAR сюди не підставляється.');
+  return panel('Погода', body);
 }
 
 function pointRows(shpp) {
@@ -342,7 +336,7 @@ function emptyMap(ctx) {
     el('button', { type: 'button', class: 'ef-btn ef-btn-primary', onClick: () => ctx.go('navigator'), text: 'Відкрити розрахунок' }));
 }
 
-export function routeBoard(ctx, summary) {
+export function routeBoard(ctx) {
   const picked = chosenDraft(ctx);
   let model = null;
   let stats = null;
@@ -371,22 +365,18 @@ export function routeBoard(ctx, summary) {
   const side = el('div', { class: 'ef-cmd-side' });
   if (flight) {
     const type = aircraftType(flight.typeId);
+    const who = [flight.callsign, flight.board ? `борт ${flight.board}` : '', type?.label || ''].filter(Boolean).join(' · ');
     side.append(el('section', { class: 'ef-card ef-cmd-card' },
-      el('h2', { class: 'ef-card-title', text: picked.title }),
-      el('p', { class: 'ef-cmd-call', text: [flight.callsign, flight.board ? `борт ${flight.board}` : '', type?.label || ''].filter(Boolean).join(' · ') || 'Розрахунок без позивного' }),
+      el('h2', { class: 'ef-card-title', text: who || 'Розрахунок' }),
+      el('p', { class: 'ef-cmd-route', text: picked.title }),
       el('p', { class: 'ef-muted', text: flight.departure?.name ? `Виліт: ${flight.departure.name}` : 'Точку вильоту не вказано' }),
-      flight.qnh !== null && flight.qnh !== undefined ? el('p', { class: 'ef-muted', text: `QNH з розрахунку: ${fmtInt(flight.qnh)} гПа` }) : null,
-      flight.wind ? el('p', { class: 'ef-muted', text: `Вітер з розрахунку: ${courseText(flight.wind.from)} ${fmtInt(flight.wind.speedMs)} м/с` }) : null,
       el('button', { type: 'button', class: 'ef-btn ef-btn-secondary ef-btn-sm', onClick: () => ctx.go('navigator'), text: 'До розрахунку' })));
   }
-  if (summary?.counters) {
-    side.append(el('section', { class: 'ef-card ef-cmd-card' },
-      el('h2', { class: 'ef-card-title', text: 'Допуски' }),
-      donut(summary.counters)));
-  }
+  side.append(weatherCard(flight));
+  side.append(panel('UKBB', missing('Даних немає. Модуль не зберігає зведення аеродрому і NOTAM.')));
+  side.append(panel('Зони', missing('Даних немає. Полігонів повітряного простору в розрахунку немає.')));
   if (model) {
-    side.append(el('section', { class: 'ef-card ef-cmd-card' },
-      el('h2', { class: 'ef-card-title', text: 'Точки маршруту' }),
+    side.append(panel('Точки',
       el('ul', { class: 'ef-cmd-points' }, pointRows(model.shpp).map(row => el('li', {},
         el('span', { class: 'ef-cmd-code', text: row.code }),
         el('span', { class: 'ef-cmd-pname', text: row.name }),

@@ -73,27 +73,24 @@
 .ef-view, .ef-stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 
 /* ───── Командна схема на зведенні ───── */
-.ef-cmd { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 12px; align-items: start; }
-.ef-cmd-map { display: flex; flex-direction: column; border: 1px solid var(--ef-line); border-radius: 16px; overflow: hidden; background: radial-gradient(1200px 480px at 70% 20%, rgba(54, 221, 181, .08), transparent 55%), #0B141B; box-shadow: inset 0 1px 0 rgba(234, 243, 245, .05); }
+.ef-cmd { display: grid; grid-template-columns: minmax(0, 1fr) 280px; grid-template-areas: "map side" "profile side"; gap: 12px; align-items: start; }
+.ef-cmd-map { grid-area: map; position: relative; display: flex; flex-direction: column; min-height: 420px; border: 1px solid var(--ef-line); border-radius: 16px; overflow: hidden; background: radial-gradient(1200px 480px at 70% 20%, rgba(54, 221, 181, .08), transparent 55%), #0B141B; box-shadow: inset 0 1px 0 rgba(234, 243, 245, .05); }
 .ef-cmd-svg, .ef-cmd-profile-svg { display: block; width: 100%; height: auto; }
-.ef-cmd-telem { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 12px 0; }
+.ef-cmd-telem { position: absolute; z-index: 2; top: 12px; left: 12px; right: 12px; display: flex; flex-wrap: wrap; gap: 8px; max-width: calc(100% - 24px); pointer-events: none; }
 .ef-cmd-metric { min-width: 92px; padding: 8px 12px 7px; border-radius: 12px; border: 1px solid var(--ef-line); background: rgba(11, 20, 27, .82); }
 .ef-cmd-metric span, .ef-cmd-metric small { display: block; color: var(--ef-muted); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; }
 .ef-cmd-metric strong { display: block; margin-top: 2px; font-size: 22px; line-height: 1.1; letter-spacing: -.03em; }
-.ef-cmd-note { margin: 0; padding: 4px 14px 12px; color: var(--ef-muted); font-size: 12px; }
-.ef-cmd-empty { min-height: 320px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 8px; padding: 28px; }
+.ef-cmd-note { margin: 0; padding: 0 14px 12px; color: var(--ef-muted); font-size: 12px; }
+.ef-cmd-empty { min-height: 360px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 8px; padding: 28px; }
 .ef-cmd-empty p { margin: 0 0 8px; max-width: 46ch; color: var(--ef-muted); }
-.ef-cmd-side, .ef-cmd-bottom { display: grid; gap: 12px; }
-.ef-cmd-bottom { grid-column: 1 / -1; }
+.ef-cmd-side { grid-area: side; display: grid; gap: 10px; align-content: start; }
+.ef-cmd-bottom { grid-area: profile; }
 .ef-cmd-card .ef-card-title { font-size: 14px; }
-.ef-cmd-call { margin: 0 0 6px; font-weight: 700; }
-.ef-cmd-card .ef-muted { margin: 0 0 4px; }
+.ef-cmd-route, .ef-cmd-card .ef-muted, .ef-cmd-missing, .ef-cmd-facts { margin: 0 0 4px; }
+.ef-cmd-route { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ef-muted); font-size: 13px; }
+.ef-cmd-missing { color: var(--ef-muted); font-size: 13px; }
+.ef-cmd-facts { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: 13px; }
 .ef-cmd-card .ef-btn { margin-top: 10px; }
-.ef-cmd-donut-wrap { display: grid; grid-template-columns: 108px minmax(0, 1fr); gap: 8px; align-items: center; }
-.ef-cmd-donut { width: 108px; height: 108px; }
-.ef-cmd-legend { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
-.ef-cmd-legend li { display: grid; grid-template-columns: 8px 1fr auto; gap: 8px; align-items: center; font-size: 13px; }
-.ef-cmd-legend i { width: 8px; height: 8px; border-radius: 50%; }
 .ef-cmd-points { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .ef-cmd-points li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 8px; align-items: baseline; font-size: 13px; font-variant-numeric: tabular-nums; }
 .ef-cmd-code { color: var(--ef-accent); font-weight: 700; }
@@ -363,7 +360,8 @@
 @media (max-width: 1100px) {
   .ef-host { --ef-gutter: 20px; }
   .ef-root { grid-template-columns: 188px minmax(0, 1fr); }
-  .ef-cmd { grid-template-columns: minmax(0, 1fr); }
+  .ef-cmd { grid-template-columns: minmax(0, 1fr); grid-template-areas: "map" "side" "profile"; }
+  .ef-cmd-telem { position: static; max-width: none; padding: 12px 12px 0; pointer-events: auto; }
   .ef-sidebar { padding: 16px 10px 12px; }
   .ef-nav-item { gap: 10px; padding: 8px 10px; font-size: 13px; }
   .ef-brand { padding-left: 10px; font-size: 18px; }

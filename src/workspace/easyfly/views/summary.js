@@ -27,7 +27,7 @@ export function render(ctx) {
   const settings = effectiveSettings(data);
   const root = el('div', { class: 'ef-view' });
   const summary = data.persons.length ? summaryView(data, today, filter) : null;
-  root.append(routeBoard(ctx, summary));
+  root.append(routeBoard(ctx));
 
   if (!data.persons.length) {
     root.append(emptyState('Немає даних', 'Додайте пілотів, щоб бачити строки перевірок, або відкрийте демо-дані.',
