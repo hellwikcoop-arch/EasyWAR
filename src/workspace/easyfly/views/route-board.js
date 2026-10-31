@@ -1,6 +1,6 @@
-// Командна панель зведення у кадрі референса: схема по центру, показники зверху,
-// праворуч погода з розрахунку, порожні UKBB і зони, точки й профіль висоти.
-// Не карта, не радар, не METAR і не положення борта.
+// Командна панель зведення: офлайн-карта України з маршрутом розрахунку,
+// показники зверху, погода лише з введених даних, порожні UKBB і зони, профіль висоти.
+// Не радар, не METAR і не положення борта.
 import { calcShpp, planScheme } from '../nav-core.js';
 import { el } from '../ui.js';
 import {
@@ -336,6 +336,347 @@ function emptyMap(ctx) {
     el('button', { type: 'button', class: 'ef-btn ef-btn-primary', onClick: () => ctx.go('navigator'), text: 'Відкрити розрахунок' }));
 }
 
+// Межі sat.jpg — ті самі, що META у map-app.js. Файл уже лежить у застосунку, мережа не потрібна.
+const UKRAINE = { lon0: 21.9, lon1: 40.5, lat0: 44.05, lat1: 52.5 };
+const ASSET = './map-assets/';
+const KM_LAT = 111.32;
+const imageCache = new Map();
+let regionsPromise = null;
+
+function loadImage(src) {
+  const hit = imageCache.get(src);
+  if (hit) return hit;
+  const pending = new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => {
+      imageCache.delete(src);
+      reject(new Error(src));
+    };
+    img.src = src;
+  });
+  imageCache.set(src, pending);
+  return pending;
+}
+
+function loadRegions() {
+  if (!regionsPromise) {
+    regionsPromise = fetch(`${ASSET}regions.json`)
+      .then(response => (response.ok ? response.json() : []))
+      .catch(() => []);
+  }
+  return regionsPromise;
+}
+
+function moveKm(lat, lon, courseDeg, km) {
+  const rad = courseDeg * Math.PI / 180;
+  const north = km * Math.cos(rad);
+  const east = km * Math.sin(rad);
+  return {
+    lat: lat + north / KM_LAT,
+    lon: lon + east / (KM_LAT * Math.cos(lat * Math.PI / 180)),
+  };
+}
+
+/** Точки маршруту на місцевості: виліт за координатами, далі курс і відстань кожної ділянки. */
+function trackPoints(flight, shpp) {
+  const lat0 = Number(flight?.departure?.lat);
+  const lon0 = Number(flight?.departure?.lon);
+  if (!Number.isFinite(lat0) || !Number.isFinite(lon0) || !shpp?.legs?.length) return null;
+  const points = [{
+    lat: lat0,
+    lon: lon0,
+    code: shpp.legs[0].from?.code || 'ВПМ',
+    name: shpp.legs[0].from?.name || '',
+    kind: 'vpm',
+  }];
+  let lat = lat0;
+  let lon = lon0;
+  for (const leg of shpp.legs) {
+    if (!Number.isFinite(leg.mk) || !Number.isFinite(leg.s)) return null;
+    const step = moveKm(lat, lon, leg.mk, leg.s);
+    lat = step.lat;
+    lon = step.lon;
+    points.push({
+      lat,
+      lon,
+      code: leg.to?.code || '',
+      name: leg.to?.name || '',
+      kind: leg.to?.kind || '',
+      landing: Boolean(leg.landing),
+    });
+  }
+  return points;
+}
+
+function fitBounds(points, width, height) {
+  let lon0 = Math.min(...points.map(point => point.lon));
+  let lon1 = Math.max(...points.map(point => point.lon));
+  let lat0 = Math.min(...points.map(point => point.lat));
+  let lat1 = Math.max(...points.map(point => point.lat));
+  const mid = (lat0 + lat1) / 2;
+  lon0 -= Math.max((lon1 - lon0) * 0.38, 0.12);
+  lon1 += Math.max((lon1 - lon0) * 0.22, 0.12);
+  lat0 -= Math.max((lat1 - lat0) * 0.28, 0.08);
+  lat1 += Math.max((lat1 - lat0) * 0.28, 0.1);
+  const cos = Math.cos(mid * Math.PI / 180) || 1;
+  const geoAspect = ((lon1 - lon0) * cos) / (lat1 - lat0);
+  const viewAspect = width / height;
+  if (geoAspect > viewAspect) {
+    const need = ((lon1 - lon0) * cos) / viewAspect;
+    const extra = (need - (lat1 - lat0)) / 2;
+    lat0 -= extra;
+    lat1 += extra;
+  } else {
+    const need = ((lat1 - lat0) * viewAspect) / cos;
+    const extra = (need - (lon1 - lon0)) / 2;
+    lon0 -= extra;
+    lon1 += extra;
+  }
+  return { lon0, lon1, lat0, lat1 };
+}
+
+function intersects(bbox, bounds) {
+  if (!Array.isArray(bbox) || bbox.length < 4) return false;
+  const [lon0, lon1, lat0, lat1] = bbox;
+  return lon1 > bounds.lon0 && lon0 < bounds.lon1 && lat1 > bounds.lat0 && lat0 < bounds.lat1;
+}
+
+function drawGeoref(ctx, img, frame, view, width, height) {
+  const iw = img.naturalWidth || img.width;
+  const ih = img.naturalHeight || img.height;
+  if (!iw || !ih) return false;
+  const sx0 = (view.lon0 - frame.lon0) / (frame.lon1 - frame.lon0) * iw;
+  const sx1 = (view.lon1 - frame.lon0) / (frame.lon1 - frame.lon0) * iw;
+  const sy0 = (frame.lat1 - view.lat1) / (frame.lat1 - frame.lat0) * ih;
+  const sy1 = (frame.lat1 - view.lat0) / (frame.lat1 - frame.lat0) * ih;
+  const csx0 = Math.max(0, Math.min(iw, sx0));
+  const csx1 = Math.max(0, Math.min(iw, sx1));
+  const csy0 = Math.max(0, Math.min(ih, sy0));
+  const csy1 = Math.max(0, Math.min(ih, sy1));
+  if (csx1 - csx0 < 1 || csy1 - csy0 < 1 || sx1 === sx0 || sy1 === sy0) return false;
+  const dx = ((csx0 - sx0) / (sx1 - sx0)) * width;
+  const dy = ((csy0 - sy0) / (sy1 - sy0)) * height;
+  const dw = ((csx1 - csx0) / (sx1 - sx0)) * width;
+  const dh = ((csy1 - csy0) / (sy1 - sy0)) * height;
+  ctx.drawImage(img, csx0, csy0, csx1 - csx0, csy1 - csy0, dx, dy, dw, dh);
+  return true;
+}
+
+function screenOf(point, bounds, width, height) {
+  return {
+    x: ((point.lon - bounds.lon0) / (bounds.lon1 - bounds.lon0)) * width,
+    y: ((bounds.lat1 - point.lat) / (bounds.lat1 - bounds.lat0)) * height,
+  };
+}
+
+function drawGrid(ctx, bounds, width, height) {
+  const mid = (bounds.lat0 + bounds.lat1) / 2;
+  const kmLat = (bounds.lat1 - bounds.lat0) * KM_LAT;
+  const kmLon = (bounds.lon1 - bounds.lon0) * KM_LAT * Math.cos(mid * Math.PI / 180);
+  const stepKm = Math.max(kmLat, kmLon) > 160 ? 20 : 10;
+  const latStep = stepKm / KM_LAT;
+  const lonStep = stepKm / (KM_LAT * Math.cos(mid * Math.PI / 180) || 1);
+  ctx.save();
+  ctx.strokeStyle = 'rgba(82, 182, 200, 0.28)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let lat = Math.ceil(bounds.lat0 / latStep) * latStep; lat < bounds.lat1; lat += latStep) {
+    const y = ((bounds.lat1 - lat) / (bounds.lat1 - bounds.lat0)) * height;
+    ctx.moveTo(0, y);
+    ctx.lineTo(width, y);
+  }
+  for (let lon = Math.ceil(bounds.lon0 / lonStep) * lonStep; lon < bounds.lon1; lon += lonStep) {
+    const x = ((lon - bounds.lon0) / (bounds.lon1 - bounds.lon0)) * width;
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, height);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawRoute(ctx, points, legs, bounds, width, height) {
+  const screen = points.map(point => screenOf(point, bounds, width, height));
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = 'rgba(6, 32, 24, 0.85)';
+  ctx.lineWidth = 7;
+  ctx.beginPath();
+  screen.forEach((point, index) => (index ? ctx.lineTo(point.x, point.y) : ctx.moveTo(point.x, point.y)));
+  ctx.stroke();
+  ctx.strokeStyle = '#36DDB5';
+  ctx.lineWidth = 3;
+  ctx.setLineDash([12, 8]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  screen.forEach((point, index) => {
+    if (!screen[index + 1]) return;
+    const next = screen[index + 1];
+    const angle = Math.atan2(next.y - point.y, next.x - point.x);
+    const x = next.x - Math.cos(angle) * 16;
+    const y = next.y - Math.sin(angle) * 16;
+    ctx.fillStyle = '#36DDB5';
+    ctx.beginPath();
+    ctx.moveTo(x + Math.cos(angle) * 8, y + Math.sin(angle) * 8);
+    ctx.lineTo(x + Math.cos(angle + 2.4) * 7, y + Math.sin(angle + 2.4) * 7);
+    ctx.lineTo(x + Math.cos(angle - 2.4) * 7, y + Math.sin(angle - 2.4) * 7);
+    ctx.fill();
+  });
+  const cx = screen.reduce((sum, point) => sum + point.x, 0) / screen.length;
+  const cy = screen.reduce((sum, point) => sum + point.y, 0) / screen.length;
+  ctx.font = '700 15px system-ui, sans-serif';
+  ctx.textBaseline = 'middle';
+  screen.forEach((point, index) => {
+    const source = points[index];
+    const last = index === screen.length - 1;
+    const kpm = last || source.kind === 'kpm';
+    ctx.beginPath();
+    ctx.fillStyle = '#0B141B';
+    ctx.strokeStyle = kpm ? '#EF6256' : '#36DDB5';
+    ctx.lineWidth = 2.5;
+    ctx.arc(point.x, point.y, 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    if (source.kind === 'vpm') {
+      ctx.beginPath();
+      ctx.fillStyle = '#36DDB5';
+      ctx.arc(point.x, point.y, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    let dx = point.x - cx;
+    let dy = point.y - cy;
+    const len = Math.hypot(dx, dy) || 1;
+    dx /= len;
+    dy /= len;
+    const lx = point.x + dx * 18;
+    const ly = point.y + dy * 16;
+    ctx.textAlign = dx > 0.3 ? 'left' : dx < -0.3 ? 'right' : 'center';
+    const line = source.name ? `${source.code}  ${source.name}` : source.code;
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = 'rgba(11, 20, 27, 0.9)';
+    ctx.strokeText(line, lx, ly);
+    ctx.fillStyle = '#EAF3F5';
+    ctx.fillText(line, lx, ly);
+  });
+  ctx.font = '13px system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  legs.forEach((leg, index) => {
+    const a = screen[index];
+    const b = screen[index + 1];
+    if (!a || !b) return;
+    const mx = (a.x + b.x) / 2;
+    const my = (a.y + b.y) / 2;
+    const label = `${fmtInt(leg.s)} км`;
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = 'rgba(11, 20, 27, 0.9)';
+    ctx.strokeText(label, mx, my - 12);
+    ctx.fillStyle = '#EAF3F5';
+    ctx.fillText(label, mx, my - 12);
+  });
+  ctx.restore();
+}
+
+function drawNorth(ctx, width) {
+  const x = width - 46;
+  const y = 78;
+  ctx.save();
+  ctx.strokeStyle = '#52B6C8';
+  ctx.fillStyle = '#52B6C8';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(x, y + 22);
+  ctx.lineTo(x, y - 16);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x, y - 22);
+  ctx.lineTo(x - 6, y - 10);
+  ctx.lineTo(x + 6, y - 10);
+  ctx.fill();
+  ctx.font = '700 14px system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('Пн', x, y - 34);
+  ctx.restore();
+}
+
+function drawScale(ctx, bounds, width, height) {
+  const mid = (bounds.lat0 + bounds.lat1) / 2;
+  const kmPerPx = ((bounds.lon1 - bounds.lon0) * KM_LAT * Math.cos(mid * Math.PI / 180)) / width;
+  const km = [5, 10, 20, 25, 50].find(step => step / kmPerPx >= 70 && step / kmPerPx <= 180) || 10;
+  const len = km / kmPerPx;
+  const y = height - 28;
+  ctx.save();
+  ctx.strokeStyle = '#EAF3F5';
+  ctx.fillStyle = '#EAF3F5';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(28, y);
+  ctx.lineTo(28 + len, y);
+  ctx.moveTo(28, y - 6);
+  ctx.lineTo(28, y + 6);
+  ctx.moveTo(28 + len, y - 6);
+  ctx.lineTo(28 + len, y + 6);
+  ctx.stroke();
+  ctx.font = '13px system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#EAF3F5';
+  ctx.fillText(`${km} км`, 28 + len / 2, y - 12);
+  ctx.restore();
+}
+
+function drawMap(ctx, sat, tiles, bounds, points, legs, width, height) {
+  ctx.fillStyle = '#0B141B';
+  ctx.fillRect(0, 0, width, height);
+  drawGeoref(ctx, sat, UKRAINE, bounds, width, height);
+  for (const tile of tiles) {
+    drawGeoref(ctx, tile.img, { lon0: tile.bbox[0], lon1: tile.bbox[1], lat0: tile.bbox[2], lat1: tile.bbox[3] }, bounds, width, height);
+  }
+  ctx.fillStyle = 'rgba(11, 20, 27, 0.42)';
+  ctx.fillRect(0, 0, width, height);
+  drawGrid(ctx, bounds, width, height);
+  drawRoute(ctx, points, legs, bounds, width, height);
+  drawNorth(ctx, width);
+  drawScale(ctx, bounds, width, height);
+}
+
+function geoMap(model, flight, note) {
+  const points = trackPoints(flight, model.shpp);
+  if (!points) return null;
+  note.textContent = 'Офлайн-знімок України. Маршрут відкладено від координат вильоту за курсом і відстанню розрахунку. Не положення борта.';
+  const canvas = el('canvas', { class: 'ef-cmd-canvas', role: 'img' });
+  canvas.setAttribute('aria-label', `Карта маршруту: ${model.shpp.routeText}`);
+  const host = el('div', { class: 'ef-cmd-canvas-host' }, canvas);
+  const width = 1000;
+  const height = 620;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = Math.round(width * dpr);
+  canvas.height = Math.round(height * dpr);
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = '#0B141B';
+  ctx.fillRect(0, 0, width, height);
+  const bounds = fitBounds(points, width, height);
+  Promise.all([loadImage(`${ASSET}sat.jpg`), loadRegions()]).then(async ([sat, regions]) => {
+    if (!canvas.isConnected) return;
+    const hits = (Array.isArray(regions) ? regions : []).filter(item => intersects(item?.bbox, bounds) && item.sat);
+    const tiles = (await Promise.all(hits.map(async item => {
+      try {
+        return { img: await loadImage(`${ASSET}${item.sat}`), bbox: item.bbox };
+      } catch {
+        return null;
+      }
+    }))).filter(Boolean);
+    if (!canvas.isConnected) return;
+    drawMap(ctx, sat, tiles, bounds, points, model.shpp.legs, width, height);
+  }).catch(() => {
+    if (!canvas.isConnected) return;
+    host.replaceChildren(mapSvg(model));
+    note.textContent = 'Схема за курсом і відстанню розрахунку. Знімок карти не відкрився. Не положення борта.';
+  });
+  return host;
+}
+
 export function routeBoard(ctx) {
   const picked = chosenDraft(ctx);
   let model = null;
@@ -351,6 +692,14 @@ export function routeBoard(ctx) {
   const flight = stats?.flight;
   const first = model?.shpp.legs[0];
   const board = el('section', { class: 'ef-cmd', 'aria-label': 'Схема маршруту і зведення' });
+  const note = el('p', { class: 'ef-cmd-note' });
+  let picture = emptyMap(ctx);
+  if (model) {
+    picture = geoMap(model, flight, note) || mapSvg(model);
+    if (!note.textContent) note.textContent = 'Схема за курсом і відстанню розрахунку. Не аеронавігаційна карта і не положення борта.';
+  } else {
+    note.textContent = 'Без ділянок із курсом, швидкістю й відстанню схема не будується.';
+  }
   const map = el('div', { class: 'ef-cmd-map' },
     model ? el('div', { class: 'ef-cmd-telem', 'aria-label': 'Показники розрахунку, не телеметрія борта' },
       metric('V першої', fmtInt(first.v), 'км/год'),
@@ -358,10 +707,8 @@ export function routeBoard(ctx) {
       metric('МК першої', courseText(first.mk), null),
       metric('S маршруту', fmtInt(model.shpp.totals.S), 'км'),
       metric('t маршруту', fmtDuration(model.shpp.totals.T), null)) : null,
-    model ? mapSvg(model) : emptyMap(ctx),
-    el('p', { class: 'ef-cmd-note', text: model
-      ? 'Схема за курсом і відстанню розрахунку. Не аеронавігаційна карта і не положення борта.'
-      : 'Без ділянок із курсом, швидкістю й відстанню схема не будується.' }));
+    picture,
+    note);
   const side = el('div', { class: 'ef-cmd-side' });
   if (flight) {
     const type = aircraftType(flight.typeId);
