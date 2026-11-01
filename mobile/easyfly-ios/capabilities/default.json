@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/mobile-schema.json",
+  "identifier": "default",
+  "description": "EasyFLY для iPhone: лише базові можливості вікна. Жодних команд, файлової системи, діалогів, мережі й бази даних.",
+  "windows": ["main"],
+  "platforms": ["iOS", "macOS", "linux", "windows"],
+  "permissions": ["core:default"]
+}

@@ -1,0 +1,16 @@
+[package]
+name = "easyfly-ios"
+version = "0.1.0"
+description = "EasyFLY для iPhone: тонка оболонка Tauri 2 навколо збірки dist-easyfly-phone"
+edition = "2021"
+publish = false
+
+[lib]
+name = "easyfly_ios_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
