@@ -294,3 +294,8 @@ test('build_easyfly_html: один файл без зовнішніх посил
   assert.throws(() => inlinePage(PAGE, {}), /Missing stylesheet/);
   assert.deepEqual(leftoverReferences('<img src="./a.png"><div style="background:url(./b.webp)">').sort(), ['./a.png', './b.webp']);
 });
+
+test('зведення на телефоні не вантажить map-assets: схема лише SVG', async () => {
+  const code = await read('workspace/easyfly/views/route-board.js');
+  assert.match(code, /ctx\.host\?\.phone \? null : geoMap\(/);
+});

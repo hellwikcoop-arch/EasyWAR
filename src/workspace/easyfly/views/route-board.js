@@ -695,7 +695,8 @@ export function routeBoard(ctx) {
   const note = el('p', { class: 'ef-cmd-note' });
   let picture = emptyMap(ctx);
   if (model) {
-    picture = geoMap(model, flight, note) || mapSvg(model);
+    // На телефоні (один HTML-файл без map-assets і без мережі) знімок не вантажимо: лише схема SVG.
+    picture = (ctx.host?.phone ? null : geoMap(model, flight, note)) || mapSvg(model);
     if (!note.textContent) note.textContent = 'Схема за курсом і відстанню розрахунку. Не аеронавігаційна карта і не положення борта.';
   } else {
     note.textContent = 'Без ділянок із курсом, швидкістю й відстанню схема не будується.';
