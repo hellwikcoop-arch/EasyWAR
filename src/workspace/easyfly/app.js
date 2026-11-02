@@ -259,7 +259,7 @@ export async function mount(container, host) {
     root.replaceChildren(el('main', { class: 'ef-start' },
       el('div', { class: 'ef-start-card' },
         el('div', { class: 'ef-start-logo', 'aria-hidden': 'true' }, icon('shturman', 28)),
-        el('h1', { class: 'ef-start-title', text: 'EasyFLY' }),
+        el('h1', { class: 'ef-start-title' }, el('span', { text: 'easy' }), el('span', { class: 'ef-brand-fly', text: 'FLY' })),
         el('p', { class: 'ef-start-lead', text: 'Облік допусків, перевірок і нальоту льотного складу. Дані належать вашому профілю: зберігаються самі, зашифровані на цьому пристрої, інтернет не потрібен.' }),
         errorHost,
         el('div', { class: 'ef-start-actions' },
@@ -299,7 +299,9 @@ export async function mount(container, host) {
   function buildShell() {
     root.className = 'ef-root';
     const nav = el('nav', { class: 'ef-sidebar', 'aria-label': 'Розділи EasyFLY' },
-      el('div', { class: 'ef-brand', text: 'EasyFLY' }),
+      el('div', { class: 'ef-brand' },
+        el('span', { class: 'ef-brand-mark', 'aria-hidden': 'true' }),
+        el('span', { class: 'ef-brand-name' }, el('span', { text: 'easy' }), el('span', { class: 'ef-brand-fly', text: 'FLY' }))),
       el('div', { class: 'ef-nav-title', text: 'Навігація' }),
       el('div', { class: 'ef-nav-list' }, NAV_ITEMS.map(item => navButton(item))),
       el('div', { class: 'ef-side-foot' },

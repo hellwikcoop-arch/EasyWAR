@@ -27,11 +27,11 @@
 .sm-onb-no { color: var(--nv-soon); }
 .sm-onb-note { margin: 6px 0 0; font-size: 12px; color: var(--nv-muted); }
 
-.sm-strip { display: flex; height: 26px; border-radius: 6px; overflow: hidden; border: 1px solid var(--nv-line); background: #0d1630; }
-.sm-seg-night { background: #0d1630; }
-.sm-seg-nautical { background: #2b3a6b; }
-.sm-seg-civil { background: #5a6aa6; }
-.sm-seg-day { background: #b8934f; }
+.sm-strip { display: flex; height: 26px; border-radius: 6px; overflow: hidden; border: 1px solid var(--nv-line); background: #0B141B; }
+.sm-seg-night { background: #0B141B; }
+.sm-seg-nautical { background: #16303A; }
+.sm-seg-civil { background: #3D6470; }
+.sm-seg-day { background: #C4A15A; }
 .sm-ticks { display: flex; justify-content: space-between; margin-top: 8px; font-size: 12px; color: var(--nv-muted); font-variant-numeric: tabular-nums; }
 .sm-legend { margin-top: 8px; font-size: 12px; color: var(--nv-muted); }
 
