@@ -291,3 +291,49 @@ export function createIndexedDbStorage(indexedDB, name = 'easyfly-phone') {
     removeItem: k => run('readwrite', store => store.delete(k)).then(() => undefined),
   };
 }
+
+/** Сховище на localStorage (запасне: iOS обмежує його ~5 МБ). */
+export function createLocalStorageAdapter(localStorage) {
+  if (!localStorage) throw new VaultError('localStorage недоступний.', 'unsupported');
+  return {
+    getItem: async k => { const v = localStorage.getItem(k); return typeof v === 'string' ? v : null; },
+    setItem: async (k, v) => { localStorage.setItem(k, v); },
+    removeItem: async k => { localStorage.removeItem(k); },
+  };
+}
+
+/** Сховище в пам'яті: дані живуть лише до закриття сторінки. */
+export function createMemoryStorage() {
+  const map = new Map();
+  return {
+    getItem: async k => (map.has(k) ? map.get(k) : null),
+    setItem: async (k, v) => { map.set(k, v); },
+    removeItem: async k => { map.delete(k); },
+  };
+}
+
+const PROBE_KEY = 'easyfly.vault.probe';
+
+/**
+ * Обирає перше робоче сховище: IndexedDB → localStorage → пам'ять. Кожне перевіряється пробним
+ * записом (у файлі з file:// або в приватному режимі сховища браузера можуть бути вимкнені).
+ * → { storage, kind: 'indexeddb' | 'localstorage' | 'memory' }.
+ */
+export async function selectStorage({ indexedDB = null, localStorage = null, dbName = 'easyfly-phone' } = {}) {
+  const candidates = [
+    ['indexeddb', () => createIndexedDbStorage(indexedDB, dbName)],
+    ['localstorage', () => createLocalStorageAdapter(localStorage)],
+  ];
+  for (const [kind, make] of candidates) {
+    try {
+      const storage = make();
+      await storage.setItem(PROBE_KEY, '1');
+      if ((await storage.getItem(PROBE_KEY)) !== '1') continue;
+      await storage.removeItem(PROBE_KEY);
+      return { storage, kind };
+    } catch {
+      /* наступний кандидат */
+    }
+  }
+  return { storage: createMemoryStorage(), kind: 'memory' };
+}

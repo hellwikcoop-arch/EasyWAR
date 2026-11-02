@@ -233,3 +233,64 @@ test('сторінка телефона: без Tauri-команд і мереж
   assert.match(config, /root: "src\/mobile\/easyfly"/);
   assert.match(config, /outDir: "\.\.\/\.\.\/\.\.\/dist-easyfly-phone"/);
 });
+
+// ───────────── вибір сховища і один HTML-файл ─────────────
+import { createLocalStorageAdapter, createMemoryStorage, selectStorage } from '../src/mobile/easyfly/vault-core.js';
+import { FILE_NAME, inlinePage, leftoverReferences } from '../script/build_easyfly_html.mjs';
+
+function fakeLocalStorage(broken = false) {
+  const map = new Map();
+  return {
+    getItem: k => (map.has(k) ? map.get(k) : null),
+    setItem: (k, v) => { if (broken) throw new Error('QuotaExceededError'); map.set(k, v); },
+    removeItem: k => { map.delete(k); },
+  };
+}
+
+test('selectStorage: IndexedDB → localStorage → пам\'ять, пробний запис прибирається', async () => {
+  const ls = fakeLocalStorage();
+  const viaLocal = await selectStorage({ indexedDB: null, localStorage: ls });
+  assert.equal(viaLocal.kind, 'localstorage');
+  assert.equal(ls.getItem('easyfly.vault.probe'), null);
+  const brokenIdb = { open: () => { throw new Error('SecurityError'); } };
+  assert.equal((await selectStorage({ indexedDB: brokenIdb, localStorage: ls })).kind, 'localstorage');
+  const memory = await selectStorage({ indexedDB: null, localStorage: fakeLocalStorage(true) });
+  assert.equal(memory.kind, 'memory');
+  await memory.storage.setItem('a', '1');
+  assert.equal(await memory.storage.getItem('a'), '1');
+  assert.equal((await selectStorage({})).kind, 'memory');
+  const adapter = createLocalStorageAdapter(ls);
+  await adapter.setItem('k', 'v');
+  assert.equal(await adapter.getItem('k'), 'v');
+  await adapter.removeItem('k');
+  assert.equal(await adapter.getItem('k'), null);
+  assert.throws(() => createLocalStorageAdapter(null), VaultError);
+  const mem = createMemoryStorage();
+  assert.equal(await mem.getItem('x'), null);
+});
+
+test('сховище працює і в пам\'яті (файл без сховища браузера)', async () => {
+  const vault = vaultFor(createMemoryStorage());
+  await vault.create(PHRASE);
+  await vault.write('easyfly.main', 'x');
+  assert.equal((await vault.read('easyfly.main')).value, 'x');
+});
+
+const PAGE = `<!doctype html><html><head>
+<link rel="manifest" href="./easyfly.webmanifest">
+<link rel="icon" type="image/png" href="./easyfly-192.png">
+<link rel="apple-touch-icon" href="./easyfly-192.png">
+<link rel="modulepreload" crossorigin href="./assets/core.js">
+<link rel="stylesheet" crossorigin href="./assets/index.css">
+</head><body><script type="module" crossorigin src="./assets/index.js"></script></body></html>`;
+
+test('build_easyfly_html: один файл без зовнішніх посилань, PWA-посилання прибрано', () => {
+  assert.equal(FILE_NAME, 'EasyFLY.html');
+  const out = inlinePage(PAGE, { 'assets/index.css': 'body{color:red}', 'assets/index.js': 'console.log("</script>")' });
+  assert.match(out, /<style>body\{color:red\}<\/style>/);
+  assert.match(out, /<script type="module">console\.log\("<\\\/script>"\)<\/script>/);
+  assert.doesNotMatch(out, /manifest|apple-touch-icon|modulepreload|rel="icon"/);
+  assert.deepEqual(leftoverReferences(out), []);
+  assert.throws(() => inlinePage(PAGE, {}), /Missing stylesheet/);
+  assert.deepEqual(leftoverReferences('<img src="./a.png"><div style="background:url(./b.webp)">').sort(), ['./a.png', './b.webp']);
+});

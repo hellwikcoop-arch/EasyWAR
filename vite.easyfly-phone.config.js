@@ -1,7 +1,8 @@
-// Окрема збірка EasyFLY для телефона (iPhone): лише сторінка src/mobile/easyfly/index.html і код,
-// який вона імпортує (спільне ядро src/workspace/easyfly/). Без 3D-моделей, карт і решти
-// EasyWAR, тож dist-easyfly-phone/ важить менше мегабайта; саме цю теку бере iOS-оболонка
-// mobile/easyfly-ios/ (frontendDist). Основна збірка `npm run build` цієї сторінки не містить.
+// PWA-збірка EasyFLY для телефона: лише сторінка src/mobile/easyfly/index.html і код, який вона
+// імпортує (спільне ядро src/workspace/easyfly/). Без 3D-моделей, карт і решти EasyWAR, тож
+// dist-easyfly-phone/ важить менше мегабайта; розміщується на HTTPS. Основний шлях для телефона —
+// один файл dist-standalone/EasyFLY.html (script/build_easyfly_html.mjs). Основна збірка
+// `npm run build` цієї сторінки не містить.
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 

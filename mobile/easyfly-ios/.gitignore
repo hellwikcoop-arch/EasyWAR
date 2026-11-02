@@ -1,6 +1,0 @@
-/target
-/gen/apple/build
-/gen/apple/Externals
-/gen/apple/*.xcodeproj/xcuserdata
-/gen/apple/*.xcodeproj/project.xcworkspace/xcuserdata
-/gen/schemas

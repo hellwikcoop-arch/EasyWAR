@@ -1,10 +1,13 @@
-// EasyFLY для телефона (iPhone): оболонка без Tauri-команд. Відкриває зашифроване сховище
-// парольною фразою, далі монтує той самий EasyFLY, що й у «Робочому середовищі»
+// EasyFLY для телефона (iPhone): сторінка без Tauri-команд, яку збирають в один .html
+// (script/build_easyfly_html.mjs) або як PWA (vite.easyfly-phone.config.js). Відкриває зашифроване
+// сховище парольною фразою, далі монтує той самий EasyFLY, що й у «Робочому середовищі»
 // (src/workspace/easyfly/app.js), через host з phone-host-core.js. Файли .easyfly — лише імпорт
 // (вибір файлу) і копія (меню «Поділитися» → «Зберегти у Файли»). Мережі немає.
+// Сховище: IndexedDB → localStorage → пам'ять (у файлі з file:// перші два можуть бути вимкнені;
+// тоді на екрані замка — попередження, що дані живуть лише до закриття сторінки).
 import { mount } from '../../workspace/easyfly/app.js';
 import { createPhoneHost, shareViaNavigator } from './phone-host-core.js';
-import { createIndexedDbStorage, createVault, passphraseProblem } from './vault-core.js';
+import { createVault, passphraseProblem, selectStorage } from './vault-core.js';
 import { icon } from '../../workspace/easyfly/icons.js';
 
 /** Через стільки хвилин у фоні сховище закривається і знову просить фразу. */
@@ -55,14 +58,11 @@ function unsupported(message) {
     el('p', { class: 'efp-error', role: 'alert', text: message }))));
 }
 
-let vault;
-try {
-  vault = createVault({ storage: createIndexedDbStorage(globalThis.indexedDB), crypto: globalThis.crypto });
-} catch (error) {
-  unsupported(`Цей браузер не підходить: ${error?.message || error}`);
-}
-
+let vault = null;
+let storageKind = 'memory';
 let mounted = null;
+
+const STORAGE_WARNING = 'Сховище браузера недоступне (файл відкрито без сервера або в приватному режимі): дані живуть лише до закриття сторінки. Перед виходом зробіть «Копія у файл…».';
 
 function lockScreen({ exists, error = null }) {
   if (mounted) { try { mounted.unmount?.(); } catch { /* уже знято */ } mounted = null; }
@@ -109,6 +109,7 @@ function lockScreen({ exists, error = null }) {
       ? 'Дані на цьому пристрої зашифровано. Введіть парольну фразу, щоб відкрити їх.'
       : 'Дані зберігатимуться лише на цьому телефоні, зашифровані парольною фразою. Інтернет не потрібен. Фразу відновити неможливо: якщо її забути, допоможе лише копія у файлі .easyfly.' }),
     form,
+    storageKind === 'memory' ? el('p', { class: 'efp-error', role: 'alert', text: STORAGE_WARNING }) : null,
     el('p', { class: 'efp-hint', text: `Сховище закривається само через ${AUTO_LOCK_MINUTES} хв у фоні. Лише позивні, без ПІБ і номерів документів.` }))));
   phrase.focus();
 }
@@ -130,10 +131,20 @@ async function openApp() {
 let hiddenAt = null;
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') { hiddenAt = Date.now(); return; }
-  if (hiddenAt && vault.unlocked && Date.now() - hiddenAt > AUTO_LOCK_MINUTES * 60_000) lockScreen({ exists: true });
+  if (hiddenAt && vault?.unlocked && Date.now() - hiddenAt > AUTO_LOCK_MINUTES * 60_000) lockScreen({ exists: true });
   hiddenAt = null;
 });
 
-if (vault) {
-  vault.exists().then(exists => lockScreen({ exists })).catch(error => unsupported(`Сховище недоступне: ${error?.message || error}`));
+async function start() {
+  if (!globalThis.crypto?.subtle) { unsupported('Цей браузер не підходить: немає WebCrypto. Відкрийте файл у Safari або Chrome.'); return; }
+  const chosen = await selectStorage({ indexedDB: globalThis.indexedDB, localStorage: safeLocalStorage() });
+  storageKind = chosen.kind;
+  vault = createVault({ storage: chosen.storage, crypto: globalThis.crypto });
+  lockScreen({ exists: await vault.exists() });
 }
+
+function safeLocalStorage() {
+  try { return globalThis.localStorage; } catch { return null; }
+}
+
+start().catch(error => unsupported(`Сховище недоступне: ${error?.message || error}`));
