@@ -1,11 +1,11 @@
-// Профіль пілота: вкладки «Перевірки», «Допуски», «Льотна книжка», «Штурманські документи».
+// Профіль пілота: вкладки «Перевірки», «Допуски», «Льотна книжка», «Штурманські документи», «Відпустки».
 // Червона плашка «Польоти заборонені» — з flightBlockers. Допуск пілот відмічає сам, без затвердження.
 import {
-  CLASS_LABELS, CLASS_QUALS, ROLES, exerciseName, formatDate, pluralDays,
+  CLASS_LABELS, CLASS_QUALS, LEAVE_PART_DAYS, ROLES, exerciseName, formatDate, leaveTotals, pluralDays,
 } from '../fly-core.js';
 import {
-  PILOT_TABS, admissionRows, blockerBanner, deleteFlight, effectiveSettings, logbookView, lostAdmissions,
-  monthLabel, pluralMonths, profileCards, updatePerson,
+  PILOT_TABS, admissionRows, blockerBanner, deleteFlight, effectiveSettings, leaveRows, logbookView,
+  lostAdmissions, monthLabel, pluralMonths, profileCards, updatePerson,
 } from '../fly-state.js';
 import {
   button, card, confirmDialog, dash, dateText, el, emptyState, notice, pageHeader, select, stat,
@@ -16,6 +16,8 @@ import {
   confirmDeletePerson, openAdmissionForm, openPilotForm, removeAdmission, setAdmissionLost,
 } from './card.js';
 import { openEntry } from './entry.js';
+import { openLeaveForm } from './leaves-form.js';
+import { leaveColumns } from './leaves.js';
 
 /** Перша літера малою, крім абревіатур (ОНБ, БЗ). */
 const lowerFirst = label => (/^[А-ЯІЇЄҐ]{2}/.test(label) ? label : label.charAt(0).toLowerCase() + label.slice(1));
@@ -28,6 +30,7 @@ const TAB_SUBTITLES = {
   admissions: 'Особисті перевірки й допуски',
   logbook: 'Особистий облік польотів · юридичний оригінал — паперова льотна книжка',
   navdocs: 'Штурманські документи пілота',
+  leaves: 'Відпустки пілота: частини по 15 діб, УБД, ВЛК і ПМО після відпустки',
 };
 
 function identity(ctx, person) {
@@ -192,6 +195,32 @@ function navDocsTab(ctx, person) {
       el('div', { class: 'ef-actions' }, button('Відкрити «Сонце і Місяць»', { variant: 'secondary', iconName: 'sontse-misiats', onClick: () => ctx.go('sunmoon') }))));
 }
 
+function leavesTab(ctx, person) {
+  const rows = leaveRows(person, ctx.data, ctx.today);
+  const year = ctx.today.slice(0, 4);
+  const nextYear = String(Number(year) + 1);
+  const totals = leaveTotals(rows.map(r => r.leave), nextYear);
+  const totalsNow = leaveTotals(rows.map(r => r.leave), year);
+  const upcoming = rows.filter(r => r.timing !== 'past');
+  const nearMedical = upcoming.find(r => r.medical?.near);
+  return el('div', { class: 'ef-stack' },
+    el('div', { class: 'ef-toolbar' },
+      el('p', { class: 'ef-muted', text: `Відпустки ${person.callsign} · частина основної — ${LEAVE_PART_DAYS} діб, між відпустками 3–4 місяці` }),
+      button('Додати відпустку', { variant: 'primary', iconName: 'vnesty', onClick: () => openLeaveForm(ctx, { personId: person.id, lockPilot: true }) })),
+    el('div', { class: 'ef-stats' },
+      stat(`Основна за ${nextYear}`, `${totals.basicDays} ${pluralDays(totals.basicDays)} · ${totals.basicParts} ${totals.basicParts === 1 ? 'частина' : totals.basicParts >= 2 && totals.basicParts <= 4 ? 'частини' : 'частин'}`, { tone: totals.basicDays ? 'blue' : '' }),
+      stat(`УБД за ${nextYear}`, `${totals.ubdDays} ${pluralDays(totals.ubdDays)}`),
+      stat(`Усього за ${year}`, `${totalsNow.basicDays + totalsNow.ubdDays + totalsNow.otherDays} ${pluralDays(totalsNow.basicDays + totalsNow.ubdDays + totalsNow.otherDays)}`),
+      stat('Застережень', String(rows.filter(r => r.warnings.length).length), { tone: rows.some(r => r.warnings.length) ? 'red' : 'green' })),
+    rows.length
+      ? table(leaveColumns(ctx, { withPilot: false }), rows, { caption: `Відпустки ${person.callsign}`, rowClass: r => (r.warnings.length ? 'ef-row-lost' : r.timing === 'past' ? 'ef-row-past' : null) })
+      : emptyState('Відпусток ще немає', 'Додайте частини основної відпустки (по 15 діб), відпустку УБД або іншу з датами з–по.'),
+    nearMedical
+      ? notice('ВЛК / ПМО біля відпустки.', `${nearMedical.medical.kind} до ${formatDate(nearMedical.medical.dueDate)} — ${nearMedical.medical.position === 'before' ? 'пройти до відпустки' : nearMedical.medical.position === 'during' ? 'строк припадає на відпустку, пройти перед нею' : 'запланувати одразу після відпустки'} ${formatDate(nearMedical.leave.from)}–${formatDate(nearMedical.leave.to)}.`, { tone: 'amber' })
+      : notice(null, 'ВЛК і ПМО чергуються кожні 6 місяців; строк, що випадає на відпустку чи одразу після неї, підсвічується тут і на екрані «Відпустки».'),
+    el('p', { class: 'ef-muted ef-pad', text: 'Дані внесено вручну · графік не замінює наказ і рапорт на відпустку' }));
+}
+
 export function render(ctx) {
   const { data, today } = ctx;
   const params = ctx.route.params;
@@ -249,7 +278,7 @@ export function render(ctx) {
     if (next) { event.preventDefault(); ctx.go('pilot', { id: person.id, tab: next }, { focus: `#ef-tab-${next}` }); }
   });
   root.append(tabs);
-  const builders = { checks: checksTab, admissions: admissionsTab, logbook: logbookTab, navdocs: navDocsTab };
+  const builders = { checks: checksTab, admissions: admissionsTab, logbook: logbookTab, navdocs: navDocsTab, leaves: leavesTab };
   root.append(el('div', { id: 'ef-tabpanel', class: 'ef-tabpanel', role: 'tabpanel', 'aria-labelledby': `ef-tab-${tab}`, tabindex: '0' }, builders[tab](ctx, person)));
   return root;
 }

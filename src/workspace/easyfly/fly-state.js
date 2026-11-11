@@ -13,6 +13,8 @@ import {
   importRecordToFlight, jumpsState, lastFlightDate, logbookSummary, longBreakState, medicalState,
   normalizeDate, normalizeFlight, ovpState, parseImportRows, personItems, renewAdmission,
   renewalHint, resolveSettings, shiftSummary, toIso, MEDICAL_KINDS, flightBlockers,
+  LEAVE_KIND_IDS, LEAVE_STATUSES, leaveDays, leaveKindById, leaveTotals, leaveWarnings, medicalAfterLeave,
+  wholeMonthsBetween,
 } from './fly-core.js';
 import {
   MAX_CALLSIGN_LEN, MAX_NAV_TITLE_LEN, MAX_NOTE_LEN, NAV_FLIGHT_NAME_FIELDS,
@@ -30,6 +32,7 @@ export const NAV_ITEMS = Object.freeze([
   { route: 'sunmoon', label: 'Сонце і Місяць', icon: 'sontse-misiats' },
   { route: 'import', label: 'Імпорт з Excel', icon: 'import-excel' },
   { route: 'reminders', label: 'Нагадування', icon: 'nahaduvannia' },
+  { route: 'leaves', label: 'Відпустки', icon: 'kalendar' },
   { route: 'settings', label: 'Налаштування', icon: 'nalashtuvannia' },
 ]);
 
@@ -42,6 +45,7 @@ export const PILOT_TABS = Object.freeze([
   { id: 'admissions', label: 'Допуски' },
   { id: 'logbook', label: 'Льотна книжка' },
   { id: 'navdocs', label: 'Штурманські документи' },
+  { id: 'leaves', label: 'Відпустки' },
 ]);
 
 const ROUTE_NAMES = NAV_ITEMS.map(item => item.route);
@@ -491,6 +495,123 @@ export function removeNavFlight(data, id, { confirmed = false } = {}) {
   if (!confirmed) return fail('Видалення потрібно підтвердити.');
   if (!(data.navFlights || []).some(n => n.id === id)) return fail('Збережений розрахунок не знайдено.');
   return { ok: true, data: { ...data, navFlights: removeById(data.navFlights, id) } };
+}
+
+// ───────────────────────────── Відпустки ─────────────────────────────
+
+function normalizeLeaveInput(data, input, current = null) {
+  const errors = [];
+  const personId = input.personId ?? current?.personId;
+  const person = personById(data, personId);
+  if (!person) errors.push('Оберіть пілота.');
+  const kind = input.kind ?? current?.kind ?? 'basic';
+  if (!LEAVE_KIND_IDS.includes(kind)) errors.push('Оберіть вид відпустки.');
+  const from = normalizeDate(input.from ?? current?.from);
+  const to = normalizeDate(input.to ?? current?.to);
+  if (!from) errors.push('Вкажіть дату початку у форматі дд.мм.рррр.');
+  if (!to) errors.push('Вкажіть дату закінчення у форматі дд.мм.рррр.');
+  if (from && to && to < from) errors.push('Дата закінчення раніше за дату початку.');
+  const status = input.status === undefined ? (current?.status ?? 'planned') : (input.status || 'planned');
+  if (!LEAVE_STATUSES.includes(status)) errors.push('Невідомий стан відпустки.');
+  const note = input.note === undefined ? (current?.note ?? null) : orNull(input.note);
+  if ((note || '').length > MAX_NOTE_LEN) errors.push(`Примітка задовга (понад ${MAX_NOTE_LEN} символів).`);
+  if (errors.length) return { errors };
+  return { record: { personId: person.id, kind, from, to, status, note } };
+}
+
+/** Додає відпустку: personId, kind (basic|ubd|other), from, to (ISO або дд.мм.рррр), status, note. */
+export function addLeave(data, input = {}) {
+  const made = normalizeLeaveInput(data, input);
+  if (made.errors) return fail(made.errors);
+  const list = data.leaves || [];
+  const id = nextId('l', list);
+  const record = { id, ...made.record };
+  return { ok: true, id, data: { ...data, leaves: [...list, record] } };
+}
+
+/** Змінює відпустку (patch: kind, from, to, status, note; пілот не змінюється). */
+export function updateLeave(data, id, patch = {}) {
+  const current = (data.leaves || []).find(l => l.id === id);
+  if (!current) return fail('Відпустку не знайдено.');
+  const made = normalizeLeaveInput(data, { ...patch, personId: current.personId }, current);
+  if (made.errors) return fail(made.errors);
+  return { ok: true, data: { ...data, leaves: upsertById(data.leaves, { id, ...made.record }) } };
+}
+
+export function deleteLeave(data, id, { confirmed = false } = {}) {
+  if (!confirmed) return fail('Видалення потрібно підтвердити.');
+  if (!(data.leaves || []).some(l => l.id === id)) return fail('Відпустку не знайдено.');
+  return { ok: true, data: { ...data, leaves: removeById(data.leaves, id) } };
+}
+
+const byFrom = (a, b) => (a.from < b.from ? -1 : a.from > b.from ? 1 : 0);
+
+/** Рядок таблиці відпусток: тривалість, застереження, ВЛК/ПМО після, проміжок після попередньої. */
+function leaveRow(leave, person, personLeaves, today) {
+  const previous = personLeaves.filter(l => l.id !== leave.id && l.to < leave.from).sort((x, y) => (x.to < y.to ? 1 : -1))[0] || null;
+  const medical = medicalAfterLeave(person, leave);
+  let timing = 'future';
+  if (leave.to < today) timing = 'past';
+  else if (leave.from <= today) timing = 'current';
+  return {
+    leave,
+    id: leave.id,
+    personId: person.id,
+    callsign: person.callsign,
+    link: person.link || '',
+    kind: leaveKindById(leave.kind),
+    days: leaveDays(leave.from, leave.to),
+    status: leave.status || 'planned',
+    warnings: leaveWarnings(leave, personLeaves),
+    gapMonths: previous ? wholeMonthsBetween(previous.to, leave.from) : null,
+    medical,
+    timing,
+  };
+}
+
+/** Відпустки одного пілота (усі роки), за датою початку. */
+export function leaveRows(person, data, today) {
+  const own = (data.leaves || []).filter(l => l.personId === person.id).sort(byFrom);
+  return own.map(l => leaveRow(l, person, own, today));
+}
+
+/** Роки, за які є відпустки, плюс поточний і наступний; за зростанням. */
+export function leaveYears(data, today) {
+  const years = new Set((data.leaves || []).map(l => String(l.from || '').slice(0, 4)).filter(Boolean));
+  const current = Number(String(today).slice(0, 4));
+  if (Number.isInteger(current)) { years.add(String(current)); years.add(String(current + 1)); }
+  return [...years].sort();
+}
+
+/**
+ * Графік відпусток частини за рік: рядки за датою початку, підсумки й сітка «пілот × місяць»
+ * (rows[].months[0..11] — відпустки, що зачіпають місяць).
+ */
+export function leaveSchedule(data, year, today) {
+  const y = String(year);
+  const persons = data.persons || [];
+  const all = data.leaves || [];
+  const rows = [];
+  const grid = [];
+  for (const person of persons) {
+    const own = all.filter(l => l.personId === person.id).sort(byFrom);
+    const inYear = own.filter(l => l.from.slice(0, 4) === y || l.to.slice(0, 4) === y);
+    if (!inYear.length) continue;
+    const personRows = inYear.map(l => leaveRow(l, person, own, today));
+    rows.push(...personRows);
+    const months = Array.from({ length: 12 }, (_, i) => {
+      const start = `${y}-${String(i + 1).padStart(2, '0')}-01`;
+      const end = `${y}-${String(i + 1).padStart(2, '0')}-31`;
+      return personRows.filter(r => r.leave.from <= end && r.leave.to >= start);
+    });
+    grid.push({ personId: person.id, callsign: person.callsign, link: person.link || '', months, totals: leaveTotals(own, y) });
+  }
+  rows.sort((a, b) => byFrom(a.leave, b.leave) || a.callsign.localeCompare(b.callsign, 'uk'));
+  grid.sort((a, b) => a.callsign.localeCompare(b.callsign, 'uk'));
+  const warningsCount = rows.filter(r => r.warnings.length).length;
+  const medicalCount = rows.filter(r => r.medical?.near).length;
+  const totalDays = rows.reduce((sum, r) => sum + (r.days || 0), 0);
+  return { year: y, rows, grid, pilots: grid.length, totalDays, warningsCount, medicalCount };
 }
 
 /** Дати змін для вибору в хронометражі: усі зміни й сьогодні, за спаданням. */

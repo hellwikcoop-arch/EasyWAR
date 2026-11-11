@@ -270,6 +270,117 @@ export function medicalState(person, today, soonDays = SOON_DAYS) {
   };
 }
 
+// ───────────────────────────── Відпустки ─────────────────────────────
+
+/** Види відпусток: основна (частинами по 15 діб), УБД (додаткова), інша. */
+export const LEAVE_KINDS = Object.freeze([
+  { id: 'basic', label: 'Основна', short: 'Осн.' },
+  { id: 'ubd', label: 'УБД', short: 'УБД' },
+  { id: 'other', label: 'Інша', short: 'Інша' },
+]);
+export const LEAVE_KIND_IDS = Object.freeze(LEAVE_KINDS.map(k => k.id));
+export const LEAVE_STATUSES = Object.freeze(['planned', 'approved', 'taken']);
+export const LEAVE_STATUS_LABELS = Object.freeze({ planned: 'Заплановано', approved: 'Погоджено', taken: 'Використано' });
+/** Типова тривалість частини основної відпустки, діб (включно з обома датами). */
+export const LEAVE_PART_DAYS = 15;
+/** Бажаний проміжок між відпустками: 3–4 місяці. Менше 3 — застереження. */
+export const LEAVE_GAP_MIN_MONTHS = 3;
+export const LEAVE_GAP_MAX_MONTHS = 4;
+/** Строк ВЛК/ПМО в межах стількох діб після кінця відпустки — «одразу після відпустки». */
+export const LEAVE_MEDICAL_WINDOW_DAYS = 45;
+
+export function leaveKindById(id) {
+  return LEAVE_KINDS.find(k => k.id === id) || null;
+}
+
+/** Тривалість відпустки в добах, обидві дати включно; null, якщо дати некоректні або кінець раніше початку. */
+export function leaveDays(from, to) {
+  const a = normalizeDate(from);
+  const b = normalizeDate(to);
+  if (!a || !b || b < a) return null;
+  return diffDays(a, b) + 1;
+}
+
+/** Чи перетинаються два проміжки дат (включно). */
+export function leavesOverlap(a, b) {
+  if (!a?.from || !a?.to || !b?.from || !b?.to) return false;
+  return a.from <= b.to && b.from <= a.to;
+}
+
+/** Кількість повних місяців від `from` до `to` (0, якщо to раніше за from). */
+export function wholeMonthsBetween(from, to) {
+  const a = normalizeDate(from);
+  const b = normalizeDate(to);
+  if (!a || !b || b < a) return 0;
+  let n = 0;
+  while (addMonths(a, n + 1) <= b) n += 1;
+  return n;
+}
+
+/**
+ * Застереження до відпустки на тлі інших відпусток того ж пілота: частина основної довша за
+ * 15 діб; перетин з іншою відпусткою; менше 3 місяців після попередньої. Порожній масив — усе гаразд.
+ */
+export function leaveWarnings(leave, personLeaves) {
+  const warnings = [];
+  const days = leaveDays(leave?.from, leave?.to);
+  if (days === null) return warnings;
+  if (leave.kind === 'basic' && days > LEAVE_PART_DAYS) {
+    warnings.push(`Частина основної відпустки довша за ${LEAVE_PART_DAYS} діб (${days}).`);
+  }
+  const others = (personLeaves || []).filter(l => l && l.id !== leave.id && normalizeDate(l.from) && normalizeDate(l.to));
+  const overlap = others.find(l => leavesOverlap(leave, l));
+  if (overlap) warnings.push(`Перетинається з відпусткою ${formatDate(overlap.from)}–${formatDate(overlap.to)}.`);
+  const previous = others.filter(l => l.to < leave.from).sort((x, y) => (x.to < y.to ? 1 : -1))[0];
+  if (previous) {
+    const months = wholeMonthsBetween(previous.to, leave.from);
+    if (months < LEAVE_GAP_MIN_MONTHS) {
+      warnings.push(`Менше ${LEAVE_GAP_MIN_MONTHS} місяців після попередньої відпустки (закінчилась ${formatDate(previous.to)}).`);
+    }
+  }
+  return warnings;
+}
+
+/**
+ * ВЛК/ПМО біля відпустки: за чергуванням ВЛК↔ПМО кожні 6 місяців від останньої події береться
+ * перший строк не раніше ніж за LEAVE_MEDICAL_WINDOW_DAYS до початку відпустки. `position`:
+ * 'before' — строк перед відпусткою (пройти до неї), 'during' — припадає на відпустку, 'after' —
+ * у межах вікна після неї (пройти одразу після), 'later' — далеко. `near` — усе, крім 'later'.
+ * Немає медичних подій — null.
+ * @returns {{kind, dueDate, daysAfterEnd, position, near}|null}
+ */
+export function medicalAfterLeave(person, leave) {
+  const from = normalizeDate(leave?.from);
+  const to = normalizeDate(leave?.to);
+  if (!from || !to) return null;
+  const state = medicalState(person, to);
+  if (!state) return null;
+  let { dueDate, nextKind: kind } = state;
+  const floor = addDays(from, -LEAVE_MEDICAL_WINDOW_DAYS);
+  for (let i = 0; i < 60 && dueDate < floor; i += 1) {
+    dueDate = addMonths(dueDate, MEDICAL_STEP_MONTHS);
+    kind = oppositeMedicalKind(kind);
+  }
+  const daysAfterEnd = diffDays(to, dueDate);
+  const position = dueDate < from ? 'before' : dueDate <= to ? 'during' : daysAfterEnd <= LEAVE_MEDICAL_WINDOW_DAYS ? 'after' : 'later';
+  return { kind, dueDate, daysAfterEnd, position, near: position !== 'later' };
+}
+
+/** Підсумок відпусток пілота за рік: діб за видами, кількість частин основної. */
+export function leaveTotals(personLeaves, year) {
+  const totals = { basicDays: 0, ubdDays: 0, otherDays: 0, basicParts: 0, count: 0 };
+  for (const leave of personLeaves || []) {
+    if (year && String(leave.from || '').slice(0, 4) !== String(year)) continue;
+    const days = leaveDays(leave.from, leave.to);
+    if (days === null) continue;
+    totals.count += 1;
+    if (leave.kind === 'basic') { totals.basicDays += days; totals.basicParts += 1; }
+    else if (leave.kind === 'ubd') totals.ubdDays += days;
+    else totals.otherDays += days;
+  }
+  return totals;
+}
+
 // ───────────────────────────── Стаття 205 ПРІАЗДАУ ─────────────────────────────
 
 /** Напрями приймання: АО, РЕО, ВД/СД (залежить від типу ПС), АОз. */

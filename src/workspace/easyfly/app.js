@@ -27,7 +27,7 @@ const SAVE_DELAY_MS = 400;
 const VIEW_MODULES = import.meta.glob('./views/*.js');
 const VIEW_FILES = {
   summary: 'summary', pilots: 'pilots', pilot: 'pilot', chrono: 'chrono', navigator: 'navigator',
-  sunmoon: 'sunmoon', import: 'import', reminders: 'reminders', settings: 'settings',
+  sunmoon: 'sunmoon', import: 'import', reminders: 'reminders', leaves: 'leaves', settings: 'settings',
 };
 
 const navLabel = name => NAV_ITEMS.find(item => item.route === name)?.label || 'Екран';

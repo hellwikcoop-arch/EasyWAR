@@ -3,9 +3,10 @@
 //
 // Файл — JSON у UTF-8, до 5 МБ:
 //   { version, unit:{ name, airfield, signers, settings }, persons, checks, admissions, flights, shifts,
-//     navFlights? }
-// `navFlights` — збережені розрахунки штурмана ({ id, title, savedAt?, flight }); колекція необов'язкова
-// при читанні (у старих файлах її немає — отримується []). У `flight` немає ПІБ: підписантів
+//     navFlights?, leaves? }
+// `navFlights` — збережені розрахунки штурмана ({ id, title, savedAt?, flight }); `leaves` — відпустки
+// ({ id, personId, kind: basic|ubd|other, from, to, status?: planned|approved|taken, note? }). Обидві
+// колекції необов'язкові при читанні (у старих файлах їх немає — отримується []). У `flight` немає ПІБ: підписантів
 // документів беруть із налаштувань частини, а поля commander/navigator/checker/captain тощо не зберігаються.
 //
 // Принцип мінімізації даних: особа ідентифікується ПОЗИВНИМ (callsign), а не прізвищем і
@@ -15,8 +16,8 @@
 // інтерфейс підписує поле як «Позивний». Невідомі додаткові поля при розборі зберігаються.
 
 import {
-  AIRCRAFT_KINDS, ARTICLE_205_IDS, CLASS_QUALS, FLIGHT_SOURCES, MEDICAL_KINDS, ROLES,
-  admissionKindById, checkTypeById, normalizeDate, normalizeExercise,
+  AIRCRAFT_KINDS, ARTICLE_205_IDS, CLASS_QUALS, FLIGHT_SOURCES, LEAVE_KIND_IDS, LEAVE_STATUSES, MEDICAL_KINDS,
+  ROLES, admissionKindById, checkTypeById, normalizeDate, normalizeExercise,
 } from './fly-core.js';
 
 /** Поточна версія схеми файлу. */
@@ -32,9 +33,9 @@ export const MAX_NAV_FLIGHT_BYTES = 20000;
 export const NAV_FLIGHT_NAME_FIELDS = Object.freeze(['commander', 'navigator', 'checker', 'captain', 'captainRankGen', 'iasChief', 'seniorNav']);
 
 /** Колекції верхнього рівня, що є масивами записів з полем `id`. */
-export const COLLECTIONS = Object.freeze(['persons', 'checks', 'admissions', 'flights', 'shifts', 'navFlights']);
+export const COLLECTIONS = Object.freeze(['persons', 'checks', 'admissions', 'flights', 'shifts', 'navFlights', 'leaves']);
 /** Колекції, яких може не бути в старих файлах: при читанні доповнюються порожнім масивом. */
-const OPTIONAL_COLLECTIONS = Object.freeze(['navFlights']);
+const OPTIONAL_COLLECTIONS = Object.freeze(['navFlights', 'leaves']);
 
 /** Порожній набір (нова частина). */
 export function createEmpty() {
@@ -52,6 +53,7 @@ export function createEmpty() {
     flights: [],
     shifts: [],
     navFlights: [],
+    leaves: [],
   };
 }
 
@@ -324,6 +326,17 @@ export function validate(data) {
     }
   });
 
+  (data.leaves || []).forEach((l, i) => {
+    const at = `leaves[${i}]`;
+    personRef(`${at}.personId`, l.personId);
+    if (!LEAVE_KIND_IDS.includes(l.kind)) fail(`${at}.kind`, `Вид відпустки має бути одним із: ${LEAVE_KIND_IDS.join(', ')}.`);
+    dateField(`${at}.from`, l.from, { required: true });
+    dateField(`${at}.to`, l.to, { required: true });
+    if (normalizeDate(l.from) === l.from && normalizeDate(l.to) === l.to && l.to < l.from) fail(`${at}.to`, 'Кінець відпустки раніше за початок.');
+    if (l.status !== undefined && l.status !== null && !LEAVE_STATUSES.includes(l.status)) fail(`${at}.status`, `Стан відпустки має бути одним із: ${LEAVE_STATUSES.join(', ')}.`);
+    noteField(`${at}.note`, l.note);
+  });
+
   return { ok: errors.length === 0, errors, warnings };
 }
 
@@ -354,8 +367,8 @@ export function removeById(items, id) {
 }
 
 /**
- * Видаляє пілота разом із пов'язаними перевірками й допусками; у польотах посилання на нього
- * замінюється на null (запис польоту лишається).
+ * Видаляє пілота разом із пов'язаними перевірками, допусками й відпустками; у польотах посилання
+ * на нього замінюється на null (запис польоту лишається).
  */
 export function removePerson(data, personId) {
   return {
@@ -364,5 +377,6 @@ export function removePerson(data, personId) {
     checks: data.checks.filter(c => c.personId !== personId),
     admissions: data.admissions.filter(a => a.personId !== personId),
     flights: data.flights.map(f => (f.personId === personId ? { ...f, personId: null } : f)),
+    leaves: (data.leaves || []).filter(l => l.personId !== personId),
   };
 }

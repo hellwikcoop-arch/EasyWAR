@@ -716,7 +716,7 @@ test('«скоро» залежить від налаштованого поро
 test('createEmpty: схема версії 1 з усіма розділами, валідна', () => {
   const empty = store.createEmpty();
   assert.equal(empty.version, 1);
-  assert.deepEqual(Object.keys(empty), ['version', 'unit', 'persons', 'checks', 'admissions', 'flights', 'shifts', 'navFlights']);
+  assert.deepEqual(Object.keys(empty), ['version', 'unit', 'persons', 'checks', 'admissions', 'flights', 'shifts', 'navFlights', 'leaves']);
   assert.deepEqual(Object.keys(empty.unit), ['name', 'airfield', 'signers', 'settings']);
   assert.equal(store.validate(empty).ok, true);
 });
