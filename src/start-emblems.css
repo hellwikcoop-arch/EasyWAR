@@ -1,0 +1,31 @@
+/* 3D-емблеми стартового екрана (start-emblems.js): смуга з 13 кадрів повороту у .bc-icon.
+   Елемент кадру тримає пропорції рендеру всередині будь-якого розміру .bc-icon (контейнерні одиниці),
+   кадр обирає --ew-frame-x на картці (ставить скрипт за курсором). Початковий <img> лишається в
+   розмітці й ховається, лише коли смуга завантажилась. */
+#view-start .branch-card .bc-icon.ew-emblem3d-on { position: relative; }
+#view-start .branch-card .bc-icon.ew-emblem3d-on > img { visibility: hidden !important; }
+.ew-emblem3d {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  container-type: size; pointer-events: none;
+}
+.ew-emblem3d-frame {
+  --ew-ar: 1; --ew-frames: 13;
+  width: min(100cqw, calc(100cqh * var(--ew-ar)));
+  height: min(100cqh, calc(100cqw / var(--ew-ar)));
+  background-repeat: no-repeat;
+  background-size: calc(var(--ew-frames) * 100%) 100%;
+  background-position: var(--ew-frame-x, 50%) 0;
+  filter: drop-shadow(calc(var(--ew-tx, 0) * -5px) calc(5px + var(--ew-ty, 0) * -3px) 6px rgba(0, 0, 0, .55));
+  /* Рельєф трохи більший за плоске зображення: рамка .bc-icon не змінюється, кадр виходить за неї. */
+  transform: scale(1.12);
+  transition: filter .25s ease-out, transform .35s cubic-bezier(.2, .8, .2, 1);
+}
+#view-start .branch-card:hover .ew-emblem3d-frame,
+#view-start .branch-card:focus-visible .ew-emblem3d-frame { transform: translateY(-2px) scale(1.2); }
+/* Картки «У розробці» лишаються сірими: рельєф без блиску металу не має сенсу. */
+#view-start .branch-card.branch-card-soon:not(.branch-card-live) .ew-emblem3d { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .ew-emblem3d-frame { background-position-x: 50% !important; transition: none; }
+  #view-start .branch-card:hover .ew-emblem3d-frame { transform: scale(1.12); }
+}
+html[data-motion="off"] .ew-emblem3d-frame { background-position-x: 50% !important; transition: none; transform: scale(1.12) !important; }
