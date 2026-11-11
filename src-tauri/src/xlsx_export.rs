@@ -287,8 +287,13 @@ fn read_archive_entries_with_limits(
             return Err(XlsxExportError::UnsupportedCompression(file.compression()));
         }
         let mut contents = Vec::new();
+        let name = file
+            .name()
+            .map_err(|error| {
+                XlsxExportError::InvalidReference(format!("некоректне ім'я частини XLSX: {error}"))
+            })?
+            .into_owned();
         if !file.is_dir() {
-            let name = file.name().to_owned();
             budget
                 .read_part(&name, &mut file, Some(&mut contents))
                 .map_err(|error| match error {
@@ -297,7 +302,7 @@ fn read_archive_entries_with_limits(
                 })?;
         }
         entries.push(ArchiveEntry {
-            name: file.name().to_owned(),
+            name,
             bytes: contents,
             compression: file.compression(),
             unix_mode: file.unix_mode(),
@@ -364,13 +369,13 @@ fn replace_entry(
 
 fn relationships(xml: &str) -> Result<Vec<Relationship>, XlsxExportError> {
     let mut reader = Reader::from_str(xml);
-    reader.trim_text(true);
+    reader.config_mut().trim_text(true);
     let mut buffer = Vec::new();
     let mut relationships = Vec::new();
     loop {
         match reader.read_event_into(&mut buffer) {
             Ok(Event::Start(element) | Event::Empty(element))
-                if local_xml_name(element.name().as_ref()) == b"Relationship" =>
+                if local_xml_name(element.name().as_ref()) == "Relationship" =>
             {
                 let attributes = xml_attributes(&element)?;
                 relationships.push(Relationship {
@@ -394,13 +399,13 @@ fn relationships(xml: &str) -> Result<Vec<Relationship>, XlsxExportError> {
 
 fn workbook_sheets(xml: &str) -> Result<Vec<WorkbookSheet>, XlsxExportError> {
     let mut reader = Reader::from_str(xml);
-    reader.trim_text(true);
+    reader.config_mut().trim_text(true);
     let mut buffer = Vec::new();
     let mut sheets = Vec::new();
     loop {
         match reader.read_event_into(&mut buffer) {
             Ok(Event::Start(element) | Event::Empty(element))
-                if local_xml_name(element.name().as_ref()) == b"sheet" =>
+                if local_xml_name(element.name().as_ref()) == "sheet" =>
             {
                 let attributes = xml_attributes(&element)?;
                 let relationship_id = attributes
@@ -438,15 +443,8 @@ fn xml_attributes(
             let attribute = attribute.map_err(|error| {
                 XlsxExportError::InvalidReference(format!("некоректний XML-атрибут: {error}"))
             })?;
-            let key = std::str::from_utf8(attribute.key.as_ref())
-                .map_err(|_| {
-                    XlsxExportError::InvalidReference("ім'я XML-атрибута не є UTF-8".to_owned())
-                })?
-                .to_owned();
-            let encoded_value = std::str::from_utf8(attribute.value.as_ref()).map_err(|_| {
-                XlsxExportError::InvalidReference("значення XML-атрибута не є UTF-8".to_owned())
-            })?;
-            let value = quick_xml::escape::unescape(encoded_value)
+            let key = attribute.key.as_ref().to_owned();
+            let value = quick_xml::escape::unescape(&attribute.value)
                 .map_err(|error| {
                     XlsxExportError::InvalidReference(format!(
                         "некоректне значення XML-атрибута: {error}"
@@ -467,8 +465,21 @@ fn required_attribute(
     })
 }
 
-fn local_xml_name(name: &[u8]) -> &[u8] {
-    name.rsplit(|byte| *byte == b':').next().unwrap_or(name)
+/// quick-xml ≥ 0.38 віддає посилання на сутності (`&amp;`, `&#x41;`) окремою подією
+/// `GeneralRef`, а не в тексті: розгортаємо їх так само, як раніше робив `unescape`
+/// (вбудовані й числові; невідома сутність — помилка).
+fn resolve_entity_ref(
+    reference: &quick_xml::events::BytesRef<'_>,
+    what: &str,
+) -> Result<String, XlsxExportError> {
+    let raw = format!("&{};", &**reference);
+    quick_xml::escape::unescape(&raw)
+        .map(|value| value.into_owned())
+        .map_err(|error| XlsxExportError::InvalidReference(format!("некоректний {what}: {error}")))
+}
+
+fn local_xml_name(name: &str) -> &str {
+    name.rsplit(':').next().unwrap_or(name)
 }
 
 fn normalize_package_path(base_directory: &str, target: &str) -> Result<String, XlsxExportError> {
@@ -514,7 +525,7 @@ fn relationship_part_path(path: &str) -> String {
 
 fn parse_shared_strings(xml: &str) -> Result<Vec<String>, XlsxExportError> {
     let mut reader = Reader::from_str(xml);
-    reader.trim_text(false);
+    reader.config_mut().trim_text(false);
     let mut buffer = Vec::new();
     let mut in_item = false;
     let mut in_text = false;
@@ -522,30 +533,27 @@ fn parse_shared_strings(xml: &str) -> Result<Vec<String>, XlsxExportError> {
     let mut values = Vec::new();
     loop {
         match reader.read_event_into(&mut buffer) {
-            Ok(Event::Start(element)) if local_xml_name(element.name().as_ref()) == b"si" => {
+            Ok(Event::Start(element)) if local_xml_name(element.name().as_ref()) == "si" => {
                 in_item = true;
                 current.clear();
             }
-            Ok(Event::End(element)) if local_xml_name(element.name().as_ref()) == b"si" => {
+            Ok(Event::End(element)) if local_xml_name(element.name().as_ref()) == "si" => {
                 if in_item {
                     values.push(current.clone());
                 }
                 in_item = false;
             }
-            Ok(Event::Start(element)) if local_xml_name(element.name().as_ref()) == b"t" => {
+            Ok(Event::Start(element)) if local_xml_name(element.name().as_ref()) == "t" => {
                 in_text = in_item;
             }
-            Ok(Event::End(element)) if local_xml_name(element.name().as_ref()) == b"t" => {
+            Ok(Event::End(element)) if local_xml_name(element.name().as_ref()) == "t" => {
                 in_text = false;
             }
-            Ok(Event::Text(text)) if in_text => {
-                current.push_str(&text.unescape().map_err(|error| {
-                    XlsxExportError::InvalidReference(format!("некоректний shared string: {error}"))
-                })?)
+            Ok(Event::Text(text)) if in_text => current.push_str(&text),
+            Ok(Event::GeneralRef(reference)) if in_text => {
+                current.push_str(&resolve_entity_ref(&reference, "shared string")?)
             }
-            Ok(Event::CData(text)) if in_text => {
-                current.push_str(&String::from_utf8_lossy(text.as_ref()))
-            }
+            Ok(Event::CData(text)) if in_text => current.push_str(&text),
             Ok(Event::Eof) => break,
             Ok(_) => {}
             Err(error) => {
@@ -651,7 +659,7 @@ fn parse_sheet_layout(
 
 fn parse_rows(xml: &str, shared_strings: &[String]) -> Result<Vec<ParsedRow>, XlsxExportError> {
     let mut reader = Reader::from_str(xml);
-    reader.trim_text(false);
+    reader.config_mut().trim_text(false);
     let mut buffer = Vec::new();
     let mut rows = Vec::new();
     let mut current_row: Option<ParsedRow> = None;
@@ -662,7 +670,7 @@ fn parse_rows(xml: &str, shared_strings: &[String]) -> Result<Vec<ParsedRow>, Xl
     let mut inline_value = String::new();
     loop {
         match reader.read_event_into(&mut buffer) {
-            Ok(Event::Start(element)) if local_xml_name(element.name().as_ref()) == b"row" => {
+            Ok(Event::Start(element)) if local_xml_name(element.name().as_ref()) == "row" => {
                 let attributes = xml_attributes(&element)?;
                 let number = required_attribute(&attributes, "r")?
                     .parse::<u32>()
@@ -676,7 +684,7 @@ fn parse_rows(xml: &str, shared_strings: &[String]) -> Result<Vec<ParsedRow>, Xl
                     cells: Vec::new(),
                 });
             }
-            Ok(Event::Empty(element)) if local_xml_name(element.name().as_ref()) == b"row" => {
+            Ok(Event::Empty(element)) if local_xml_name(element.name().as_ref()) == "row" => {
                 let attributes = xml_attributes(&element)?;
                 let number = required_attribute(&attributes, "r")?
                     .parse::<u32>()
@@ -690,12 +698,12 @@ fn parse_rows(xml: &str, shared_strings: &[String]) -> Result<Vec<ParsedRow>, Xl
                     cells: Vec::new(),
                 });
             }
-            Ok(Event::End(element)) if local_xml_name(element.name().as_ref()) == b"row" => {
+            Ok(Event::End(element)) if local_xml_name(element.name().as_ref()) == "row" => {
                 if let Some(row) = current_row.take() {
                     rows.push(row);
                 }
             }
-            Ok(Event::Start(element)) if local_xml_name(element.name().as_ref()) == b"c" => {
+            Ok(Event::Start(element)) if local_xml_name(element.name().as_ref()) == "c" => {
                 let attributes = xml_attributes(&element)?;
                 current_cell = Some(ParsedCell {
                     reference: required_attribute(&attributes, "r")?,
@@ -706,7 +714,7 @@ fn parse_rows(xml: &str, shared_strings: &[String]) -> Result<Vec<ParsedRow>, Xl
                 raw_value.clear();
                 inline_value.clear();
             }
-            Ok(Event::Empty(element)) if local_xml_name(element.name().as_ref()) == b"c" => {
+            Ok(Event::Empty(element)) if local_xml_name(element.name().as_ref()) == "c" => {
                 let attributes = xml_attributes(&element)?;
                 if let Some(row) = current_row.as_mut() {
                     row.cells.push(ParsedCell {
@@ -717,7 +725,7 @@ fn parse_rows(xml: &str, shared_strings: &[String]) -> Result<Vec<ParsedRow>, Xl
                     });
                 }
             }
-            Ok(Event::End(element)) if local_xml_name(element.name().as_ref()) == b"c" => {
+            Ok(Event::End(element)) if local_xml_name(element.name().as_ref()) == "c" => {
                 if let Some(mut cell) = current_cell.take() {
                     cell.value = match cell.kind.as_str() {
                         "s" => raw_value
@@ -739,33 +747,27 @@ fn parse_rows(xml: &str, shared_strings: &[String]) -> Result<Vec<ParsedRow>, Xl
                     }
                 }
             }
-            Ok(Event::Start(element)) if local_xml_name(element.name().as_ref()) == b"v" => {
+            Ok(Event::Start(element)) if local_xml_name(element.name().as_ref()) == "v" => {
                 in_value = current_cell.is_some();
             }
-            Ok(Event::End(element)) if local_xml_name(element.name().as_ref()) == b"v" => {
+            Ok(Event::End(element)) if local_xml_name(element.name().as_ref()) == "v" => {
                 in_value = false;
             }
-            Ok(Event::Start(element)) if local_xml_name(element.name().as_ref()) == b"t" => {
+            Ok(Event::Start(element)) if local_xml_name(element.name().as_ref()) == "t" => {
                 in_inline_text = current_cell.is_some();
             }
-            Ok(Event::End(element)) if local_xml_name(element.name().as_ref()) == b"t" => {
+            Ok(Event::End(element)) if local_xml_name(element.name().as_ref()) == "t" => {
                 in_inline_text = false;
             }
-            Ok(Event::Text(text)) if in_value => {
-                raw_value.push_str(&text.unescape().map_err(|error| {
-                    XlsxExportError::InvalidReference(format!(
-                        "некоректне значення комірки: {error}"
-                    ))
-                })?)
+            Ok(Event::Text(text)) if in_value => raw_value.push_str(&text),
+            Ok(Event::GeneralRef(reference)) if in_value => {
+                raw_value.push_str(&resolve_entity_ref(&reference, "значення комірки")?)
             }
-            Ok(Event::Text(text)) if in_inline_text => {
-                inline_value.push_str(&text.unescape().map_err(|error| {
-                    XlsxExportError::InvalidReference(format!("некоректний inline string: {error}"))
-                })?)
+            Ok(Event::Text(text)) if in_inline_text => inline_value.push_str(&text),
+            Ok(Event::GeneralRef(reference)) if in_inline_text => {
+                inline_value.push_str(&resolve_entity_ref(&reference, "inline string")?)
             }
-            Ok(Event::CData(text)) if in_inline_text => {
-                inline_value.push_str(&String::from_utf8_lossy(text.as_ref()))
-            }
+            Ok(Event::CData(text)) if in_inline_text => inline_value.push_str(&text),
             Ok(Event::Eof) => break,
             Ok(_) => {}
             Err(error) => {
@@ -1631,14 +1633,15 @@ mod tests {
 
         let result = read_archive_entries_with_limits(&bomb, TEST_LIMITS);
 
-        // Бібліотека zip 2.4.2 читає всі 4 МБ попри підроблений розмір (перевірено вручну),
-        // тож зупинити читання може лише власна межа за реально розпакованими байтами.
+        // zip 2.4.2 читав усі 4 МБ попри підроблений розмір, і зупиняла читання лише власна
+        // межа за реально розпакованими байтами; zip ≥ 9 сам відхиляє запис, більший за
+        // оголошений розмір (`InvalidData`). Прийнятні обидві відмови, але не успіх.
         assert!(
             matches!(
                 &result,
                 Err(XlsxExportError::ArchiveTooLarge(
                     ZipLimitExceeded::Entry { .. }
-                ))
+                )) | Err(XlsxExportError::Io(_))
             ),
             "forged size must not be trusted: {result:?}"
         );

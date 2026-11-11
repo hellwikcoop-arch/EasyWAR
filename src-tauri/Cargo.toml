@@ -15,7 +15,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 base64 = "0.22"
-calamine = { version = "=0.26.1", features = ["dates"] }
+calamine = { version = "=0.38.0", features = ["dates"] }
 # Захищена бібліотека «Офісу»: AEAD для вмісту й обгорток ключа, HKDF-підключі, HMAC ідентифікаторів.
 chacha20poly1305 = "0.11"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
@@ -23,7 +23,7 @@ dirs = "7"
 fs2 = "0.4"
 hkdf = "0.12"
 hmac = "0.12"
-quick-xml = "=0.31.0"
+quick-xml = "=0.42.0"
 regex = "=1.13.1"
 # Нативні повідомлення до створення вікна. З 0.17 бекенд на Linux треба вказати самим (gtk3):
 # tauri-plugin-dialog тягне власну rfd 0.16 і для цієї копії бекенд не вмикає.
@@ -40,7 +40,7 @@ tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 tempfile = "3"
 thiserror = "2"
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "signal", "sync", "time"] }
-zip = { version = "4", default-features = false, features = ["deflate"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
 zeroize = "1"
 tauri-plugin-updater = "2"
 rustls = { version = "0.23", default-features = false, features = ["ring"] }

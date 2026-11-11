@@ -187,7 +187,9 @@ impl ProfileDataStore {
 
         let names: Vec<String> = zip
             .file_names()
-            .filter_map(|entry| record_name(entry).map(|_| entry.to_owned()))
+            .filter_map(Result::ok)
+            .filter(|entry| record_name(entry).is_some())
+            .map(|entry| entry.into_owned())
             .collect();
         let mut report = ArchiveReport {
             total: names.len(),
