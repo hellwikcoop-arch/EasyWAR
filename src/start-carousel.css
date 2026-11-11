@@ -1,0 +1,92 @@
+/* Карусель стартового екрана (start-carousel.js): одна стрічка карток одного розміру.
+   Усі правила — за html.ew-start-carousel, щоб без скрипта лаунчер лишався сіткою, як раніше.
+   !important потрібні проти правил лаунчера в index.html (там вони теж з !important). */
+html.ew-start-carousel #view-start .ew-carousel {
+  /* Рівно 4 картки на екран (3 на вужчих, на телефоні — вільна прокрутка). */
+  --ew-per-page: 4; --ew-gap: 16px; --ew-cyan: #60dde8;
+  --ew-card-w: calc((100% - (var(--ew-per-page) - 1) * var(--ew-gap)) / var(--ew-per-page));
+  position: relative; width: 100%; min-width: 0;
+}
+html.ew-start-carousel #view-start .branch-cards {
+  display: flex !important; flex-wrap: nowrap !important; justify-content: flex-start !important; align-items: stretch !important;
+  gap: var(--ew-gap) !important; width: 100% !important; margin: 0 !important; padding: 12px 4px 26px !important;
+  overflow-x: auto; overflow-y: hidden; scroll-snap-type: x mandatory; scroll-padding-inline: 4px;
+  scrollbar-width: none; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain;
+  grid-template-columns: none !important;
+}
+html.ew-start-carousel #view-start .branch-cards::-webkit-scrollbar { display: none; }
+html.ew-start-carousel #view-start .branch-cards::before,
+html.ew-start-carousel #view-start .branch-cards::after { content: none !important; display: none !important; }
+html.ew-start-carousel #view-start .branch-cards .branch-col { display: contents !important; }
+/* Порядок: командування, потім роди військ. */
+html.ew-start-carousel #view-start .branch-cards [data-col="air"] > .cmd-slot { order: 1 !important; }
+html.ew-start-carousel #view-start .branch-cards [data-col="rocket"] > .cmd-slot { order: 2 !important; }
+html.ew-start-carousel #view-start .branch-cards [data-col="air"] > .branch-card { order: 3 !important; }
+html.ew-start-carousel #view-start .branch-cards [data-col="rocket"] > .branch-card { order: 4 !important; }
+html.ew-start-carousel #view-start .branch-cards > .branch-card[data-branch="artillery"] { order: 5 !important; }
+html.ew-start-carousel #view-start .branch-cards > .branch-card[data-branch="army"] { order: 6 !important; }
+html.ew-start-carousel #view-start .branch-cards > .branch-card[data-branch="sso"] { order: 7 !important; }
+html.ew-start-carousel #view-start .branch-cards > .branch-card[data-branch="custom"] { order: 8 !important; }
+/* Однаковий розмір: кожна картка й слот командування — одна комірка стрічки. */
+html.ew-start-carousel #view-start .branch-cards .cmd-slot,
+html.ew-start-carousel #view-start .branch-cards > .branch-card,
+html.ew-start-carousel #view-start .branch-cards .branch-col > .branch-card {
+  flex: 0 0 var(--ew-card-w) !important; width: var(--ew-card-w) !important; min-width: 0 !important; max-width: none !important;
+  scroll-snap-align: start; grid-column: auto !important;
+}
+html.ew-start-carousel #view-start .branch-cards .cmd-slot[data-open] {
+  flex-basis: calc(2 * var(--ew-card-w) + var(--ew-gap)) !important; width: calc(2 * var(--ew-card-w) + var(--ew-gap)) !important;
+}
+html.ew-start-carousel #view-start .branch-cards .branch-card {
+  position: relative; display: grid !important; grid-template-columns: none !important; grid-template-rows: 88px auto !important;
+  justify-items: center !important; align-items: center !important; align-content: center !important;
+  height: var(--branch-card-height, 196px) !important; min-height: var(--branch-card-height, 196px) !important;
+  padding: 18px 14px !important; row-gap: 10px !important; column-gap: 0 !important; width: 100% !important;
+}
+html.ew-start-carousel #view-start .branch-cards .branch-card.branch-card-soon { grid-template-rows: 88px auto auto !important; row-gap: 6px !important; }
+html.ew-start-carousel #view-start .branch-cards .branch-card.branch-card-soon.branch-card-live { grid-template-rows: 88px auto !important; }
+html.ew-start-carousel #view-start .branch-cards .branch-card h3 { text-align: center !important; font-size: 17px !important; line-height: 1.2 !important; width: 100%; }
+html.ew-start-carousel #view-start .branch-cards .branch-card .bc-icon {
+  grid-row: auto !important; grid-column: 1 !important; width: 104px !important; height: 88px !important; margin: 0 !important;
+}
+html.ew-start-carousel #view-start .branch-cards .branch-card .bc-soon { grid-column: 1 !important; }
+html.ew-start-carousel #view-start .branch-cards .cmd-slot .command-tile { height: var(--branch-card-height, 196px); }
+/* Підпис категорії у верхньому лівому куті. */
+html.ew-start-carousel #view-start .branch-card .ew-cat {
+  position: absolute !important; top: 9px; left: 12px; z-index: 2; pointer-events: none;
+  font: 600 9.5px/1 var(--ew-mono, ui-monospace, Menlo, Consolas, monospace); letter-spacing: .16em; text-transform: uppercase;
+  color: rgba(190, 236, 242, .62); text-shadow: 0 1px 6px rgba(0, 0, 0, .8);
+}
+html.ew-start-carousel #view-start .branch-card.branch-card-soon:not(.branch-card-live) .ew-cat { color: rgba(154, 176, 197, .6); }
+/* Стрілки й крапки. */
+html.ew-start-carousel #view-start .ew-carousel-btn {
+  position: absolute; top: calc(50% - 7px); transform: translateY(-50%); z-index: 3;
+  width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; cursor: pointer;
+  background: rgba(8, 16, 28, .86); border: 1px solid rgba(96, 221, 232, .45); color: #eaf1ff;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .45); transition: border-color .2s, background .2s, opacity .2s;
+}
+html.ew-start-carousel #view-start .ew-carousel-prev { left: -22px; }
+html.ew-start-carousel #view-start .ew-carousel-next { right: -22px; }
+html.ew-start-carousel #view-start .ew-carousel-btn:hover,
+html.ew-start-carousel #view-start .ew-carousel-btn:focus-visible { border-color: var(--ew-cyan); background: rgba(12, 28, 44, .96); outline: none; }
+html.ew-start-carousel #view-start .ew-carousel-btn:disabled { opacity: .28; cursor: default; }
+html.ew-start-carousel #view-start .ew-carousel-single .ew-carousel-btn,
+html.ew-start-carousel #view-start .ew-carousel-single .ew-carousel-dots { display: none; }
+html.ew-start-carousel #view-start .ew-carousel-dots { display: flex; justify-content: center; gap: 8px; margin-top: -6px; pointer-events: none; }
+html.ew-start-carousel #view-start .ew-carousel-dot { width: 7px; height: 7px; border-radius: 50%; background: rgba(190, 236, 242, .28); transition: background .2s, transform .2s; }
+html.ew-start-carousel #view-start .ew-carousel-dot.on { background: var(--ew-cyan); box-shadow: 0 0 10px var(--ew-cyan); transform: scale(1.15); }
+@media (max-width: 1000px) {
+  html.ew-start-carousel #view-start .ew-carousel { --ew-per-page: 3; }
+}
+@media (max-width: 760px) {
+  html.ew-start-carousel #view-start .ew-carousel { --ew-card-w: min(250px, 70vw); --ew-gap: 12px; }
+  html.ew-start-carousel #view-start .ew-carousel-prev { left: -6px; }
+  html.ew-start-carousel #view-start .ew-carousel-next { right: -6px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  html.ew-start-carousel #view-start .branch-cards { scroll-behavior: auto; }
+  html.ew-start-carousel #view-start .ew-carousel-dot, html.ew-start-carousel #view-start .ew-carousel-btn { transition: none; }
+}
+html[data-motion="off"].ew-start-carousel #view-start .branch-cards { scroll-behavior: auto; }
+/* Відкритий слот командування показує плитку замість картки (правило лаунчера, повторене з вищою специфічністю). */
+html.ew-start-carousel #view-start .branch-cards .cmd-slot[data-open] .cmd-card { display: none !important; }
