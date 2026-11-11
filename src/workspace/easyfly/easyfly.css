@@ -428,3 +428,106 @@
 .ef-leave-warn { border-color: var(--ef-bad); }
 .ef-warn-list { margin: 0; padding-left: 16px; font-size: 12px; }
 .ef-row-past { opacity: .7; }
+
+/* Зведення як міні-дашборд */
+.ef-dash-hero { display: flex; align-items: center; gap: 18px; padding: 18px 20px; border: 1px solid var(--ef-line); border-radius: var(--ef-radius); background: linear-gradient(135deg, color-mix(in srgb, var(--ef-accent) 12%, var(--ef-surface)), var(--ef-surface) 60%); }
+.ef-dash-hero-text { min-width: 0; }
+.ef-dash-hero .ef-title { margin: 0; overflow-wrap: anywhere; }
+.ef-dash-hero .ef-subtitle { margin: 4px 0 0; }
+.ef-ring { --ef-ring: 0%; --ef-ring-color: var(--ef-good); flex: 0 0 auto; width: 96px; height: 96px; border-radius: 50%; display: grid; place-items: center; background: conic-gradient(var(--ef-ring-color) var(--ef-ring), color-mix(in srgb, var(--ef-muted) 22%, transparent) 0); }
+.ef-ring-amber { --ef-ring-color: var(--ef-soon); }
+.ef-ring-red { --ef-ring-color: var(--ef-bad); }
+.ef-ring-hole { width: 74px; height: 74px; border-radius: 50%; background: var(--ef-surface); display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.1; }
+.ef-ring-hole strong { font-size: 20px; font-weight: 750; }
+.ef-ring-hole span { font-size: 10px; color: var(--ef-muted); text-transform: uppercase; letter-spacing: .06em; }
+.ef-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.ef-kpi { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; text-align: left; padding: 14px 16px; background: var(--ef-surface); border: 1px solid var(--ef-line); border-radius: var(--ef-radius); color: var(--ef-text); font: inherit; cursor: pointer; min-width: 0; }
+.ef-kpi:hover, .ef-tile:hover, .ef-dash-item:hover { border-color: var(--ef-accent); }
+.ef-kpi-label { font-size: 12px; letter-spacing: .05em; text-transform: uppercase; color: var(--ef-muted); }
+.ef-kpi .ef-kpi-value { font-size: 34px; }
+.ef-kpi-hint { font-size: 12px; color: var(--ef-muted); }
+.ef-share-wrap { display: flex; flex-direction: column; gap: 6px; }
+.ef-share { display: flex; gap: 3px; height: 10px; border-radius: 999px; overflow: hidden; }
+.ef-share-seg { flex: 0 1 0; min-width: 0; }
+.ef-share-overdue { background: var(--ef-bad); }
+.ef-share-soon { background: var(--ef-soon); }
+.ef-share-valid { background: var(--ef-good); }
+.ef-share-none { flex: 1; background: color-mix(in srgb, var(--ef-muted) 22%, transparent); }
+.ef-share-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; font-weight: 600; }
+.ef-dash-card .ef-card-head { margin-bottom: 8px; }
+.ef-dash-more { display: inline-flex; align-items: center; gap: 2px; padding: 0; border: 0; background: none; color: var(--ef-accent); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.ef-dash-items, .ef-dash-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.ef-dash-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; padding: 9px 12px; border: 1px solid var(--ef-line); border-radius: 10px; background: color-mix(in srgb, var(--ef-text) 3%, transparent); color: var(--ef-text); font: inherit; text-align: left; cursor: pointer; }
+.ef-dash-item-main { display: flex; flex-direction: column; min-width: 0; }
+.ef-dash-item-main .ef-muted { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ef-dash-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.ef-dash-big { margin: 0 0 6px; color: var(--ef-muted); font-size: 13px; }
+.ef-dash-big strong { font-size: 28px; font-weight: 750; color: var(--ef-text); }
+.ef-dash-list { font-size: 13px; }
+.ef-dash-clip { margin: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.ef-dash-section { margin: 4px 0 -6px; }
+.ef-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.ef-tile { display: grid; grid-template-columns: auto 1fr auto; grid-template-areas: "icon label value" "hint hint hint"; align-items: center; gap: 6px 10px; padding: 12px 14px; background: var(--ef-surface); border: 1px solid var(--ef-line); border-radius: var(--ef-radius); color: var(--ef-text); font: inherit; text-align: left; cursor: pointer; min-width: 0; }
+.ef-tile-icon { grid-area: icon; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; background: color-mix(in srgb, var(--ef-accent) 14%, transparent); color: var(--ef-accent); }
+.ef-tile-label { grid-area: label; font-weight: 650; min-width: 0; overflow-wrap: anywhere; }
+.ef-tile .ef-tile-value { grid-area: value; font-size: 20px; }
+.ef-tile-hint { grid-area: hint; font-size: 12px; color: var(--ef-muted); }
+.ef-dash-route > summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; cursor: pointer; list-style: none; }
+.ef-dash-route > summary::-webkit-details-marker { display: none; }
+.ef-dash-route > summary .ef-card-title { margin: 0; }
+.ef-dash-route[open] > summary { margin-bottom: 14px; }
+@media (max-width: 1100px) {
+  .ef-dash-row { grid-template-columns: minmax(0, 1fr); }
+  .ef-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 700px) {
+  .ef-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .ef-kpi { padding: 12px 14px; }
+  .ef-kpi .ef-kpi-value { font-size: 28px; }
+  .ef-dash-hero { padding: 14px; gap: 14px; }
+  .ef-ring { width: 80px; height: 80px; }
+  .ef-ring-hole { width: 62px; height: 62px; }
+  .ef-ring-hole strong { font-size: 17px; }
+  .ef-dash { gap: 12px; }
+  .ef-dash-hero .ef-title { font-size: 18px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .ef-dash-hero .ef-subtitle { font-size: 13px; }
+  .ef-dash > .ef-alert .ef-alert-body { display: none; }
+  .ef-dash > .ef-alert { padding: 10px 14px; }
+  .ef-dash { gap: 10px; }
+  .ef-dash-hero { padding: 10px 12px; gap: 12px; }
+  .ef-dash-hero .ef-eyebrow { margin-bottom: 2px; font-size: 9px; }
+  .ef-dash-hero .ef-title { font-size: 16px; -webkit-line-clamp: 1; }
+  .ef-dash-hero .ef-subtitle { font-size: 12px; margin-top: 2px; }
+  .ef-ring { width: 58px; height: 58px; }
+  .ef-ring-hole { width: 46px; height: 46px; }
+  .ef-ring-hole strong { font-size: 14px; }
+  .ef-ring-hole span { font-size: 7px; }
+  .ef-dash > .ef-alert { padding: 8px 12px; font-size: 13px; }
+  .ef-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+  .ef-kpi { padding: 8px 6px; gap: 0; align-items: center; text-align: center; }
+  .ef-kpi-label { font-size: 9px; letter-spacing: 0; white-space: nowrap; }
+  .ef-kpi .ef-kpi-value { font-size: 22px; }
+  .ef-kpi-hint { display: none; }
+  .ef-share { height: 8px; }
+  .ef-share-legend { font-size: 11px; }
+  .ef-tile-icon { width: 30px; height: 30px; }
+  /* Порядок на телефоні: плитки розділів і три міні-картки — одразу під лічильниками. */
+  .ef-dash-section-tiles { display: none; }
+  .ef-tiles { order: 1; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+  .ef-dash-row { order: 2; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .ef-dash-split { order: 3; }
+  .ef-dash-route { order: 4; }
+  .ef-dash > .ef-filterbar { order: 5; }
+  .ef-tile { grid-template-areas: "icon" "value" "label"; grid-template-columns: minmax(0, 1fr); justify-items: center; text-align: center; gap: 2px; padding: 10px 4px; position: relative; }
+  .ef-tile .ef-tile-value { grid-area: auto; position: absolute; top: 5px; right: 7px; font-size: 12px; line-height: 1; }
+  .ef-tile-label { font-size: 10px; font-weight: 600; line-height: 1.15; overflow-wrap: normal; white-space: nowrap; }
+  .ef-dash-hero .ef-subtitle { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ef-tile-hint { display: none; }
+  .ef-dash-row .ef-dash-card { padding: 10px; }
+  .ef-dash-row .ef-dash-list, .ef-dash-row .ef-actions, .ef-dash-row .ef-dash-clip, .ef-dash-row .ef-dash-more { display: none; }
+  .ef-dash-row .ef-card-title { font-size: 12px; }
+  .ef-dash-row .ef-card-head { margin-bottom: 2px; }
+  .ef-dash-row .ef-dash-big { margin: 0; font-size: 11px; line-height: 1.2; }
+  .ef-dash-row .ef-dash-big strong { display: block; font-size: 24px; }
+  .ef-dash-item { padding: 7px 10px; }
+}

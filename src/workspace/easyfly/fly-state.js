@@ -14,7 +14,7 @@ import {
   normalizeDate, normalizeFlight, ovpState, parseImportRows, personItems, renewAdmission,
   renewalHint, resolveSettings, shiftSummary, toIso, MEDICAL_KINDS, flightBlockers,
   LEAVE_KIND_IDS, LEAVE_STATUSES, leaveDays, leaveKindById, leaveTotals, leaveWarnings, medicalAfterLeave,
-  wholeMonthsBetween,
+  wholeMonthsBetween, buildReminders,
 } from './fly-core.js';
 import {
   MAX_CALLSIGN_LEN, MAX_NAV_TITLE_LEN, MAX_NOTE_LEN, NAV_FLIGHT_NAME_FIELDS,
@@ -939,6 +939,75 @@ export function summaryView(data, today, filter = {}) {
   const summary = commanderSummary(data.persons, coreCtx(data), today, filter);
   const links = [...new Set(data.persons.map(p => p.link).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'uk'));
   return { ...summary, links, buckets: deadlineBuckets(summary.calendar, today, 30) };
+}
+
+/** Частки у відсотках (цілі, разом 100; усе 0, якщо total = 0). Залишок від округлення — найбільшій частці. */
+export function shares(counts) {
+  const keys = Object.keys(counts);
+  const total = keys.reduce((sum, key) => sum + (counts[key] || 0), 0);
+  const out = Object.fromEntries(keys.map(key => [key, 0]));
+  if (!total) return out;
+  for (const key of keys) out[key] = Math.floor((counts[key] || 0) * 100 / total);
+  const rest = 100 - keys.reduce((sum, key) => sum + out[key], 0);
+  const top = keys.reduce((best, key) => ((counts[key] || 0) > (counts[best] || 0) ? key : best), keys[0]);
+  out[top] += rest;
+  return out;
+}
+
+/**
+ * Модель міні-дашборда «Зведення»: готовність (пілоти без блокувань), лічильники строків і їхні
+ * частки, відпустки (зараз і найближчі), остання льотна зміна, останній розрахунок штурмана,
+ * плитки розділів із числами. Фільтр (ланка, роль) діє на пілотів, строки й відпустки.
+ */
+export function dashboardView(data, today, filter = {}) {
+  const summary = summaryView(data, today, filter);
+  const persons = (data.persons || []).filter(p => (!filter.link || p.link === filter.link) && (!filter.role || p.role === filter.role));
+  const pilots = persons.length;
+  const blocked = summary.blocked.length;
+  const ready = pilots - blocked;
+  const { overdue, soon, valid } = summary.counters;
+  const leaveAll = persons.flatMap(p => leaveRows(p, data, today));
+  const leavesNow = leaveAll.filter(r => r.timing === 'current');
+  const leavesNext = leaveAll.filter(r => r.timing === 'future').sort((a, b) => byFrom(a.leave, b.leave)).slice(0, 3);
+  const leaveWarningsCount = leaveAll.filter(r => r.timing !== 'past' && r.warnings.length).length;
+
+  const lastDate = (data.shifts || []).map(s => s.date).filter(d => d <= today).sort().at(-1) || null;
+  let shift = null;
+  if (lastDate) {
+    const flights = flightsOfShift(data.flights, data.shifts.find(s => s.date === lastDate));
+    const known = flights.filter(f => Number.isInteger(f.airtimeMin));
+    shift = {
+      date: lastDate,
+      flights: flights.reduce((sum, f) => sum + (Number.isInteger(f.count) ? f.count : 0), 0),
+      crews: new Set(flights.map(f => f.personId).filter(Boolean)).size,
+      airtime: known.length ? formatDuration(known.reduce((sum, f) => sum + f.airtimeMin, 0)) : null,
+    };
+  }
+  const navList = data.navFlights || [];
+  const nav = navList.length ? { count: navList.length, title: navList.at(-1).title } : { count: 0, title: null };
+  const settings = effectiveSettings(data);
+  const items = persons.flatMap(p => personItems(p, today, coreCtx(data)));
+  const reminders = buildReminders(items, today, settings.reminderDays).length;
+
+  const tiles = [
+    { route: 'pilots', value: String(pilots), hint: pilots ? `${ready} без блокувань` : 'додайте пілотів', tone: blocked ? 'red' : '' },
+    { route: 'reminders', value: String(reminders), hint: reminders ? 'строки в межах порогів' : 'нагадувань немає', tone: reminders ? 'amber' : '' },
+    { route: 'leaves', value: String(leavesNow.length), hint: leavesNext[0] ? `наступна з ${formatDate(leavesNext[0].leave.from)}` : 'у відпустці зараз', tone: leaveWarningsCount ? 'amber' : '' },
+    { route: 'chrono', value: shift ? String(shift.flights) : '—', hint: shift ? `польотів за ${formatDate(shift.date)}` : 'змін ще немає', tone: '' },
+    { route: 'navigator', value: String(nav.count), hint: nav.count ? 'збережених розрахунків' : 'розрахунків немає', tone: '' },
+    { route: 'sunmoon', value: null, hint: 'схід, захід, фаза Місяця', tone: '' },
+    { route: 'import', value: null, hint: 'польоти з таблиці CSV', tone: '' },
+    { route: 'settings', value: null, hint: 'частина, пороги, підписанти', tone: '' },
+  ].map(tile => ({ ...tile, ...NAV_ITEMS.find(item => item.route === tile.route) }));
+
+  return {
+    ...summary,
+    pilots, ready, blockedCount: blocked,
+    readyPercent: pilots ? Math.round(ready * 100 / pilots) : 0,
+    share: shares({ overdue, soon, valid }),
+    leavesNow, leavesNext, leaveWarningsCount,
+    shift, nav, reminders, tiles,
+  };
 }
 
 // ───────────────────────────── Налаштування частини ─────────────────────────────
