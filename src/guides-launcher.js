@@ -13,7 +13,7 @@ function initializeGuidesLauncher() {
   openButton.type = 'button';
   openButton.className = 'btn quiet';
   openButton.textContent = 'easyWIKI';
-  openButton.title = 'Довідники: 3D-техніка, рухомі вузли, ТТХ, уразливі місця, бригади';
+  openButton.title = 'Довідники: ангар і гараж техніки, вкладка «Ворог», БпАК, бригади';
   toolbar.prepend(openButton);
 
   const overlay = document.createElement('div');

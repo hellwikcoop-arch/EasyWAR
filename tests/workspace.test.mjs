@@ -54,14 +54,14 @@ test('розділ «Офіс» має EasyGreen, EasyDoc, EasySlide, «Особ
   assert.deepEqual(OFFICE_APPS.map(app => app.title), ['EasyGreen', 'EasyDoc', 'EasySlide']);
   assert.deepEqual(WORKSPACE_SECTIONS.map(section => section.title), ['Офіс', 'Обстановка', 'Колективи', 'Особисте', 'Авіація']);
   assert.deepEqual(WORKSPACE_SECTIONS[0].apps, ['easygreen', 'easydoc', 'easyslide']);
-  assert.deepEqual(WORKSPACE_SECTIONS[1].apps, ['weather']);
+  assert.deepEqual(WORKSPACE_SECTIONS[1].apps, ['weather', 'sun']);
   assert.deepEqual(WORKSPACE_SECTIONS[2].apps, ['collectives', 'collective-demo']);
   assert.deepEqual(WORKSPACE_SECTIONS[3].apps, ['easypay']);
   assert.deepEqual(WORKSPACE_SECTIONS[4].apps, ['easyfly']);
   assert.deepEqual(AVIATION_APPS.map(app => app.id), ['easyfly']);
   assert.deepEqual(PERSONAL_APPS.map(app => app.id), ['easypay']);
   assert.deepEqual(COLLECTIVE_APPS.map(app => app.id), ['collectives', 'collective-demo']);
-  assert.deepEqual(WORKSPACE_APPS.map(app => app.id), ['easygreen', 'easydoc', 'easyslide', 'weather', 'collectives', 'collective-demo', 'easypay', 'easyfly']);
+  assert.deepEqual(WORKSPACE_APPS.map(app => app.id), ['easygreen', 'easydoc', 'easyslide', 'weather', 'sun', 'collectives', 'collective-demo', 'easypay', 'easyfly']);
   assert.equal(appById('easypay').title, 'easyPay');
   assert.deepEqual(dialogOptions(appById('easypay')).extensions, ['easypay']);
   assert.deepEqual(dialogOptions(appById('collectives')).extensions, ['ewcoll']);
@@ -318,6 +318,8 @@ test('модуль підключено в лаунчері, у збірці й 
 
   const dir = new URL('src/workspace/', root);
   for (const file of (await readdir(dir)).filter(name => /\.(js|html)$/.test(name))) {
+    // profile-store.js — єдине місце, де є запасний режим на localStorage (лише без Tauri, див. docs/WORKSPACE.md).
+    if (file === 'profile-store.js') continue;
     // Простір імен SVG (createElementNS) — не мережеве посилання.
     const text = (await read(`src/workspace/${file}`)).replaceAll("'http://www.w3.org/2000/svg'", '');
     assert.doesNotMatch(text, /https?:\/\/|fetch\(|XMLHttpRequest|WebSocket|localStorage|sessionStorage|indexedDB/, `${file}: без мережі й сховищ браузера`);
@@ -508,4 +510,57 @@ test('оболонка: вкладки «Розділи» і «Бібліоте�
     'Зберегти копію…', 'Оновити з джерела', 'Відв’язати', 'Зробити поточною', 'Оновити всі']) {
     assert.ok(library.includes(`'${label}`) || library.includes(`${label}'`), label);
   }
+});
+
+test('host.collectives є лише в застосунку «Колективи» з Tauri і викликає команди collective_*', async () => {
+  const calls = [];
+  const invoke = async (command, args) => { calls.push([command, args]); return { keyStore: 'absent' }; };
+  const host = createHost({ appEntry: appById('collectives'), invoke });
+  assert.deepEqual(await host.collectives.status(), { keyStore: 'absent' });
+  await host.collectives.createIdentity('пароль-профілю');
+  await host.collectives.create('пароль-профілю', 'Група', 'Синтетик');
+  assert.deepEqual(calls, [
+    ['collective_status', undefined],
+    ['collective_create_identity', { password: 'пароль-профілю' }],
+    ['collective_create', { password: 'пароль-профілю', name: 'Група', memberName: 'Синтетик' }],
+  ]);
+  assert.equal(createHost({ appEntry: appById('collectives') }).collectives, null, 'без Tauri');
+  assert.equal(createHost({ appEntry: appById('easygreen'), invoke }).collectives, null, 'інший застосунок');
+});
+
+test('host.collectives: команди обміну передають лише рядки, булеві й число', async () => {
+  const calls = [];
+  const invoke = async (command, args) => { calls.push([command, args]); return {}; };
+  const host = createHost({ appEntry: appById('collectives'), invoke });
+  await host.collectives.detail('ABCDEFGHIJ');
+  await host.collectives.setTable({ collective: 'ABCDEFGHIJ', title: 'Облік', cls: 'C', purpose: 'after-fact' });
+  await host.collectives.setTable({ collective: 'ABCDEFGHIJ', table: 'KLMNOPQRST', title: 'Облік', cls: 'D', purpose: 'planned' });
+  await host.collectives.setTable({ collective: 'ABCDEFGHIJ', table: 'KLMNOPQRST', title: 'Облік', cls: 'C', purpose: 'after-fact', columns: ['Стан', 7] });
+  await host.collectives.tableRead('пароль-профілю', 'ABCDEFGHIJ', 'KLMNOPQRST');
+  await host.collectives.syncExport('пароль-профілю', 'ABCDEFGHIJ');
+  await host.collectives.syncImport('пароль-профілю', 'EWSYNC1.x');
+  await host.collectives.inviteCreate('пароль-профілю', 'ABCDEFGHIJ', '24');
+  await host.collectives.joinRequest('пароль-профілю', 'EWINV1.x', 'Синтетик');
+  await host.collectives.inviteAdmit('пароль-профілю', 'ABCDEFGHIJ', 'EWJOIN1.x');
+  await host.collectives.joinAccept('пароль-профілю', 'EWKEYS1.x');
+  await host.collectives.reportPrepare({ collective: 'ABCDEFGHIJ', table: 'KLMNOPQRST',
+    transport: 'lan', explicitWan: 'так', reviewed: true, operation: '{"row":"synthetic"}' });
+  await host.collectives.reportConfirm('пароль-профілю', '00112233445566778899aabbccddeeff');
+  assert.deepEqual(calls, [
+    ['collective_detail', { collective: 'ABCDEFGHIJ' }],
+    ['collective_table_set', { collective: 'ABCDEFGHIJ', table: null, title: 'Облік', class: 'C', purpose: 'after-fact', columns: null }],
+    ['collective_table_set', { collective: 'ABCDEFGHIJ', table: 'KLMNOPQRST', title: 'Облік', class: 'D', purpose: 'planned', columns: null }],
+    ['collective_table_set', { collective: 'ABCDEFGHIJ', table: 'KLMNOPQRST', title: 'Облік', class: 'C', purpose: 'after-fact', columns: ['Стан', '7'] }],
+    ['collective_table_read', { password: 'пароль-профілю', collective: 'ABCDEFGHIJ', table: 'KLMNOPQRST' }],
+    ['collective_sync_export', { password: 'пароль-профілю', collective: 'ABCDEFGHIJ' }],
+    ['collective_sync_import', { password: 'пароль-профілю', text: 'EWSYNC1.x' }],
+    ['collective_invite_create', { password: 'пароль-профілю', collective: 'ABCDEFGHIJ', hours: 24 }],
+    ['collective_join_request', { password: 'пароль-профілю', invitation: 'EWINV1.x', memberName: 'Синтетик' }],
+    ['collective_invite_admit', { password: 'пароль-профілю', collective: 'ABCDEFGHIJ', request: 'EWJOIN1.x' }],
+    ['collective_join_accept', { password: 'пароль-профілю', keys: 'EWKEYS1.x' }],
+    ['collective_report_prepare', { collective: 'ABCDEFGHIJ', table: 'KLMNOPQRST',
+      transport: 'lan', explicitWan: false, operation: '{"row":"synthetic"}' }],
+    ['collective_report_confirm', { password: 'пароль-профілю', intent: '00112233445566778899aabbccddeeff' }],
+  ], 'явний вибір WAN — лише true; прапорець reviewed з JS не передається (SEC-003)');
+  assert.equal(host.collectives.report, undefined, 'однокрокового «Доповісти» більше немає');
 });

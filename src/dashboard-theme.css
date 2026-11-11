@@ -164,7 +164,5 @@ html:not([data-theme="light"]) .ud-kpi-ic {
 }
 html:not([data-theme="light"]) .ud-kpi > .ud-spark { filter: drop-shadow(0 0 6px color-mix(in srgb, var(--tone) 55%, transparent)); }
 
-/* ---------- Однотонний фон РВ: колір із палітри модуля, без градієнта й координатної сітки ----------
-   ПС, артилерія й лончер уже однотонні; УДШВ має власне правило (udshv-dashboard.css, rocket.html); світла тема РВ — у rocket.html. */
-html:not([data-theme="light"]).rocket-ref24:not([data-command="dshv"]), html:not([data-theme="light"]).rocket-ref24:not([data-command="dshv"]) body { background: var(--bg) !important; }
+/* ---------- Фон РВ: без координатної сітки; плакат РВ задає rocket-background.css (УДШВ — там само, у світлій темі фон однотонний, див. rocket.html). ---------- */
 html:not([data-theme="light"]).rocket-ref24:not([data-command="dshv"]) body::before { display: none !important; }

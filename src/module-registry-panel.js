@@ -7,8 +7,9 @@ import { countLine, definitionView, facets, filterDefinitions } from './module-r
 /**
  * `definitions` — перелік реєстру; `available` — Set id шаблонів Rust цієї збірки; `branch` — рід військ дашборда
  * (початковий фільтр); `onAdd(definition)` — повертає Promise, під час якого кнопки вимкнені; `onBack` — «← До каталогу».
+ * `columnsBox(definition)` — блок «Додати стовпці в основну таблицю» (E5) для блоків, що читають стовпці таблиці, або `null`.
  */
-export function registryPanel({ el, definitions, available, branch, branchLabel, onAdd, onBack }) {
+export function registryPanel({ el, definitions, available, branch, branchLabel, onAdd, onBack, columnsBox = null }) {
   const options = facets(definitions);
   const search = el('input', { type: 'search', class: 'ewmc-search', placeholder: 'Пошук за назвою, роллю даних чи обчисленням…', 'aria-label': 'Пошук у визначеннях модулів' });
   const select = (label, values, all, initial = '') => el('select', { class: 'ewmc-reg-select', 'aria-label': label },
@@ -51,7 +52,8 @@ export function registryPanel({ el, definitions, available, branch, branchLabel,
       el('ul', { class: 'ewmc-reg-req' }, view.requirements.map(item => el('li', { class: item.required ? 'required' : 'optional' },
         item.label, item.detail ? el('small', { text: ` (${item.detail})` }) : null, item.count > 1 ? el('small', { text: ` × ${item.count}` }) : null, item.required ? null : el('small', { text: ' · за бажанням' })))),
       view.counterpart ? el('p', { class: 'ewmc-reg-meta', text: `Рахує те саме, що й «${view.counterpart}».` }) : null,
-      view.addable ? button : el('p', { class: 'ewmc-reg-reason', text: view.reason }));
+      view.addable ? button : el('p', { class: 'ewmc-reg-reason', text: view.reason }),
+      !view.addable && columnsBox ? columnsBox(definition) : null);
   }
 
   for (const control of [source, visual, branchSelect]) control.addEventListener('change', paint);

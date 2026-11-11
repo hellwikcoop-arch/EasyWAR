@@ -15,6 +15,11 @@ import {
   installAppUpdate,
   LIBRARY_BACKUP_NOTE,
   LIBRARY_RESTORE_NOTE,
+  PROFILE_DATA_BACKUP_NOTE,
+  createProfileDataBackup,
+  profileDataBackupMessage,
+  profileDataRestoreMessage,
+  restoreProfileDataBackup,
   setAppUpdateAutoCheck,
   restoreStartupMessage,
   stageLocalRestore,
@@ -138,4 +143,39 @@ test('backup and restore warn that the encrypted office library travels with the
   const source = await readFile(new URL('../src/backup.js', import.meta.url), 'utf8');
   assert.match(source, /<p class="ew-backup-warning">\$\{LIBRARY_BACKUP_NOTE\}<\/p>/);
   assert.match(source, /<p class="ew-backup-warning">\$\{LIBRARY_RESTORE_NOTE\}<\/p>/);
+});
+
+test('profile data backup calls only its dedicated commands and never passes the password to create', async () => {
+  const calls = [];
+  const invoke = async (command, payload) => {
+    calls.push([command, payload]);
+    return null;
+  };
+  await createProfileDataBackup(invoke);
+  await restoreProfileDataBackup('синтетичний-пароль', invoke);
+  assert.deepEqual(calls, [
+    ['profile_data_backup_create', undefined],
+    ['profile_data_backup_restore', { password: 'синтетичний-пароль' }],
+  ]);
+  assert.match(PROFILE_DATA_BACKUP_NOTE, /\.ewpdb/);
+});
+
+test('profile data backup messages describe the outcome in Ukrainian', () => {
+  assert.match(profileDataBackupMessage(null), /скасовано/);
+  assert.match(profileDataBackupMessage({ path: '/x/a.ewpdb', records: 3 }), /записів: 3/);
+  assert.match(profileDataRestoreMessage(null), /скасовано/);
+  const text = profileDataRestoreMessage({ total: 5, restored: 3, keptNewer: 1, skipped: 1 });
+  assert.match(text, /відновлено: 3/);
+  assert.match(text, /новіші в профілі: 1/);
+  assert.match(text, /пропущено.*: 1/);
+  assert.doesNotMatch(profileDataRestoreMessage({ total: 2, restored: 2, keptNewer: 0, skipped: 0 }), /новіші|пропущено/);
+});
+
+test('backup dialog exposes the profile data section and disables it while busy', async () => {
+  const source = await readFile(new URL('../src/backup.js', import.meta.url), 'utf8');
+  assert.match(source, /ew-profile-data-create/);
+  assert.match(source, /ew-profile-data-restore/);
+  assert.match(source, /profileDataCreateButton\.disabled = value/);
+  assert.match(source, /profileDataRestoreButton\.disabled = value/);
+  assert.match(source, /type="password" id="ew-profile-data-password"/);
 });

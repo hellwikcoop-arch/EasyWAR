@@ -2,6 +2,9 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
+// Армійська авіація відкриває карту з ?module=army: тло, панелі й сітка в її зеленому кольорі (map.css).
+if (new URLSearchParams(location.search).get('module') === 'army') document.documentElement.dataset.module = 'army';
+
 // ---------- geodata core: pure functions shared by the Web Worker and the main-thread fallback ----------
 // Projection: Lambert conformal conic on WGS84 (standard parallels 45.7° and 51°), so distances and angles in the scene are true to
 // within about 0.3 % everywhere in Ukraine. The rasters stay on their plate grid (lon/lat-linear); only the geometry is projected.
