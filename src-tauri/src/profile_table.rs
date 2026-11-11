@@ -78,7 +78,7 @@ pub enum ProfileTableError {
 /// перевіряється лише, що книга відкривається й має аркуші.
 pub fn required_sheet(branch: Branch) -> Option<&'static str> {
     match branch {
-        Branch::Air | Branch::Rocket => Some("Зведена"),
+        Branch::Air | Branch::Rocket | Branch::Army => Some("Зведена"),
         Branch::Pvk => Some("Таблиця 1"),
         _ => None,
     }
@@ -463,7 +463,12 @@ mod tests {
 
     #[test]
     fn every_shipped_base_table_passes_its_own_branch_validation() {
-        for table in [BaseTable::Air, BaseTable::Rvia, BaseTable::Pvk] {
+        for table in [
+            BaseTable::Air,
+            BaseTable::Rvia,
+            BaseTable::Pvk,
+            BaseTable::Army,
+        ] {
             validate_workbook(table.branch(), table.bytes())
                 .unwrap_or_else(|error| panic!("{}: {error}", table.title()));
         }

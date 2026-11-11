@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
@@ -8,8 +8,8 @@ const host = process.env.TAURI_DEV_HOST;
 // Офлайн-кеш для мобільного перегляду (viewer.html): після збірки записує dist/sw.js
 // зі списком усіх файлів. Версія кешу береться з package.json, тож нова збірка
 // замінює старий кеш. 3D-моделі (.glb), переглядач літаків (aircraft-viewer.html, aircraft-3d/),
-// відео заставки (.mp4), ресурси 3D-карти (map-assets, >100 МБ) і 3D-довідники (сторінки й
-// скрипти guides*, їхні шрифти .woff2) і «Робоче середовище» (workspace*, .wasm) у кеш не входять: у вікнах командування вони не потрібні,
+// відео заставки (.mp4), ресурси 3D-карти (map-assets, >100 МБ), ангар і гараж (hangar/, ~330 МБ),
+// 3D-довідники (сторінки й скрипти guides*, їхні шрифти .woff2) і «Робоче середовище» (workspace*, .wasm) у кеш не входять: у вікнах командування вони не потрібні,
 // моделі важать десятки мегабайтів, а заставка є лише в застосунку.
 // Сервіс-воркер реєструє лише viewer.html; у застосунку Tauri його немає.
 function viewerServiceWorker() {
@@ -25,7 +25,7 @@ function viewerServiceWorker() {
           if (statSync(full).isDirectory()) walk(full);
           else {
             const rel = relative(out, full).split("\\").join("/");
-            if (name !== "sw.js" && !name.endsWith(".map") && !name.endsWith(".glb") && !name.endsWith(".mp4") && !name.endsWith(".wasm") && !name.endsWith(".woff2") && name !== "aircraft-viewer.html" && !full.includes(`${sep}aircraft-3d${sep}`) && !/(^|\/)guides[-/]/.test(rel) && !/(^|\/)workspace[-/]/.test(rel) && !rel.startsWith("map-assets/")) files.push("./" + rel);
+            if (name !== "sw.js" && !name.endsWith(".map") && !name.endsWith(".glb") && !name.endsWith(".mp4") && !name.endsWith(".wasm") && !name.endsWith(".woff2") && name !== "aircraft-viewer.html" && !full.includes(`${sep}aircraft-3d${sep}`) && !/(^|\/)guides[-/]/.test(rel) && !/(^|\/)workspace[-/]/.test(rel) && !rel.startsWith("map-assets/") && !rel.startsWith("hangar/")) files.push("./" + rel);
           }
         }
       };
@@ -52,9 +52,34 @@ self.addEventListener("fetch", (event) => {
   };
 }
 
+const HANGAR_DIR = fileURLToPath(new URL("./hangar", import.meta.url));
+
+// Ангар не проходить через бандлер: сторінка й ліниві models/g_*.js (~330 МБ) копіюються в dist/hangar
+// і в режимі розробки віддаються як є. У вікні Tauri це ті самі файли фронтенду, без другої копії в resources.
+function hangarStatic() {
+  const send = (req, res, next) => {
+    const pathOnly = decodeURIComponent((req.url || "").split("?")[0]);
+    if (pathOnly !== "/hangar/EasyWAR_hangar.html" && !/^\/hangar\/models\/g_[\w.-]+\.js$/.test(pathOnly)) return next();
+    const file = join(HANGAR_DIR, pathOnly.slice("/hangar/".length));
+    if (!file.startsWith(HANGAR_DIR) || !existsSync(file)) return next();
+    res.setHeader("Content-Type", pathOnly.endsWith(".html") ? "text/html; charset=utf-8" : "text/javascript; charset=utf-8");
+    createReadStream(file).pipe(res);
+  };
+  return {
+    name: "easywar-hangar-static",
+    configureServer(server) { server.middlewares.use(send); },
+    closeBundle() {
+      const dest = fileURLToPath(new URL("./dist/hangar", import.meta.url));
+      mkdirSync(join(dest, "models"), { recursive: true });
+      cpSync(join(HANGAR_DIR, "EasyWAR_hangar.html"), join(dest, "EasyWAR_hangar.html"));
+      cpSync(join(HANGAR_DIR, "models"), join(dest, "models"), { recursive: true });
+    },
+  };
+}
+
 export default defineConfig({
   root: "src",
-  plugins: [viewerServiceWorker()],
+  plugins: [hangarStatic(), viewerServiceWorker()],
   base: "./",
   clearScreen: false,
   server: {
@@ -86,11 +111,11 @@ export default defineConfig({
     // Launcher plus the branch modules it opens in same-origin iframes; map.html — 3D-карта, яку вкладки «Карта» ПС і РВ вбудовують в iframe.
     rolldownOptions: {
       // Код застосунків «Робочого середовища» (src/workspace/<id>/app.js) і вкладки «Бібліотека»
-      // (src/workspace/library.js) отримує префікс workspace-, щоб офлайн-кеш телефона
+      // (src/workspace/library.js, files.js) отримує префікс workspace-, щоб офлайн-кеш телефона
       // (viewerServiceWorker) його не брав.
       output: {
         chunkFileNames: (chunk) =>
-          /\/src\/workspace\/(?:[^/]+\/app|library)\.js$/.test((chunk.facadeModuleId || "").replace(/\\/g, "/"))
+          /\/src\/workspace\/(?:[^/]+\/app|library|files)\.js$/.test((chunk.facadeModuleId || "").replace(/\\/g, "/"))
             ? "assets/workspace-[name]-[hash].js"
             : "assets/[name]-[hash].js",
       },
@@ -99,19 +124,17 @@ export default defineConfig({
         air: fileURLToPath(new URL("./src/air.html", import.meta.url)),
         rocket: fileURLToPath(new URL("./src/rocket.html", import.meta.url)),
         artillery: fileURLToPath(new URL("./src/artillery.html", import.meta.url)),
+        custom: fileURLToPath(new URL("./src/custom.html", import.meta.url)),
         map: fileURLToPath(new URL("./src/map.html", import.meta.url)),
         viewer: fileURLToPath(new URL("./src/viewer.html", import.meta.url)),
         // Літаки у вкладці «Довідник» (ПС): окрема сторінка зі своєю сценою, відкривається в кадрі.
         aircraftViewer: fileURLToPath(new URL("./src/aircraft-viewer.html", import.meta.url)),
-        // 3D-довідники: хаб і шість довідників; лаунчер відкриває хаб в iframe-накладці (src/guides-launcher.js).
+        // easyWIKI: хаб веде в ангар/гараж. У збірку лишаються хаб, бригади й БпАК (його в ангарі немає).
+        // Старі довідники техніки (rvia, ppo, ground-forces, aviation, enemy-ground) не є входами,
+        // тож їхні .glb у dist не потрапляють.
         guides: fileURLToPath(new URL("./src/guides/index.html", import.meta.url)),
         "guides-brigades": fileURLToPath(new URL("./src/guides/brigades/index.html", import.meta.url)),
-        "guides-rvia": fileURLToPath(new URL("./src/guides/rvia/index.html", import.meta.url)),
-        "guides-ppo": fileURLToPath(new URL("./src/guides/ppo/index.html", import.meta.url)),
-        "guides-ground-forces": fileURLToPath(new URL("./src/guides/ground-forces/index.html", import.meta.url)),
         "guides-uav": fileURLToPath(new URL("./src/guides/uav/index.html", import.meta.url)),
-        "guides-aviation": fileURLToPath(new URL("./src/guides/aviation/index.html", import.meta.url)),
-        "guides-enemy-ground": fileURLToPath(new URL("./src/guides/enemy-ground/index.html", import.meta.url)),
         // Робоче середовище: розділ «Офіс» і сторінка застосунку; лаунчер відкриває його в iframe-накладці (src/workspace-launcher.js).
         workspace: fileURLToPath(new URL("./src/workspace/index.html", import.meta.url)),
         "workspace-app": fileURLToPath(new URL("./src/workspace/app.html", import.meta.url)),

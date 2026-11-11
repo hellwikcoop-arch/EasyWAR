@@ -13,7 +13,7 @@ use super::epoch::{self, EpochKey};
 use super::hex;
 use super::identity::{self, DeviceIdentity, MemberIdentity};
 use super::replay::{
-    receive, Decision, InMemoryMembership, Journals, MembershipView, RevokedPolicy,
+    receive, Decision, InMemoryMembership, Journals, MembershipView, RevokedPolicy, DEFER_HORIZON,
 };
 use super::{hkdf, Reason, ID_LEN, KEY_LEN, NONCE_LEN};
 
@@ -166,9 +166,18 @@ fn header_json(h: &EnvelopeHeader) -> Value {
     })
 }
 
+/// Час синтетичного зв'язування ключа обміну (G12, U1).
+const BINDING_ISSUED_AT: i64 = 1_761_600_000;
+
 fn synthetic_json() -> Value {
     let s = synthetic();
     let public = s.member.public();
+    let binding = s
+        .member
+        .bind_exchange(s.header.collective_id, BINDING_ISSUED_AT);
+    let recipient = binding
+        .verify(&s.header.collective_id)
+        .expect("синтетичне зв'язування дійсне");
     let record = s.member.issue_device(&s.device.public(), 1_761_600_000);
     let signed = s.payload.clone().sign(&s.device);
     let envelope = envelope::seal(&s.epoch_key, s.header, &signed);
@@ -178,10 +187,8 @@ fn synthetic_json() -> Value {
     let reencrypted = envelope::seal(&s.epoch_key, second, &signed);
     let wrap = epoch::wrap_deterministic(
         &s.epoch_key,
-        s.header.collective_id,
         0,
-        s.member.member_id(),
-        &public.exchange,
+        &recipient,
         [0x05; KEY_LEN],
         [0x13; NONCE_LEN],
     )
@@ -195,6 +202,10 @@ fn synthetic_json() -> Value {
         "device": {
             "seed": hex::encode(&[0x03; KEY_LEN]), "public": hex::encode(&s.device.public().0),
             "record": hex::encode(&record.to_bytes()), "issued_at": record.issued_at,
+        },
+        "exchange_binding": {
+            "collective_id": hex::encode(&binding.collective_id), "issued_at": binding.issued_at,
+            "bytes": hex::encode(&binding.to_bytes()),
         },
         "epoch_wrap": {
             "epoch_key": hex::encode(s.epoch_key.as_bytes()), "eph_secret": hex::encode(&[0x05; KEY_LEN]),
@@ -241,7 +252,14 @@ fn print_synthetic() {
 fn synthetic_vectors_match_fixture() {
     let f = fixture();
     let generated = synthetic_json();
-    for key in ["member", "device", "epoch_wrap", "envelope", "reencrypt"] {
+    for key in [
+        "member",
+        "device",
+        "exchange_binding",
+        "epoch_wrap",
+        "envelope",
+        "reencrypt",
+    ] {
         assert_eq!(
             f[key], generated[key],
             "розділ {key} фікстури відстав від коду — перегенеруй print_synthetic"
@@ -278,6 +296,11 @@ fn synthetic_envelope_opens_with_fixture_values_only() {
     let record =
         identity::DeviceRecord::from_bytes(&hex::decode(field(&f["device"], "record"))).unwrap();
     record.verify(&member.public()).unwrap();
+    let binding =
+        identity::ExchangeBinding::from_bytes(&hex::decode(field(&f["exchange_binding"], "bytes")))
+            .unwrap();
+    let bound = binding.verify(&wrap.collective_id).unwrap();
+    assert_eq!(bound.public(), &member.public());
 }
 
 /// Негативні вектори розділу 4 — виконуються на синтетичному журналі складу з відкликанням
@@ -286,9 +309,10 @@ fn synthetic_envelope_opens_with_fixture_values_only() {
 fn negative_vectors_behave_as_declared() {
     let f = fixture();
     let s = synthetic();
-    let public = s.member.public();
-    let mut membership = InMemoryMembership::new();
-    membership.join(&public); // 1
+    let collective = s.header.collective_id;
+    let binding = s.member.bind_exchange(collective, BINDING_ISSUED_AT);
+    let mut membership = InMemoryMembership::new(collective);
+    membership.join(&binding).unwrap(); // 1
     membership.grant_table(&s.member.member_id(), s.payload.table_id); // 2
     membership
         .add_device(&s.member.issue_device(&s.device.public(), 1))
@@ -323,6 +347,16 @@ fn negative_vectors_behave_as_declared() {
         envelope::seal(key_for(epoch).as_ref().unwrap(), header, &signed).to_bytes()
     };
     let base = make(3, 1_761_696_000, 0, &s.payload.op);
+    // Журнал без відкликання: вступ, право на таблицю, пристрій (seq 1–3).
+    let fresh = || {
+        let mut fresh = InMemoryMembership::new(collective);
+        fresh.join(&binding).unwrap();
+        fresh.grant_table(&s.member.member_id(), s.payload.table_id);
+        fresh
+            .add_device(&s.member.issue_device(&s.device.public(), 1))
+            .unwrap();
+        fresh
+    };
     for v in f["negative"].as_array().unwrap() {
         let name = field(v, "name");
         let expect = field(v, "expect");
@@ -340,12 +374,7 @@ fn negative_vectors_behave_as_declared() {
             }
             "same op_id, different payload" => {
                 // Для цього сценарію автор не відкликаний: окремий журнал без відкликання.
-                let mut fresh = InMemoryMembership::new();
-                fresh.join(&public);
-                fresh.grant_table(&s.member.member_id(), s.payload.table_id);
-                fresh
-                    .add_device(&s.member.issue_device(&s.device.public(), 1))
-                    .unwrap();
+                let fresh = fresh();
                 assert!(matches!(
                     receive(&mut journals, &fresh, policy, key_for, &base),
                     Decision::Apply(_)
@@ -388,11 +417,29 @@ fn negative_vectors_behave_as_declared() {
             ),
             "membership_seq from the future" => receive(
                 &mut journals,
+                &fresh(),
+                policy,
+                key_for,
+                &make(12, 1_761_696_000, 0, &s.payload.op),
+            ),
+            // N1: відкликаний на поточному журналі автор не відкладається.
+            "membership_seq from the future, revoked author" => receive(
+                &mut journals,
                 &membership,
                 policy,
                 key_for,
                 &make(12, 1_761_696_000, 0, &s.payload.op),
             ),
+            "membership_seq beyond the deferral horizon" => {
+                assert_eq!(v["horizon"], json!(super::replay::DEFER_HORIZON));
+                receive(
+                    &mut journals,
+                    &fresh(),
+                    policy,
+                    key_for,
+                    &make(3 + DEFER_HORIZON + 1, 1_761_696_000, 0, &s.payload.op),
+                )
+            }
             other => panic!("невідомий негативний вектор {other}"),
         };
         let actual = match &decision {

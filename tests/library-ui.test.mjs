@@ -262,7 +262,9 @@ test('екран за станом бібліотеки, тексти помил
   assert.equal(errorText(new Error('збій')), 'збій');
   assert.match(passwordProblem(''), /Введіть пароль/);
   assert.equal(passwordProblem('x'), null, 'довжину пароля входу перевіряє Rust');
-  assert.match(newPasswordProblem('12345', '12345'), /щонайменше 6/);
+  // Вхід/розблокування перевіряє лише порожнє поле: пароль, встановлений раніше коротшим за 8, і далі впускає.
+  assert.equal(passwordProblem('секрет'), null);
+  assert.match(newPasswordProblem('1234567', '1234567'), /щонайменше 8/);
   assert.match(newPasswordProblem('x'.repeat(129), 'x'.repeat(129)), /не більше 128/);
   assert.match(newPasswordProblem('пароль-1', 'пароль-2'), /не збігаються/);
   assert.equal(newPasswordProblem('пароль-1', 'пароль-1'), null);

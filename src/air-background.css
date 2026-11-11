@@ -1,0 +1,7 @@
+/* Фон дашбордів ПС і ПВК — плакат роду військ на всю сторінку (лише темна тема; у світлій — як було).
+   Плакат лежить на <html> і не рухається при прокручуванні, панелі й картки лишаються непрозорими, тож читаність та сама.
+   Армійська авіація має власний плакат у своєму inline-стилі в air.html: файл командування його не містить. */
+html:not([data-theme="light"]) {
+  background: linear-gradient(180deg, rgba(4, 9, 18, .38), rgba(4, 9, 18, .66)), url('./brand-art/ps-background.webp') center / cover no-repeat fixed, var(--bg);
+}
+html:not([data-theme="light"]) body { background: transparent; }

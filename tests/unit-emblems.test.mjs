@@ -34,7 +34,7 @@ for (const file of ['air.html', 'rocket.html']) {
 
 test('the army aviation card on the start screen shows the emblem', async () => {
   const html = await readFile(new URL('../src/index.html', import.meta.url), 'utf8');
-  const start = html.indexOf('data-soon="army-aviation"');
+  const start = html.indexOf('data-branch="army" data-emblem="army-aviation"');
   assert.notEqual(start, -1);
   const icon = html.slice(start, html.indexOf('</div>', html.indexOf('class="bc-icon"', start)));
   assert.match(icon, /<img alt="" src="data:image\/webp;base64,/);

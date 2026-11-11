@@ -15,9 +15,11 @@
   <div class="ws-tabs" id="ws-tabs" role="tablist" aria-label="Вкладки робочого середовища">
     <button type="button" class="ws-tab" id="ws-tab-office" role="tab" data-tab="office" aria-controls="ws-sections" aria-selected="true">Розділи</button>
     <button type="button" class="ws-tab" id="ws-tab-library" role="tab" data-tab="library" aria-controls="ws-library" aria-selected="false" tabindex="-1">Бібліотека<span class="ws-badge" id="ws-library-badge" hidden></span></button>
+    <button type="button" class="ws-tab" id="ws-tab-files" role="tab" data-tab="files" aria-controls="ws-files" aria-selected="false" tabindex="-1">Файли</button>
   </div>
   <main class="ws-home-main" id="ws-sections" role="tabpanel" aria-labelledby="ws-tab-office"></main>
   <section class="ws-home-main ws-library" id="ws-library" role="tabpanel" aria-labelledby="ws-tab-library" hidden></section>
+  <section class="ws-home-main ws-library ws-files-panel" id="ws-files" role="tabpanel" aria-labelledby="ws-tab-files" hidden></section>
 </section>
 <section class="ws-workspace" id="ws-app" hidden aria-labelledby="ws-app-name">
   <header class="ws-topbar ws-appbar">

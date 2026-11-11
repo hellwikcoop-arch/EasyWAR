@@ -7,8 +7,8 @@ application as three same-origin pages:
 | File | Source | Notes |
 | --- | --- | --- |
 | `src/index.html` | launcher from the unified HTML | payloads removed; iframes load `./air.html` / `./rocket.html`; Air controls aligned with the desktop toolbar |
-| `src/rocket.html` | «Ракетні Війська» module | v3.1 plus the module-editor hook and scripts |
-| `src/air.html` | previous desktop frontend + v3.1 Air changes | storage namespace `easywar.air::`, branch brand styles/mark, updated F-16 image; keeps «База даних», Signal, SQLite, XLSX, backup and profiles |
+| `src/rocket.html` | «Ракетні Війська» module | v3.1 plus the module-editor hook and scripts; tab and side-menu entry «База даних» (`#view-base`, `renderBase`, table of the «Зведена» columns as imported, hidden in `data-command="dshv"`, where the УДШВ dashboard has its own «База даних» menu item: `basePage` in `src/udshv-dashboard.js` over `workbook.raw` / `rawSheetGrid`) |
+| `src/air.html` | previous desktop frontend + v3.1 Air changes | storage namespace `easywar.air::`, branch brand styles/mark, updated F-16 image; keeps «База даних» (in `data-command="pvk"` the PVK dashboard menu item «База даних» calls `openBase` → `showView('base')`), Signal, SQLite, XLSX, backup and profiles |
 | `src/aircraft-viewer.html` | interactive aircraft viewer for the Air «Довідник» tab | classic (non-module) page opened in an `iframe` by `ref-wiki.js` as `aircraft-viewer.html?embed=1&a=<key>`; three r128, GLTFLoader and the meshopt decoder plus the model data live in `src/public/aircraft-3d/` (no CDN, no network); `embed` hides the aircraft row and hotkeys so the article chooses the aircraft; kept out of the phone offline cache |
 
 Each module isolates its `localStorage` keys and IndexedDB names by prefix
@@ -84,6 +84,8 @@ needs an entry in the test's `FAMILIES` table.
 
 ## Dashboard layout (PVK, UDSHV)
 
+Фони сторінок: плакат роду військ лежить на `<html>` (`background-attachment: fixed`, затемнення градієнтом, `body` прозорий) лише в темній темі. ПС і ПВК — `air-background.css` (`brand-art/ps-background.webp`), РВ і УДШВ — `rocket-background.css` (`rv-` і `udshv-background.webp`; `!important` і подвійний `[data-command]` потрібні проти фонів `rocket.html`), артилерія — `artillery.css`, армійська авіація — рядок у `easywar-army-aviation-css` в `air.html` (у файл командування він не потрапляє), стартовий екран — `#view-start` в `index.html` (`start-background.webp`, кільце фону узгоджує `alignBackground`). Плакати — `webp` 800×450 (старт 1280×720), їх перевіряє `tests/dashboard-background.test.mjs`; новому плакату потрібен файл у `brand-art` і рядок у цьому тесті.
+
 `src/dashboard-layout.css` (підключений у `air.html` і `rocket.html` перед `dashboard-theme.css`) від 1200px робить із `<nav>` дашборда ліву колонку сітки кореня: `grid-column: 1; grid-row: 1 / span 12`, решта блоків — у колонці 2. Проміжки між блоками задано полями, а не `gap`, щоб порожні неявні рядки сітки не додавали висоти. Іконки меню — CSS-маски за атрибутом `data-nav` кнопки (його ставлять `udshv-dashboard.js` і `pvk-dashboard.js`; ключ — ключ розділу). Новому розділу потрібен рядок `--nav-icon` у цьому файлі, інакше буде іконка за замовчуванням. Фото шапок — `udshv-art/hero-photo.webp` (десантник під куполом: права частина банера УДШВ від власника, пропорції 760:142 під висоту шапки, згасання зліва вшите в альфа-канал) і `pvk-art/hero-photo.webp`, підключені в `dashboard-theme.css` лише для темної теми. Шапка УДШВ використовує `background-size: auto 100%`, тому фото не розтягується при зміні ширини вікна; нове фото для неї печеться під те саме співвідношення сторін. Картки внизу лівого меню (`pvk-art/pilot-card.webp`, `udshv-art/badge.webp`) задані в кінці `dashboard-layout.css` через `::after` меню, лише в темній темі й лише від 1200px.
 
 ## Startup splash
@@ -157,42 +159,73 @@ ends, and the launcher stays `inert` until sign-in.
 
 | File | Role |
 | --- | --- |
-| `src/profile-gate-core.js` | pure rules: form validation, module list, table slots per module, retry delay, which screen to show (tested in `tests/profile-gate.test.mjs`) |
+| `src/profile-gate-core.js` | pure rules: form validation, module rows (`GATE_MODULES`: one row may enable several modules — «Командування військ» = `pvk` + `dshv`; `modulesForRows`, `rowChosen`), table slots per module (`slotsForModules`), retry delay, which screen to show (tested in `tests/profile-gate.test.mjs`) |
 | `src/profile-gate.js` | DOM: login, three-step registration (profile → modules → tables), error screen; `html.ew-locked` + `inert` on the page; no network, no browser storage |
 | `src/profile-gate.css` | gate styles; `.ew-module-off` hides unchosen module cards (selectors carry `#view-start` because `index.html` uses `!important` ids) |
 | `src/local-profiles.js` | creates the gate, hides unchosen modules (`applyModules`), keeps the profile dialog; sign-out sets the splash skip flag and reloads |
 | `src/startup-splash-core.js` | `requestSplashSkip` / `consumeSplashSkip`: one-shot `sessionStorage` flag so sign-out does not replay the video |
 
-- `src/index.html` is unchanged. Module cards and tiles are found by the selectors
-  in `GATE_MODULES`; `tests/profile-gate.test.mjs` fails if one disappears from
-  `index.html`, so re-check it after `script/import_unified_html.mjs`.
+- Module cards and tiles are found by the selectors in `GATE_MODULES` (`cards`
+  and `tiles`, one per module of the row); `tests/profile-gate.test.mjs` fails if
+  one disappears from `index.html`, so re-check it after
+  `script/import_unified_html.mjs`. The splash tiles (`startup-splash-core.js`)
+  follow the same rows: «Командування військ» and «Власний модуль».
+- «Армійська авіація» (`army`): the launcher card `[data-branch="army"]` opens
+  `src/air.html?module=army` in `#frame-army`. The Air Force page sets
+  `html[data-module="army"]` from that query (`easywar-command-mode` script), takes
+  the green accent tokens from `<style id="easywar-army-aviation-css">`, keeps its
+  own storage namespace `easywar.army::` (prefs, theme, IndexedDB cache) and, in
+  `<script id="easywar-army-aviation-mode">`, sets the window title, the brand
+  caption and the emblem (copied at runtime from the launcher card, so it is not
+  embedded twice). Profile slot `army` (`local-profiles-core.js` `PROFILE_BRANCHES`,
+  Rust `Branch::Army`, base table `BaseTable::Army` = the Air Force base workbook),
+  module catalog branch `army` (`branchFromLocation` reads `?module=army` on
+  `air.html` only). `script/build_standalone.mjs` strips the army style, script and
+  probe from the command-mode (ПВК) file. In army mode that head script also defines
+  `window.__EW_ARMY_ART` (`card`, `kpi`, `chart`, `db`: Mi-8 photos supplied by the owner on
+  2026-10-30, graded dark green; `poster`: «Army Aviation»); the page uses it instead of the jet
+  photos (`kc-photo`, `kh-jet`, `a2-hc`, `dh-jet`) and `AF_LOGO`, takes green `--bg`/`--surface`
+  tokens, opens the 3D map as `map.html?embed=1&module=army` (green `--bg`/`--grid` in `map.css`), and switches «Дашборд ПС»,
+  the blue KPI tone (`CC.blue`, `KCOL`) and the side-menu capsule to green. The test budget of that file was raised
+  from 5 MB to 10 MB on the owner's decision (2026-10-30); it is ≈5 MB now.
+- «Власний модуль» (`custom`): a launcher card `[data-branch="custom"]` opens
+  `src/custom.html` in `#frame-custom` (`MODULE_SRC`, `BRANCH_TITLE`, Vite input
+  `custom`). The page (`custom.css` tokens with a teal accent, `custom-app.js`
+  for the shared theme switch and the hint) has only an app bar with the
+  «Каталог модулів» button and a `#view-dash` host with `[data-ewmc-slot]`, so
+  `dashboard-module-catalog.js` works there unchanged with branch `custom`
+  (`branchFromLocation`, `BRANCH_LABELS`; colour in `public/module-styles.css`).
+  Rust accepts `custom` in `dashboard_modules.branch` (migration 0021) and
+  `lib.rs::dashboard_branch` maps it to no profile table slot, so XLSX-linked
+  sources are refused for it.
 - Outside Tauri (plain browser, `npm run dev`) there is no profile backend, so no
   gate is shown.
 - The gate is a UI barrier plus the Rust unlock check of data commands, not
   protection against file tampering; see `docs/DATABASE.md` (Local profiles).
 
-## easyWIKI (хаб, шість 3D-довідників і довідник бригад)
+## easyWIKI (ангар, гараж, БпАК і довідник бригад)
 
-Кнопка «easyWIKI» на головному екрані відкриває хаб інтерактивних довідників у накладці поверх лаунчера. Довідники — окремі сторінки збірки, тому legacy HTML (`index.html`, `air.html`, `rocket.html`) для них не змінювався, а `script/import_unified_html.mjs` їх не чіпає. Опис моделей, авторства й завантаження — в `docs/3D_MODELS.md` (розділ «3D-довідники»).
+Кнопка «easyWIKI» на головному екрані відкриває хаб у накладці поверх лаунчера. Картки техніки ведуть в `hangar/EasyWAR_hangar.html` (ангар, гараж, «Ворог»). БпАК і довідник бригад лишаються сторінками `src/guides`. Legacy HTML (`index.html`, `air.html`, `rocket.html`) для хаба не змінювався; вкладка «Довідник» у модулях відкриває той самий ангар для зіставлених статей (`src/ref-wiki.js`, `src/hangar-catalog-core.js`). Опис — в `docs/3D_MODELS.md` і `docs/USER_GUIDE.md`.
 
 | Файл | Роль |
 | --- | --- |
 | `src/guides-launcher.js`, `src/guides-launcher.css` | кнопка (`prepend` у `.appbar-right`; імпорт останній у `launcher-tools.js`, тож кнопка стоїть крайньою ліворуч) і накладка з `<iframe>` на `guides/index.html`; «Закрити» та `Esc` ставлять `about:blank`, щоб WebGL-сцена не лишалась у пам'яті |
-| `src/guides/index.html`, `hub.js`, `hub.css` | хаб: шість карток (кількість і назви моделей беруться з `credits.js`) і легенда походження моделей; посилання «До EasyWAR» видиме лише тоді, коли хаб відкрито не в накладці |
-| `src/guides/<id>/` | довідник (`rvia`, `ppo`, `ground-forces`, `uav`, `aviation`, `enemy-ground`): `index.html` без вбудованих скриптів, `main.js`, `style.css`, `models.js`, `models/*.glb`, поділ моделей на частини (`specs.js`, `meta.js`, `rig.js`, `spec.js`) |
-| `src/guides/credits.js` | авторство всіх моделей і ландшафту; від нього залежать підписи, хаб і `src/models/CREDITS.md` |
+| `src/guides/index.html`, `hub.js`, `hub.css` | хаб: картки ангара й гаража (`src/hangar-catalog-core.js`), БпАК і бригади; посилання «До EasyWAR» видиме лише тоді, коли хаб відкрито не в накладці |
+| `hangar/EasyWAR_hangar.html`, `hangar/models/` | офлайн-ангар; плагін `easywar-hangar-static` копіює їх у `dist/hangar` і віддає в `vite` dev. У `bundle.resources` другої копії немає |
+| `src/guides/<id>/` | БпАК (`uav`) входить у збірку. `rvia`, `ppo`, `ground-forces`, `aviation`, `enemy-ground` у збірку не входять |
+| `src/guides/credits.js` | авторство моделей БпАК і вихідних сторінок; від нього залежать підписи сцен і `src/models/CREDITS.md` |
 | `src/guides/guide-kit.js`, `room-env.js`, `base.css`, `fonts/` | спільне: читання GLB, годинник, заплатка відбиттів three, копія `RoomEnvironment` із three r160 (MIT), базові стилі, локальні шрифти woff2 (SIL OFL, тексти ліцензій у `fonts/licenses`) |
 
 - `base.css` лише задає запасні значення: селектори `html`, `body`, `:root`, `img` у ньому обгорнуті в `:where()` (нульова специфічність), бо збірка Vite може віддати його після стилів сторінки, а фон і колір тексту задає сама сторінка (`hub.css`, `<id>/style.css`, `brigades/style.css`). Новий довідник має сам задати `background` і `color` для `body`; це перевіряє `tests/guides-base-css.test.mjs`.
-- `vite.config.js` має сім входів: `guides` (хаб) і `guides-rvia`, `guides-ppo`, `guides-ground-forces`, `guides-uav`, `guides-aviation`, `guides-enemy-ground`. Новий довідник потребує входу тут, рядка в `GUIDES` у `script/guides-credits.mjs` і в `hub.js`; `tests/guides.test.mjs` бере перелік із `GUIDES` і для кожного довідника перевіряє вхід збірки, хаб, моделі та авторство.
-- Кеш переглядача для телефона (`viewerServiceWorker`) не бере ні сторінок `guides*`, ні `.woff2`: ≈ 105 МБ моделей телефонному файлу не потрібні.
+- `vite.config.js` має входи `guides` (хаб), `guides-brigades` і `guides-uav`. Старі каталоги техніки входами не є, тож їхні `.glb` у `dist` не потрапляють. Авторство вихідних моделей як і раніше звіряє `tests/guides.test.mjs` із `script/guides-credits.mjs`.
+- Кеш переглядача для телефона (`viewerServiceWorker`) не бере сторінок `guides*`, `.woff2` і каталогу `hangar/` (близько 330 МБ).
 - Мережі немає: three із npm, шрифти й ландшафт лежать у збірці, на сторінках довідників немає `eval`, `new Function` і вбудованих скриптів (перевіряє `tests/guides.test.mjs`).
 - CSP у `tauri.conf.json` не змінювали (вона `null`). Якщо її колись посилять, довідникам, імовірно, знадобляться `'wasm-unsafe-eval'` (декодер meshopt — WASM), `blob:` для текстур із GLB і `font-src 'self'`; з посиленою CSP довідники не перевіряли.
 - Довідники налаштовано під three r160, а проєкт на r186. Різницю гасять `room-env.js` і заплатка `LEGACY_REFLECTIONS` у `guide-kit.js`; тест «вигляд, затверджений на three r160» падає, коли відповідний шматок шейдера three змінюється, — це сигнал переглянути `guide-kit.js`.
 
 ## Робоче середовище (розділи «Офіс» і «Обстановка»)
 
-Кнопка «Робоче середовище» на головному екрані відкриває модуль `workspace` у накладці поверх лаунчера, так само як 3D-довідники; legacy HTML не змінювався. Модуль — окремі сторінки збірки `workspace/index.html` (оболонка з розділом «Офіс» і картками EasyGreen, EasyDoc, EasySlide та розділом «Обстановка» з карткою «Погода») і `workspace/app.html?app=<id>` (сторінка одного застосунку в `<iframe>` оболонки). Контракт підключення застосунку, команди відкриття й збереження файлів і перелік файлів — у [WORKSPACE.md](WORKSPACE.md).
+Кнопка «Робоче середовище» на головному екрані відкриває модуль `workspace` у накладці поверх лаунчера, так само як 3D-довідники; legacy HTML не змінювався. Модуль — окремі сторінки збірки `workspace/index.html` (оболонка з розділом «Офіс» і картками EasyGreen, EasyDoc, EasySlide, розділом «Обстановка» з карткою «Погода» та вкладками «Бібліотека» — зашифроване сховище документів у базі — і «Файли» — сховище файлів будь-якого типу в теці на диску, зашифрованих ключем бібліотеки, з окремим розділом «Таблиці дашбордів»: таблиці, які дашборди читають і записують у тому самому зашифрованому сховищі замість файла на диску, прив'язка `ewstore:<id>:<назва>` у `local_profile_tables.path`) і `workspace/app.html?app=<id>` (сторінка одного застосунку в `<iframe>` оболонки). Контракт підключення застосунку, команди відкриття й збереження файлів і перелік файлів — у [WORKSPACE.md](WORKSPACE.md).
 
 - `src/workspace-launcher.js` імпортується в `launcher-tools.js` після `guides-launcher.js`, тож кнопка стоїть крайньою ліворуч; перед закриттям накладки питає `EW_WORKSPACE.requestClose()` (незбережені зміни).
 - Код застосунку — `src/workspace/<id>/app.js` з `mount(container, host)`; оболонка знаходить його через `import.meta.glob`, без змін у самій оболонці. Поки файлу немає, картка відкриває заглушку «у розробці».
@@ -585,6 +618,15 @@ by hand with narrow anchored patches (see `AGENTS.md`), then run
 читання дашбордів за підтвердженими ролями ще не підключено (залишок E3). Тести — `tests/profile-schema.test.mjs`,
 `tests/profile-schema-client.test.mjs`.
 
+Зв'язки між таблицями (E3б, B2) зберігаються в тому самому документі v1 необов'язковими полями `relations` і
+`groups` (без нової міграції, команди чи capability): `confirmRelation` / `rejectRelation` / `clearRelation` /
+`clearRelations` («Скинути зв'язки»), `setGroups`, читання `relatedSources`, `staleRelations` («перевірте», якщо
+стовпець ключа зник чи змінив тип). Одна пара таблиць має не більш як один підтверджений ключ; «багато до багатьох» —
+лише вручну із застереженням; схема зберігає імена стовпців, кардинальність і основу, але не значення клітинок.
+`removeSource` прибирає зв'язки таблиці й розпускає групи, що розпались; `updateSourceColumns` не губить стовпці
+ключа (лишає їх як `orphan`); `columnDependents` додатково називає зв'язки, що користуються стовпцем. Екрана для
+рішень ще немає (майстер — B3). Тести — `tests/profile-schema-relations.test.mjs`; Rust-ліміти (256 зв'язків, 64 групи) — `profile_schema.rs`.
+
 ## Екземпляри модулів і розкладка (E4)
 
 `src/module-instance-core.js` — чисте ядро розкладки «Мій дашборд» профілю без DOM, сховищ і
@@ -678,7 +720,22 @@ keyColumns, correctedCells })` дає додані, змінені, зниклі
 відкидається разом зі зсувом; `tick` викликається лише між парами таблиць, тож на 10 000 рядків одна пара
 може тримати потік понад секунду (≈1,5 с у найгіршому виміряному випадку, 12 нерозпізнаних ролей), а 28 пар
 у такому випадку — десятки секунд: у майстрі B3 пошук має йти порціями.
-Збереження зв'язків у схемі профілю (B2), майстер «залишити зв'язок» (B3) і групи (B4) — наступні блоки, тільки за рішенням власника.
+Збереження зв'язків у схемі профілю, майстер у «Моєму дашборді» й групи — наступні блоки, тільки за рішенням власника.
+
+## Екран «Усі визначення модулів» (реєстр E1 на екрані)
+
+`src/module-registry-view-core.js` (чисте): `buildRegistry` (шаблони Rust з `get_dashboard_module_catalog`, каталог ПС
+v1 і блоки вкладок через `listDefinitions` + `validateRegistry`), `filterDefinitions` (слова через пробіл за назвою,
+обчисленням, назвами ролей і місцями; тип, вигляд, рід військ), `facets`, `definitionView` (людські тексти, однакові
+вимоги зведені з кількістю, `addable` лише для шаблонів «Мого дашборда», що є в каталозі збірки; для решти `reason` —
+де блок уже стоїть), `addRequest` (`{ branch, templateId, title, style: 'standard' }` або `null`), `VISUAL_LABELS`
+(тест вимагає підпис для кожного виду в реєстрі). `src/module-registry-panel.js` — DOM: пошук, три списки, картки,
+кнопка `add-definition`; лише `textContent`. У `dashboard-module-catalog.js`: кнопка `show-registry` поруч із пошуком
+каталогу, `showRegistry()` (`dialog.dataset.view = 'registry'`, перелік кешується в `state.registry`), додавання —
+`create_dashboard_module` із `addRequest`, далі `loadModules()` (розкладка E4 ставить картку). Нових команд Tauri,
+записів у схему профілю, міграцій, capabilities і CSP немає. CSS — `.ewmc-reg*`, `.ewmc-catalog-tools`. Тести —
+`tests/module-registry-view.test.mjs`.
+Збереження зв'язків у схемі профілю (B2) і підтвердження на екрані (B3) описано нижче; групи (B4) — наступний блок.
 
 ### Підказки зв'язків на екрані (E3б, показ ядра B1)
 
@@ -689,8 +746,67 @@ keyColumns, correctedCells })` дає додані, змінені, зниклі
 `src/table-link-panel.js` — DOM: `<details class="ewmc-links">` «Зв'язки між таблицями» з кнопками
 `find-links` / `cancel-links`; пошук через `suggestRelations` із `tick` (віддає керування між парами) і
 `cancelled` (кнопка або зникла з сторінки панель, `!panel.isConnected`); лише `textContent`, без `innerHTML`.
-Панель бере `state.schema` і `state.data` каталогу й **не викликає Tauri** (нічого не пише): у
-`dashboard-module-catalog.js` її додає `renderHost` перед сіткою карток, коли модулів ≥ 2 і схему прочитано.
+Панель бере `state.schema` і `state.data` каталогу й сама **не викликає Tauri**: рішення (B3) вона віддає функції
+`apply(change)`, яку дає `dashboard-module-catalog.js` (`applyLinkChange` → `updateProfileSchema`, ті самі команди
+`get/save_profile_schema`, без нових команд і capabilities), а після запису кличе `onChange` (`refreshRelatedLines`).
+У каталозі панель додає `renderHost` перед сіткою карток, коли модулів ≥ 2 і схему прочитано. Рішення (B3):
+`decisionOf` (`open` / `confirmed` / `rejected` / `taken`), `confirmArgs` / `rejectArgs`, `confirmBlock` (кандидат з
+припущеним порядком «день/місяць» не підтверджується), `savedRelationViews`, `rejectedRelationViews`, `relatedLine`
+(рядок «Зв'язано з: …» `p.ewmc-related[data-related-for]` на картці модуля). Кнопки: `confirm-relation`,
+`replace-relation`, `reject-relation`, `clear-relation`, `restore-relation`.
+Групи й попередження (B4): `suggestedGroups` (компоненти зв'язності підтверджених зв'язків з ≥ 2 таблиць, `g1`, `g2`…),
+`groupsNeedSaving`, `savedGroupViews`, `deleteLinksNote` (текст у картці модуля перед видаленням: `p.ewmc-delete-links[data-delete-links-for]`,
+оновлюється разом із `refreshRelatedLines`); кнопки `split-groups` (`setGroups`), `clear-groups`, `reset-links` →
+`confirm-reset-links` (`clearRelations`, два кроки).
+Читання за зв'язком (перший крок): `linkCoverage` (`table-link-core.js`: рядки з парою за ключем у кожній із двох таблиць, `complete`
+для усіченого читання) і `linkCoverageViews` (`table-link-view-core.js`: текст по кожному підтвердженому зв'язку; «перевірте» й непрочитані дані
+пропускаються з поясненням). У картці `ul.ewmc-related-stats[data-related-stats-for]` заповнює `fillCoverage` через `setTimeout(0)` після малювання
+і з `refreshRelatedLines`; тільки підрахунок, без фільтра й без змін у картках. `removeSource` розпускає групу, що лишилась з однієї таблиці.
+Перегляд об'єднання (B5, перший крок): `mergePreview` (`table-link-core.js`: повне зовнішнє з'єднання двох профільних таблиць за ключем,
+помилки `bad_key`/`many_many`, дублі заголовків із суфіксом « (Назва таблиці)», перші `sample` рядків) і `mergePreviewView`
+(`table-link-view-core.js`: підсумок і зразок для екрана). Кнопка `preview-merge` біля підтвердженого зв'язку (`togglePreview`, `mergeNode`
+у `table-link-panel.js`) лише показує блок `.ewmc-links-merge`; жодного `apply`/запису схеми й жодного нового модуля.
+Завантаження об'єднаної таблиці: `mergeDownloadView` (усі рядки через `mergePreview` з `sample: Infinity`; неповно прочитане не віддається) і
+`tableCsv` (`;`, BOM, CRLF, як в інших вивантаженнях) у `table-link-view-core.js`; кнопка `download-merge` у панелі викликає `download(filename, text)`
+(за замовчуванням `downloadText`: blob-посилання, без Tauri). Нічого не пишеться в схему профілю й у таблиці модулів.
+Модуль з об'єднаної таблиці: `mergeModuleView` (`table-link-view-core.js`) будує запит `create_dashboard_module` з `templateId: 'merged-table'`
+(`MERGED_TEMPLATE_ID`, збігається з Rust) і `customFields` (`label`, `dataType`: `integer`/`real`/`date`/`text` за значеннями, `role`, `aggregation`);
+рядки ключуються `c1`, `c2`, …, порожнє — `null`; відмовляє при неповному читанні, >10 000 рядків, >64 стовпців, клітинці >4096. Кнопка
+`create-merged-module` у панелі викликає `createModule(request)`, який передає `createMergedModule` каталогу: той самий `invoke('create_dashboard_module', request)`,
+далі `loadModules()` (розкладка E4 ставить картку) і сповіщення. Лише `invoke` у каталозі, панель і ядро його не викликають. Нових команд і capabilities немає:
+у наявної команди з'явився необов'язковий `customFields`.
+Оновлення знімка: `createMergedModule(request, { relationId, rowCount })` після створення чекає `state.syncing` (синхронізацію джерел схеми) і пише знімок
+`setSnapshot` (`profile-schema-core.js`, поле `snapshots` схеми профілю: `sourceId`, `relationId`, `builtAt`, `rowCount`; без міграції й команд).
+`table-link-snapshot-core.js` (чисте): `snapshotInfo`, `refreshView` (перебудова з поточних вихідних через `mergeModuleView`, порівняння стовпців знімка за назвою й типом,
+`countChanges` — додано/зникне/без змін, запит із повною заміною рядків без `rowId`), `refreshSummary`. `table-link-snapshot-panel.js` — DOM: `<details class="ewmc-update ewmc-snapshot">`
+на сторінці таблиці-знімка (кнопки `check-snapshot`, `apply-snapshot`, `confirm-snapshot`); `table-link-snapshot-client.js` — `replaceSnapshotRows` (та сама
+`replace_dashboard_module_rows` з `expectedUpdatedAt`). Каталог перед перевіркою читає обидві вихідні таблиці наново (`readSnapshotSources`) і після заміни оновлює дату
+знімка. Тести — `tests/table-link-snapshot.test.mjs`.
+
+Блок реєстру → основна таблиця (E5): `module-add-columns-core.js` (чисте, без `Object.freeze` на верхньому рівні — інакше виклик лишається у збірці ПВК-lite):
+`planAddColumns` (які ролі блоку є, які зіставити з наявним стовпцем за підписом, які додати; ключі `c{n}` далі за наявними; ліміт 64), `bindingsAfterAdd`
+(ключі нових стовпців — з відповіді команди за підписом), `confirmPlanBindings`, `addFieldsRequest`, `createUserTableRequest`, `userTables`.
+`module-add-columns-client.js` — `saveBlockColumns` (`add_dashboard_module_fields` чи `create_dashboard_module` для `user-table`) і `bindBlockColumns` (синхронізація схеми +
+зіставлення ролей одним записом). `module-add-columns-panel.js` — DOM: `<details class="ewmc-update ewmc-addcols">` на картці реєстру (кнопки `add-columns`,
+`confirm-add-columns`, галочка `with-optional`; наявні класи, нового CSS немає). Каталог передає в `registryPanel` `columnsBox` і виконує `addBlockColumns`.
+Тести — `tests/module-add-columns.test.mjs`.
+Картка блока з основної таблиці (E5, крок 4): `module-block-card-core.js` (чисте) — `hasBlockCard` (поки шість карток РВ `legacy:rv-kpi-*`), `rvRow` (значення за ролями →
+рядок моделі РВ), `blockCardModel` (перевірка ролей через `availability`, числа — `agg`/`resKind`/`shareOfOps` з `module-adapters/rv-kpi-core.js`, модель виду `kpi` для
+`mountChart`). Після додавання блока каталог ставить картку розкладки (`addInstance` з `definitionId` блока і `sourceId` основної таблиці); `renderModule` для такої картки
+малює картку блока (`blockCardView`, див. нижче) і не показує «Видалити модуль і дані». `resKind` перенесено в ядро дослівно з rocket.html (тест порівнює текст).
+Блоки-діаграми спільних вкладок ПС/РВ (розподіл і динаміка результатів, час доби, активність за днями, тип носія/цілі, боєприпаси, топ-5 підрозділів, повторні цілі,
+вогневі бригади): рядки моделі РВ зводяться до рядків службового модуля з полями `category`/`day`/`series`/`value`, малюнок — `chartModel` (ті самі види, що й шаблони).
+Описи діаграм будуються ліниво (`charts()`), бо виклики на верхньому рівні лишилися б у збірці ПВК-lite.
+Вигляд карток блоків (E5, крок 6): `module-block-card-view.js` — `blockCardView` (окремий `<article class="ewmc-module ewmc-block">` з налаштуваннями за `details.ewmc-block-tools`
+«⋯»), `kpiNode` (тон `data-tone`, підпис, число, зміна, рядок плиток, праворуч кільце частки — дуга SVG без пунктиру — або міні-графік; показник займає всю картку без
+заголовка), `deltaTone`. Рамка всіх карток розкладки (крім стилю «Пункт керування») — одна тонка лінія без кутиків (`.ewmc-dashboard-grid[data-layout] .ewmc-module`). Модель показника в ядрі доповнено `tone`, `share`, `tiles`, `delta` (зміна з
+`computeRvKpis`). `placeBlockCard` ставить нову картку перед карткою основної таблиці, нову таблицю розтягує на 12 колонок. Звичайна картка розкладки ховає `instanceBar`, «Видалити модуль
+і дані» й «Структуру таблиці» в те саме меню «⋯» (`.ewmc-card-menu`). Розмір «Мала» (`SIZE_CHOICES`, 2 колонки) малює показник компактно (`.ewmc-block.is-compact`: підпис і число). Вид діаграми й колір картки блока зберігаються в `instance.style.view` і `instance.style.accent` (поля розкладки вже були, міграції немає): `chartViews(definitionId)` дає варіанти виду, `CARD_PALETTES` — кольори (`data-palette` на картці перевизначає `--ewmc-s1…8`, у показника — тон); `blockChoices` малює обидва вибори в «⋯». Діаграми результатів беруть колір за змістом (`RESULT_SLOTS`). Лінії діаграм (`line`, `area`, лінія в `combo`) — плавні: `monotonePath` у `dashboard-module-charts.js` (монотонна кубічна інтерполяція, крива не виходить за значення сусідніх точок); область заливається градієнтом до прозорого (`.ewmc-area-fade`). Стовпчики й смуги (`columnPath`, `barPath`) мають заокруглений кінець даних дугою радіусом до 8 px (не більше половини товщини); у накопиченому стовпці — лише крайній відрізок. На «Моєму дашборді» легенда серій (`.ewmc-legend`) переставлена над малюнком праворуч (`order:-1` у `public/module-styles.css`), позначки круглі. Стилі — `public/module-styles.css` (у ПВК-lite не вбудовуються).
+Тести — `tests/module-block-card.test.mjs`.
+Карта операцій (E5, крок 9): `coordinates-core.js` (чисте) — `parseCoordinates` (MGRS із кириличними двійниками літер і десяткова пара; `mgrsToLatLon` — те саме перетворення, що вбудоване в `air.html`/`rocket.html`); `rvRow` дістає `coords` з ролі `coordinates`, а `charts()['legacy:strike-map']` у `module-block-card-core.js` будує рядки для виду `map` (`mapModel` у `dashboard-module-charts-core.js`: `latitude`, `longitude`, `label` — номер цілі, `status` — результат). `resultPoints` фарбує точки за результатом (`POINT_TONES`) і складає легенду за кольорами; `mapChart` малює її через `figure({ legendItems, legendColor })`, а понад 12 точок — дрібнішими кружками. `chartViews` для карти порожній (вибору виду немає); `placeBlockCard` ставить карту розміром 6×5. Блоки-переліки (E5, крок 8): `LIST_IDS` у `module-block-card-core.js` — `legacy:records-journal` (`journalModel`, 8 записів, найновіші зверху) і `legacy:data-quality` (`qualityModel`, 10 записів, категорії проблем, `recordIssues`); `blockCardModel` повертає `{ kind: 'list', model }`, `module-block-card-view.js` малює їх `listNode` (класи `.ewmc-bl*` у `public/module-styles.css`). `blockRequirements`/`withBlockRequirements` дають блоку вимоги, яких немає в реєстрі (для якості даних — обов'язкова дата), і каталог використовує їх у `columnsBox`. Шаблони «Зібрати за шаблоном» (E5, крок 7): `module-preset-core.js` (чисте) — `PRESETS` (блоки в порядку дашборда, підписи карток, що відрізняються від РВ), `presetsFor(branch)`,
+`planPreset` (один `planAddColumns` на об'єднані обов'язкові ролі всіх блоків і картки, яких ще немає на таблиці), `placePreset` (по черзі `placeBlockCard`, без повторів);
+`module-preset-panel.js` — розділ `details.ewmc-preset` у вікні «Каталог модулів» (наявні класи `ewmc-update`, без нового CSS); запис — `assemblePreset` у `dashboard-module-catalog.js`
+(стовпці → ролі → одна зміна розкладки). Назва картки (`instance.title`), відмінна від назви визначення, стає підписом показника (`blockCardModel({ title })`). Тести — `tests/module-preset.test.mjs`.
 CSS — `.ewmc-links*` у `dashboard-module-catalog.css`. Тести — `tests/table-link-view.test.mjs`
 (логіка й текстові контракти: імпорт, відсутність `invoke`, `innerHTML`, запису схеми).
 

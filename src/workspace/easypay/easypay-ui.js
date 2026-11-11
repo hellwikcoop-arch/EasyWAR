@@ -1,7 +1,8 @@
 // easyPay: інтерфейс особистого калькулятора й журналу виплат за макетами набору 1
 // (plans/easypay/vizuali/nabir-1): вкладки «Мої виплати» (список, картка пункту, «Рік у графіку»),
 // «Розрахунок» (блоки, живий підсумок, довідник посад №317), «Нагадування», «Довідка».
-// Логіка — easypay-core.js; журнал зберігається лише у файлі .easypay через host оболонки.
+// Логіка — easypay-core.js. Журнал належить профілю: зберігається автоматично в зашифрованих даних профілю
+// (host.profile, ключ easypay.ledger); файл .easypay — лише імпорт і копія для архіву (docs/WORKSPACE.md).
 import {
   COMBAT_CATEGORIES,
   LEDGER_EXTENSION,
@@ -35,6 +36,9 @@ import {
 } from './easypay-core.js';
 import { POSTS_317 } from './posady-317.js';
 
+import { loadText } from '../profile-store.js';
+
+const PROFILE_KEY = 'easypay.ledger';
 const FILE_OPTIONS = { extensions: [LEDGER_EXTENSION], filterName: 'Журнал easyPay' };
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const DAYS = ['день', 'дні', 'днів'];
@@ -154,12 +158,14 @@ function normalize(text) {
   return text.toLowerCase().replace(/[’ʼ`]/g, '\'').replace(/\s+/g, ' ').trim();
 }
 
-export function mountEasyPay(container, host) {
+export async function mountEasyPay(container, host) {
+  const profile = host.profile ?? null;
   const state = {
     ledger: emptyLedger(),
     handle: null,
     fileName: '',
     dirty: false,
+    unbound: false,
     tab: 'ledger',
     view: 'list',
     itemId: '',
@@ -210,10 +216,39 @@ export function mountEasyPay(container, host) {
     status.classList.toggle('ep-error', error);
   }
 
+  // Журнал прив'язано до профілю, якщо сховище доступне й збережене в ньому не пошкоджене:
+  // тоді зміни пишуться самі, а «незбережених змін» у файлі не буває.
+  const bound = () => Boolean(profile?.available) && !state.unbound;
+  let saveTimer = null;
+  let saveQueue = Promise.resolve();
+  let saveFailed = false;
+
+  function scheduleSave() {
+    if (!bound()) return;
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => { saveTimer = null; persist(); }, 400);
+  }
+
+  function persist() {
+    if (!bound()) return saveQueue;
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    const text = new TextDecoder().decode(serializeLedger({ ...state.ledger, savedAt: state.today }));
+    saveQueue = saveQueue.then(() => profile.write(PROFILE_KEY, text)).then(() => {
+      if (saveFailed) say('Журнал знову зберігається в профілі.');
+      saveFailed = false;
+    }, error => {
+      if (!saveFailed) say(`Не вдалося зберегти журнал у профілі: ${error?.message || error}. Спробую ще раз після наступної зміни.`, true);
+      saveFailed = true;
+    });
+    return saveQueue;
+  }
+
   function setDirty(dirty) {
-    state.dirty = dirty;
-    host.setDirty(dirty);
-    host.setTitle(state.fileName ? state.fileName : (state.ledger.items.length ? 'новий журнал' : ''));
+    state.dirty = dirty && !bound();
+    host.setDirty(state.dirty);
+    if (dirty) scheduleSave();
+    host.setTitle(bound() ? (state.ledger.items.length ? 'зберігається в профілі' : '') : (state.fileName ? state.fileName : (state.ledger.items.length ? 'новий журнал' : '')));
   }
 
   function changeLedger(ledger, message) {
@@ -259,9 +294,16 @@ export function mountEasyPay(container, host) {
   function fileButtons() {
     return [
       button('Новий журнал', () => guarded(newLedger, 'new'), { iconName: 'plus' }),
-      button('Відкрити…', () => guarded(openLedger, 'open'), { iconName: 'folder' }),
-      button('Зберегти', () => saveLedger(false), { iconName: 'save', kind: 'strong' }),
-      button('Зберегти як…', () => saveLedger(true), { iconName: 'file' }),
+      ...(bound()
+        ? [
+          button('Імпорт із файлу…', () => guarded(openLedger, 'open'), { iconName: 'folder' }),
+          button('Копія у файл…', () => saveLedger(true), { iconName: 'save', kind: 'strong' }),
+        ]
+        : [
+          button('Відкрити…', () => guarded(openLedger, 'open'), { iconName: 'folder' }),
+          button('Зберегти', () => saveLedger(false), { iconName: 'save', kind: 'strong' }),
+          button('Зберегти як…', () => saveLedger(true), { iconName: 'file' }),
+        ]),
     ];
   }
 
@@ -304,6 +346,12 @@ export function mountEasyPay(container, host) {
 
   // ---------- Файл журналу ----------
   async function guarded(action, key) {
+    // У профілі журнал замінюється назавжди (копії в файлі може не бути), тому заміну непорожнього журналу підтверджуємо.
+    if (bound() && state.ledger.items.length && state.discardArmed !== key) {
+      state.discardArmed = key;
+      say('Журнал у профілі буде замінено. Натисніть ще раз, щоб продовжити, або спершу збережіть «Копію у файл…».', true);
+      return;
+    }
     if (state.dirty && state.discardArmed !== key) {
       state.discardArmed = key;
       say('Є незбережені зміни. Натисніть ще раз, щоб продовжити без збереження, або спершу збережіть журнал.', true);
@@ -319,7 +367,9 @@ export function mountEasyPay(container, host) {
     state.handle = null;
     state.fileName = '';
     state.bannerHidden = false;
+    state.unbound = false;
     setDirty(false);
+    scheduleSave();
     showTab('ledger');
     say('Створено новий журнал.');
   }
@@ -331,14 +381,23 @@ export function mountEasyPay(container, host) {
       const ledger = parseLedger(opened.bytes);
       if (state.handle) await host.closeFile(state.handle).catch(() => {});
       state.ledger = ledger;
-      state.handle = opened.handle;
-      state.fileName = opened.name;
+      state.unbound = false;
+      // З профілем файл — лише джерело імпорту: зв'язок із ним не тримаємо, дані вже в профілі.
+      if (bound()) {
+        await host.closeFile(opened.handle).catch(() => {});
+        state.handle = null;
+        state.fileName = '';
+      } else {
+        state.handle = opened.handle;
+        state.fileName = opened.name;
+      }
       state.bannerHidden = false;
       setDirty(false);
+      scheduleSave();
       applyProfile(ledger.profile);
       fillMonths(monthInput.value);
       showTab('ledger');
-      say(`Відкрито ${opened.name}.`);
+      say(bound() ? `Імпортовано ${opened.name} у профіль.` : `Відкрито ${opened.name}.`);
     } catch (error) {
       say(error.message || 'Не вдалося відкрити файл.', true);
     }
@@ -348,10 +407,16 @@ export function mountEasyPay(container, host) {
     try {
       const ledger = { ...state.ledger, savedAt: state.today };
       const bytes = serializeLedger(ledger);
-      const saved = !as && state.handle
+      const saved = !as && state.handle && !bound()
         ? await host.saveFile({ handle: state.handle, bytes })
-        : await host.saveFileAs({ ...FILE_OPTIONS, bytes, title: 'Зберегти журнал easyPay', suggestedName: state.fileName || 'мої-виплати.easypay' });
+        : await host.saveFileAs({ ...FILE_OPTIONS, bytes, title: bound() ? 'Копія журналу easyPay у файл' : 'Зберегти журнал easyPay', suggestedName: state.fileName || 'мої-виплати.easypay' });
       if (!saved) return;
+      if (bound()) {
+        // Копія для архіву: файл не стає «поточним», журнал і далі живе в профілі.
+        await host.closeFile(saved.handle).catch(() => {});
+        say(`Копію збережено: ${saved.name}.`);
+        return;
+      }
       state.ledger = ledger;
       state.handle = saved.handle;
       state.fileName = saved.name;
@@ -484,7 +549,7 @@ export function mountEasyPay(container, host) {
     const payForm = el('form', { class: 'ep-card ep-pay', onsubmit: event => {
       event.preventDefault();
       try {
-        changeLedger(addPayment(state.ledger, item.id, { date: date.value, amount: amount.value, note: note.value }), 'Надходження внесено. Збережіть журнал, щоб не втратити.');
+        changeLedger(addPayment(state.ledger, item.id, { date: date.value, amount: amount.value, note: note.value }), (bound() ? 'Надходження внесено. Журнал збережено в профілі.' : 'Надходження внесено. Збережіть журнал, щоб не втратити.'));
       } catch (error) {
         say(error.message, true);
       }
@@ -540,8 +605,8 @@ export function mountEasyPay(container, host) {
         el('p', { class: 'ep-sub', text: 'Ще немає нарахувань або виплат. Порахуйте місяць або відкрийте вже збережений локальний файл.' }),
         el('div', { class: 'ep-row-buttons' },
           button('Порахувати місяць', () => showTab('calc'), { kind: 'gold', iconName: 'plus' }),
-          button('Відкрити файл .easypay', () => guarded(openLedger, 'open'), { iconName: 'folder' })),
-        el('p', { class: 'ep-hint', text: 'Журнал зберігається тільки на вашому комп\'ютері.' })),
+          button(bound() ? 'Імпорт із файлу .easypay' : 'Відкрити файл .easypay', () => guarded(openLedger, 'open'), { iconName: 'folder' })),
+        el('p', { class: 'ep-hint', text: bound() ? 'Журнал зберігається в профілі, зашифрованим, тільки на вашому комп\'ютері.' : 'Журнал зберігається тільки на вашому комп\'ютері.' })),
       card('ep-steps',
         eyebrow('Як це працює'),
         el('h2', { text: 'Три кроки' }),
@@ -549,7 +614,7 @@ export function mountEasyPay(container, host) {
           el('li', {}, el('strong', { text: 'Порахуйте місяць' }), el('span', { text: 'Оберіть посаду з наказу №317, внесіть дні й доби. Підсумок оновлюється одразу.' })),
           el('li', {}, el('strong', { text: 'Запишіть у «Мої виплати»' }), el('span', { text: 'Кожен вид виплати стає пунктом зі строком: грошове забезпечення, винагороди, штурмові.' })),
           el('li', {}, el('strong', { text: 'Вносьте надходження' }), el('span', { text: 'easyPay покаже борги й прострочені строки й нагадає, коли варто звернутися з рапортом.' }))),
-        el('p', { class: 'ep-hint', text: 'Збережіть журнал кнопкою «Зберегти»: незбережені зміни позначаються крапкою біля назви файлу.' })));
+        el('p', { class: 'ep-hint', text: bound() ? 'Зміни зберігаються в профілі автоматично. Для архіву зробіть «Копію у файл…».' : 'Збережіть журнал кнопкою «Зберегти»: незбережені зміни позначаються крапкою біля назви файлу.' })));
   }
 
   // ---------- Рік у графіку ----------
@@ -985,7 +1050,7 @@ export function mountEasyPay(container, host) {
   function recordCalculation() {
     if (!lastCalc) return;
     const month = lastCalc.month;
-    changeLedger(addCalculation(state.ledger, lastCalc, readInput()), `Розрахунок за ${monthTitle(month)} записано. Збережіть журнал, щоб не втратити.`);
+    changeLedger(addCalculation(state.ledger, lastCalc, readInput()), `Розрахунок за ${monthTitle(month)} записано.${bound() ? ' Журнал збережено в профілі.' : ' Збережіть журнал, щоб не втратити.'}`);
     showTab('ledger');
   }
 
@@ -1167,17 +1232,45 @@ export function mountEasyPay(container, host) {
         assumption('03', 'Особливості служби', '65 % — початкове значення поля, а не універсальна ставка.'),
         assumption('04', 'Премія та інше', 'Премія, частка за полон та інші виплати, яких документи не визначають, вносяться вручну.')),
       helpCard('04', 'Файли та конфіденційність', 'Де зберігаються дані', [
-        'Журнал — лише у файлі .easypay на вашому комп\'ютері. Збереження — через «Зберегти» та «Зберегти як…», відкриття — через «Відкрити…».',
+        bound()
+          ? 'Журнал зберігається автоматично в зашифрованих даних вашого профілю на цьому комп\'ютері: відкрили, увійшли — і він на місці. Файл .easypay потрібен лише для архіву («Копія у файл…») і перенесення («Імпорт із файлу…»).'
+          : 'Журнал — лише у файлі .easypay на вашому комп\'ютері. Збереження — через «Зберегти» та «Зберегти як…», відкриття — через «Відкрити…».',
         'easyPay нічого не надсилає в мережу: без входу, синхронізації, банків чи відправлення рапортів. У файлі — тільки параметри окладу й суми, без імені та номерів документів.',
       ], [], el('div', { class: 'ep-note' }, icon('info'), 'Розрахунок допоміжний. Перед зверненням до фінансової служби звірте цифри з чинними текстами постанови №704 і Порядку №260 на zakon.rada.gov.ua.'))),
   ));
 
   applyOption();
+
+  // Журнал із профілю: відкрили, увійшли — і він на місці. Недоступні або пошкоджені дані не перезаписуємо.
+  if (profile?.available) {
+    const { text, error } = await loadText(profile, { key: PROFILE_KEY });
+    if (error) {
+      state.unbound = true;
+      say(`Дані профілю недоступні: ${error}. Журнал працює з файлом .easypay, як раніше.`, true);
+    } else if (text) {
+      try {
+        const stored = parseLedger(new TextEncoder().encode(text));
+        state.ledger = stored;
+        applyProfile(stored.profile);
+        fillMonths(monthInput.value);
+      } catch (loadError) {
+        state.unbound = true;
+        say(`Журнал у профілі не прочитано (${loadError.message}). Він не буде перезаписаний; імпортуйте копію з файлу або створіть новий журнал.`, true);
+      }
+    }
+  }
   showTab('ledger');
-  host.setTitle('');
+  host.setTitle(bound() && state.ledger.items.length ? 'зберігається в профілі' : '');
+  const flush = () => { if (saveTimer) persist(); };
+  const onHidden = () => { if (document.visibilityState === 'hidden') flush(); };
+  document.addEventListener('visibilitychange', onHidden);
+  window.addEventListener('pagehide', flush);
 
   return {
     unmount() {
+      document.removeEventListener('visibilitychange', onHidden);
+      window.removeEventListener('pagehide', flush);
+      flush();
       if (state.handle) host.closeFile(state.handle).catch(() => {});
       root.remove();
     },
