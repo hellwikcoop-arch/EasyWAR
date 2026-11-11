@@ -21,6 +21,8 @@ pub enum BaseTable {
     Rvia,
     /// Повітряні Сили рівня ПВК: журнал ударів «Таблиця 1» і ТАБЛ 2-3 (аркуші «АА», «ПС», «Об'єкти»).
     Pvk,
+    /// Армійська авіація: та сама структура, що й ПС (аркуш «Зведена»), але у слоті `army`.
+    Army,
 }
 
 impl BaseTable {
@@ -29,6 +31,7 @@ impl BaseTable {
             BaseTable::Air => include_bytes!("../resources/base-tables/air-base.xlsx"),
             BaseTable::Rvia => include_bytes!("../resources/base-tables/rvia-base.xlsx"),
             BaseTable::Pvk => include_bytes!("../resources/base-tables/pvk-base.xlsx"),
+            BaseTable::Army => include_bytes!("../resources/base-tables/air-base.xlsx"),
         }
     }
 
@@ -38,6 +41,7 @@ impl BaseTable {
             BaseTable::Rvia => Branch::Rocket,
             BaseTable::Air => Branch::Air,
             BaseTable::Pvk => Branch::Pvk,
+            BaseTable::Army => Branch::Army,
         }
     }
 
@@ -46,6 +50,7 @@ impl BaseTable {
             BaseTable::Air => "ПС",
             BaseTable::Rvia => "РВ",
             BaseTable::Pvk => "ПС рівня ПВК",
+            BaseTable::Army => "АА",
         }
     }
 
@@ -54,6 +59,7 @@ impl BaseTable {
             BaseTable::Air => "EasyWAR_ПС.xlsx",
             BaseTable::Rvia => "EasyWAR_РВ.xlsx",
             BaseTable::Pvk => "EasyWAR_ПС_ПВК.xlsx",
+            BaseTable::Army => "EasyWAR_АА.xlsx",
         }
     }
 }
@@ -125,7 +131,12 @@ mod tests {
 
     #[test]
     fn packages_carry_no_author_path_printer_or_query_parts() {
-        for table in [BaseTable::Air, BaseTable::Rvia, BaseTable::Pvk] {
+        for table in [
+            BaseTable::Air,
+            BaseTable::Rvia,
+            BaseTable::Pvk,
+            BaseTable::Army,
+        ] {
             let (names, text) = package_text(table);
             assert!(
                 !names

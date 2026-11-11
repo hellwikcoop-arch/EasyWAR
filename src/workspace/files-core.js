@@ -37,7 +37,36 @@ export function filesApi(invoke) {
     remove: id => invoke('workspace_files_delete', { id }),
     exportCopy: id => invoke('workspace_files_export', { id }),
     open: id => invoke('workspace_files_open', { id }),
+    // Таблиці дашбордів у сховищі (workspace_tables.rs): лише список, копія й видалення непов'язаних.
+    listTables: () => invoke('workspace_files_list_tables'),
+    exportTable: id => invoke('workspace_files_export_table', { id }),
+    removeTable: id => invoke('workspace_files_delete_table', { id }),
   });
+}
+
+/** Підпис роду військ таблиці дашборда (`Branch::as_str` у Rust → назва плитки). */
+const BRANCH_LABELS = new Map([
+  ['air', 'Повітряні Сили'], ['rocket', 'Ракетні війська'], ['pvk', 'ПВК'], ['dshv', 'УДШВ'],
+  ['pvk_losses', '«Наші втрати» ПВК'], ['dshv_losses', '«Наші втрати» УДШВ'],
+]);
+
+export function branchLabel(branch) {
+  return BRANCH_LABELS.get(String(branch ?? '')) ?? null;
+}
+
+/** Рядок під назвою таблиці дашборда: рід військ · розмір · змінено · попередня копія. */
+export function tableMetaLine(table, { offsetMinutes } = {}) {
+  if (table?.damaged) return metaLine(table, { offsetMinutes });
+  const parts = [branchLabel(table?.branch) ? `Таблиця дашборда: ${branchLabel(table.branch)}` : 'Таблиця дашборда', formatSize(table?.size)];
+  const changed = formatDateTime(table?.modifiedAt, { offsetMinutes });
+  if (changed !== '—') parts.push(`змінено ${changed}`);
+  if (table?.hasPrevious) parts.push('є попередня копія');
+  return parts.join(' · ');
+}
+
+/** Чи можна видалити таблицю зі сховища: лише не прив'язану до жодного профілю. */
+export function tableDeletable(table) {
+  return Boolean(table) && !table.bound;
 }
 
 /** Застосунок за розширенням — як `workspace_files::app_for_ext` у Rust. */

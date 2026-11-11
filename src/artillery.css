@@ -26,6 +26,9 @@
 [hidden] { display: none !important; }
 html { background: var(--bg); }
 body { margin: 0; min-height: 100vh; font: 15px/1.45 var(--sans); color: var(--ink); background: var(--bg); font-synthesis: none; }
+/* Фон дашборда — плакат артилерії на весь екран (лише темна тема); панелі лишаються непрозорими. */
+html:not([data-theme="light"]) { background: linear-gradient(180deg, rgba(8, 7, 3, .36), rgba(8, 7, 3, .64)), url('./brand-art/artillery-background.webp') center / cover no-repeat fixed, var(--bg); }
+html:not([data-theme="light"]) body { background: transparent; }
 body.drag::after { content: "Відпустіть файл .xlsx тут"; position: fixed; inset: 12px; display: grid; place-items: center; border: 2px dashed var(--accent); border-radius: 14px; background: color-mix(in srgb, var(--bg) 88%, transparent); color: var(--accent); font-size: 20px; font-weight: 650; z-index: 90; }
 button, input, select { font: inherit; color: inherit; }
 .muted { color: var(--muted); }

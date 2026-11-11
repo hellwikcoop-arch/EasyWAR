@@ -183,7 +183,7 @@ test('картки лягають рядками: дві половини в р�
   const layout = four();
   const packedLayout = resizeInstance(layout, 'a', 6).layout;
   assert.deepEqual(orderedIds(packedLayout), ['a', 'b', 'c', 'd']);
-  assert.deepEqual(SIZE_CHOICES.map(item => item.w), [4, 6, 8, 12]);
+  assert.deepEqual(SIZE_CHOICES.map(item => item.w), [2, 4, 6, 8, 12]);
 });
 
 test('переставлення: вперед — після цілі, назад — перед нею, решта зсувається й кладеться рядками', () => {

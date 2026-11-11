@@ -5,7 +5,8 @@
 // `pendingFile` — документ з бібліотеки, який чекає у вікні редактора (його першим віддає
 // office_open_file, без вікна вибору); віддавши його, host ставить позначку в history.state кадру,
 // тож після перезавантаження вікна документ уже не вважається очікуваним. Нічого не надсилається
-// в мережу й не пишеться в сховища браузера.
+// в мережу. У сховища браузера пише лише `host.profile` без Tauri (перегляд у браузері); у
+// настільному застосунку дані профілю зашифровані й лежать у прихованій теці (profile-store.js).
 import {
   CONTRACT_VERSION,
   UI_LANGUAGE,
@@ -17,6 +18,7 @@ import {
   parsePendingFile,
   toBytes,
 } from './workspace-core.js';
+import { createProfileStore } from './profile-store.js';
 
 /** Tauri invoke цієї сторінки або батьківських (сторінка застосунку лежить у двох iframe). */
 export function findInvoke(win = globalThis.window) {
@@ -129,10 +131,13 @@ export function markPendingTaken(name, win = globalThis.window) {
  * збірки (там лежать і статичні файли з src/public), від неї рахує `host.resolve(path)`;
  * `pendingFile` — файл з бібліотеки, який віддасть перший openFile (типово шукається від
  * поточного вікна, як invoke; лише в настільному застосунку, без Tauri його немає);
- * `onPendingTaken(name)` — виклик, коли office_open_file віддав саме його (типово markPendingTaken).
+ * `onPendingTaken(name)` — виклик, коли office_open_file віддав саме його (типово markPendingTaken);
+ * `profileStorage` — сховище-подібний (Storage) об'єкт для `host.profile` лише без Tauri (перегляд у
+ * браузері): у настільному застосунку дані профілю ходять командами profile_data_* і зашифровані.
  */
 export function createHost({
   appEntry, invoke = null, browser = null, onState = () => {}, rootUrl = '', pendingFile = findPendingFile(), onPendingTaken = markPendingTaken,
+  profileStorage = null,
 }) {
   const state = { title: '', dirty: false };
   const pending = invoke ? parsePendingFile(pendingFile) : null;
@@ -189,11 +194,59 @@ export function createHost({
   // Захищені колективи (E8, C3b): лише для застосунку «Колективи» й лише в настільному
   // застосунку — команди collective_* дозволені вікну редактора. Пароль профілю йде в Rust
   // і ніде в JS не зберігається; назад приходять відбитки, назви й лічильники.
+  // Дані профілю: зашифровані записи в прихованій теці застосунку; вікно редактора бачить лише
+  // простір імен свого застосунку (Rust). Див. profile-store.js.
+  const profile = createProfileStore({ invoke, storage: invoke ? null : profileStorage });
+
   const collectives = invoke && appEntry.id === 'collectives'
     ? Object.freeze({
       status: () => invoke('collective_status'),
       createIdentity: password => invoke('collective_create_identity', { password: String(password ?? '') }),
-      create: (password, name) => invoke('collective_create', { password: String(password ?? ''), name: String(name ?? '') }),
+      // Ім'я в колективі вказує сам учасник; воно йде в журнал складу під його підписом.
+      create: (password, name, memberName) => invoke('collective_create', {
+        password: String(password ?? ''), name: String(name ?? ''), memberName: String(memberName ?? ''),
+      }),
+      // Обмін (C3b, другий зріз): тексти запрошень і ключів люди пересилають самі,
+      // «Підготувати» лишає намір у Rust, «Доповісти» підтверджує його паролем (SEC-003);
+      // прапорця «переглянуто» з JS немає. Конверт іде лише в локальну чергу.
+      detail: collective => invoke('collective_detail', { collective: String(collective ?? '') }),
+      // `columns: null` залишає стовпці таблиці як є.
+      setTable: ({ collective, table = null, title, cls, purpose, columns = null }) => invoke('collective_table_set', {
+        collective: String(collective ?? ''), table: table == null ? null : String(table),
+        title: String(title ?? ''), class: String(cls ?? ''), purpose: String(purpose ?? ''),
+        columns: Array.isArray(columns) ? columns.map(String) : null,
+      }),
+      // «Оновити таблицю»: Rust відкриває збережені пакети змін паролем і перевіряє кожен.
+      tableRead: (password, collective, table) => invoke('collective_table_read', {
+        password: String(password ?? ''), collective: String(collective ?? ''), table: String(table ?? ''),
+      }),
+      // Пакет оновлення `EWSYNC1.`: текст люди передають самі, мережі немає.
+      syncExport: (password, collective) => invoke('collective_sync_export', {
+        password: String(password ?? ''), collective: String(collective ?? ''),
+      }),
+      syncImport: (password, text) => invoke('collective_sync_import', {
+        password: String(password ?? ''), text: String(text ?? ''),
+      }),
+      inviteCreate: (password, collective, hours) => invoke('collective_invite_create', {
+        password: String(password ?? ''), collective: String(collective ?? ''), hours: Number(hours),
+      }),
+      joinRequest: (password, invitation, memberName) => invoke('collective_join_request', {
+        password: String(password ?? ''), invitation: String(invitation ?? ''), memberName: String(memberName ?? ''),
+      }),
+      inviteAdmit: (password, collective, request) => invoke('collective_invite_admit', {
+        password: String(password ?? ''), collective: String(collective ?? ''), request: String(request ?? ''),
+      }),
+      joinAccept: (password, keys) => invoke('collective_join_accept', {
+        password: String(password ?? ''), keys: String(keys ?? ''),
+      }),
+      reportPrepare: ({ collective, table, transport, explicitWan, operation }) => invoke('collective_report_prepare', {
+        collective: String(collective ?? ''), table: String(table ?? ''),
+        transport: String(transport ?? ''), explicitWan: explicitWan === true,
+        operation: String(operation ?? ''),
+      }),
+      reportConfirm: (password, intent) => invoke('collective_report_confirm', {
+        password: String(password ?? ''), intent: String(intent ?? ''),
+      }),
     })
     : null;
 
@@ -211,6 +264,7 @@ export function createHost({
     saveFileAs,
     closeFile,
     collectives,
+    profile,
     setTitle(title) {
       state.title = String(title ?? '');
       publish();

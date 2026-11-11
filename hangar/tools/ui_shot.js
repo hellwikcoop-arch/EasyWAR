@@ -1,0 +1,12 @@
+const p=require('puppeteer-core');
+(async()=>{const b=await p.launch({executablePath:'/usr/bin/google-chrome',headless:'new',protocolTimeout:600000,args:['--no-sandbox','--use-angle=swiftshader','--enable-unsafe-swiftshader','--ignore-gpu-blocklist']});
+const pg=await b.newPage();await pg.setViewport({width:1400,height:1000});const errs=[];
+pg.on('pageerror',e=>errs.push(e.message));pg.on('console',m=>{if((m.type()==='error'||m.type()==='warning')&&!/404/.test(m.text()))errs.push(m.text().slice(0,200))});
+await pg.goto('http://localhost:8799/EasyWAR_hangar.html',{timeout:180000});
+await pg.waitForFunction(()=>document.getElementById('load').hidden,{timeout:180000});await new Promise(r=>setTimeout(r,3000));
+await pg.screenshot({path:'/workspace/hangar2/shots/ui_hangar.png',fullPage:true});
+await pg.click('#stage .ui-help');await new Promise(r=>setTimeout(r,500));await (await pg.$('#aFig')).screenshot({path:'/workspace/hangar2/shots/ui_hangar_help.png'});await pg.click('#stage .ui-help');
+await pg.keyboard.press('Digit3');await new Promise(r=>setTimeout(r,4000));await (await pg.$('#aFig')).screenshot({path:'/workspace/hangar2/shots/ui_hangar_taxi.png'});
+await pg.keyboard.press('Backquote');await pg.waitForFunction(()=>GAR.ready,{timeout:120000});await new Promise(r=>setTimeout(r,3000));
+await pg.screenshot({path:'/workspace/hangar2/shots/ui_garage.png',fullPage:true});await pg.click('#gStage .ui-help');await new Promise(r=>setTimeout(r,600));await (await pg.$('#gFig')).screenshot({path:'/workspace/hangar2/shots/ui_garage_help.png'});
+console.log('ERR',errs.join(' | '));await b.close();})();

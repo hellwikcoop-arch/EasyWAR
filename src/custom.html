@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="uk" data-ew-module="custom">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>easyWAR — Власний модуль</title>
+<script>try { document.documentElement.dataset.theme = localStorage.getItem('aviahub.theme') === 'light' ? 'light' : 'dark'; } catch (e) { document.documentElement.dataset.theme = 'dark'; }</script>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 100 100%27%3E%3Crect width=%27100%27 height=%27100%27 rx=%2722%27 fill=%27%23121b27%27/%3E%3Crect x=%2722%27 y=%2722%27 width=%2724%27 height=%2724%27 rx=%276%27 fill=%27%233fbfb0%27/%3E%3Crect x=%2754%27 y=%2722%27 width=%2724%27 height=%2724%27 rx=%276%27 fill=%27%233fbfb0%27 opacity=%27.55%27/%3E%3Crect x=%2722%27 y=%2754%27 width=%2724%27 height=%2724%27 rx=%276%27 fill=%27%233fbfb0%27 opacity=%27.55%27/%3E%3Crect x=%2754%27 y=%2754%27 width=%2724%27 height=%2724%27 rx=%276%27 fill=%27none%27 stroke=%27%233fbfb0%27 stroke-width=%274%27 stroke-dasharray=%276 5%27/%3E%3C/svg%3E">
+<link rel="stylesheet" href="./custom.css">
+<link rel="stylesheet" href="./dashboard-module-catalog.css">
+</head>
+<body>
+<header class="appbar">
+  <div class="brand">
+    <svg class="brand-mark" viewBox="0 0 100 100" aria-hidden="true" width="34" height="34"><rect x="12" y="12" width="32" height="32" rx="8" fill="currentColor"/><rect x="56" y="12" width="32" height="32" rx="8" fill="currentColor" opacity=".55"/><rect x="12" y="56" width="32" height="32" rx="8" fill="currentColor" opacity=".55"/><rect x="56" y="56" width="32" height="32" rx="8" fill="none" stroke="currentColor" stroke-width="5" stroke-dasharray="7 6"/></svg>
+    <div><h1>Власний модуль</h1><p>БЕЗ ПРИВ’ЯЗКИ ДО РОДУ ВІЙСЬК</p></div>
+  </div>
+  <div class="appbar-right"></div>
+</header>
+<main id="view-dash" class="dash" aria-label="Власний модуль">
+  <div class="dmain">
+    <section class="cm-intro" aria-labelledby="cm-intro-title">
+      <p class="cm-eyebrow">Ваш простір</p>
+      <h2 id="cm-intro-title">Модулі на ваш розсуд</h2>
+      <p>Цей модуль не прив’язаний до роду військ і не має власної таблиці XLSX. Кнопкою <b>«Каталог модулів»</b> угорі створіть
+        потрібні аналітичні модулі: кожен отримує власну локальну таблицю SQLite у вашому профілі, а його картка стає на
+        <b>«Мій дашборд»</b> нижче. Дані лишаються лише на цьому комп’ютері.</p>
+      <p class="cm-note" id="cm-note" hidden>Модулі зберігаються в локальній базі застосунку: відкрийте «Власний модуль» у застосунку easyWAR, щоб створювати їх.</p>
+    </section>
+    <section class="cm-mine" data-ewmc-slot aria-label="Мій дашборд"></section>
+  </div>
+</main>
+<script type="module" src="./custom-app.js"></script>
+<script type="module" src="./dashboard-module-catalog.js"></script>
+</body>
+</html>

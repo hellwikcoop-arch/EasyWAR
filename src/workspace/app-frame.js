@@ -6,6 +6,7 @@
 import { LOADING_STEPS, appFromSearch, branchFromSearch, entryError, frameMessage, graphicsProblem, normalizeMounted } from './workspace-core.js';
 import { appIcon, element as make } from './workspace-dom.js';
 import { browserFallback, createHost, findInvoke } from './workspace-host.js';
+import { safeLocalStorage } from './profile-store.js';
 import { entryLoader } from './workspace-registry.js';
 
 document.documentElement.dataset.branch = branchFromSearch(location.search);
@@ -137,6 +138,7 @@ async function start() {
       appEntry: app,
       invoke: findInvoke(window),
       browser: browserFallback(document),
+      profileStorage: safeLocalStorage(window),
       rootUrl: new URL('../', location.href).href,
       onState: state => {
         if (window.parent !== window) window.parent.postMessage(frameMessage(app.id, state), location.origin);

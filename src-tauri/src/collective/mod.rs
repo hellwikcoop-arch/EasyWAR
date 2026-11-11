@@ -12,9 +12,17 @@ pub mod codec;
 pub mod envelope;
 pub mod epoch;
 pub mod identity;
+pub mod invite;
 pub mod join_request;
+pub mod pairing;
+pub mod relay;
+pub mod relay_auth;
+pub mod relay_node;
+pub mod rendezvous;
 pub mod replay;
 pub mod secret_store;
+pub mod send_gate;
+pub mod table_record;
 
 #[cfg(test)]
 mod vectors;
@@ -36,10 +44,31 @@ pub mod labels {
     pub const MEMBER_ID: &[u8] = b"easywar/collective/v1/member-id";
     pub const DEVICE_RECORD: &[u8] = b"easywar/collective/v1/device";
     pub const EXCHANGE_BINDING: &[u8] = b"easywar/collective/v1/exchange-binding";
+    pub const INVITATION: &[u8] = b"easywar/collective/v1/invitation";
+    pub const JOIN_REQUEST: &[u8] = b"easywar/collective/v1/join-request";
+    pub const MEMBER_NAME: &[u8] = b"easywar/collective/v1/member-name";
+    pub const MEMBER_SCOPE: &[u8] = b"easywar/collective/v1/member-scope";
+    pub const RELAY_PUT: &[u8] = b"easywar/collective/v1/relay-put";
+    pub const RELAY_FETCH: &[u8] = b"easywar/collective/v1/relay-fetch";
+    pub const RELAY_ACK: &[u8] = b"easywar/collective/v1/relay-ack";
+    pub const RELAY_STORED: &[u8] = b"easywar/collective/v1/relay-stored";
+    pub const RELAY_JOURNAL: &[u8] = b"easywar/collective/v1/relay-journal";
     pub const EPOCH_WRAP: &[u8] = b"easywar/collective/v1/epoch-wrap";
     pub const OPERATION: &[u8] = b"easywar/collective/v1/op";
     pub const SECRET_KEYRING: &[u8] = b"easywar/collective/v1/keyring";
     pub const SECRET_ENTRY: &[u8] = b"easywar/collective/v1/secret";
+    pub const PAIR_CODE: &[u8] = b"easywar/collective/v1/pair-code";
+    pub const PAIR_HOST: &[u8] = b"easywar/collective/v1/pair-host";
+    pub const PAIR_GUEST: &[u8] = b"easywar/collective/v1/pair-guest";
+    pub const PAIR_TRANSCRIPT: &[u8] = b"easywar/collective/v1/pair-transcript";
+    pub const PAIR_CONFIRM_HOST: &[u8] = b"easywar/collective/v1/pair-confirm-host";
+    pub const PAIR_CONFIRM_GUEST: &[u8] = b"easywar/collective/v1/pair-confirm-guest";
+    pub const PAIR_HOST_TO_GUEST: &[u8] = b"easywar/collective/v1/pair-host-to-guest";
+    pub const PAIR_GUEST_TO_HOST: &[u8] = b"easywar/collective/v1/pair-guest-to-host";
+    pub const PAIR_FRAME: &[u8] = b"easywar/collective/v1/pair-frame";
+    pub const PAIR_SAFETY: &[u8] = b"easywar/collective/v1/pair-safety";
+    pub const TABLE_RECORD: &[u8] = b"easywar/collective/v1/table";
+    pub const SYNC_PACKAGE: &[u8] = b"easywar/collective/v1/sync-package";
 }
 
 /// Причина відмови — лише для локального журналу. Назовні всі варіанти стають одним
@@ -79,6 +108,10 @@ pub enum Reason {
     /// Відкладення неможливе: `membership_seq` за горизонтом, черга відкладених повна або
     /// конверт пролежав довше TTL (G12, N1).
     DeferLimit,
+    /// Строк запрошення минув.
+    InvitationExpired,
+    /// Талон запрошення вже впустив учасника (одноразовий).
+    InvitationUsed,
 }
 
 impl Reason {
@@ -102,6 +135,8 @@ impl Reason {
             Reason::DeferLimit => {
                 "конверт не може чекати журналу складу (горизонт, черга або строк)"
             }
+            Reason::InvitationExpired => "строк запрошення минув",
+            Reason::InvitationUsed => "запрошення вже використано",
         }
     }
 }
