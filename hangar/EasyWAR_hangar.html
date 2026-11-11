@@ -8455,12 +8455,17 @@ function set(gar,en,air){en=!!en;air=!!(en&&air);if(en&&!air)gar=true;if(air)gar
   $('#mHint').textContent=air?'авіація ворога · ПКС РФ · довідник розпізнавання':en?'техніка ворога · ЗС РФ · довідник розпізнавання':gar?'наземна техніка · парк бойових машин':'літальні апарати ПС ЗСУ';
   document.querySelectorAll('.foot').forEach(f=>f.hidden=(f.id==='gFoot')!==gar);
   try{window.HSIDE&&window.HSIDE(air?'en':'ua');}catch(e){console.warn(e);}
-  if(gar){GAR.setSide(en?'en':'ua');GAR.show();}else{GAR.hide();window.dispatchEvent(new Event('resize'));}
+  const pick=set.pick;set.pick=null;const cat=set.cat;set.cat=null;
+  if(gar){GAR.setSide(en?'en':'ua');if(pick)GAR.want=pick;GAR.show();if(cat&&GAR.setCat)GAR.setCat(cat,!pick);if(pick&&GAR.set)GAR.set(pick);}
+  else{GAR.hide();window.dispatchEvent(new Event('resize'));if(pick&&window.__setAircraft){try{window.__setAircraft(pick);}catch(e){console.warn(e);}}}
   try{history.replaceState(null,'',air?'#enemy-air':en?'#enemy':gar?'#garage':'#hangar');}catch(e){}}
 $('#mAir').onclick=()=>set(false);$('#mGar').onclick=()=>set(true);$('#mEn').onclick=()=>set(true,true,false);
 $('#eG').onclick=()=>set(true,true,false);$('#eA').onclick=()=>set(false,true,true);
 addEventListener('keydown',e=>{if(e.code==='Backquote'&&!e.ctrlKey&&!e.metaKey){set(!window.__GAR);e.preventDefault();}});
-window.__setMode=set;const hs=location.hash;if(hs==='#garage')set(true);else if(hs==='#enemy')set(true,true);else if(hs==='#enemy-air')set(false,true,true);})();
+window.__setMode=set;
+const hq=new URLSearchParams(location.search),parts=(location.hash||'').replace(/^#/,'').split('/');
+set.pick=parts[1]||hq.get('v')||null;set.cat=hq.get('cat')||null;const hs=parts[0];
+if(hs==='garage')set(true);else if(hs==='enemy')set(true,true);else if(hs==='enemy-air')set(false,true,true);else if(hs==='hangar'&&(set.pick||set.cat))set(false);})();
 </script>
 <script>/* UI 2: перебудовує нижню панель ангара й гаража в картки + степер + бічні інструменти. Кнопки ті самі (обробники й гарячі клавіші не змінено). */
 (()=>{const $=s=>document.querySelector(s);document.body.classList.add('ui2');
