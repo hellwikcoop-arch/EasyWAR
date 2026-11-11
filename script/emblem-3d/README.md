@@ -15,3 +15,15 @@ python3 strip.py frames/air src/public/emblem-3d/air.webp 320
 вихідне зображення мало інші розміри; `tests/start-emblems.test.mjs` перевіряє смугу.
 Вихідні емблеми — ті самі, що вбудовані в картки `src/index.html` (data-URI).
 Синтетичних чи реальних таблиць конвеєр не торкається.
+
+## Логотип (тризуб)
+
+```bash
+pip install opencv-python-headless                  # лише для logo.py
+python3 logo.py cut src/index.html out/logo        # trident.png, logo-base.webp (основа без тризуба), bbox.txt
+python3 prep.py out/logo/trident.png maps/logo
+python render.py -- maps/logo frames/logo 13 640 48
+python3 strip.py frames/logo src/public/emblem-3d/logo-trident.webp 300
+python3 logo.py box out/logo/bbox.txt frames/logo  # → LOGO.box і пропорції для src/start-logo-3d-core.js
+cp out/logo/logo-base.webp src/public/emblem-3d/
+```

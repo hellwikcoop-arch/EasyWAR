@@ -19,7 +19,7 @@ bevel = np.clip((bevel-0.5)*2, 0, 1)**0.6
 detail = np.asarray(Image.fromarray((lum*255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(scale*0.6))).astype(np.float32)/255
 h = bevel*(0.72+0.28*detail)*a + bevel*(1-a)*0.0
 h16 = (np.clip(h,0,1)*65535).astype(np.uint16)
-Image.fromarray(h16, mode='I;16').save(f'{out}/height.png')
+Image.fromarray(h16).save(f'{out}/height.png')
 # колір: заповнюємо прозорі пікселі кольором сусідів, щоб не було темних обводок
 col = im.copy(); 
 col_np = np.asarray(col.convert('RGB')).astype(np.float32)

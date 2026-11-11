@@ -1,0 +1,27 @@
+/* 3D-логотип стартового екрана (start-logo-3d.js): обгортка span.ew-logo3d займає місце
+   <img class="start-brand-art"> (та сама ширина й пропорції, тож alignBackground і радар
+   start-tech працюють як раніше), плоска основа без тризуба — фоном на всю обгортку, смуга
+   кадрів тризуба — у рамці з start-logo-3d-core (відсотки логотипа). Кадр обирає --ew-frame-x
+   на обгортці (ставить скрипт за курсором). Початковий <img> лишається в розмітці і ховається,
+   лише коли обидва файли завантажились. */
+#view-start .ew-logo3d { position: relative; display: block; width: 100%; }
+#view-start .ew-logo3d.ew-logo3d-on > .start-brand-art { visibility: hidden !important; }
+#view-start .ew-logo3d-base,
+#view-start .ew-logo3d-frame { position: absolute; pointer-events: none; background-repeat: no-repeat; }
+#view-start .ew-logo3d-base {
+  inset: 0;
+  background-size: contain;
+  background-position: 50% 50%;
+  filter: drop-shadow(0 12px 20px rgba(0, 0, 0, .20));
+}
+#view-start .ew-logo3d-frame {
+  --ew-frames: 13;
+  background-size: calc(var(--ew-frames) * 100%) 100%;
+  background-position: var(--ew-frame-x, 50%) 0;
+  filter: drop-shadow(0 14px 18px rgba(0, 0, 0, .55));
+  transition: filter .25s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  #view-start .ew-logo3d-frame { background-position-x: 50% !important; transition: none; }
+}
+html[data-motion="off"] #view-start .ew-logo3d-frame { background-position-x: 50% !important; transition: none; }
