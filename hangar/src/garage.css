@@ -1,0 +1,70 @@
+/* ===== режим Ангар / Гараж ===== */
+.hx-mode{max-width:1280px;margin:0 auto 10px;display:flex;align-items:center;gap:14px;font:600 12px/1 var(--hx-ui);letter-spacing:.14em;color:#6d7a80;text-transform:uppercase}
+.hx-mode .seg{display:inline-flex;border:1px solid #23343a;background:#070b0c;border-radius:2px;overflow:hidden}
+.hx-mode button{all:unset;cursor:pointer;padding:9px 22px;font:700 14px/1 var(--hx-ui);letter-spacing:.12em;color:#8d9aa0;text-transform:uppercase;position:relative}
+.hx-mode button+button{border-left:1px solid #23343a}
+.hx-mode button:hover{color:#fff}
+.hx-mode button.on{color:#15130c;background:repeating-linear-gradient(-55deg,var(--hx-y) 0 14px,#e0b326 14px 28px)}
+.hx-mode button:focus-visible{outline:1px solid var(--hx-y);outline-offset:2px}
+.hx-mode kbd{font:600 10px/1 var(--mono);padding:3px 5px;border-radius:2px;background:#d9dee0;color:#111;margin-left:4px}
+.gstage canvas{display:block;width:100%;height:100%;cursor:grab;touch-action:pan-y}
+.gstage canvas.drag{cursor:grabbing}
+.gholo{position:absolute;inset:0;pointer-events:none;transition:opacity .35s}
+.gholo.off{opacity:0}
+.gholo svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+.gholo polyline{stroke:rgba(95,211,224,.75);stroke-width:1;fill:none}
+.gholo circle{fill:#fff;stroke:rgba(95,211,224,.9);stroke-width:1.5}
+.hc-mass{display:flex;align-items:center;gap:8px}
+.hc-mass .v{writing-mode:vertical-rl;text-orientation:upright;font:600 11px/1 var(--hx-ui);letter-spacing:.05em;color:var(--hx-or)}
+.hc-mass b{font:200 64px/.9 var(--hx-ui);letter-spacing:-.02em}
+.hc-mass b i.u{font:400 18px/1 var(--hx-ui);font-style:normal;margin-left:6px;color:#9fb6bc}
+.hc-mass small{display:block;font:500 11px/1.3 var(--hx-ui);color:#9fdbe3;letter-spacing:.06em;max-width:140px;white-space:normal}
+.hc-rng{font:300 30px/1 var(--hx-ui);color:var(--hx-teal);letter-spacing:.02em}
+.hc-rng small{display:block;font:600 9px/1.2 var(--hx-ui);letter-spacing:.14em;color:#8fb5bb;text-transform:uppercase}
+.hc-rng em{display:block;font:500 11px/1.3 var(--hx-ui);font-style:normal;color:var(--hx-y);margin-top:4px;max-width:220px;white-space:normal}
+.hx-leg .c{color:var(--hx-y)} .hx-leg .c i{display:inline-grid;place-items:center;width:13px;height:15px;margin-right:9px;background:var(--hx-y);color:#111;font:700 10px/1 var(--hx-ui);font-style:normal}
+.hx-leg .o{color:#9fd88a} .hx-leg .o i{font-style:normal;margin-right:8px}
+.gcap{position:absolute;left:50%;top:calc(69% - 64px);transform:translateX(-50%);font:600 13px/1 var(--hx-ui);letter-spacing:.08em;color:var(--hx-y);text-transform:uppercase;text-shadow:0 1px 3px #000;pointer-events:none;opacity:0;transition:opacity .3s;white-space:nowrap}
+.gcap.on{opacity:1}
+#gFig .hx-frame svg{width:74px;height:46px}
+
+.codim path{stroke:rgba(255,190,90,.85);stroke-width:1.3;fill:none}
+.codim text{fill:#ffd9a0;font:600 12px/1 var(--hx-ui,sans-serif);text-anchor:middle;paint-order:stroke;stroke:rgba(0,0,0,.6);stroke-width:3px}
+.codim{transition:opacity .25s}
+.oflag{display:inline-block;width:18px;height:12px;vertical-align:-1px;margin:0 6px 0 0;box-shadow:0 0 0 1px rgba(255,255,255,.4);border-radius:1px;flex:none}
+.hx-band .nm .oflag,#gName .oflag{width:27px;height:18px;margin:0 10px 0 4px;vertical-align:-2px}
+.nflag{display:inline-flex;align-items:center;margin-right:10px}.nflag .oflag{width:30px;height:20px;margin:0}
+.g-cats{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 6px 0;padding:0 2px}
+.g-cats button{font:600 11px/1 var(--hx-ui,sans-serif);letter-spacing:.06em;text-transform:uppercase;color:#cfd9dc;background:rgba(20,28,30,.85);border:1px solid rgba(160,190,195,.28);padding:6px 10px;cursor:pointer;display:inline-flex;gap:6px;align-items:center;clip-path:polygon(6px 0,100% 0,100% calc(100% - 6px),calc(100% - 6px) 100%,0 100%,0 6px)}
+.g-cats button i{font-style:normal;color:#8fa3a8;font-size:10px}
+.g-cats button:hover{border-color:rgba(255,213,74,.6);color:#fff}
+.g-cats button.on{background:#f2c230;color:#151a1b;border-color:#f2c230}.g-cats button.on i{color:#3b3410}
+.g-cats button:disabled{opacity:.35;cursor:default}
+.ui-car .chip[hidden]{display:none!important}
+.hx-band{grid-auto-flow:column;justify-content:center;align-items:center}.hx-band .nflag{position:relative;z-index:1}.hx-nb .oflag{width:15px;height:10px;margin-right:5px}
+/* ---------- вкладка «Ворог»: червона гама ---------- */
+body.enemy{--hx-y:#e3262f;--hx-y2:#a8141c}
+body.enemy .hx-mode button.on{color:#fff;background:repeating-linear-gradient(-55deg,#e3262f 0 14px,#a8141c 14px 28px)}
+body.enemy .hx-mode #mEn{color:#ff8a8f}
+body.enemy .hx-mode #mEn.on{color:#fff}
+body.enemy .hx-band .nm{color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.6)}
+body.enemy .hx-band .nm small{color:#ffd5d7}
+body.enemy .hx-band::after{background:rgba(255,140,140,.6)}
+body.enemy .hx-head .bar::after{box-shadow:0 0 10px rgba(227,38,47,.5)}
+body.enemy .g-cats button:hover{border-color:rgba(227,38,47,.7)}
+body.enemy .g-cats button.on{background:#e3262f;color:#fff;border-color:#e3262f}
+body.enemy .g-cats button.on i{color:#ffd0d2}
+body.enemy .chip.on{background:rgba(227,38,47,.1)}
+body.enemy .chip.on kbd{color:#fff}
+body.enemy .ui-car .chip.on{background:radial-gradient(120% 90% at 50% 20%,rgba(227,38,47,.2),rgba(0,0,0,0) 62%),linear-gradient(180deg,#1c1314,#0f0a0b);box-shadow:0 0 0 1px rgba(227,38,47,.4),0 6px 18px rgba(0,0,0,.5)}
+body.enemy .ui-step .chips::after{background:linear-gradient(90deg,#8e1016,var(--hx-y));box-shadow:0 0 8px rgba(227,38,47,.6)}
+body.enemy .ui-step .chip.on::before{border-color:#ffd0d2;box-shadow:0 0 0 4px rgba(227,38,47,.2),0 0 12px rgba(227,38,47,.7)}
+body.enemy .ui-tools .chip.on,body.enemy .ui-tools .tb.on{background:rgba(227,38,47,.12)}
+body.enemy .codim path{stroke:rgba(255,120,110,.85)}
+/* «Ворог»: підвкладки й картки авіації */
+.hx-mode .en-sub{display:none;margin-left:8px}
+body.enemy .hx-mode .en-sub{display:flex}
+body.enemy .hx-mode .en-sub button{color:#ffb0b4;font-size:11px}
+body.enemyA #rowA .chip:not([data-side="en"]){display:none}
+body:not(.enemyA) #rowA .chip[data-side="en"]{display:none}
+body.enemy .hx-head .bar{border-color:var(--hx-y)}
