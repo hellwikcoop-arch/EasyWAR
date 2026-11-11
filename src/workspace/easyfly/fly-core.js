@@ -239,33 +239,60 @@ export function classGroup(classQual) {
 // ───────────────────────────── Медицина: ВЛК ↔ ПМО ─────────────────────────────
 
 export const MEDICAL_KINDS = Object.freeze(['ВЛК', 'ПМО']);
-/** ВЛК і ПМО чергуються з кроком 6 місяців. */
-export const MEDICAL_STEP_MONTHS = 6;
+/** ВЛК — раз на 12 місяців; ПМО — раз на 6 місяців (ВЛК зараховується і як черговий медогляд). */
+export const VLK_MONTHS = 12;
+export const PMO_MONTHS = 6;
+/** Крок між медичними подіями (півроку); лишено для сумісності. */
+export const MEDICAL_STEP_MONTHS = PMO_MONTHS;
 
 export function oppositeMedicalKind(kind) {
   return kind === 'ВЛК' ? 'ПМО' : 'ВЛК';
 }
 
 /**
- * Стан медицини за останньою подією {kind, date}: наступна подія — протилежного виду через
- * 6 міс. Прострочена (ВЛК чи ПМО) блокує допуск. Немає подій — null.
- * @returns {{status, lastKind, lastDate, nextKind, dueDate, daysLeft, blocks}|null}
+ * Найближчий медичний строк за останніми датами ВЛК і ПМО. ВЛК діє 12 місяців; ПМО — через
+ * 6 місяців після останнього медогляду (ВЛК або ПМО). Якщо ВЛК ще не внесено, її строк береться
+ * як 6 місяців після останнього ПМО. За однакової дати першою йде ВЛК (вона покриває й ПМО).
+ * @returns {{kind, dueDate, vlkDue, pmoDue}|null}
  */
-export function medicalState(person, today, soonDays = SOON_DAYS) {
+export function medicalNext(lastVlk, lastPmo) {
+  if (!lastVlk && !lastPmo) return null;
+  const lastAny = !lastPmo || (lastVlk && lastVlk > lastPmo) ? lastVlk : lastPmo;
+  const vlkDue = lastVlk ? addMonths(lastVlk, VLK_MONTHS) : addMonths(lastPmo, PMO_MONTHS);
+  const pmoDue = addMonths(lastAny, PMO_MONTHS);
+  const kind = vlkDue <= pmoDue ? 'ВЛК' : 'ПМО';
+  return { kind, dueDate: kind === 'ВЛК' ? vlkDue : pmoDue, vlkDue, pmoDue };
+}
+
+/** Останні дати ВЛК і ПМО пілота: { vlk, pmo } (ISO або null). */
+export function lastMedicalDates(person) {
   const events = (Array.isArray(person?.medical) ? person.medical : [])
     .map(event => ({ kind: event?.kind, date: normalizeDate(event?.date) }))
     .filter(event => MEDICAL_KINDS.includes(event.kind) && event.date);
-  if (!events.length) return null;
-  const last = events.reduce((best, event) => (event.date > best.date ? event : best));
-  const dueDate = addMonths(last.date, MEDICAL_STEP_MONTHS);
-  const status = deadlineStatus(dueDate, today, soonDays);
+  const latest = kind => events.filter(e => e.kind === kind).map(e => e.date).sort().at(-1) || null;
+  return { vlk: latest('ВЛК'), pmo: latest('ПМО') };
+}
+
+/**
+ * Стан медицини: ВЛК раз на 12 місяців, ПМО раз на 6 місяців. Найближчий строк (ВЛК чи ПМО)
+ * визначає статус; прострочений блокує допуск. Немає подій — null.
+ * @returns {{status, lastKind, lastDate, nextKind, dueDate, vlkDue, pmoDue, daysLeft, blocks}|null}
+ */
+export function medicalState(person, today, soonDays = SOON_DAYS) {
+  const { vlk, pmo } = lastMedicalDates(person);
+  const next = medicalNext(vlk, pmo);
+  if (!next) return null;
+  const lastIsVlk = !pmo || (vlk && vlk > pmo);
+  const status = deadlineStatus(next.dueDate, today, soonDays);
   return {
     status,
-    lastKind: last.kind,
-    lastDate: last.date,
-    nextKind: oppositeMedicalKind(last.kind),
-    dueDate,
-    daysLeft: daysLeft(dueDate, today),
+    lastKind: lastIsVlk ? 'ВЛК' : 'ПМО',
+    lastDate: lastIsVlk ? vlk : pmo,
+    nextKind: next.kind,
+    dueDate: next.dueDate,
+    vlkDue: next.vlkDue,
+    pmoDue: next.pmoDue,
+    daysLeft: daysLeft(next.dueDate, today),
     blocks: status === STATUS.OVERDUE,
   };
 }
@@ -342,25 +369,26 @@ export function leaveWarnings(leave, personLeaves) {
 }
 
 /**
- * ВЛК/ПМО біля відпустки: за чергуванням ВЛК↔ПМО кожні 6 місяців від останньої події береться
- * перший строк не раніше ніж за LEAVE_MEDICAL_WINDOW_DAYS до початку відпустки. `position`:
- * 'before' — строк перед відпусткою (пройти до неї), 'during' — припадає на відпустку, 'after' —
- * у межах вікна після неї (пройти одразу після), 'later' — далеко. `near` — усе, крім 'later'.
- * Немає медичних подій — null.
+ * ВЛК/ПМО біля відпустки: від останніх дат строки переносяться вперед (ВЛК раз на 12 місяців,
+ * ПМО раз на 6; вважається, що кожен огляд проходять у свій строк) до першого строку не раніше
+ * ніж за LEAVE_MEDICAL_WINDOW_DAYS до початку відпустки. `position`: 'before' — строк перед
+ * відпусткою (пройти до неї), 'during' — припадає на відпустку, 'after' — у межах вікна після
+ * неї (пройти одразу після), 'later' — далеко. `near` — усе, крім 'later'. Немає подій — null.
  * @returns {{kind, dueDate, daysAfterEnd, position, near}|null}
  */
 export function medicalAfterLeave(person, leave) {
   const from = normalizeDate(leave?.from);
   const to = normalizeDate(leave?.to);
   if (!from || !to) return null;
-  const state = medicalState(person, to);
-  if (!state) return null;
-  let { dueDate, nextKind: kind } = state;
+  let { vlk, pmo } = lastMedicalDates(person);
+  let next = medicalNext(vlk, pmo);
+  if (!next) return null;
   const floor = addDays(from, -LEAVE_MEDICAL_WINDOW_DAYS);
-  for (let i = 0; i < 60 && dueDate < floor; i += 1) {
-    dueDate = addMonths(dueDate, MEDICAL_STEP_MONTHS);
-    kind = oppositeMedicalKind(kind);
+  for (let i = 0; i < 80 && next.dueDate < floor; i += 1) {
+    if (next.kind === 'ВЛК') vlk = next.dueDate; else pmo = next.dueDate;
+    next = medicalNext(vlk, pmo);
   }
+  const { kind, dueDate } = next;
   const daysAfterEnd = diffDays(to, dueDate);
   const position = dueDate < from ? 'before' : dueDate <= to ? 'during' : daysAfterEnd <= LEAVE_MEDICAL_WINDOW_DAYS ? 'after' : 'later';
   return { kind, dueDate, daysAfterEnd, position, near: position !== 'later' };

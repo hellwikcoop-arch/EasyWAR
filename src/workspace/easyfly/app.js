@@ -7,7 +7,7 @@ import './easyfly.css';
 import { formatDate } from './fly-core.js';
 import { DEMO_TODAY, createDemo } from './fly-demo.js';
 import {
-  NAV_ITEMS, PHONE_NAV, applyMutation, buildRoute, effectiveSettings, fingerprint, isDirty, navFor,
+  NAV_ITEMS, PHONE_NAV, applyMutation, buildRoute, effectiveSettings, fingerprint, isDirty, navFor, navItemsFor,
   parseRoute, suggestedFileName, todayIso,
 } from './fly-state.js';
 import { createEmpty, parse, serialize } from './fly-store.js';
@@ -291,9 +291,15 @@ export async function mount(container, host) {
   function navButton(item, { compact = false } = {}) {
     const node = el('button', {
       type: 'button', class: compact ? 'ef-bnav-item' : 'ef-nav-item', dataset: { route: item.route },
-      onClick: () => ctx.go(item.route),
-    }, icon(item.icon, compact ? 22 : 18), el('span', { text: item.label }));
+      onClick: () => goNav(item.route),
+    }, icon(item.icon, compact ? 22 : 18), el('span', { class: 'ef-nav-text', text: item.label }));
     return node;
+  }
+
+  /** Перехід із меню: якщо пілот один, «Мої пілоти» («Комісація») веде одразу в його профіль. */
+  function goNav(routeName) {
+    const item = navItemsFor(doc?.data).find(i => i.route === routeName);
+    if (item) ctx.go(item.target.name, item.target.params); else ctx.go(routeName);
   }
 
   function buildShell() {
@@ -342,8 +348,8 @@ export async function mount(container, host) {
     const phoneItems = PHONE_NAV.map(name => NAV_ITEMS.find(i => i.route === name));
     const rest = NAV_ITEMS.filter(i => !PHONE_NAV.includes(i.route));
     moreMenu = el('div', { class: 'ef-more-menu', hidden: true, role: 'menu' }, rest.map(item => {
-      const b = el('button', { type: 'button', class: 'ef-more-item', role: 'menuitem', dataset: { route: item.route }, onClick: () => ctx.go(item.route) },
-        icon(item.icon, 18), el('span', { text: item.label }));
+      const b = el('button', { type: 'button', class: 'ef-more-item', role: 'menuitem', dataset: { route: item.route }, onClick: () => goNav(item.route) },
+        icon(item.icon, 18), el('span', { class: 'ef-nav-text', text: item.label }));
       return b;
     }));
     const moreButton = el('button', { type: 'button', class: 'ef-bnav-item', 'aria-haspopup': 'menu', 'aria-expanded': 'false', onClick: event => {
@@ -370,7 +376,10 @@ export async function mount(container, host) {
 
   function markActive() {
     const active = navFor(route);
+    const labels = new Map(navItemsFor(doc?.data).map(item => [item.route, item.label]));
     for (const node of root.querySelectorAll('[data-route]')) {
+      const text = node.querySelector('.ef-nav-text');
+      if (text && labels.has(node.dataset.route) && text.textContent !== labels.get(node.dataset.route)) text.textContent = labels.get(node.dataset.route);
       if (node.dataset.route === active) node.setAttribute('aria-current', 'page');
       else node.removeAttribute('aria-current');
     }

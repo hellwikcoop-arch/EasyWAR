@@ -102,7 +102,7 @@ test('пілот: зміна, перейменування оновлює екі
   assert.equal(validate(removed.data).ok, true);
 });
 
-test('recordCheck: ВЛК/ПМО чергуються, строки перераховуються', () => {
+test('recordCheck: ВЛК/ПМО, строки перераховуються', () => {
   const data = demo();
   const berkut = byCallsign(data, 'Беркут-14');
   assert.ok(blockerBanner(berkut, data, DEMO_TODAY).text.includes('ВЛК'));

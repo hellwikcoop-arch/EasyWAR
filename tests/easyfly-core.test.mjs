@@ -65,7 +65,27 @@ test('pluralDays', () => {
 
 // ───────────── Медицина ─────────────
 
-test('ВЛК↔ПМО: чергування з кроком 6 місяців', () => {
+test('ВЛК раз на 12 місяців, ПМО раз на 6 місяців', () => {
+  assert.equal(core.VLK_MONTHS, 12);
+  assert.equal(core.PMO_MONTHS, 6);
+  // після ВЛК: ПМО через 6 міс, ВЛК через 12
+  assert.deepEqual(core.medicalNext('2026-01-10', null), { kind: 'ПМО', dueDate: '2026-07-10', vlkDue: '2027-01-10', pmoDue: '2026-07-10' });
+  // ВЛК і вчасний ПМО: наступною ВЛК рівно через рік після попередньої
+  assert.deepEqual(core.medicalNext('2026-01-10', '2026-07-10'), { kind: 'ВЛК', dueDate: '2027-01-10', vlkDue: '2027-01-10', pmoDue: '2027-01-10' });
+  // ПМО із запізненням не зсуває річний строк ВЛК
+  const late = core.medicalNext('2026-01-10', '2026-09-01');
+  assert.deepEqual([late.kind, late.dueDate, late.pmoDue], ['ВЛК', '2027-01-10', '2027-03-01']);
+  // ПМО пройдено раніше строку: наступний ПМО настає до ВЛК
+  const early = core.medicalNext('2026-01-10', '2026-05-10');
+  assert.deepEqual([early.kind, early.dueDate, early.vlkDue], ['ПМО', '2026-11-10', '2027-01-10']);
+  // лише ПМО: ВЛК очікується через 6 міс після нього
+  assert.deepEqual(core.medicalNext(null, '2026-06-14'), { kind: 'ВЛК', dueDate: '2026-12-14', vlkDue: '2026-12-14', pmoDue: '2026-12-14' });
+  assert.equal(core.medicalNext(null, null), null);
+  const state = core.medicalState({ medical: [{ kind: 'ВЛК', date: '2026-01-10' }, { kind: 'ПМО', date: '2026-09-01' }] }, TODAY);
+  assert.deepEqual([state.nextKind, state.dueDate, state.vlkDue, state.pmoDue, state.lastKind], ['ВЛК', '2027-01-10', '2027-01-10', '2027-03-01', 'ПМО']);
+});
+
+test('ВЛК/ПМО: найближчий строк після останньої події', () => {
   const afterVlk = core.medicalState({ medical: [{ kind: 'ВЛК', date: '2026-06-14' }] }, TODAY);
   assert.equal(afterVlk.nextKind, 'ПМО');
   assert.equal(afterVlk.dueDate, '2026-12-14');

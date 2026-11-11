@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { NAV_ITEMS, addLeave, dashboardView, shares } from '../src/workspace/easyfly/fly-state.js';
+import { NAV_ITEMS, SOLO_PILOTS_LABEL, addLeave, addPerson, dashboardView, navItemsFor, profileCards, recordCheck, shares } from '../src/workspace/easyfly/fly-state.js';
 import { createEmpty } from '../src/workspace/easyfly/fly-store.js';
 import { createDemo, DEMO_TODAY } from '../src/workspace/easyfly/fly-demo.js';
 
@@ -67,4 +67,37 @@ test('екран «Зведення»: дашборд із кільцем, лі�
   assert.doesNotMatch(view, /root\.append\(routeBoard\(ctx\)\)/, 'схема маршруту не стоїть першою');
   for (const cls of ['.ef-dash-hero', '.ef-ring', '.ef-kpis', '.ef-share', '.ef-tiles', '.ef-dash-row']) assert.ok(css.includes(cls), cls);
   assert.match(css, /\.ef-tiles \{ order: 1;/, 'на телефоні плитки одразу під лічильниками');
+});
+
+test('один пілот: «Мої пілоти» стає «Комісація» і веде в його профіль', () => {
+  assert.equal(SOLO_PILOTS_LABEL, 'Комісація');
+  const empty = createEmpty();
+  assert.equal(navItemsFor(empty).find(i => i.route === 'pilots').label, 'Мої пілоти');
+  const one = addPerson(empty, { callsign: 'Тест-01', role: 'КЕ' }).data;
+  const item = navItemsFor(one).find(i => i.route === 'pilots');
+  assert.deepEqual([item.label, item.target.name, item.target.params.id], ['Комісація', 'pilot', one.persons[0].id]);
+  assert.deepEqual(navItemsFor(one).map(i => i.route), NAV_ITEMS.map(i => i.route));
+  assert.deepEqual(navItemsFor(one).find(i => i.route === 'leaves').target, { name: 'leaves', params: {} });
+  const tile = dashboardView(one, '2026-10-20').tiles.find(t => t.route === 'pilots');
+  assert.deepEqual([tile.label, tile.value, tile.target.name], ['Комісація', null, 'pilot']);
+  const two = addPerson(one, { callsign: 'Тест-02', role: 'ЛШ' }).data;
+  assert.equal(navItemsFor(two).find(i => i.route === 'pilots').label, 'Мої пілоти');
+  assert.equal(navItemsFor(createDemo()).find(i => i.route === 'pilots').target.name, 'pilots');
+});
+
+test('картки профілю: ВЛК раз на 12 міс, ПМО раз на 6 міс', () => {
+  let data = addPerson(createEmpty(), { callsign: 'Тест-01', role: 'КЕ' }).data;
+  const id = data.persons[0].id;
+  data = recordCheck(data, id, { kind: 'medical:ВЛК', date: '2026-08-01' }).data;
+  let cards = profileCards(data.persons[0], data, '2026-10-20');
+  const vlk = cards.find(c => c.key === 'medical:ВЛК');
+  const pmo = cards.find(c => c.key === 'medical:ПМО');
+  assert.match(vlk.lines[0], /01\.08\.2026 · раз на 12 міс\./);
+  assert.match(vlk.footer, /Наступна ВЛК до 01\.08\.2027/);
+  assert.match(pmo.lines[0], /раз на 6 міс\./);
+  assert.match(pmo.footer, /Наступна ПМО до 01\.02\.2027/);
+  data = recordCheck(data, id, { kind: 'medical:ПМО', date: '2027-02-01' }).data;
+  cards = profileCards(data.persons[0], data, '2027-02-02');
+  assert.match(cards.find(c => c.key === 'medical:ВЛК').footer, /Наступна ВЛК до 01\.08\.2027/);
+  assert.match(cards.find(c => c.key === 'medical:ПМО').footer, /Наступною — ВЛК до 01\.08\.2027/);
 });

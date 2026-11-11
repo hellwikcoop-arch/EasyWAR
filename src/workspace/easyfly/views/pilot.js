@@ -4,7 +4,7 @@ import {
   CLASS_LABELS, CLASS_QUALS, LEAVE_PART_DAYS, ROLES, exerciseName, formatDate, leaveTotals, pluralDays,
 } from '../fly-core.js';
 import {
-  PILOT_TABS, admissionRows, blockerBanner, deleteFlight, effectiveSettings, leaveRows, logbookView,
+  PILOT_TABS, SOLO_PILOTS_LABEL, admissionRows, blockerBanner, deleteFlight, effectiveSettings, leaveRows, logbookView,
   lostAdmissions, monthLabel, pluralMonths, profileCards, updatePerson,
 } from '../fly-state.js';
 import {
@@ -217,7 +217,7 @@ function leavesTab(ctx, person) {
       : emptyState('Відпусток ще немає', 'Додайте частини основної відпустки (по 15 діб), відпустку УБД або іншу з датами з–по.'),
     nearMedical
       ? notice('ВЛК / ПМО біля відпустки.', `${nearMedical.medical.kind} до ${formatDate(nearMedical.medical.dueDate)} — ${nearMedical.medical.position === 'before' ? 'пройти до відпустки' : nearMedical.medical.position === 'during' ? 'строк припадає на відпустку, пройти перед нею' : 'запланувати одразу після відпустки'} ${formatDate(nearMedical.leave.from)}–${formatDate(nearMedical.leave.to)}.`, { tone: 'amber' })
-      : notice(null, 'ВЛК і ПМО чергуються кожні 6 місяців; строк, що випадає на відпустку чи одразу після неї, підсвічується тут і на екрані «Відпустки».'),
+      : notice(null, 'ВЛК — раз на рік, ПМО — раз на 6 місяців; строк, що випадає на відпустку чи одразу після неї, підсвічується тут і на екрані «Відпустки».'),
     el('p', { class: 'ef-muted ef-pad', text: 'Дані внесено вручну · графік не замінює наказ і рапорт на відпустку' }));
 }
 
@@ -232,9 +232,10 @@ export function render(ctx) {
     return root;
   }
   const tab = params.tab || 'checks';
+  const solo = data.persons.length === 1;
   root.append(pageHeader({
-    crumbs: [{ label: 'EasyFLY' }, { label: 'Мої пілоти', onClick: () => ctx.go('pilots') }, { label: person.callsign }],
-    title: 'Профіль пілота',
+    crumbs: [{ label: 'EasyFLY' }, { label: solo ? SOLO_PILOTS_LABEL : 'Мої пілоти', onClick: () => ctx.go('pilots') }, { label: person.callsign }],
+    title: solo ? SOLO_PILOTS_LABEL : 'Профіль пілота',
     subtitle: TAB_SUBTITLES[tab],
     actions: [
       button('До списку', { variant: 'secondary', iconName: 'nazad', onClick: () => ctx.go('pilots') }),

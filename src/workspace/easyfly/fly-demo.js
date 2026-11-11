@@ -77,7 +77,7 @@ export function createDemo() {
     const keys = ['medical', 'article205', 'ovp', 'jumps', ...types.map(t => `check:${t.id}`)];
     const days = key => DUE[base.id]?.[key] ?? defaultDays(index, keys.indexOf(key));
 
-    // Медицина: остання подія — за 6 міс до строку; вид чергується.
+    // Медицина: остання подія — за 6 міс до строку (після ВЛК — ПМО, після ПМО — ВЛК).
     const medKind = index % 2 === 0 ? 'ПМО' : 'ВЛК';
     person.medical = base.id === 'p02'
       ? [{ kind: 'ВЛК', date: '2025-10-12' }, { kind: 'ПМО', date: '2026-04-12' }] // наступна ВЛК до 12.10.2026

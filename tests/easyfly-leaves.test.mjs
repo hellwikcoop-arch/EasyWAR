@@ -48,7 +48,15 @@ test('leaveWarnings: частина основної довша за 15 діб, 
   assert.deepEqual(leaveWarnings({ id: 'l1', kind: 'basic', from: '2027-02-01', to: '2027-02-15' }, others), [], 'сам із собою не порівнюється');
 });
 
-test('medicalAfterLeave: чергування ВЛК↔ПМО переноситься до відпустки; before/during/after/later', () => {
+test('medicalAfterLeave: річна ВЛК не зсувається через пізній ПМО', () => {
+  const person = { medical: [{ kind: 'ВЛК', date: '2026-01-10' }, { kind: 'ПМО', date: '2026-09-01' }] };
+  const vlk = medicalAfterLeave(person, { from: '2026-12-20', to: '2027-01-03' });
+  assert.deepEqual([vlk.kind, vlk.dueDate, vlk.position], ['ВЛК', '2027-01-10', 'after']);
+  const pmo = medicalAfterLeave(person, { from: '2027-06-20', to: '2027-07-04' });
+  assert.deepEqual([pmo.kind, pmo.dueDate, pmo.position], ['ПМО', '2027-07-10', 'after']);
+});
+
+test('medicalAfterLeave: строки ВЛК (12 міс) і ПМО (6 міс) переносяться до відпустки; before/during/after/later', () => {
   const person = { medical: [{ kind: 'ПМО', date: '2026-04-12' }] }; // ВЛК до 12.10.2026, ПМО до 12.04.2027, ВЛК до 12.10.2027
   assert.equal(medicalAfterLeave({ medical: [] }, { from: '2027-01-01', to: '2027-01-15' }), null);
   const after = medicalAfterLeave(person, { from: '2027-03-15', to: '2027-03-29' });

@@ -14,7 +14,7 @@ import {
   normalizeDate, normalizeFlight, ovpState, parseImportRows, personItems, renewAdmission,
   renewalHint, resolveSettings, shiftSummary, toIso, MEDICAL_KINDS, flightBlockers,
   LEAVE_KIND_IDS, LEAVE_STATUSES, leaveDays, leaveKindById, leaveTotals, leaveWarnings, medicalAfterLeave,
-  wholeMonthsBetween, buildReminders,
+  wholeMonthsBetween, buildReminders, deadlineStatus, PMO_MONTHS, VLK_MONTHS,
 } from './fly-core.js';
 import {
   MAX_CALLSIGN_LEN, MAX_NAV_TITLE_LEN, MAX_NOTE_LEN, NAV_FLIGHT_NAME_FIELDS,
@@ -80,6 +80,21 @@ export function buildRoute(name, params = {}) {
   }
   if (name === 'navigator') return params.pilot ? `#/navigator/${enc(params.pilot)}` : '#/navigator';
   return ROUTE_NAMES.includes(name) ? `#/${name}` : '#/summary';
+}
+
+/** Підпис пункту «Мої пілоти», коли в базі один пілот (власник веде облік лише для себе). */
+export const SOLO_PILOTS_LABEL = 'Комісація';
+
+/**
+ * Пункти навігації для даних: якщо пілот один, «Мої пілоти» стає «Комісація» і веде одразу в
+ * його профіль (target). Для решти пунктів target — сам маршрут.
+ */
+export function navItemsFor(data) {
+  const persons = data?.persons || [];
+  const solo = persons.length === 1 ? persons[0] : null;
+  return NAV_ITEMS.map(item => (item.route === 'pilots' && solo
+    ? { ...item, label: SOLO_PILOTS_LABEL, target: { name: 'pilot', params: { id: solo.id } } }
+    : { ...item, target: { name: item.route, params: {} } }));
 }
 
 /** Який пункт сайдбару підсвічувати для маршруту (профіль → «Мої пілоти»). */
@@ -735,26 +750,28 @@ export function profileCards(person, data, today) {
   const cards = [];
   const med = medicalState(person, today, settings.soonDays);
 
+  // ВЛК — раз на 12 місяців, ПМО — раз на 6 (ВЛК зараховується і як черговий медогляд).
   for (const kind of MEDICAL_KINDS) {
     const last = latestMedical(person, kind);
-    const pending = med && med.nextKind === kind;
     const card = { key: `medical:${kind}`, title: kind, icon: kind === 'ВЛК' ? 'vlk' : 'pmo', status: null, blocks: false, lines: [], rows: [], footer: null, footerStatus: null, entryKind: `medical:${kind}` };
-    if (!last && !pending) {
-      cards.push(card);
-      continue;
-    }
-    card.lines.push(last ? `Остання дата: ${formatDate(last)} · термін ${6} міс.` : 'Дата не внесена');
-    if (pending) {
-      card.status = med.status;
-      card.blocks = med.blocks;
-      card.footerStatus = med.status;
-      card.footer = med.status === STATUS.OVERDUE
-        ? `Прострочено з ${formatDate(med.dueDate)} · ${leftPhrase(med.status, med.daysLeft)}`
-        : `Наступна ${kind} до ${formatDate(med.dueDate)} · ${leftPhrase(med.status, med.daysLeft)}`;
-    } else {
+    if (!med) { cards.push(card); continue; }
+    const months = kind === 'ВЛК' ? VLK_MONTHS : PMO_MONTHS;
+    card.lines.push(last ? `Остання дата: ${formatDate(last)} · раз на ${months} міс.` : `Дата не внесена · раз на ${months} міс.`);
+    const own = kind === 'ВЛК' ? med.vlkDue : med.pmoDue;
+    if (kind === 'ПМО' && med.pmoDue >= med.vlkDue) {
+      // черговий медогляд закриє ВЛК: окремого строку ПМО до неї немає
       card.status = STATUS.VALID;
       card.footerStatus = STATUS.VALID;
-      card.footer = `Наступною — ${med.nextKind} до ${formatDate(med.dueDate)}`;
+      card.footer = `Наступною — ВЛК до ${formatDate(med.vlkDue)}`;
+    } else {
+      const status = deadlineStatus(own, today, settings.soonDays);
+      const left = daysLeft(own, today);
+      card.status = status;
+      card.blocks = status === STATUS.OVERDUE;
+      card.footerStatus = status;
+      card.footer = status === STATUS.OVERDUE
+        ? `Прострочено з ${formatDate(own)} · ${leftPhrase(status, left)}`
+        : `Наступна ${kind} до ${formatDate(own)} · ${leftPhrase(status, left)}`;
     }
     cards.push(card);
   }
@@ -990,7 +1007,7 @@ export function dashboardView(data, today, filter = {}) {
   const reminders = buildReminders(items, today, settings.reminderDays).length;
 
   const tiles = [
-    { route: 'pilots', value: String(pilots), hint: pilots ? `${ready} без блокувань` : 'додайте пілотів', tone: blocked ? 'red' : '' },
+    { route: 'pilots', value: (data.persons || []).length === 1 ? null : String(pilots), hint: (data.persons || []).length === 1 ? (blocked ? 'є блокування польотів' : 'ВЛК, ПМО, перевірки, допуски') : pilots ? `${ready} без блокувань` : 'додайте пілотів', tone: blocked ? 'red' : '' },
     { route: 'reminders', value: String(reminders), hint: reminders ? 'строки в межах порогів' : 'нагадувань немає', tone: reminders ? 'amber' : '' },
     { route: 'leaves', value: String(leavesNow.length), hint: leavesNext[0] ? `наступна з ${formatDate(leavesNext[0].leave.from)}` : 'у відпустці зараз', tone: leaveWarningsCount ? 'amber' : '' },
     { route: 'chrono', value: shift ? String(shift.flights) : '—', hint: shift ? `польотів за ${formatDate(shift.date)}` : 'змін ще немає', tone: '' },
@@ -998,7 +1015,7 @@ export function dashboardView(data, today, filter = {}) {
     { route: 'sunmoon', value: null, hint: 'схід, захід, фаза Місяця', tone: '' },
     { route: 'import', value: null, hint: 'польоти з таблиці CSV', tone: '' },
     { route: 'settings', value: null, hint: 'частина, пороги, підписанти', tone: '' },
-  ].map(tile => ({ ...tile, ...NAV_ITEMS.find(item => item.route === tile.route) }));
+  ].map(tile => ({ ...tile, ...navItemsFor(data).find(item => item.route === tile.route) }));
 
   return {
     ...summary,

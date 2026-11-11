@@ -94,7 +94,7 @@ export function render(ctx) {
       el('h2', { class: 'ef-card-title', text: 'Перелік' }),
       table(leaveColumns(ctx), schedule.rows, { caption: `Відпустки за ${schedule.year} рік`, rowClass: r => (r.warnings.length ? 'ef-row-lost' : null) })));
   }
-  root.append(notice(null, `ВЛК і ПМО чергуються кожні 6 місяців: у стовпці «ВЛК / ПМО» показано найближчий строк біля відпустки (${schedule.medicalCount} ${schedule.medicalCount === 1 ? 'запис потребує' : 'записів потребують'} уваги). Дані внесено вручну: графік не замінює наказ і рапорти.`));
+  root.append(notice(null, `ВЛК — раз на рік, ПМО — раз на 6 місяців: у стовпці «ВЛК / ПМО» показано найближчий строк біля відпустки (${schedule.medicalCount} ${schedule.medicalCount === 1 ? 'запис потребує' : 'записів потребують'} уваги). Дані внесено вручну: графік не замінює наказ і рапорти.`));
   root.append(el('div', { class: 'ef-alert ef-alert-outline' }, icon('kalendar', 16), ' Про відпустку кожного пілота окремо — вкладка «Відпустки» в його профілі.'));
   return root;
 }
