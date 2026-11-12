@@ -109,7 +109,10 @@ test('робочий застосунок не імпортує ядра C1', as
     }
   }
   await walk('src/');
-  const consumers = files.filter(f => !C1_CORES.includes(f));
+  // Єдиний дозволений споживач до C3b/C5 — демонстрація S1 (наказ JE 29.10.2026, Sync MVP): лише її
+  // ядро в пам'яті вікна, без мережі й команд Tauri (tests/collective-demo.test.mjs). Решта застосунку — ні.
+  const DEMO_CORE = 'src/workspace/collective-demo/collective-demo-core.js';
+  const consumers = files.filter(f => !C1_CORES.includes(f) && f !== DEMO_CORE);
   for (const file of consumers) {
     const code = await readFile(new URL(file, root), 'utf8');
     for (const name of names) assert.equal(code.includes(name), false, `${file} імпортує ${name}`);

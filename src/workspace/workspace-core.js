@@ -98,7 +98,11 @@ export const AVIATION_APPS = Object.freeze([
   }),
 ]);
 
-/** Усі застосунки модуля в порядку розділів. */
+/**
+ * Застосунки розділу «Колективи»: локальний план колективу (main) і демонстрація S1 «Колектив (демо)» —
+ * спільна таблиця двох учасників у пам'яті вікна, без мережі, команд Tauri, профілів і збереження
+ * (src/workspace/collective-demo).
+ */
 export const COLLECTIVE_APPS = Object.freeze([
   app({
     id: 'collectives',
@@ -108,11 +112,20 @@ export const COLLECTIVE_APPS = Object.freeze([
     extensions: ['ewcoll'],
     filterName: 'Локальні колективи',
   }),
+  app({
+    id: 'collective-demo',
+    title: 'Колектив (демо)',
+    kind: 'Спільна таблиця',
+    hint: 'Демонстрація «Доповісти» → «Звірити» між двома учасниками — без мережі та збереження',
+    extensions: [],
+  }),
 ]);
 
+/** Усі застосунки модуля в порядку розділів. */
 export const WORKSPACE_APPS = Object.freeze([...OFFICE_APPS, ...SITUATION_APPS, ...COLLECTIVE_APPS, ...PERSONAL_APPS, ...AVIATION_APPS]);
 
-/** Розділи модуля: «Офіс», «Обстановка», «Особисте» і «Авіація». */
+
+/** Розділи модуля: «Офіс», «Обстановка», «Колективи», «Особисте» і «Авіація». */
 export const WORKSPACE_SECTIONS = Object.freeze([
   Object.freeze({ id: 'office', title: 'Офіс', eyebrow: 'ЛОКАЛЬНІ ЗАСТОСУНКИ', subtitle: 'Оберіть застосунок для роботи з файлами на цьому комп’ютері.', apps: Object.freeze(OFFICE_APPS.map(entry => entry.id)) }),
   Object.freeze({ id: 'situation', title: 'Обстановка', eyebrow: 'ПОТОЧНА ОБСТАНОВКА', subtitle: 'Погода у вибраному населеному пункті: вручну або з інтернету, якщо ви його ввімкнете. Сонце і Місяць — завжди офлайн.', apps: Object.freeze(SITUATION_APPS.map(entry => entry.id)) }),
@@ -132,10 +145,15 @@ export function sectionOfApp(id) {
 
 /**
  * Чи відкривати застосунок в окремому вікні редактора (лише office_*). Застосунки «Обстановки» —
- * наш код без файлів і чужого WASM, їм потрібні власні команди головного вікна (погода).
+ * наш код без файлів і чужого WASM, їм потрібні власні команди головного вікна (погода). «Колектив (демо)»
+ * теж без файлів і без команд Tauri — лишається в iframe головного вікна, як погода.
  */
+// Застосунки без файлів і без чужого WASM лишаються в iframe головного вікна: «Погода» («Обстановка»)
+// і «Колектив (демо)» (команд Tauri не викликає). Решта, зокрема «Колективи» з файлами .ewcoll, — у вікні редактора.
+const MAIN_WINDOW_APPS = new Set([...SITUATION_APPS, ...COLLECTIVE_APPS.filter(entry => entry.extensions.length === 0)].map(entry => entry.id));
+
 export function opensInEditorWindow(id) {
-  return Boolean(appById(id)) && !SITUATION_APPS.some(entry => entry.id === id);
+  return Boolean(appById(id)) && !MAIN_WINDOW_APPS.has(id);
 }
 
 /**
@@ -360,6 +378,7 @@ export const APP_ICONS = Object.freeze({
   collectives: [['circle', { cx: '8', cy: '8', r: '3' }], ['circle', { cx: '17', cy: '9', r: '2.5' }], ['path', { d: 'M2.5 20v-2a5.5 5.5 0 0 1 11 0v2M13.5 16a4.5 4.5 0 0 1 7.5 3v1' }]],
   weather: [['path', { d: 'M7 17.5h10a3.75 3.75 0 0 0 .55-7.46A5.25 5.25 0 0 0 7.4 9.1 4.2 4.2 0 0 0 7 17.5Z' }], ['path', { d: 'M8.5 21h7' }]],
   sun: [['circle', { cx: '12', cy: '12', r: '4' }], ['path', { d: 'M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M18.7 5.3l-1.8 1.8M7.1 16.9l-1.8 1.8' }]],
+  'collective-demo': [['circle', { cx: '8', cy: '8', r: '3' }], ['circle', { cx: '16', cy: '8', r: '3' }], ['path', { d: 'M3 20c0-3 2.2-5 5-5s5 2 5 5M11 20c0-3 2.2-5 5-5s5 2 5 5' }]],
   easypay: [['rect', { x: '3', y: '6', width: '18', height: '12', rx: '2' }], ['circle', { cx: '12', cy: '12', r: '2.5' }], ['path', { d: 'M6.5 9.5v.01M17.5 14.5v.01' }]],
 });
 
