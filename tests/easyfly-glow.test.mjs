@@ -2,7 +2,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { todayHome } from '../src/workspace/easyfly/glow-core.js';
+import { personalHome, todayHome } from '../src/workspace/easyfly/glow-core.js';
+import { addPerson, lapsingAdmissionRows, setTraining } from '../src/workspace/easyfly/fly-state.js';
 import { circuit, descent, groundSpeed, mpr, windFromDrift } from '../src/workspace/easyfly/nav-calc-core.js';
 import { createDemo, DEMO_TODAY } from '../src/workspace/easyfly/fly-demo.js';
 import { createEmpty } from '../src/workspace/easyfly/fly-store.js';
@@ -20,6 +21,21 @@ test('сьогодні на демо: 8/12, чотири заборони, зм�
   assert.match(view.shift.subtitle, /23 польоти/);
   assert.match(view.shift.subtitle, /11:40/);
   assert.equal(view.deadlines.overdue, 4);
+});
+
+test('особистий екран і рівень підготовки: допуск із перервою йде в комісацію', () => {
+  const home = personalHome(createEmpty(), '2026-10-20');
+  assert.equal(home.person, null);
+  let data = addPerson(createEmpty(), { callsign: 'Тест-01', role: 'КЕ' }).data;
+  const id = data.persons[0].id;
+  data = setTraining(data, id, { ids: ['circle', 'site', 'no-such'], custom: ['Свій пункт'] }).data;
+  assert.deepEqual(data.persons[0].training, { ids: ['circle', 'site'], custom: ['Свій пункт'] });
+  const rows = lapsingAdmissionRows(data.persons[0], data, '2026-10-20');
+  assert.deepEqual(rows.map(row => row.kind.id), ['site']);
+  assert.equal(rows[0].admission, null);
+  const self = personalHome(data, '2026-10-20');
+  assert.equal(self.person.callsign, 'Тест-01');
+  assert.equal(self.ready, true);
 });
 
 test('порожня база не вигадує готовність і зміну', () => {

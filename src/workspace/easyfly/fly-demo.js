@@ -67,6 +67,7 @@ export function createDemo() {
       ovpBlocks: true,
       onbCriterionPercent: 50,
       timezone: 'Europe/Kyiv',
+      subordinates: true,
     },
   };
 

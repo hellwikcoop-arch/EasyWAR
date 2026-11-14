@@ -19,7 +19,7 @@ const demo = () => createDemo();
 const byCallsign = (data, callsign) => data.persons.find(p => p.callsign === callsign);
 
 test('маршрути: розбір і побудова, невідоме — зведення', () => {
-  assert.deepEqual(parseRoute('#/pilot/p01/admissions'), { name: 'pilot', params: { id: 'p01', tab: 'admissions' } });
+  assert.deepEqual(parseRoute('#/pilot/p01/admissions'), { name: 'pilot', params: { id: 'p01', tab: 'komis' } });
   assert.deepEqual(parseRoute('#/pilot/p01'), { name: 'pilot', params: { id: 'p01', tab: 'komis' } });
   assert.deepEqual(parseRoute('#/pilot/p01/дивна'), { name: 'pilot', params: { id: 'p01', tab: 'komis' } });
   assert.deepEqual(parseRoute('#/flights/2026-10-20'), { name: 'flights', params: { date: '2026-10-20' } });
@@ -123,9 +123,10 @@ test('recordCheck: ВЛК/ПМО, строки перераховуються', 
 test('recordCheck: Стаття 205, ОВП, стрибок, перевірка за роллю', () => {
   const data = demo();
   const lelek = byCallsign(data, 'Лелека-09');
-  assert.equal(recordCheck(data, lelek.id, { kind: 'article205', date: '2026-10-01' }).ok, false);
-  const a = recordCheck(data, lelek.id, { kind: 'article205', direction: 'ao', date: '01.10.2026', acceptedBy: 'Спеціаліст' });
-  assert.equal(byCallsign(a.data, 'Лелека-09').article205.ao.date, '2026-10-01');
+  const a = recordCheck(data, lelek.id, { kind: 'article205', date: '01.10.2026', acceptedBy: 'Спеціаліст' });
+  assert.equal(a.ok, true);
+  assert.equal(byCallsign(a.data, 'Лелека-09').article205.date, '2026-10-01');
+  assert.equal(byCallsign(a.data, 'Лелека-09').article205.acceptedBy, 'Спеціаліст');
   const o = recordCheck(a.data, lelek.id, { kind: 'ovp', date: '2026-10-02' });
   assert.equal(byCallsign(o.data, 'Лелека-09').ovp.date, '2026-10-02');
   const j = recordCheck(o.data, lelek.id, { kind: 'jump', date: '2026-10-03' });
@@ -257,7 +258,8 @@ test('картки профілю: ВЛК прострочена, ПМО без 
   assert.equal(vlk.blocks, true);
   assert.match(vlk.footer, /Прострочено з 12\.10\.2026 · 8 дн\./);
   const art = cards.find(c => c.key === 'article205');
-  assert.deepEqual(art.rows.map(r => r.label), ['АО', 'РЕО', 'ВД', 'АОз']);
+  assert.match(art.lines[0], /Остання дата/);
+  assert.equal(art.rows.length, 0);
   const banner = blockerBanner(berkut, data, DEMO_TODAY);
   assert.equal(banner.days, 8);
   assert.deepEqual(cards.filter(c => c.key.startsWith('group:')).map(c => c.title), ['Техніка пілотування', 'Прилади', 'БЗ і навігація на ГМВ']);
@@ -271,7 +273,8 @@ test('картки профілю: порожній пілот — «немає 
   const cards = profileCards(data.persons[0], data, DEMO_TODAY);
   assert.ok(cards.length >= 7);
   assert.ok(cards.every(c => c.status === null));
-  assert.equal(cards.find(c => c.key === 'article205').rows.length, 4);
+  assert.equal(cards.find(c => c.key === 'article205').rows.length, 0);
+  assert.match(cards.find(c => c.key === 'article205').lines[0], /Дата не внесена/);
   assert.equal(blockerBanner(data.persons[0], data, DEMO_TODAY), null);
 });
 

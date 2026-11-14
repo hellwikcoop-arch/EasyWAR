@@ -1,8 +1,9 @@
 // Екран «Сьогодні»: дуга готовності, картка льотної зміни, заборони, стан за пілотами.
 // Числа — з todayHome (реальні дані). Схема маршруту лишається згорнутою внизу.
-import { formatDate } from '../fly-core.js';
-import { pluralFlights, pluralPilots, todayHome } from '../glow-core.js';
+import { formatDate, pluralDays } from '../fly-core.js';
+import { hasSubordinates, personalHome, pluralFlights, pluralPilots, todayHome } from '../glow-core.js';
 import { el } from '../ui.js';
+import { openPilotForm } from './card.js';
 import { routeBoard } from './route-board.js';
 
 function arc(percent) {
@@ -74,7 +75,50 @@ function banRow(ctx, item) {
   el('span', { class: 'ef-ban-days', text: days }));
 }
 
+function renderPersonal(ctx) {
+  const { data, today } = ctx;
+  const view = personalHome(data, today);
+  const root = el('div', { class: 'ef-view ef-today ef-today-personal' });
+  const person = view.person;
+  root.append(el('header', { class: 'ef-today-head' },
+    el('h1', { text: person ? person.callsign : 'Сьогодні' }),
+    el('span', { class: 'ef-today-date', text: formatDate(today) || '' })));
+  if (!person) {
+    root.append(
+      el('p', { class: 'ef-today-empty', text: 'Це ваш облік: лише ви, без списку підлеглих. Спершу вкажіть позивний і рівень підготовки.' }),
+      el('button', { type: 'button', class: 'ef-btn ef-btn-primary', text: 'Почати', onClick: () => openPilotForm(ctx) }));
+    return root;
+  }
+  const nearest = view.nearest;
+  const headline = view.blockers.length
+    ? 'Польоти заборонені'
+    : nearest && nearest.daysLeft < 0
+      ? `Прострочено ${-nearest.daysLeft} ${pluralDays(nearest.daysLeft)}`
+      : nearest?.daysLeft === 0
+        ? 'Строк сьогодні'
+        : nearest?.daysLeft > 0
+          ? `${nearest.daysLeft} ${pluralDays(nearest.daysLeft)}`
+          : 'Без блокувань';
+  root.append(el('section', { class: 'ef-glow-card ef-komis-hero' },
+    el('div', { class: 'ef-komis-num' }, el('strong', { text: headline })),
+    el('p', { class: 'ef-glow-quiet', text: view.blockers.length
+      ? view.blockers.map(item => item.daysOverdue === null ? item.label : `${item.label} · ${item.daysOverdue} дн.`).join('; ')
+      : (nearest ? `Найближче: ${nearest.label}${nearest.dueDate ? ` до ${formatDate(nearest.dueDate)}` : ''}` : 'Прострочених і близьких строків немає.') }),
+    el('button', { type: 'button', class: 'ef-btn ef-btn-primary', text: 'Комісація', onClick: () => ctx.go('pilot', { id: person.id, tab: 'komis' }) })));
+  if (view.upcoming.length) {
+    root.append(el('section', { class: 'ef-glow-card' },
+      el('div', { class: 'ef-glow-card-head' }, el('h2', { text: 'Ваші строки' })),
+      view.upcoming.map(item => el('div', { class: 'ef-ban-row ef-flight-row' },
+        el('span', { class: 'ef-ban-who' },
+          el('strong', { text: item.label }),
+          el('span', { text: item.dueDate ? formatDate(item.dueDate) : 'дату не внесено' })),
+        el('span', { class: item.status === 'overdue' ? 'ef-ban-days' : 'ef-glow-quiet', text: item.daysLeft < 0 ? `прострочено ${-item.daysLeft} дн.` : item.daysLeft === 0 ? 'сьогодні' : item.daysLeft > 0 ? `${item.daysLeft} дн.` : '' })))));
+  }
+  return root;
+}
+
 export function render(ctx) {
+  if (!hasSubordinates(ctx.data)) return renderPersonal(ctx);
   const { data, today } = ctx;
   const view = todayHome(data, today);
   const root = el('div', { class: 'ef-view ef-today' });

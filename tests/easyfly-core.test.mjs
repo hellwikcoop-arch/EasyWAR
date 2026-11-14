@@ -123,28 +123,28 @@ function art205(dates, kind = 'helicopter') {
   return { aircraftKind: kind, article205 };
 }
 
-test('Стаття 205: «дійсно» лише коли здані всі чотири; «скоро» за найранішим; один прострочений блокує', () => {
+test('Стаття 205: одна дата; у старих напрямах береться найраніша, пропуск напряму не прострочує', () => {
+  const single = core.article205State({ article205: { date: '2026-09-01' } }, TODAY);
+  assert.equal(single.status, 'valid');
+  assert.equal(single.dueDate, '2027-03-01');
+  assert.equal(single.legacy, false);
+
   const valid = core.article205State(art205(['2026-09-01', '2026-09-02', '2026-09-03', '2026-09-04']), TODAY);
   assert.equal(valid.status, 'valid');
   assert.equal(valid.dueDate, '2027-03-01');
 
   const soon = core.article205State(art205(['2026-09-01', '2026-05-10', '2026-09-03', '2026-09-04']), TODAY);
-  assert.equal(soon.status, 'soon'); // РЕО: до 10.11.2026 = 21 доба
-  assert.equal(soon.earliest.label, 'РЕО');
+  assert.equal(soon.status, 'soon');
   assert.equal(soon.daysLeft, 21);
 
   const oneOverdue = core.article205State(art205(['2026-09-01', '2026-09-02', '2026-03-01', '2026-09-04']), TODAY);
-  assert.equal(oneOverdue.status, 'overdue'); // ВД: до 01.09.2026
+  assert.equal(oneOverdue.status, 'overdue');
   assert.equal(oneOverdue.blocks, true);
-  assert.equal(oneOverdue.directions.find(d => d.id === 'vd_sd').status, 'overdue');
-  assert.equal(oneOverdue.directions.find(d => d.id === 'ao').status, 'valid');
-});
 
-test('Стаття 205: напрям без дати — не здано (прострочено); без жодних даних — невідомо', () => {
   const partial = core.article205State(art205(['2026-09-01', '2026-09-02', '2026-09-03']), TODAY);
-  assert.equal(partial.status, 'overdue');
-  assert.deepEqual(partial.missing, ['АОз']);
-  assert.equal(partial.dueDate, null);
+  assert.equal(partial.status, 'valid');
+  assert.deepEqual(partial.missing, []);
+  assert.equal(partial.dueDate, '2027-03-01');
   assert.equal(core.article205State({ article205: {} }, TODAY), null);
   assert.equal(core.article205State({}, TODAY), null);
 });

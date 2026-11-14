@@ -69,19 +69,20 @@ test('екран «Сьогодні»: дуга, зміна, заборони, �
   assert.doesNotMatch(css, /https?:\/\//, 'тема без зовнішніх адрес');
 });
 
-test('один пілот: пункт лишається «Пілоти» і відкриває вкладку «Комісація»', () => {
+test('без підлеглих пункт зветься «Профіль» і відкриває комісацію', () => {
   assert.equal(SOLO_PILOTS_LABEL, 'Комісація');
   const empty = createEmpty();
-  assert.equal(navItemsFor(empty).find(i => i.route === 'pilots').label, 'Пілоти');
+  assert.equal(navItemsFor(empty).find(i => i.route === 'pilots').label, 'Профіль');
   const one = addPerson(empty, { callsign: 'Тест-01', role: 'КЕ' }).data;
   const item = navItemsFor(one).find(i => i.route === 'pilots');
-  assert.deepEqual([item.label, item.target.name, item.target.params.id, item.target.params.tab], ['Пілоти', 'pilot', one.persons[0].id, 'komis']);
+  assert.deepEqual([item.label, item.target.name, item.target.params.id, item.target.params.tab], ['Профіль', 'pilot', one.persons[0].id, 'komis']);
   assert.deepEqual(navItemsFor(one).map(i => i.route), NAV_ITEMS.map(i => i.route));
   assert.deepEqual(navItemsFor(one).find(i => i.route === 'leaves').target, { name: 'leaves', params: {} });
   const tile = dashboardView(one, '2026-10-20').tiles.find(t => t.route === 'pilots');
-  assert.deepEqual([tile.label, tile.value, tile.target.name, tile.target.params.tab], ['Пілоти', null, 'pilot', 'komis']);
+  assert.deepEqual([tile.label, tile.value, tile.target.name, tile.target.params.tab], ['Профіль', null, 'pilot', 'komis']);
   const two = addPerson(one, { callsign: 'Тест-02', role: 'ЛШ' }).data;
-  assert.equal(navItemsFor(two).find(i => i.route === 'pilots').label, 'Пілоти');
+  assert.equal(navItemsFor(two).find(i => i.route === 'pilots').label, 'Профіль');
+  assert.equal(navItemsFor(createDemo()).find(i => i.route === 'pilots').label, 'Пілоти');
   assert.equal(navItemsFor(createDemo()).find(i => i.route === 'pilots').target.name, 'pilots');
 });
 

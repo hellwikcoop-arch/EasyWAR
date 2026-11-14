@@ -119,7 +119,8 @@ test('редуктори: addLeave / updateLeave / deleteLeave, дати дд.м
   assert.equal(data.leaves.length, 8, 'вхідні дані не змінюються');
   assert.deepEqual(addLeave(data, { personId: 'p04', kind: 'basic', from: '2027-07-20', to: '2027-07-10' }).errors, ['Дата закінчення раніше за дату початку.']);
   assert.deepEqual(addLeave(data, { personId: 'nobody', kind: 'basic', from: '2027-07-01', to: '2027-07-15' }).errors, ['Оберіть пілота.']);
-  assert.ok(addLeave(data, { personId: 'p04', kind: 'basic', from: '', to: '' }).errors.length === 2);
+  assert.equal(addLeave(data, { personId: 'p04', kind: 'basic', from: '', to: '' }).errors.length, 1);
+  assert.equal(addLeave(data, { personId: 'p04', kind: 'basic', from: '2027-07-01' }).data.leaves.at(-1).to, '2027-07-15');
   assert.equal(addLeave(data, { personId: 'p04', kind: 'basic', from: '2027-07-01', to: '2027-07-15', status: 'odd' }).errors[0], 'Невідомий стан відпустки.');
   assert.equal(addLeave({ ...data, leaves: undefined }, { personId: 'p04', kind: 'ubd', from: '2027-07-01', to: '2027-07-14' }).id, 'l1', 'старі дані без колекції');
 
@@ -174,7 +175,7 @@ test('маршрут «Відпустки», вкладка профілю, те
   assert.equal(buildRoute('leaves'), '#/leaves');
   assert.deepEqual(parseRoute('#/pilot/p01/leaves'), { name: 'pilot', params: { id: 'p01', tab: 'leaves' } });
   assert.equal(buildRoute('pilot', { id: 'p01', tab: 'leaves' }), '#/pilot/p01/leaves');
-  assert.deepEqual(PILOT_TABS.map(t => t.label), ['Комісація', 'Перевірки', 'Допуски', 'Льотна книжка', 'Штурманські документи', 'Відпустки']);
+  assert.deepEqual(PILOT_TABS.map(t => t.label), ['Комісація', 'Перевірки', 'Льотна книжка', 'Штурманські документи', 'Відпустки']);
   assert.deepEqual(PHONE_NAV, ['summary', 'pilots', 'flights', 'navigator']);
 });
 

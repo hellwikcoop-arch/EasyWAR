@@ -249,8 +249,26 @@ export function validate(data) {
     if (p.article205 !== undefined && p.article205 !== null) {
       if (!isObject(p.article205)) fail(`${at}.article205`, 'Має бути об\'єктом.');
       else for (const id of Object.keys(p.article205)) {
-        if (!ARTICLE_205_IDS.includes(id)) fail(`${at}.article205.${id}`, `Невідомий напрям (очікується: ${ARTICLE_205_IDS.join(', ')}).`);
-        else dateField(`${at}.article205.${id}.date`, p.article205[id]?.date);
+        if (id === 'date') { dateField(`${at}.article205.date`, p.article205.date); continue; }
+        if (id === 'acceptedBy') {
+          if (p.article205.acceptedBy != null && typeof p.article205.acceptedBy !== 'string') fail(`${at}.article205.acceptedBy`, 'Має бути текстом.');
+          continue;
+        }
+        if (!ARTICLE_205_IDS.includes(id)) fail(`${at}.article205.${id}`, `Невідомий напрям (очікується: ${ARTICLE_205_IDS.join(', ')} або дата).`);
+        else if (p.article205[id] != null && typeof p.article205[id] === 'object') dateField(`${at}.article205.${id}.date`, p.article205[id]?.date);
+      }
+    }
+    if (p.training !== undefined && p.training !== null) {
+      if (!isObject(p.training)) fail(`${at}.training`, 'Має бути об\'єктом.');
+      else {
+        if (p.training.ids !== undefined && !Array.isArray(p.training.ids)) fail(`${at}.training.ids`, 'Має бути масивом.');
+        else (p.training.ids || []).forEach((id, j) => {
+          if (!admissionKindById(id)) fail(`${at}.training.ids[${j}]`, `Невідомий допуск «${id}».`);
+        });
+        if (p.training.custom !== undefined && !Array.isArray(p.training.custom)) fail(`${at}.training.custom`, 'Має бути масивом.');
+        else (p.training.custom || []).forEach((label, j) => {
+          if (typeof label !== 'string' || !label.trim() || label.length > 80) fail(`${at}.training.custom[${j}]`, 'Свій пункт — текст до 80 символів.');
+        });
       }
     }
     if (p.ovp !== undefined && p.ovp !== null) dateField(`${at}.ovp.date`, p.ovp?.date);

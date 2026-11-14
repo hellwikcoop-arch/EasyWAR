@@ -1,10 +1,10 @@
 // Профіль пілота: «Комісація», «Перевірки», «Допуски», «Льотна книжка», «Штурманські документи», «Відпустки».
 // Червона плашка «Польоти заборонені» — з flightBlockers. Допуск пілот відмічає сам, без затвердження.
 import {
-  CLASS_LABELS, CLASS_QUALS, LEAVE_PART_DAYS, ROLES, daysLeft, exerciseName, formatDate, leaveTotals, medicalState, pluralDays,
+  CLASS_LABELS, CLASS_QUALS, LEAVE_PART_DAYS, ROLES, daysLeft, exerciseName, formatDate, hasSubordinates, leaveTotals, medicalState, pluralDays,
 } from '../fly-core.js';
 import {
-  PILOT_TABS, admissionRows, blockerBanner, deleteFlight, effectiveSettings, leaveRows, logbookView,
+  PILOT_TABS, admissionRows, blockerBanner, deleteFlight, effectiveSettings, lapsingAdmissionRows, leaveRows, logbookView,
   lostAdmissions, monthLabel, pluralMonths, profileCards, updatePerson,
 } from '../fly-state.js';
 import {
@@ -13,7 +13,7 @@ import {
 } from '../ui.js';
 import { icon } from '../icons.js';
 import {
-  confirmDeletePerson, openAdmissionForm, openPilotForm, removeAdmission, setAdmissionLost,
+  confirmDeletePerson, openAdmissionForm, openPilotForm, openTrainingForm, removeAdmission, setAdmissionLost,
 } from './card.js';
 import { openEntry } from './entry.js';
 import { openLeaveForm } from './leaves-form.js';
@@ -56,7 +56,44 @@ function komisTab(ctx, person) {
         el('span', { class: 'ef-glow-quiet', text: card.footer || '' })))),
     nextLeave
       ? el('p', { class: 'ef-glow-quiet', text: `${nextLeave.medical.kind} до ${formatDate(nextLeave.medical.dueDate)} — ${nextLeave.medical.position === 'after' ? 'одразу після відпустки' : nextLeave.medical.position === 'during' ? 'припадає на відпустку' : 'перед відпусткою'} ${formatDate(nextLeave.leave.from)}–${formatDate(nextLeave.leave.to)}.` })
-      : el('p', { class: 'ef-glow-quiet', text: 'ВЛК і ПМО, що випадають на відпустку чи одразу після неї, буде видно тут, коли відпустку додано.' }));
+      : el('p', { class: 'ef-glow-quiet', text: 'ВЛК і ПМО, що випадають на відпустку чи одразу після неї, буде видно тут, коли відпустку додано.' }),
+    trainingBlock(ctx, person),
+    lapsingBlock(ctx, person));
+}
+
+function trainingBlock(ctx, person) {
+  const ids = new Set(person.training?.ids || []);
+  const marked = admissionRows(person, ctx.data, ctx.today).filter(row => ids.has(row.kind.id));
+  const custom = person.training?.custom || [];
+  return el('section', { class: 'ef-glow-card' },
+    el('div', { class: 'ef-glow-card-head' }, el('h2', { text: 'Рівень підготовки' })),
+    el('p', { class: 'ef-glow-quiet', text: 'Довідково: які допуски ви позначили. Само по собі польотів не дозволяє.' }),
+    marked.length || custom.length
+      ? el('ul', { class: 'ef-level-saved' },
+        ...marked.map(row => el('li', { text: row.kind.label })),
+        ...custom.map(label => el('li', { text: label })))
+      : el('p', { class: 'ef-glow-quiet', text: 'Позначок ще немає.' }),
+    button('Змінити рівень', { variant: 'secondary', onClick: () => openTrainingForm(ctx, person.id) }));
+}
+
+function lapsingBlock(ctx, person) {
+  const rows = lapsingAdmissionRows(person, ctx.data, ctx.today);
+  return el('section', { class: 'ef-glow-card' },
+    el('div', { class: 'ef-glow-card-head' }, el('h2', { text: 'Допуски з перервою' })),
+    el('p', { class: 'ef-glow-quiet', text: 'Ті, що втрачаються через перерву в польотах, разом із ВЛК. Окремого переліку «внести допуск» немає.' }),
+    rows.length
+      ? rows.map(row => {
+        const when = row.status === 'lost' ? 'втрачено через перерву' : row.evaluation?.limitDate ? `до ${formatDate(row.evaluation.limitDate)}` : 'дату не внесено';
+        return el('div', { class: 'ef-ban-row ef-flight-row' },
+          el('span', { class: 'ef-ban-who' },
+            el('strong', { text: row.kind.label }),
+            el('span', { text: when })),
+          button(row.admission ? 'Оновити дату' : 'Вказати дату', {
+            variant: 'ghost', small: true,
+            onClick: () => openAdmissionForm(ctx, person, { kindId: row.kind.id, admission: row.admission, dayNight: row.admission?.dayNight }),
+          }));
+      })
+      : el('p', { class: 'ef-glow-quiet', text: 'Немає позначених допусків із нормою перерви.' }));
 }
 
 function identity(ctx, person) {
@@ -76,7 +113,9 @@ function identity(ctx, person) {
     el('div', { class: 'ef-avatar', 'aria-hidden': 'true', text: person.callsign.charAt(0).toUpperCase() }),
     el('div', { class: 'ef-identity-name' },
       el('h2', { class: 'ef-pilot-name', text: person.callsign }),
-      el('span', { class: 'ef-muted', text: `${ctx.data.unit.name || 'Частина'} · ${person.link ? person.link.toLowerCase() : 'ланку не вказано'}` })),
+      [ctx.data.unit?.name, person.link].filter(Boolean).length
+        ? el('span', { class: 'ef-muted', text: [ctx.data.unit.name, person.link].filter(Boolean).join(' · ') })
+        : null)),
     el('div', { class: 'ef-meta-boxes' }, labelled('Роль', role), labelled('Клас', cls), labelled('Тип ПС', type)));
 }
 
@@ -258,12 +297,15 @@ export function render(ctx) {
     return root;
   }
   const tab = params.tab || 'komis';
+  const personal = !hasSubordinates(data);
   root.append(pageHeader({
-    crumbs: [{ label: 'EasyFLY' }, { label: 'Пілоти', onClick: () => ctx.go('pilots') }, { label: person.callsign }],
+    crumbs: personal
+      ? [{ label: 'EasyFLY' }, { label: person.callsign }]
+      : [{ label: 'EasyFLY' }, { label: 'Пілоти', onClick: () => ctx.go('pilots') }, { label: person.callsign }],
     title: person.callsign,
     subtitle: TAB_SUBTITLES[tab],
     actions: [
-      button('До списку', { variant: 'secondary', iconName: 'nazad', onClick: () => ctx.go('pilots') }),
+      personal ? null : button('До списку', { variant: 'secondary', iconName: 'nazad', onClick: () => ctx.go('pilots') }),
       button('Змінити', { variant: 'ghost', onClick: () => openPilotForm(ctx, person.id) }),
       button('Видалити', { variant: 'ghost-danger', onClick: () => confirmDeletePerson(ctx, person) }),
     ],
@@ -304,7 +346,7 @@ export function render(ctx) {
     if (next) { event.preventDefault(); ctx.go('pilot', { id: person.id, tab: next }, { focus: `#ef-tab-${next}` }); }
   });
   root.append(tabs);
-  const builders = { komis: komisTab, checks: checksTab, admissions: admissionsTab, logbook: logbookTab, navdocs: navDocsTab, leaves: leavesTab };
+  const builders = { komis: komisTab, checks: checksTab, logbook: logbookTab, navdocs: navDocsTab, leaves: leavesTab };
   root.append(el('div', { id: 'ef-tabpanel', class: 'ef-tabpanel', role: 'tabpanel', 'aria-labelledby': `ef-tab-${tab}`, tabindex: '0' }, builders[tab](ctx, person)));
   return root;
 }

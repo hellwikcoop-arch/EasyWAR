@@ -1,8 +1,10 @@
 // Модель екрана «Сьогодні» (макет «тепле світіння») з реальних даних файлу .easyfly.
 // Без DOM і без вигаданих чисел: немає зміни — картка про це каже, немає пілотів — дуга порожня.
 import {
-  commanderSummary, flightsOfShift, formatDate, formatDuration, resolveSettings,
+  commanderSummary, flightsOfShift, formatDate, formatDuration, hasSubordinates, resolveSettings,
 } from './fly-core.js';
+
+export { hasSubordinates };
 
 /** «1 політ», «23 польоти», «5 польотів». */
 export function pluralFlights(n) {
@@ -87,5 +89,34 @@ export function todayHome(data, today) {
     states,
     deadlines: summary.counters,
     shift: shiftCard(data, today),
+  };
+}
+
+/** Особистий екран: один пілот, його заборони й найближчі строки. Без дуги N/M і списку підлеглих. */
+export function personalHome(data, today) {
+  const person = (data?.persons || [])[0] || null;
+  if (!person) return { person: null, ready: false, blockers: [], upcoming: [] };
+  const settings = resolveSettings(data?.unit?.settings);
+  const summary = commanderSummary([person], { checks: data?.checks || [], settings }, today);
+  const blocked = summary.blocked[0];
+  const upcoming = [...(summary.items || [])]
+    .filter(item => item.dueDate)
+    .sort((a, b) => (a.dueDate < b.dueDate ? -1 : a.dueDate > b.dueDate ? 1 : 0))
+    .slice(0, 8)
+    .map(item => ({
+    label: item.label,
+    dueDate: item.dueDate,
+    daysLeft: item.daysLeft,
+    status: item.status,
+  }));
+  return {
+    person,
+    ready: !blocked,
+    blockers: (blocked?.blockers || []).map(item => ({
+      label: shortBlockReason(item.label),
+      daysOverdue: item.daysOverdue,
+    })),
+    upcoming,
+    nearest: upcoming.find(item => item.daysLeft !== null && item.daysLeft !== undefined) || upcoming[0] || null,
   };
 }

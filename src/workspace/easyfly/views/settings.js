@@ -41,6 +41,7 @@ export function render(ctx) {
   const ovpMonths = numberInput(s.ovpMonths, { min: 1, max: 60 });
   const a205Months = numberInput(s.article205Months, { min: 1, max: 60 });
   const ovpBlocks = el('input', { type: 'checkbox', id: 'ef-ovp-blocks', checked: s.ovpBlocks });
+  const subordinates = el('input', { type: 'checkbox', id: 'ef-subordinates', checked: s.subordinates === true });
 
   root.append(el('div', { class: 'ef-settings-grid' },
     card('Підписанти друкованих форм', first.root, second.root),
@@ -64,7 +65,8 @@ export function render(ctx) {
         field('«Скоро» — днів до строку', soon, { hint: 'Типово 30.' }).root,
         field('Строк Статті 205, міс.', a205Months).root,
         field('Строк ОВП, міс.', ovpMonths, { hint: 'Припущення частини; уточніть у керівних документах.' }).root,
-        el('div', { class: 'ef-field ef-check-field' }, ovpBlocks, el('label', { for: 'ef-ovp-blocks', text: 'Прострочена ОВП забороняє польоти' }))))));
+        el('div', { class: 'ef-field ef-check-field' }, ovpBlocks, el('label', { for: 'ef-ovp-blocks', text: 'Прострочена ОВП забороняє польоти' })),
+        el('div', { class: 'ef-field ef-check-field' }, subordinates, el('label', { for: 'ef-subordinates', text: 'Є підлеглі — зведення командира і список пілотів' }))))));
 
   const save = () => {
     errors.clear();
@@ -75,7 +77,7 @@ export function render(ctx) {
       settings: {
         timezone: tz.value, airfieldLat: lat.value, airfieldLon: lon.value, onbCriterionPercent: onb.value,
         aerobaticsLimit: aero.value, soonDays: soon.value, article205Months: a205Months.value, ovpMonths: ovpMonths.value,
-        ovpBlocks: ovpBlocks.checked,
+        ovpBlocks: ovpBlocks.checked, subordinates: subordinates.checked,
       },
     }));
     if (!result.ok) { errors.show(result.result.errors); window.scrollTo?.(0, 0); return; }

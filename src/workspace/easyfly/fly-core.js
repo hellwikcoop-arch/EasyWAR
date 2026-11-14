@@ -192,6 +192,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
   onbMaxShiftMin: 180,
   onbMaxFlightMin: 120,
   reminderDays: Object.freeze([30, 14, 7]),
+  /** Облік підлеглих (зведення командира). За замовчуванням вимкнено: застосунок особистий. */
+  subordinates: false,
 });
 
 /** Накладає часткові налаштування на типові; некоректні значення ігноруються. */
@@ -204,11 +206,17 @@ export function resolveSettings(partial) {
     if (Number.isInteger(input[key]) && input[key] > 0) out[key] = input[key];
   }
   if (typeof input.ovpBlocks === 'boolean') out.ovpBlocks = input.ovpBlocks;
+  if (typeof input.subordinates === 'boolean') out.subordinates = input.subordinates;
   if (Array.isArray(input.reminderDays)) {
     const days = input.reminderDays.filter(d => Number.isInteger(d) && d > 0);
     if (days.length) out.reminderDays = [...new Set(days)].sort((a, b) => b - a);
   }
   return out;
+}
+
+/** Чи увімкнено облік підлеглих. Немає поля або воно хибне — вимкнено. */
+export function hasSubordinates(data) {
+  return resolveSettings(data?.unit?.settings).subordinates === true;
 }
 
 // ───────────────────────────── Ролі, класи, типи ПС ─────────────────────────────
@@ -428,44 +436,60 @@ export function article205Directions(aircraftKind) {
 }
 
 /**
- * Стан Статті 205 (період `article205Months`, типово 6 міс). «Дійсно» лише коли здані всі
- * чотири напрями; «скоро»/«прострочено» — за найранішим строком. Напрям без дати — не здано
- * (прострочено, missing). Якщо про Статтю 205 взагалі нічого не внесено — null (невідомо).
+ * Дата Статті 205. Новий запис — поле `date`. Старі файли тримають напрями (АО, РЕО, …):
+ * береться найраніша з наявних дат, напрям без дати не робить перевірку простроченою.
  */
-export function article205State(person, today, settings = DEFAULT_SETTINGS) {
+export function article205CheckedOn(person) {
   const data = person?.article205;
   if (!data || typeof data !== 'object') return null;
-  const hasAny = ARTICLE_205_IDS.some(id => normalizeDate(data[id]?.date));
-  if (!hasAny) return null;
+  const direct = normalizeDate(data.date);
+  if (direct) return { date: direct, acceptedBy: typeof data.acceptedBy === 'string' ? data.acceptedBy : null, legacy: false };
+  let best = null;
+  for (const id of ARTICLE_205_IDS) {
+    const date = normalizeDate(data[id]?.date);
+    if (!date) continue;
+    if (!best || date < best.date) best = { date, id, acceptedBy: data[id]?.acceptedBy ?? null };
+  }
+  return best ? { date: best.date, acceptedBy: best.acceptedBy, legacy: true, legacyId: best.id } : null;
+}
+
+/**
+ * Стан Статті 205 (період `article205Months`, типово 6 міс) за однією датою.
+ * Немає жодної дати — null (невідомо), нічого не вигадується.
+ */
+export function article205State(person, today, settings = DEFAULT_SETTINGS) {
+  const checked = article205CheckedOn(person);
+  if (!checked) return null;
+  const data = person.article205;
   const months = settings.article205Months ?? DEFAULT_SETTINGS.article205Months;
   const soonDays = settings.soonDays ?? SOON_DAYS;
+  const dueDate = addMonths(checked.date, months);
+  const status = deadlineStatus(dueDate, today, soonDays);
   const directions = ARTICLE_205_IDS.map(id => {
     const date = normalizeDate(data[id]?.date);
-    const dueDate = date ? addMonths(date, months) : null;
+    const due = date ? addMonths(date, months) : null;
     return {
       id,
       label: article205Label(id, person.aircraftKind),
       date,
       acceptedBy: data[id]?.acceptedBy ?? null,
-      dueDate,
-      daysLeft: dueDate ? daysLeft(dueDate, today) : null,
-      status: date ? deadlineStatus(dueDate, today, soonDays) : STATUS.OVERDUE,
+      dueDate: due,
+      daysLeft: due ? daysLeft(due, today) : null,
+      status: date ? deadlineStatus(due, today, soonDays) : null,
       missing: !date,
     };
-  });
-  const missing = directions.filter(d => d.missing);
-  const known = directions.filter(d => d.dueDate);
-  const earliest = known.reduce((best, d) => (!best || d.dueDate < best.dueDate ? d : best), null);
-  let status;
-  if (missing.length) status = STATUS.OVERDUE;
-  else status = earliest.status;
+  }).filter(d => d.date);
+  const earliest = directions.reduce((best, d) => (!best || d.dueDate < best.dueDate ? d : best), null);
   return {
     status,
+    date: checked.date,
+    acceptedBy: checked.acceptedBy,
+    legacy: checked.legacy,
     directions,
-    missing: missing.map(d => d.label),
+    missing: [],
     earliest: earliest ? { id: earliest.id, label: earliest.label } : null,
-    dueDate: missing.length ? null : earliest.dueDate,
-    daysLeft: missing.length ? null : earliest.daysLeft,
+    dueDate,
+    daysLeft: daysLeft(dueDate, today),
     blocks: status === STATUS.OVERDUE,
   };
 }
