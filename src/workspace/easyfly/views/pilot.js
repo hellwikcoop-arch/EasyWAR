@@ -109,13 +109,12 @@ function identity(ctx, person) {
     control.setAttribute('aria-label', label);
     return el('label', { class: 'ef-meta-box' }, el('span', { class: 'ef-meta-label', text: label }), control);
   };
+  const place = [ctx.data.unit?.name, person.link].filter(Boolean).join(' · ');
   return el('div', { class: 'ef-identity' },
     el('div', { class: 'ef-avatar', 'aria-hidden': 'true', text: person.callsign.charAt(0).toUpperCase() }),
     el('div', { class: 'ef-identity-name' },
       el('h2', { class: 'ef-pilot-name', text: person.callsign }),
-      [ctx.data.unit?.name, person.link].filter(Boolean).length
-        ? el('span', { class: 'ef-muted', text: [ctx.data.unit.name, person.link].filter(Boolean).join(' · ') })
-        : null)),
+      place ? el('span', { class: 'ef-muted', text: place }) : null),
     el('div', { class: 'ef-meta-boxes' }, labelled('Роль', role), labelled('Клас', cls), labelled('Тип ПС', type)));
 }
 
