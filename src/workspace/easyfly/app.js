@@ -27,6 +27,7 @@ const SAVE_DELAY_MS = 400;
 const VIEW_MODULES = import.meta.glob('./views/*.js');
 const VIEW_FILES = {
   summary: 'summary', pilots: 'pilots', pilot: 'pilot', flights: 'flights', chrono: 'chrono', navigator: 'navigator',
+  timing: 'timing', sheet: 'sheet',
   sunmoon: 'sunmoon', import: 'import', reminders: 'reminders', leaves: 'leaves', calculators: 'calculators',
   settings: 'settings', about: 'about', more: 'more',
 };

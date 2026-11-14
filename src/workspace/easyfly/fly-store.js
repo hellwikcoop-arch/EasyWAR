@@ -33,9 +33,9 @@ export const MAX_NAV_FLIGHT_BYTES = 20000;
 export const NAV_FLIGHT_NAME_FIELDS = Object.freeze(['commander', 'navigator', 'checker', 'captain', 'captainRankGen', 'iasChief', 'seniorNav']);
 
 /** Колекції верхнього рівня, що є масивами записів з полем `id`. */
-export const COLLECTIONS = Object.freeze(['persons', 'checks', 'admissions', 'flights', 'shifts', 'navFlights', 'leaves']);
+export const COLLECTIONS = Object.freeze(['persons', 'checks', 'admissions', 'flights', 'shifts', 'navFlights', 'leaves', 'timings', 'sheets']);
 /** Колекції, яких може не бути в старих файлах: при читанні доповнюються порожнім масивом. */
-const OPTIONAL_COLLECTIONS = Object.freeze(['navFlights', 'leaves']);
+const OPTIONAL_COLLECTIONS = Object.freeze(['navFlights', 'leaves', 'timings', 'sheets']);
 
 /** Порожній набір (нова частина). */
 export function createEmpty() {
@@ -54,6 +54,8 @@ export function createEmpty() {
     shifts: [],
     navFlights: [],
     leaves: [],
+    timings: [],
+    sheets: [],
   };
 }
 
@@ -353,6 +355,23 @@ export function validate(data) {
     if (normalizeDate(l.from) === l.from && normalizeDate(l.to) === l.to && l.to < l.from) fail(`${at}.to`, 'Кінець відпустки раніше за початок.');
     if (l.status !== undefined && l.status !== null && !LEAVE_STATUSES.includes(l.status)) fail(`${at}.status`, `Стан відпустки має бути одним із: ${LEAVE_STATUSES.join(', ')}.`);
     noteField(`${at}.note`, l.note);
+  });
+
+  const clockOk = value => typeof value === 'string' && /^([01]\d|2[0-3]):[0-5]\d:[0-5]\d$/.test(value);
+  (data.timings || []).forEach((t, i) => {
+    const at = `timings[${i}]`;
+    dateField(`${at}.date`, t.date, { required: true });
+    if (t.status !== 'open' && t.status !== 'confirmed') fail(`${at}.status`, 'Стан хронометражу: open або confirmed.');
+    if (!Array.isArray(t.events)) fail(`${at}.events`, 'Події мають бути масивом.');
+    else t.events.forEach((event, j) => {
+      if (!['start', 'takeoff', 'landing', 'shutdown', 'note'].includes(event?.kind)) fail(`${at}.events[${j}].kind`, 'Невідома подія.');
+      if (!clockOk(event?.at)) fail(`${at}.events[${j}].at`, 'Час має бути ГГ:ХХ:СС.');
+    });
+  });
+  (data.sheets || []).forEach((s, i) => {
+    const at = `sheets[${i}]`;
+    if (!Array.isArray(s.rows)) fail(`${at}.rows`, 'Рядки польотного листа мають бути масивом.');
+    if (s.dates !== undefined && !Array.isArray(s.dates)) fail(`${at}.dates`, 'Дати мають бути масивом.');
   });
 
   return { ok: errors.length === 0, errors, warnings };

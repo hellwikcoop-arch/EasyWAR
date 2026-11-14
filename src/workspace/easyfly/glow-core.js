@@ -1,7 +1,7 @@
 // Модель екрана «Сьогодні» (макет «тепле світіння») з реальних даних файлу .easyfly.
 // Без DOM і без вигаданих чисел: немає зміни — картка про це каже, немає пілотів — дуга порожня.
 import {
-  commanderSummary, flightsOfShift, formatDate, formatDuration, hasSubordinates, resolveSettings,
+  commanderSummary, flightsOfShift, formatDate, formatDuration, hasSubordinates, keBoard, resolveSettings,
 } from './fly-core.js';
 
 export { hasSubordinates };
@@ -118,5 +118,6 @@ export function personalHome(data, today) {
     })),
     upcoming,
     nearest: upcoming.find(item => item.daysLeft !== null && item.daysLeft !== undefined) || upcoming[0] || null,
+    board: keBoard(person, data, today),
   };
 }

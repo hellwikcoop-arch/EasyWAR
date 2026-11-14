@@ -74,7 +74,7 @@ export function createDemo() {
   let checkNo = 0;
   PEOPLE.forEach((base, index) => {
     const person = { ...base, aircraftKind: 'helicopter', instructor: false, note: null };
-    const types = checkTypesForPerson(person);
+    const types = checkTypesForPerson(person).filter(type => !type.assumed);
     const keys = ['medical', 'article205', 'ovp', 'jumps', ...types.map(t => `check:${t.id}`)];
     const days = key => DUE[base.id]?.[key] ?? defaultDays(index, keys.indexOf(key));
 

@@ -1,6 +1,6 @@
 // Екран «Сьогодні»: дуга готовності, картка льотної зміни, заборони, стан за пілотами.
 // Числа — з todayHome (реальні дані). Схема маршруту лишається згорнутою внизу.
-import { formatDate, pluralDays } from '../fly-core.js';
+import { formatDate, keStatusLabel, pluralDays } from '../fly-core.js';
 import { hasSubordinates, personalHome, pluralFlights, pluralPilots, todayHome } from '../glow-core.js';
 import { el } from '../ui.js';
 import { openPilotForm } from './card.js';
@@ -105,6 +105,15 @@ function renderPersonal(ctx) {
       ? view.blockers.map(item => item.daysOverdue === null ? item.label : `${item.label} · ${item.daysOverdue} дн.`).join('; ')
       : (nearest ? `Найближче: ${nearest.label}${nearest.dueDate ? ` до ${formatDate(nearest.dueDate)}` : ''}` : 'Прострочених і близьких строків немає.') }),
     el('button', { type: 'button', class: 'ef-btn ef-btn-primary', text: 'Комісація', onClick: () => ctx.go('pilot', { id: person.id, tab: 'komis' }) })));
+  if (view.board?.length) {
+    root.append(el('section', { class: 'ef-glow-card', 'data-ef': 'ke-board' },
+      el('div', { class: 'ef-glow-card-head' }, el('h2', { text: 'Комісування' })),
+      view.board.map(item => el('div', { class: 'ef-ban-row ef-flight-row' },
+        el('span', { class: 'ef-ban-who' },
+          el('strong', { text: item.label }),
+          el('span', { text: item.dueDate ? `до ${formatDate(item.dueDate)}` : 'дату не внесено' })),
+        el('span', { class: item.status === 'overdue' ? 'ef-ban-days' : 'ef-glow-quiet', text: keStatusLabel(item.status) })))));
+  }
   if (view.upcoming.length) {
     root.append(el('section', { class: 'ef-glow-card' },
       el('div', { class: 'ef-glow-card-head' }, el('h2', { text: 'Ваші строки' })),

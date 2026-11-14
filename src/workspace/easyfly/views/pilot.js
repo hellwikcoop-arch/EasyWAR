@@ -1,14 +1,14 @@
 // Профіль пілота: «Комісація», «Перевірки», «Допуски», «Льотна книжка», «Штурманські документи», «Відпустки».
 // Червона плашка «Польоти заборонені» — з flightBlockers. Допуск пілот відмічає сам, без затвердження.
 import {
-  CLASS_LABELS, CLASS_QUALS, LEAVE_PART_DAYS, ROLES, daysLeft, exerciseName, formatDate, hasSubordinates, leaveTotals, medicalState, pluralDays,
+  CLASS_LABELS, CLASS_QUALS, LEAVE_PART_DAYS, ROLES, daysLeft, exerciseName, formatDate, hasSubordinates, keBoard, keStatusLabel, leaveTotals, medicalState, pluralDays,
 } from '../fly-core.js';
 import {
   PILOT_TABS, admissionRows, blockerBanner, deleteFlight, effectiveSettings, lapsingAdmissionRows, leaveRows, logbookView,
-  lostAdmissions, monthLabel, pluralMonths, profileCards, updatePerson,
+  lostAdmissions, monthLabel, pluralMonths, profileCards, updatePerson, updateUnit,
 } from '../fly-state.js';
 import {
-  button, card, confirmDialog, dash, dateText, el, emptyState, notice, pageHeader, select, stat,
+  button, card, confirmDialog, dash, dateText, el, emptyState, notice, numberInput, pageHeader, select, stat,
   statusChip, table, textInput, toast,
 } from '../ui.js';
 import { icon } from '../icons.js';
@@ -58,7 +58,44 @@ function komisTab(ctx, person) {
       ? el('p', { class: 'ef-glow-quiet', text: `${nextLeave.medical.kind} до ${formatDate(nextLeave.medical.dueDate)} — ${nextLeave.medical.position === 'after' ? 'одразу після відпустки' : nextLeave.medical.position === 'during' ? 'припадає на відпустку' : 'перед відпусткою'} ${formatDate(nextLeave.leave.from)}–${formatDate(nextLeave.leave.to)}.` })
       : el('p', { class: 'ef-glow-quiet', text: 'ВЛК і ПМО, що випадають на відпустку чи одразу після неї, буде видно тут, коли відпустку додано.' }),
     trainingBlock(ctx, person),
-    lapsingBlock(ctx, person));
+    lapsingBlock(ctx, person),
+    keBoardSection(ctx, person));
+}
+
+function keBoardSection(ctx, person) {
+  const rows = keBoard(person, ctx.data, ctx.today);
+  if (!rows.length) return null;
+  return el('section', { class: 'ef-glow-card', 'data-ef': 'ke-board' },
+    el('div', { class: 'ef-glow-card-head' }, el('h2', { text: 'Комісування' })),
+    el('p', { class: 'ef-glow-quiet', text: 'Позначка «припущення» означає, що період можна змінити: це не норма з документа.' }),
+    rows.map(row => {
+      const when = row.lastDate ? `остання ${formatDate(row.lastDate)}` : 'дату не внесено';
+      const due = row.dueDate ? `до ${formatDate(row.dueDate)}` : '';
+      const months = row.assumed ? numberInput(row.months || '', { min: 1, max: 60 }) : null;
+      if (months) {
+        months.classList.add('ef-ke-months');
+        months.setAttribute('aria-label', `Період у місяцях: ${row.label}`);
+        months.addEventListener('change', () => {
+          const value = Number(months.value);
+          if (!Number.isInteger(value)) return;
+          const result = ctx.mutate(data => updateUnit(data, { settings: { keMonths: { [row.id]: value } } }));
+          if (!result.ok) toast(result.result.errors.join(' '), 'error');
+        });
+      }
+      return el('div', { class: 'ef-ke-row' },
+        el('span', { class: 'ef-ban-who' },
+          el('strong', { text: row.label }),
+          el('span', { text: [when, due, row.note].filter(Boolean).join(' · ') })),
+        el('span', { class: 'ef-ke-meta' },
+          months || (row.months ? el('span', { class: 'ef-glow-quiet', text: `${row.months} міс.` }) : null),
+          row.assumed ? el('span', { class: 'ef-glow-quiet', text: 'припущення' }) : null,
+          el('span', { class: row.status === 'overdue' ? 'ef-ban-days' : 'ef-glow-quiet', text: keStatusLabel(row.status) })),
+        button('Дата', {
+          variant: 'ghost', small: true,
+          onClick: () => openEntry(ctx, { mode: 'check', personId: person.id, kind: row.entryKind, lockPilot: true }),
+          ariaLabel: `Внести дату: ${row.label}`,
+        }));
+    }));
 }
 
 function trainingBlock(ctx, person) {

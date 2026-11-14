@@ -191,7 +191,7 @@ test('КБПВ п. 1.1.10: терміни перевірок за класом �
   assert.equal(ke3.instr_landing, 6);
   assert.equal(ke3.instr_backup, 6);
   assert.equal(ke3.engine_failure, 12);
-  assert.equal(ke1.instructor_seat, undefined);
+  assert.equal(ke1.instructor_seat, 12);
   assert.equal(monthsOf({ role: 'КЕ', classQual: '2', instructor: true }).instructor_seat, 12);
   // ЛШ: з власного сидіння раз на 3 міс (1–2 клас — не рідше разу на 6 міс)
   assert.equal(monthsOf({ role: 'ЛШ', classQual: '3' }).lsh_technique, 3);
@@ -736,7 +736,7 @@ test('«скоро» залежить від налаштованого поро
 test('createEmpty: схема версії 1 з усіма розділами, валідна', () => {
   const empty = store.createEmpty();
   assert.equal(empty.version, 1);
-  assert.deepEqual(Object.keys(empty), ['version', 'unit', 'persons', 'checks', 'admissions', 'flights', 'shifts', 'navFlights', 'leaves']);
+  assert.deepEqual(Object.keys(empty), ['version', 'unit', 'persons', 'checks', 'admissions', 'flights', 'shifts', 'navFlights', 'leaves', 'timings', 'sheets']);
   assert.deepEqual(Object.keys(empty.unit), ['name', 'airfield', 'signers', 'settings']);
   assert.equal(store.validate(empty).ok, true);
 });

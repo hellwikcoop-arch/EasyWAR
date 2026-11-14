@@ -14,8 +14,9 @@ import {
   normalizeDate, normalizeFlight, ovpState, parseImportRows, personItems, renewAdmission,
   renewalHint, resolveSettings, shiftSummary, toIso, MEDICAL_KINDS, flightBlockers,
   LEAVE_KIND_IDS, LEAVE_PART_DAYS, LEAVE_STATUSES, hasSubordinates, leaveDays, leaveKindById, leaveTotals, leaveWarnings, medicalAfterLeave,
-  wholeMonthsBetween, buildReminders, deadlineStatus, PMO_MONTHS, VLK_MONTHS,
+  wholeMonthsBetween, buildReminders, deadlineStatus, PMO_MONTHS, VLK_MONTHS, KE_PERIOD_IDS,
 } from './fly-core.js';
+import { TIMING_NOTE, applyTimingEvent, confirmTimingRecord, editTimingEvent, timingFlights } from './timing-core.js';
 import {
   MAX_CALLSIGN_LEN, MAX_NAV_TITLE_LEN, MAX_NOTE_LEN, NAV_FLIGHT_NAME_FIELDS,
   nextId, removeById, removePerson, upsertById, validate,
@@ -53,6 +54,8 @@ export const PILOT_TABS = Object.freeze([
 ]);
 
 const ROUTE_NAMES = NAV_ITEMS.map(item => item.route);
+/** Екрани штурмана, які не є пунктами меню: їх відкривають вкладки поруч з ІШР. */
+const EXTRA_ROUTES = Object.freeze(['timing', 'sheet']);
 const TAB_IDS = PILOT_TABS.map(tab => tab.id);
 
 /**
@@ -71,7 +74,7 @@ export function parseRoute(hash) {
   }
   if (name === 'navigator') return { name, params: parts[1] ? { pilot: parts[1] } : {} };
   if (name === 'flights') return { name, params: parts[1] ? { date: parts[1] } : {} };
-  if (ROUTE_NAMES.includes(name)) return { name, params: {} };
+  if (ROUTE_NAMES.includes(name) || EXTRA_ROUTES.includes(name)) return { name, params: {} };
   return { name: 'summary', params: {} };
 }
 
@@ -85,7 +88,7 @@ export function buildRoute(name, params = {}) {
   }
   if (name === 'navigator') return params.pilot ? `#/navigator/${enc(params.pilot)}` : '#/navigator';
   if (name === 'flights') return params.date ? `#/flights/${enc(params.date)}` : '#/flights';
-  return ROUTE_NAMES.includes(name) ? `#/${name}` : '#/summary';
+  return ROUTE_NAMES.includes(name) || EXTRA_ROUTES.includes(name) ? `#/${name}` : '#/summary';
 }
 
 /** Залишено для старих тестів і підпису: вкладка профілю, а не пункт меню. */
@@ -113,7 +116,9 @@ export function navItemsFor(data) {
 
 /** Який пункт сайдбару підсвічувати для маршруту (профіль → «Мої пілоти»). */
 export function navFor(route) {
-  return route?.name === 'pilot' ? 'pilots' : (route?.name || 'summary');
+  if (route?.name === 'pilot') return 'pilots';
+  if (route?.name === 'timing' || route?.name === 'sheet') return 'navigator';
+  return route?.name || 'summary';
 }
 
 // ───────────────────────────── Дата, «незбережені зміни» ─────────────────────────────
@@ -502,6 +507,81 @@ export function addFlight(data, input = {}) {
   const id = nextId('f', withShift.data.flights);
   const flight = { ...normalized.value, id, shiftId: withShift.shift.id };
   return { ok: true, id, data: { ...withShift.data, flights: [...withShift.data.flights, flight] } };
+}
+
+function withTimings(data) {
+  return Array.isArray(data.timings) ? data : { ...data, timings: [] };
+}
+
+/** Відкритий хронометраж на дату або новий порожній запис. */
+export function openTiming(data, date) {
+  const base = withTimings(data);
+  const found = base.timings.find(item => item.date === date && item.status === 'open');
+  if (found) return { ok: true, id: found.id, data: base };
+  const id = nextId('t', base.timings);
+  const timing = { id, date, status: 'open', note: null, exercise: '', logged: false, events: [] };
+  return { ok: true, id, data: { ...base, timings: [...base.timings, timing] } };
+}
+
+/** Мітка часу в хронометраж дати. Створює запис дня, якщо його ще немає. */
+export function logTimingEvent(data, date, event) {
+  const opened = openTiming(data, date);
+  const timing = opened.data.timings.find(item => item.id === opened.id);
+  const applied = applyTimingEvent(timing, event);
+  if (!applied.ok) return fail(applied.error);
+  return { ok: true, id: opened.id, data: { ...opened.data, timings: upsertById(opened.data.timings, applied.timing) } };
+}
+
+export function setTimingExercise(data, id, exercise) {
+  const timing = (data.timings || []).find(item => item.id === id);
+  if (!timing) return fail('Хронометраж не знайдено.');
+  return { ok: true, data: { ...data, timings: upsertById(data.timings, { ...timing, exercise: String(exercise || '') }) } };
+}
+
+export function patchTimingEvent(data, timingId, eventId, patch) {
+  const timing = (data.timings || []).find(item => item.id === timingId);
+  if (!timing) return fail('Хронометраж не знайдено.');
+  const next = editTimingEvent(timing, eventId, patch);
+  return { ok: true, data: { ...data, timings: upsertById(data.timings, next) } };
+}
+
+/**
+ * Підтверджує день: примітка «виконання польотних завдань» і запис завершених польотів у книжку.
+ * Повторне підтвердження нічого не дублює.
+ */
+export function confirmTiming(data, id, personId = null) {
+  const timing = (data.timings || []).find(item => item.id === id);
+  if (!timing) return fail('Хронометраж не знайдено.');
+  if (timing.status === 'confirmed') return { ok: true, data, id };
+  const confirmed = confirmTimingRecord(timing);
+  let next = { ...data, timings: upsertById(data.timings, confirmed) };
+  const person = (personId ? next.persons.find(item => item.id === personId) : null) || next.persons[0];
+  let logged = Boolean(person);
+  if (person) {
+    for (const flight of timingFlights(confirmed)) {
+      if (flight.minutes === null) continue;
+      const added = addFlight(next, {
+        personId: person.id,
+        date: confirmed.date,
+        exercise: flight.exercise || confirmed.exercise || null,
+        count: 1,
+        airtimeMin: flight.minutes,
+        source: 'timekeeper',
+        note: TIMING_NOTE,
+      });
+      if (!added.ok) { logged = false; continue; }
+      next = added.data;
+    }
+  } else logged = false;
+  next = { ...next, timings: upsertById(next.timings, { ...confirmed, logged }) };
+  return { ok: true, data: next, id };
+}
+
+export function saveSheet(data, sheet) {
+  const list = Array.isArray(data.sheets) ? data.sheets : [];
+  const id = sheet.id || nextId('sh', list);
+  const record = { ...sheet, id };
+  return { ok: true, id, data: { ...data, sheets: upsertById(list, record) } };
 }
 
 export function deleteFlight(data, id, { confirmed = false } = {}) {
@@ -1120,6 +1200,15 @@ export function updateUnit(data, patch = {}) {
     if (s.article205Months !== undefined) { const v = intInRange(s.article205Months, 1, 60, 'Строк Статті 205 (міс.)', errors); if (v !== undefined) unit.settings.article205Months = v; }
     if (s.ovpBlocks !== undefined) unit.settings.ovpBlocks = Boolean(s.ovpBlocks);
     if (s.subordinates !== undefined) unit.settings.subordinates = s.subordinates === true;
+    if (s.keMonths && typeof s.keMonths === 'object') {
+      const next = { ...(unit.settings.keMonths || {}) };
+      for (const id of KE_PERIOD_IDS) {
+        if (s.keMonths[id] === undefined) continue;
+        const value = intInRange(s.keMonths[id], 1, 60, 'Період колонки КЕ (міс.)', errors);
+        if (value !== undefined) next[id] = value;
+      }
+      unit.settings.keMonths = next;
+    }
     if (s.timezone !== undefined) unit.settings.timezone = text(s.timezone) || 'Europe/Kyiv';
     for (const [key, label, lo, hi] of [['airfieldLat', 'Широта', -90, 90], ['airfieldLon', 'Довгота', -180, 180]]) {
       if (s[key] === undefined) continue;

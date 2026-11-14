@@ -178,6 +178,16 @@ function maxDate(dates) {
 // ───────────────────────────── Налаштування частини ─────────────────────────────
 
 /**
+ * Періоди колонок таблиці КЕ, яких у довіднику перевірок ще не було окремим строком.
+ * 12 місяців — припущення для редагування, не норма з документа.
+ */
+export const KE_ASSUMED_MONTHS = 12;
+export const KE_PERIOD_IDS = Object.freeze([
+  'ke_technique', 'ke_navigation', 'ke_combat', 'duty_leave',
+  'ke_sim_aircraft', 'ke_sim_egress', 'instructor_seat',
+]);
+
+/**
  * Типові налаштування частини. ОВП: періодичність 12 міс і блокування допуску — припущення
  * (власник не підтвердив), тому винесені в налаштування.
  */
@@ -194,12 +204,14 @@ export const DEFAULT_SETTINGS = Object.freeze({
   reminderDays: Object.freeze([30, 14, 7]),
   /** Облік підлеглих (зведення командира). За замовчуванням вимкнено: застосунок особистий. */
   subordinates: false,
+  /** Перевизначені періоди колонок КЕ (місяці). Порожньо — лишається припущення. */
+  keMonths: Object.freeze({}),
 });
 
 /** Накладає часткові налаштування на типові; некоректні значення ігноруються. */
 export function resolveSettings(partial) {
   const input = partial && typeof partial === 'object' ? partial : {};
-  const out = { ...DEFAULT_SETTINGS, reminderDays: [...DEFAULT_SETTINGS.reminderDays] };
+  const out = { ...DEFAULT_SETTINGS, reminderDays: [...DEFAULT_SETTINGS.reminderDays], keMonths: {} };
   const intKeys = ['soonDays', 'ovpMonths', 'article205Months', 'jumpsPerYear', 'jumpsMaxGapMonths',
     'aerobaticsLimit', 'onbMaxShiftMin', 'onbMaxFlightMin'];
   for (const key of intKeys) {
@@ -207,6 +219,12 @@ export function resolveSettings(partial) {
   }
   if (typeof input.ovpBlocks === 'boolean') out.ovpBlocks = input.ovpBlocks;
   if (typeof input.subordinates === 'boolean') out.subordinates = input.subordinates;
+  if (input.keMonths && typeof input.keMonths === 'object' && !Array.isArray(input.keMonths)) {
+    for (const id of KE_PERIOD_IDS) {
+      const value = input.keMonths[id];
+      if (Number.isInteger(value) && value > 0 && value <= 60) out.keMonths[id] = value;
+    }
+  }
   if (Array.isArray(input.reminderDays)) {
     const days = input.reminderDays.filter(d => Number.isInteger(d) && d > 0);
     if (days.length) out.reminderDays = [...new Set(days)].sort((a, b) => b - a);
@@ -567,6 +585,13 @@ export const CHECK_TYPES = Object.freeze([
   Object.freeze({ id: 'instructor_seat', label: 'Інструктор: з інструкторського сидіння', roles: ['КЕ', 'Борттехнік'], months: 12, instructorOnly: true }),
   Object.freeze({ id: 'lsh_technique', label: 'Техніка пілотування зі свого робочого місця', roles: ['ЛШ'], months: { high: 6, low: 3 } }),
   Object.freeze({ id: 'flight_engineer', label: 'Планова перевірка борттехніка', roles: ['Борттехнік'], months: 12 }),
+  // Колонки таблиці КЕ без окремого строку в довіднику вище. Період — припущення, польотів не блокує.
+  Object.freeze({ id: 'ke_technique', label: 'Техніка пілотування', roles: ['КЕ'], months: KE_ASSUMED_MONTHS, assumed: true, blocks: false }),
+  Object.freeze({ id: 'ke_navigation', label: 'Навігація', roles: ['КЕ'], months: KE_ASSUMED_MONTHS, assumed: true, blocks: false }),
+  Object.freeze({ id: 'ke_combat', label: 'Бойове застосування', roles: ['КЕ'], months: KE_ASSUMED_MONTHS, assumed: true, blocks: false }),
+  Object.freeze({ id: 'duty_leave', label: 'Чергова відпустка', roles: ['КЕ'], months: KE_ASSUMED_MONTHS, assumed: true, blocks: false }),
+  Object.freeze({ id: 'ke_sim_aircraft', label: 'Заліковий тренаж на авіаційній техніці', roles: ['КЕ'], months: KE_ASSUMED_MONTHS, assumed: true, blocks: false }),
+  Object.freeze({ id: 'ke_sim_egress', label: 'Заліковий тренаж з покидання повітряного судна', roles: ['КЕ'], months: KE_ASSUMED_MONTHS, assumed: true, blocks: false }),
 ]);
 
 export function checkTypeById(id) {
@@ -580,14 +605,27 @@ function resolveMonths(months, classQual) {
 
 /** Перевірки, що діють для людини: за роллю, класом, ознакою інструктора. */
 export function checkTypesForPerson(person) {
-  return CHECK_TYPES
+  const list = CHECK_TYPES
     .filter(type => type.roles.includes(person?.role) && (!type.instructorOnly || person?.instructor === true))
     .map(type => ({
       id: type.id,
       label: type.label,
       months: resolveMonths(type.months, person?.classQual),
-      blocks: true,
+      blocks: type.blocks !== false,
+      assumed: type.assumed === true,
     }));
+  // Колонка «з інструкторського сидіння» є в таблиці кожного КЕ. Для інструктора лишається
+  // чинний строк із довідника; для решти КЕ — той самий період як припущення, без блокування.
+  if (person?.role === 'КЕ' && !list.some(type => type.id === 'instructor_seat')) {
+    list.push({
+      id: 'instructor_seat',
+      label: 'Техніка пілотування з інструкторського сидіння',
+      months: 12,
+      blocks: false,
+      assumed: true,
+    });
+  }
+  return list;
 }
 
 /**
@@ -596,16 +634,99 @@ export function checkTypesForPerson(person) {
  * checks: [{personId, kind, date}].
  */
 export function checkStates(person, checks, today, settings = DEFAULT_SETTINGS) {
+  const resolved = resolveSettings(settings);
   const own = (Array.isArray(checks) ? checks : []).filter(check => check?.personId === person?.id);
   return checkTypesForPerson(person).map(type => {
+    const override = type.assumed && Number.isInteger(resolved.keMonths?.[type.id]) ? resolved.keMonths[type.id] : null;
+    const months = override ?? type.months;
     const lastDate = maxDate(own.filter(check => check.kind === type.id).map(check => check.date));
-    const dueDate = lastDate ? addMonths(lastDate, type.months) : null;
+    const dueDate = lastDate ? addMonths(lastDate, months) : null;
     return {
       ...type,
+      months,
+      assumed: type.assumed === true && override === null,
       lastDate,
       dueDate,
       daysLeft: dueDate ? daysLeft(dueDate, today) : null,
-      status: dueDate ? deadlineStatus(dueDate, today, settings.soonDays ?? SOON_DAYS) : null,
+      status: dueDate ? deadlineStatus(dueDate, today, resolved.soonDays ?? SOON_DAYS) : null,
+    };
+  });
+}
+
+/** Підпис стану колонки КЕ: чинне, скоро, прострочено або немає даних. */
+export function keStatusLabel(status) {
+  return { valid: 'чинне', soon: 'скоро', overdue: 'прострочено' }[status] || 'немає даних';
+}
+
+const KE_BOARD = Object.freeze([
+  ['ke_technique', 'Техніка пілотування'],
+  ['instr_landing', 'Захід за приладами'],
+  ['instr_backup', 'Техніка пілотування за дублюючими приладами'],
+  ['ke_navigation', 'Навігація'],
+  ['ke_combat', 'Бойове застосування'],
+  ['engine_failure', 'Техніка пілотування при імітації відмови двигуна'],
+  ['instructor_seat', 'Техніка пілотування з інструкторського сидіння'],
+  ['duty_leave', 'Чергова відпустка'],
+  ['ke_sim_aircraft', 'Заліковий тренаж на авіаційній техніці'],
+  ['ke_sim_egress', 'Заліковий тренаж з покидання повітряного судна'],
+  ['jumps', 'Парашутні стрибки'],
+]);
+
+/**
+ * Колонки таблиці комісування для ролі КЕ. Інші ролі — порожній список (їхній набір перевірок не змінюється).
+ * Немає дати — status null («немає даних»), не прострочено.
+ */
+export function keBoard(person, data, today) {
+  if (person?.role !== 'КЕ') return [];
+  const settings = resolveSettings(data?.unit?.settings);
+  const byId = new Map(checkStates(person, data?.checks, today, settings).map(state => [state.id, state]));
+  return KE_BOARD.map(([id, label]) => {
+    if (id === 'jumps') {
+      const jumps = jumpsState(person, today, settings);
+      const exempt = jumps?.status === 'exempt';
+      return {
+        id, label,
+        lastDate: jumps?.lastDate || null,
+        months: settings.jumpsMaxGapMonths,
+        assumed: false,
+        dueDate: exempt ? null : (jumps?.dueDate || null),
+        status: exempt ? 'valid' : (jumps?.status || null),
+        blocks: Boolean(jumps?.blocks),
+        daysLeft: exempt ? null : (jumps?.daysLeft ?? null),
+        entryKind: 'jump',
+        note: exempt ? 'тимчасово звільнено' : null,
+      };
+    }
+    if (id === 'duty_leave') {
+      const state = byId.get(id);
+      const leaveEnd = maxDate((data?.leaves || [])
+        .filter(leave => leave?.personId === person.id && leave.to && (!today || leave.to <= today))
+        .map(leave => leave.to));
+      const lastDate = maxDate([state?.lastDate, leaveEnd]);
+      const months = state?.months ?? KE_ASSUMED_MONTHS;
+      const assumed = state ? state.assumed !== false : true;
+      const dueDate = lastDate ? addMonths(lastDate, months) : null;
+      const status = dueDate ? deadlineStatus(dueDate, today, settings.soonDays) : null;
+      return {
+        id, label, lastDate, months, assumed, dueDate, status,
+        blocks: false,
+        daysLeft: dueDate ? daysLeft(dueDate, today) : null,
+        entryKind: 'check:duty_leave',
+        note: assumed ? 'період — припущення, змініть' : null,
+      };
+    }
+    const state = byId.get(id);
+    return {
+      id, label,
+      lastDate: state?.lastDate || null,
+      months: state?.months ?? null,
+      assumed: Boolean(state?.assumed),
+      dueDate: state?.dueDate || null,
+      status: state?.status || null,
+      blocks: Boolean(state?.blocks),
+      daysLeft: state?.daysLeft ?? null,
+      entryKind: `check:${id}`,
+      note: state?.assumed ? 'період — припущення, змініть' : null,
     };
   });
 }
@@ -744,6 +865,8 @@ export const EXERCISE_NAMES = Object.freeze({
   51: 'з вантажем на зовнішній підвісці',
   53: 'заліковий політ на десантно-транспортні завдання',
   54: 'мінування з повітря',
+  'БП': 'бойова підготовка',
+  'СБП': 'спеціальна бойова підготовка',
 });
 
 /** Назва вправи або null (невідомо; нічого не вигадуємо). */
@@ -1169,12 +1292,15 @@ export function shiftSummary(shiftFlights, opts = {}) {
 export const FLIGHT_SOURCES = Object.freeze(['timekeeper', 'trip', 'import', 'logbook']);
 
 const EXERCISE_RE = /^\d{1,3}[a-zа-яіїє]{0,3}$/i;
+const NAMED_EXERCISES = new Set(['бп', 'сбп']);
 
-/** Номер вправи як рядок (`14`, `76м`) або null. */
+/** Номер вправи як рядок (`14`, `76м`, `БП`, `СБП`) або null. */
 export function normalizeExercise(value) {
   if (value === null || value === undefined) return null;
   const text = String(value).trim();
-  return text && EXERCISE_RE.test(text) ? text : null;
+  if (!text) return null;
+  if (NAMED_EXERCISES.has(text.toLowerCase())) return text.toUpperCase();
+  return EXERCISE_RE.test(text) ? text : null;
 }
 
 /**
@@ -1199,7 +1325,7 @@ export function normalizeFlight(raw) {
   let exercise = null;
   if (raw?.exercise !== undefined && raw?.exercise !== null && String(raw.exercise).trim() !== '') {
     exercise = normalizeExercise(raw.exercise);
-    if (exercise === null) errors.push('Номер вправи має бути числом (наприклад, 14 або 76м).');
+    if (exercise === null) errors.push('Номер вправи: число (14, 76м) або БП чи СБП.');
   }
   if (raw?.source !== undefined && raw?.source !== null && !FLIGHT_SOURCES.includes(raw.source)) {
     errors.push('Невідоме джерело запису польоту.');

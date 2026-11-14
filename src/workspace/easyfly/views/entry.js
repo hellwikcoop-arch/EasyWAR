@@ -31,7 +31,7 @@ export function openEntry(ctx, opts = {}) {
 
   // ── поля польоту
   const date = dateInput(opts.date || ctx.today);
-  const exercise = textInput('', { placeholder: 'Наприклад, 14', maxLength: 8 });
+  const exercise = textInput('', { placeholder: '14, БП або СБП', maxLength: 8 });
   exercise.setAttribute('list', 'ef-exercises');
   const exerciseList = el('datalist', { id: 'ef-exercises' },
     Object.entries(EXERCISE_NAMES).map(([n, name]) => el('option', { value: n, label: `№ ${n} · ${name}` })));

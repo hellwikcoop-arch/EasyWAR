@@ -98,7 +98,9 @@ export function render(ctx) {
       items.map(item => el('button', {
         type: 'button', class: 'nv-tab', role: 'tab', 'aria-selected': String(item.id === active),
         onClick: () => switchTab(item.id),
-      }, item.label)));
+      }, item.label)),
+      el('button', { type: 'button', class: 'nv-tab', onClick: () => ctx.go('timing') }, 'Хронометраж'),
+      el('button', { type: 'button', class: 'nv-tab', onClick: () => ctx.go('sheet') }, 'Польотний лист'));
   }
 
   function header({ crumb, title, subtitle, actions }) {
@@ -351,11 +353,14 @@ export function render(ctx) {
       const kg = value => (value === null || value === undefined ? '—' : `${fmtInt(value)} кг`);
       const statusClass = s.massOk === false ? 'nv-status-bad' : s.massOk === true ? 'nv-status-ok' : 'nv-status-none';
       const statusMark = s.massOk === false ? '✕ ' : s.massOk === true ? '✓ ' : '';
-      const docsRow = el('div', { class: 'nv-docs-row' }, DOC_ORDER.map(id => btn(DOC_KINDS[id].tab, {
-        variant: id === 'ishr' ? 'primary' : 'secondary', disabled: s.blocking,
-        title: s.blocking ? 'Спершу заповніть дані розрахунку' : `Переглянути: ${DOC_KINDS[id].tab}`,
-        onClick: () => switchTab(id),
-      })));
+      const docsRow = el('div', { class: 'nv-docs-row' },
+        ...DOC_ORDER.map(id => btn(DOC_KINDS[id].tab, {
+          variant: id === 'ishr' ? 'primary' : 'secondary', disabled: s.blocking,
+          title: s.blocking ? 'Спершу заповніть дані розрахунку' : `Переглянути: ${DOC_KINDS[id].tab}`,
+          onClick: () => switchTab(id),
+        })),
+        btn('Хронометраж', { onClick: () => ctx.go('timing') }),
+        btn('Польотний лист', { onClick: () => ctx.go('sheet') }));
       const metric = (label, value) => el('div', { class: 'nv-metric' }, el('span', { text: label }), el('strong', { text: value }));
       summaryBox.replaceChildren(...[
         el('h2', { text: 'Живий підсумок' }),
