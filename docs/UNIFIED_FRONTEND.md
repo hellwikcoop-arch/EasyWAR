@@ -203,21 +203,22 @@ ends, and the launcher stays `inert` until sign-in.
 - The gate is a UI barrier plus the Rust unlock check of data commands, not
   protection against file tampering; see `docs/DATABASE.md` (Local profiles).
 
-## easyWIKI (хаб, шість 3D-довідників і довідник бригад)
+## easyWIKI (ангар, гараж, БпАК і довідник бригад)
 
-Кнопка «easyWIKI» на головному екрані відкриває хаб інтерактивних довідників у накладці поверх лаунчера. Довідники — окремі сторінки збірки, тому legacy HTML (`index.html`, `air.html`, `rocket.html`) для них не змінювався, а `script/import_unified_html.mjs` їх не чіпає. Опис моделей, авторства й завантаження — в `docs/3D_MODELS.md` (розділ «3D-довідники»).
+Кнопка «easyWIKI» на головному екрані відкриває хаб у накладці поверх лаунчера. Картки техніки ведуть в `hangar/EasyWAR_hangar.html` (ангар, гараж, «Ворог»). БпАК і довідник бригад лишаються сторінками `src/guides`. Legacy HTML (`index.html`, `air.html`, `rocket.html`) для хаба не змінювався; вкладка «Довідник» у модулях відкриває той самий ангар для зіставлених статей (`src/ref-wiki.js`, `src/hangar-catalog-core.js`). Опис — в `docs/3D_MODELS.md` і `docs/USER_GUIDE.md`.
 
 | Файл | Роль |
 | --- | --- |
 | `src/guides-launcher.js`, `src/guides-launcher.css` | кнопка (`prepend` у `.appbar-right`; імпорт останній у `launcher-tools.js`, тож кнопка стоїть крайньою ліворуч) і накладка з `<iframe>` на `guides/index.html`; «Закрити» та `Esc` ставлять `about:blank`, щоб WebGL-сцена не лишалась у пам'яті |
-| `src/guides/index.html`, `hub.js`, `hub.css` | хаб: шість карток (кількість і назви моделей беруться з `credits.js`) і легенда походження моделей; посилання «До EasyWAR» видиме лише тоді, коли хаб відкрито не в накладці |
-| `src/guides/<id>/` | довідник (`rvia`, `ppo`, `ground-forces`, `uav`, `aviation`, `enemy-ground`): `index.html` без вбудованих скриптів, `main.js`, `style.css`, `models.js`, `models/*.glb`, поділ моделей на частини (`specs.js`, `meta.js`, `rig.js`, `spec.js`) |
-| `src/guides/credits.js` | авторство всіх моделей і ландшафту; від нього залежать підписи, хаб і `src/models/CREDITS.md` |
+| `src/guides/index.html`, `hub.js`, `hub.css` | хаб: картки ангара й гаража (`src/hangar-catalog-core.js`), БпАК і бригади; посилання «До EasyWAR» видиме лише тоді, коли хаб відкрито не в накладці |
+| `hangar/EasyWAR_hangar.html`, `hangar/models/` | офлайн-ангар; плагін `easywar-hangar-static` копіює їх у `dist/hangar` і віддає в `vite` dev. У `bundle.resources` другої копії немає |
+| `src/guides/<id>/` | БпАК (`uav`) входить у збірку. `rvia`, `ppo`, `ground-forces`, `aviation`, `enemy-ground` у збірку не входять |
+| `src/guides/credits.js` | авторство моделей БпАК і вихідних сторінок; від нього залежать підписи сцен і `src/models/CREDITS.md` |
 | `src/guides/guide-kit.js`, `room-env.js`, `base.css`, `fonts/` | спільне: читання GLB, годинник, заплатка відбиттів three, копія `RoomEnvironment` із three r160 (MIT), базові стилі, локальні шрифти woff2 (SIL OFL, тексти ліцензій у `fonts/licenses`) |
 
 - `base.css` лише задає запасні значення: селектори `html`, `body`, `:root`, `img` у ньому обгорнуті в `:where()` (нульова специфічність), бо збірка Vite може віддати його після стилів сторінки, а фон і колір тексту задає сама сторінка (`hub.css`, `<id>/style.css`, `brigades/style.css`). Новий довідник має сам задати `background` і `color` для `body`; це перевіряє `tests/guides-base-css.test.mjs`.
-- `vite.config.js` має сім входів: `guides` (хаб) і `guides-rvia`, `guides-ppo`, `guides-ground-forces`, `guides-uav`, `guides-aviation`, `guides-enemy-ground`. Новий довідник потребує входу тут, рядка в `GUIDES` у `script/guides-credits.mjs` і в `hub.js`; `tests/guides.test.mjs` бере перелік із `GUIDES` і для кожного довідника перевіряє вхід збірки, хаб, моделі та авторство.
-- Кеш переглядача для телефона (`viewerServiceWorker`) не бере ні сторінок `guides*`, ні `.woff2`: ≈ 105 МБ моделей телефонному файлу не потрібні.
+- `vite.config.js` має входи `guides` (хаб), `guides-brigades` і `guides-uav`. Старі каталоги техніки входами не є, тож їхні `.glb` у `dist` не потрапляють. Авторство вихідних моделей як і раніше звіряє `tests/guides.test.mjs` із `script/guides-credits.mjs`.
+- Кеш переглядача для телефона (`viewerServiceWorker`) не бере сторінок `guides*`, `.woff2` і каталогу `hangar/` (близько 330 МБ).
 - Мережі немає: three із npm, шрифти й ландшафт лежать у збірці, на сторінках довідників немає `eval`, `new Function` і вбудованих скриптів (перевіряє `tests/guides.test.mjs`).
 - CSP у `tauri.conf.json` не змінювали (вона `null`). Якщо її колись посилять, довідникам, імовірно, знадобляться `'wasm-unsafe-eval'` (декодер meshopt — WASM), `blob:` для текстур із GLB і `font-src 'self'`; з посиленою CSP довідники не перевіряли.
 - Довідники налаштовано під three r160, а проєкт на r186. Різницю гасять `room-env.js` і заплатка `LEGACY_REFLECTIONS` у `guide-kit.js`; тест «вигляд, затверджений на three r160» падає, коли відповідний шматок шейдера three змінюється, — це сигнал переглянути `guide-kit.js`.

@@ -4240,7 +4240,8 @@ fn office_xml_text(
     let mut archive = open_archive(bytes, limits)?;
     let mut parts: Vec<((u8, u32), String)> = archive
         .file_names()
-        .filter_map(|name| order(name).map(|key| (key, name.to_owned())))
+        .filter_map(Result::ok)
+        .filter_map(|name| order(&name).map(|key| (key, name.into_owned())))
         .collect();
     parts.sort();
     let mut budget = ZipBudget::new(ZipLimits {
@@ -4348,7 +4349,7 @@ fn xlsx_text(
             let file = archive
                 .by_index(index)
                 .map_err(|_| LibraryError::Extraction("архів документа пошкоджено"))?;
-            let name = file.name().to_owned();
+            let name = String::from_utf8_lossy(file.name_raw()).into_owned();
             if file.is_dir() || !xlsx_part_is_read(&name) {
                 continue;
             }

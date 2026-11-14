@@ -420,7 +420,7 @@ pub fn ensure_zip_within_limits_with(
         if file.is_dir() {
             continue;
         }
-        let name = file.name().to_owned();
+        let name = String::from_utf8_lossy(file.name_raw()).into_owned();
         match budget.read_part(&name, &mut file, None) {
             Err(ZipPartError::Limit(exceeded)) => return Err(exceeded),
             Ok(_) | Err(ZipPartError::Io(_)) => {}
