@@ -189,7 +189,8 @@ function initialize() {
     const slot = dashboard.querySelector(`[${MINE_SLOT}]`);
     const nav = dashboard.querySelector(':scope > .side .snav');
     if (nav && !nav.contains(mineButton)) {
-      nav.insertBefore(mineButton, nav.querySelector(':scope > .snav-entry'));
+      // Після прибирання дублів вкладок із меню якір — «Розташування блоків».
+      nav.insertBefore(mineButton, nav.querySelector(':scope > .snav-lay'));
       // Будь-який інший пункт меню повертає до дашборда.
       nav.addEventListener('click', event => {
         const button = event.target.closest('.snav-b');

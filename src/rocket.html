@@ -350,6 +350,14 @@ html { scroll-padding-top: 70px; }
 .mk.c-hit, .mk.c-part, .mk.c-miss { stroke: var(--map-bg); stroke-width: 1.2; }
 .bars.wide .bar { grid-template-columns: minmax(118px, 1.7fr) 34px minmax(0, 1.3fr) 40px; }
 .dpanel.empty-state { padding: 26px 28px 24px; }
+/* Стрічка «Потребує перевірки» над дашбордом */
+.ew-quality-ribbon { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 4px; padding: 10px 14px; border: 1px solid color-mix(in srgb, var(--warn, #f4b04a) 55%, var(--line)); border-radius: 12px; background: color-mix(in srgb, var(--warn, #f4b04a) 12%, var(--surface)); color: var(--ink); font: 600 13.5px/1.35 var(--display); cursor: pointer; text-align: left; width: 100%; box-sizing: border-box; }
+.ew-quality-ribbon[hidden] { display: none !important; }
+.ew-quality-ribbon:hover, .ew-quality-ribbon:focus-visible { border-color: var(--warn, #f4b04a); outline: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--warn, #f4b04a) 35%, transparent); }
+.ew-quality-ribbon .ew-qr-count { display: inline-grid; place-items: center; min-width: 28px; height: 28px; padding: 0 8px; border-radius: 999px; background: var(--warn, #f4b04a); color: #1a1206; font-variant-numeric: tabular-nums; }
+.ew-quality-ribbon .ew-qr-go { margin-left: auto; color: var(--accent); font-weight: 700; }
+.es-act { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+
 /* без таблиці бічну панель приховано: головна колонка займає всю сітку, а картка «Відкрийте таблицю» стоїть по центру нормальної ширини */
 #view-dash.shell > .side[hidden] ~ .dmain { grid-column: 1 / -1; }
 .dmain > .dpanel.empty-state { justify-self: center; width: min(640px, 100%); box-sizing: border-box; }
@@ -458,7 +466,7 @@ html { scroll-padding-top: 70px; }
   .snav-b { width: 100%; border: 0; border-radius: 8px; background: transparent; padding: 11px 14px; font-size: 15px; text-align: left; }
   .snav-b:hover { background: var(--surface); }
   .snav-b.on { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
-  .snav-entry { margin-top: 14px; border-top: 1px solid var(--line); border-radius: 0 0 8px 8px; padding-top: 16px; }
+  .snav-lay, .ewmc-mine-tab { margin-top: 14px; border-top: 1px solid var(--line); border-radius: 0 0 8px 8px; padding-top: 16px; }
   .side-foot { display: block; padding: 0 0 4px; }
   .slogan { margin: 0 0 16px; max-width: 8ch; font: 700 20px/1.2 var(--display); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
   .slogan-s, .slogan-e { margin: 0 0 12px; font-size: 12px; line-height: 1.5; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
@@ -4950,6 +4958,18 @@ function startScreen() {
   el.resume = h('button', { class: 'btn big', type: 'button', hidden: true, onclick: () => AV.resume && AV.resume() });
   const syncResume = () => { const fh = AV.S.storedHandle; el.resume.hidden = !fh; if (fh) el.resume.textContent = 'Продовжити з «' + fh.name + '»'; };
   document.addEventListener('ew-stored-handle', syncResume); syncResume();
+  const profileApi = () => (window.parent && window.parent !== window && window.parent.EWProfiles) || window.EWProfiles || null;
+  const profileBranch = () => document.documentElement.dataset.command === 'dshv' ? 'dshv' : 'rocket';
+  el.profileTable = h('button', { class: 'btn big', type: 'button', hidden: true, onclick: () => { const api = profileApi(); if (api?.openBound) api.openBound(profileBranch()); } });
+  el.syncProfileTable = () => {
+    const api = profileApi();
+    const name = api?.boundName?.(profileBranch());
+    el.profileTable.hidden = !name;
+    if (name) el.profileTable.textContent = 'Остання таблиця профілю: «' + name + '»';
+  };
+  document.addEventListener('ew-profiles-changed', el.syncProfileTable);
+  window.addEventListener('focus', el.syncProfileTable);
+  el.syncProfileTable();
   const tile = w => h('i', { class: 'es-tile' }, h('em', { style: 'width:' + w + '%' }));
   const bars = [38, 56, 44, 72, 60, 84, 66, 92].map(v => h('i', { style: 'height:' + v + '%' }));
   return h('section', { class: 'dpanel empty-state es', hidden: true },
@@ -4958,7 +4978,7 @@ function startScreen() {
       h('h2', { text: 'Відкрийте таблицю, щоб побачити дашборд' }),
       h('p', { class: 'es-lead', text: 'Дашборд рахується з аркуша «Зведена» вашого файлу .xlsx — того самого, куди інструмент вносить доповіді.' }),
       h('ol', { class: 'es-steps' }, step('01', 'Відкрийте таблицю .xlsx'), step('02', 'Показники, карта й підрозділи перераховуються одразу'), step('03', 'Виправили в Excel — натисніть «Оновити»')),
-      h('div', { class: 'es-act' }, h('button', { class: 'btn primary big', type: 'button', onclick: () => AV.pickFile() }, 'Відкрити таблицю…'), el.resume),
+      h('div', { class: 'es-act' }, h('button', { class: 'btn primary big', type: 'button', onclick: () => AV.pickFile() }, 'Відкрити таблицю…'), el.profileTable, el.resume),
       h('div', { class: 'es-drop', text: 'або перетягніть файл у це вікно' }),
       h('p', { class: 'es-safe', text: 'Дані обробляються на цьому пристрої й нікуди не надсилаються.' })),
     h('div', { class: 'es-prev', 'aria-hidden': 'true' },
@@ -4995,7 +5015,10 @@ function skeleton() {
   el.crumbT = h('h2'); el.crumbS = h('span', { class: 'sub' });
   el.crumb = h('div', { class: 'crumb' }, h('button', { class: 'back', type: 'button', onclick: () => openView('overview') }, '← Дашборд РВ'), el.crumbT, el.crumbS);
   el.detail = h('div', { class: 'detail', hidden: true });
+  el.qualityRibbon = h('button', { type: 'button', class: 'ew-quality-ribbon', hidden: true, onclick: () => openView('quality') },
+    h('span', { class: 'ew-qr-count', text: '0' }), h('span', { class: 'ew-qr-text', text: 'Потребує перевірки' }), h('span', { class: 'ew-qr-go', text: 'Відкрити →' }));
   el.content = h('div', { class: 'dmain-in' },
+    el.qualityRibbon,
     el.crumb,
     el.kpis,
     h('div', { class: 'g2 gmap' }, el.mapPanel, h('div', { class: 'stack' }, panel('Результати у динаміці', el.dyn, el.dynSub, '', 'p-dyn'), panel('Глибина ураження', el.depth, el.depthSub, '', 'p-depth'), panel('Розподіл результатів', el.donut, null, '', 'p-dist'))),
@@ -5286,10 +5309,7 @@ function flipCard() {
 function buildSide() {
   el.navBtns = NAV.map(([id, label, ic]) => h('button', { type: 'button', class: 'snav-b', 'data-t': id, onclick: () => openView(VIEW_BY_ID[id]) }, icon(ic), h('span', { text: label }), h('span', { class: 'nb', hidden: true })));
   el.side = h('aside', { class: 'side', 'aria-label': 'Розділи дашборда', hidden: true },
-    h('nav', { class: 'snav' }, el.navBtns,
-      h('button', { type: 'button', class: 'snav-b snav-entry', onclick: () => showView('base') }, icon('db'), h('span', { text: 'База даних' })),
-      h('button', { type: 'button', class: 'snav-b snav-entry2', onclick: () => showView('entry') }, icon('edit'), h('span', { text: 'Внесення доповідей' })),
-      h('button', { type: 'button', class: 'snav-b snav-ref', onclick: () => showView('ref') }, icon('book'), h('span', { text: 'Довідник' }))),
+    h('nav', { class: 'snav' }, el.navBtns),
     h('div', { class: 'side-foot' }, CARD ? flipCard() : null));
   let raf = 0;
   window.addEventListener('scroll', () => { if (raf) return; raf = requestAnimationFrame(() => { raf = 0; markNav(); }); }, { passive: true });
@@ -6643,7 +6663,7 @@ function renderActivity(cur) {
 function renderAll() {
   if (!el.content) return; // дані прийшли раніше, ніж збудовано дашборд: init() покаже їх сам
   const has = !!AV.S.wb;
-  el.empty.hidden = has; el.toolbar.hidden = !has || !ROWS.length; el.content.hidden = !has; el.side.hidden = !has || !ROWS.length;
+  el.empty.hidden = has; el.toolbar.hidden = !has || !ROWS.length; el.content.hidden = !has; el.side.hidden = !has || !ROWS.length; if (!has) el.syncProfileTable?.();
   if (!has) { refAfterRender(); return; }
   if (!ROWS.length) { el.content.hidden = true; el.empty.hidden = false; el.empty.querySelector('h2').textContent = 'У таблиці немає записів'; refAfterRender(); return; }
   el.empty.querySelector('h2').textContent = 'Відкрийте таблицю, щоб побачити дашборд';
@@ -6720,8 +6740,9 @@ function renderAll() {
 
   renderQuality(); renderExtras(cur); renderActivity(cur);
   el.crumbT.textContent = VIEWS[D.view].title; el.crumbS.textContent = D.view === 'quality' ? 'перевіряється вся таблиця · ' + N0(ROWS.length) + ' ' + plural(ROWS.length, ['запис', 'записи', 'записів']) : dmy(D.from) + ' – ' + dmy(D.to) + ' · ' + N0(A.n) + ' ' + plural(A.n, ['операція', 'операції', 'операцій']);
-  { const nb = { 'p-ops': N0(A.n), 'p-mun': N0(A.mun), 'p-quality': ROWS.filter(r => r.issues.length).length };
-    el.navBtns.forEach(b => { const s = b.querySelector('.nb'); if (!s) return; const v = nb[b.dataset.t]; s.textContent = v == null ? '' : v; s.hidden = !v || v === '0'; s.classList.toggle('warn', b.dataset.t === 'p-quality'); }); }
+  { const qn = ROWS.filter(r => r.issues.length).length; const nb = { 'p-ops': N0(A.n), 'p-mun': N0(A.mun), 'p-quality': qn };
+    el.navBtns.forEach(b => { const s = b.querySelector('.nb'); if (!s) return; const v = nb[b.dataset.t]; s.textContent = v == null ? '' : v; s.hidden = !v || v === '0'; s.classList.toggle('warn', b.dataset.t === 'p-quality'); });
+    if (el.qualityRibbon) { el.qualityRibbon.hidden = !qn || D.view === 'quality'; el.qualityRibbon.querySelector('.ew-qr-count').textContent = String(qn); el.qualityRibbon.querySelector('.ew-qr-text').textContent = 'Потребує перевірки (' + qn + ')'; } }
   renderDetail(cur, A); markNav();
   refAfterRender();
   { const full = MOTION_FULL; MOTION_FULL = false; motionAfterRender(full); }

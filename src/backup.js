@@ -30,18 +30,21 @@ function initializeBackup() {
 
   const toolbar = document.querySelector('.appbar-right');
   if (!toolbar) return;
+  const mount = window.__EW_TOOLS_MOUNT__ || toolbar;
 
   const openButton = document.createElement('button');
   openButton.type = 'button';
   openButton.className = 'btn quiet ew-backup-open';
   openButton.textContent = 'Резервна копія';
-  toolbar.prepend(openButton);
+  openButton.setAttribute('role', 'menuitem');
+  mount.append(openButton);
 
   const headerUpdate = document.createElement('button');
   headerUpdate.type = 'button';
   headerUpdate.className = 'btn quiet ew-header-update';
   headerUpdate.title = 'Оновлення та міграції EasyWAR';
   headerUpdate.textContent = 'Оновлення';
+  headerUpdate.setAttribute('role', 'menuitem');
   openButton.after(headerUpdate);
 
   const dialog = document.createElement('dialog');
