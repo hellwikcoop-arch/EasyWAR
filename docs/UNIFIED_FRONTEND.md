@@ -131,6 +131,18 @@ module script before `</body>`. `script/import_unified_html.mjs` rewrites
   (backlog P2-6), so do not commit iterations.
 
 
+## Ознайомлення
+
+Перший вхід після реєстрації може показати коротке вікно і тури модулів.
+Логіка без DOM — `src/onboarding-core.js` (тест `tests/onboarding.test.mjs`):
+вітання, чекліст із п’яти кроків, кроки турів, демо-записи і заборона віддавати
+їх в експорт. Інтерфейс — `src/onboarding-shell.js` і `src/onboarding-style.js`;
+сторінки Vite підключають `src/onboarding.js`. Ангар не проходить через бандлер
+HTML, тому `hangar/EasyWAR_hangar.html` вантажить сталий `onboarding-hangar.js`
+з кореня збірки. Демо-картка не пишеться в таблицю модуля. Кнопка easyWIKI має
+`data-ew-tour="wiki"` і віддає `window.EW_GUIDES.open`, щоб тур міг відкрити
+ангар у тій самій накладці.
+
 ## Технологічний шар стартового екрана
 
 Поверх фону лаунчера і під картками лежить декоративний шар у стилі HUD: мережа вузлів на `<canvas>`,

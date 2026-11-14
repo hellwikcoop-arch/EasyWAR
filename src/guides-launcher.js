@@ -12,6 +12,7 @@ function initializeGuidesLauncher() {
   const openButton = document.createElement('button');
   openButton.type = 'button';
   openButton.className = 'btn quiet';
+  openButton.dataset.ewTour = 'wiki';
   openButton.textContent = 'easyWIKI';
   openButton.title = 'Довідники: ангар і гараж техніки, вкладка «Ворог», БпАК, бригади';
   toolbar.prepend(openButton);
@@ -36,11 +37,13 @@ function initializeGuidesLauncher() {
     frame.src = 'about:blank';
     openButton.focus();
   };
-  openButton.addEventListener('click', () => {
-    frame.src = HUB_URL;
+  const open = (url = HUB_URL) => {
+    frame.src = url;
     overlay.hidden = false;
     closeButton.focus();
-  });
+  };
+  openButton.addEventListener('click', () => open());
+  window.EW_GUIDES = { open, close };
   closeButton.addEventListener('click', close);
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && !overlay.hidden) close();

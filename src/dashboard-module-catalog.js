@@ -149,6 +149,7 @@ function initialize() {
   const openButton = el('button', {
     type: 'button',
     class: 'btn quiet ewmc-open',
+    'data-ew-tour': 'catalog',
     text: 'Каталог модулів',
     title: 'Додати аналітичний модуль і створити його локальну таблицю SQLite',
   });
