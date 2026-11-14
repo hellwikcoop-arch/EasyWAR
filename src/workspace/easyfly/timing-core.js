@@ -3,6 +3,9 @@
 // Підтверджений день отримує примітку «виконання польотних завдань».
 
 export const TIMING_NOTE = 'виконання польотних завдань';
+/** Витрата пального в хронометражі: літри за хвилину. Це розрахункові коефіцієнти екрана, не норма з документа. */
+export const FUEL_AIR_L_PER_MIN = 11.2;
+export const FUEL_GROUND_L_PER_MIN = 6;
 export const EVENT_KINDS = Object.freeze(['start', 'takeoff', 'landing', 'shutdown', 'note']);
 const TIME_RE = /^([01]?\d|2[0-3]):([0-5]\d):([0-5]\d)$/;
 
@@ -107,6 +110,81 @@ export function confirmTimingRecord(timing) {
   return { ...timing, status: 'confirmed', note: TIMING_NOTE };
 }
 
+/**
+ * Тривалості завершених польотів.
+ * Земля до зльоту — від запуску до зльоту.
+ * Земля після посадки — до вимкнення, а якщо його немає — до наступного зльоту.
+ * Запуск–зліт, який уже входить у «посадка → наступний зліт», другий раз не додається.
+ */
+export function flightDurations(timing) {
+  const complete = timingFlights(timing).filter(flight => flight.takeoff && flight.landing);
+  return complete.map((flight, index) => {
+    const prev = complete[index - 1];
+    const next = complete[index + 1];
+    const airMin = minutesBetween(flight.takeoff, flight.landing) ?? 0;
+    const insidePrevGap = Boolean(prev && !prev.shutdown);
+    const groundBefore = flight.start && !insidePrevGap ? (minutesBetween(flight.start, flight.takeoff) ?? 0) : 0;
+    let groundAfter = 0;
+    if (flight.shutdown) groundAfter = minutesBetween(flight.landing, flight.shutdown) ?? 0;
+    else if (next?.takeoff) groundAfter = minutesBetween(flight.landing, next.takeoff) ?? 0;
+    return { ...flight, airMin, groundBefore, groundAfter, totalMin: airMin + groundBefore + groundAfter };
+  });
+}
+
+/** Підсумок дня: кількість, наліт повітря, земля, загальний наліт і паливо з розкладом. */
+export function timingDaySummary(timing) {
+  const rows = flightDurations(timing);
+  const airMin = rows.reduce((sum, row) => sum + row.airMin, 0);
+  const groundBefore = rows.reduce((sum, row) => sum + row.groundBefore, 0);
+  const groundAfter = rows.reduce((sum, row) => sum + row.groundAfter, 0);
+  const groundMin = groundBefore + groundAfter;
+  const fuelAir = Math.round(airMin * FUEL_AIR_L_PER_MIN * 10) / 10;
+  const fuelGround = Math.round(groundMin * FUEL_GROUND_L_PER_MIN * 10) / 10;
+  return {
+    flights: rows.length,
+    airMin,
+    groundBefore,
+    groundAfter,
+    groundMin,
+    totalMin: airMin + groundMin,
+    fuelAir,
+    fuelGround,
+    fuel: Math.round((fuelAir + fuelGround) * 10) / 10,
+    passengers: Number.isInteger(timing?.passengers) ? timing.passengers : null,
+    remark: timing?.remark || '',
+    dayNight: timing?.dayNight === 'night' ? 'night' : 'day',
+  };
+}
+
+/** Мінімум погоди на бланку потрібен, лише якщо завдання чи вправа про хмари або мінімум. */
+export function needsMinima(text) {
+  return /хмар|мінім|сму|імц|прилад|заход/i.test(String(text || ''));
+}
+
+/** Звання, прізвище та, для командира екіпажу, позивний. */
+export function personBits(person, withCall = false) {
+  if (!person || typeof person !== 'object') return '';
+  const who = [person.rank, person.name].map(part => String(part || '').trim()).filter(Boolean).join(' ');
+  const call = withCall && String(person.callsign || '').trim() ? `позивний ${String(person.callsign).trim()}` : '';
+  return [who, call].filter(Boolean).join(', ');
+}
+
+/** Рядок екіпажу для бланка. Позивний лише в командира екіпажу. */
+export function crewText(crew) {
+  if (!crew || typeof crew === 'string') return String(crew || '');
+  const line = (label, person, withCall = false) => {
+    const body = personBits(person, withCall);
+    return body ? `${label}: ${body}` : '';
+  };
+  return [
+    line('КЕ', crew.ke, true),
+    line('ЛШ', crew.lsh),
+    line('БТ', crew.bt),
+    line('ЛІ', crew.instructor),
+    String(crew.extra || '').trim() ? `додатково: ${String(crew.extra).trim()}` : '',
+  ].filter(Boolean).join('; ');
+}
+
 /** Змінює час або вправу однієї події. */
 export function editTimingEvent(timing, eventId, patch = {}) {
   const events = (timing.events || []).map(event => {
@@ -201,8 +279,7 @@ export function sheetFromTimings(timings, extras = {}) {
   const list = (Array.isArray(timings) ? timings : []).filter(item => item && item.status === 'confirmed');
   const rows = [];
   for (const timing of list) {
-    for (const flight of timingFlights(timing)) {
-      const minutes = flight.minutes;
+    for (const flight of flightDurations(timing)) {
       rows.push({
         date: timing.date,
         airfieldFrom: '',
@@ -210,13 +287,13 @@ export function sheetFromTimings(timings, extras = {}) {
         weather: '',
         aircraftType: extras.aircraftType || '',
         tailNumber: extras.tailNumber || '',
-        dayNight: 'day',
-        exercise: flight.exercise || '',
+        dayNight: timing.dayNight === 'night' ? 'night' : 'day',
+        exercise: flight.exercise || timing.exercise || '',
         takeoff: flight.takeoff || '',
         landing: flight.landing || '',
-        count: flight.takeoff && flight.landing ? 1 : 0,
-        airtimeMin: minutes,
-        airborneMin: minutes,
+        count: 1,
+        airtimeMin: flight.airMin,
+        totalMin: flight.totalMin,
         cabinMin: null,
         smuMin: null,
         cloudMin: null,
@@ -225,28 +302,27 @@ export function sheetFromTimings(timings, extras = {}) {
         minimaLandings: null,
         landingSystem: '',
         grade: '',
-        fta: '',
-        fuelLiters: null,
-        cargoKg: null,
-        passengers: null,
-        paratroopers: null,
         start: flight.start || '',
         shutdown: flight.shutdown || '',
       });
     }
   }
+  const starts = rows.map(row => row.start).filter(Boolean).sort();
+  const ends = rows.map(row => row.shutdown).filter(Boolean).sort();
   return {
     dates: [...new Set(list.map(item => item.date))],
     header: {
       aircraftType: extras.aircraftType || '',
       tailNumber: extras.tailNumber || '',
-      crew: extras.crew || '',
+      crew: extras.crew && typeof extras.crew === 'object' ? extras.crew : {},
       task: extras.task || '',
-      startTime: rows.find(row => row.start)?.start || '',
-      minima: emptyMinima(),
+      engineStart: starts[0] || '',
+      engineEnd: ends.at(-1) || '',
+      minima: extras.minima || emptyMinima(),
+      showMinima: extras.showMinima === true,
     },
     rows,
-    report: '',
+    report: extras.report || '',
   };
 }
 
@@ -268,6 +344,7 @@ export function sheetTotals(rows) {
     cloudMin: sumKey(list, 'cloudMin', dayNight),
     minimaApproaches: sumKey(list, 'minimaApproaches', dayNight),
     minimaLandings: sumKey(list, 'minimaLandings', dayNight),
+    totalMin: sumKey(list, 'totalMin', dayNight),
   });
   return { all: pack(null), day: pack('day'), night: pack('night') };
 }

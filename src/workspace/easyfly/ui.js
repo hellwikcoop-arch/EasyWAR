@@ -96,9 +96,10 @@ export function textInput(value = '', { placeholder = '', maxLength = null, inpu
   return el('input', { type: 'text', class: 'ef-input', value: value ?? '', placeholder, maxlength: maxLength, inputmode: inputMode, name, 'aria-required': required ? 'true' : null, autocomplete: 'off', spellcheck: 'false' });
 }
 
-/** Поле дати дд.мм.рррр: у value кладе ISO або текст користувача. */
+/** Поле дати: системний календар. Значення — ISO рррр-мм-дд. */
 export function dateInput(iso = '') {
-  return textInput(iso ? (formatDate(iso) || iso) : '', { placeholder: 'дд.мм.рррр', inputMode: 'numeric', maxLength: 10 });
+  const value = normalizeDate(iso) || '';
+  return el('input', { type: 'date', class: 'ef-input', value, autocomplete: 'off' });
 }
 
 /** Читає поле дати → ISO або null. */

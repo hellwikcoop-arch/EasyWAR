@@ -1,11 +1,11 @@
 // Профіль пілота: «Комісація», «Перевірки», «Допуски», «Льотна книжка», «Штурманські документи», «Відпустки».
 // Червона плашка «Польоти заборонені» — з flightBlockers. Допуск пілот відмічає сам, без затвердження.
 import {
-  CLASS_LABELS, CLASS_QUALS, LEAVE_PART_DAYS, ROLES, daysLeft, exerciseName, formatDate, hasSubordinates, keBoard, keStatusLabel, leaveTotals, medicalState, pluralDays,
+  CLASS_LABELS, daysLeft, exerciseName, formatDate, hasSubordinates, keBoard, keStatusLabel, leaveTotals, medicalState, pluralDays,
 } from '../fly-core.js';
 import {
   PILOT_TABS, admissionRows, blockerBanner, deleteFlight, effectiveSettings, lapsingAdmissionRows, leaveRows, logbookView,
-  lostAdmissions, monthLabel, pluralMonths, profileCards, updatePerson, updateUnit,
+  lostAdmissions, monthLabel, pluralMonths, profileCards, updateUnit,
 } from '../fly-state.js';
 import {
   button, card, confirmDialog, dash, dateText, el, emptyState, notice, numberInput, pageHeader, select, stat,
@@ -25,15 +25,6 @@ const lowerFirst = label => (/^[А-ЯІЇЄҐ]{2}/.test(label) ? label : label.c
 const logbookFilter = { month: '', dayNight: '', exercise: '' };
 let logbookPerson = null;
 
-const TAB_SUBTITLES = {
-  komis: 'ВЛК раз на 12 місяців, ПМО раз на 6. ВЛК зараховується і як черговий медогляд.',
-  checks: 'Особисті перевірки та допуски',
-  admissions: 'Особисті перевірки й допуски',
-  logbook: 'Особистий облік польотів · юридичний оригінал — паперова льотна книжка',
-  navdocs: 'Штурманські документи пілота',
-  leaves: 'Відпустки пілота: частини по 15 діб, УБД, ВЛК і ПМО після відпустки',
-};
-
 function komisTab(ctx, person) {
   const settings = effectiveSettings(ctx.data);
   const med = medicalState(person, ctx.today, settings.soonDays);
@@ -48,7 +39,7 @@ function komisTab(ctx, person) {
       med?.vlkDue ? el('p', { class: 'ef-glow-quiet', text: `строк ${formatDate(med.vlkDue)}` }) : null,
       button('Внести ВЛК', { variant: 'primary', onClick: () => openEntry(ctx, { mode: 'check', personId: person.id, kind: 'medical:ВЛК', lockPilot: true }) })),
     el('section', { class: 'ef-glow-card' },
-      el('div', { class: 'ef-glow-card-head' }, el('h2', { text: 'ВЛК 12 міс. · ПМО 6 міс.' })),
+      el('div', { class: 'ef-glow-card-head' }, el('h2', { text: 'ВЛК · ПМО' })),
       cards.map(card => el('div', { class: 'ef-ban-row ef-flight-row' },
         el('span', { class: 'ef-ban-who' },
           el('strong', { text: card.title }),
@@ -56,7 +47,7 @@ function komisTab(ctx, person) {
         el('span', { class: 'ef-glow-quiet', text: card.footer || '' })))),
     nextLeave
       ? el('p', { class: 'ef-glow-quiet', text: `${nextLeave.medical.kind} до ${formatDate(nextLeave.medical.dueDate)} — ${nextLeave.medical.position === 'after' ? 'одразу після відпустки' : nextLeave.medical.position === 'during' ? 'припадає на відпустку' : 'перед відпусткою'} ${formatDate(nextLeave.leave.from)}–${formatDate(nextLeave.leave.to)}.` })
-      : el('p', { class: 'ef-glow-quiet', text: 'ВЛК і ПМО, що випадають на відпустку чи одразу після неї, буде видно тут, коли відпустку додано.' }),
+      : null,
     trainingBlock(ctx, person),
     lapsingBlock(ctx, person),
     keBoardSection(ctx, person));
@@ -67,7 +58,6 @@ function keBoardSection(ctx, person) {
   if (!rows.length) return null;
   return el('section', { class: 'ef-glow-card', 'data-ef': 'ke-board' },
     el('div', { class: 'ef-glow-card-head' }, el('h2', { text: 'Комісування' })),
-    el('p', { class: 'ef-glow-quiet', text: 'Позначка «припущення» означає, що період можна змінити: це не норма з документа.' }),
     rows.map(row => {
       const when = row.lastDate ? `остання ${formatDate(row.lastDate)}` : 'дату не внесено';
       const due = row.dueDate ? `до ${formatDate(row.dueDate)}` : '';
@@ -85,7 +75,7 @@ function keBoardSection(ctx, person) {
       return el('div', { class: 'ef-ke-row' },
         el('span', { class: 'ef-ban-who' },
           el('strong', { text: row.label }),
-          el('span', { text: [when, due, row.note].filter(Boolean).join(' · ') })),
+          el('span', { text: [when, due].filter(Boolean).join(' · ') })),
         el('span', { class: 'ef-ke-meta' },
           months || (row.months ? el('span', { class: 'ef-glow-quiet', text: `${row.months} міс.` }) : null),
           row.assumed ? el('span', { class: 'ef-glow-quiet', text: 'припущення' }) : null,
@@ -104,11 +94,11 @@ function trainingBlock(ctx, person) {
   const custom = person.training?.custom || [];
   return el('section', { class: 'ef-glow-card' },
     el('div', { class: 'ef-glow-card-head' }, el('h2', { text: 'Рівень підготовки' })),
-    el('p', { class: 'ef-glow-quiet', text: 'Довідково: які допуски ви позначили. Само по собі польотів не дозволяє.' }),
-    marked.length || custom.length
+    marked.length || custom.length || person.training?.instructor
       ? el('ul', { class: 'ef-level-saved' },
         ...marked.map(row => el('li', { text: row.kind.label })),
-        ...custom.map(label => el('li', { text: label })))
+        ...custom.map(label => el('li', { text: label })),
+        person.training?.instructor ? el('li', { text: 'Інструкторський рівень підготовки' }) : null)
       : el('p', { class: 'ef-glow-quiet', text: 'Позначок ще немає.' }),
     button('Змінити рівень', { variant: 'secondary', onClick: () => openTrainingForm(ctx, person.id) }));
 }
@@ -117,7 +107,6 @@ function lapsingBlock(ctx, person) {
   const rows = lapsingAdmissionRows(person, ctx.data, ctx.today);
   return el('section', { class: 'ef-glow-card' },
     el('div', { class: 'ef-glow-card-head' }, el('h2', { text: 'Допуски з перервою' })),
-    el('p', { class: 'ef-glow-quiet', text: 'Ті, що втрачаються через перерву в польотах, разом із ВЛК. Окремого переліку «внести допуск» немає.' }),
     rows.length
       ? rows.map(row => {
         const when = row.status === 'lost' ? 'втрачено через перерву' : row.evaluation?.limitDate ? `до ${formatDate(row.evaluation.limitDate)}` : 'дату не внесено';
@@ -134,25 +123,19 @@ function lapsingBlock(ctx, person) {
 }
 
 function identity(ctx, person) {
-  const role = select(ROLES, person.role, { onChange: () => change({ role: role.value }) });
-  const cls = select(CLASS_QUALS.map(c => ({ value: c, label: CLASS_LABELS[c] })), person.classQual || 'none', { onChange: () => change({ classQual: cls.value }) });
-  const type = textInput(person.aircraftType || '', { maxLength: 30, placeholder: '—' });
-  type.addEventListener('change', () => change({ aircraftType: type.value }));
-  function change(patch) {
-    const result = ctx.mutate(data => updatePerson(data, person.id, patch));
-    if (!result.ok) toast(result.result.errors.join(' '), 'error');
-  }
-  const labelled = (label, control) => {
-    control.setAttribute('aria-label', label);
-    return el('label', { class: 'ef-meta-box' }, el('span', { class: 'ef-meta-label', text: label }), control);
-  };
   const place = [ctx.data.unit?.name, person.link].filter(Boolean).join(' · ');
+  const meta = (label, value) => el('div', { class: 'ef-meta-box' },
+    el('span', { class: 'ef-meta-label', text: label }),
+    el('strong', { text: value || '—' }));
   return el('div', { class: 'ef-identity' },
     el('div', { class: 'ef-avatar', 'aria-hidden': 'true', text: person.callsign.charAt(0).toUpperCase() }),
     el('div', { class: 'ef-identity-name' },
       el('h2', { class: 'ef-pilot-name', text: person.callsign }),
       place ? el('span', { class: 'ef-muted', text: place }) : null),
-    el('div', { class: 'ef-meta-boxes' }, labelled('Роль', role), labelled('Клас', cls), labelled('Тип ПС', type)));
+    el('div', { class: 'ef-meta-boxes' },
+      meta('Роль', person.role),
+      meta('Клас', CLASS_LABELS[person.classQual] || '—'),
+      meta('Тип ПС', person.aircraftType)));
 }
 
 function checkCard(ctx, person, c) {
@@ -180,7 +163,7 @@ function checksTab(ctx, person) {
   const cards = profileCards(person, ctx.data, ctx.today);
   return el('div', { class: 'ef-stack' },
     el('div', { class: 'ef-toolbar' },
-      el('p', { class: 'ef-muted', text: `Дані станом на ${formatDate(ctx.today)} · самооблік пілота, без затвердження` }),
+      el('p', { class: 'ef-muted', text: `Дані станом на ${formatDate(ctx.today)}` }),
       button('Внести перевірку', { variant: 'primary', iconName: 'vnesty', onClick: () => openEntry(ctx, { mode: 'check', personId: person.id, lockPilot: true }) })),
     el('div', { class: 'ef-check-grid' }, cards.map(c => checkCard(ctx, person, c))));
 }
@@ -306,7 +289,7 @@ function leavesTab(ctx, person) {
   const nearMedical = upcoming.find(r => r.medical?.near);
   return el('div', { class: 'ef-stack' },
     el('div', { class: 'ef-toolbar' },
-      el('p', { class: 'ef-muted', text: `Відпустки ${person.callsign} · частина основної — ${LEAVE_PART_DAYS} діб, між відпустками 3–4 місяці` }),
+      el('p', { class: 'ef-muted', text: `Відпустки ${person.callsign}` }),
       button('Додати відпустку', { variant: 'primary', iconName: 'vnesty', onClick: () => openLeaveForm(ctx, { personId: person.id, lockPilot: true }) })),
     el('div', { class: 'ef-stats' },
       stat(`Основна за ${nextYear}`, `${totals.basicDays} ${pluralDays(totals.basicDays)} · ${totals.basicParts} ${totals.basicParts === 1 ? 'частина' : totals.basicParts >= 2 && totals.basicParts <= 4 ? 'частини' : 'частин'}`, { tone: totals.basicDays ? 'blue' : '' }),
@@ -318,8 +301,7 @@ function leavesTab(ctx, person) {
       : emptyState('Відпусток ще немає', 'Додайте частини основної відпустки (по 15 діб), відпустку УБД або іншу з датами з–по.'),
     nearMedical
       ? notice('ВЛК / ПМО біля відпустки.', `${nearMedical.medical.kind} до ${formatDate(nearMedical.medical.dueDate)} — ${nearMedical.medical.position === 'before' ? 'пройти до відпустки' : nearMedical.medical.position === 'during' ? 'строк припадає на відпустку, пройти перед нею' : 'запланувати одразу після відпустки'} ${formatDate(nearMedical.leave.from)}–${formatDate(nearMedical.leave.to)}.`, { tone: 'amber' })
-      : notice(null, 'ВЛК — раз на рік, ПМО — раз на 6 місяців; строк, що випадає на відпустку чи одразу після неї, підсвічується тут і на екрані «Відпустки».'),
-    el('p', { class: 'ef-muted ef-pad', text: 'Дані внесено вручну · графік не замінює наказ і рапорт на відпустку' }));
+      : null);
 }
 
 export function render(ctx) {
@@ -339,7 +321,6 @@ export function render(ctx) {
       ? [{ label: 'EasyFLY' }, { label: person.callsign }]
       : [{ label: 'EasyFLY' }, { label: 'Пілоти', onClick: () => ctx.go('pilots') }, { label: person.callsign }],
     title: person.callsign,
-    subtitle: TAB_SUBTITLES[tab],
     actions: [
       personal ? null : button('До списку', { variant: 'secondary', iconName: 'nazad', onClick: () => ctx.go('pilots') }),
       button('Змінити', { variant: 'ghost', onClick: () => openPilotForm(ctx, person.id) }),

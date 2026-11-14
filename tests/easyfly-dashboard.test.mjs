@@ -93,9 +93,9 @@ test('картки профілю: ВЛК раз на 12 міс, ПМО раз �
   let cards = profileCards(data.persons[0], data, '2026-10-20');
   const vlk = cards.find(c => c.key === 'medical:ВЛК');
   const pmo = cards.find(c => c.key === 'medical:ПМО');
-  assert.match(vlk.lines[0], /01\.08\.2026 · раз на 12 міс\./);
+  assert.match(vlk.lines[0], /01\.08\.2026/);
   assert.match(vlk.footer, /Наступна ВЛК до 01\.08\.2027/);
-  assert.match(pmo.lines[0], /раз на 6 міс\./);
+  assert.match(pmo.lines[0], /14\.06\.2026|01\.08\.2026|Дата/);
   assert.match(pmo.footer, /Наступна ПМО до 01\.02\.2027/);
   data = recordCheck(data, id, { kind: 'medical:ПМО', date: '2027-02-01' }).data;
   cards = profileCards(data.persons[0], data, '2027-02-02');

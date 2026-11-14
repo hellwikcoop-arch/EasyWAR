@@ -37,7 +37,7 @@ const mins = seconds => {
 
 function input(label, value, onChange) {
   const node = el('input', { class: 'ef-input', inputmode: 'decimal', value: value ?? '', 'aria-label': label, onInput: () => onChange(node.value) });
-  return field(label, node);
+  return field(label, node).root;
 }
 
 function lines(rows) {
@@ -95,7 +95,6 @@ const forms = {
       input('МК, °', v.mk, x => { v.mk = x; paint(); }),
       input('КУР, °', v.kur, x => { v.kur = x; paint(); }),
       input('ΔМ, ° (необовʼязково)', v.dm, x => { v.dm = x; paint(); }),
-      el('p', { class: 'ef-glow-quiet', text: 'МПР = МК + КУР. ІПР — якщо вказано магнітне схилення. У файлі частини схилення не зберігається.' }),
       box);
   },
   circuit(box) {
@@ -120,7 +119,7 @@ const forms = {
     };
     return el('div', {},
       input('Посадковий МК, °', v.mk, x => { v.mk = x; paint(); }),
-      field('Сторона', side),
+      field('Сторона', side).root,
       input('V на колі, км/год', v.air, x => { v.air = x; paint(); }),
       input('Крен, °', v.bank, x => { v.bank = x; paint(); }),
       input('Ширина, км', v.width, x => { v.width = x; paint(); }),
@@ -145,12 +144,11 @@ const forms = {
         : el('p', { class: 'ef-form-error', text: (r.issues || ['Схема не замикається.']).join(' ') }));
     };
     return el('div', {},
-      field('Схема', scheme),
+      field('Схема', scheme).root,
       input('Посадковий МК, °', v.mk, x => { v.mk = x; paint(); }),
-      field('Сторона', side),
+      field('Сторона', side).root,
       input('Вітер звідки, °', v.from, x => { v.from = x; paint(); }),
       input('Вітер, м/с', v.ms, x => { v.ms = x; paint(); }),
-      el('p', { class: 'ef-glow-quiet', text: 'Швидкість і крен — зі схеми довідкової сторінки, час прямих — типовий для режиму «за часом».' }),
       box);
   },
   descent(box) {
@@ -175,7 +173,7 @@ const forms = {
         ...(r.warnings || []).map(text => el('p', { class: 'ef-glow-quiet', text }))));
     };
     return el('div', {},
-      field('Профіль', profile),
+      field('Профіль', profile).root,
       input('Посадковий МК, °', v.mk, x => { v.mk = x; paint(); }),
       input('Вітер звідки, °', v.from, x => { v.from = x; paint(); }),
       input('Вітер, м/с', v.ms, x => { v.ms = x; paint(); }),
@@ -190,14 +188,14 @@ export function render(ctx) {
   const body = el('div', { class: 'ef-glow-card ef-flight-form' });
   const show = () => {
     box.replaceChildren();
-    body.replaceChildren(forms[kind](box));
-    queueMicrotask(() => body.querySelector('input')?.dispatchEvent(new Event('input')));
+    const form = forms[kind](box);
+    body.replaceChildren(form);
+    form.querySelector('input')?.dispatchEvent(new Event('input'));
   };
   root.append(
     el('header', { class: 'ef-today-head' },
-      button('Штурман', { variant: 'ghost', onClick: () => ctx.go('navigator') }),
+      button('Назад', { variant: 'ghost', onClick: () => ctx.go('more') }),
       el('h1', { text: 'Калькулятори' })),
-    el('p', { class: 'ef-glow-quiet', text: 'Довідково. Вітер вводите самі: з мережі він не береться. Результат не є допуском.' }),
     el('div', { class: 'ef-calc-kinds', role: 'tablist' }, KINDS.map(item => el('button', {
       type: 'button', class: `ef-calc-kind${item.id === kind ? ' ef-calc-kind-on' : ''}`, role: 'tab',
       'aria-selected': String(item.id === kind),

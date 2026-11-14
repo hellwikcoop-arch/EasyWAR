@@ -137,7 +137,7 @@ export function render(ctx) {
     typeSelect.value = d.typeId;
     const flightCard = card('Політ', null,
       el('div', { class: 'nv-grid' },
-        field('Дата', bound(() => dateUk(d.date) || d.date, v => { d.date = v; }, { placeholder: 'дд.мм.рррр', inputMode: 'numeric', maxLength: 10 })),
+        field('Дата', bound(() => (d.date || '').slice(0, 10), v => { d.date = v; }, { type: 'date' })),
         field('Вправа', bound(() => d.exercise, v => { d.exercise = v; }, { placeholder: '№ 14', maxLength: 20 })),
         field('Позивний', bound(() => d.callsign, v => { d.callsign = v; }, { maxLength: 40 })),
         field('Тип ПС', typeSelect),

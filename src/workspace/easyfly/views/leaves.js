@@ -70,7 +70,6 @@ export function render(ctx) {
   root.append(pageHeader({
     crumbs: [{ label: 'EasyFLY' }, { label: 'Відпустки' }],
     title: `Графік відпусток · ${schedule.year}`,
-    subtitle: 'Частини по 15 діб, УБД, проміжок 3–4 місяці, ВЛК і ПМО одразу після відпустки',
     actions: [yearSel, button('Додати відпустку', { variant: 'primary', iconName: 'vnesty', onClick: () => openLeaveForm(ctx) })],
   }));
   if (!data.persons.length) {

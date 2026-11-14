@@ -28,6 +28,5 @@ export function render(ctx) {
       el('div', { class: 'ef-overview' },
         cell('Цей місяць', String(view.month.flights)),
         cell('Цей рік', String(view.year.flights)),
-        cell('Усього', String(view.total.flights)))),
-    el('p', { class: 'ef-glow-quiet', text: 'Живий хронометраж і польотний лист — у розділі «Штурман». Підтверджений день додається до нальоту.' }));
+        cell('Усього', String(view.total.flights)))));
 }

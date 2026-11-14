@@ -29,7 +29,7 @@ test('особистий екран і рівень підготовки: доп
   let data = addPerson(createEmpty(), { callsign: 'Тест-01', role: 'КЕ' }).data;
   const id = data.persons[0].id;
   data = setTraining(data, id, { ids: ['circle', 'site', 'no-such'], custom: ['Свій пункт'] }).data;
-  assert.deepEqual(data.persons[0].training, { ids: ['circle', 'site'], custom: ['Свій пункт'] });
+  assert.deepEqual(data.persons[0].training, { ids: ['circle', 'site'], custom: ['Свій пункт'], instructor: false });
   const rows = lapsingAdmissionRows(data.persons[0], data, '2026-10-20');
   assert.deepEqual(rows.map(row => row.kind.id), ['site']);
   assert.equal(rows[0].admission, null);

@@ -7,7 +7,7 @@ import './easyfly.css';
 import { formatDate } from './fly-core.js';
 import { DEMO_TODAY, createDemo } from './fly-demo.js';
 import {
-  NAV_ITEMS, PHONE_NAV, applyMutation, buildRoute, effectiveSettings, fingerprint, isDirty, navFor, navItemsFor,
+  NAV_ITEMS, PHONE_NAV, applyMutation, backTarget, buildRoute, effectiveSettings, fingerprint, isDirty, navFor, navItemsFor,
   parseRoute, suggestedFileName, todayIso,
 } from './fly-state.js';
 import { createEmpty, parse, serialize } from './fly-store.js';
@@ -409,6 +409,13 @@ export async function mount(container, host) {
     const scroll = parts.main.scrollTop;
     const node = await loadView(route.name);
     if (token !== renderToken || !doc || !parts) return;
+    const target = backTarget(route, doc.data);
+    if (target && node?.prepend) {
+      node.prepend(el('button', {
+        type: 'button', class: 'ef-back',
+        onClick: () => ctx.go(target.name, target.params || {}),
+      }, '‹ Назад'));
+    }
     parts.content.replaceChildren(node);
     parts.main.scrollTop = resetScroll ? 0 : scroll;
     markActive();

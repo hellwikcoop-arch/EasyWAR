@@ -75,6 +75,7 @@ export function openTrainingForm(ctx, personId) {
   const custom = [...(person.training?.custom || [])];
   const errors = errorBox();
   const list = el('div', { class: 'ef-level-list' });
+  const instructorBox = el('input', { type: 'checkbox', checked: person.training?.instructor === true, id: 'ef-level-instructor' });
   const boxes = kinds.map(kind => {
     const box = el('input', { type: 'checkbox', checked: selected.has(kind.id), id: `ef-level-${kind.id}` });
     return { kind, box };
@@ -87,10 +88,12 @@ export function openTrainingForm(ctx, personId) {
       el('button', { type: 'button', class: 'ef-btn ef-btn-ghost', text: 'Прибрати', onClick: () => { custom.splice(index, 1); paintCustom(); } }))));
   };
   paintCustom();
-  list.append(...boxes.map(({ kind, box }) => el('label', { class: 'ef-level-item', for: box.id }, box, el('span', { text: kind.label }))));
+  list.append(
+    ...boxes.map(({ kind, box }) => el('label', { class: 'ef-level-item', for: box.id }, box, el('span', { text: kind.label }))),
+    el('label', { class: 'ef-level-item', for: instructorBox.id }, instructorBox, el('span', { text: 'Інструкторський рівень підготовки' })));
   const save = () => {
     const ids = boxes.filter(item => item.box.checked).map(item => item.kind.id);
-    const result = ctx.mutate(data => setTraining(data, personId, { ids, custom }));
+    const result = ctx.mutate(data => setTraining(data, personId, { ids, custom, instructor: instructorBox.checked }));
     if (!result.ok) { errors.show(result.result.errors); return false; }
     toast('Рівень підготовки збережено. Це довідкова позначка, не допуск до польотів.');
     return true;
@@ -99,7 +102,6 @@ export function openTrainingForm(ctx, personId) {
     title: 'Рівень підготовки',
     content: el('form', { class: 'ef-form', novalidate: true, onSubmit: e => e.preventDefault() },
       errors,
-      el('p', { class: 'ef-hint ef-hint-block', text: 'Позначте допуски, які у вас є, у порядку підготовки. Це лише щоб бачити свій рівень: польотів саме по собі не дозволяє і не забороняє.' }),
       list,
       el('p', { class: 'ef-hint', text: 'Свій пункт' }),
       customHost,

@@ -53,7 +53,7 @@ export function render(ctx) {
           el('span', { text: 'Точки маршруту' })))));
 
     // ── керування: дата, точка, координати ──
-    const dateInput = el('input', { type: 'text', inputmode: 'numeric', maxlength: 10, placeholder: 'дд.мм.рррр', value: dateUk(navSession.sunDate), 'aria-label': 'Дата', autocomplete: 'off' });
+    const dateInput = el('input', { type: 'date', class: 'nv-input', value: navSession.sunDate || '', 'aria-label': 'Дата', autocomplete: 'off' });
     dateInput.addEventListener('change', () => {
       const iso = formatDateIso(dateInput.value);
       if (iso) { navSession.sunDate = iso; paint(); } else dateInput.setAttribute('aria-invalid', 'true');
@@ -121,7 +121,7 @@ export function render(ctx) {
       el('div', { class: 'sm-pairs' }, pair('Схід', m.rise), pair('Захід', m.set), pair('Кульмінація', m.transit), pair('Макс. висота', m.maxAltitudeText)),
       el('div', { class: `sm-onb ${model.onb.favourable ? 'sm-onb-good' : 'sm-onb-no'}`, role: 'status' },
         el('span', { text: model.onb.favourable ? 'Сприятлива ніч для ОНБ' : 'Несприятлива ніч для ОНБ' })),
-      el('p', { class: 'sm-onb-note', text: `Довідково: освітленість ${model.onb.illumination} % ${model.onb.favourable ? '≥' : '<'} порогу ${model.onb.threshold} % (поріг задається в Налаштуваннях частини). Це підказка, а не допуск.${model.onb.moonInDarkText ? ` Місяць над горизонтом у темряві: ${model.onb.moonInDarkText}.` : ''}` }));
+      model.onb.moonInDarkText ? el('p', { class: 'sm-onb-note', text: model.onb.moonInDarkText }) : null);
     root.append(el('div', { class: 'sm-cards' }, sunCard, moonCard));
 
     // ── смужка доби ──

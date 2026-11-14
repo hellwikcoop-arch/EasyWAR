@@ -14,7 +14,7 @@ import {
   normalizeDate, normalizeFlight, ovpState, parseImportRows, personItems, renewAdmission,
   renewalHint, resolveSettings, shiftSummary, toIso, MEDICAL_KINDS, flightBlockers,
   LEAVE_KIND_IDS, LEAVE_PART_DAYS, LEAVE_STATUSES, hasSubordinates, leaveDays, leaveKindById, leaveTotals, leaveWarnings, medicalAfterLeave,
-  wholeMonthsBetween, buildReminders, deadlineStatus, PMO_MONTHS, VLK_MONTHS, KE_PERIOD_IDS,
+  wholeMonthsBetween, buildReminders, deadlineStatus, KE_PERIOD_IDS,
 } from './fly-core.js';
 import { TIMING_NOTE, applyTimingEvent, confirmTimingRecord, editTimingEvent, timingFlights } from './timing-core.js';
 import {
@@ -119,6 +119,17 @@ export function navFor(route) {
   if (route?.name === 'pilot') return 'pilots';
   if (route?.name === 'timing' || route?.name === 'sheet') return 'navigator';
   return route?.name || 'summary';
+}
+
+/** Куди веде «Назад» з вкладеного екрана. Головні вкладки кнопки не мають. */
+export function backTarget(route, data) {
+  const name = route?.name;
+  if (name === 'timing' || name === 'sheet') return { name: 'navigator', params: {} };
+  if (name === 'pilot' && hasSubordinates(data)) return { name: 'pilots', params: {} };
+  if (['chrono', 'sunmoon', 'import', 'reminders', 'leaves', 'settings', 'about'].includes(name)) {
+    return { name: 'more', params: {} };
+  }
+  return null;
 }
 
 // ───────────────────────────── Дата, «незбережені зміни» ─────────────────────────────
@@ -339,7 +350,8 @@ export function setTraining(data, personId, input = {}) {
     if (custom.length >= MAX_TRAINING_CUSTOM) return fail(`Своїх пунктів може бути не більше ${MAX_TRAINING_CUSTOM}.`);
     if (!custom.includes(label)) custom.push(label);
   }
-  return { ok: true, data: { ...data, persons: upsertById(data.persons, { ...person, training: { ids, custom } }) } };
+  const instructor = input.instructor === undefined ? person.training?.instructor === true : input.instructor === true;
+  return { ok: true, data: { ...data, persons: upsertById(data.persons, { ...person, training: { ids, custom, instructor } }) } };
 }
 
 /** Видаляє запис із колекції перевірок (потрібне підтвердження). */
@@ -532,6 +544,26 @@ export function logTimingEvent(data, date, event) {
   return { ok: true, id: opened.id, data: { ...opened.data, timings: upsertById(opened.data.timings, applied.timing) } };
 }
 
+/** Поля дня хронометражу: номер вправи, пасажири, примітка, день/ніч. */
+export function setTimingMeta(data, id, patch = {}) {
+  const timing = (data.timings || []).find(item => item.id === id);
+  if (!timing) return fail('Хронометраж не знайдено.');
+  const next = { ...timing };
+  if (patch.exercise !== undefined) next.exercise = String(patch.exercise || '').trim();
+  if (patch.remark !== undefined) next.remark = String(patch.remark || '').trim().slice(0, 200);
+  if (patch.dayNight === 'night' || patch.dayNight === 'day') next.dayNight = patch.dayNight;
+  if (patch.passengers !== undefined) {
+    const raw = String(patch.passengers ?? '').trim();
+    if (!raw) next.passengers = null;
+    else {
+      const count = Number(raw);
+      if (!Number.isInteger(count) || count < 0 || count > 99) return fail('Пасажири: ціле число від 0 до 99.');
+      next.passengers = count;
+    }
+  }
+  return { ok: true, data: { ...data, timings: upsertById(data.timings, next) } };
+}
+
 export function setTimingExercise(data, id, exercise) {
   const timing = (data.timings || []).find(item => item.id === id);
   if (!timing) return fail('Хронометраж не знайдено.');
@@ -549,12 +581,18 @@ export function patchTimingEvent(data, timingId, eventId, patch) {
  * Підтверджує день: примітка «виконання польотних завдань» і запис завершених польотів у книжку.
  * Повторне підтвердження нічого не дублює.
  */
-export function confirmTiming(data, id, personId = null) {
-  const timing = (data.timings || []).find(item => item.id === id);
+export function confirmTiming(data, id, personId = null, meta = null) {
+  let source = data;
+  if (meta) {
+    const saved = setTimingMeta(source, id, meta);
+    if (!saved.ok) return saved;
+    source = saved.data;
+  }
+  const timing = (source.timings || []).find(item => item.id === id);
   if (!timing) return fail('Хронометраж не знайдено.');
-  if (timing.status === 'confirmed') return { ok: true, data, id };
+  if (timing.status === 'confirmed') return { ok: true, data: source, id };
   const confirmed = confirmTimingRecord(timing);
-  let next = { ...data, timings: upsertById(data.timings, confirmed) };
+  let next = { ...source, timings: upsertById(source.timings, confirmed) };
   const person = (personId ? next.persons.find(item => item.id === personId) : null) || next.persons[0];
   let logged = Boolean(person);
   if (person) {
@@ -891,8 +929,7 @@ export function profileCards(person, data, today) {
     const last = latestMedical(person, kind);
     const card = { key: `medical:${kind}`, title: kind, icon: kind === 'ВЛК' ? 'vlk' : 'pmo', status: null, blocks: false, lines: [], rows: [], footer: null, footerStatus: null, entryKind: `medical:${kind}` };
     if (!med) { cards.push(card); continue; }
-    const months = kind === 'ВЛК' ? VLK_MONTHS : PMO_MONTHS;
-    card.lines.push(last ? `Остання дата: ${formatDate(last)} · раз на ${months} міс.` : `Дата не внесена · раз на ${months} міс.`);
+    card.lines.push(last ? `Остання дата: ${formatDate(last)}` : 'Дата не внесена');
     const own = kind === 'ВЛК' ? med.vlkDue : med.pmoDue;
     if (kind === 'ПМО' && med.pmoDue >= med.vlkDue) {
       // черговий медогляд закриє ВЛК: окремого строку ПМО до неї немає
@@ -915,7 +952,7 @@ export function profileCards(person, data, today) {
   const art = article205State(person, today, settings);
   const artCard = { key: 'article205', title: 'Стаття 205', icon: 'stattya-205', status: art?.status ?? null, blocks: Boolean(art?.blocks), lines: [], rows: [], footer: null, footerStatus: null, entryKind: 'article205' };
   if (art) {
-    artCard.lines.push(`Остання дата: ${formatDate(art.date)} · раз на ${settings.article205Months} міс.`);
+    artCard.lines.push(`Остання дата: ${formatDate(art.date)}`);
     artCard.footerStatus = art.status;
     artCard.footer = art.status === STATUS.OVERDUE
       ? `Прострочено з ${formatDate(art.dueDate)} · ${leftPhrase(art.status, art.daysLeft)}`
@@ -928,7 +965,7 @@ export function profileCards(person, data, today) {
   const ovp = ovpState(person, today, settings);
   const ovpCard = { key: 'ovp', title: 'ОВП', icon: 'ovp', status: ovp?.status ?? null, blocks: Boolean(ovp?.blocks), lines: [], rows: [], footer: null, footerStatus: null, entryKind: 'ovp' };
   if (ovp) {
-    ovpCard.lines.push(`Остання дата: ${formatDate(ovp.date)} · термін ${ovp.months} міс.`);
+    ovpCard.lines.push(`Остання дата: ${formatDate(ovp.date)}`);
     ovpCard.footerStatus = ovp.status;
     ovpCard.footer = ovp.status === STATUS.OVERDUE
       ? `Прострочено з ${formatDate(ovp.dueDate)} · ${leftPhrase(ovp.status, ovp.daysLeft)}`

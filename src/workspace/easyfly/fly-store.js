@@ -271,6 +271,9 @@ export function validate(data) {
         else (p.training.custom || []).forEach((label, j) => {
           if (typeof label !== 'string' || !label.trim() || label.length > 80) fail(`${at}.training.custom[${j}]`, 'Свій пункт — текст до 80 символів.');
         });
+        if (p.training.instructor !== undefined && typeof p.training.instructor !== 'boolean') {
+          fail(`${at}.training.instructor`, 'Інструкторський рівень — так або ні.');
+        }
       }
     }
     if (p.ovp !== undefined && p.ovp !== null) dateField(`${at}.ovp.date`, p.ovp?.date);
