@@ -9,3 +9,4 @@ import './local-profiles.js';
 import './phone-export.js';
 import './guides-launcher.js';
 import './workspace-launcher.js';
+import './onboarding.js';
