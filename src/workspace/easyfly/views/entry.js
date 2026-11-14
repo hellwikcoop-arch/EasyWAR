@@ -6,8 +6,6 @@ import {
   dateInput, el, errorBox, field, notice, numberInput, openModal, readDate, select, textInput, toast,
 } from '../ui.js';
 
-const ARTICLE_DIRECTIONS = [['ao', 'АО'], ['reo', 'РЕО'], ['vd_sd', 'ВД (СД)'], ['aoz', 'АОз']];
-
 function pilotSelect(ctx, personId) {
   return select(ctx.data.persons.map(p => ({ value: p.id, label: p.callsign })), personId || ctx.data.persons[0]?.id || '');
 }
@@ -33,7 +31,7 @@ export function openEntry(ctx, opts = {}) {
 
   // ── поля польоту
   const date = dateInput(opts.date || ctx.today);
-  const exercise = textInput('', { placeholder: 'Наприклад, 14', maxLength: 8 });
+  const exercise = textInput('', { placeholder: '14, БП або СБП', maxLength: 8 });
   exercise.setAttribute('list', 'ef-exercises');
   const exerciseList = el('datalist', { id: 'ef-exercises' },
     Object.entries(EXERCISE_NAMES).map(([n, name]) => el('option', { value: n, label: `№ ${n} · ${name}` })));
@@ -49,11 +47,9 @@ export function openEntry(ctx, opts = {}) {
   // ── поля перевірки
   const kinds = () => entryKinds(ctx.data.persons.find(p => p.id === pilot.value) || ctx.data.persons[0]);
   const kindSel = select(kinds().map(k => ({ value: k.id, label: k.label })), opts.kind || 'medical:ВЛК');
-  const direction = select(ARTICLE_DIRECTIONS.map(([value, label]) => ({ value, label })), 'ao');
   const checkDate = dateInput(opts.date || ctx.today);
   const by = textInput('', { placeholder: 'Хто проводив (необов’язково)', maxLength: 60 });
   const checkNote = textInput('', { placeholder: 'Необов’язково', maxLength: 200 });
-  const directionField = field('Напрям Статті 205', direction);
 
   const refreshKinds = () => {
     const current = kindSel.value;
@@ -62,7 +58,6 @@ export function openEntry(ctx, opts = {}) {
     syncCheck();
   };
   function syncCheck() {
-    directionField.root.hidden = kindSel.value !== 'article205';
     by.closest('.ef-field').hidden = kindSel.value !== 'article205';
   }
   pilot.addEventListener('change', () => { refreshKinds(); });
@@ -74,7 +69,7 @@ export function openEntry(ctx, opts = {}) {
     field('Частина доби', dayNight).root, field('Метеоумови', meteo).root, field('Характер польоту', note).root,
     field('Екіпаж', crewField, { wide: true }).root, exerciseList);
   const checkPane = el('div', { class: 'ef-form-grid ef-form-grid-3' },
-    field('Вид перевірки *', kindSel).root, directionField.root, field('Дата *', checkDate, { hint: 'дд.мм.рррр' }).root,
+    field('Вид перевірки *', kindSel).root, field('Дата *', checkDate, { hint: 'дд.мм.рррр' }).root,
     field('Хто проводив', by).root, field('Примітка', checkNote).root);
   const pilotRow = el('div', { class: 'ef-form-grid' }, field('Пілот', pilot).root);
 
@@ -130,7 +125,7 @@ export function openEntry(ctx, opts = {}) {
     const iso = normalizeDate(checkDate.value);
     if (!iso) { errors.show('Вкажіть дату перевірки у форматі дд.мм.рррр.'); return false; }
     const result = ctx.mutate(data => recordCheck(data, personId, {
-      kind: kindSel.value, date: iso, direction: direction.value, acceptedBy: by.value, note: checkNote.value,
+      kind: kindSel.value, date: iso, acceptedBy: by.value, note: checkNote.value,
     }));
     if (!result.ok) { errors.show(result.result.errors); return false; }
     toast(`Перевірку внесено (${formatDate(iso)}). Це самооблік без затвердження.`);

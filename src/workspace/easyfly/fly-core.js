@@ -178,6 +178,16 @@ function maxDate(dates) {
 // ───────────────────────────── Налаштування частини ─────────────────────────────
 
 /**
+ * Періоди колонок таблиці КЕ, яких у довіднику перевірок ще не було окремим строком.
+ * 12 місяців — припущення для редагування, не норма з документа.
+ */
+export const KE_ASSUMED_MONTHS = 12;
+export const KE_PERIOD_IDS = Object.freeze([
+  'ke_technique', 'ke_navigation', 'ke_combat', 'duty_leave',
+  'ke_sim_aircraft', 'ke_sim_egress', 'instructor_seat',
+]);
+
+/**
  * Типові налаштування частини. ОВП: періодичність 12 міс і блокування допуску — припущення
  * (власник не підтвердив), тому винесені в налаштування.
  */
@@ -192,23 +202,39 @@ export const DEFAULT_SETTINGS = Object.freeze({
   onbMaxShiftMin: 180,
   onbMaxFlightMin: 120,
   reminderDays: Object.freeze([30, 14, 7]),
+  /** Облік підлеглих (зведення командира). За замовчуванням вимкнено: застосунок особистий. */
+  subordinates: false,
+  /** Перевизначені періоди колонок КЕ (місяці). Порожньо — лишається припущення. */
+  keMonths: Object.freeze({}),
 });
 
 /** Накладає часткові налаштування на типові; некоректні значення ігноруються. */
 export function resolveSettings(partial) {
   const input = partial && typeof partial === 'object' ? partial : {};
-  const out = { ...DEFAULT_SETTINGS, reminderDays: [...DEFAULT_SETTINGS.reminderDays] };
+  const out = { ...DEFAULT_SETTINGS, reminderDays: [...DEFAULT_SETTINGS.reminderDays], keMonths: {} };
   const intKeys = ['soonDays', 'ovpMonths', 'article205Months', 'jumpsPerYear', 'jumpsMaxGapMonths',
     'aerobaticsLimit', 'onbMaxShiftMin', 'onbMaxFlightMin'];
   for (const key of intKeys) {
     if (Number.isInteger(input[key]) && input[key] > 0) out[key] = input[key];
   }
   if (typeof input.ovpBlocks === 'boolean') out.ovpBlocks = input.ovpBlocks;
+  if (typeof input.subordinates === 'boolean') out.subordinates = input.subordinates;
+  if (input.keMonths && typeof input.keMonths === 'object' && !Array.isArray(input.keMonths)) {
+    for (const id of KE_PERIOD_IDS) {
+      const value = input.keMonths[id];
+      if (Number.isInteger(value) && value > 0 && value <= 60) out.keMonths[id] = value;
+    }
+  }
   if (Array.isArray(input.reminderDays)) {
     const days = input.reminderDays.filter(d => Number.isInteger(d) && d > 0);
     if (days.length) out.reminderDays = [...new Set(days)].sort((a, b) => b - a);
   }
   return out;
+}
+
+/** Чи увімкнено облік підлеглих. Немає поля або воно хибне — вимкнено. */
+export function hasSubordinates(data) {
+  return resolveSettings(data?.unit?.settings).subordinates === true;
 }
 
 // ───────────────────────────── Ролі, класи, типи ПС ─────────────────────────────
@@ -239,35 +265,174 @@ export function classGroup(classQual) {
 // ───────────────────────────── Медицина: ВЛК ↔ ПМО ─────────────────────────────
 
 export const MEDICAL_KINDS = Object.freeze(['ВЛК', 'ПМО']);
-/** ВЛК і ПМО чергуються з кроком 6 місяців. */
-export const MEDICAL_STEP_MONTHS = 6;
+/** ВЛК — раз на 12 місяців; ПМО — раз на 6 місяців (ВЛК зараховується і як черговий медогляд). */
+export const VLK_MONTHS = 12;
+export const PMO_MONTHS = 6;
+/** Крок між медичними подіями (півроку); лишено для сумісності. */
+export const MEDICAL_STEP_MONTHS = PMO_MONTHS;
 
 export function oppositeMedicalKind(kind) {
   return kind === 'ВЛК' ? 'ПМО' : 'ВЛК';
 }
 
 /**
- * Стан медицини за останньою подією {kind, date}: наступна подія — протилежного виду через
- * 6 міс. Прострочена (ВЛК чи ПМО) блокує допуск. Немає подій — null.
- * @returns {{status, lastKind, lastDate, nextKind, dueDate, daysLeft, blocks}|null}
+ * Найближчий медичний строк за останніми датами ВЛК і ПМО. ВЛК діє 12 місяців; ПМО — через
+ * 6 місяців після останнього медогляду (ВЛК або ПМО). Якщо ВЛК ще не внесено, її строк береться
+ * як 6 місяців після останнього ПМО. За однакової дати першою йде ВЛК (вона покриває й ПМО).
+ * @returns {{kind, dueDate, vlkDue, pmoDue}|null}
  */
-export function medicalState(person, today, soonDays = SOON_DAYS) {
+export function medicalNext(lastVlk, lastPmo) {
+  if (!lastVlk && !lastPmo) return null;
+  const lastAny = !lastPmo || (lastVlk && lastVlk > lastPmo) ? lastVlk : lastPmo;
+  const vlkDue = lastVlk ? addMonths(lastVlk, VLK_MONTHS) : addMonths(lastPmo, PMO_MONTHS);
+  const pmoDue = addMonths(lastAny, PMO_MONTHS);
+  const kind = vlkDue <= pmoDue ? 'ВЛК' : 'ПМО';
+  return { kind, dueDate: kind === 'ВЛК' ? vlkDue : pmoDue, vlkDue, pmoDue };
+}
+
+/** Останні дати ВЛК і ПМО пілота: { vlk, pmo } (ISO або null). */
+export function lastMedicalDates(person) {
   const events = (Array.isArray(person?.medical) ? person.medical : [])
     .map(event => ({ kind: event?.kind, date: normalizeDate(event?.date) }))
     .filter(event => MEDICAL_KINDS.includes(event.kind) && event.date);
-  if (!events.length) return null;
-  const last = events.reduce((best, event) => (event.date > best.date ? event : best));
-  const dueDate = addMonths(last.date, MEDICAL_STEP_MONTHS);
-  const status = deadlineStatus(dueDate, today, soonDays);
+  const latest = kind => events.filter(e => e.kind === kind).map(e => e.date).sort().at(-1) || null;
+  return { vlk: latest('ВЛК'), pmo: latest('ПМО') };
+}
+
+/**
+ * Стан медицини: ВЛК раз на 12 місяців, ПМО раз на 6 місяців. Найближчий строк (ВЛК чи ПМО)
+ * визначає статус; прострочений блокує допуск. Немає подій — null.
+ * @returns {{status, lastKind, lastDate, nextKind, dueDate, vlkDue, pmoDue, daysLeft, blocks}|null}
+ */
+export function medicalState(person, today, soonDays = SOON_DAYS) {
+  const { vlk, pmo } = lastMedicalDates(person);
+  const next = medicalNext(vlk, pmo);
+  if (!next) return null;
+  const lastIsVlk = !pmo || (vlk && vlk > pmo);
+  const status = deadlineStatus(next.dueDate, today, soonDays);
   return {
     status,
-    lastKind: last.kind,
-    lastDate: last.date,
-    nextKind: oppositeMedicalKind(last.kind),
-    dueDate,
-    daysLeft: daysLeft(dueDate, today),
+    lastKind: lastIsVlk ? 'ВЛК' : 'ПМО',
+    lastDate: lastIsVlk ? vlk : pmo,
+    nextKind: next.kind,
+    dueDate: next.dueDate,
+    vlkDue: next.vlkDue,
+    pmoDue: next.pmoDue,
+    daysLeft: daysLeft(next.dueDate, today),
     blocks: status === STATUS.OVERDUE,
   };
+}
+
+// ───────────────────────────── Відпустки ─────────────────────────────
+
+/** Види відпусток: основна (частинами по 15 діб), УБД (додаткова), інша. */
+export const LEAVE_KINDS = Object.freeze([
+  { id: 'basic', label: 'Основна', short: 'Осн.' },
+  { id: 'ubd', label: 'УБД', short: 'УБД' },
+  { id: 'other', label: 'Інша', short: 'Інша' },
+]);
+export const LEAVE_KIND_IDS = Object.freeze(LEAVE_KINDS.map(k => k.id));
+export const LEAVE_STATUSES = Object.freeze(['planned', 'approved', 'taken']);
+export const LEAVE_STATUS_LABELS = Object.freeze({ planned: 'Заплановано', approved: 'Погоджено', taken: 'Використано' });
+/** Типова тривалість частини основної відпустки, діб (включно з обома датами). */
+export const LEAVE_PART_DAYS = 15;
+/** Бажаний проміжок між відпустками: 3–4 місяці. Менше 3 — застереження. */
+export const LEAVE_GAP_MIN_MONTHS = 3;
+export const LEAVE_GAP_MAX_MONTHS = 4;
+/** Строк ВЛК/ПМО в межах стількох діб після кінця відпустки — «одразу після відпустки». */
+export const LEAVE_MEDICAL_WINDOW_DAYS = 45;
+
+export function leaveKindById(id) {
+  return LEAVE_KINDS.find(k => k.id === id) || null;
+}
+
+/** Тривалість відпустки в добах, обидві дати включно; null, якщо дати некоректні або кінець раніше початку. */
+export function leaveDays(from, to) {
+  const a = normalizeDate(from);
+  const b = normalizeDate(to);
+  if (!a || !b || b < a) return null;
+  return diffDays(a, b) + 1;
+}
+
+/** Чи перетинаються два проміжки дат (включно). */
+export function leavesOverlap(a, b) {
+  if (!a?.from || !a?.to || !b?.from || !b?.to) return false;
+  return a.from <= b.to && b.from <= a.to;
+}
+
+/** Кількість повних місяців від `from` до `to` (0, якщо to раніше за from). */
+export function wholeMonthsBetween(from, to) {
+  const a = normalizeDate(from);
+  const b = normalizeDate(to);
+  if (!a || !b || b < a) return 0;
+  let n = 0;
+  while (addMonths(a, n + 1) <= b) n += 1;
+  return n;
+}
+
+/**
+ * Застереження до відпустки на тлі інших відпусток того ж пілота: частина основної довша за
+ * 15 діб; перетин з іншою відпусткою; менше 3 місяців після попередньої. Порожній масив — усе гаразд.
+ */
+export function leaveWarnings(leave, personLeaves) {
+  const warnings = [];
+  const days = leaveDays(leave?.from, leave?.to);
+  if (days === null) return warnings;
+  if (leave.kind === 'basic' && days > LEAVE_PART_DAYS) {
+    warnings.push(`Частина основної відпустки довша за ${LEAVE_PART_DAYS} діб (${days}).`);
+  }
+  const others = (personLeaves || []).filter(l => l && l.id !== leave.id && normalizeDate(l.from) && normalizeDate(l.to));
+  const overlap = others.find(l => leavesOverlap(leave, l));
+  if (overlap) warnings.push(`Перетинається з відпусткою ${formatDate(overlap.from)}–${formatDate(overlap.to)}.`);
+  const previous = others.filter(l => l.to < leave.from).sort((x, y) => (x.to < y.to ? 1 : -1))[0];
+  if (previous) {
+    const months = wholeMonthsBetween(previous.to, leave.from);
+    if (months < LEAVE_GAP_MIN_MONTHS) {
+      warnings.push(`Менше ${LEAVE_GAP_MIN_MONTHS} місяців після попередньої відпустки (закінчилась ${formatDate(previous.to)}).`);
+    }
+  }
+  return warnings;
+}
+
+/**
+ * ВЛК/ПМО біля відпустки: від останніх дат строки переносяться вперед (ВЛК раз на 12 місяців,
+ * ПМО раз на 6; вважається, що кожен огляд проходять у свій строк) до першого строку не раніше
+ * ніж за LEAVE_MEDICAL_WINDOW_DAYS до початку відпустки. `position`: 'before' — строк перед
+ * відпусткою (пройти до неї), 'during' — припадає на відпустку, 'after' — у межах вікна після
+ * неї (пройти одразу після), 'later' — далеко. `near` — усе, крім 'later'. Немає подій — null.
+ * @returns {{kind, dueDate, daysAfterEnd, position, near}|null}
+ */
+export function medicalAfterLeave(person, leave) {
+  const from = normalizeDate(leave?.from);
+  const to = normalizeDate(leave?.to);
+  if (!from || !to) return null;
+  let { vlk, pmo } = lastMedicalDates(person);
+  let next = medicalNext(vlk, pmo);
+  if (!next) return null;
+  const floor = addDays(from, -LEAVE_MEDICAL_WINDOW_DAYS);
+  for (let i = 0; i < 80 && next.dueDate < floor; i += 1) {
+    if (next.kind === 'ВЛК') vlk = next.dueDate; else pmo = next.dueDate;
+    next = medicalNext(vlk, pmo);
+  }
+  const { kind, dueDate } = next;
+  const daysAfterEnd = diffDays(to, dueDate);
+  const position = dueDate < from ? 'before' : dueDate <= to ? 'during' : daysAfterEnd <= LEAVE_MEDICAL_WINDOW_DAYS ? 'after' : 'later';
+  return { kind, dueDate, daysAfterEnd, position, near: position !== 'later' };
+}
+
+/** Підсумок відпусток пілота за рік: діб за видами, кількість частин основної. */
+export function leaveTotals(personLeaves, year) {
+  const totals = { basicDays: 0, ubdDays: 0, otherDays: 0, basicParts: 0, count: 0 };
+  for (const leave of personLeaves || []) {
+    if (year && String(leave.from || '').slice(0, 4) !== String(year)) continue;
+    const days = leaveDays(leave.from, leave.to);
+    if (days === null) continue;
+    totals.count += 1;
+    if (leave.kind === 'basic') { totals.basicDays += days; totals.basicParts += 1; }
+    else if (leave.kind === 'ubd') totals.ubdDays += days;
+    else totals.otherDays += days;
+  }
+  return totals;
 }
 
 // ───────────────────────────── Стаття 205 ПРІАЗДАУ ─────────────────────────────
@@ -289,44 +454,60 @@ export function article205Directions(aircraftKind) {
 }
 
 /**
- * Стан Статті 205 (період `article205Months`, типово 6 міс). «Дійсно» лише коли здані всі
- * чотири напрями; «скоро»/«прострочено» — за найранішим строком. Напрям без дати — не здано
- * (прострочено, missing). Якщо про Статтю 205 взагалі нічого не внесено — null (невідомо).
+ * Дата Статті 205. Новий запис — поле `date`. Старі файли тримають напрями (АО, РЕО, …):
+ * береться найраніша з наявних дат, напрям без дати не робить перевірку простроченою.
  */
-export function article205State(person, today, settings = DEFAULT_SETTINGS) {
+export function article205CheckedOn(person) {
   const data = person?.article205;
   if (!data || typeof data !== 'object') return null;
-  const hasAny = ARTICLE_205_IDS.some(id => normalizeDate(data[id]?.date));
-  if (!hasAny) return null;
+  const direct = normalizeDate(data.date);
+  if (direct) return { date: direct, acceptedBy: typeof data.acceptedBy === 'string' ? data.acceptedBy : null, legacy: false };
+  let best = null;
+  for (const id of ARTICLE_205_IDS) {
+    const date = normalizeDate(data[id]?.date);
+    if (!date) continue;
+    if (!best || date < best.date) best = { date, id, acceptedBy: data[id]?.acceptedBy ?? null };
+  }
+  return best ? { date: best.date, acceptedBy: best.acceptedBy, legacy: true, legacyId: best.id } : null;
+}
+
+/**
+ * Стан Статті 205 (період `article205Months`, типово 6 міс) за однією датою.
+ * Немає жодної дати — null (невідомо), нічого не вигадується.
+ */
+export function article205State(person, today, settings = DEFAULT_SETTINGS) {
+  const checked = article205CheckedOn(person);
+  if (!checked) return null;
+  const data = person.article205;
   const months = settings.article205Months ?? DEFAULT_SETTINGS.article205Months;
   const soonDays = settings.soonDays ?? SOON_DAYS;
+  const dueDate = addMonths(checked.date, months);
+  const status = deadlineStatus(dueDate, today, soonDays);
   const directions = ARTICLE_205_IDS.map(id => {
     const date = normalizeDate(data[id]?.date);
-    const dueDate = date ? addMonths(date, months) : null;
+    const due = date ? addMonths(date, months) : null;
     return {
       id,
       label: article205Label(id, person.aircraftKind),
       date,
       acceptedBy: data[id]?.acceptedBy ?? null,
-      dueDate,
-      daysLeft: dueDate ? daysLeft(dueDate, today) : null,
-      status: date ? deadlineStatus(dueDate, today, soonDays) : STATUS.OVERDUE,
+      dueDate: due,
+      daysLeft: due ? daysLeft(due, today) : null,
+      status: date ? deadlineStatus(due, today, soonDays) : null,
       missing: !date,
     };
-  });
-  const missing = directions.filter(d => d.missing);
-  const known = directions.filter(d => d.dueDate);
-  const earliest = known.reduce((best, d) => (!best || d.dueDate < best.dueDate ? d : best), null);
-  let status;
-  if (missing.length) status = STATUS.OVERDUE;
-  else status = earliest.status;
+  }).filter(d => d.date);
+  const earliest = directions.reduce((best, d) => (!best || d.dueDate < best.dueDate ? d : best), null);
   return {
     status,
+    date: checked.date,
+    acceptedBy: checked.acceptedBy,
+    legacy: checked.legacy,
     directions,
-    missing: missing.map(d => d.label),
+    missing: [],
     earliest: earliest ? { id: earliest.id, label: earliest.label } : null,
-    dueDate: missing.length ? null : earliest.dueDate,
-    daysLeft: missing.length ? null : earliest.daysLeft,
+    dueDate,
+    daysLeft: daysLeft(dueDate, today),
     blocks: status === STATUS.OVERDUE,
   };
 }
@@ -404,6 +585,13 @@ export const CHECK_TYPES = Object.freeze([
   Object.freeze({ id: 'instructor_seat', label: 'Інструктор: з інструкторського сидіння', roles: ['КЕ', 'Борттехнік'], months: 12, instructorOnly: true }),
   Object.freeze({ id: 'lsh_technique', label: 'Техніка пілотування зі свого робочого місця', roles: ['ЛШ'], months: { high: 6, low: 3 } }),
   Object.freeze({ id: 'flight_engineer', label: 'Планова перевірка борттехніка', roles: ['Борттехнік'], months: 12 }),
+  // Колонки таблиці КЕ без окремого строку в довіднику вище. Період — припущення, польотів не блокує.
+  Object.freeze({ id: 'ke_technique', label: 'Техніка пілотування', roles: ['КЕ'], months: KE_ASSUMED_MONTHS, assumed: true, blocks: false }),
+  Object.freeze({ id: 'ke_navigation', label: 'Навігація', roles: ['КЕ'], months: KE_ASSUMED_MONTHS, assumed: true, blocks: false }),
+  Object.freeze({ id: 'ke_combat', label: 'Бойове застосування', roles: ['КЕ'], months: KE_ASSUMED_MONTHS, assumed: true, blocks: false }),
+  Object.freeze({ id: 'duty_leave', label: 'Чергова відпустка', roles: ['КЕ'], months: KE_ASSUMED_MONTHS, assumed: true, blocks: false }),
+  Object.freeze({ id: 'ke_sim_aircraft', label: 'Заліковий тренаж на авіаційній техніці', roles: ['КЕ'], months: KE_ASSUMED_MONTHS, assumed: true, blocks: false }),
+  Object.freeze({ id: 'ke_sim_egress', label: 'Заліковий тренаж з покидання повітряного судна', roles: ['КЕ'], months: KE_ASSUMED_MONTHS, assumed: true, blocks: false }),
 ]);
 
 export function checkTypeById(id) {
@@ -417,14 +605,27 @@ function resolveMonths(months, classQual) {
 
 /** Перевірки, що діють для людини: за роллю, класом, ознакою інструктора. */
 export function checkTypesForPerson(person) {
-  return CHECK_TYPES
+  const list = CHECK_TYPES
     .filter(type => type.roles.includes(person?.role) && (!type.instructorOnly || person?.instructor === true))
     .map(type => ({
       id: type.id,
       label: type.label,
       months: resolveMonths(type.months, person?.classQual),
-      blocks: true,
+      blocks: type.blocks !== false,
+      assumed: type.assumed === true,
     }));
+  // Колонка «з інструкторського сидіння» є в таблиці кожного КЕ. Для інструктора лишається
+  // чинний строк із довідника; для решти КЕ — той самий період як припущення, без блокування.
+  if (person?.role === 'КЕ' && !list.some(type => type.id === 'instructor_seat')) {
+    list.push({
+      id: 'instructor_seat',
+      label: 'Техніка пілотування з інструкторського сидіння',
+      months: 12,
+      blocks: false,
+      assumed: true,
+    });
+  }
+  return list;
 }
 
 /**
@@ -433,16 +634,99 @@ export function checkTypesForPerson(person) {
  * checks: [{personId, kind, date}].
  */
 export function checkStates(person, checks, today, settings = DEFAULT_SETTINGS) {
+  const resolved = resolveSettings(settings);
   const own = (Array.isArray(checks) ? checks : []).filter(check => check?.personId === person?.id);
   return checkTypesForPerson(person).map(type => {
+    const override = type.assumed && Number.isInteger(resolved.keMonths?.[type.id]) ? resolved.keMonths[type.id] : null;
+    const months = override ?? type.months;
     const lastDate = maxDate(own.filter(check => check.kind === type.id).map(check => check.date));
-    const dueDate = lastDate ? addMonths(lastDate, type.months) : null;
+    const dueDate = lastDate ? addMonths(lastDate, months) : null;
     return {
       ...type,
+      months,
+      assumed: type.assumed === true && override === null,
       lastDate,
       dueDate,
       daysLeft: dueDate ? daysLeft(dueDate, today) : null,
-      status: dueDate ? deadlineStatus(dueDate, today, settings.soonDays ?? SOON_DAYS) : null,
+      status: dueDate ? deadlineStatus(dueDate, today, resolved.soonDays ?? SOON_DAYS) : null,
+    };
+  });
+}
+
+/** Підпис стану колонки КЕ: чинне, скоро, прострочено або немає даних. */
+export function keStatusLabel(status) {
+  return { valid: 'чинне', soon: 'скоро', overdue: 'прострочено' }[status] || 'немає даних';
+}
+
+const KE_BOARD = Object.freeze([
+  ['ke_technique', 'Техніка пілотування'],
+  ['instr_landing', 'Захід за приладами'],
+  ['instr_backup', 'Техніка пілотування за дублюючими приладами'],
+  ['ke_navigation', 'Навігація'],
+  ['ke_combat', 'Бойове застосування'],
+  ['engine_failure', 'Техніка пілотування при імітації відмови двигуна'],
+  ['instructor_seat', 'Техніка пілотування з інструкторського сидіння'],
+  ['duty_leave', 'Чергова відпустка'],
+  ['ke_sim_aircraft', 'Заліковий тренаж на авіаційній техніці'],
+  ['ke_sim_egress', 'Заліковий тренаж з покидання повітряного судна'],
+  ['jumps', 'Парашутні стрибки'],
+]);
+
+/**
+ * Колонки таблиці комісування для ролі КЕ. Інші ролі — порожній список (їхній набір перевірок не змінюється).
+ * Немає дати — status null («немає даних»), не прострочено.
+ */
+export function keBoard(person, data, today) {
+  if (person?.role !== 'КЕ') return [];
+  const settings = resolveSettings(data?.unit?.settings);
+  const byId = new Map(checkStates(person, data?.checks, today, settings).map(state => [state.id, state]));
+  return KE_BOARD.map(([id, label]) => {
+    if (id === 'jumps') {
+      const jumps = jumpsState(person, today, settings);
+      const exempt = jumps?.status === 'exempt';
+      return {
+        id, label,
+        lastDate: jumps?.lastDate || null,
+        months: settings.jumpsMaxGapMonths,
+        assumed: false,
+        dueDate: exempt ? null : (jumps?.dueDate || null),
+        status: exempt ? 'valid' : (jumps?.status || null),
+        blocks: Boolean(jumps?.blocks),
+        daysLeft: exempt ? null : (jumps?.daysLeft ?? null),
+        entryKind: 'jump',
+        note: exempt ? 'тимчасово звільнено' : null,
+      };
+    }
+    if (id === 'duty_leave') {
+      const state = byId.get(id);
+      const leaveEnd = maxDate((data?.leaves || [])
+        .filter(leave => leave?.personId === person.id && leave.to && (!today || leave.to <= today))
+        .map(leave => leave.to));
+      const lastDate = maxDate([state?.lastDate, leaveEnd]);
+      const months = state?.months ?? KE_ASSUMED_MONTHS;
+      const assumed = state ? state.assumed !== false : true;
+      const dueDate = lastDate ? addMonths(lastDate, months) : null;
+      const status = dueDate ? deadlineStatus(dueDate, today, settings.soonDays) : null;
+      return {
+        id, label, lastDate, months, assumed, dueDate, status,
+        blocks: false,
+        daysLeft: dueDate ? daysLeft(dueDate, today) : null,
+        entryKind: 'check:duty_leave',
+        note: assumed ? 'період — припущення, змініть' : null,
+      };
+    }
+    const state = byId.get(id);
+    return {
+      id, label,
+      lastDate: state?.lastDate || null,
+      months: state?.months ?? null,
+      assumed: Boolean(state?.assumed),
+      dueDate: state?.dueDate || null,
+      status: state?.status || null,
+      blocks: Boolean(state?.blocks),
+      daysLeft: state?.daysLeft ?? null,
+      entryKind: `check:${id}`,
+      note: state?.assumed ? 'період — припущення, змініть' : null,
     };
   });
 }
@@ -581,6 +865,8 @@ export const EXERCISE_NAMES = Object.freeze({
   51: 'з вантажем на зовнішній підвісці',
   53: 'заліковий політ на десантно-транспортні завдання',
   54: 'мінування з повітря',
+  'БП': 'бойова підготовка',
+  'СБП': 'спеціальна бойова підготовка',
 });
 
 /** Назва вправи або null (невідомо; нічого не вигадуємо). */
@@ -1006,12 +1292,15 @@ export function shiftSummary(shiftFlights, opts = {}) {
 export const FLIGHT_SOURCES = Object.freeze(['timekeeper', 'trip', 'import', 'logbook']);
 
 const EXERCISE_RE = /^\d{1,3}[a-zа-яіїє]{0,3}$/i;
+const NAMED_EXERCISES = new Set(['бп', 'сбп']);
 
-/** Номер вправи як рядок (`14`, `76м`) або null. */
+/** Номер вправи як рядок (`14`, `76м`, `БП`, `СБП`) або null. */
 export function normalizeExercise(value) {
   if (value === null || value === undefined) return null;
   const text = String(value).trim();
-  return text && EXERCISE_RE.test(text) ? text : null;
+  if (!text) return null;
+  if (NAMED_EXERCISES.has(text.toLowerCase())) return text.toUpperCase();
+  return EXERCISE_RE.test(text) ? text : null;
 }
 
 /**
@@ -1036,7 +1325,7 @@ export function normalizeFlight(raw) {
   let exercise = null;
   if (raw?.exercise !== undefined && raw?.exercise !== null && String(raw.exercise).trim() !== '') {
     exercise = normalizeExercise(raw.exercise);
-    if (exercise === null) errors.push('Номер вправи має бути числом (наприклад, 14 або 76м).');
+    if (exercise === null) errors.push('Номер вправи: число (14, 76м) або БП чи СБП.');
   }
   if (raw?.source !== undefined && raw?.source !== null && !FLIGHT_SOURCES.includes(raw.source)) {
     errors.push('Невідоме джерело запису польоту.');

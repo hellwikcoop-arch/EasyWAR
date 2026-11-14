@@ -13,7 +13,10 @@ import {
   importRecordToFlight, jumpsState, lastFlightDate, logbookSummary, longBreakState, medicalState,
   normalizeDate, normalizeFlight, ovpState, parseImportRows, personItems, renewAdmission,
   renewalHint, resolveSettings, shiftSummary, toIso, MEDICAL_KINDS, flightBlockers,
+  LEAVE_KIND_IDS, LEAVE_PART_DAYS, LEAVE_STATUSES, hasSubordinates, leaveDays, leaveKindById, leaveTotals, leaveWarnings, medicalAfterLeave,
+  wholeMonthsBetween, buildReminders, deadlineStatus, PMO_MONTHS, VLK_MONTHS, KE_PERIOD_IDS,
 } from './fly-core.js';
+import { TIMING_NOTE, applyTimingEvent, confirmTimingRecord, editTimingEvent, timingFlights } from './timing-core.js';
 import {
   MAX_CALLSIGN_LEN, MAX_NAV_TITLE_LEN, MAX_NOTE_LEN, NAV_FLIGHT_NAME_FIELDS,
   nextId, removeById, removePerson, upsertById, validate,
@@ -21,30 +24,38 @@ import {
 
 // ───────────────────────────── Маршрути ─────────────────────────────
 
-/** Пункти бічної навігації в порядку з макетів. */
+/** Пункти навігації. На телефоні перші чотири — нижня панель, «Ще» відкриває решту. */
 export const NAV_ITEMS = Object.freeze([
-  { route: 'summary', label: 'Зведення', icon: 'zvedennia' },
-  { route: 'pilots', label: 'Мої пілоти', icon: 'moi-piloty' },
-  { route: 'chrono', label: 'Хронометраж', icon: 'khronometrazh' },
+  { route: 'summary', label: 'Сьогодні', icon: 'zvedennia' },
+  { route: 'pilots', label: 'Пілоти', icon: 'moi-piloty' },
+  { route: 'flights', label: 'Польоти', icon: 'khronometrazh' },
   { route: 'navigator', label: 'Штурман', icon: 'shturman' },
+  { route: 'chrono', label: 'Хронометраж', icon: 'khronometrazh' },
   { route: 'sunmoon', label: 'Сонце і Місяць', icon: 'sontse-misiats' },
   { route: 'import', label: 'Імпорт з Excel', icon: 'import-excel' },
   { route: 'reminders', label: 'Нагадування', icon: 'nahaduvannia' },
+  { route: 'leaves', label: 'Відпустки', icon: 'kalendar' },
+  { route: 'calculators', label: 'Калькулятори', icon: 'shturman' },
   { route: 'settings', label: 'Налаштування', icon: 'nalashtuvannia' },
+  { route: 'about', label: 'Про застосунок', icon: 'nalashtuvannia' },
+  { route: 'more', label: 'Ще', icon: 'more' },
 ]);
 
-/** Нижня навігація телефона (зауваження до екрана 17); решта — у меню «Ще». */
-export const PHONE_NAV = Object.freeze(['summary', 'pilots', 'navigator', 'sunmoon']);
+/** Нижня навігація телефона: Сьогодні, Пілоти, Польоти, Штурман. Решта — екран «Ще». */
+export const PHONE_NAV = Object.freeze(['summary', 'pilots', 'flights', 'navigator']);
 
-/** Вкладки профілю пілота. */
+/** Вкладки профілю пілота. «Комісація» є в кожного, не лише коли пілот один. */
 export const PILOT_TABS = Object.freeze([
+  { id: 'komis', label: 'Комісація' },
   { id: 'checks', label: 'Перевірки' },
-  { id: 'admissions', label: 'Допуски' },
   { id: 'logbook', label: 'Льотна книжка' },
   { id: 'navdocs', label: 'Штурманські документи' },
+  { id: 'leaves', label: 'Відпустки' },
 ]);
 
 const ROUTE_NAMES = NAV_ITEMS.map(item => item.route);
+/** Екрани штурмана, які не є пунктами меню: їх відкривають вкладки поруч з ІШР. */
+const EXTRA_ROUTES = Object.freeze(['timing', 'sheet']);
 const TAB_IDS = PILOT_TABS.map(tab => tab.id);
 
 /**
@@ -59,10 +70,11 @@ export function parseRoute(hash) {
   const name = parts[0];
   if (name === 'pilot') {
     if (!parts[1]) return { name: 'pilots', params: {} };
-    return { name: 'pilot', params: { id: parts[1], tab: TAB_IDS.includes(parts[2]) ? parts[2] : 'checks' } };
+    return { name: 'pilot', params: { id: parts[1], tab: TAB_IDS.includes(parts[2]) ? parts[2] : 'komis' } };
   }
   if (name === 'navigator') return { name, params: parts[1] ? { pilot: parts[1] } : {} };
-  if (ROUTE_NAMES.includes(name)) return { name, params: {} };
+  if (name === 'flights') return { name, params: parts[1] ? { date: parts[1] } : {} };
+  if (ROUTE_NAMES.includes(name) || EXTRA_ROUTES.includes(name)) return { name, params: {} };
   return { name: 'summary', params: {} };
 }
 
@@ -71,16 +83,42 @@ export function buildRoute(name, params = {}) {
   const enc = encodeURIComponent;
   if (name === 'pilot') {
     if (!params.id) return '#/pilots';
-    const tab = TAB_IDS.includes(params.tab) ? params.tab : 'checks';
+    const tab = TAB_IDS.includes(params.tab) ? params.tab : 'komis';
     return `#/pilot/${enc(params.id)}/${tab}`;
   }
   if (name === 'navigator') return params.pilot ? `#/navigator/${enc(params.pilot)}` : '#/navigator';
-  return ROUTE_NAMES.includes(name) ? `#/${name}` : '#/summary';
+  if (name === 'flights') return params.date ? `#/flights/${enc(params.date)}` : '#/flights';
+  return ROUTE_NAMES.includes(name) || EXTRA_ROUTES.includes(name) ? `#/${name}` : '#/summary';
+}
+
+/** Залишено для старих тестів і підпису: вкладка профілю, а не пункт меню. */
+export const SOLO_PILOTS_LABEL = 'Комісація';
+
+/**
+ * Пункти навігації. Без підлеглих друга вкладка — «Профіль» (особистий облік).
+ * З підлеглими — «Пілоти»; якщо пілот один, пункт одразу відкриває його профіль.
+ */
+export function navItemsFor(data) {
+  const persons = data?.persons || [];
+  const self = persons[0] || null;
+  const personal = !hasSubordinates(data);
+  return NAV_ITEMS.map(item => {
+    if (item.route !== 'pilots') return { ...item, target: { name: item.route, params: {} } };
+    if (personal) {
+      return self
+        ? { ...item, label: 'Профіль', target: { name: 'pilot', params: { id: self.id, tab: 'komis' } } }
+        : { ...item, label: 'Профіль', target: { name: 'pilots', params: {} } };
+    }
+    if (persons.length === 1) return { ...item, target: { name: 'pilot', params: { id: self.id, tab: 'komis' } } };
+    return { ...item, target: { name: 'pilots', params: {} } };
+  });
 }
 
 /** Який пункт сайдбару підсвічувати для маршруту (профіль → «Мої пілоти»). */
 export function navFor(route) {
-  return route?.name === 'pilot' ? 'pilots' : (route?.name || 'summary');
+  if (route?.name === 'pilot') return 'pilots';
+  if (route?.name === 'timing' || route?.name === 'sheet') return 'navigator';
+  return route?.name || 'summary';
 }
 
 // ───────────────────────────── Дата, «незбережені зміни» ─────────────────────────────
@@ -253,11 +291,11 @@ export function recordCheck(data, personId, entry = {}) {
     const old = Array.isArray(person.medical) ? person.medical : [];
     nextPerson.medical = old.some(e => e.kind === medKind && e.date === date) ? old : [...old, { kind: medKind, date }];
   } else if (kind === 'article205') {
-    if (!ARTICLE_205_IDS.includes(entry.direction)) return fail('Оберіть напрям Статті 205.');
     const old = person.article205 && typeof person.article205 === 'object' ? person.article205 : {};
     nextPerson.article205 = {
       ...old,
-      [entry.direction]: { date, acceptedBy: orNull(entry.acceptedBy) ?? old[entry.direction]?.acceptedBy ?? null },
+      date,
+      acceptedBy: orNull(entry.acceptedBy) ?? (typeof old.acceptedBy === 'string' ? old.acceptedBy : null),
     };
   } else if (kind === 'ovp') {
     nextPerson.ovp = { date };
@@ -273,6 +311,35 @@ export function recordCheck(data, personId, entry = {}) {
     return fail('Оберіть вид перевірки.');
   }
   return { ok: true, data: { ...data, checks, persons: upsertById(data.persons, nextPerson) } };
+}
+
+const MAX_TRAINING_CUSTOM = 8;
+const MAX_TRAINING_LABEL = 80;
+
+/**
+ * Рівень підготовки: позначені допуски (у порядку довідника) і власні пункти.
+ * Лише довідково — не змінює строки й не забороняє польоти.
+ */
+export function setTraining(data, personId, input = {}) {
+  const person = personById(data, personId);
+  if (!person) return fail('Пілота не знайдено.');
+  const ids = [];
+  for (const raw of Array.isArray(input.ids) ? input.ids : []) {
+    const id = String(raw);
+    if (!admissionKindById(id) || ids.includes(id)) continue;
+    ids.push(id);
+  }
+  const order = new Map(admissionKindsForRole(person.role).map((kind, index) => [kind.id, index]));
+  ids.sort((a, b) => (order.get(a) ?? 999) - (order.get(b) ?? 999));
+  const custom = [];
+  for (const raw of Array.isArray(input.custom) ? input.custom : []) {
+    const label = text(raw);
+    if (!label) continue;
+    if (label.length > MAX_TRAINING_LABEL) return fail(`Свій пункт задовгий (понад ${MAX_TRAINING_LABEL} символів).`);
+    if (custom.length >= MAX_TRAINING_CUSTOM) return fail(`Своїх пунктів може бути не більше ${MAX_TRAINING_CUSTOM}.`);
+    if (!custom.includes(label)) custom.push(label);
+  }
+  return { ok: true, data: { ...data, persons: upsertById(data.persons, { ...person, training: { ids, custom } }) } };
 }
 
 /** Видаляє запис із колекції перевірок (потрібне підтвердження). */
@@ -377,6 +444,15 @@ export function admissionRows(person, data, today) {
   return rows;
 }
 
+/**
+ * Допуски, які втрачаються через перерву в польотах: їхні строки живуть у «Комісації»
+ * разом із ВЛК. Показуємо позначені в рівні підготовки і ті, на які вже є запис.
+ */
+export function lapsingAdmissionRows(person, data, today) {
+  const marked = new Set(person?.training?.ids || []);
+  return admissionRows(person, data, today).filter(row => row.kind.rule && (marked.has(row.kind.id) || row.admission));
+}
+
 /** Втрачені допуски пілота з підказкою вправи й тривалістю перерви. */
 export function lostAdmissions(person, data, today) {
   return admissionRows(person, data, today)
@@ -431,6 +507,81 @@ export function addFlight(data, input = {}) {
   const id = nextId('f', withShift.data.flights);
   const flight = { ...normalized.value, id, shiftId: withShift.shift.id };
   return { ok: true, id, data: { ...withShift.data, flights: [...withShift.data.flights, flight] } };
+}
+
+function withTimings(data) {
+  return Array.isArray(data.timings) ? data : { ...data, timings: [] };
+}
+
+/** Відкритий хронометраж на дату або новий порожній запис. */
+export function openTiming(data, date) {
+  const base = withTimings(data);
+  const found = base.timings.find(item => item.date === date && item.status === 'open');
+  if (found) return { ok: true, id: found.id, data: base };
+  const id = nextId('t', base.timings);
+  const timing = { id, date, status: 'open', note: null, exercise: '', logged: false, events: [] };
+  return { ok: true, id, data: { ...base, timings: [...base.timings, timing] } };
+}
+
+/** Мітка часу в хронометраж дати. Створює запис дня, якщо його ще немає. */
+export function logTimingEvent(data, date, event) {
+  const opened = openTiming(data, date);
+  const timing = opened.data.timings.find(item => item.id === opened.id);
+  const applied = applyTimingEvent(timing, event);
+  if (!applied.ok) return fail(applied.error);
+  return { ok: true, id: opened.id, data: { ...opened.data, timings: upsertById(opened.data.timings, applied.timing) } };
+}
+
+export function setTimingExercise(data, id, exercise) {
+  const timing = (data.timings || []).find(item => item.id === id);
+  if (!timing) return fail('Хронометраж не знайдено.');
+  return { ok: true, data: { ...data, timings: upsertById(data.timings, { ...timing, exercise: String(exercise || '') }) } };
+}
+
+export function patchTimingEvent(data, timingId, eventId, patch) {
+  const timing = (data.timings || []).find(item => item.id === timingId);
+  if (!timing) return fail('Хронометраж не знайдено.');
+  const next = editTimingEvent(timing, eventId, patch);
+  return { ok: true, data: { ...data, timings: upsertById(data.timings, next) } };
+}
+
+/**
+ * Підтверджує день: примітка «виконання польотних завдань» і запис завершених польотів у книжку.
+ * Повторне підтвердження нічого не дублює.
+ */
+export function confirmTiming(data, id, personId = null) {
+  const timing = (data.timings || []).find(item => item.id === id);
+  if (!timing) return fail('Хронометраж не знайдено.');
+  if (timing.status === 'confirmed') return { ok: true, data, id };
+  const confirmed = confirmTimingRecord(timing);
+  let next = { ...data, timings: upsertById(data.timings, confirmed) };
+  const person = (personId ? next.persons.find(item => item.id === personId) : null) || next.persons[0];
+  let logged = Boolean(person);
+  if (person) {
+    for (const flight of timingFlights(confirmed)) {
+      if (flight.minutes === null) continue;
+      const added = addFlight(next, {
+        personId: person.id,
+        date: confirmed.date,
+        exercise: flight.exercise || confirmed.exercise || null,
+        count: 1,
+        airtimeMin: flight.minutes,
+        source: 'timekeeper',
+        note: TIMING_NOTE,
+      });
+      if (!added.ok) { logged = false; continue; }
+      next = added.data;
+    }
+  } else logged = false;
+  next = { ...next, timings: upsertById(next.timings, { ...confirmed, logged }) };
+  return { ok: true, data: next, id };
+}
+
+export function saveSheet(data, sheet) {
+  const list = Array.isArray(data.sheets) ? data.sheets : [];
+  const id = sheet.id || nextId('sh', list);
+  const record = { ...sheet, id };
+  return { ok: true, id, data: { ...data, sheets: upsertById(list, record) } };
 }
 
 export function deleteFlight(data, id, { confirmed = false } = {}) {
@@ -491,6 +642,127 @@ export function removeNavFlight(data, id, { confirmed = false } = {}) {
   if (!confirmed) return fail('Видалення потрібно підтвердити.');
   if (!(data.navFlights || []).some(n => n.id === id)) return fail('Збережений розрахунок не знайдено.');
   return { ok: true, data: { ...data, navFlights: removeById(data.navFlights, id) } };
+}
+
+// ───────────────────────────── Відпустки ─────────────────────────────
+
+function normalizeLeaveInput(data, input, current = null) {
+  const errors = [];
+  const personId = input.personId ?? current?.personId;
+  const person = personById(data, personId);
+  if (!person) errors.push('Оберіть пілота.');
+  const kind = input.kind ?? current?.kind ?? 'basic';
+  if (!LEAVE_KIND_IDS.includes(kind)) errors.push('Оберіть вид відпустки.');
+  const from = normalizeDate(input.from ?? current?.from);
+  const givenTo = input.to === undefined || input.to === null || String(input.to).trim() === ''
+    ? null
+    : normalizeDate(input.to);
+  const to = givenTo || (input.to === undefined ? normalizeDate(current?.to) : null) || (from ? addDays(from, LEAVE_PART_DAYS - 1) : null);
+  if (!from) errors.push('Вкажіть дату початку у форматі дд.мм.рррр.');
+  if (input.to !== undefined && input.to !== null && String(input.to).trim() !== '' && !givenTo) errors.push('Дата закінчення має бути у форматі дд.мм.рррр.');
+  if (!to && from) errors.push('Не вдалося порахувати дату закінчення.');
+  if (from && to && to < from) errors.push('Дата закінчення раніше за дату початку.');
+  const status = input.status === undefined ? (current?.status ?? 'planned') : (input.status || 'planned');
+  if (!LEAVE_STATUSES.includes(status)) errors.push('Невідомий стан відпустки.');
+  const note = input.note === undefined ? (current?.note ?? null) : orNull(input.note);
+  if ((note || '').length > MAX_NOTE_LEN) errors.push(`Примітка задовга (понад ${MAX_NOTE_LEN} символів).`);
+  if (errors.length) return { errors };
+  return { record: { personId: person.id, kind, from, to, status, note } };
+}
+
+/** Додає відпустку: personId, kind (basic|ubd|other), from, to (ISO або дд.мм.рррр), status, note. */
+export function addLeave(data, input = {}) {
+  const made = normalizeLeaveInput(data, input);
+  if (made.errors) return fail(made.errors);
+  const list = data.leaves || [];
+  const id = nextId('l', list);
+  const record = { id, ...made.record };
+  return { ok: true, id, data: { ...data, leaves: [...list, record] } };
+}
+
+/** Змінює відпустку (patch: kind, from, to, status, note; пілот не змінюється). */
+export function updateLeave(data, id, patch = {}) {
+  const current = (data.leaves || []).find(l => l.id === id);
+  if (!current) return fail('Відпустку не знайдено.');
+  const made = normalizeLeaveInput(data, { ...patch, personId: current.personId }, current);
+  if (made.errors) return fail(made.errors);
+  return { ok: true, data: { ...data, leaves: upsertById(data.leaves, { id, ...made.record }) } };
+}
+
+export function deleteLeave(data, id, { confirmed = false } = {}) {
+  if (!confirmed) return fail('Видалення потрібно підтвердити.');
+  if (!(data.leaves || []).some(l => l.id === id)) return fail('Відпустку не знайдено.');
+  return { ok: true, data: { ...data, leaves: removeById(data.leaves, id) } };
+}
+
+const byFrom = (a, b) => (a.from < b.from ? -1 : a.from > b.from ? 1 : 0);
+
+/** Рядок таблиці відпусток: тривалість, застереження, ВЛК/ПМО після, проміжок після попередньої. */
+function leaveRow(leave, person, personLeaves, today) {
+  const previous = personLeaves.filter(l => l.id !== leave.id && l.to < leave.from).sort((x, y) => (x.to < y.to ? 1 : -1))[0] || null;
+  const medical = medicalAfterLeave(person, leave);
+  let timing = 'future';
+  if (leave.to < today) timing = 'past';
+  else if (leave.from <= today) timing = 'current';
+  return {
+    leave,
+    id: leave.id,
+    personId: person.id,
+    callsign: person.callsign,
+    link: person.link || '',
+    kind: leaveKindById(leave.kind),
+    days: leaveDays(leave.from, leave.to),
+    status: leave.status || 'planned',
+    warnings: leaveWarnings(leave, personLeaves),
+    gapMonths: previous ? wholeMonthsBetween(previous.to, leave.from) : null,
+    medical,
+    timing,
+  };
+}
+
+/** Відпустки одного пілота (усі роки), за датою початку. */
+export function leaveRows(person, data, today) {
+  const own = (data.leaves || []).filter(l => l.personId === person.id).sort(byFrom);
+  return own.map(l => leaveRow(l, person, own, today));
+}
+
+/** Роки, за які є відпустки, плюс поточний і наступний; за зростанням. */
+export function leaveYears(data, today) {
+  const years = new Set((data.leaves || []).map(l => String(l.from || '').slice(0, 4)).filter(Boolean));
+  const current = Number(String(today).slice(0, 4));
+  if (Number.isInteger(current)) { years.add(String(current)); years.add(String(current + 1)); }
+  return [...years].sort();
+}
+
+/**
+ * Графік відпусток частини за рік: рядки за датою початку, підсумки й сітка «пілот × місяць»
+ * (rows[].months[0..11] — відпустки, що зачіпають місяць).
+ */
+export function leaveSchedule(data, year, today) {
+  const y = String(year);
+  const persons = data.persons || [];
+  const all = data.leaves || [];
+  const rows = [];
+  const grid = [];
+  for (const person of persons) {
+    const own = all.filter(l => l.personId === person.id).sort(byFrom);
+    const inYear = own.filter(l => l.from.slice(0, 4) === y || l.to.slice(0, 4) === y);
+    if (!inYear.length) continue;
+    const personRows = inYear.map(l => leaveRow(l, person, own, today));
+    rows.push(...personRows);
+    const months = Array.from({ length: 12 }, (_, i) => {
+      const start = `${y}-${String(i + 1).padStart(2, '0')}-01`;
+      const end = `${y}-${String(i + 1).padStart(2, '0')}-31`;
+      return personRows.filter(r => r.leave.from <= end && r.leave.to >= start);
+    });
+    grid.push({ personId: person.id, callsign: person.callsign, link: person.link || '', months, totals: leaveTotals(own, y) });
+  }
+  rows.sort((a, b) => byFrom(a.leave, b.leave) || a.callsign.localeCompare(b.callsign, 'uk'));
+  grid.sort((a, b) => a.callsign.localeCompare(b.callsign, 'uk'));
+  const warningsCount = rows.filter(r => r.warnings.length).length;
+  const medicalCount = rows.filter(r => r.medical?.near).length;
+  const totalDays = rows.reduce((sum, r) => sum + (r.days || 0), 0);
+  return { year: y, rows, grid, pilots: grid.length, totalDays, warningsCount, medicalCount };
 }
 
 /** Дати змін для вибору в хронометражі: усі зміни й сьогодні, за спаданням. */
@@ -614,26 +886,28 @@ export function profileCards(person, data, today) {
   const cards = [];
   const med = medicalState(person, today, settings.soonDays);
 
+  // ВЛК — раз на 12 місяців, ПМО — раз на 6 (ВЛК зараховується і як черговий медогляд).
   for (const kind of MEDICAL_KINDS) {
     const last = latestMedical(person, kind);
-    const pending = med && med.nextKind === kind;
     const card = { key: `medical:${kind}`, title: kind, icon: kind === 'ВЛК' ? 'vlk' : 'pmo', status: null, blocks: false, lines: [], rows: [], footer: null, footerStatus: null, entryKind: `medical:${kind}` };
-    if (!last && !pending) {
-      cards.push(card);
-      continue;
-    }
-    card.lines.push(last ? `Остання дата: ${formatDate(last)} · термін ${6} міс.` : 'Дата не внесена');
-    if (pending) {
-      card.status = med.status;
-      card.blocks = med.blocks;
-      card.footerStatus = med.status;
-      card.footer = med.status === STATUS.OVERDUE
-        ? `Прострочено з ${formatDate(med.dueDate)} · ${leftPhrase(med.status, med.daysLeft)}`
-        : `Наступна ${kind} до ${formatDate(med.dueDate)} · ${leftPhrase(med.status, med.daysLeft)}`;
-    } else {
+    if (!med) { cards.push(card); continue; }
+    const months = kind === 'ВЛК' ? VLK_MONTHS : PMO_MONTHS;
+    card.lines.push(last ? `Остання дата: ${formatDate(last)} · раз на ${months} міс.` : `Дата не внесена · раз на ${months} міс.`);
+    const own = kind === 'ВЛК' ? med.vlkDue : med.pmoDue;
+    if (kind === 'ПМО' && med.pmoDue >= med.vlkDue) {
+      // черговий медогляд закриє ВЛК: окремого строку ПМО до неї немає
       card.status = STATUS.VALID;
       card.footerStatus = STATUS.VALID;
-      card.footer = `Наступною — ${med.nextKind} до ${formatDate(med.dueDate)}`;
+      card.footer = `Наступною — ВЛК до ${formatDate(med.vlkDue)}`;
+    } else {
+      const status = deadlineStatus(own, today, settings.soonDays);
+      const left = daysLeft(own, today);
+      card.status = status;
+      card.blocks = status === STATUS.OVERDUE;
+      card.footerStatus = status;
+      card.footer = status === STATUS.OVERDUE
+        ? `Прострочено з ${formatDate(own)} · ${leftPhrase(status, left)}`
+        : `Наступна ${kind} до ${formatDate(own)} · ${leftPhrase(status, left)}`;
     }
     cards.push(card);
   }
@@ -641,17 +915,13 @@ export function profileCards(person, data, today) {
   const art = article205State(person, today, settings);
   const artCard = { key: 'article205', title: 'Стаття 205', icon: 'stattya-205', status: art?.status ?? null, blocks: Boolean(art?.blocks), lines: [], rows: [], footer: null, footerStatus: null, entryKind: 'article205' };
   if (art) {
-    artCard.rows = art.directions.map(d => ({
-      label: d.label,
-      value: d.date ? `${formatDate(d.date)} · до ${formatDate(d.dueDate)}` : 'Немає даних',
-      status: d.missing ? null : d.status,
-    }));
+    artCard.lines.push(`Остання дата: ${formatDate(art.date)} · раз на ${settings.article205Months} міс.`);
     artCard.footerStatus = art.status;
-    artCard.footer = art.missing.length
-      ? `Не здано: ${art.missing.join(', ')}`
-      : `Найраніший строк: ${art.earliest.label} до ${formatDate(art.dueDate)} · ${leftPhrase(art.status, art.daysLeft)}`;
+    artCard.footer = art.status === STATUS.OVERDUE
+      ? `Прострочено з ${formatDate(art.dueDate)} · ${leftPhrase(art.status, art.daysLeft)}`
+      : `Наступна до ${formatDate(art.dueDate)} · ${leftPhrase(art.status, art.daysLeft)}`;
   } else {
-    artCard.rows = article205DirectionsPlaceholder(person);
+    artCard.lines.push('Дата не внесена');
   }
   cards.push(artCard);
 
@@ -703,11 +973,6 @@ export function profileCards(person, data, today) {
   }
   cards.push(jumpCard);
   return cards;
-}
-
-function article205DirectionsPlaceholder(person) {
-  const vd = person.aircraftKind === 'airplane' ? 'СД' : 'ВД';
-  return ['АО', 'РЕО', vd, 'АОз'].map(label => ({ label, value: 'Немає даних', status: null }));
 }
 
 /** Причини заборони польотів для червоної плашки профілю. */
@@ -820,6 +1085,78 @@ export function summaryView(data, today, filter = {}) {
   return { ...summary, links, buckets: deadlineBuckets(summary.calendar, today, 30) };
 }
 
+/** Частки у відсотках (цілі, разом 100; усе 0, якщо total = 0). Залишок від округлення — найбільшій частці. */
+export function shares(counts) {
+  const keys = Object.keys(counts);
+  const total = keys.reduce((sum, key) => sum + (counts[key] || 0), 0);
+  const out = Object.fromEntries(keys.map(key => [key, 0]));
+  if (!total) return out;
+  for (const key of keys) out[key] = Math.floor((counts[key] || 0) * 100 / total);
+  const rest = 100 - keys.reduce((sum, key) => sum + out[key], 0);
+  const top = keys.reduce((best, key) => ((counts[key] || 0) > (counts[best] || 0) ? key : best), keys[0]);
+  out[top] += rest;
+  return out;
+}
+
+/**
+ * Модель міні-дашборда «Зведення»: готовність (пілоти без блокувань), лічильники строків і їхні
+ * частки, відпустки (зараз і найближчі), остання льотна зміна, останній розрахунок штурмана,
+ * плитки розділів із числами. Фільтр (ланка, роль) діє на пілотів, строки й відпустки.
+ */
+export function dashboardView(data, today, filter = {}) {
+  const summary = summaryView(data, today, filter);
+  const persons = (data.persons || []).filter(p => (!filter.link || p.link === filter.link) && (!filter.role || p.role === filter.role));
+  const pilots = persons.length;
+  const blocked = summary.blocked.length;
+  const ready = pilots - blocked;
+  const { overdue, soon, valid } = summary.counters;
+  const leaveAll = persons.flatMap(p => leaveRows(p, data, today));
+  const leavesNow = leaveAll.filter(r => r.timing === 'current');
+  const leavesNext = leaveAll.filter(r => r.timing === 'future').sort((a, b) => byFrom(a.leave, b.leave)).slice(0, 3);
+  const leaveWarningsCount = leaveAll.filter(r => r.timing !== 'past' && r.warnings.length).length;
+
+  const lastDate = (data.shifts || []).map(s => s.date).filter(d => d <= today).sort().at(-1) || null;
+  let shift = null;
+  if (lastDate) {
+    const flights = flightsOfShift(data.flights, data.shifts.find(s => s.date === lastDate));
+    const known = flights.filter(f => Number.isInteger(f.airtimeMin));
+    shift = {
+      date: lastDate,
+      flights: flights.reduce((sum, f) => sum + (Number.isInteger(f.count) ? f.count : 0), 0),
+      crews: new Set(flights.map(f => f.personId).filter(Boolean)).size,
+      airtime: known.length ? formatDuration(known.reduce((sum, f) => sum + f.airtimeMin, 0)) : null,
+    };
+  }
+  const navList = data.navFlights || [];
+  const nav = navList.length ? { count: navList.length, title: navList.at(-1).title } : { count: 0, title: null };
+  const settings = effectiveSettings(data);
+  const items = persons.flatMap(p => personItems(p, today, coreCtx(data)));
+  const reminders = buildReminders(items, today, settings.reminderDays).length;
+
+  const tiles = [
+    { route: 'pilots', value: (data.persons || []).length === 1 ? null : String(pilots), hint: (data.persons || []).length === 1 ? (blocked ? 'є блокування польотів' : 'ВЛК, ПМО, перевірки, допуски') : pilots ? `${ready} без блокувань` : 'додайте пілотів', tone: blocked ? 'red' : '' },
+    { route: 'reminders', value: String(reminders), hint: reminders ? 'строки в межах порогів' : 'нагадувань немає', tone: reminders ? 'amber' : '' },
+    { route: 'leaves', value: String(leavesNow.length), hint: leavesNext[0] ? `наступна з ${formatDate(leavesNext[0].leave.from)}` : 'у відпустці зараз', tone: leaveWarningsCount ? 'amber' : '' },
+    { route: 'flights', value: shift ? String(shift.flights) : '—', hint: shift ? `польотів за ${formatDate(shift.date)}` : 'змін ще немає', tone: '' },
+    { route: 'chrono', value: shift ? String(shift.flights) : '—', hint: shift ? `польотів за ${formatDate(shift.date)}` : 'змін ще немає', tone: '' },
+    { route: 'navigator', value: String(nav.count), hint: nav.count ? 'збережених розрахунків' : 'розрахунків немає', tone: '' },
+    { route: 'calculators', value: null, hint: 'вітер, шляхова, МПР, коробочка', tone: '' },
+    { route: 'about', value: null, hint: 'модуль і ліцензія шрифту', tone: '' },
+    { route: 'sunmoon', value: null, hint: 'схід, захід, фаза Місяця', tone: '' },
+    { route: 'import', value: null, hint: 'польоти з таблиці CSV', tone: '' },
+    { route: 'settings', value: null, hint: 'частина, пороги, підписанти', tone: '' },
+  ].map(tile => ({ ...tile, ...navItemsFor(data).find(item => item.route === tile.route) }));
+
+  return {
+    ...summary,
+    pilots, ready, blockedCount: blocked,
+    readyPercent: pilots ? Math.round(ready * 100 / pilots) : 0,
+    share: shares({ overdue, soon, valid }),
+    leavesNow, leavesNext, leaveWarningsCount,
+    shift, nav, reminders, tiles,
+  };
+}
+
 // ───────────────────────────── Налаштування частини ─────────────────────────────
 
 function intInRange(value, min, max, label, errors) {
@@ -862,6 +1199,16 @@ export function updateUnit(data, patch = {}) {
     if (s.ovpMonths !== undefined) { const v = intInRange(s.ovpMonths, 1, 60, 'Строк ОВП (міс.)', errors); if (v !== undefined) unit.settings.ovpMonths = v; }
     if (s.article205Months !== undefined) { const v = intInRange(s.article205Months, 1, 60, 'Строк Статті 205 (міс.)', errors); if (v !== undefined) unit.settings.article205Months = v; }
     if (s.ovpBlocks !== undefined) unit.settings.ovpBlocks = Boolean(s.ovpBlocks);
+    if (s.subordinates !== undefined) unit.settings.subordinates = s.subordinates === true;
+    if (s.keMonths && typeof s.keMonths === 'object') {
+      const next = { ...(unit.settings.keMonths || {}) };
+      for (const id of KE_PERIOD_IDS) {
+        if (s.keMonths[id] === undefined) continue;
+        const value = intInRange(s.keMonths[id], 1, 60, 'Період колонки КЕ (міс.)', errors);
+        if (value !== undefined) next[id] = value;
+      }
+      unit.settings.keMonths = next;
+    }
     if (s.timezone !== undefined) unit.settings.timezone = text(s.timezone) || 'Europe/Kyiv';
     for (const [key, label, lo, hi] of [['airfieldLat', 'Широта', -90, 90], ['airfieldLon', 'Довгота', -180, 180]]) {
       if (s[key] === undefined) continue;

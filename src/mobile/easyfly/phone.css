@@ -1,0 +1,26 @@
+/* Оболонка EasyFLY для телефона: екран замка й контейнер застосунку. Стилі самого EasyFLY — easyfly.css. */
+@import '../../workspace/easyfly/fonts/manrope.css';
+:root { color-scheme: dark; }
+html, body { margin: 0; min-height: 100%; background: #141414; color: #fff; font-family: "Manrope", system-ui, -apple-system, "Segoe UI", sans-serif; -webkit-text-size-adjust: 100%; }
+body { min-height: 100vh; min-height: 100dvh; overscroll-behavior-y: none; }
+.efp-app { min-height: 100dvh; display: flex; flex-direction: column; }
+.efp-app > .ef-host { flex: 1; min-height: 0; }
+.efp-app .ef-host { padding-bottom: env(safe-area-inset-bottom); }
+.efp-lock { min-height: 100dvh; display: grid; place-items: center; padding: max(24px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom)); }
+.efp-card { width: min(440px, 100%); padding: 28px 22px; background: #1c1614; border: 1px solid rgba(255,255,255,.12); border-radius: 24px; box-shadow: 0 10px 26px rgba(0, 0, 0, .35); }
+.efp-logo { display: grid; place-items: center; width: 56px; height: 56px; margin: 0 auto 12px; border-radius: 16px; background: #2a221c; color: #f89654; }
+.efp-title { margin: 0; text-align: center; font-size: 26px; letter-spacing: .02em; }
+.efp-lead { margin: 8px 0 20px; text-align: center; color: rgba(255,255,255,.72); font-size: 14px; line-height: 1.45; }
+.efp-form { display: grid; gap: 12px; }
+.efp-label { display: grid; gap: 6px; font-size: 13px; color: rgba(255,255,255,.72); }
+.efp-input { width: 100%; box-sizing: border-box; padding: 12px 14px; border: 1px solid rgba(255,255,255,.16); border-radius: 999px; background: rgba(255,255,255,.08); color: #fff; font: inherit; font-size: 16px; }
+.efp-input:focus-visible { outline: 2px solid #f89654; outline-offset: 2px; }
+.efp-btn { appearance: none; padding: 13px 16px; border: 1px solid rgba(255,255,255,.16); border-radius: 999px; background: rgba(255,255,255,.08); color: #fff; font: inherit; font-size: 16px; font-weight: 600; cursor: pointer; }
+.efp-btn-primary { background: #e66a37; border-color: #e66a37; color: #1a0d06; }
+.efp-btn-ghost { background: none; border-color: transparent; color: rgba(255,255,255,.72); font-weight: 500; }
+.efp-btn[disabled] { opacity: .6; cursor: progress; }
+.efp-error { margin: 0; padding: 10px 12px; border: 1px solid #7a2e2e; border-radius: 10px; background: rgba(232, 93, 70, .12); color: #ffb4a8; font-size: 14px; }
+.efp-error:empty { display: none; }
+.efp-hint { margin: 16px 0 0; color: rgba(255,255,255,.66); font-size: 12px; line-height: 1.45; }
+.efp-actions { display: grid; gap: 8px; margin-top: 4px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }

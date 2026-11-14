@@ -1,5 +1,5 @@
 // Мої пілоти: таблиця з фільтрами ланка / роль / пошук за позивним і статусами строків.
-import { CLASS_LABELS, ROLES, formatDate } from '../fly-core.js';
+import { CLASS_LABELS, ROLES, formatDate, hasSubordinates } from '../fly-core.js';
 import { filterPilots, pilotOverview } from '../fly-state.js';
 import {
   button, dash, dateText, el, emptyState, pageHeader, select, stat, statusDot, textInput,
@@ -24,10 +24,26 @@ function classText(person) {
 
 export function render(ctx) {
   const { data, today } = ctx;
+  if (!hasSubordinates(data)) {
+    const self = data.persons[0];
+    const root = el('div', { class: 'ef-view ef-today-personal' });
+    if (!self) {
+      root.append(pageHeader({
+        crumbs: [{ label: 'EasyFLY' }, { label: 'Профіль' }],
+        title: 'Профіль',
+        subtitle: 'Особистий облік. Список підлеглих увімкнеться в налаштуваннях, коли він знадобиться.',
+      }),
+      el('p', { class: 'ef-today-empty', text: 'Вкажіть позивний — далі можна позначити рівень підготовки.' }),
+      button('Почати', { variant: 'primary', onClick: () => openPilotForm(ctx) }));
+      return root;
+    }
+    ctx.go('pilot', { id: self.id, tab: 'komis' });
+    return root;
+  }
   const root = el('div', { class: 'ef-view' });
   root.append(pageHeader({
-    crumbs: [{ label: 'EasyFLY' }, { label: 'Мої пілоти' }],
-    title: 'Мої пілоти',
+    crumbs: [{ label: 'EasyFLY' }, { label: 'Пілоти' }],
+    title: 'Пілоти',
     subtitle: 'Особовий склад частини · самооблік строків і допусків',
     actions: [button('Додати пілота', { variant: 'primary', iconName: 'vnesty', onClick: () => openPilotForm(ctx) })],
   }));
@@ -71,7 +87,7 @@ export function render(ctx) {
       el('th', { scope: 'col', text: 'Останній політ' }), el('th', { scope: 'col', text: 'Рік' }), el('th', { scope: 'col' }, el('span', { class: 'ef-sr', text: 'Відкрити профіль' }))));
     const body = el('tbody', {}, rows.map(row => {
       const p = row.person;
-      const open = () => ctx.go('pilot', { id: p.id });
+      const open = () => ctx.go('pilot', { id: p.id, tab: 'komis' });
       const tr = el('tr', { class: 'ef-row-click' },
         el('th', { scope: 'row', class: 'ef-callsign' },
           el('button', { type: 'button', class: 'ef-link', onClick: open, 'aria-label': `Відкрити профіль ${p.callsign}` }, p.callsign),

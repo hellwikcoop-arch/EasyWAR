@@ -4,7 +4,7 @@ import {
   AIRCRAFT_KINDS, CLASS_LABELS, CLASS_QUALS, ROLES, admissionKindsForRole, renewalHint,
 } from '../fly-core.js';
 import {
-  addAdmission, addPerson, deleteAdmission, deletePerson, markAdmissionLost, updatePerson,
+  addAdmission, addPerson, deleteAdmission, deletePerson, markAdmissionLost, setTraining, updatePerson,
 } from '../fly-state.js';
 import {
   confirmDialog, dateInput, el, errorBox, field, notice, openModal, readDate, select, textInput, toast,
@@ -36,7 +36,10 @@ export function openPilotForm(ctx, personId = null) {
     const result = ctx.mutate(data => (person ? updatePerson(data, person.id, input) : addPerson(data, input)));
     if (!result.ok) { errors.show(result.result.errors); return false; }
     toast(person ? 'Зміни пілота внесено.' : `Пілота «${input.callsign.trim()}» додано.`);
-    if (!person && result.result.id) ctx.go('pilot', { id: result.result.id });
+    if (!person && result.result.id) {
+      ctx.go('pilot', { id: result.result.id, tab: 'komis' });
+      openTrainingForm(ctx, result.result.id);
+    }
     return true;
   };
   form.addEventListener('submit', event => { event.preventDefault(); });
@@ -58,6 +61,59 @@ export async function confirmDeletePerson(ctx, person) {
   const result = ctx.mutate(data => deletePerson(data, person.id, { confirmed: true }));
   if (result.ok) { toast(`Пілота «${person.callsign}» видалено.`); ctx.go('pilots'); }
   return result.ok;
+}
+
+/**
+ * Рівень підготовки: позначки допусків у порядку зростання і свій пункт в кінці.
+ * Довідково, строки від цього не змінюються.
+ */
+export function openTrainingForm(ctx, personId) {
+  const person = ctx.data.persons.find(p => p.id === personId);
+  if (!person) return;
+  const kinds = admissionKindsForRole(person.role);
+  const selected = new Set(person.training?.ids || []);
+  const custom = [...(person.training?.custom || [])];
+  const errors = errorBox();
+  const list = el('div', { class: 'ef-level-list' });
+  const boxes = kinds.map(kind => {
+    const box = el('input', { type: 'checkbox', checked: selected.has(kind.id), id: `ef-level-${kind.id}` });
+    return { kind, box };
+  });
+  const customHost = el('div', { class: 'ef-level-custom' });
+  const customInput = textInput('', { placeholder: 'Свій пункт, якого немає в переліку', maxLength: 80 });
+  const paintCustom = () => {
+    customHost.replaceChildren(...custom.map((label, index) => el('div', { class: 'ef-level-custom-row' },
+      el('span', { text: label }),
+      el('button', { type: 'button', class: 'ef-btn ef-btn-ghost', text: 'Прибрати', onClick: () => { custom.splice(index, 1); paintCustom(); } }))));
+  };
+  paintCustom();
+  list.append(...boxes.map(({ kind, box }) => el('label', { class: 'ef-level-item', for: box.id }, box, el('span', { text: kind.label }))));
+  const save = () => {
+    const ids = boxes.filter(item => item.box.checked).map(item => item.kind.id);
+    const result = ctx.mutate(data => setTraining(data, personId, { ids, custom }));
+    if (!result.ok) { errors.show(result.result.errors); return false; }
+    toast('Рівень підготовки збережено. Це довідкова позначка, не допуск до польотів.');
+    return true;
+  };
+  openModal({
+    title: 'Рівень підготовки',
+    content: el('form', { class: 'ef-form', novalidate: true, onSubmit: e => e.preventDefault() },
+      errors,
+      el('p', { class: 'ef-hint ef-hint-block', text: 'Позначте допуски, які у вас є, у порядку підготовки. Це лише щоб бачити свій рівень: польотів саме по собі не дозволяє і не забороняє.' }),
+      list,
+      el('p', { class: 'ef-hint', text: 'Свій пункт' }),
+      customHost,
+      el('div', { class: 'ef-form-grid' },
+        field('Додати пункт, якого немає в переліку', customInput).root,
+        el('button', { type: 'button', class: 'ef-btn', text: 'Додати свій пункт', onClick: () => {
+          const label = customInput.value.trim();
+          if (!label) return;
+          custom.push(label);
+          customInput.value = '';
+          paintCustom();
+        } }))),
+    actions: [{ label: 'Пізніше' }, { label: 'Зберегти рівень', variant: 'primary', onClick: save }],
+  });
 }
 
 /** Форма допуску: kindId — вид, що підставляється; admission — наявний запис (повторна відмітка). */

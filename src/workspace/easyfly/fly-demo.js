@@ -67,17 +67,18 @@ export function createDemo() {
       ovpBlocks: true,
       onbCriterionPercent: 50,
       timezone: 'Europe/Kyiv',
+      subordinates: true,
     },
   };
 
   let checkNo = 0;
   PEOPLE.forEach((base, index) => {
     const person = { ...base, aircraftKind: 'helicopter', instructor: false, note: null };
-    const types = checkTypesForPerson(person);
+    const types = checkTypesForPerson(person).filter(type => !type.assumed);
     const keys = ['medical', 'article205', 'ovp', 'jumps', ...types.map(t => `check:${t.id}`)];
     const days = key => DUE[base.id]?.[key] ?? defaultDays(index, keys.indexOf(key));
 
-    // Медицина: остання подія — за 6 міс до строку; вид чергується.
+    // Медицина: остання подія — за 6 міс до строку (після ВЛК — ПМО, після ПМО — ВЛК).
     const medKind = index % 2 === 0 ? 'ПМО' : 'ВЛК';
     person.medical = base.id === 'p02'
       ? [{ kind: 'ВЛК', date: '2025-10-12' }, { kind: 'ПМО', date: '2026-04-12' }] // наступна ВЛК до 12.10.2026
@@ -145,6 +146,19 @@ export function createDemo() {
       takeoff: '09:00',
     },
   });
+
+  // Відпустки на 2027 рік (синтетичний графік): частини по 15 діб, УБД, приклад частини, що йде
+  // раніше ніж через 3 місяці після попередньої (Кречет-33) — для застереження.
+  data.leaves.push(
+    { id: 'l1', personId: 'p01', kind: 'basic', from: '2027-02-01', to: '2027-02-15', status: 'planned', note: null },
+    { id: 'l2', personId: 'p01', kind: 'basic', from: '2027-06-14', to: '2027-06-28', status: 'planned', note: null },
+    { id: 'l3', personId: 'p01', kind: 'ubd', from: '2027-10-04', to: '2027-10-17', status: 'planned', note: null },
+    { id: 'l4', personId: 'p02', kind: 'basic', from: '2027-01-11', to: '2027-01-25', status: 'approved', note: 'Після відпустки — ВЛК' },
+    { id: 'l5', personId: 'p02', kind: 'basic', from: '2027-05-10', to: '2027-05-24', status: 'planned', note: null },
+    { id: 'l6', personId: 'p03', kind: 'basic', from: '2027-03-01', to: '2027-03-15', status: 'planned', note: null },
+    { id: 'l7', personId: 'p03', kind: 'basic', from: '2027-05-03', to: '2027-05-17', status: 'planned', note: null },
+    { id: 'l8', personId: 'p06', kind: 'ubd', from: '2027-04-05', to: '2027-04-18', status: 'planned', note: null },
+  );
 
   // Допуски (самовідмітка пілота, без затвердження).
   data.admissions.push(
