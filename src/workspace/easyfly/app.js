@@ -26,8 +26,9 @@ const SAVE_DELAY_MS = 400;
 /** Файли екранів: import.meta.glob, щоб Vite бачив їх у збірці; відсутній файл — заглушка. */
 const VIEW_MODULES = import.meta.glob('./views/*.js');
 const VIEW_FILES = {
-  summary: 'summary', pilots: 'pilots', pilot: 'pilot', chrono: 'chrono', navigator: 'navigator',
-  sunmoon: 'sunmoon', import: 'import', reminders: 'reminders', leaves: 'leaves', settings: 'settings',
+  summary: 'summary', pilots: 'pilots', pilot: 'pilot', flights: 'flights', chrono: 'chrono', navigator: 'navigator',
+  sunmoon: 'sunmoon', import: 'import', reminders: 'reminders', leaves: 'leaves', calculators: 'calculators',
+  settings: 'settings', about: 'about', more: 'more',
 };
 
 const navLabel = name => NAV_ITEMS.find(item => item.route === name)?.label || 'Екран';
@@ -283,10 +284,7 @@ export async function mount(container, host) {
 
   // ───────────── шелл ─────────────
 
-  let moreMenu = null;
-  function closeMore() {
-    if (moreMenu) { moreMenu.hidden = true; parts?.moreButton?.setAttribute('aria-expanded', 'false'); }
-  }
+  function closeMore() { /* екран «Ще» замість вигулькненого меню */ }
 
   function navButton(item, { compact = false } = {}) {
     const node = el('button', {
@@ -309,7 +307,7 @@ export async function mount(container, host) {
         el('span', { class: 'ef-brand-mark', 'aria-hidden': 'true' }),
         el('span', { class: 'ef-brand-name' }, el('span', { text: 'easy' }), el('span', { class: 'ef-brand-fly', text: 'FLY' }))),
       el('div', { class: 'ef-nav-title', text: 'Навігація' }),
-      el('div', { class: 'ef-nav-list' }, NAV_ITEMS.map(item => navButton(item))),
+      el('div', { class: 'ef-nav-list' }, NAV_ITEMS.filter(item => item.route !== 'more').map(item => navButton(item))),
       el('div', { class: 'ef-side-foot' },
         el('span', { class: 'ef-local', text: 'Дані профілю' }),
         el('span', { class: 'ef-side-date', text: formatDate(doc.today) })));
@@ -346,18 +344,11 @@ export async function mount(container, host) {
     const main = el('main', { class: 'ef-main' }, bar, content);
 
     const phoneItems = PHONE_NAV.map(name => NAV_ITEMS.find(i => i.route === name));
-    const rest = NAV_ITEMS.filter(i => !PHONE_NAV.includes(i.route));
-    moreMenu = el('div', { class: 'ef-more-menu', hidden: true, role: 'menu' }, rest.map(item => {
-      const b = el('button', { type: 'button', class: 'ef-more-item', role: 'menuitem', dataset: { route: item.route }, onClick: () => goNav(item.route) },
-        icon(item.icon, 18), el('span', { class: 'ef-nav-text', text: item.label }));
-      return b;
-    }));
-    const moreButton = el('button', { type: 'button', class: 'ef-bnav-item', 'aria-haspopup': 'menu', 'aria-expanded': 'false', onClick: event => {
-      event.stopPropagation();
-      moreMenu.hidden = !moreMenu.hidden;
-      moreButton.setAttribute('aria-expanded', String(!moreMenu.hidden));
-    } }, icon('more', 22), el('span', { text: 'Ще' }));
-    const bottom = el('nav', { class: 'ef-bottom-nav', 'aria-label': 'Розділи EasyFLY (телефон)' }, phoneItems.map(item => navButton(item, { compact: true })), moreButton, moreMenu);
+    const moreButton = el('button', {
+      type: 'button', class: 'ef-bnav-item', dataset: { route: 'more' },
+      onClick: () => goNav('more'),
+    }, icon('more', 22), el('span', { class: 'ef-nav-text', text: 'Ще' }));
+    const bottom = el('nav', { class: 'ef-bottom-nav', 'aria-label': 'Розділи EasyFLY (телефон)' }, phoneItems.map(item => navButton(item, { compact: true })), moreButton);
 
     root.replaceChildren(nav, main, bottom);
     parts = { content, main, nav, bottom, bar, barTitle, barState, saveBtn, moreButton };
@@ -383,7 +374,7 @@ export async function mount(container, host) {
       if (node.dataset.route === active) node.setAttribute('aria-current', 'page');
       else node.removeAttribute('aria-current');
     }
-    const restActive = !PHONE_NAV.includes(active);
+    const restActive = active === 'more' || !PHONE_NAV.includes(active);
     parts.moreButton.classList.toggle('ef-active', restActive);
   }
 
@@ -435,7 +426,7 @@ export async function mount(container, host) {
     if (menu && !menu.hidden) { menu.hidden = true; parts.bar.querySelector('.ef-bar-more')?.setAttribute('aria-expanded', 'false'); }
   };
   const onDocKey = event => {
-    if (event.key === 'Escape' && moreMenu && !moreMenu.hidden) { event.stopPropagation(); closeMore(); parts?.moreButton?.focus(); }
+    if (event.key === 'Escape' && route?.name === 'more') { event.stopPropagation(); ctx.go('summary'); }
   };
   document.addEventListener('click', onDocClick);
   document.addEventListener('keydown', onDocKey);

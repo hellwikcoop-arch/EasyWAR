@@ -168,14 +168,14 @@ test('leaveRows і leaveSchedule на демо-наборі: застереже�
   assert.deepEqual(leaveYears(createEmpty(), '2026-10-20'), ['2026', '2027']);
 });
 
-test('маршрут «Відпустки», вкладка профілю, телефонна навігація без змін', () => {
+test('маршрут «Відпустки», вкладка профілю, телефонна навігація', () => {
   assert.ok(NAV_ITEMS.some(i => i.route === 'leaves' && i.label === 'Відпустки'));
   assert.deepEqual(parseRoute('#/leaves'), { name: 'leaves', params: {} });
   assert.equal(buildRoute('leaves'), '#/leaves');
   assert.deepEqual(parseRoute('#/pilot/p01/leaves'), { name: 'pilot', params: { id: 'p01', tab: 'leaves' } });
   assert.equal(buildRoute('pilot', { id: 'p01', tab: 'leaves' }), '#/pilot/p01/leaves');
-  assert.deepEqual(PILOT_TABS.map(t => t.label), ['Перевірки', 'Допуски', 'Льотна книжка', 'Штурманські документи', 'Відпустки']);
-  assert.deepEqual(PHONE_NAV, ['summary', 'pilots', 'navigator', 'sunmoon']);
+  assert.deepEqual(PILOT_TABS.map(t => t.label), ['Комісація', 'Перевірки', 'Допуски', 'Льотна книжка', 'Штурманські документи', 'Відпустки']);
+  assert.deepEqual(PHONE_NAV, ['summary', 'pilots', 'flights', 'navigator']);
 });
 
 test('екран і форма: текстові контракти (без імен, українські підписи, маршрут у app.js)', () => {

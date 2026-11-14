@@ -26,8 +26,8 @@ export function render(ctx) {
   const { data, today } = ctx;
   const root = el('div', { class: 'ef-view' });
   root.append(pageHeader({
-    crumbs: [{ label: 'EasyFLY' }, { label: 'Мої пілоти' }],
-    title: 'Мої пілоти',
+    crumbs: [{ label: 'EasyFLY' }, { label: 'Пілоти' }],
+    title: 'Пілоти',
     subtitle: 'Особовий склад частини · самооблік строків і допусків',
     actions: [button('Додати пілота', { variant: 'primary', iconName: 'vnesty', onClick: () => openPilotForm(ctx) })],
   }));
@@ -71,7 +71,7 @@ export function render(ctx) {
       el('th', { scope: 'col', text: 'Останній політ' }), el('th', { scope: 'col', text: 'Рік' }), el('th', { scope: 'col' }, el('span', { class: 'ef-sr', text: 'Відкрити профіль' }))));
     const body = el('tbody', {}, rows.map(row => {
       const p = row.person;
-      const open = () => ctx.go('pilot', { id: p.id });
+      const open = () => ctx.go('pilot', { id: p.id, tab: 'komis' });
       const tr = el('tr', { class: 'ef-row-click' },
         el('th', { scope: 'row', class: 'ef-callsign' },
           el('button', { type: 'button', class: 'ef-link', onClick: open, 'aria-label': `Відкрити профіль ${p.callsign}` }, p.callsign),

@@ -23,24 +23,29 @@ import {
 
 // ───────────────────────────── Маршрути ─────────────────────────────
 
-/** Пункти бічної навігації в порядку з макетів. */
+/** Пункти навігації. На телефоні перші чотири — нижня панель, «Ще» відкриває решту. */
 export const NAV_ITEMS = Object.freeze([
-  { route: 'summary', label: 'Зведення', icon: 'zvedennia' },
-  { route: 'pilots', label: 'Мої пілоти', icon: 'moi-piloty' },
-  { route: 'chrono', label: 'Хронометраж', icon: 'khronometrazh' },
+  { route: 'summary', label: 'Сьогодні', icon: 'zvedennia' },
+  { route: 'pilots', label: 'Пілоти', icon: 'moi-piloty' },
+  { route: 'flights', label: 'Польоти', icon: 'khronometrazh' },
   { route: 'navigator', label: 'Штурман', icon: 'shturman' },
+  { route: 'chrono', label: 'Хронометраж', icon: 'khronometrazh' },
   { route: 'sunmoon', label: 'Сонце і Місяць', icon: 'sontse-misiats' },
   { route: 'import', label: 'Імпорт з Excel', icon: 'import-excel' },
   { route: 'reminders', label: 'Нагадування', icon: 'nahaduvannia' },
   { route: 'leaves', label: 'Відпустки', icon: 'kalendar' },
+  { route: 'calculators', label: 'Калькулятори', icon: 'shturman' },
   { route: 'settings', label: 'Налаштування', icon: 'nalashtuvannia' },
+  { route: 'about', label: 'Про застосунок', icon: 'nalashtuvannia' },
+  { route: 'more', label: 'Ще', icon: 'more' },
 ]);
 
-/** Нижня навігація телефона (зауваження до екрана 17); решта — у меню «Ще». */
-export const PHONE_NAV = Object.freeze(['summary', 'pilots', 'navigator', 'sunmoon']);
+/** Нижня навігація телефона: Сьогодні, Пілоти, Польоти, Штурман. Решта — екран «Ще». */
+export const PHONE_NAV = Object.freeze(['summary', 'pilots', 'flights', 'navigator']);
 
-/** Вкладки профілю пілота. */
+/** Вкладки профілю пілота. «Комісація» є в кожного, не лише коли пілот один. */
 export const PILOT_TABS = Object.freeze([
+  { id: 'komis', label: 'Комісація' },
   { id: 'checks', label: 'Перевірки' },
   { id: 'admissions', label: 'Допуски' },
   { id: 'logbook', label: 'Льотна книжка' },
@@ -63,9 +68,10 @@ export function parseRoute(hash) {
   const name = parts[0];
   if (name === 'pilot') {
     if (!parts[1]) return { name: 'pilots', params: {} };
-    return { name: 'pilot', params: { id: parts[1], tab: TAB_IDS.includes(parts[2]) ? parts[2] : 'checks' } };
+    return { name: 'pilot', params: { id: parts[1], tab: TAB_IDS.includes(parts[2]) ? parts[2] : 'komis' } };
   }
   if (name === 'navigator') return { name, params: parts[1] ? { pilot: parts[1] } : {} };
+  if (name === 'flights') return { name, params: parts[1] ? { date: parts[1] } : {} };
   if (ROUTE_NAMES.includes(name)) return { name, params: {} };
   return { name: 'summary', params: {} };
 }
@@ -75,25 +81,26 @@ export function buildRoute(name, params = {}) {
   const enc = encodeURIComponent;
   if (name === 'pilot') {
     if (!params.id) return '#/pilots';
-    const tab = TAB_IDS.includes(params.tab) ? params.tab : 'checks';
+    const tab = TAB_IDS.includes(params.tab) ? params.tab : 'komis';
     return `#/pilot/${enc(params.id)}/${tab}`;
   }
   if (name === 'navigator') return params.pilot ? `#/navigator/${enc(params.pilot)}` : '#/navigator';
+  if (name === 'flights') return params.date ? `#/flights/${enc(params.date)}` : '#/flights';
   return ROUTE_NAMES.includes(name) ? `#/${name}` : '#/summary';
 }
 
-/** Підпис пункту «Мої пілоти», коли в базі один пілот (власник веде облік лише для себе). */
+/** Залишено для старих тестів і підпису: вкладка профілю, а не пункт меню. */
 export const SOLO_PILOTS_LABEL = 'Комісація';
 
 /**
- * Пункти навігації для даних: якщо пілот один, «Мої пілоти» стає «Комісація» і веде одразу в
- * його профіль (target). Для решти пунктів target — сам маршрут.
+ * Пункти навігації. Підпис «Пілоти» не змінюється. Якщо пілот один, пункт одразу відкриває
+ * його профіль на вкладці «Комісація».
  */
 export function navItemsFor(data) {
   const persons = data?.persons || [];
   const solo = persons.length === 1 ? persons[0] : null;
   return NAV_ITEMS.map(item => (item.route === 'pilots' && solo
-    ? { ...item, label: SOLO_PILOTS_LABEL, target: { name: 'pilot', params: { id: solo.id } } }
+    ? { ...item, target: { name: 'pilot', params: { id: solo.id, tab: 'komis' } } }
     : { ...item, target: { name: item.route, params: {} } }));
 }
 
@@ -1010,8 +1017,11 @@ export function dashboardView(data, today, filter = {}) {
     { route: 'pilots', value: (data.persons || []).length === 1 ? null : String(pilots), hint: (data.persons || []).length === 1 ? (blocked ? 'є блокування польотів' : 'ВЛК, ПМО, перевірки, допуски') : pilots ? `${ready} без блокувань` : 'додайте пілотів', tone: blocked ? 'red' : '' },
     { route: 'reminders', value: String(reminders), hint: reminders ? 'строки в межах порогів' : 'нагадувань немає', tone: reminders ? 'amber' : '' },
     { route: 'leaves', value: String(leavesNow.length), hint: leavesNext[0] ? `наступна з ${formatDate(leavesNext[0].leave.from)}` : 'у відпустці зараз', tone: leaveWarningsCount ? 'amber' : '' },
+    { route: 'flights', value: shift ? String(shift.flights) : '—', hint: shift ? `польотів за ${formatDate(shift.date)}` : 'змін ще немає', tone: '' },
     { route: 'chrono', value: shift ? String(shift.flights) : '—', hint: shift ? `польотів за ${formatDate(shift.date)}` : 'змін ще немає', tone: '' },
     { route: 'navigator', value: String(nav.count), hint: nav.count ? 'збережених розрахунків' : 'розрахунків немає', tone: '' },
+    { route: 'calculators', value: null, hint: 'вітер, шляхова, МПР, коробочка', tone: '' },
+    { route: 'about', value: null, hint: 'модуль і ліцензія шрифту', tone: '' },
     { route: 'sunmoon', value: null, hint: 'схід, захід, фаза Місяця', tone: '' },
     { route: 'import', value: null, hint: 'польоти з таблиці CSV', tone: '' },
     { route: 'settings', value: null, hint: 'частина, пороги, підписанти', tone: '' },

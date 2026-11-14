@@ -1,192 +1,144 @@
-// Зведення — міні-дашборд частини: готовність (кільце), чотири лічильники, смуга часток строків,
-// «Потребують уваги», найближчі 30 днів, відпустки, остання зміна, розрахунок штурмана й плитки
-// розділів. Схема маршруту (route-board) — нижче, у згорнутому блоці. Модель — dashboardView.
+// Екран «Сьогодні»: дуга готовності, картка льотної зміни, заборони, стан за пілотами.
+// Числа — з todayHome (реальні дані). Схема маршруту лишається згорнутою внизу.
 import { formatDate } from '../fly-core.js';
-import { dashboardView, effectiveSettings, navItemsFor, pluralEvents } from '../fly-state.js';
-import { el, emptyState, button, notice, select, statusChip, dateText } from '../ui.js';
-import { icon } from '../icons.js';
-import { openPilotForm } from './card.js';
-import { openEntry } from './entry.js';
-import { openLeaveForm } from './leaves-form.js';
+import { pluralFlights, pluralPilots, todayHome } from '../glow-core.js';
+import { el } from '../ui.js';
 import { routeBoard } from './route-board.js';
 
-const PROBLEM_LIMIT = 5;
-let showAll = false;
-const filter = { link: '', role: '' };
-
-function kpi(label, value, tone, hint, onClick) {
-  return el('button', { type: 'button', class: `ef-kpi ef-tone-${tone}`, onClick, 'aria-label': `${label}: ${value}${hint ? `, ${hint}` : ''}` },
-    el('span', { class: 'ef-kpi-label', text: label }),
-    el('strong', { class: 'ef-counter-value ef-kpi-value', text: String(value) }),
-    hint ? el('span', { class: 'ef-kpi-hint', text: hint }) : null);
+function arc(percent) {
+  const r = 200;
+  const x0 = 13.7;
+  const x1 = 376.3;
+  const y = 207.5;
+  const cx = (x0 + x1) / 2;
+  const half = (x1 - x0) / 2;
+  const cy = y + Math.sqrt(r * r - half * half);
+  const a0 = Math.atan2(y - cy, x0 - cx);
+  const a1 = Math.atan2(y - cy, x1 - cx);
+  const t = Math.max(0, Math.min(1, percent / 100));
+  const a = a0 + (a1 - a0) * t;
+  const px = cx + r * Math.cos(a);
+  const py = cy + r * Math.sin(a);
+  const d = (x, yy) => `${x.toFixed(1)} ${yy.toFixed(1)}`;
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'ef-arc');
+  svg.setAttribute('viewBox', '-22 -8 434 248');
+  svg.setAttribute('role', 'img');
+  svg.setAttribute('aria-label', `Готовність ${percent} відсотків`);
+  const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+  const grad = document.createElementNS('http://www.w3.org/2000/svg', 'linearGradient');
+  grad.id = 'efArcGlow';
+  grad.setAttribute('x1', '0');
+  grad.setAttribute('y1', '0');
+  grad.setAttribute('x2', '1');
+  grad.setAttribute('y2', '0');
+  for (const [offset, color] of [['0', '#7a3418'], ['.5', '#e66a37'], ['1', '#fec38a']]) {
+    const stop = document.createElementNS('http://www.w3.org/2000/svg', 'stop');
+    stop.setAttribute('offset', offset);
+    stop.setAttribute('stop-color', color);
+    grad.append(stop);
+  }
+  defs.append(grad);
+  const track = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  track.setAttribute('d', `M${d(x0, y)}A200 200 0 0 1 ${d(x1, y)}`);
+  track.setAttribute('class', 'ef-arc-track');
+  svg.append(defs, track);
+  if (t > 0.01) {
+    const prog = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    prog.setAttribute('d', `M${d(x0, y)}A200 200 0 0 1 ${d(px, py)}`);
+    prog.setAttribute('class', 'ef-arc-value');
+    const knob = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    knob.setAttribute('cx', px.toFixed(1));
+    knob.setAttribute('cy', py.toFixed(1));
+    knob.setAttribute('r', '11');
+    knob.setAttribute('class', 'ef-arc-knob');
+    const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    dot.setAttribute('cx', px.toFixed(1));
+    dot.setAttribute('cy', py.toFixed(1));
+    dot.setAttribute('r', '3');
+    dot.setAttribute('class', 'ef-arc-dot');
+    svg.append(prog, knob, dot);
+  }
+  return svg;
 }
 
-function stateText(item) {
-  const left = item.daysLeft;
-  if (left === null) return '';
-  return item.status === 'overdue' ? `Прострочено · ${-left} дн.` : `${item.status === 'soon' ? 'Скоро' : 'Дійсно'} · ${left} дн.`;
-}
-
-function ring(percent, tone) {
-  const node = el('div', { class: `ef-ring ef-ring-${tone}`, role: 'img', 'aria-label': `Готовність ${percent}%` },
-    el('div', { class: 'ef-ring-hole' }, el('strong', { text: `${percent}%` }), el('span', { text: 'готові' })));
-  node.style.setProperty('--ef-ring', `${percent}%`);
-  return node;
-}
-
-function shareBar(view) {
-  const part = (key, label, count) => {
-    const seg = el('span', { class: `ef-share-seg ef-share-${key}`, title: `${label}: ${count}` });
-    seg.style.flexGrow = String(Math.max(view.share[key], count ? 2 : 0));
-    return seg;
-  };
-  const { overdue, soon, valid, total } = view.counters;
-  return el('div', { class: 'ef-share', role: 'img', 'aria-label': `Строки: прострочено ${overdue}, скоро ${soon}, дійсно ${valid}` },
-    total ? [part('overdue', 'Прострочено', overdue), part('soon', 'Скоро', soon), part('valid', 'Дійсно', valid)] : el('span', { class: 'ef-share-seg ef-share-none' }));
-}
-
-function block(title, action, ...body) {
-  return el('section', { class: 'ef-card ef-dash-card' },
-    el('div', { class: 'ef-card-head' }, el('h2', { class: 'ef-card-title', text: title }), action || null),
-    body);
-}
-
-const more = (label, onClick) => el('button', { type: 'button', class: 'ef-dash-more', onClick }, label, icon('chevron', 14));
-
-function leavesBlock(ctx, view) {
-  const line = (row, lead) => el('li', {},
-    el('button', { type: 'button', class: 'ef-link', onClick: () => ctx.go('pilot', { id: row.personId, tab: 'leaves' }), text: row.callsign }),
-    el('span', { class: 'ef-muted', text: ` ${row.kind?.short || ''} · ${lead} ${formatDate(row.leave.from).slice(0, 5)}–${formatDate(row.leave.to)}` }),
-    row.warnings.length ? el('span', { class: 'ef-text-overdue', text: ' · є застереження' }) : null);
-  const now = view.leavesNow;
-  const next = view.leavesNext;
-  return block('Відпустки', more('Графік', () => ctx.go('leaves')),
-    el('p', { class: 'ef-dash-big' }, el('strong', { text: String(now.length) }), el('span', { text: now.length === 1 ? ' пілот у відпустці зараз' : ' у відпустці зараз' })),
-    now.length || next.length
-      ? el('ul', { class: 'ef-dash-list' }, now.map(r => line(r, 'зараз,')), next.map(r => line(r, 'з')))
-      : el('p', { class: 'ef-muted ef-dash-clip', text: 'Запланованих відпусток немає.' }),
-    el('div', { class: 'ef-actions' }, button('Додати відпустку', { variant: 'ghost', small: true, iconName: 'vnesty', onClick: () => openLeaveForm(ctx) })));
-}
-
-function shiftBlock(ctx, view) {
-  const s = view.shift;
-  return block('Остання зміна', more('Хронометраж', () => ctx.go('chrono')),
-    s
-      ? [el('p', { class: 'ef-dash-big' }, el('strong', { text: String(s.flights) }), el('span', { text: ` польотів · ${formatDate(s.date)}` })),
-        el('ul', { class: 'ef-dash-list' },
-          el('li', {}, el('span', { class: 'ef-muted', text: 'Екіпажів: ' }), el('strong', { text: String(s.crews) })),
-          el('li', {}, el('span', { class: 'ef-muted', text: 'Наліт: ' }), el('strong', { text: s.airtime || '—' })))]
-      : el('p', { class: 'ef-dash-big' }, el('strong', { text: '—' }), el('span', { text: ' змін ще не внесено' })),
-    el('div', { class: 'ef-actions' }, button('Додати політ', { variant: 'ghost', small: true, iconName: 'vnesty', onClick: () => openEntry(ctx, { mode: 'flight' }) })));
-}
-
-function navBlock(ctx, view) {
-  return block('Штурман', more('Розрахунки', () => ctx.go('navigator')),
-    el('p', { class: 'ef-dash-big' }, el('strong', { text: String(view.nav.count) }), el('span', { text: ' збережених розрахунків' })),
-    el('p', { class: 'ef-muted ef-dash-clip', text: view.nav.title ? `Останній: ${view.nav.title}` : 'ІШР, бортжурнал і ШПП формуються на екрані «Штурман».' }),
-    el('div', { class: 'ef-actions' }, button('Сонце і Місяць', { variant: 'ghost', small: true, iconName: 'sontse-misiats', onClick: () => ctx.go('sunmoon') })));
-}
-
-function tiles(ctx, view) {
-  return el('nav', { class: 'ef-tiles', 'aria-label': 'Розділи EasyFLY' }, view.tiles.map(t =>
-    el('button', { type: 'button', class: `ef-tile${t.tone ? ` ef-tone-${t.tone}` : ''}`, onClick: () => ctx.go(t.target.name, t.target.params) },
-      el('span', { class: 'ef-tile-icon', 'aria-hidden': 'true' }, icon(t.icon, 20)),
-      el('span', { class: 'ef-tile-label', text: t.label }),
-      t.value !== null ? el('strong', { class: 'ef-stat-value ef-tile-value', text: t.value }) : null,
-      el('span', { class: 'ef-tile-hint', text: t.hint }))));
-}
-
-/** До пілотів; якщо пілот один — одразу в його профіль («Комісація»). */
-function goPilots(ctx) {
-  const target = navItemsFor(ctx.data).find(i => i.route === 'pilots').target;
-  ctx.go(target.name, target.params);
+function banRow(ctx, item) {
+  const days = item.daysOverdue === null ? 'строк невідомий' : `прострочено ${item.daysOverdue} дн.`;
+  return el('button', {
+    type: 'button', class: 'ef-ban-row',
+    onClick: () => ctx.go('pilot', { id: item.personId, tab: 'komis' }),
+  },
+  el('span', { class: 'ef-ban-who' },
+    el('strong', { text: item.callsign }),
+    el('span', { text: item.reason })),
+  el('span', { class: 'ef-ban-days', text: days }));
 }
 
 export function render(ctx) {
   const { data, today } = ctx;
-  const settings = effectiveSettings(data);
-  const root = el('div', { class: 'ef-view ef-dash' });
+  const view = todayHome(data, today);
+  const root = el('div', { class: 'ef-view ef-today' });
+  const place = [view.airfield, view.dateLabel].filter(Boolean).join(' · ');
+  root.append(el('header', { class: 'ef-today-head' },
+    el('h1', { text: 'Сьогодні' }),
+    place ? el('span', { class: 'ef-today-date', text: place }) : null));
 
-  if (!data.persons.length) {
-    root.append(
-      el('header', { class: 'ef-dash-hero' }, el('div', { class: 'ef-dash-hero-text' },
-        el('span', { class: 'ef-eyebrow', text: `EasyFLY · стан на ${formatDate(today)}` }),
-        el('h1', { class: 'ef-title', text: data.unit?.name || 'Зведення частини' }))),
-      emptyState('Немає даних', 'Додайте пілотів, щоб бачити готовність і строки перевірок, або відкрийте демо-дані.',
-        button('Додати пілота', { variant: 'primary', iconName: 'vnesty', onClick: () => openPilotForm(ctx) })));
+  if (!view.pilots) {
+    root.append(el('p', { class: 'ef-today-empty', text: 'Пілотів ще немає. Додайте їх у розділі «Пілоти» — готовність і заборони порахуються з їхніх строків.' }));
     return root;
   }
 
-  const view = dashboardView(data, today, filter);
-  const { counters } = view;
-  const tone = view.blockedCount ? (view.readyPercent < 50 ? 'red' : 'amber') : 'green';
+  const hero = el('div', { class: 'ef-today-hero' }, arc(view.readyPercent));
+  const shift = view.shift;
+  hero.append(el('button', {
+    type: 'button', class: 'ef-shift-pill',
+    onClick: () => ctx.go('flights', shift ? { date: shift.date } : {}),
+  },
+  el('span', { class: 'ef-shift-ico', 'aria-hidden': 'true', text: '▦' }),
+  el('span', { class: 'ef-shift-text' },
+    el('strong', { text: shift ? shift.title : 'Льотних змін не заплановано' }),
+    el('span', { text: shift ? shift.subtitle : 'Польоти → «Льотна зміна»' })),
+  el('span', { class: 'ef-shift-go', 'aria-hidden': 'true', text: '›' })));
+  const banPhrase = view.banned.length ? `${view.banned.length} під забороною` : 'без заборони';
+  hero.append(el('div', { class: 'ef-today-score' },
+    el('div', { class: 'ef-today-fraction' },
+      el('span', { class: 'ef-today-n', text: String(view.ready) }),
+      el('span', { class: 'ef-today-m', text: `/${view.pilots}` })),
+    el('div', { class: 'ef-today-caption', text: view.pilots === 1 ? (view.ready ? 'пілот готовий до польотів' : 'пілот не готовий до польотів') : 'пілотів готові до польотів' }),
+    el('div', { class: 'ef-today-sub', text: `${view.readyPercent} % · ${banPhrase}` })));
+  root.append(hero);
 
-  root.append(el('header', { class: 'ef-dash-hero' },
-    ring(view.readyPercent, tone),
-    el('div', { class: 'ef-dash-hero-text' },
-      el('span', { class: 'ef-eyebrow', text: `EasyFLY · стан на ${formatDate(today)}` }),
-      el('h1', { class: 'ef-title', text: data.unit?.name || 'Зведення частини' }),
-      el('p', { class: 'ef-subtitle', text: `${data.persons.length === 1 ? `${data.persons[0].callsign} · ${view.blockedCount ? 'є блокування польотів' : 'польоти не заблоковано'}` : `${view.ready} з ${view.pilots} пілотів без блокувань`}${data.unit?.airfield ? ` · аеродром ${data.unit.airfield}` : ''}` }))));
+  root.append(el('section', { class: 'ef-glow-card' },
+    el('div', { class: 'ef-glow-card-head' },
+      el('h2', { text: 'Польоти заборонені' }),
+      el('span', { class: 'ef-glow-pill', text: view.banned.length ? `${view.banned.length} ${pluralPilots(view.banned.length)}` : 'немає' })),
+    view.banned.length
+      ? view.banned.map(item => banRow(ctx, item))
+      : el('p', { class: 'ef-glow-quiet', text: 'Прострочених строків, що забороняють польоти, немає.' })));
 
-  if (view.blocked.length) {
-    root.append(notice(`Польоти заборонені: ${view.blocked.map(b => b.callsign).join(', ')}`,
-      'Прострочені строки блокують допуск до польотів. Деталі — у профілі пілота.', { tone: 'red', role: 'status' }));
-  }
-
-  root.append(el('div', { class: 'ef-kpis' },
-    kpi('Готові', `${view.ready}/${view.pilots}`, tone, 'пілоти без блокувань', () => goPilots(ctx)),
-    kpi('Прострочено', counters.overdue, counters.overdue ? 'red' : 'green', 'строків', () => ctx.go('reminders')),
-    kpi('Скоро', counters.soon, counters.soon ? 'amber' : 'green', `≤ ${settings.soonDays} днів`, () => ctx.go('reminders')),
-    kpi('Дійсно', counters.valid, 'green', `із ${counters.total} строків`, () => goPilots(ctx))));
-  root.append(el('div', { class: 'ef-share-wrap' }, shareBar(view),
-    el('div', { class: 'ef-share-legend' },
-      el('span', { class: 'ef-text-overdue', text: `Прострочено ${view.share.overdue}%` }),
-      el('span', { class: 'ef-text-soon', text: `Скоро ${view.share.soon}%` }),
-      el('span', { class: 'ef-text-valid', text: `Дійсно ${view.share.valid}%` }))));
-
-  const problems = view.problems;
-  const limit = ctx.host?.phone ? 3 : PROBLEM_LIMIT;
-  const visible = showAll ? problems : problems.slice(0, limit);
-  const attention = block('Потребують уваги', problems.length ? el('span', { class: `ef-pill${counters.overdue ? '' : ' ef-pill-amber'}`, text: String(problems.length) }) : null,
-    problems.length
-      ? el('ul', { class: 'ef-dash-items' }, visible.map(i => el('li', {},
-        el('button', { type: 'button', class: 'ef-dash-item', onClick: () => ctx.go('pilot', { id: i.personId }) },
-          el('span', { class: 'ef-dash-item-main' }, el('strong', { text: i.callsign }), el('span', { class: 'ef-muted', text: i.label })),
-          statusChip(i.status, stateText(i))))))
-      : el('p', { class: 'ef-muted', text: 'Прострочених і близьких строків немає.' }),
-    problems.length > limit
-      ? button(showAll ? 'Показати менше' : `Показати всі (${problems.length})`, { variant: 'ghost', small: true, onClick: () => { showAll = !showAll; ctx.rerender(); } })
-      : null);
-
-  const upcoming = block('Найближчі 30 днів', more('Нагадування', () => ctx.go('reminders')),
-    el('div', { class: 'ef-buckets' }, view.buckets.map(bucket => {
-      const body = el('details', { class: 'ef-bucket' },
-        el('summary', {},
-          el('span', { class: 'ef-bucket-range', text: bucket.label }),
-          el('span', { class: `ef-bucket-count${bucket.items.length ? ' ef-tone-amber' : ''}`, text: bucket.items.length ? pluralEvents(bucket.items.length) : 'подій немає' })),
-        bucket.items.length
-          ? el('ul', { class: 'ef-bucket-list' }, bucket.items.map(i => el('li', {},
-            el('button', { type: 'button', class: 'ef-link', onClick: () => ctx.go('pilot', { id: i.personId }), text: `${i.callsign} · ${i.label}` }),
-            el('span', { class: 'ef-muted', text: ` ${dateText(i.dueDate)}` }))))
-          : null);
-      if (!bucket.items.length) body.classList.add('ef-bucket-empty');
-      return body;
-    })));
-
-  root.append(el('div', { class: 'ef-split ef-dash-split' }, attention, upcoming));
-  root.append(el('div', { class: 'ef-dash-row' }, leavesBlock(ctx, view), shiftBlock(ctx, view), navBlock(ctx, view)));
-  root.append(el('h2', { class: 'ef-eyebrow ef-dash-section ef-dash-section-tiles', text: 'Розділи' }), tiles(ctx, view));
+  const overdue = view.deadlines.overdue || 0;
+  const soon = view.deadlines.soon || 0;
+  const valid = view.deadlines.valid || 0;
+  root.append(el('section', { class: 'ef-glow-card' },
+    el('div', { class: 'ef-glow-card-head' },
+      el('h2', { text: 'Стан за пілотами' }),
+      el('span', { class: 'ef-glow-pill', text: String(view.pilots) })),
+    el('div', { class: 'ef-state-dots', role: 'img', 'aria-label': `${view.banned.length} під забороною, ${view.ready} готові` },
+      view.states.map(person => el('span', {
+        class: person.blocked ? 'ef-dot ef-dot-bad' : 'ef-dot ef-dot-ok',
+        title: `${person.callsign}: ${person.blocked ? 'заборона' : 'готовий'}`,
+      }))),
+    el('div', { class: 'ef-state-legend' },
+      el('span', {}, el('i', { class: 'ef-dot ef-dot-bad' }), 'заборона'),
+      el('span', {}, el('i', { class: 'ef-dot ef-dot-ok' }), 'готовий')),
+    el('div', { class: 'ef-state-counts' },
+      el('span', {}, el('strong', { text: String(overdue) }), 'строки прострочені'),
+      el('span', {}, el('strong', { text: String(soon) }), 'скоро спливуть'),
+      el('span', {}, el('strong', { text: String(valid) }), 'чинних'))));
 
   root.append(el('details', { class: 'ef-card ef-dash-route' },
     el('summary', {}, el('span', { class: 'ef-card-title', text: 'Схема маршруту останнього розрахунку' }), el('span', { class: 'ef-muted', text: 'розгорнути' })),
     routeBoard(ctx)));
-
-  const linkSel = select([{ value: '', label: 'Усі ланки' }, ...view.links.map(l => ({ value: l, label: l }))], filter.link, { onChange: () => { filter.link = linkSel.value; ctx.rerender(); } });
-  const roleSel = select([{ value: '', label: 'Усі ролі' }, ...['КЕ', 'ЛШ', 'Борттехнік'].map(r => ({ value: r, label: r }))], filter.role, { onChange: () => { filter.role = roleSel.value; ctx.rerender(); } });
-  linkSel.setAttribute('aria-label', 'Фільтр за ланкою');
-  roleSel.setAttribute('aria-label', 'Фільтр за роллю');
-  root.append(el('div', { class: 'ef-filterbar' },
-    el('span', { class: 'ef-muted', text: 'Фільтр:' }), linkSel, roleSel,
-    el('span', { class: 'ef-muted', text: `локальний стан на ${formatDate(today)}` })));
+  root.append(el('p', { class: 'ef-glow-foot', text: `Дані файлу · стан на ${formatDate(today) || '—'}${view.shift?.flights ? ` · ${view.shift.flights} ${pluralFlights(view.shift.flights)}` : ''}` }));
   return root;
 }

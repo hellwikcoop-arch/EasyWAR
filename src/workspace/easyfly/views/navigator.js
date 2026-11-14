@@ -86,7 +86,9 @@ export function render(ctx) {
     root.replaceChildren();
     const tab = navSession.tab;
     const body = tab === 'calc' ? calcScreen() : docScreen(tab);
-    root.append(body, toastBox);
+    root.append(
+      el('p', { class: 'nv-sub' }, btn('Калькулятори', { onClick: () => ctx.go('calculators') })),
+      body, toastBox);
   };
   const switchTab = tab => { navSession.tab = tab; paint(); };
 

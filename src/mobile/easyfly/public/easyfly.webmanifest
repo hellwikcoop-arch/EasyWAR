@@ -7,8 +7,8 @@
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#0a0f1c",
-  "theme_color": "#0a0f1c",
+  "background_color": "#141414",
+  "theme_color": "#141414",
   "icons": [
     { "src": "./easyfly-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
     { "src": "./easyfly-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }

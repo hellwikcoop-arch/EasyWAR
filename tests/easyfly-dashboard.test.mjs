@@ -33,9 +33,9 @@ test('dashboardView на демо-наборі: готовність, лічил
 
 test('плитки: усі розділи, крім самого зведення, з підписами з NAV_ITEMS і числами', () => {
   const view = dashboardView(createDemo(), DEMO_TODAY);
-  assert.deepEqual(view.tiles.map(t => t.route).sort(), NAV_ITEMS.map(i => i.route).filter(r => r !== 'summary').sort());
+  assert.deepEqual(view.tiles.map(t => t.route).sort(), NAV_ITEMS.map(i => i.route).filter(r => r !== 'summary' && r !== 'more').sort());
   const tile = route => view.tiles.find(t => t.route === route);
-  assert.deepEqual([tile('pilots').label, tile('pilots').value, tile('pilots').hint, tile('pilots').tone], ['Мої пілоти', '12', '8 без блокувань', 'red']);
+  assert.deepEqual([tile('pilots').label, tile('pilots').value, tile('pilots').hint, tile('pilots').tone], ['Пілоти', '12', '8 без блокувань', 'red']);
   assert.equal(tile('chrono').value, '23');
   assert.equal(tile('leaves').hint, 'наступна з 11.01.2027');
   assert.equal(tile('settings').value, null);
@@ -57,31 +57,31 @@ test('фільтр за ланкою, відпустка «зараз», пор�
   assert.deepEqual(empty.share, { overdue: 0, soon: 0, valid: 0 });
 });
 
-test('екран «Зведення»: дашборд із кільцем, лічильниками, плитками; схема маршруту згорнута', () => {
+test('екран «Сьогодні»: дуга, зміна, заборони, стан за пілотами; схема маршруту згорнута', () => {
   const view = readFileSync(new URL('../src/workspace/easyfly/views/summary.js', import.meta.url), 'utf8');
   const css = readFileSync(new URL('../src/workspace/easyfly/easyfly.css', import.meta.url), 'utf8');
-  for (const text of ['dashboardView', 'Готові', 'Прострочено', 'Скоро', 'Дійсно', 'Потребують уваги', 'Найближчі 30 днів', 'Відпустки', 'Остання зміна', 'Штурман', 'Розділи']) {
+  for (const text of ['todayHome', 'Сьогодні', 'Льотна зміна', 'Польоти заборонені', 'Стан за пілотами', 'ef-arc']) {
     assert.ok(view.includes(text), text);
   }
   assert.match(view, /el\('details', \{ class: 'ef-card ef-dash-route' \}/);
   assert.doesNotMatch(view, /root\.append\(routeBoard\(ctx\)\)/, 'схема маршруту не стоїть першою');
-  for (const cls of ['.ef-dash-hero', '.ef-ring', '.ef-kpis', '.ef-share', '.ef-tiles', '.ef-dash-row']) assert.ok(css.includes(cls), cls);
-  assert.match(css, /\.ef-tiles \{ order: 1;/, 'на телефоні плитки одразу під лічильниками');
+  for (const cls of ['.ef-today', '.ef-arc', '.ef-shift-pill', '.ef-glow-card', '.ef-dot-bad']) assert.ok(css.includes(cls), cls);
+  assert.doesNotMatch(css, /https?:\/\//, 'тема без зовнішніх адрес');
 });
 
-test('один пілот: «Мої пілоти» стає «Комісація» і веде в його профіль', () => {
+test('один пілот: пункт лишається «Пілоти» і відкриває вкладку «Комісація»', () => {
   assert.equal(SOLO_PILOTS_LABEL, 'Комісація');
   const empty = createEmpty();
-  assert.equal(navItemsFor(empty).find(i => i.route === 'pilots').label, 'Мої пілоти');
+  assert.equal(navItemsFor(empty).find(i => i.route === 'pilots').label, 'Пілоти');
   const one = addPerson(empty, { callsign: 'Тест-01', role: 'КЕ' }).data;
   const item = navItemsFor(one).find(i => i.route === 'pilots');
-  assert.deepEqual([item.label, item.target.name, item.target.params.id], ['Комісація', 'pilot', one.persons[0].id]);
+  assert.deepEqual([item.label, item.target.name, item.target.params.id, item.target.params.tab], ['Пілоти', 'pilot', one.persons[0].id, 'komis']);
   assert.deepEqual(navItemsFor(one).map(i => i.route), NAV_ITEMS.map(i => i.route));
   assert.deepEqual(navItemsFor(one).find(i => i.route === 'leaves').target, { name: 'leaves', params: {} });
   const tile = dashboardView(one, '2026-10-20').tiles.find(t => t.route === 'pilots');
-  assert.deepEqual([tile.label, tile.value, tile.target.name], ['Комісація', null, 'pilot']);
+  assert.deepEqual([tile.label, tile.value, tile.target.name, tile.target.params.tab], ['Пілоти', null, 'pilot', 'komis']);
   const two = addPerson(one, { callsign: 'Тест-02', role: 'ЛШ' }).data;
-  assert.equal(navItemsFor(two).find(i => i.route === 'pilots').label, 'Мої пілоти');
+  assert.equal(navItemsFor(two).find(i => i.route === 'pilots').label, 'Пілоти');
   assert.equal(navItemsFor(createDemo()).find(i => i.route === 'pilots').target.name, 'pilots');
 });
 

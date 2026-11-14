@@ -1,32 +1,31 @@
-/* EasyFLY — Aviation Tactical Glass. Токени: фон #0B141B, панелі #14232D,
-   підняті #1B3039, акцент #36DDB5, другий акцент #52B6C8, попередження #F4A64D,
-   небезпека #EF6256, текст #EAF3F5, приглушений #93A9B4.
-   Шрифт системний (UAF Sans у репозиторії немає, зовнішні файли заборонені).
-   Фокус — 2px м’ятний контур. Тіні мінімальні: лише внутрішній край панелі.
+/* EasyFLY — «тепле світіння» з макета: фон #141414, акцент #e66a37 / #f89654,
+   текст білий, приглушений rgba(255,255,255,.66). Шрифт Manrope вбудовано локально (OFL).
+   Фокус — 2px помаранчевий контур.
    Адаптив: ≥1100px — сайдбар зліва; 700–1100px — планшет; <700px — нижня навігація. */
+@import './fonts/manrope.css';
 
 .ef-host {
-  --ef-bg: #0B141B;
-  --ef-bg-side: #0B141B;
-  --ef-panel: #14232D;
-  --ef-panel-2: #1B3039;
-  --ef-line: rgba(82, 182, 200, .18);
-  --ef-line-strong: rgba(82, 182, 200, .34);
-  --ef-text: #EAF3F5;
-  --ef-muted: #93A9B4;
-  --ef-accent: #36DDB5;
-  --ef-accent-2: #52B6C8;
-  --ef-good: #36DDB5;
-  --ef-soon: #F4A64D;
-  --ef-bad: #EF6256;
-  --ef-on-accent: #062018;
+  --ef-bg: #141414;
+  --ef-bg-side: #100c0a;
+  --ef-panel: #1c1614;
+  --ef-panel-2: #2a221c;
+  --ef-line: rgba(255, 255, 255, .12);
+  --ef-line-strong: rgba(248, 150, 84, .45);
+  --ef-text: #ffffff;
+  --ef-muted: rgba(255, 255, 255, .66);
+  --ef-accent: #f89654;
+  --ef-accent-2: #e66a37;
+  --ef-good: #eddbd8;
+  --ef-soon: #f8a56b;
+  --ef-bad: #f9623b;
+  --ef-on-accent: #1a0d06;
   --ef-radius: 12px;
   --ef-radius-sm: 10px;
   --ef-gutter: 28px;
   --ef-surface: linear-gradient(180deg, rgba(234, 243, 245, .045), rgba(234, 243, 245, 0) 42%), var(--ef-panel);
   background: var(--ef-bg);
   color: var(--ef-text);
-  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  font: 14px/1.45 "Manrope", system-ui, -apple-system, "Segoe UI", sans-serif;
   color-scheme: dark;
   font-variant-numeric: tabular-nums;
 }
@@ -50,7 +49,7 @@
 .ef-root-start { display: block; overflow: auto; }
 .ef-sidebar { display: flex; flex-direction: column; gap: 4px; padding: 18px 12px 16px; background: var(--ef-bg-side); border-right: 1px solid var(--ef-line); overflow-y: auto; }
 .ef-brand { display: flex; align-items: center; gap: 10px; font-size: 20px; font-weight: 750; letter-spacing: -.02em; padding: 2px 10px 16px; }
-.ef-brand-mark { position: relative; width: 28px; height: 28px; border-radius: 8px; flex: none; background: linear-gradient(160deg, #7CF0D2, var(--ef-accent) 42%, var(--ef-accent-2)); box-shadow: inset 0 0 0 1px rgba(6, 32, 24, .35); }
+.ef-brand-mark { position: relative; width: 28px; height: 28px; border-radius: 8px; flex: none; background: linear-gradient(160deg, #fec38a, #e66a37 55%, #7a3418); box-shadow: inset 0 0 0 1px rgba(26, 13, 6, .35); }
 .ef-brand-mark::before { content: ""; position: absolute; left: 8px; top: 8px; width: 11px; height: 11px; border-top: 1.7px solid var(--ef-on-accent); border-right: 1.7px solid var(--ef-on-accent); transform: rotate(-42deg); }
 .ef-brand-fly { color: var(--ef-accent); }
 .ef-nav-title { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--ef-muted); padding: 4px 12px 8px; }
@@ -391,8 +390,8 @@
   .ef-bar-menu:not([hidden]) { display: block; }
   .ef-bar-title { flex-basis: 100%; }
   .ef-bottom-nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: flex; align-items: stretch; justify-content: space-around; padding: 0 4px env(safe-area-inset-bottom); background: var(--ef-bg-side); border-top: 1px solid var(--ef-line); }
-  .ef-bnav-item { position: relative; display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 58px; padding: 6px 2px; border: 0; background: none; color: var(--ef-muted); font-size: 11px; cursor: pointer; }
-  .ef-bnav-item[aria-current="page"], .ef-bnav-item.ef-active { color: var(--ef-accent); font-weight: 700; }
+  .ef-bnav-item { position: relative; display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 44px; margin: 6px 2px; padding: 6px 4px; border: 0; border-radius: 999px; background: none; color: rgba(255,255,255,.62); font-size: 11px; font-weight: 500; cursor: pointer; }
+  .ef-bnav-item[aria-current="page"], .ef-bnav-item.ef-active { color: #fff; background: #e66a37; font-weight: 600; }
   .ef-title, .ef-pilot-name { font-size: 22px; }
   .ef-counters, .ef-form-grid, .ef-form-grid-3 { grid-template-columns: minmax(0, 1fr); }
   .ef-counter { padding: 14px 18px; }
@@ -531,3 +530,63 @@
   .ef-dash-row .ef-dash-big strong { display: block; font-size: 24px; }
   .ef-dash-item { padding: 7px 10px; }
 }
+
+/* ───── «Тепле світіння»: Сьогодні, картки, калькулятори ───── */
+.ef-today, .ef-flights, .ef-calcs, .ef-more, .ef-about { position: relative; }
+.ef-today { max-width: 480px; margin: 0 auto; }
+.ef-today::before { content: ""; position: absolute; left: -16px; right: -16px; top: -24px; height: 380px; background: radial-gradient(80% 70% at 50% 0%, rgba(230, 106, 55, .42), rgba(20, 20, 20, 0) 72%); pointer-events: none; z-index: 0; }
+.ef-today > * { position: relative; z-index: 1; }
+.ef-today-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 4px 0 8px; }
+.ef-today-head h1 { margin: 0; font-size: 22px; font-weight: 500; letter-spacing: -.005em; }
+.ef-today-date { height: 28px; padding: 0 12px; display: inline-flex; align-items: center; border-radius: 999px; background: rgba(255,255,255,.09); font-size: 11px; font-weight: 500; color: rgba(255,255,255,.86); }
+.ef-today-hero { position: relative; min-height: 250px; margin: 0 -8px 8px; }
+.ef-arc { display: block; width: 100%; height: auto; }
+.ef-arc-track, .ef-arc-value { fill: none; stroke-width: 34; stroke-linecap: round; }
+.ef-arc-track { stroke: rgba(255,255,255,.09); }
+.ef-arc-value { stroke: url(#efArcGlow); }
+.ef-arc-knob { fill: #fff; }
+.ef-arc-dot { fill: #1a0d06; }
+.ef-shift-pill { position: absolute; left: 16px; right: 16px; top: 8px; height: 52px; display: flex; align-items: center; gap: 10px; padding: 0 14px 0 8px; border-radius: 999px; border: 1px solid rgba(255,255,255,.14); background: rgba(44, 30, 22, .72); color: #fff; text-align: left; cursor: pointer; }
+.ef-shift-ico, .ef-shift-go { flex: none; }
+.ef-shift-ico { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: rgba(255,255,255,.1); }
+.ef-shift-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.ef-shift-text strong { font-size: 13px; font-weight: 600; }
+.ef-shift-text span, .ef-glow-quiet { font-size: 12px; font-weight: 500; color: rgba(255,255,255,.72); }
+.ef-shift-text span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ef-today-score { position: absolute; left: 0; right: 0; top: 118px; display: flex; flex-direction: column; align-items: center; text-align: center; }
+.ef-today-fraction { display: flex; align-items: baseline; gap: 2px; }
+.ef-today-n { font-size: 50px; font-weight: 300; line-height: 1; letter-spacing: -.02em; }
+.ef-today-m { font-size: 26px; font-weight: 300; color: rgba(255,255,255,.74); }
+.ef-today-caption { font-size: 14.5px; font-weight: 500; }
+.ef-today-sub { font-size: 12px; color: rgba(255,255,255,.7); }
+.ef-glow-card { margin: 8px 0; padding: 14px 16px 8px; border-radius: 24px; background: #141414; border: 1px solid rgba(255,255,255,.08); }
+.ef-glow-card-head { display: flex; align-items: center; gap: 10px; min-height: 28px; margin-bottom: 4px; }
+.ef-glow-card-head h2 { margin: 0; flex: 1; font-size: 13px; font-weight: 500; color: rgba(255,255,255,.9); }
+.ef-glow-pill { height: 28px; padding: 0 12px; display: inline-flex; align-items: center; border-radius: 999px; background: rgba(255,255,255,.07); font-size: 11px; }
+.ef-ban-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 44px; padding: 6px 0; border: 0; border-top: 1px solid rgba(255,255,255,.07); background: none; color: inherit; text-align: left; cursor: pointer; }
+.ef-ban-who { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.ef-ban-who strong { font-size: 13.5px; font-weight: 500; }
+.ef-ban-who span { font-size: 11.5px; color: rgba(255,255,255,.66); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ef-ban-days { flex: none; font-size: 13px; font-weight: 600; color: #f89654; }
+.ef-state-dots { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.ef-dot { width: 18px; height: 18px; border-radius: 50%; display: inline-block; }
+.ef-dot-bad { background: transparent; box-shadow: inset 0 0 0 1.5px #f9623b; background-image: linear-gradient(135deg, transparent 42%, #f9623b 42%, #f9623b 58%, transparent 58%); }
+.ef-dot-ok { background: #eddbd8; }
+.ef-state-legend, .ef-state-counts { display: flex; flex-wrap: wrap; gap: 10px 16px; font-size: 12px; color: rgba(255,255,255,.72); }
+.ef-state-legend i { width: 12px; height: 12px; margin-right: 6px; vertical-align: -2px; }
+.ef-state-counts strong { display: block; color: #fff; font-size: 18px; font-weight: 500; }
+.ef-today-empty, .ef-glow-foot { color: rgba(255,255,255,.72); font-size: 13px; }
+.ef-flight-form { display: flex; flex-direction: column; gap: 10px; }
+.ef-form-error:empty { display: none; }
+.ef-form-error { margin: 0; color: #f8a56b; font-size: 13px; }
+.ef-calc-kinds { display: flex; gap: 8px; overflow: auto; padding-bottom: 8px; }
+.ef-calc-kind { flex: none; height: 36px; padding: 0 14px; border-radius: 999px; border: 1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.06); color: #fff; cursor: pointer; }
+.ef-calc-kind-on { background: #e66a37; border-color: #e66a37; }
+.ef-calc-out { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; margin: 8px 0 0; }
+.ef-calc-out dt { color: rgba(255,255,255,.66); }
+.ef-calc-out dd { margin: 0; text-align: right; font-weight: 600; }
+.ef-about-name { margin: 0 0 8px; font-size: 28px; font-weight: 500; }
+.ef-about-card p { margin: 8px 0; line-height: 1.45; }
+.ef-komis-num { display: flex; align-items: baseline; gap: 8px; }
+.ef-komis-num strong { font-size: 48px; font-weight: 300; line-height: 1; }
+.ef-input, .ef-select, .ef-textarea { border-radius: 999px; }

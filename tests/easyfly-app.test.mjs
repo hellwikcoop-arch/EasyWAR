@@ -20,8 +20,10 @@ const byCallsign = (data, callsign) => data.persons.find(p => p.callsign === cal
 
 test('маршрути: розбір і побудова, невідоме — зведення', () => {
   assert.deepEqual(parseRoute('#/pilot/p01/admissions'), { name: 'pilot', params: { id: 'p01', tab: 'admissions' } });
-  assert.deepEqual(parseRoute('#/pilot/p01'), { name: 'pilot', params: { id: 'p01', tab: 'checks' } });
-  assert.deepEqual(parseRoute('#/pilot/p01/дивна'), { name: 'pilot', params: { id: 'p01', tab: 'checks' } });
+  assert.deepEqual(parseRoute('#/pilot/p01'), { name: 'pilot', params: { id: 'p01', tab: 'komis' } });
+  assert.deepEqual(parseRoute('#/pilot/p01/дивна'), { name: 'pilot', params: { id: 'p01', tab: 'komis' } });
+  assert.deepEqual(parseRoute('#/flights/2026-10-20'), { name: 'flights', params: { date: '2026-10-20' } });
+  assert.equal(buildRoute('flights', { date: '2026-10-20' }), '#/flights/2026-10-20');
   assert.deepEqual(parseRoute('#/pilot'), { name: 'pilots', params: {} });
   assert.deepEqual(parseRoute('#/navigator/p02'), { name: 'navigator', params: { pilot: 'p02' } });
   assert.deepEqual(parseRoute('#/sunmoon'), { name: 'sunmoon', params: {} });
@@ -38,8 +40,8 @@ test('маршрути: розбір і побудова, невідоме — �
 });
 
 test('навігація: вісім пунктів у порядку макетів, телефон — чотири', () => {
-  assert.deepEqual(NAV_ITEMS.map(i => i.label), ['Зведення', 'Мої пілоти', 'Хронометраж', 'Штурман', 'Сонце і Місяць', 'Імпорт з Excel', 'Нагадування', 'Відпустки', 'Налаштування']);
-  assert.deepEqual(PHONE_NAV, ['summary', 'pilots', 'navigator', 'sunmoon']);
+  assert.deepEqual(NAV_ITEMS.map(i => i.label), ['Сьогодні', 'Пілоти', 'Польоти', 'Штурман', 'Хронометраж', 'Сонце і Місяць', 'Імпорт з Excel', 'Нагадування', 'Відпустки', 'Калькулятори', 'Налаштування', 'Про застосунок', 'Ще']);
+  assert.deepEqual(PHONE_NAV, ['summary', 'pilots', 'flights', 'navigator']);
 });
 
 test('todayIso бере локальну дату годинника', () => {
