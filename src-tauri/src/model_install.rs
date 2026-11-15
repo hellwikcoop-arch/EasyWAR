@@ -1050,11 +1050,15 @@ mod tests {
             total_bytes: 120,
             resume_from: 0,
         };
-        assert!(consent_under_network_policy("main".into(), true, accept())(&prompt));
-        assert!(!consent_under_network_policy("main".into(), true, decline())(&prompt));
-        assert!(!consent_under_network_policy("office-editor".into(), true, accept())(&prompt));
-        assert!(!consent_under_network_policy("main".into(), false, accept())(&prompt));
-        assert!(!consent_under_network_policy("other".into(), false, accept())(&prompt));
+        let allows = |label: &str, profile_open: bool, answer: bool| {
+            let ask: Consent = Arc::new(move |_| answer);
+            consent_under_network_policy(label.to_owned(), profile_open, ask)(&prompt)
+        };
+        assert!(allows("main", true, true));
+        assert!(!allows("main", true, false));
+        assert!(!allows("office-editor", true, true));
+        assert!(!allows("main", false, true));
+        assert!(!allows("other", false, true));
     }
 
     #[test]
