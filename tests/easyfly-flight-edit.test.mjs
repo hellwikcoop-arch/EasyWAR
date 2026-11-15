@@ -153,7 +153,7 @@ test('UI: редагування доступне і в льотній книж�
     read('../src/workspace/easyfly/views/pilot.js'),
     read('../src/workspace/easyfly/views/chrono.js'),
   ]);
-  assert.match(entry, /editing \? updateFlight\(data, editing\.id, values\)/);
+  assert.match(entry, /editing\s*\?\s*updateFlight\(data, editing\.id, values\)/);
   assert.match(entry, /title: editing \? 'Змінити політ'/);
   assert.match(entry, /editing\.source === 'import'/);
   assert.match(entry, /return selected \? entryKinds\(selected\) : \[\]/, 'неприв’язаний запис відкривається без пілотів');
