@@ -1107,12 +1107,16 @@ struct InstallResult {
 #[tauri::command]
 async fn install_local_model(
     app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
     store: tauri::State<'_, LocalModelStore>,
     runtime: tauri::State<'_, LocalModelRuntime>,
     installer: tauri::State<'_, InstallController>,
     session: tauri::State<'_, ProfileSession>,
     on_event: tauri::ipc::Channel<InstallEvent>,
 ) -> Result<InstallResult, String> {
+    if window.label() != network_policy::MAIN_WINDOW_LABEL {
+        return Err(network_policy::Denied::WindowNotAllowed.to_string());
+    }
     local_model_signed_in(&session)?;
     let guard = installer.begin().map_err(|error| error.to_string())?;
     let source = model_install::qwen3_4b_q4km();
@@ -1120,8 +1124,12 @@ async fn install_local_model(
     let emit: model_install::Emit = std::sync::Arc::new(move |event| {
         let _ = on_event.send(event);
     });
-    match model_install::install_model(&source, &dir, &guard, emit, model_install::native_consent())
-        .await
+    let consent = model_install::consent_under_network_policy(
+        window.label().to_owned(),
+        session.get().is_some(),
+        model_install::native_consent(),
+    );
+    match model_install::install_model(&source, &dir, &guard, emit, consent).await
     {
         Ok(_) => {}
         Err(
