@@ -572,5 +572,4 @@ mod tests {
             assert!(!saved_online_enabled(value), "must fail closed: {value:?}");
         }
     }
-
 }
