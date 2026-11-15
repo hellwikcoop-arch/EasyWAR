@@ -20,4 +20,12 @@ test('завантаження моделі проходить Rust-політи
   assert.match(installer, /let confirmed = ask\(prompt\);/);
   assert.match(installer, /crate::network_policy::Purpose::ModelInstall/);
   assert.match(installer, /confirm_download\(&consent, source, have\)\.await\?;/);
+
+  const entry = lib.match(/async fn install_local_model\([\s\S]*?\n\}/)?.[0] || '';
+  assert.ok(entry.indexOf('window.label() != network_policy::MAIN_WINDOW_LABEL')
+    < entry.indexOf('installer.begin()'), 'чужі вікна відхиляються ще до початку встановлення');
+  const download = installer.match(/pub async fn install_model\([\s\S]*?\n\}/)?.[0] || '';
+  assert.ok(download.indexOf('confirm_download(&consent, source, have).await?')
+    < download.indexOf('download_part(source, &part, guard, &emit).await?'),
+  'підтвердження має відбутися перед першим HTTP');
 });
