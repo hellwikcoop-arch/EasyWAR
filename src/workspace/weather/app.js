@@ -412,14 +412,20 @@ export async function mount(container, host) {
   });
   toggle.addEventListener('change', async () => {
     if (onlineSaving) return;
+    const previousOnline = state.online;
     const enabled = toggle.checked;
     onlineSaving = true;
     const stored = await save({ ...state, online: enabled });
     onlineSaving = false;
     if (!stored) {
-      // Якщо ввімкнення не вдалося зберегти, не робимо запитів на основі одного JS-прапорця.
-      if (enabled) state = { ...state, online: false };
+      // Стан у зашифрованому профілі не змінився: не показуємо невдале вимкнення
+      // як успішне. Rust продовжує застосовувати попередній збережений дозвіл.
+      state = { ...state, online: previousOnline };
       render();
+      say(enabled
+        ? 'Не вдалося зберегти дозвіл. Онлайн-оновлення не ввімкнено.'
+        : 'Не вдалося зберегти вимкнення. Онлайн-оновлення все ще дозволено у профілі. Спробуйте вимкнути ще раз.',
+      'bad');
       return;
     }
     renderNet();
