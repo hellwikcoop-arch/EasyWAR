@@ -79,6 +79,8 @@ export async function mount(container, host) {
   let state = stored.text ? parseState(stored.text) : emptyState();
   let busy = false;
   let timer = 0;
+  let onlineSaving = false;
+  let writeQueue = Promise.resolve();
 
   container.classList.add('wx-root');
   host.setTitle?.('');
@@ -176,8 +178,13 @@ export async function mount(container, host) {
 
   /** Записує стан у дані профілю; невдача не ламає екран, але про неї видно. */
   function writeState(value) {
-    host.profile.write(PROFILE_KEY, serializeState(value)).catch(error => {
+    // Порядок записів важливий: заборона онлайну не може бути перезаписана старішим станом.
+    const snapshot = serializeState(value);
+    const pending = writeQueue.then(() => host.profile.write(PROFILE_KEY, snapshot));
+    writeQueue = pending.catch(() => {});
+    return pending.then(() => true, error => {
       say(`Зміни не збережено в профілі: ${error?.message || error}`, 'warn');
+      return false;
     });
   }
 
@@ -188,8 +195,9 @@ export async function mount(container, host) {
 
   function save(next) {
     state = next;
-    writeState(state);
+    const written = writeState(state);
     render();
+    return written;
   }
 
   function renderPlaces() {
@@ -211,15 +219,15 @@ export async function mount(container, host) {
 
   function renderNet() {
     toggle.checked = state.online && Boolean(invoke);
-    toggle.disabled = !invoke;
+    toggle.disabled = !invoke || onlineSaving;
     refresh.hidden = !toggle.checked;
     toggleLabel.querySelector('.wx-icon').innerHTML = WEATHER_ICONS[toggle.checked ? 'internet-on' : 'internet-off'];
     toggleState.textContent = !invoke ? 'Недоступно' : (toggle.checked ? 'Увімкнено користувачем' : 'Вимкнено');
     toggleState.dataset.on = toggle.checked ? '1' : '';
     mode.textContent = toggle.checked ? 'Онлайн увімкнено' : 'Офлайн за замовчуванням';
-    refresh.disabled = busy || !current();
-    searchButton.disabled = busy || !toggle.checked;
-    searchInput.disabled = !toggle.checked;
+    refresh.disabled = busy || onlineSaving || !current();
+    searchButton.disabled = busy || onlineSaving || !toggle.checked;
+    searchInput.disabled = onlineSaving || !toggle.checked;
     if (!invoke) disclosure.textContent = 'Онлайн-оновлення працює лише в настільному застосунку EasyWAR. Тут — тільки ручне введення.';
     else if (!toggle.checked) disclosure.textContent = 'Вимкнено: застосунок нічого не надсилає в мережу.';
     else disclosure.textContent = current() ? `${disclosureText(current())}. Оновлення — раз на ${REFRESH_MINUTES} хв, поки застосунок відкритий.` : 'Додайте населений пункт, щоб отримувати погоду.';
@@ -329,7 +337,7 @@ export async function mount(container, host) {
 
   async function refreshNow({ quiet = false } = {}) {
     const place = current();
-    if (!invoke || !state.online || !place || busy) return;
+    if (!invoke || !state.online || onlineSaving || !place || busy) return;
     busy = true;
     renderNet();
     if (!quiet) say('Отримую погоду…');
@@ -348,12 +356,12 @@ export async function mount(container, host) {
 
   function tick() {
     const place = current();
-    if (state.online && place && needsRefresh(state.observations[place.id])) refreshNow({ quiet: true });
+    if (!onlineSaving && state.online && place && needsRefresh(state.observations[place.id])) refreshNow({ quiet: true });
   }
 
   async function search() {
     const query = searchInput.value.trim();
-    if (!invoke || !state.online || busy) return;
+    if (!invoke || !state.online || onlineSaving || busy) return;
     if (query.length < 2) {
       say('Вкажіть щонайменше дві літери назви.', 'warn');
       return;
@@ -402,10 +410,21 @@ export async function mount(container, host) {
     save(removePlace(state, place.id));
     say(`Прибрано: ${place.name}.`);
   });
-  toggle.addEventListener('change', () => {
-    save({ ...state, online: toggle.checked });
-    say(toggle.checked ? 'Онлайн-оновлення ввімкнено.' : 'Онлайн-оновлення вимкнено: нічого не надсилається.');
-    if (toggle.checked) tick();
+  toggle.addEventListener('change', async () => {
+    if (onlineSaving) return;
+    const enabled = toggle.checked;
+    onlineSaving = true;
+    const stored = await save({ ...state, online: enabled });
+    onlineSaving = false;
+    if (!stored) {
+      // Якщо ввімкнення не вдалося зберегти, не робимо запитів на основі одного JS-прапорця.
+      if (enabled) state = { ...state, online: false };
+      render();
+      return;
+    }
+    renderNet();
+    say(enabled ? 'Онлайн-оновлення ввімкнено.' : 'Онлайн-оновлення вимкнено: нічого не надсилається.');
+    if (enabled) tick();
   });
   refresh.addEventListener('click', () => refreshNow());
   searchButton.addEventListener('click', search);
