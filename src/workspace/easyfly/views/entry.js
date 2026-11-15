@@ -56,7 +56,10 @@ export function openEntry(ctx, opts = {}) {
   const crewField = textInput(Array.isArray(editing?.crew) ? editing.crew.join(', ') : '', { placeholder: 'Позивни через кому (необов’язково)', maxLength: 200 });
 
   // ── поля перевірки
-  const kinds = () => entryKinds(ctx.data.persons.find(p => p.id === pilot.value) || ctx.data.persons[0]);
+  const kinds = () => {
+    const selected = ctx.data.persons.find(p => p.id === pilot.value) || ctx.data.persons[0];
+    return selected ? entryKinds(selected) : [];
+  };
   const kindSel = select(kinds().map(k => ({ value: k.id, label: k.label })), opts.kind || 'medical:ВЛК');
   const direction = select(ARTICLE_DIRECTIONS.map(([value, label]) => ({ value, label })), 'ao');
   const checkDate = dateInput(opts.date || ctx.today);
