@@ -11,6 +11,7 @@ import {
   parseRoute, suggestedFileName, todayIso,
 } from './fly-state.js';
 import { createEmpty, parse, serialize } from './fly-store.js';
+import { createProfileSaveQueue } from './fly-save.js';
 import { icon } from './icons.js';
 import {
   button, confirmDialog, el, notice, setOverlayRoot, toast, underDevelopment,
@@ -43,12 +44,25 @@ export async function mount(container, host) {
   // demo — синтетичний набір (ніколи не пишеться в профіль).
   let doc = null;
   let saveTimer = null;
-  let saveQueue = Promise.resolve();
   let saveFailed = false;
   let route = parseRoute('');
   let renderToken = 0;
   let parts = null; // { content, main, nav, bottom, bar }
   let destroyed = false;
+  const enqueueSave = createProfileSaveQueue({
+    write: value => host.profile.write(STORE_KEY, value),
+    encode: serialize,
+    fingerprint,
+    onResult({ target, ok, error }) {
+      if (doc !== target || destroyed) return;
+      if (ok) saveFailed = false;
+      else {
+        if (!saveFailed) toast(`Не вдалося зберегти дані в профілі: ${error?.message || error}`, 'error');
+        saveFailed = true;
+      }
+      syncDirty();
+    },
+  });
 
   // ───────────── стан і контекст для екранів ─────────────
 
@@ -107,27 +121,11 @@ export async function mount(container, host) {
     saveTimer = setTimeout(() => { saveTimer = null; persist(); }, SAVE_DELAY_MS);
   }
 
-  /** Записує дані профілю одразу. Записи йдуть по черзі; → true, якщо дані збережено. */
+  /** Збереження записує знімок до очищення стану, навіть якщо черга ще виконується. */
   function persist() {
     clearTimeout(saveTimer);
     saveTimer = null;
-    const run = async () => {
-      const target = doc;
-      if (!target?.stored) return true;
-      const snapshot = target.data;
-      try {
-        await host.profile.write(STORE_KEY, serialize(snapshot));
-        target.savedFp = fingerprint(snapshot);
-        saveFailed = false;
-      } catch (error) {
-        if (!saveFailed) toast(`Не вдалося зберегти дані в профілі: ${error?.message || error}`, 'error');
-        saveFailed = true;
-      }
-      if (doc === target) syncDirty();
-      return !saveFailed;
-    };
-    saveQueue = saveQueue.then(run, run);
-    return saveQueue;
+    return enqueueSave(doc);
   }
 
   /** Дані профілю відкриваються самі: увійшов у профіль — і вони вже тут. */
