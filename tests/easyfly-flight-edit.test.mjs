@@ -89,6 +89,22 @@ test('перепризначення пілота й непов’язаний �
   assert.equal(validate(unlinked.data).ok, true);
 });
 
+test('неприв’язаний імпортований політ редагується навіть без пілотів у базі', () => {
+  const { data, id } = withFlight({ source: 'import' });
+  const orphan = {
+    ...data,
+    persons: [],
+    flights: data.flights.map(flight => ({ ...flight, personId: null, crew: ['Екіпаж-04'] })),
+  };
+  assert.equal(validate(orphan).ok, true);
+  const edited = updateFlight(orphan, id, { count: 4, personId: null, crew: ['Екіпаж-04'], note: 'Виправлено' });
+  assert.equal(edited.ok, true);
+  assert.equal(edited.data.flights[0].personId, null);
+  assert.equal(edited.data.flights[0].source, 'import');
+  assert.equal(edited.data.flights[0].count, 4);
+  assert.equal(edited.data.flights.length, 1);
+});
+
 test('невалідні правки й невідомий ID відхиляються без мутації та без створення зміни', () => {
   const { data, id } = withFlight();
   const snapshot = structuredClone(data);
@@ -122,6 +138,7 @@ test('UI: редагування доступне і в льотній книж�
   assert.match(entry, /editing \? updateFlight\(data, editing\.id, values\)/);
   assert.match(entry, /title: editing \? 'Змінити політ'/);
   assert.match(entry, /editing\.source === 'import'/);
+  assert.match(entry, /return selected \? entryKinds\(selected\) : \[\]/, 'неприв’язаний запис відкривається без пілотів');
   assert.match(pilot, /button\('Змінити',[\s\S]*?openEntry\(ctx, \{ flightId: e\.id/);
   assert.match(chrono, /button\('Змінити',[\s\S]*?openEntry\(ctx, \{ flightId: r\.flight\.id/);
 });
