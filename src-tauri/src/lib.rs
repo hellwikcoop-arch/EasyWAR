@@ -1129,8 +1129,7 @@ async fn install_local_model(
         session.get().is_some(),
         model_install::native_consent(),
     );
-    match model_install::install_model(&source, &dir, &guard, emit, consent).await
-    {
+    match model_install::install_model(&source, &dir, &guard, emit, consent).await {
         Ok(_) => {}
         Err(
             error
