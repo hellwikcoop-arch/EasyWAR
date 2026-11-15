@@ -268,6 +268,31 @@ impl DownloadPrompt {
 /// It is injected, so tests answer without a window, and it runs on a blocking thread.
 pub type Consent = Arc<dyn Fn(&DownloadPrompt) -> bool + Send + Sync>;
 
+/// Enforce the central outbound policy at the native confirmation boundary.
+/// The invoking window and active profile are checked before asking; the actual
+/// native answer is then part of the policy decision immediately before HTTP.
+/// An injected webview call cannot manufacture `model_install_confirmed`.
+pub fn consent_under_network_policy(
+    window_label: String,
+    profile_open: bool,
+    ask: Consent,
+) -> Consent {
+    Arc::new(move |prompt| {
+        if window_label != crate::network_policy::MAIN_WINDOW_LABEL || !profile_open {
+            return false;
+        }
+        let confirmed = ask(prompt);
+        let mut context = crate::network_policy::NetworkContext::closed(&window_label);
+        context.profile_open = profile_open;
+        context.model_install_confirmed = confirmed;
+        crate::network_policy::network_policy(
+            &context,
+            crate::network_policy::Purpose::ModelInstall,
+        )
+        .is_allowed()
+    })
+}
+
 /// Decimal units, as the page shows them («≈2,5 ГБ»).
 fn format_size(bytes: u64) -> String {
     let gb = bytes as f64 / 1e9;
@@ -1016,6 +1041,22 @@ mod tests {
     }
 
     const SIZE: usize = 2 * 1024 * 1024 + 123;
+
+
+    #[test]
+    fn model_download_network_policy_requires_main_window_login_and_native_yes() {
+        let prompt = DownloadPrompt {
+            title: "Синтетична модель".into(),
+            host: "example.invalid".into(),
+            total_bytes: 120,
+            resume_from: 0,
+        };
+        assert!(consent_under_network_policy("main".into(), true, accept())(&prompt));
+        assert!(!consent_under_network_policy("main".into(), true, decline())(&prompt));
+        assert!(!consent_under_network_policy("office-editor".into(), true, accept())(&prompt));
+        assert!(!consent_under_network_policy("main".into(), false, accept())(&prompt));
+        assert!(!consent_under_network_policy("other".into(), false, accept())(&prompt));
+    }
 
     #[test]
     fn pinned_model_matches_the_official_pointer() {
