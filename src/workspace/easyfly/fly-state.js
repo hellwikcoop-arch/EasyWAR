@@ -433,6 +433,70 @@ export function addFlight(data, input = {}) {
   return { ok: true, id, data: { ...withShift.data, flights: [...withShift.data.flights, flight] } };
 }
 
+/**
+ * Коригує наявний політ без зміни ID, джерела або сторонніх метаданих.
+ * Імпортований файл залишається недоторканим: змінюється лише запис профілю.
+ * Зміна дати прив'язує запис до відповідної льотної зміни.
+ */
+export function updateFlight(data, id, patch = {}) {
+  const current = data.flights.find(flight => flight.id === id);
+  if (!current) return fail('Запис польоту не знайдено.');
+
+  const personId = Object.hasOwn(patch, 'personId') ? patch.personId || null : current.personId ?? null;
+  const person = personId ? personById(data, personId) : null;
+  if (personId && !person) return fail('Пілота не знайдено.');
+
+  const requestedCrew = patch.crew === undefined ? current.crew : patch.crew;
+  if (!Array.isArray(requestedCrew)) return fail('Екіпаж має бути списком позивних.');
+  const crew = requestedCrew.map(text).filter(Boolean);
+  if (person && !crew.includes(person.callsign)) crew.unshift(person.callsign);
+  if (!crew.length) return fail('Вкажіть пілота або екіпаж.');
+  if (crew.some(callsign => callsign.length > MAX_CALLSIGN_LEN)) {
+    return fail(`Позивний екіпажу задовгий (понад ${MAX_CALLSIGN_LEN} символів).`);
+  }
+
+  const field = (name, previous) => Object.hasOwn(patch, name) ? patch[name] : previous;
+  const next = {
+    ...current,
+    date: field('date', current.date),
+    personId,
+    crew,
+    exercise: field('exercise', current.exercise),
+    count: field('count', current.count),
+    dayNight: field('dayNight', current.dayNight),
+    meteo: orNull(field('meteo', current.meteo)),
+    aircraftType: orNull(field('aircraftType', current.aircraftType)),
+    tailNumber: orNull(field('tailNumber', current.tailNumber)),
+    note: orNull(field('note', current.note)),
+    // Історичні імпортовані записи зберігають оригінальне джерело.
+    source: current.source,
+  };
+  if (Object.hasOwn(patch, 'airtime')) {
+    // normalizeFlight віддає пріоритет airtimeMin: його треба скинути,
+    // інакше редагування тривалості не вплине на підсумки.
+    next.airtimeMin = null;
+    next.airtime = patch.airtime;
+  }
+  if (text(next.note).length > MAX_NOTE_LEN) {
+    return fail(`Примітка задовга (понад ${MAX_NOTE_LEN} символів).`);
+  }
+
+  const normalized = normalizeFlight(next);
+  if (!normalized.ok) return fail(normalized.errors);
+  const withShift = ensureShift(data, normalized.value.date);
+  const revised = {
+    ...current, ...normalized.value,
+    id: current.id,
+    source: current.source ?? normalized.value.source,
+    shiftId: withShift.shift.id,
+  };
+  return {
+    ok: true,
+    id: current.id,
+    data: { ...withShift.data, flights: upsertById(withShift.data.flights, revised) },
+  };
+}
+
 export function deleteFlight(data, id, { confirmed = false } = {}) {
   if (!confirmed) return fail('Видалення потрібно підтвердити.');
   if (!data.flights.some(f => f.id === id)) return fail('Запис польоту не знайдено.');
