@@ -16,6 +16,15 @@ pub const FORECAST_ENDPOINT: &str = "https://api.open-meteo.com/v1/forecast";
 pub const GEOCODE_ENDPOINT: &str = "https://geocoding-api.open-meteo.com/v1/search";
 /// Відповідь Open-Meteo на один пункт займає кілька кілобайт; більше — щось не те.
 pub const MAX_RESPONSE_BYTES: usize = 256 * 1024;
+
+/// Offline consent is stored in the encrypted profile record `weather.state`.
+/// Missing, malformed or non-boolean values do not authorize network access.
+pub fn saved_online_enabled(raw: Option<&str>) -> bool {
+    raw.and_then(|text| serde_json::from_str::<Value>(text).ok())
+        .and_then(|value| value.get("online").and_then(Value::as_bool))
+        == Some(true)
+}
+
 const MIN_QUERY_CHARS: usize = 2;
 const MAX_QUERY_CHARS: usize = 80;
 const MAX_PLACES: usize = 10;
@@ -546,4 +555,22 @@ mod tests {
             Err(WeatherOnlineError::BadResponse)
         );
     }
+
+    #[test]
+    fn saved_weather_consent_is_true_only_for_explicit_boolean() {
+        assert!(saved_online_enabled(Some(r#"{"online":true,"places":[]}"#)));
+        for value in [
+            None,
+            Some(""),
+            Some("{}"),
+            Some(r#"{"online":false}"#),
+            Some(r#"{"online":"true"}"#),
+            Some(r#"{"online":1}"#),
+            Some(r#"{"online":null}"#),
+            Some("not json"),
+        ] {
+            assert!(!saved_online_enabled(value), "must fail closed: {value:?}");
+        }
+    }
+
 }
