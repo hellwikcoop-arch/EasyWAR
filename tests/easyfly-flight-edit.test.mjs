@@ -73,6 +73,24 @@ test('корекція імпортованого польоту зберіга�
   assert.deepEqual(reopened.data.flights[0].provenance, original.flights[0].provenance);
 });
 
+test('редагування інших полів не стирає нестандартні метеодані старого файлу', () => {
+  const { data, id } = withFlight();
+  const legacy = {
+    ...data,
+    flights: data.flights.map(flight => ({
+      ...flight, meteo: { cloudScore: 4, cloudBase: 800, visibilityKm: 10 },
+    })),
+  };
+  assert.equal(validate(legacy).ok, true);
+  const edited = updateFlight(legacy, id, { count: 3, airtime: '0:45' });
+  assert.equal(edited.ok, true);
+  assert.deepEqual(edited.data.flights[0].meteo, legacy.flights[0].meteo);
+  assert.deepEqual(parse(serialize(edited.data)).data.flights[0].meteo, legacy.flights[0].meteo);
+  const chosen = updateFlight(legacy, id, { meteo: 'СМУ' });
+  assert.equal(chosen.ok, true);
+  assert.equal(chosen.data.flights[0].meteo, 'СМУ');
+});
+
 test('перепризначення пілота й непов’язаний екіпаж не змінюють ID', () => {
   const { data, id } = withFlight();
   const secondPilot = addPerson(data, { callsign: 'Тест-03', role: 'ЛШ' });
@@ -139,6 +157,7 @@ test('UI: редагування доступне і в льотній книж�
   assert.match(entry, /title: editing \? 'Змінити політ'/);
   assert.match(entry, /editing\.source === 'import'/);
   assert.match(entry, /return selected \? entryKinds\(selected\) : \[\]/, 'неприв’язаний запис відкривається без пілотів');
+  assert.match(entry, /meteo\.value === '__original__'/, 'нестандартне метео не перезаписується без вибору');
   assert.match(pilot, /button\('Змінити',[\s\S]*?openEntry\(ctx, \{ flightId: e\.id/);
   assert.match(chrono, /button\('Змінити',[\s\S]*?openEntry\(ctx, \{ flightId: r\.flight\.id/);
 });
