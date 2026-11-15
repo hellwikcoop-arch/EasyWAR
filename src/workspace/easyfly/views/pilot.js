@@ -142,7 +142,9 @@ function logbookTab(ctx, person) {
     { label: 'Тривалість', render: e => el('strong', { text: Number.isInteger(e.airtimeMin) ? `${Math.floor(e.airtimeMin / 60)}:${String(e.airtimeMin % 60).padStart(2, '0')}` : '—' }) },
     { label: 'К-сть', render: e => String(e.count) },
     { label: 'Характер', render: e => dash(e.note) },
-    { label: 'Дія', class: 'ef-col-actions', render: e => button('', { variant: 'icon', iconName: 'zakryty', title: 'Видалити запис', ariaLabel: `Видалити запис польоту ${dateText(e.date)}`, onClick: () => removeFlight(ctx, e) }) },
+    { label: 'Дія', class: 'ef-col-actions', render: e => el('span', { class: 'ef-row-actions' },
+      button('Змінити', { variant: 'link', onClick: () => openEntry(ctx, { flightId: e.id, personId: person.id, lockPilot: true }) }),
+      button('', { variant: 'icon', iconName: 'zakryty', title: 'Видалити запис', ariaLabel: `Видалити запис польоту ${dateText(e.date)}`, onClick: () => removeFlight(ctx, e) })) },
   ], view.entries, { caption: 'Записи льотної книжки' });
 
   const longBreak = view.longBreak;
