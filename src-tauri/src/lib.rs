@@ -1854,13 +1854,45 @@ fn office_close_file(
     Ok(())
 }
 
+/// Перед будь-яким запитом погоди Rust звіряє дозвіл із зашифрованим
+/// `weather.state` поточного профілю. JS-прапорець не є авторитетним дозволом.
+fn ensure_weather_network_permission(
+    window: &tauri::WebviewWindow,
+    session: &ProfileSession,
+    data: &ProfileDataSession,
+    store: &ProfileDataStore,
+) -> Result<(), String> {
+    let mut context = network_policy::NetworkContext::closed(window.label());
+    if let Some(profile_id) = session.get() {
+        context.profile_open = true;
+        if window.label() == network_policy::MAIN_WINDOW_LABEL {
+            let keys = data.keys(&profile_id).map_err(|error| error.to_string())?;
+            let saved = store
+                .get(&keys, "weather.state")
+                .map_err(|error| error.to_string())?;
+            context.weather_online_enabled = weather_online::saved_online_enabled(
+                saved.as_ref().map(|record| record.value.as_str()),
+            );
+        }
+    }
+    match network_policy::network_policy(&context, network_policy::Purpose::WeatherOnline) {
+        network_policy::Verdict::Allowed => Ok(()),
+        network_policy::Verdict::Denied(reason) => Err(reason.to_string()),
+    }
+}
+
 /// Застосунок «Погода»: поточні умови в пункті з Open-Meteo. Назовні йдуть лише
-/// координати, округлені до 0,01°. Викликається тільки після явного ввімкнення онлайн-оновлення.
+/// координати, округлені до 0,01°. Потрібен дозвіл поточного профілю.
 #[tauri::command]
 async fn weather_online_fetch(
+    window: tauri::WebviewWindow,
+    session: tauri::State<'_, ProfileSession>,
+    data: tauri::State<'_, ProfileDataSession>,
+    store: tauri::State<'_, ProfileDataStore>,
     latitude: f64,
     longitude: f64,
 ) -> Result<weather_online::WeatherObservation, String> {
+    ensure_weather_network_permission(&window, &session, &data, &store)?;
     let url =
         weather_online::forecast_url(latitude, longitude).map_err(|error| error.to_string())?;
     let body = weather_online::fetch_json(url).await?;
@@ -1869,7 +1901,14 @@ async fn weather_online_fetch(
 
 /// Застосунок «Погода»: пошук населеного пункту за назвою (Open-Meteo, лише Україна).
 #[tauri::command]
-async fn weather_online_search(name: String) -> Result<Vec<weather_online::WeatherPlace>, String> {
+async fn weather_online_search(
+    window: tauri::WebviewWindow,
+    session: tauri::State<'_, ProfileSession>,
+    data: tauri::State<'_, ProfileDataSession>,
+    store: tauri::State<'_, ProfileDataStore>,
+    name: String,
+) -> Result<Vec<weather_online::WeatherPlace>, String> {
+    ensure_weather_network_permission(&window, &session, &data, &store)?;
     let url = weather_online::geocode_url(&name).map_err(|error| error.to_string())?;
     let body = weather_online::fetch_json(url).await?;
     weather_online::parse_places(&body).map_err(|error| error.to_string())
