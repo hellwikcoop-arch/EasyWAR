@@ -464,7 +464,7 @@ export function updateFlight(data, id, patch = {}) {
     exercise: field('exercise', current.exercise),
     count: field('count', current.count),
     dayNight: field('dayNight', current.dayNight),
-    meteo: orNull(field('meteo', current.meteo)),
+    meteo: Object.hasOwn(patch, 'meteo') ? orNull(patch.meteo) : current.meteo,
     aircraftType: orNull(field('aircraftType', current.aircraftType)),
     tailNumber: orNull(field('tailNumber', current.tailNumber)),
     note: orNull(field('note', current.note)),
