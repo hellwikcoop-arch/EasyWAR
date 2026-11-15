@@ -1042,7 +1042,6 @@ mod tests {
 
     const SIZE: usize = 2 * 1024 * 1024 + 123;
 
-
     #[test]
     fn model_download_network_policy_requires_main_window_login_and_native_yes() {
         let prompt = DownloadPrompt {
