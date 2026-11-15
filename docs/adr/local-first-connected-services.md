@@ -1,6 +1,6 @@
 # ADR: Local-first із дозволеними хмарними сервісами та E2EE обміном
 
-**Рішення власника (JE):** 14.11.2026. **Зафіксовано:** 15.11.2026.
+**Рішення власника (JE):** 15.11.2026. **Зафіксовано:** 15.11.2026.
 **Статус:** архітектурне рішення; **не є дозволом увімкнути WAN або завантажувати реальні дані**.
 **Пов'язане:** [ARCHITECTURE.md](../ARCHITECTURE.md), [network-and-secret-boundaries.md](network-and-secret-boundaries.md), [collective-crypto.md](collective-crypto.md), [collective-store-forward.md](collective-store-forward.md), [collective-sync-policies.md](collective-sync-policies.md).
 
