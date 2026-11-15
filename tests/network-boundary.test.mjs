@@ -223,4 +223,10 @@ test('погодні Rust-команди перевіряють зашифров
   assert.match(ui, /const stored = await save\(\{ \.\.\.state, online: enabled \}\)/,
     'UI завершує збереження дозволу до першого запиту');
   assert.match(ui, /if \(enabled\) tick\(\)/, 'перший запит лише після успішного збереження');
+  assert.match(ui, /const previousOnline = state\.online;/,
+    'непідтверджений перемикач пам’ятає попередній дозвіл');
+  assert.match(ui, /state = \{ \.\.\.state, online: previousOnline \};/,
+    'після помилки збереження UI відновлює старий дозвіл, а не повідомляє про успішне вимкнення');
+  assert.match(ui, /Не вдалося зберегти вимкнення\./,
+    'у разі відмови вимкнення користувач бачить попередження');
 });
