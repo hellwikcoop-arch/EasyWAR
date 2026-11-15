@@ -51,7 +51,13 @@ export function openEntry(ctx, opts = {}) {
     ? `${Math.floor(editing.airtimeMin / 60)}:${String(editing.airtimeMin % 60).padStart(2, '0')}` : '';
   const airtime = textInput(existingAirtime, { placeholder: 'Г:ХХ, наприклад 1:25', inputMode: 'numeric', maxLength: 8 });
   const dayNight = select([{ value: '', label: 'Оберіть…' }, { value: 'day', label: 'День' }, { value: 'night', label: 'Ніч' }], editing?.dayNight || '');
-  const meteo = select([{ value: '', label: 'Оберіть…' }, { value: 'ПМУ', label: 'ПМУ' }, { value: 'СМУ', label: 'СМУ' }], editing?.meteo || '');
+  const preserveMeteo = editing?.meteo != null && !['ПМУ', 'СМУ'].includes(editing.meteo);
+  const meteo = select([
+    { value: '', label: 'Оберіть…' },
+    { value: 'ПМУ', label: 'ПМУ' },
+    { value: 'СМУ', label: 'СМУ' },
+    ...(preserveMeteo ? [{ value: '__original__', label: 'Збережене значення (без змін)' }] : []),
+  ], preserveMeteo ? '__original__' : editing?.meteo || '');
   const note = textInput(editing?.note || '', { placeholder: 'Необов’язково', maxLength: 200 });
   const crewField = textInput(Array.isArray(editing?.crew) ? editing.crew.join(', ') : '', { placeholder: 'Позивни через кому (необов’язково)', maxLength: 200 });
 
@@ -134,7 +140,7 @@ export function openEntry(ctx, opts = {}) {
         count: count.value,
         airtime: airtime.value,
         dayNight: dayNight.value || null,
-        meteo: meteo.value || null,
+        ...(meteo.value === '__original__' ? {} : { meteo: meteo.value || null }),
         aircraftType: aircraft.value,
         tailNumber: tail.value,
         note: note.value,
