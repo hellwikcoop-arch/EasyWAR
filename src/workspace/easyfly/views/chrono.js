@@ -67,7 +67,9 @@ export function render(ctx) {
     { label: 'Кількість', render: r => el('strong', { text: String(r.flight.count) }) },
     { label: 'Час', render: r => dash(formatDuration(r.flight.airtimeMin)) },
     { label: 'Стан', render: r => chip(r.state, r.limit) },
-    { label: 'Дія', class: 'ef-col-actions', render: r => button('', { variant: 'icon', iconName: 'zakryty', title: 'Видалити запис', ariaLabel: `Видалити запис екіпажу ${r.flight.crew[0] || ''}`, onClick: () => remove(ctx, r.flight) }) },
+    { label: 'Дія', class: 'ef-col-actions', render: r => el('span', { class: 'ef-row-actions' },
+      button('Змінити', { variant: 'link', onClick: () => openEntry(ctx, { flightId: r.flight.id }) }),
+      button('', { variant: 'icon', iconName: 'zakryty', title: 'Видалити запис', ariaLabel: `Видалити запис екіпажу ${r.flight.crew[0] || ''}`, onClick: () => remove(ctx, r.flight) })) },
   ];
   root.append(table(columns, report.rows, {
     caption: `Записи зміни ${formatDate(date)}`,
