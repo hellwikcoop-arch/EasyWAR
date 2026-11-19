@@ -4283,29 +4283,29 @@ fn collect_xml_text(
         }
         match reader.read_event() {
             Ok(Event::Start(element)) => {
-                if element.local_name().as_ref() == b"t" {
+                if element.local_name().as_ref() == "t" {
                     inside_text += 1;
                 }
             }
             Ok(Event::End(element)) => match element.local_name().as_ref() {
-                b"t" => inside_text = inside_text.saturating_sub(1),
-                b"p" => sink.push_char('\n'),
+                "t" => inside_text = inside_text.saturating_sub(1),
+                "p" => sink.push_char('\n'),
                 _ => {}
             },
             Ok(Event::Empty(element)) => match element.local_name().as_ref() {
-                b"tab" => sink.push_char('\t'),
-                b"br" | b"cr" => sink.push_char('\n'),
+                "tab" => sink.push_char('\t'),
+                "br" | "cr" => sink.push_char('\n'),
                 _ => {}
             },
-            Ok(Event::Text(text)) if inside_text > 0 => {
-                let value = text
-                    .unescape()
+            Ok(Event::Text(text)) if inside_text > 0 => sink.push_str(&text),
+            // quick-xml ≥ 0.38: `&amp;` тощо приходять окремою подією, а не в тексті.
+            Ok(Event::GeneralRef(reference)) if inside_text > 0 => {
+                let raw = format!("&{};", &*reference);
+                let value = quick_xml::escape::unescape(&raw)
                     .map_err(|_| LibraryError::Extraction("XML документа пошкоджено"))?;
                 sink.push_str(&value);
             }
-            Ok(Event::CData(data)) if inside_text > 0 => {
-                sink.push_str(&String::from_utf8_lossy(&data));
-            }
+            Ok(Event::CData(data)) if inside_text > 0 => sink.push_str(&data),
             Ok(Event::Eof) => break,
             Err(_) => return Err(LibraryError::Extraction("XML документа пошкоджено")),
             Ok(_) => {}
@@ -4356,8 +4356,17 @@ fn xlsx_text(
             read_limited(&mut budget, &name, file, None)?;
         }
     }
-    let mut workbook = Xlsx::new(Cursor::new(bytes))
-        .map_err(|_| LibraryError::Extraction("книгу XLSX пошкоджено"))?;
+    let mut workbook = Xlsx::new(Cursor::new(
+        crate::xlsx_compat::prepare_xlsx_for_calamine(
+            bytes,
+            ZipLimits {
+                per_entry: limits.max_xml_bytes,
+                total: limits.max_xml_bytes,
+            },
+        )
+        .map_err(|_| LibraryError::Extraction("книгу XLSX пошкоджено"))?,
+    ))
+    .map_err(|_| LibraryError::Extraction("книгу XLSX пошкоджено"))?;
     let mut sink = TextSink::new(limits.max_text_bytes);
     for sheet in workbook.sheet_names() {
         check_deadline(deadline)?;
