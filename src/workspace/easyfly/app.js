@@ -447,6 +447,8 @@ export async function mount(container, host) {
 
   return {
     isDirty: dirty,
+    // The phone host must finish queued writes before discarding its vault key.
+    flush: persist,
     unmount() {
       flush();
       destroyed = true;

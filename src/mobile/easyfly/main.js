@@ -61,10 +61,26 @@ function unsupported(message) {
 let vault = null;
 let storageKind = 'memory';
 let mounted = null;
+let locking = false;
 
 const STORAGE_WARNING = 'Сховище браузера недоступне (файл відкрито без сервера або в приватному режимі): дані живуть лише до закриття сторінки. Перед виходом зробіть «Копія у файл…».';
 
-function lockScreen({ exists, error = null }) {
+async function lockScreen(options) {
+  if (locking) return;
+  locking = true;
+  root.inert = true;
+  try {
+    // Keep the mounted document available for retry/export if storage rejects the write.
+    if (mounted && !(await mounted.flush()) && mounted.isDirty()) return;
+    showLockScreen(options);
+  } finally {
+    root.inert = false;
+    locking = false;
+    root.querySelector('[name="passphrase"]')?.focus();
+  }
+}
+
+function showLockScreen({ exists, error = null }) {
   if (mounted) { try { mounted.unmount?.(); } catch { /* уже знято */ } mounted = null; }
   vault.lock();
   const errorBox = el('p', { class: 'efp-error', role: 'alert', text: error || '' });
@@ -100,7 +116,7 @@ function lockScreen({ exists, error = null }) {
     exists ? el('button', { class: 'efp-btn efp-btn-ghost', type: 'button', text: 'Стерти сховище на цьому пристрої…', onClick: async () => {
       if (!window.confirm('Стерти всі дані EasyFLY на цьому пристрої? Копії у файлах .easyfly лишаться.')) return;
       await vault.destroy();
-      lockScreen({ exists: false });
+      await lockScreen({ exists: false });
     } }) : null));
   root.replaceChildren(el('main', { class: 'efp-lock' }, el('div', { class: 'efp-card' },
     el('div', { class: 'efp-logo', 'aria-hidden': 'true' }, icon('shturman', 28)),
@@ -140,7 +156,7 @@ async function start() {
   const chosen = await selectStorage({ indexedDB: globalThis.indexedDB, localStorage: safeLocalStorage() });
   storageKind = chosen.kind;
   vault = createVault({ storage: chosen.storage, crypto: globalThis.crypto });
-  lockScreen({ exists: await vault.exists() });
+  await lockScreen({ exists: await vault.exists() });
 }
 
 function safeLocalStorage() {
