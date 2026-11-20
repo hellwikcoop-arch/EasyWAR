@@ -42,6 +42,7 @@ pub mod weather_online;
 pub mod workspace_files;
 pub mod workspace_tables;
 pub mod workspace_templates;
+mod xlsx_compat;
 pub mod xlsx_export;
 pub mod xlsx_import;
 
