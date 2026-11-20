@@ -104,10 +104,15 @@ test('довідники не ходять у мережу й не викону�
   }
 });
 
-test('кожна сторінка довідника веде назад на хаб, а хаб перелічує всі довідники', async () => {
+test('кожна сторінка довідника веде назад на хаб, а хаб відкриває ангар', async () => {
   for (const id of IDS) assert.match(await read(`src/guides/${id}/index.html`), /<a href="\.\.\/index\.html">← easyWIKI<\/a>/, id);
   const hub = await read('src/guides/hub.js');
-  for (const id of IDS) assert.match(hub, new RegExp(`id: '${id}'`), `хаб: ${id}`);
+  assert.match(hub, /hangarHref\(link, '\.\.\/'\)/);
+  assert.match(hub, /\.\/uav\/index\.html/);
+  assert.match(hub, /\.\/brigades\/index\.html/);
+  for (const id of ['rvia', 'ppo', 'ground-forces', 'aviation', 'enemy-ground']) {
+    assert.doesNotMatch(hub, new RegExp(`\\./${id}/index\\.html`), id);
+  }
   assert.match(await read('src/guides/index.html'), /<a href="\.\.\/index\.html">← До EasyWAR<\/a>/);
 });
 
@@ -120,11 +125,17 @@ test('підпис моделі під сценою береться з credits.
   }
 });
 
-test('збірка: хаб і шість довідників — окремі входи, лаунчер відкриває хаб, кеш телефонного переглядача їх не бере', async () => {
+test('збірка: хаб, бригади й БпАК входять у збірку, старі каталоги техніки — ні', async () => {
   const cfg = await read('vite.config.js');
   assert.match(cfg, /guides: fileURLToPath\(new URL\("\.\/src\/guides\/index\.html"/);
-  for (const id of IDS) assert.match(cfg, new RegExp(`"guides-${id}": fileURLToPath\\(new URL\\("\\./src/guides/${id}/index\\.html"`), id);
+  for (const id of ['brigades', 'uav']) {
+    assert.match(cfg, new RegExp(`"guides-${id}": fileURLToPath\\(new URL\\("\\./src/guides/${id}/index\\.html"`), id);
+  }
+  for (const id of ['rvia', 'ppo', 'ground-forces', 'aviation', 'enemy-ground']) {
+    assert.doesNotMatch(cfg, new RegExp(`"guides-${id}":`), id);
+  }
   assert.match(cfg, /!name\.endsWith\("\.woff2"\)/);
+  assert.match(cfg, /!rel\.startsWith\("hangar\/"\)/);
   assert.match(cfg, /guides\[-\/\]/);
   assert.match(await read('src/launcher-tools.js'), /import '\.\/guides-launcher\.js';/);
   const launcher = await read('src/guides-launcher.js');

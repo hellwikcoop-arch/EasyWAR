@@ -287,8 +287,13 @@ fn read_archive_entries_with_limits(
             return Err(XlsxExportError::UnsupportedCompression(file.compression()));
         }
         let mut contents = Vec::new();
+        let name = file
+            .name()
+            .map_err(|error| {
+                XlsxExportError::InvalidReference(format!("некоректне ім'я частини XLSX: {error}"))
+            })?
+            .into_owned();
         if !file.is_dir() {
-            let name = file.name().to_owned();
             budget
                 .read_part(&name, &mut file, Some(&mut contents))
                 .map_err(|error| match error {
@@ -297,7 +302,7 @@ fn read_archive_entries_with_limits(
                 })?;
         }
         entries.push(ArchiveEntry {
-            name: file.name().to_owned(),
+            name,
             bytes: contents,
             compression: file.compression(),
             unix_mode: file.unix_mode(),
@@ -1631,14 +1636,15 @@ mod tests {
 
         let result = read_archive_entries_with_limits(&bomb, TEST_LIMITS);
 
-        // Бібліотека zip 2.4.2 читає всі 4 МБ попри підроблений розмір (перевірено вручну),
-        // тож зупинити читання може лише власна межа за реально розпакованими байтами.
+        // zip 2.4.2 читав усі 4 МБ попри підроблений розмір, і зупиняла читання лише власна
+        // межа за реально розпакованими байтами; zip ≥ 9 сам відхиляє запис, більший за
+        // оголошений розмір (`InvalidData`). Прийнятні обидві відмови, але не успіх.
         assert!(
             matches!(
                 &result,
                 Err(XlsxExportError::ArchiveTooLarge(
                     ZipLimitExceeded::Entry { .. }
-                ))
+                )) | Err(XlsxExportError::Io(_))
             ),
             "forged size must not be trusted: {result:?}"
         );

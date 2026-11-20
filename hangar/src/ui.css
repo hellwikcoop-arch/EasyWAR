@@ -1,0 +1,75 @@
+/* ===== UI 2: картки-карусель, степер фаз, бічна панель інструментів, «?» ===== */
+.ui2 .hx-keys{display:none!important}
+.ui2 .rows{background:none;border:0;padding:0;display:block}
+.ui2 .rows>.row>b{display:none}
+.ui2 .chip kbd{display:none}
+.ui2 .row{display:block;margin:0}
+/* степер фаз / режимів */
+.ui-step{position:relative;margin:10px 0 8px;padding:12px 16px 10px;background:linear-gradient(180deg,rgba(10,15,17,.92),rgba(6,9,10,.92));border:1px solid #16242a;border-radius:3px}
+.ui-step .ttl{font:600 10px/1 var(--hx-ui);letter-spacing:.2em;color:#6f8389;text-transform:uppercase;margin-bottom:10px;display:flex;justify-content:space-between}
+.ui-step .ttl i{font-style:normal;color:var(--hx-y)}
+.ui-step .chips{display:flex!important;flex-wrap:nowrap!important;gap:0!important;position:relative;justify-content:space-between}
+.ui-step .chips::before{content:"";position:absolute;left:8px;right:8px;top:7px;height:2px;background:#1e2c31}
+.ui-step .chips::after{content:"";position:absolute;left:8px;top:7px;height:2px;width:calc((100% - 16px)*var(--prog,0));background:linear-gradient(90deg,#b8901c,var(--hx-y));box-shadow:0 0 8px rgba(242,194,48,.6);transition:width .5s}
+.ui-step .chip{all:unset;cursor:pointer;position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;gap:7px;flex:1;min-width:0;font:500 11px/1.15 var(--hx-ui);color:#7d8f95;text-align:center;letter-spacing:.03em}
+.ui-step .chip::before{content:"";width:12px;height:12px;border-radius:50%;background:#0b1113;border:2px solid #2c3d43;box-sizing:border-box;transition:all .2s}
+.ui-step .chip.done::before{background:#8a6d17;border-color:#b8901c}
+.ui-step .chip.on{color:#fff}
+.ui-step .chip.on::before{background:var(--hx-y);border-color:#fff3c4;box-shadow:0 0 0 4px rgba(242,194,48,.18),0 0 12px rgba(242,194,48,.7)}
+.ui-step .chip:hover{color:#fff}
+.ui-step .chip small{display:none}
+.ui-step .chip.lock,.ui-step .chip[disabled]{display:none!important}
+/* карусель карток */
+.ui-car{background:linear-gradient(180deg,rgba(9,13,15,.95),rgba(5,8,9,.95));border:1px solid #16242a;border-radius:3px;padding:10px 12px 12px}
+.ui-car .ttl{font:600 10px/1 var(--hx-ui);letter-spacing:.2em;color:#6f8389;text-transform:uppercase;margin-bottom:9px}
+.ui-car .chips{display:flex!important;flex-wrap:nowrap!important;gap:8px!important;overflow-x:auto;scroll-behavior:smooth;padding-bottom:6px;scrollbar-width:thin;scrollbar-color:#2a3a40 transparent}
+.ui-car .chip{all:unset;cursor:pointer;flex:0 0 132px;height:96px;box-sizing:border-box;position:relative;display:grid;grid-template-rows:50px auto auto;padding:6px 8px;border:1px solid #1c2a2f;border-radius:2px;
+  background:radial-gradient(120% 90% at 50% 20%,rgba(120,150,160,.10),rgba(0,0,0,0) 60%),linear-gradient(180deg,#121b1e,#0a1012);transition:border-color .15s,transform .15s}
+.ui-car .chip:hover{border-color:#3d5258;transform:translateY(-2px)}
+.ui-car .chip.on{border-color:var(--hx-y);background:radial-gradient(120% 90% at 50% 20%,rgba(242,194,48,.16),rgba(0,0,0,0) 62%),linear-gradient(180deg,#1a1c14,#0d0f0b);box-shadow:0 0 0 1px rgba(242,194,48,.35),0 6px 18px rgba(0,0,0,.5)}
+.ui-car .chip.on::before{content:"";position:absolute;left:-1px;right:-1px;top:-1px;height:3px;background:var(--hx-y)}
+.ui-car .chip svg{width:100%;height:50px}
+.ui-car .chip>span{font:700 12px/1.1 var(--hx-ui);color:#e8eef0;letter-spacing:.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
+.ui-car .chip .meta{display:flex;align-items:center;gap:6px;font:500 10px/1 var(--hx-ui);color:#7f9399;white-space:nowrap;overflow:hidden;margin-top:4px}
+.ui-car .chip .flag{flex:0 0 16px;height:10px;background:linear-gradient(#2f6fd6 50%,#f5cf2a 50%);border-radius:1px;box-shadow:0 0 0 1px rgba(0,0,0,.4)}
+.ui-car .chip small{display:none}
+/* бічна панель інструментів */
+.ui-tools{position:absolute;right:14px;top:150px;display:flex;flex-direction:column;gap:10px;z-index:6;pointer-events:auto}
+.ui-tools .grp{display:flex;flex-direction:column;gap:4px;padding:5px;background:rgba(6,10,11,.72);border:1px solid #17252a;border-radius:3px;backdrop-filter:blur(3px)}
+.ui-tools .grp>i{font:600 8px/1 var(--hx-ui);letter-spacing:.16em;color:#5f7379;text-transform:uppercase;font-style:normal;text-align:center;padding:2px 0 3px}
+.ui-tools .chips{display:flex!important;flex-direction:column;gap:4px!important}
+.ui-tools .chip,.ui-tools .tb{all:unset;cursor:pointer;position:relative;width:36px;height:34px;display:grid!important;place-items:center;border:1px solid #1d2b30;border-radius:2px;background:rgba(255,255,255,.02);color:#a9b9be;font:600 16px/1 var(--hx-ui)}
+.ui-tools .chip>span,.ui-tools .chip>small{display:none}
+.ui-tools .chip .gl,.ui-tools .tb .gl{font-size:16px;line-height:1}
+.ui-tools .chip .gl.t{font-size:9px;letter-spacing:.02em;font-weight:700;text-align:center;line-height:1.05}
+.ui-tools .chip:hover,.ui-tools .tb:hover{border-color:#4a6168;color:#fff}
+.ui-tools .chip.on,.ui-tools .tb.on{border-color:var(--hx-y);color:var(--hx-y);background:rgba(242,194,48,.10)}
+.ui-tools .chip.lock,.ui-tools .chip[disabled]{display:none!important}
+.ui-tools [data-tip]:hover::after{content:attr(data-tip);position:absolute;right:44px;top:50%;transform:translateY(-50%);white-space:nowrap;background:rgba(8,12,13,.95);border:1px solid #2b3b40;border-left:2px solid var(--hx-y);color:#e9eef0;font:500 12px/1 var(--hx-ui);padding:7px 10px;border-radius:2px;pointer-events:none;z-index:9}
+.ui-tools .grp.empty{display:none}
+/* «?» і довідка */
+.ui-help{position:absolute;left:14px;bottom:14px;z-index:7;width:30px;height:30px;border-radius:50%;border:1px solid #2b3b40;background:rgba(6,10,11,.8);color:#cfd9dc;font:700 15px/28px var(--hx-ui);text-align:center;cursor:pointer}
+.ui-help:hover,.ui-help.on{border-color:var(--hx-y);color:var(--hx-y)}
+.ui-hov{position:absolute;left:14px;bottom:52px;z-index:8;max-height:70%;overflow:auto;min-width:330px;padding:12px 14px;background:rgba(6,10,11,.94);border:1px solid #1f2f34;border-top:2px solid var(--hx-y);border-radius:2px;font:500 12px/1.2 var(--hx-ui);color:#cfd9dc}
+.ui-hov h4{margin:8px 0 6px;font:600 10px/1 var(--hx-ui);letter-spacing:.18em;color:var(--hx-y);text-transform:uppercase}
+.ui-hov h4:first-child{margin-top:0}
+.ui-hov div{display:grid;grid-template-columns:62px 1fr;gap:4px 10px}
+.ui-hov kbd{justify-self:start;font:600 10px/1 var(--mono);padding:3px 6px;border-radius:2px;background:#d9dee0;color:#111}
+/* легка віньєтка як у ігрових гаражах */
+.ui2 #stage::after,.ui2 #gStage::after{content:"";position:absolute;inset:0;pointer-events:none;z-index:1;background:radial-gradient(120% 95% at 50% 42%,rgba(0,0,0,0) 55%,rgba(0,0,0,.55) 100%)}
+.ui2 #stage>*:not(canvas),.ui2 #gStage>*:not(canvas){z-index:2}
+.ui-tools{flex-direction:row-reverse;align-items:flex-start;top:168px;gap:6px}
+.ui-tools .chip,.ui-tools .tb{width:32px;height:30px}
+.ui2 .hx-car{display:none}
+
+.ui2 .foot{display:none!important}
+.ui-hov{max-width:560px}
+.ui-hov .cred{margin:0;font:400 11px/1.5 var(--hx-ui);color:#9fb0b5}
+.ui-hov .cred a{color:#d9b54a}
+.ui2 .rows,.ui2 .ui-car,.ui2 .ui-step{min-width:0;max-width:100%;box-sizing:border-box}
+.ui2 .ui-car .chips{max-width:100%;min-width:0}
+.ui2 #aFig,.ui2 #gFig{min-width:0;max-width:100%;grid-template-columns:minmax(0,1fr)}
+.ui-hov{max-width:min(900px,calc(100% - 40px))}
+.ui-hov .cols{display:flex;gap:22px;align-items:flex-start}
+.ui-hov .kc{flex:0 0 300px}
+.ui-hov .cc{flex:1 1 auto;min-width:0}

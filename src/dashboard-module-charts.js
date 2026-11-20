@@ -68,10 +68,10 @@ function legend(series, colorOf = item => slotColor(item.slot)) {
     el('span', { text: item.name }))));
 }
 
-function figure(kind, model, content, { legendItems = null, footer = null, compact = false } = {}) {
+function figure(kind, model, content, { legendItems = null, legendColor = undefined, footer = null, compact = false } = {}) {
   return el('figure', { class: `ewmc-chart ewmc-chart-${kind}${compact ? ' compact' : ''}`, role: 'img', 'aria-label': chartSummary(model) },
     content,
-    legendItems && legendItems.length > 1 ? legend(legendItems) : null,
+    legendItems && legendItems.length > 1 ? legend(legendItems, legendColor) : null,
     footer);
 }
 
@@ -102,22 +102,26 @@ function xLabels(frame, labels, slotWidth, { centered = true } = {}) {
   }) : null)));
 }
 
-/** Стовпчик із заокругленим кінцем даних і прямою основою; від'ємний — вниз від нуля. */
-function columnPath(x, yZero, yValue, width, radius = 4) {
-  const r = Math.min(radius, width / 2, Math.abs(yZero - yValue));
-  if (yValue <= yZero) {
-    return `M${fixed(x)} ${fixed(yZero)} V${fixed(yValue + r)} Q${fixed(x)} ${fixed(yValue)} ${fixed(x + r)} ${fixed(yValue)} H${fixed(x + width - r)} Q${fixed(x + width)} ${fixed(yValue)} ${fixed(x + width)} ${fixed(yValue + r)} V${fixed(yZero)} Z`;
-  }
-  return `M${fixed(x)} ${fixed(yZero)} V${fixed(yValue - r)} Q${fixed(x)} ${fixed(yValue)} ${fixed(x + r)} ${fixed(yValue)} H${fixed(x + width - r)} Q${fixed(x + width)} ${fixed(yValue)} ${fixed(x + width)} ${fixed(yValue - r)} V${fixed(yZero)} Z`;
+// Заокруглення кінця даних: дуга кола, не більше половини товщини, 8 px і самої довжини стовпчика.
+const ROUND = 8;
+const cornerRadius = (thickness, length, radius) => Math.max(0, Math.min(radius, thickness / 2, Math.abs(length)));
+
+/** Стовпчик із заокругленою верхівкою (кінцем даних) і прямою основою; від'ємний — вниз від нуля. `radius` 0 — без заокруглення. */
+export function columnPath(x, yZero, yValue, width, radius = ROUND) {
+  const r = cornerRadius(width, yZero - yValue, radius);
+  const up = yValue <= yZero;
+  const edge = up ? yValue + r : yValue - r;
+  const sweep = up ? 1 : 0;
+  return `M${fixed(x)} ${fixed(yZero)} V${fixed(edge)} A${fixed(r)} ${fixed(r)} 0 0 ${sweep} ${fixed(x + r)} ${fixed(yValue)} H${fixed(x + width - r)} A${fixed(r)} ${fixed(r)} 0 0 ${sweep} ${fixed(x + width)} ${fixed(edge)} V${fixed(yZero)} Z`;
 }
 
 /** Горизонтальна смуга від нуля з заокругленим кінцем даних. */
-function barPath(xZero, xValue, y, height, radius = 4) {
-  const r = Math.min(radius, height / 2, Math.abs(xValue - xZero));
-  if (xValue >= xZero) {
-    return `M${fixed(xZero)} ${fixed(y)} H${fixed(xValue - r)} Q${fixed(xValue)} ${fixed(y)} ${fixed(xValue)} ${fixed(y + r)} V${fixed(y + height - r)} Q${fixed(xValue)} ${fixed(y + height)} ${fixed(xValue - r)} ${fixed(y + height)} H${fixed(xZero)} Z`;
-  }
-  return `M${fixed(xZero)} ${fixed(y)} H${fixed(xValue + r)} Q${fixed(xValue)} ${fixed(y)} ${fixed(xValue)} ${fixed(y + r)} V${fixed(y + height - r)} Q${fixed(xValue)} ${fixed(y + height)} ${fixed(xValue + r)} ${fixed(y + height)} H${fixed(xZero)} Z`;
+export function barPath(xZero, xValue, y, height, radius = ROUND) {
+  const r = cornerRadius(height, xValue - xZero, radius);
+  const right = xValue >= xZero;
+  const edge = right ? xValue - r : xValue + r;
+  const sweep = right ? 1 : 0;
+  return `M${fixed(xZero)} ${fixed(y)} H${fixed(edge)} A${fixed(r)} ${fixed(r)} 0 0 ${sweep} ${fixed(xValue)} ${fixed(y + r)} V${fixed(y + height - r)} A${fixed(r)} ${fixed(r)} 0 0 ${sweep} ${fixed(edge)} ${fixed(y + height)} H${fixed(xZero)} Z`;
 }
 
 function arcPath(cx, cy, r, startAngle, endAngle) {
@@ -135,6 +139,39 @@ function marker(x, y, color, title) {
 
 // ---------------------------------------------------------------------------------------------
 // Види
+
+/**
+ * Плавна крива через точки ряду без «вигаданих» горбів: монотонна кубічна інтерполяція (Фріч — Карлсон, як
+ * monotoneX у d3). Між двома точками крива не виходить за їхні значення, тож пік на малюнку — справжній пік даних.
+ */
+export function monotonePath(points) {
+  if (!points.length) return '';
+  const n = points.length;
+  let d = `M${fixed(points[0].x)} ${fixed(points[0].y)}`;
+  if (n === 1) return d;
+  const h = [];
+  const slope = [];
+  for (let i = 0; i < n - 1; i += 1) {
+    h.push(points[i + 1].x - points[i].x || 1e-9);
+    slope.push((points[i + 1].y - points[i].y) / h[i]);
+  }
+  const tangent = points.map((point, i) => {
+    if (i === 0) return slope[0];
+    if (i === n - 1) return slope[n - 2];
+    const [s0, s1] = [slope[i - 1], slope[i]];
+    if (s0 * s1 <= 0) return 0;
+    const p = (s0 * h[i] + s1 * h[i - 1]) / (h[i - 1] + h[i]);
+    return Math.sign(s0) * Math.min(Math.abs(s0), Math.abs(s1), 0.5 * Math.abs(p)) * 2;
+  });
+  for (let i = 0; i < n - 1; i += 1) {
+    const [a, b] = [points[i], points[i + 1]];
+    const third = h[i] / 3;
+    d += ` C${fixed(a.x + third)} ${fixed(a.y + tangent[i] * third)} ${fixed(b.x - third)} ${fixed(b.y - tangent[i + 1] * third)} ${fixed(b.x)} ${fixed(b.y)}`;
+  }
+  return d;
+}
+
+let areaId = 0;
 
 function seriesLines(model, width, height, { compact }) {
   const frame = cartesian(width, height, model.scale);
@@ -155,12 +192,18 @@ function seriesLines(model, width, height, { compact }) {
         current.push({ x: x(index), y: frame.y(value), value, label: model.categories[index] });
       });
       if (current.length) runs.push(current);
+      // Заливка області — градієнт кольору ряду до прозорого біля основи.
+      const fillId = area ? `ewmc-area-${++areaId}` : '';
+      const base = fixed(frame.y(Math.max(0, model.scale.min)));
       return svg('g', {},
+        area ? svg('defs', {}, svg('linearGradient', { id: fillId, x1: 0, y1: 0, x2: 0, y2: 1 },
+          svg('stop', { offset: '0%', 'stop-color': color, 'stop-opacity': 0.42 }),
+          svg('stop', { offset: '100%', 'stop-color': color, 'stop-opacity': 0.02 }))) : null,
         area ? runs.map(run => svg('path', {
-          d: `M${fixed(run[0].x)} ${fixed(frame.y(Math.max(0, model.scale.min)))} ${run.map(point => `L${fixed(point.x)} ${fixed(point.y)}`).join(' ')} L${fixed(run.at(-1).x)} ${fixed(frame.y(Math.max(0, model.scale.min)))} Z`,
-          fill: color, class: 'ewmc-area',
+          d: `${monotonePath(run)} L${fixed(run.at(-1).x)} ${base} L${fixed(run[0].x)} ${base} Z`,
+          fill: `url(#${fillId})`, class: 'ewmc-area ewmc-area-fade',
         })) : null,
-        runs.map(run => svg('polyline', { points: run.map(point => `${fixed(point.x)},${fixed(point.y)}`).join(' '), stroke: color, class: 'ewmc-line' })),
+        runs.map(run => svg('path', { d: monotonePath(run), stroke: color, class: 'ewmc-line' })),
         showMarkers ? runs.flatMap(run => run.map(point => marker(point.x, point.y, color, `${point.label} · ${series.name}: ${model.valueText(point.value)}`))) : null,
         !compact && model.series.length <= 4 && runs.length ? (() => {
           const last = runs.at(-1).at(-1);
@@ -189,7 +232,11 @@ function columns(model, width, height, { compact }) {
     if (stacked) {
       let positive = 0;
       let negative = 0;
-      barSeries.forEach(series => {
+      // Заокруглюється лише верхній (і нижній від'ємний) відрізок стовпця: середина накопичення лишається прямою.
+      const values = barSeries.map(series => series.values[index]);
+      const top = values.findLastIndex(value => value > 0);
+      const bottom = values.findLastIndex(value => value < 0);
+      barSeries.forEach((series, order) => {
         const value = series.values[index];
         if (value == null || value === 0) return;
         const from = value > 0 ? positive : negative;
@@ -199,7 +246,7 @@ function columns(model, width, height, { compact }) {
         const yTo = frame.y(to);
         const inset = from === 0 ? 0 : GAP;
         bars.push(svg('path', {
-          d: value > 0 ? columnPath(left, yFrom - inset, yTo, barWidth) : columnPath(left, yFrom + inset, yTo, barWidth),
+          d: columnPath(left, value > 0 ? yFrom - inset : yFrom + inset, yTo, barWidth, order === top || order === bottom ? ROUND : 0),
           fill: slotColor(series.slot), class: 'ewmc-bar', title: `${category} · ${series.name}: ${model.valueText(value)}`,
         }));
       });
@@ -224,7 +271,7 @@ function columns(model, width, height, { compact }) {
     for (const point of points) { if (!point) { if (current.length) runs.push(current); current = []; } else current.push(point); }
     if (current.length) runs.push(current);
     return svg('g', {},
-      runs.map(run => svg('polyline', { points: run.map(point => `${fixed(point.x)},${fixed(point.y)}`).join(' '), stroke: color, class: 'ewmc-line' })),
+      runs.map(run => svg('path', { d: monotonePath(run), stroke: color, class: 'ewmc-line' })),
       count <= 24 ? runs.flatMap(run => run.map(point => marker(point.x, point.y, color, `${point.label} · ${series.name}: ${model.valueText(point.value)}`))) : null);
   });
   const body = svg('svg', { viewBox: `0 0 ${width} ${height}`, width, height, class: 'ewmc-svg' },
@@ -537,7 +584,7 @@ function mapChart(model, width, height, { compact }) {
   const labelled = model.points.length <= 8;
   const points = model.points.map(point => {
     const position = project(point.longitude, point.latitude);
-    const radius = 4 + point.weight * (compact ? 5 : 8);
+    const radius = model.points.length > 12 ? 2.5 + point.weight * (compact ? 2 : 4) : 4 + point.weight * (compact ? 5 : 8);
     return svg('g', {},
       svg('circle', { cx: fixed(position.x), cy: fixed(position.y), r: fixed(radius + 2), class: 'ewmc-dot-ring' }),
       svg('circle', { cx: fixed(position.x), cy: fixed(position.y), r: fixed(radius), fill: toneColor(point.tone) ?? slotColor(1), class: 'ewmc-dot', title: `${point.label || 'Точка'}${point.valueText !== '—' ? `: ${point.valueText}` : ''}${point.status ? ` · ${point.status}` : ''}` }),
@@ -545,7 +592,7 @@ function mapChart(model, width, height, { compact }) {
   });
   const body = svg('svg', { viewBox: `0 0 ${width} ${height}`, width, height, class: 'ewmc-svg' }, outline, points);
   const footer = model.skipped && !compact ? el('p', { class: 'ewmc-chart-foot', text: `Без координат: ${model.skipped}` }) : null;
-  return figure('map', model, body, { compact, footer });
+  return figure('map', model, body, { compact, footer, legendItems: model.legend, legendColor: item => toneColor(item.tone) ?? slotColor(1) });
 }
 
 function activity(model, width, height, { compact }) {

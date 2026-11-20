@@ -47,21 +47,41 @@
 }
 
 .ew-update-section,
-.ew-restore-section {
+.ew-restore-section,
+.ew-profile-data-section {
   margin: 18px 0;
   padding: 14px 0;
   border-block: 1px solid var(--line);
 }
 
 .ew-update-section h3,
-.ew-restore-section h3 {
+.ew-restore-section h3,
+.ew-profile-data-section h3 {
   margin: 0 0 8px;
 }
 
 .ew-update-section p,
-.ew-restore-section p {
+.ew-restore-section p,
+.ew-profile-data-section p {
   margin: 0 0 12px;
   color: var(--muted);
+}
+
+.ew-profile-data-password {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 12px;
+  color: var(--muted);
+}
+
+.ew-profile-data-password input {
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: inherit;
+  font: inherit;
 }
 
 .ew-backup-actions {

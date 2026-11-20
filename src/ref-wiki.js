@@ -1,9 +1,10 @@
 // Вкладка «Довідник» модуля «Повітряні Сили»: вікі по засобах (літаки-носії) і боєприпасах.
 // Ліворуч список зі пошуком, праворуч стаття: 3D-модель, картка з ТТХ, опис, пов’язані статті й підсумок по вашій таблиці.
 // Дані статей — ref-data.js. 3D-переглядач боєприпасів і наземних засобів — ref-viewer.js (підвантажується, коли відкривають першу статтю з моделлю).
-// Літаки й вертольоти показує окрема сторінка aircraft-viewer.html у кадрі: власна сцена з фазами польоту, шасі, вогнями й підвіскою.
-// Решта моделей у вигляді «Інтерактивна модель» отримує сценарій за типом (ref-sim-data.js, ref-sim.js): зліт і посадка, пуск, залп, постріл.
+// Зіставлені літаки, вертольоти й наземні машини відкривають ангар (hangar-catalog-core.js).
+// Решта моделей — aircraft-viewer.html або сценарій ref-sim.js: зліт, пуск, залп, постріл.
 import * as AIR_DATA from './ref-data.js';
+import { hangarHref, hangarTarget } from './hangar-catalog-core.js';
 import { thumbOf } from './ref-thumbs.js';
 import { simOf } from './ref-sim-data.js';
 
@@ -297,6 +298,17 @@ export function mount(host, options = {}) {
       h('p', { class: 'rw-fine', text: 'Фази, системи, вогні й озброєння перемикаються кнопками під сценою або клавішами, коли сцена в фокусі (клацніть по ній). Підвіска складена для моделі, це не заводська схема.' }));
   }
 
+  // Стаття, зіставлена з ангаром: кадр відкриває ту саму офлайн-сторінку, що й easyWIKI.
+  function hangarBox(entry) {
+    const target = hangarTarget(entry.id);
+    const frame = h('iframe', { class: 'rw-hangar-frame', src: hangarHref(target),
+      title: entry.name + ': ангар і гараж' });
+    aircraftFrame = frame;
+    const note = target.note ? ' ' + target.note : '';
+    return h('div', { class: 'rw-hangar' }, frame,
+      h('p', { class: 'rw-fine', text: 'Модель відкрито в ангарі або гаражі. Назва статті, пошук і розділ «У вашій базі» лишаються тут.' + note }));
+  }
+
   // ---------- стаття ----------
   const slot = h('div', { class: 'rw-slot' });
   const usageEl = h('section', { class: 'rw-sec rw-usage' });
@@ -379,7 +391,7 @@ export function mount(host, options = {}) {
   function weakBlock(entry) {
     const weak = entry.weak || [];
     if (!weak.length) return null;
-    const live = !!entry.model;
+    const live = !!entry.model && !hangarTarget(entry.id);
     return h('section', { class: 'rw-sec rw-weaksec' }, h('h3', { text: weakLabel(entry) }),
       live ? h('p', { class: 'rw-fine', text: 'Номер на моделі й пункт списку пов’язані: натисніть, і зона підсвітиться, а модель повернеться до неї.' }) : null,
       h('ol', { class: 'rw-weaklist' }, weak.map((w, i) => h('li', {}, h(live ? 'button' : 'div', { class: 'rw-weak', type: live ? 'button' : null, 'data-spot': String(i), 'aria-pressed': live ? 'false' : null, onclick: live ? () => spotFromList(i) : null },
@@ -410,7 +422,7 @@ export function mount(host, options = {}) {
     if (box) box.replaceChildren(creditNode(entry));
     const vslot = article.querySelector('.rw-vslot');
     if (vslot) vslot.replaceChildren(...[variantNode(entry)].filter(Boolean));
-    showModel(entry, ++token);
+    if (!hangarTarget(entry.id)) showModel(entry, ++token);
   }
 
   function renderArt(entry) {
@@ -433,11 +445,14 @@ export function mount(host, options = {}) {
     const activeVariant = variants.find(v => v.id === state.variant) || variants[0];
     const variantBar = variants.length ? h('div', { class: 'seg rw-variants', role: 'group', 'aria-label': 'Модель' },
       variants.map(v => h('button', { type: 'button', 'data-variant': v.id, 'aria-pressed': String(v === activeVariant), text: v.label, onclick: () => pickVariant(entry, v.id) }))) : null;
-    const creditBox = h('div', { class: 'rw-creditbox' }, viewerOf(entry) ? creditsNode(entry) : creditNode(entry));
-    // Інтерактивна модель: окремий переглядач (літаки з фазами польоту) або сценарій ref-sim.js для решти моделей.
-    const both = interactive && (!!(viewerOf(entry) && entry.model) || !!simOf(entry, viewerOf));
+    const mapped = !!(interactive && hangarTarget(entry.id));
+    const creditBox = h('div', { class: 'rw-creditbox' }, mapped
+      ? h('p', { class: 'rw-credit', text: 'Модель цієї статті відкривається в ангарі або гаражі. Автори й ліцензії — у сцені та у файлі hangar/CREDITS.md.' })
+      : (viewerOf(entry) ? creditsNode(entry) : creditNode(entry)));
+    // Інтерактивна модель: ангар для зіставленої техніки, переглядач літаків або сценарій ref-sim.js для решти.
+    const both = !mapped && interactive && (!!(viewerOf(entry) && entry.model) || !!simOf(entry, viewerOf));
     state.mode = both ? 'live' : 'weak';
-    airBox = viewerOf(entry) ? aircraftBox(entry) : null;
+    airBox = mapped ? hangarBox(entry) : (viewerOf(entry) ? aircraftBox(entry) : null);
     modeBar = both ? h('div', { class: 'seg rw-modes', role: 'group', 'aria-label': 'Вигляд моделі' },
       [['live', 'Інтерактивна модель'], ['weak', (entry.weak || []).length ? weakLabel(entry) : 'Огляд']].map(([m, label]) =>
         h('button', { type: 'button', 'data-mode': m, 'aria-pressed': String(m === 'live'), text: label, onclick: () => setMode(m) }))) : null;
@@ -445,7 +460,7 @@ export function mount(host, options = {}) {
       variantBar,
       modeBar,
       airBox,
-      entry.model ? stageBox : null,
+      !mapped && entry.model ? stageBox : null,
       h('div', { class: 'rw-vslot' }, variantNode(entry)),
       slot,
       h('p', { class: 'rw-summary', text: entry.summary }),
@@ -505,10 +520,11 @@ export function mount(host, options = {}) {
     if (state.id !== entry.id) state.variant = '';
     state.id = entry.id;
     const mine = ++token;
+    if (aircraftFrame) { aircraftFrame.src = 'about:blank'; aircraftFrame = null; }
     renderNav();
     renderArticle(entry);
     state.weakFor = '';
-    if (entry.model && !viewerOf(entry)) showModel(entry, mine);
+    if (entry.model && !viewerOf(entry) && !hangarTarget(entry.id)) showModel(entry, mine);
     else { stageBox.hidden = true; simBar.hidden = true; simCap.hidden = true; machineBar.hidden = true; if (viewer) viewer.stopSim(); }
     if (onSelect) onSelect(entry.id);
     if (user && article.getBoundingClientRect().top < 0) article.scrollIntoView({ block: 'start', behavior: motion() ? 'smooth' : 'auto' });

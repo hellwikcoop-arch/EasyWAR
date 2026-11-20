@@ -28,7 +28,7 @@ test('each branch module is reached through its own frame', async () => {
   const { frameWindow, rocketWindow, opened, open } = launcher();
   assert.equal(moduleWindow('air'), frameWindow);
   assert.equal(moduleWindow('rocket'), rocketWindow);
-  assert.equal(moduleWindow('army'), null);
+  assert.equal(moduleWindow('navy'), null);
 
   const pending = whenModuleDashboard('rocket');
   rocketWindow.__AV = { connect() {} };
@@ -50,7 +50,7 @@ test('the command dashboards have their own frames and wait for their own openin
   open('dshv');
   open('pvk');
   assert.equal(await pending, pvkWindow.__AV);
-  assert.equal(moduleWindow('army'), null);
+  assert.equal(moduleWindow('navy'), null);
 });
 
 test('the own-losses tab of a command dashboard is reached once its module and tab are ready', async () => {

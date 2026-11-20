@@ -8,6 +8,8 @@
 // Застосунки «Обстановки» (погода) лишаються в iframe головного вікна (opensInEditorWindow).
 // Вкладка «Бібліотека» (лише в головному вікні застосунку) — library.js, окремий чанк, що
 // вантажиться при першому відкритті вкладки; закриття сторінки блокує бібліотеку (library_lock).
+// Вкладка «Файли» (теж лише в головному вікні) — files.js, окремий чанк: сховище файлів
+// профілю в теці на диску (команди workspace_files_*).
 // У вікні редактора смуга підказує, як відкрити документ, що чекає з бібліотеки (EasyDoc, EasySlide).
 import {
   CLOSE_MESSAGE,
@@ -48,6 +50,7 @@ const confirmBar = document.getElementById('ws-confirm');
 const tabs = document.getElementById('ws-tabs');
 const libraryPanel = document.getElementById('ws-library');
 const libraryBadge = document.getElementById('ws-library-badge');
+const filesPanel = document.getElementById('ws-files');
 const notice = document.getElementById('ws-notice');
 
 const invoke = findInvoke(window);
@@ -57,6 +60,7 @@ let current = null; // { app, dirty, card }
 let pendingConfirm = null; // resolve смуги підтвердження
 let pendingClose = null;   // проміс, який чекає на відповідь
 let library = null;        // проміс { activate } вкладки «Бібліотека» після першого відкриття
+let files = null;          // проміс { activate } вкладки «Файли» після першого відкриття
 
 const element = (tag, className, text) => make(document, tag, className, text);
 
@@ -119,7 +123,7 @@ function renderSections() {
   }
 }
 
-// Вкладки «Розділи» й «Бібліотека» (шаблон WAI-ARIA tabs: стрілки, Home, End).
+// Вкладки «Розділи», «Бібліотека» і «Файли» (шаблон WAI-ARIA tabs: стрілки, Home, End).
 const tabButtons = () => [...tabs.querySelectorAll('[role="tab"]')];
 
 function selectTab(id, focus = false) {
@@ -131,7 +135,9 @@ function selectTab(id, focus = false) {
   }
   sections.hidden = id !== 'office';
   libraryPanel.hidden = id !== 'library';
+  filesPanel.hidden = id !== 'files';
   if (id === 'library') openLibrary();
+  if (id === 'files') openFiles();
 }
 
 function setLibraryBadge(count) {
@@ -152,6 +158,19 @@ function openLibrary() {
     console.error(error);
     library = null;
     libraryPanel.replaceChildren(element('p', 'ws-lib-note', 'Не вдалося відкрити бібліотеку. Закрийте «Робоче середовище» й відкрийте його знову.'));
+  });
+}
+
+function openFiles() {
+  if (shell.mode !== 'desktop') {
+    if (!filesPanel.childElementCount) filesPanel.append(element('p', 'ws-lib-note', 'Сховище файлів доступне лише в застосунку EasyWAR.'));
+    return;
+  }
+  if (!files) files = import('./files.js').then(module => module.mountFiles(filesPanel, { invoke }));
+  files.then(mounted => mounted.activate()).catch(error => {
+    console.error(error);
+    files = null;
+    filesPanel.replaceChildren(element('p', 'ws-lib-note', 'Не вдалося відкрити сховище файлів. Закрийте «Робоче середовище» й відкрийте його знову.'));
   });
 }
 

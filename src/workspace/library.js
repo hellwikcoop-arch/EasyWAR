@@ -14,7 +14,7 @@ import { findInvoke, listenTauriEvent } from './workspace-host.js';
 import { MAX_ITEM_NAME_CHARS, formatDateTime, isLockedError, regenerationPlan, sortItems, validateItemName } from './library-core.js';
 import { SOURCE_KINDS } from './field-dictionary-core.js';
 import {
-  BRANCHES, PASSWORD_MAX, archiveResult, defaultDocumentName, errorText, fieldReport, generateDocument, itemBadges, kindLine, libraryApi,
+  BRANCHES, PASSWORD_MAX, PASSWORD_MIN, archiveResult, defaultDocumentName, errorText, fieldReport, generateDocument, itemBadges, kindLine, libraryApi,
   keyActionResult, libraryScreen, linkDescription, linkStatusMap, newPasswordProblem, openedInEditorText, passwordProblem, readTemplateFields,
   recoveryCodeProblem, regenerateAll, regenerateItem, searchRows, skipReasonText, sourceParams, staleCount, tableItems,
   templateItems, versionLabel,
@@ -371,7 +371,7 @@ export function mountLibrary(root, { invoke = findInvoke(window), onBadge = () =
       el('h3', { class: 'ws-lib-subtitle', text: 'Відновлення кодом' }),
       el('p', { text: 'Код відновлення задає новий пароль профілю: ним ви й надалі входите в профіль і відкриваєте бібліотеку. Старий код після цього перестає діяти — ви отримаєте новий.' }),
       field('Код відновлення', code),
-      field('Новий пароль (від 6 символів)', first),
+      field(`Новий пароль (від ${PASSWORD_MIN} символів)`, first),
       field('Повторіть новий пароль', second),
       el('div', { class: 'ws-lib-actions' }, el('button', { type: 'submit', class: 'ws-btn ws-primary', text: 'Задати новий пароль і розблокувати' })));
     form.addEventListener('submit', event => {

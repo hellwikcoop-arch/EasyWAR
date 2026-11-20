@@ -11,6 +11,9 @@
 :root[data-theme="dark"]{
   --bg:#0a0f1c; --fg:#e8edf6; --muted:#8e9ab0; --panel:rgba(14,20,36,.72); --line:rgba(232,237,246,.12);
   --accent:#4c8df2; --gold:#ffd500; --warn:#ff8a7a; --wall:#6e121c; --shadow:rgba(0,0,0,.85); --grid:#4c8df2; color-scheme:dark}
+/* Армійська авіація (map.html?module=army): зелене тло й сітка замість синіх; світла тема не змінюється. */
+:root[data-module="army"]:not([data-theme="light"]){
+  --bg:#0b150c; --panel:rgba(14,26,16,.74); --muted:#95a690; --accent:#8fcf4a; --grid:#6fae3a}
 html,body{height:100%}
 body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--body);overflow:hidden;-webkit-font-smoothing:antialiased}
 #stage{position:fixed;inset:0;touch-action:none}
