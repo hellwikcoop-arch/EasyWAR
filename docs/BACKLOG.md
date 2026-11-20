@@ -51,18 +51,18 @@
 
 ## P2 — найближчий цикл
 
-- [ ] **P2-1** CSP замість `null`: `default-src 'self'`, `connect-src`/`img-src` лише
-  потрібні хости плиток, `frame-src https://dimap.live`, `object-src 'none'`,
-  `'unsafe-inline'` лише для legacy-скриптів; фасад замість копіювання
-  `__TAURI_INTERNALS__` у iframe. (H1) Аудит 2026-10-19: гірше, `csp: null` і
-  `capabilities` без змін, а команд, доступних будь-якому скрипту webview, понад 70.
-  Сам фасад без ACL (P3-1) нічого не дасть. Гостріший випадок — «Офіс» (F-01 у
-  [`WORKSPACE.md`](WORKSPACE.md)): редактори стороннього WASM в `<iframe>` того самого походження без
-  `sandbox` бачать той самий `invoke`; ізоляція — окремий webview з capability лише на `office_*`
-  (варіант C+D), потім `sandbox` і CSP.
-  2026-10-19 (T-Office-06, злито в `main` як PR #87, випуск 2.2.3): окреме вікно `office-editor`,
-  усі власні команди в `AppManifest::commands`, capability редактора лише на `office_*`, мітка вікна
-  перевіряється в Rust; негативний тест у WebKitGTK пройдено. Лишаються CSP, `sandbox`, macOS/Windows.
+- [~] **P2-1** CSP замість `null` — **частково закрито 29.10.2026 (T-0018, JE-21 а, PR
+  `claude/e8-csp`)**: `default-src 'self'`, `img-src` лише 4 хости плиток, `frame-src 'self'
+  https://dimap.live`, `connect-src` лише власні ресурси/blob/IPC, `object-src 'none'`,
+  `base-uri 'self'`, `worker-src 'self' blob:`, `'wasm-unsafe-eval'` для Офісу. **Залишок:**
+  `'unsafe-inline'` для legacy-скриптів (до переходу `air.html`/`rocket.html`/`index.html` на
+  хеші; Tauri уже додає хеші inline-скриптів, тож у webview `'unsafe-inline'` для скриптів не
+  діє) і для стилів (`dangerousDisableAssetCspModification: ["style-src"]` — динамічні
+  `<style>`/`style=""` у JS); ключ Planet у URL плиток (P2-2); фасад замість копіювання
+  `__TAURI_INTERNALS__` у iframe — не зроблено. Перевірено в браузері з емульованим заголовком
+  (docs/evidence/csp/2026-10-29-csp-t0018.md); Windows/macOS — не перевірено. (H1) Аудит
+  2026-10-19: команд, доступних будь-якому скрипту webview, понад 70 — CSP це не змінює.
+
 - [ ] **P2-2** Ключ Planet — у Rust (файл 0600 або keychain); плитки через Rust-команду з
   `Authorization: Basic`; прибрати з `localStorage` і з URL. (M5) Аудит 2026-10-19:
   відкрито (`air.html`, `rocket.html`), не виправлялось.

@@ -291,6 +291,16 @@ test('start screen keeps only the profile modules: empty sections hide and cards
   assert.match(css, /\.branch-cards\.ew-no-command::before,\n#view-start \.branch-cards\.ew-no-branches::after \{ display: none !important; \}/, 'empty section headers hide');
 });
 
+test('tauri.conf.json: CSP головного вікна не null і без unsafe-eval (контракт T-0018)', async () => {
+  const conf = JSON.parse(await readFile(new URL('../src-tauri/tauri.conf.json', import.meta.url), 'utf8'));
+  const csp = conf.app.security.csp;
+  assert.equal(typeof csp, 'string');
+  assert.match(csp, /default-src 'self'/);
+  assert.match(csp, /object-src 'none'/);
+  assert.match(csp, /frame-src 'self' https:\/\/dimap\.live/);
+  assert.doesNotMatch(csp, /(^|\s)'unsafe-eval'/, "'unsafe-eval' заборонено; дозволений лише 'wasm-unsafe-eval'");
+});
+
 test('стартовий екран: меню «⋯» збирає Профілі / копію / оновлення / Signal; EWProfiles для порожнього дашборда', async () => {
   const tools = await read('launcher-tools.js');
   assert.match(tools, /import '\.\/launcher-overflow\.js'/);
