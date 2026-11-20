@@ -5,6 +5,9 @@ import {
   timeByDistance, windFromDrift,
 } from '../nav-calc-core.js';
 import { button, el, field, select } from '../ui.js';
+import { defaultDraft, navSession } from './navigator-core.js';
+
+let calcCtx = { go() {}, today: '' };
 
 const KINDS = [
   { id: 'wind', title: 'Вітер' },
@@ -44,13 +47,35 @@ function lines(rows) {
   return el('dl', { class: 'ef-calc-out' }, rows.map(([name, value]) => [el('dt', { text: name }), el('dd', { text: value })]));
 }
 
+function bigNumbers(pairs) {
+  return el('div', { class: 'ef-calc-big' }, pairs.map(([value, label]) => el('div', {},
+    el('strong', { text: value }),
+    el('span', { text: label }))));
+}
+
+function sendWind(from, speedMs) {
+  if (!navSession.draft) navSession.draft = defaultDraft({ today: calcCtx.today || '' });
+  navSession.draft.wind = {
+    from: Number.isFinite(from) ? String(Math.round(from)) : '',
+    speedMs: Number.isFinite(speedMs) ? String(Math.round(speedMs * 10) / 10) : '',
+  };
+  calcCtx.go('navigator');
+}
+
+function passButton(from, speedMs) {
+  return button('Передати у розрахунок', { variant: 'primary', onClick: () => sendWind(from, speedMs) });
+}
+
 const forms = {
   wind(box) {
     const v = { mk: '90', air: '180', track: '95', w: '190' };
     const paint = () => {
       const r = windFromDrift({ mk: num(v.mk), v: num(v.air), track: num(v.track), w: num(v.w) });
       box.replaceChildren(r.ok
-        ? lines([['Звідки', `${deg(r.from)}°`], ['Куди', `${deg(r.to)}°`], ['Швидкість', `${one(r.uMs)} м/с`], ['Кут зносу', `${one(r.kz)}°`]])
+        ? el('div', {},
+          bigNumbers([[`${deg(r.from)}°`, 'звідки'], [`${one(r.uMs)}`, 'м/с']]),
+          lines([['Звідки', `${deg(r.from)}°`], ['Куди', `${deg(r.to)}°`], ['Швидкість', `${one(r.uMs)} м/с`], ['Кут зносу', `${one(r.kz)}°`]]),
+          passButton(r.from, r.uMs))
         : el('p', { class: 'ef-form-error', text: 'Потрібні МК, повітряна швидкість, фактичний шлях і шляхова. Швидкості — км/год.' }));
     };
     return el('div', {},
@@ -71,7 +96,10 @@ const forms = {
       else rows.push(['За вітром', 'заповніть шлях, V, звідки і м/с']);
       if (Number.isFinite(byDist)) rows.push(['За відстанню і часом', `${one(byDist)} км/год`]);
       if (Number.isFinite(byTime)) rows.push(['Час ділянки', mins(byTime * 60)]);
-      box.replaceChildren(lines(rows));
+      box.replaceChildren(el('div', {},
+        wind.ok ? bigNumbers([[`${one(wind.w)}`, 'км/год'], [`${deg(wind.mk)}°`, 'МК']]) : null,
+        lines(rows),
+        wind.ok ? passButton(num(v.from), num(v.ms)) : null));
     };
     return el('div', {},
       input('МШК, °', v.track, x => { v.track = x; paint(); }),
@@ -88,7 +116,9 @@ const forms = {
       const decl = v.dm.trim() === '' ? null : num(v.dm);
       const r = mpr({ mk: num(v.mk), kur: num(v.kur), declination: decl });
       box.replaceChildren(r.ok
-        ? lines([['МПР', `${deg(r.mpr)}°`], ['МПС', `${deg(r.mps)}°`], ['ІПР', r.ipr === null ? 'немає ΔМ' : `${deg(r.ipr)}°`]])
+        ? el('div', {},
+          bigNumbers([[`${deg(r.mpr)}°`, 'МПР']]),
+          lines([['МПР', `${deg(r.mpr)}°`], ['МПС', `${deg(r.mps)}°`], ['ІПР', r.ipr === null ? 'немає ΔМ' : `${deg(r.ipr)}°`]]))
         : el('p', { class: 'ef-form-error', text: 'Потрібні МК і КУР у градусах.' }));
     };
     return el('div', {},
@@ -110,12 +140,15 @@ const forms = {
         return;
       }
       const leg = (id, title) => [`${title}, МК`, `${deg(r.legs[id].mk)}° · ${mins(r.seconds[id])}`];
-      box.replaceChildren(lines([
-        ['Радіус розвороту', `${one(r.radiusKm)} км`],
-        leg('upwind', 'Зліт'), leg('cross', 'Друга'), leg('down', 'Третя'), leg('base', 'Четверта'),
-        ['До 3-го від траверзу', `${one(r.abeamToThirdKm)} км · ${mins(r.abeamToThirdSec)}`],
-        ['Усього', mins(r.totalSec)],
-      ]));
+      box.replaceChildren(el('div', {},
+        bigNumbers([[`${one(r.radiusKm)}`, 'км'], [mins(r.totalSec), 'усього']]),
+        lines([
+          ['Радіус розвороту', `${one(r.radiusKm)} км`],
+          leg('upwind', 'Зліт'), leg('cross', 'Друга'), leg('down', 'Третя'), leg('base', 'Четверта'),
+          ['До 3-го від траверзу', `${one(r.abeamToThirdKm)} км · ${mins(r.abeamToThirdSec)}`],
+          ['Усього', mins(r.totalSec)],
+        ]),
+        passButton(num(v.from), num(v.ms))));
     };
     return el('div', {},
       input('Посадковий МК, °', v.mk, x => { v.mk = x; paint(); }),
@@ -140,7 +173,10 @@ const forms = {
     const paint = () => {
       const r = padApproach({ landingMk: num(v.mk), side: v.side, scheme: v.scheme, windFrom: num(v.from), windMs: num(v.ms) });
       box.replaceChildren(r.ok
-        ? lines([['Вихід на пряму', `${one(r.finalKm)} км`], ['Радіус', `${one(r.radiusKm)} км`]])
+        ? el('div', {},
+          bigNumbers([[`${one(r.finalKm)}`, 'км'], [`${one(r.radiusKm)}`, 'радіус']]),
+          lines([['Вихід на пряму', `${one(r.finalKm)} км`], ['Радіус', `${one(r.radiusKm)} км`]]),
+          passButton(num(v.from), num(v.ms)))
         : el('p', { class: 'ef-form-error', text: (r.issues || ['Схема не замикається.']).join(' ') }));
     };
     return el('div', {},
@@ -163,6 +199,7 @@ const forms = {
         return;
       }
       box.replaceChildren(el('div', {},
+        bigNumbers([[String(Math.round(r.startM)), 'м']]),
         lines([
           ['Зустрічна складова', `${one(head)} м/с`],
           ['Бокова', `${one(crosswindMs(num(v.mk), num(v.from), num(v.ms)))} м/с`],
@@ -170,6 +207,7 @@ const forms = {
           ['Горизонталь до початку', Number.isFinite(r.levelM) ? `${Math.round(r.levelM)} м · ${mins(r.levelSec)}` : 'немає вихідного орієнтира'],
           ...r.segments.map((seg, i) => [`Ділянка ${i + 1}`, `${Math.round(seg.sWind)} м · ${seg.sec} с`]),
         ]),
+        passButton(num(v.from), num(v.ms)),
         ...(r.warnings || []).map(text => el('p', { class: 'ef-glow-quiet', text }))));
     };
     return el('div', {},
@@ -183,6 +221,7 @@ const forms = {
 };
 
 export function render(ctx) {
+  calcCtx = ctx;
   const root = el('div', { class: 'ef-view ef-calcs' });
   const box = el('div', { class: 'ef-calc-box' });
   const body = el('div', { class: 'ef-glow-card ef-flight-form' });

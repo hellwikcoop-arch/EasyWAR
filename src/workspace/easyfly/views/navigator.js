@@ -447,8 +447,22 @@ export function render(ctx) {
       btn('Приклад', { title: 'Заповнити синтетичним прикладом (Мі-8МТВ-1, борт № 123)', onClick: () => { navSession.draft = demoDraft({ today: ctx.today, unit }); paint(); } }),
       btn('Очистити', { onClick: () => { navSession.draft = defaultDraft({ today: ctx.today, unit }); paint(); toast('Розрахунок очищено.'); } }),
     ];
+    let snap = summarize(d, unit);
+    if (!snap.totalKm) {
+      const saved = (ctx.data?.navFlights || []).at(-1);
+      if (saved?.flight) snap = summarize(flightToDraft(saved.flight), unit);
+    }
+    const metric = (label, value) => el('div', { class: 'ef-overview-cell' },
+      el('span', { text: label }),
+      el('strong', { text: value }));
+    const routeHero = el('section', { class: 'ef-glow-card ef-route-hero', 'data-ef': 'route-hero' },
+      el('div', { class: 'ef-overview' },
+        metric('км', snap.totalKm ? fmtInt(snap.totalKm) : '—'),
+        metric('час', snap.airTimeMin == null ? '—' : (fmtDuration(snap.airTimeMin) || '—')),
+        metric('паливо', snap.routeFuelKg == null ? '—' : fmtInt(snap.routeFuelKg))));
     return el('div', {},
-      header({ crumb: 'Новий розрахунок', title: 'Новий розрахунок', subtitle: 'Дані польоту й попередній підсумок', actions }),
+      routeHero,
+      header({ crumb: 'Новий розрахунок', title: 'Новий розрахунок', subtitle: '', actions }),
       tabsBar('calc'),
       el('div', { class: 'nv-layout' }, el('div', { class: 'nv-col' }, savedCard, flightCard, massCard, routeCard, condCard), summaryBox));
   }
