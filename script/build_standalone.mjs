@@ -56,6 +56,12 @@ export function inlinePage(html, files, publicText, command) {
   const probe = `new URLSearchParams(location.search).get('command') === '${command}'`;
   if (!out.includes(probe)) throw new Error(`Command-mode probe for ${command} not found`);
   out = out.replace(probe, 'true');
+  // Режим армійської авіації (?module=army) є лише в лончері: у файлі командування його стиль і скрипт зайві.
+  out = out.replace(/<style id="easywar-army-aviation-css">[\s\S]*?<\/style>\n?/, '');
+  out = out.replace(/<script id="easywar-army-aviation-mode">[\s\S]*?<\/script>\n?/, '');
+  out = out.replace(/\n\s*if \(new URLSearchParams\(location\.search\)\.get\('module'\) === 'army'\)[^\n]*/, '');
+  out = out.replace(/\n\s*const ARMY = document\.documentElement\.dataset\.module === 'army';\n\s*const NS = ARMY \? 'easywar\.army::' : 'easywar\.air::';\n\s*window\.__EASYWAR_MODULE__ = ARMY \? 'army' : 'air';/,
+    "\n  const NS = 'easywar.air::';\n  window.__EASYWAR_MODULE__ = 'air';");
   const close = out.lastIndexOf('</body>');
   if (close < 0) throw new Error('No </body> to place the embedded-table slot before');
   out = `${out.slice(0, close)}${EMBED_SLOT}<script>${scriptSafe(embedBootstrap)}</script>\n${out.slice(close)}`;

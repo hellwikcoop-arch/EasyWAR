@@ -187,8 +187,11 @@ fn import_easywar_xlsx_with_limits(
 ) -> Result<XlsxImportBatch, XlsxImportError> {
     ensure_zip_within_limits_with(bytes, limits)
         .map_err(|error| XlsxImportError::InvalidWorkbook(error.to_string()))?;
-    let mut workbook = Xlsx::new(Cursor::new(bytes.to_vec()))
-        .map_err(|error| XlsxImportError::InvalidWorkbook(error.to_string()))?;
+    let mut workbook = Xlsx::new(Cursor::new(
+        crate::xlsx_compat::prepare_xlsx_for_calamine(bytes, limits)
+            .map_err(|error| XlsxImportError::InvalidWorkbook(error.to_string()))?,
+    ))
+    .map_err(|error| XlsxImportError::InvalidWorkbook(error.to_string()))?;
     let sheet_names = workbook.sheet_names();
     let sheet_name = sheet_names
         .iter()
@@ -420,7 +423,7 @@ pub fn ensure_zip_within_limits_with(
         if file.is_dir() {
             continue;
         }
-        let name = file.name().to_owned();
+        let name = String::from_utf8_lossy(file.name_raw()).into_owned();
         match budget.read_part(&name, &mut file, None) {
             Err(ZipPartError::Limit(exceeded)) => return Err(exceeded),
             Ok(_) | Err(ZipPartError::Io(_)) => {}

@@ -6,7 +6,8 @@ import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
 import test from 'node:test';
 import {
-  addSummary, appForExt, appName, errorText, extensionOf, filesApi, filterFiles, isLockedError, kindLabel, metaLine, sortFiles, storeScreen,
+  addSummary, appForExt, appName, branchLabel, errorText, extensionOf, filesApi, filterFiles, isLockedError, kindLabel, metaLine, sortFiles, storeScreen,
+  tableDeletable, tableMetaLine,
 } from '../src/workspace/files-core.js';
 
 const root = new URL('../', import.meta.url);
@@ -19,6 +20,10 @@ const CONTRACT = Object.freeze({
   workspace_files_delete: ['id'],
   workspace_files_export: ['id'],
   workspace_files_open: ['id'],
+  // Таблиці дашбордів у сховищі (workspace_tables.rs): список, копія, видалення непов'язаних.
+  workspace_files_list_tables: [],
+  workspace_files_export_table: ['id'],
+  workspace_files_delete_table: ['id'],
 });
 const ID = '0123456789abcdef0123456789abcdef';
 
@@ -31,6 +36,9 @@ test('filesApi викликає команди контракту з точни�
   await api.remove(ID);
   await api.exportCopy(ID);
   await api.open(ID);
+  await api.listTables();
+  await api.exportTable(ID);
+  await api.removeTable(ID);
   assert.deepEqual(calls, [
     ['library_status', undefined],
     ['workspace_files_list', undefined],
@@ -38,6 +46,9 @@ test('filesApi викликає команди контракту з точни�
     ['workspace_files_delete', { id: ID }],
     ['workspace_files_export', { id: ID }],
     ['workspace_files_open', { id: ID }],
+    ['workspace_files_list_tables', undefined],
+    ['workspace_files_export_table', { id: ID }],
+    ['workspace_files_delete_table', { id: ID }],
   ]);
   for (const [command, args] of calls.slice(1)) assert.deepEqual(Object.keys(args ?? {}), CONTRACT[command], command);
 });
@@ -91,8 +102,58 @@ test('команди workspace_files_* у Rust: сигнатури, generate_han
   assert.match(rust, /BLOB_EXT: &str = "ewf"/);
   assert.match(rust, /keys\.seal_store_file\(&id, &meta, bytes\)/);
   assert.match(rust, /keys\.open_store_meta\(id, &data\)/, 'список читає лише метадані');
+  // Таблиці дашбордів: окрема підтека, без відкриття в редакторі; видалення лише непов'язаних.
+  const tables = await read('src-tauri/src/workspace_tables.rs');
+  assert.match(tables, /TABLES_DIR_NAME: &str = "tables"/);
+  assert.match(tables, /REF_PREFIX: &str = "ewstore:"/);
+  assert.match(tables, /validate_workbook\(branch, bytes\)/, 'запис перевіряє книгу');
+  assert.match(lib, /async fn workspace_files_delete_table\([\s\S]*?if bound\.contains\(&id\) \{\s*return Err\(/, 'прив’язану таблицю не видалити');
+  assert.ok(!/workspace_files_open_table|PendingSource::Table/.test(lib), 'таблиці дашбордів не відкриваються в редакторі');
+  // Дашборди читають і записують таблицю сховища лише ключами бібліотеки профілю сесії.
+  assert.match(lib, /async fn write_profile_database\([\s\S]*?TableRef::Store \{ id, \.\. \} => \{\s*let \(dir, keys\) = store_table_access\(&app, &session, &library, &profile_id\)\?;[\s\S]*?workspace_tables::save\(&dir, &keys, &id, branch, &bytes\)/);
+  assert.match(lib, /fn store_table_access\([\s\S]*?session\.get\(\)\.as_deref\(\) != Some\(profile_id\)[\s\S]*?LibraryError::Locked => STORE_LOCKED_MESSAGE/);
+  // Вхід у профіль паролем розблоковує бібліотеку (інакше таблиці сховища не відкрити).
+  assert.match(lib, /async fn activate_local_profile\([\s\S]*?if !library_unlocked && !password\.is_empty\(\) \{\s*unlock_library_at_sign_in\(/);
   // Жодних нових дозволів плагінів: fs і dialog для JS не відкрито.
   assert.ok(!main.permissions.some(permission => /^(fs|dialog):/.test(String(permission))), 'без fs:*/dialog:* у головному вікні');
+});
+
+test('команди таблиць сховища для вікна «Профілі»: сигнатури, реєстрація, лише головне вікно', async () => {
+  const lib = await read('src-tauri/src/lib.rs');
+  const commands = rustCommandParams(lib);
+  const PROFILE_CONTRACT = { move_profile_database_to_store: ['profile_id', 'branch'], create_profile_base_table_in_store: ['profile_id', 'table'] };
+  const main = JSON.parse(await read('src-tauri/capabilities/default.json'));
+  const editor = JSON.parse(await read('src-tauri/capabilities/office-editor.json'));
+  for (const [command, params] of Object.entries(PROFILE_CONTRACT)) {
+    assert.deepEqual(commands.get(command), params, command);
+    assert.match(lib, new RegExp(`\\n\\s+${command},?\\n`), `${command} у generate_handler!`);
+    assert.ok((await read('src-tauri/build.rs')).includes(`"${command}"`), `${command} у build.rs`);
+    const permission = `allow-${command.replaceAll('_', '-')}`;
+    assert.ok(main.permissions.includes(permission), permission);
+    assert.ok(!JSON.stringify(editor).includes(permission), `${permission} не у вікні редактора`);
+  }
+  const core = await read('src/local-profiles-core.js');
+  assert.match(core, /invokeCommand\('move_profile_database_to_store', \{ profileId, branch \}\)/);
+  assert.match(core, /invokeCommand\('create_profile_base_table_in_store', \{ profileId, table \}\)/);
+  assert.match(core, /STORE_REF_PREFIX = 'ewstore:'/);
+  // «Перенести у сховище» не чіпає файл на диску: лише читання + новий блоб + нова прив'язка.
+  const body = /async fn move_profile_database_to_store\([\s\S]*?\n\}\n/.exec(lib)[0];
+  assert.match(body, /read_source_file\(&path\)/);
+  assert.match(body, /workspace_tables::write_new\(/);
+  assert.ok(!/remove_file|rename\(/.test(body), 'оригінал на диску не видаляється й не перейменовується');
+});
+
+test('підписи таблиць дашбордів у сховищі', () => {
+  assert.equal(branchLabel('rocket'), 'Ракетні війська');
+  assert.equal(branchLabel('pvk_losses'), '«Наші втрати» ПВК');
+  assert.equal(branchLabel('x'), null);
+  const table = { id: ID, name: 'EasyWAR_РВ.xlsx', branch: 'rocket', size: 2048, modifiedAt: '2026-10-29T10:00:00Z', hasPrevious: true, damaged: false, bound: true };
+  assert.equal(tableMetaLine(table, { offsetMinutes: 0 }), 'Таблиця дашборда: Ракетні війська · 2 КБ · змінено 29.10.2026 10:00 · є попередня копія');
+  assert.equal(tableMetaLine({ ...table, branch: null, hasPrevious: false }, { offsetMinutes: 0 }), 'Таблиця дашборда · 2 КБ · змінено 29.10.2026 10:00');
+  assert.match(tableMetaLine({ ...table, damaged: true }), /^Пошкоджено/);
+  assert.equal(tableDeletable(table), false, 'прив’язану не видалити');
+  assert.equal(tableDeletable({ ...table, bound: false }), true);
+  assert.equal(tableDeletable(null), false);
 });
 
 test('застосунок за розширенням збігається з workspace_files::app_for_ext у Rust', async () => {
@@ -182,9 +243,11 @@ test('оболонка: вкладка «Файли», окремий чанк, 
   assert.ok(new RegExp(chunkRule[1].slice(1, -1)).test('/x/src/workspace/files.js'), 'чанк files.js має префікс workspace-');
   assert.ok(!new RegExp(chunkRule[1].slice(1, -1)).test('/x/src/workspace/files-core.js'));
   const files = await read('src/workspace/files.js');
-  for (const label of ['Додати файли…', 'Оновити список', 'Зберегти копію…', 'Видалити', 'Скасувати', 'Відкрити в ${app}', 'Пошук за назвою', 'Перейти до бібліотеки', 'пошкоджено']) {
+  for (const label of ['Додати файли…', 'Оновити список', 'Зберегти копію…', 'Видалити', 'Скасувати', 'Відкрити в ${app}', 'Пошук за назвою', 'Перейти до бібліотеки', 'пошкоджено', 'Таблиці дашбордів', 'прив’язана до профілю', 'не прив’язана', 'У сховищі ще немає таблиць дашбордів.']) {
     assert.ok(files.includes(label), label);
   }
+  assert.match(files, /tableDeletable\(table\) \? button\('Видалити'/, 'видалення лише непов’язаних таблиць');
+  assert.ok(!/api\.open\(table|openTable/.test(files), 'таблиці дашбордів не відкриваються з вкладки');
   assert.match(files, /listen\('office-editor-closed'/);
   assert.match(files, /listen\('library-state'/, 'блокування бібліотеки одразу ховає список');
   assert.match(files, /if \(isLockedError\(error\)\) onLocked\(\)/);

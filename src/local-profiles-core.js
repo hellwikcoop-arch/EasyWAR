@@ -148,6 +148,7 @@ export function setLocalProfilePassword(profileId, currentPassword, newPassword,
  */
 export const PROFILE_BRANCHES = [
   { branch: 'air', short: 'ПС', title: 'Повітряні Сили', table: 'Таблиця Повітряних Сил' },
+  { branch: 'army', short: 'АА', title: 'Армійська авіація', table: 'Таблиця армійської авіації' },
   { branch: 'pvk', short: 'ПВК', title: 'Повітряне командування (дашборд ПВК)', table: 'Таблиця ПВК' },
   { branch: 'rocket', short: 'РВ', title: 'Ракетні війська', table: 'Таблиця Ракетних військ' },
   { branch: 'dshv', short: 'УДШВ', title: 'Командування ДШВ (дашборд УДШВ)', table: 'Таблиця УДШВ' },
@@ -172,6 +173,7 @@ export const ownLossesBranch = command => `${command}_losses`;
 /** Порожні базові таблиці, з яких можна почати. `branch` — модуль, що їх відкриває. */
 export const BASE_TABLES = [
   { key: 'air', branch: 'air', label: 'ПС — базова таблиця' },
+  { key: 'army', branch: 'army', label: 'АА — базова таблиця (структура ПС)' },
   { key: 'pvk', branch: 'pvk', label: 'ПС рівня ПВК (ТАБЛ 2-3)' },
   { key: 'rvia', branch: 'rocket', label: 'РВ — базова таблиця' },
 ];
@@ -192,6 +194,30 @@ export function clearProfileDatabase(profileId, branch, invokeCommand = invoke) 
 /** Зберігає порожню базову таблицю в новий файл і прив'язує її; null — якщо скасовано. */
 export function createProfileBaseTable(profileId, table, invokeCommand = invoke) {
   return invokeCommand('create_profile_base_table', { profileId, table });
+}
+
+/** Порожня базова таблиця одразу в зашифрованому сховищі профілю (без вікна збереження). */
+export function createProfileBaseTableInStore(profileId, table, invokeCommand = invoke) {
+  return invokeCommand('create_profile_base_table_in_store', { profileId, table });
+}
+
+/** «Перенести у сховище»: прив'язана таблиця з диска стає зашифрованою таблицею сховища; файл на диску лишається. */
+export function moveProfileDatabaseToStore(profileId, branch, invokeCommand = invoke) {
+  return invokeCommand('move_profile_database_to_store', { profileId, branch });
+}
+
+/** Префікс прив'язки таблиці, що лежить у зашифрованому сховищі профілю (`workspace_tables.rs`). */
+export const STORE_REF_PREFIX = 'ewstore:';
+
+/** Чи прив'язка вказує на таблицю в зашифрованому сховищі, а не на файл на диску. */
+export function isStoreTable(path) {
+  return typeof path === 'string' && path.startsWith(STORE_REF_PREFIX);
+}
+
+/** Підпис місця таблиці для вікна «Профілі»: шлях на диску або «у зашифрованому сховищі профілю». */
+export function databaseLocation(path) {
+  if (!path) return '';
+  return isStoreTable(path) ? 'У зашифрованому сховищі профілю (Робоче середовище → Файли)' : String(path);
 }
 
 /**
@@ -221,6 +247,12 @@ export function isProfileLocked(profile, sessionProfileId) {
 
 export function databaseFileName(path) {
   if (!path) return '';
+  if (isStoreTable(path)) {
+    // `ewstore:<32 hex>:<назва>` — назва після ідентифікатора (сама може містити «:»).
+    const rest = String(path).slice(STORE_REF_PREFIX.length);
+    const colon = rest.indexOf(':');
+    return colon > 0 ? rest.slice(colon + 1) : '';
+  }
   return String(path).split(/[\\/]/).pop();
 }
 

@@ -175,10 +175,8 @@ export function routeFor(cls, transport, options) {
       return deny('delta-unverified', '«Дельту» ще не перевірено (G10); у v1 клас D працює лише по LAN');
     case 'peer_wan': {
       const o = opts(options);
-      if (cls === 'D') return deny('class-d-wan', 'Клас D передається лише через локальну мережу LAN');
-      if (cls !== 'C') return deny('wan-class-unapproved', 'У WAN дозволений лише підтверджений облік класу C');
+      // SEC-005 (JE, 30.10.2026): клас не блокує синхронізацію між учасниками колективу.
       if (endToEnd !== true) return deny('no-e2e', 'Інтернет-обмін потребує наскрізного шифрування');
-      if (o.confirmedAfterFact !== true) return deny('wan-purpose-unconfirmed', 'Власник має підтвердити облік після факту');
       if (o.membershipVerified !== true) return deny('wan-membership-unverified', 'Потрібно перевірити підписаний склад колективу');
       if (o.explicitUserChoice !== true) return deny('wan-needs-user-choice', 'Користувач має явно вибрати передачу через інтернет');
       if (o.relayOpaqueVerified !== true) return deny('wan-relay-unverified', 'Relay має передавати лише зашифровані пакети');

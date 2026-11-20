@@ -86,7 +86,9 @@ export function render(ctx) {
     root.replaceChildren();
     const tab = navSession.tab;
     const body = tab === 'calc' ? calcScreen() : docScreen(tab);
-    root.append(body, toastBox);
+    root.append(
+      el('p', { class: 'nv-sub' }, btn('Калькулятори', { onClick: () => ctx.go('calculators') })),
+      body, toastBox);
   };
   const switchTab = tab => { navSession.tab = tab; paint(); };
 
@@ -96,7 +98,9 @@ export function render(ctx) {
       items.map(item => el('button', {
         type: 'button', class: 'nv-tab', role: 'tab', 'aria-selected': String(item.id === active),
         onClick: () => switchTab(item.id),
-      }, item.label)));
+      }, item.label)),
+      el('button', { type: 'button', class: 'nv-tab', onClick: () => ctx.go('timing') }, 'Хронометраж'),
+      el('button', { type: 'button', class: 'nv-tab', onClick: () => ctx.go('sheet') }, 'Польотний лист'));
   }
 
   function header({ crumb, title, subtitle, actions }) {
@@ -133,7 +137,7 @@ export function render(ctx) {
     typeSelect.value = d.typeId;
     const flightCard = card('Політ', null,
       el('div', { class: 'nv-grid' },
-        field('Дата', bound(() => dateUk(d.date) || d.date, v => { d.date = v; }, { placeholder: 'дд.мм.рррр', inputMode: 'numeric', maxLength: 10 })),
+        field('Дата', bound(() => (d.date || '').slice(0, 10), v => { d.date = v; }, { type: 'date' })),
         field('Вправа', bound(() => d.exercise, v => { d.exercise = v; }, { placeholder: '№ 14', maxLength: 20 })),
         field('Позивний', bound(() => d.callsign, v => { d.callsign = v; }, { maxLength: 40 })),
         field('Тип ПС', typeSelect),
@@ -349,13 +353,21 @@ export function render(ctx) {
       const kg = value => (value === null || value === undefined ? '—' : `${fmtInt(value)} кг`);
       const statusClass = s.massOk === false ? 'nv-status-bad' : s.massOk === true ? 'nv-status-ok' : 'nv-status-none';
       const statusMark = s.massOk === false ? '✕ ' : s.massOk === true ? '✓ ' : '';
-      const docsRow = el('div', { class: 'nv-docs-row' }, DOC_ORDER.map(id => btn(DOC_KINDS[id].tab, {
-        variant: id === 'ishr' ? 'primary' : 'secondary', disabled: s.blocking,
-        title: s.blocking ? 'Спершу заповніть дані розрахунку' : `Переглянути: ${DOC_KINDS[id].tab}`,
-        onClick: () => switchTab(id),
-      })));
+      const docsRow = el('div', { class: 'nv-docs-row' },
+        ...DOC_ORDER.map(id => btn(DOC_KINDS[id].tab, {
+          variant: id === 'ishr' ? 'primary' : 'secondary', disabled: s.blocking,
+          title: s.blocking ? 'Спершу заповніть дані розрахунку' : `Переглянути: ${DOC_KINDS[id].tab}`,
+          onClick: () => switchTab(id),
+        })),
+        btn('Хронометраж', { onClick: () => ctx.go('timing') }),
+        btn('Польотний лист', { onClick: () => ctx.go('sheet') }));
+      const metric = (label, value) => el('div', { class: 'nv-metric' }, el('span', { text: label }), el('strong', { text: value }));
       summaryBox.replaceChildren(...[
         el('h2', { text: 'Живий підсумок' }),
+        el('div', { class: 'nv-metrics', 'aria-label': 'Показники розрахунку' },
+          metric('Відстань', `${fmtInt(s.totalKm)} км`),
+          metric('Час у повітрі', s.airTimeMin === null ? '—' : fmtDuration(s.airTimeMin)),
+          metric('Пальне на маршрут', s.routeFuelKg === null ? '—' : `${fmtInt(s.routeFuelKg)} кг`)),
         el('div', { class: 'nv-sum-rows' },
           row('Порожнє ПС', kg(s.empty)), row('Екіпаж', kg(s.crew)), row('Пальне', kg(s.fuelKg)), row('Обладнання і вантаж', kg(s.cargo))),
         el('div', { class: 'nv-mass' },

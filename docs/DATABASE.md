@@ -63,7 +63,13 @@ size limits) and a monotonic `revision` used as a compare-and-swap mark; the JS
 core (`src/profile-schema-core.js`) composes and validates the content. The table
 holds no module rows and no raw XLSX values; deleting the profile removes it
 (`ON DELETE CASCADE`). A document of a newer format version is never overwritten
-by an older application. Migration
+by an older application. The same document may carry optional `relations` (confirmed or
+rejected key pairs between two user tables: column keys only, cardinality, basis, the column
+types at the moment of the decision; no cell values) and `groups` (sets of tables joined by
+confirmed relations); an optional `snapshots` list records which table module was built from which confirmed relation (`sourceId`, `relationId`, `builtAt`, `rowCount`; no values) so that the table can be refreshed from its sources. They are part of format version 1 (no new migration and no new Tauri
+command; the old `save_profile_schema` stores them); Rust only checks that both fields, when
+present, are arrays within the limits (256 relations, 64 groups, 64 snapshots) and the JS core validates the
+content. A schema without them stays valid and is not rewritten. Migration
 `0018_dashboard_layouts.sql` adds `dashboard_layouts`: one row per profile and
 dashboard (the primary key is `(profile_id, dashboard_id)`; today only `my`, «Мій
 дашборд») with the E4 layout as a JSON document of format `easywar.dashboard-layout` —
@@ -82,6 +88,30 @@ profile created: random 16-byte id, name) and `collective_membership_log` (the
 applied contiguous prefix of the signed membership journal, one canonical
 `MembershipRecord` blob per `seq`; Rust re-verifies and re-applies the journal on
 every read, so a tampered row grants nothing). No network touches these rows.
+Migration `0020_collective_sync.sql` (E8, C3b, second slice) adds two more tables keyed by
+`(profile_id, collective_id)` and deleted with the collective: `collective_tables` (a
+collective table: random 16-byte id, title, owner `member_id`, the class `A`–`D` and the
+purpose `after-fact`/`planned` together with who confirmed each; the send gate
+`collective::send_gate` counts the effective class from these rows — anything not
+confirmed by the table owner, or planned, is class D) and `collective_invitations_used`
+(nonces of invitations that already admitted a member; each admits exactly one). Epoch keys
+live in the secret store file, the local send queue in `collective-outbox/*.queue`; neither
+is in the database.
+Migration `0023_collective_table_data.sql` (owner decision 2026-10-30, «Змінити дані» /
+«Оновити таблицю» without network) adds `collective_tables.columns` (a JSON array of column
+names set by the table owner, `[]` by default, at most 32 names of 1–40 characters checked in
+Rust) and `collective_table_ops`: one row per «Доповісти», keyed by
+`(profile_id, collective_id, envelope_id)` with the table id, the **sealed envelope** (signed
+by the device, encrypted with the epoch key; up to 1 MiB) and `recorded_at`; it cascades with
+the table. No plaintext row values are stored: «Оновити таблицю» opens the envelopes with the
+profile password and re-checks each one with `collective::replay::receive` (signature, device
+and write right at `membership_seq`, epoch, revocation, replays). The change format inside an
+envelope is `{"v":1,"rows":[{"key","kind":"upsert"|"delete","values"}]}`. The same migration adds `collective_tables.record`: the table record
+signed by the owner (`collective::table_record`: title, columns, class, purpose, writers —
+empty means every member, owner decision 2026-10-30). The owner's node signs it at «Пакет
+оновлення»; received tables keep the owner's bytes so any member can relay them. The
+`EWSYNC1.` update package (journal, table records, envelopes, encrypted with the epoch key)
+is never stored; only what passes verification on import is written.
 Migration
 `0012_dashboard_module_style.sql` adds `dashboard_modules.style` — the look chosen
 when the module was created: `standard` (default for existing modules), `branch`
@@ -93,8 +123,23 @@ documents, encrypted content, immutable versions, events and purges), and
 migration `0014_document_links.sql` links a generated library document to its
 template version and data source, and migration `0015_library_blob_repair.sql`
 lets a damaged ciphertext row of `library_blobs` be replaced while the keyring is
-active (see «Office library»). Migrations contain no operational fixtures and
-create no external integration.
+active (see «Office library»). Migration `0021_custom_module.sql` adds the profile
+module `custom` («Власний модуль», no service branch, no profile table) to the
+`CHECK` of `local_profile_modules` and the dashboard branch `custom` to the `CHECK`
+of `dashboard_modules`. Both tables are rebuilt (SQLite cannot change a `CHECK` in
+place); because foreign keys are on during migrations and `DROP TABLE` of a parent
+cascades, the migration first copies `dashboard_module_fields` and
+`dashboard_module_corrections` into `*_new` tables that reference
+`dashboard_modules_new`, drops the old tables children first, renames the new ones
+and recreates both indexes; correction ids and the autoincrement sequence are
+kept, `dashboard_data_<id>` tables are untouched. Profiles that already exist get
+the `custom` module row, as `0009` once gave them all modules. Migration
+`0022_army_aviation.sql` adds `army` («Армійська авіація»: the Air Force page in its
+own mode, `air.html?module=army`, with its own profile table) to the `CHECK`s of
+`local_profile_tables`, `local_profile_modules` and `dashboard_modules`, rebuilding
+the three tables the same way as `0007`/`0008` and `0021` (dashboard children copied
+first, ids and indexes kept); existing profiles do not get the `army` module row (it is switched on in «Профілі»). Migrations
+contain no operational fixtures and create no external integration.
 
 ## Provenance layers
 
@@ -113,11 +158,11 @@ create no external integration.
 | Active local profile | `local_profile_state` | Singleton local selection used by future workspace features. |
 | Workspace template assignments | `local_profile_workspace_templates` | Optional local presentation preset for a profile; no authorization semantics. |
 | Profile details | `local_profile_details` | Position, small avatar and the Argon2id sign-in hash; gates sign-in on this device only. The hash column is nullable: a profile created before registration required a password has no hash and accepts any password until one is set, while every new registration stores a hash (see «Local profiles»). |
-| Profile modules | `local_profile_modules` | Modules a profile chose at registration (`air`, `rocket`, `artillery`, `pvk`, `dshv`); only shown on the start screen, not an access boundary. Cascades on profile delete. |
-| Profile tables | `local_profile_tables` | One XLSX path per profile and slot: `air`, `rocket`, `pvk`, `dshv`, and the «НАШІ ВТРАТИ» slots `pvk_losses` and `dshv_losses`; the file itself is never stored or changed by binding. |
-| Dashboard modules | `dashboard_modules` | One user-created dashboard module per row: owning profile, branch (`air`, `rocket`, `pvk`, `dshv`), built-in catalog template, visual kind, title and the name of its data table. Cascades on profile delete. |
+| Profile modules | `local_profile_modules` | Modules a profile chose at registration (`air`, `rocket`, `artillery`, `army`, `pvk`, `dshv`, `custom`); only shown on the start screen, not an access boundary. Cascades on profile delete. |
+| Profile tables | `local_profile_tables` | One XLSX path per profile and slot: `air`, `rocket`, `army`, `pvk`, `dshv`, and the «НАШІ ВТРАТИ» slots `pvk_losses` and `dshv_losses`; the file itself is never stored or changed by binding. Since the encrypted store (2026-10-29) `path` may instead be a reference `ewstore:<32 hex>:<name>` to a dashboard table sealed in the profile's store folder (`workspace-files/<profile>/tables/<id>.ewf`, see `docs/WORKSPACE.md`); it fits the existing 1–4096 check, so no migration. |
+| Dashboard modules | `dashboard_modules` | One user-created dashboard module per row: owning profile, branch (`air`, `rocket`, `army`, `pvk`, `dshv`, `custom`), built-in catalog template, visual kind, title and the name of its data table. Cascades on profile delete. |
 | Dashboard module fields | `dashboard_module_fields` | The checked field list copied from the catalog template: key, Ukrainian label, data type, role, aggregation, required flag and position. Cascades with the module. |
-| Dashboard module data | `dashboard_data_<24 hex>` | Created at runtime, one table per module: `row_id`, `created_at` and one column per catalog field. Table and column names come only from the validated catalog, never from user text. `row_id` is `INTEGER PRIMARY KEY AUTOINCREMENT`, so the number of a deleted row is never reused; a save keeps the `row_id` and `created_at` of every row that comes back with its `rowId`. `dashboard_modules.updated_at` is the version of the whole table: a save that carries `expected_updated_at` is applied only if it still matches (compare-and-swap in the first statement of the transaction), otherwise nothing changes and the caller gets a conflict. Deleting one module (`delete_dashboard_module`, own profile only) removes its metadata, fields and corrections and drops its table in one transaction; deleting a profile drops its module tables in the same transaction as the metadata cascade. Only names that match the generated `dashboard_data_<24 hex>` pattern are ever dropped. In the built-in `flight-hours` template the unit-bearing `REAL` columns hold plain numbers and the unit is part of the field label: durations (`airborne_hours`, `total_hours`, `engine_test_time`, `time_in_clouds`, `hood_time`) are decimal hours (`0:32` is stored as `32/60` and shown as `год:хв`), `flight_altitude`, `cloud_base_upper` and `cloud_base_lower` are metres, `cloud_cover` is an integer 0–10, `visibility` is kilometres, `fuel_consumption` is litres and `cargo_kg` is kilograms; `passengers`, `rsp_approaches` and `rsp_landings` are counts. Fuel mass is not stored: the UI derives it at 0.8 kg/L. The crew columns (`crew_ke`, `crew_lsh`, `crew_bt`, `crew_other`) are `TEXT` with surnames, `crew_other` comma-separated. `crew_ke_callsign`, the crew commander's call sign placed right after `aircraft_number`, is `TEXT` as well (leading zeros are kept) and is not counted in the crew of at most 8. Value ranges (cloud cover 0–10, non-negative visibility, fuel, cargo, passengers and RSP counts, crew of at most 8, lower cloud base not above the upper one) are checked by the form only; the backend stores what it receives so that an old out-of-range row cannot block saving the table. `date` and `datetime` values are checked by the backend too: a `date` is `YYYY-MM-DD` (a real calendar date, the whole text), a `datetime` is `YYYY-MM-DDTHH:MM` with optional `:SS` (hours 00–23, minutes and seconds 00–59) — local wall-clock time without a time zone, never one assigned to the source file. A date without time is not accepted as a `datetime` (it is never turned into midnight). A kept row whose stored date is malformed from an older import may be saved unchanged; a new or changed malformed value is refused. Saving rows (`replace_dashboard_module_rows`) requires the `expectedUpdatedAt` version the client opened: a missing or empty version is refused without writing. Template fields appended later are added to existing tables by the runtime schema synchronisation, without a migration. A module can be created together with its first rows (`create_dashboard_module` with `rows`, read from the user's own XLSX by `module_source.rs`): the metadata, the table and the rows are written in one transaction, a row that fails `validate_value` (or more than 10 000 rows) leaves nothing behind, and the XLSX is only read, never changed. Columns the XLSX does not have simply stay empty in the new table. |
+| Dashboard module data | `dashboard_data_<24 hex>` | Created at runtime, one table per module: `row_id`, `created_at` and one column per catalog field. Table and column names come only from the validated catalog, never from user text. `row_id` is `INTEGER PRIMARY KEY AUTOINCREMENT`, so the number of a deleted row is never reused; a save keeps the `row_id` and `created_at` of every row that comes back with its `rowId`. `dashboard_modules.updated_at` is the version of the whole table: a save that carries `expected_updated_at` is applied only if it still matches (compare-and-swap in the first statement of the transaction), otherwise nothing changes and the caller gets a conflict. Deleting one module (`delete_dashboard_module`, own profile only) removes its metadata, fields and corrections and drops its table in one transaction; deleting a profile drops its module tables in the same transaction as the metadata cascade. Only names that match the generated `dashboard_data_<24 hex>` pattern are ever dropped. In the built-in `flight-hours` template the unit-bearing `REAL` columns hold plain numbers and the unit is part of the field label: durations (`airborne_hours`, `total_hours`, `engine_test_time`, `time_in_clouds`, `hood_time`) are decimal hours (`0:32` is stored as `32/60` and shown as `год:хв`), `flight_altitude`, `cloud_base_upper` and `cloud_base_lower` are metres, `cloud_cover` is an integer 0–10, `visibility` is kilometres, `fuel_consumption` is litres and `cargo_kg` is kilograms; `passengers`, `rsp_approaches` and `rsp_landings` are counts. Fuel mass is not stored: the UI derives it at 0.8 kg/L. The crew columns (`crew_ke`, `crew_lsh`, `crew_bt`, `crew_other`) are `TEXT` with surnames, `crew_other` comma-separated. `crew_ke_callsign`, the crew commander's call sign placed right after `aircraft_number`, is `TEXT` as well (leading zeros are kept) and is not counted in the crew of at most 8. Value ranges (cloud cover 0–10, non-negative visibility, fuel, cargo, passengers and RSP counts, crew of at most 8, lower cloud base not above the upper one) are checked by the form only; the backend stores what it receives so that an old out-of-range row cannot block saving the table. `date` and `datetime` values are checked by the backend too: a `date` is `YYYY-MM-DD` (a real calendar date, the whole text), a `datetime` is `YYYY-MM-DDTHH:MM` with optional `:SS` (hours 00–23, minutes and seconds 00–59) — local wall-clock time without a time zone, never one assigned to the source file. A date without time is not accepted as a `datetime` (it is never turned into midnight). A kept row whose stored date is malformed from an older import may be saved unchanged; a new or changed malformed value is refused. Saving rows (`replace_dashboard_module_rows`) requires the `expectedUpdatedAt` version the client opened: a missing or empty version is refused without writing. Template fields appended later are added to existing tables by the runtime schema synchronisation, without a migration. A module can be created together with its first rows (`create_dashboard_module` with `rows`, read from the user's own XLSX by `module_source.rs`): the metadata, the table and the rows are written in one transaction, a row that fails `validate_value` (or more than 10 000 rows) leaves nothing behind, and the XLSX is only read, never changed. Columns the XLSX does not have simply stay empty in the new table. A module can also be created from a merged table (`create_dashboard_module` with the service template `merged-table` and `customFields`, no migration): the fields are described by the call, not by the catalog; the server names them `c1`, `c2`, … (up to 64, label up to 80 characters, type `text`, `integer`, `real` or `date`, role `dimension`, `metric` or `label`, aggregation `none` or `sum`), the labels are only text and never reach DDL, and the rows go through the same `validate_value` in one transaction. Such a module is read, saved and deleted like a template one; `custom_fields` with a catalog template, or `merged-table` without them, is refused. The same call with the service template `user-table` creates the user's main table; only that kind accepts `add_dashboard_module_fields` (`DashboardModuleStore::add_fields`, no migration): it appends fields with the next keys `c{n}` (never reused) and physical nullable columns (`ALTER TABLE … ADD COLUMN`) in one transaction guarded by `expected_updated_at`; existing rows keep their values and get empty new cells, a label that already exists (case-insensitive) or a total over 64 columns is refused, and template, merged and foreign-profile tables are never changed (`NotExtendable`, `ModuleNotFound`). The command is allowed to the main window only (`allow-add-dashboard-module-fields`). |
 | Dashboard module corrections | `dashboard_module_corrections` | Values corrected on the «Перевірка» screen before an XLSX import: module, the record's `row_id`, field key, raw cell text (as it is in the user's file), the text the user typed, the reason the cell could not be used, and where it was (file name only, sheet, row number, column header). The record in `dashboard_data_<24 hex>` holds the corrected value; corrections never become dynamic columns of that table. One correction per field of a record; cascades with the module (and so with the profile); a record removed by a save takes its corrections with it in the same transaction. The XLSX is never written. |
 | Office library | `library_keyrings`, `library_items`, `library_blobs`, `library_versions`, `library_events`, `library_purges` | One key wrap per profile with a password (Argon2id from the password, optional recovery-code slot), documents with encrypted names, encrypted content stored once per profile under an HMAC `content_id`, immutable versions, an append-only audit of event kinds and IDs, and the purge log. No plaintext document text or name. No foreign key to `local_profiles`: a profile with an active library cannot be deleted until the library is crypto-shredded (see «Office library»). |
 | Document links | `document_links` | For a generated library document: the template version, the data-source kind and bounded JSON parameters, the last generated version and an HMAC fingerprint of the source data. Only the generation state changes; deleting the row unlinks the document and keeps its versions. |
@@ -336,6 +381,21 @@ both the active and previous databases before deleting the previous file. All
 automated restore tests use temporary synthetic databases; acceptance of the
 full restart flow in packaged macOS and Windows applications remains a release
 gate.
+
+## Profile data store (outside SQLite)
+
+`src-tauri/src/profile_data.rs` keeps per-profile application data in
+`<app local data>/profile-data/<profile id>/`; nothing of it is in the database and there is no
+migration. `keyring.json` holds `format`, the Argon2id parameters and salt, the password slot and an
+optional library slot (the same data key wrapped by `LibraryKeys::profile_data_wrap_key`). Each record is
+`<first 32 hex of HMAC(name key, key)>.ewd` = `EWPD` + version + 24-byte nonce + XChaCha20-Poly1305
+ciphertext, with the profile id and file name as associated data; writes are atomic. Limits: key ≤ 80
+characters, value ≤ 32 MB, ≤ 512 records per profile. Deleting a profile (also
+`delete_local_profile_with_library`) removes its directory. The SQLite backup (`backup.rs`) does not include this directory: it has
+its own archive `.ewpdb` (`profile_data/archive.rs`: an uncompressed zip with `manifest.json`, `keyring.json`
+and the already-encrypted `records/*.ewd`, so export decrypts nothing and the file is protected by the
+profile password at the moment of the copy; restore decrypts with that password, re-encrypts for the target
+profile, merges and never overwrites a newer record). A forgotten password without a library slot makes the data unrecoverable. Details and the key/window rules: [`WORKSPACE.md`](WORKSPACE.md), «Дані профілю».
 
 ## Office library
 

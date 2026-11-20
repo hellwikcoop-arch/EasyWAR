@@ -28,6 +28,7 @@ const JS_NETWORK_ALLOWLIST = new Set([
   'src/phone-export.js',                // шаблони телефону (phoneAssetUrl)
   'src/presentation-art.js',            // зображення презентації з власних ресурсів
   'src/startup-splash.js',              // відео заставки (VIDEO_URL)
+  'src/workspace/easyfly/views/route-board.js', // контур регіонів map-assets/regions.json для схеми маршруту (на телефоні не викликається)
   'src/assistant/assistant-cloud.js', // явний онлайн-канал через fetchImpl, перевірка chatEndpoint
 ]);
 const NETWORK_CALL = /\b(?:fetch|fetchImpl)\s*\(|\bnew\s+XMLHttpRequest\b|\bnew\s+WebSocket\s*\(|\bnew\s+EventSource\s*\(|\bsendBeacon\s*\(/;
@@ -110,6 +111,8 @@ const RUST_NETWORK_ALLOWLIST = new Set([
   'signal_session.rs',  // сеанс signal-cli
   'weather_online.rs',  // Open-Meteo
   'app_update.rs',      // tauri-plugin-updater (endpoint з tauri.conf.json)
+  'pair_relay.rs',      // сервер зустрічі для вступу за кодом; клієнт лише з дозволом WAN
+  'pair_session.rs',    // сеанс вступу за кодом: тільки тести на localhost (tokio::net), мережі в коді немає
 ]);
 const RUST_NETWORK = /\breqwest\b|\bstd::net\b|\btokio::net\b|TcpListener|TcpStream|UdpSocket/;
 
@@ -168,8 +171,9 @@ test('вікно редактора без мережі, webview без HTTP/she
   for (const permission of editor.permissions) {
     const id = typeof permission === 'string' ? permission : permission.identifier;
     // Лише власні локальні команди: файли «Офісу» й колективи (E8 C3b: ключ учасника,
-    // створення колективу — без мережі, пароль профілю через обмежувач спроб).
-    assert.match(id, /^allow-(office|collective)-/, `редактор: ${id}`);
+    // створення колективу — без мережі, пароль профілю через обмежувач спроб) і дані профілю
+    // свого застосунку (profile_data_get/set/remove/list, простір імен перевіряє Rust).
+    assert.match(id, /^allow-(office|collective|profile-data)-/, `редактор: ${id}`);
   }
   const main = JSON.parse(await read('src-tauri/capabilities/default.json'));
   for (const permission of main.permissions) {
@@ -195,4 +199,35 @@ test('CSP головного вікна: null — відомий ризик P2-1
     const text = typeof csp === 'string' ? csp : JSON.stringify(csp);
     for (const host of ['tile.openstreetmap.org', 'dimap.live']) assert.ok(text.includes(host), host);
   }
+});
+
+
+test('погодні Rust-команди перевіряють зашифрований дозвіл перед запитом', async () => {
+  const lib = await read('src-tauri/src/lib.rs');
+  const weather = await read('src-tauri/src/weather_online.rs');
+  const ui = await read('src/workspace/weather/app.js');
+
+  assert.match(lib, /store\s*\.get\(&keys, "weather\.state"\)/, 'дозвіл береться із локального зашифрованого запису');
+  assert.match(lib, /network_policy::network_policy\(&context, network_policy::Purpose::WeatherOnline\)/,
+    'перевіряється наявна авторитетна Rust-політика');
+
+  for (const name of ['weather_online_fetch', 'weather_online_search']) {
+    const body = lib.match(new RegExp(`async fn ${name}\\([\\s\\S]*?\\n\\}`))?.[0];
+    assert.ok(body, `команда ${name} існує`);
+    const consent = body.indexOf('ensure_weather_network_permission(');
+    const network = body.indexOf('weather_online::fetch_json(url).await');
+    assert.ok(consent !== -1 && network > consent, `${name} перевіряє дозвіл до HTTP`);
+  }
+
+  assert.match(weather, /pub fn saved_online_enabled\(raw: Option<&str>\) -> bool/,
+    'значення дозволу розбирається в Rust');
+  assert.match(ui, /const stored = await save\(\{ \.\.\.state, online: enabled \}\)/,
+    'UI завершує збереження дозволу до першого запиту');
+  assert.match(ui, /if \(enabled\) tick\(\)/, 'перший запит лише після успішного збереження');
+  assert.match(ui, /const previousOnline = state\.online;/,
+    'непідтверджений перемикач пам’ятає попередній дозвіл');
+  assert.match(ui, /state = \{ \.\.\.state, online: previousOnline \};/,
+    'після помилки збереження UI відновлює старий дозвіл, а не повідомляє про успішне вимкнення');
+  assert.match(ui, /Не вдалося зберегти вимкнення\./,
+    'у разі відмови вимкнення користувач бачить попередження');
 });

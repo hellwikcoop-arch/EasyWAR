@@ -205,6 +205,7 @@ export function placeInstance(layout, instanceId, box) {
 
 /** Ширина картки на сітці з 12 колонок: готові розміри для вибору (повна ширина — 12). */
 export const SIZE_CHOICES = Object.freeze([
+  Object.freeze({ id: 'small', w: 2, label: 'Мала' }),
   Object.freeze({ id: 'third', w: 4, label: 'Третина' }),
   Object.freeze({ id: 'half', w: 6, label: 'Половина' }),
   Object.freeze({ id: 'two-thirds', w: 8, label: 'Дві третини' }),

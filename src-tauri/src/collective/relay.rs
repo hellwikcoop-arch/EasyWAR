@@ -14,7 +14,7 @@ use super::codec::{Reader, Writer};
 use super::envelope::Envelope;
 use super::identity::DeviceIdentity;
 use super::receipt::StoredReceipt;
-use super::{sha256, ID_LEN, KEY_LEN};
+use super::{sha256, Reason, ID_LEN, KEY_LEN};
 
 const MAGIC: &[u8; 8] = b"EWRELAY1";
 pub const MAX_TTL_SECONDS: i64 = 24 * 60 * 60;
@@ -58,6 +58,14 @@ pub enum PutResult {
     AlreadyStored,
 }
 
+/// Результат видалення за підтвердженням.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RemoveResult {
+    Removed,
+    /// Немає такого пакета (уже видалено або минув TTL): повторне підтвердження безпечне.
+    NotFound,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SignedPut {
     pub result: PutResult,
@@ -69,6 +77,49 @@ pub struct Page {
     pub envelopes: Vec<Vec<u8>>,
     pub next_cursor: u64,
     pub has_more: bool,
+}
+
+impl Page {
+    /// Мережеве кодування (етап 2б): курсор ‖ ще є ‖ кількість ‖ конверти (var).
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let size = 13 + self.envelopes.iter().map(|e| e.len() + 4).sum::<usize>();
+        let mut w = Writer::with_capacity(size);
+        w.u64(self.next_cursor)
+            .u8(u8::from(self.has_more))
+            .u32(self.envelopes.len() as u32);
+        for envelope in &self.envelopes {
+            w.var(envelope);
+        }
+        w.finish()
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, Reason> {
+        let mut r = Reader::new(bytes);
+        let next_cursor = r.u64()?;
+        let has_more = match r.u8()? {
+            0 => false,
+            1 => true,
+            _ => return Err(Reason::Malformed),
+        };
+        let count = r.u32()? as usize;
+        if count > 100 {
+            return Err(Reason::Malformed);
+        }
+        let mut envelopes = Vec::with_capacity(count);
+        for _ in 0..count {
+            let envelope = r.var()?;
+            if envelope.len() > MAX_ENVELOPE_BYTES {
+                return Err(Reason::Malformed);
+            }
+            envelopes.push(envelope.to_vec());
+        }
+        r.finish()?;
+        Ok(Self {
+            envelopes,
+            next_cursor,
+            has_more,
+        })
+    }
 }
 
 /// Один власник файлу одночасно. Доступ до мережі та автентифікація одержувача
@@ -246,6 +297,37 @@ impl OfflineMailbox {
         })
     }
 
+    /// Видаляє конверт за перевіреним підтвердженням одержувача (ADR store-forward, `ack`).
+    /// Інший digest — відмова без видалення: чужий чи підмінений пакет не зникає.
+    pub fn remove(
+        &mut self,
+        scope: [u8; ID_LEN],
+        id: [u8; ID_LEN],
+        digest: &[u8; KEY_LEN],
+        now: i64,
+    ) -> Result<RemoveResult, MailboxError> {
+        let Some(position) = self
+            .entries
+            .iter()
+            .position(|entry| entry.expires_at > now && entry.scope == scope && entry.id == id)
+        else {
+            return Ok(RemoveResult::NotFound);
+        };
+        if &self.entries[position].digest != digest {
+            return Err(MailboxError::ConflictingEnvelope);
+        }
+        let entries: Vec<Entry> = self
+            .entries
+            .iter()
+            .enumerate()
+            .filter(|(index, entry)| *index != position && entry.expires_at > now)
+            .map(|(_, entry)| entry.clone())
+            .collect();
+        self.write_snapshot(self.next_seq, &entries)?;
+        self.entries = entries;
+        Ok(RemoveResult::Removed)
+    }
+
     /// Cursor — локальний монотонний номер. Повторне читання без ACK є безпечним;
     /// лише одержувач із ключем епохи може перевірити й застосувати пакет.
     pub fn fetch(&self, scope: [u8; ID_LEN], cursor: u64, limit: usize, now: i64) -> Page {
@@ -381,6 +463,39 @@ mod tests {
         ));
         assert!(mailbox.fetch(scope, 0, 1, 2).envelopes[0] == bytes);
         assert_eq!(mailbox.put(&another, 200, 100).unwrap(), PutResult::Stored);
+    }
+
+    #[test]
+    fn remove_needs_the_same_digest_and_survives_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("queue");
+        let key = EpochKey::generate();
+        let scope = [5; ID_LEN];
+        let bytes = sealed(&key, scope, b'C');
+        let envelope = Envelope::from_bytes(&bytes).unwrap();
+        let id = envelope.header.envelope_id;
+        let mut mailbox = OfflineMailbox::open(&path, 4096).unwrap();
+        mailbox.put(&bytes, 100, 1).unwrap();
+        assert!(matches!(
+            mailbox.remove(scope, id, &[0; KEY_LEN], 2),
+            Err(MailboxError::ConflictingEnvelope)
+        ));
+        assert_eq!(
+            mailbox.fetch(scope, 0, 10, 2).envelopes,
+            vec![bytes.clone()]
+        );
+        let digest = sha256(&[&bytes]);
+        assert_eq!(
+            mailbox.remove(scope, id, &digest, 2).unwrap(),
+            RemoveResult::Removed
+        );
+        assert_eq!(
+            mailbox.remove(scope, id, &digest, 2).unwrap(),
+            RemoveResult::NotFound
+        );
+        drop(mailbox);
+        let mailbox = OfflineMailbox::open(&path, 4096).unwrap();
+        assert!(mailbox.fetch(scope, 0, 10, 2).envelopes.is_empty());
     }
 
     #[test]

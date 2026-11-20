@@ -7,6 +7,34 @@ import { invoke } from '@tauri-apps/api/core';
 export const LIBRARY_BACKUP_NOTE = 'Копія містить і бібліотеку «Робочого середовища» — зашифровану, як і в базі. Після відновлення з копії бібліотеку відкриває пароль профілю, чинний на час створення копії, а не змінений пізніше.';
 export const LIBRARY_RESTORE_NOTE = 'Відновлення повертає й бібліотеку «Робочого середовища» до стану на час копії: документи, додані пізніше, зникнуть. Копія, створена до видалення профілю разом з бібліотекою, і далі містить її зашифровані документи.';
 
+/**
+ * Дані профілю (EasyFLY, easyPay, «Сонце і Місяць», «Погода», підрозділи РВ) лежать не в базі, а в
+ * зашифрованій теці профілю, тож резервна копія бази їх не містить: для них є окремий файл `.ewpdb`.
+ */
+export const PROFILE_DATA_BACKUP_NOTE = 'Дані профілю (EasyFLY, easyPay, «Сонце і Місяць», «Погода», підрозділи РВ) зберігаються окремо від бази, зашифровані паролем профілю. Резервна копія бази їх не містить: збережіть їх окремим файлом .ewpdb. Файл захищений паролем профілю на момент копії — без нього відновити дані неможливо.';
+
+export function createProfileDataBackup(invokeCommand = invoke) {
+  return invokeCommand('profile_data_backup_create');
+}
+
+export function restoreProfileDataBackup(password, invokeCommand = invoke) {
+  return invokeCommand('profile_data_backup_restore', { password });
+}
+
+export function profileDataBackupMessage(result) {
+  if (!result) return 'Створення копії даних профілю скасовано.';
+  const count = Number(result.records) || 0;
+  return `Копію даних профілю збережено (записів: ${count}).`;
+}
+
+export function profileDataRestoreMessage(report) {
+  if (!report) return 'Відновлення даних профілю скасовано.';
+  const parts = [`відновлено: ${report.restored}`];
+  if (report.keptNewer) parts.push(`лишено новіші в профілі: ${report.keptNewer}`);
+  if (report.skipped) parts.push(`пропущено (пошкоджені або понад ліміт): ${report.skipped}`);
+  return `Дані профілю з копії (записів у копії: ${report.total}) — ${parts.join('; ')}. Відкрийте застосунки знову, щоб побачити зміни.`;
+}
+
 export function getDatabaseStatus(invokeCommand = invoke) {
   return invokeCommand('get_database_status');
 }

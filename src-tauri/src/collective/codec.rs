@@ -131,6 +131,11 @@ impl<'a> Reader<'a> {
         rest
     }
 
+    /// Чи прочитано все (для необов'язкового останнього поля).
+    pub fn at_end(&self) -> bool {
+        self.pos == self.bytes.len()
+    }
+
     /// Після повного розбору зайвих байтів бути не повинно.
     pub fn finish(self) -> Result<(), Reason> {
         if self.pos == self.bytes.len() {

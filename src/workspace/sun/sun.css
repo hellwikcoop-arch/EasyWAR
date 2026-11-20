@@ -1,0 +1,46 @@
+/* «Сонце і Місяць» у «Робочому середовищі» → «Обстановка». Токени — з workspace.css (темний вигляд),
+   розкладка поряд із «Погодою» (weather.css). Акцент — роду військ з оболонки. */
+.sn-root{--sn-tile:var(--raised);max-width:1180px;margin:0 auto;padding:16px;display:grid;gap:14px;color:var(--text);font-family:var(--sans)}
+.sn-head{display:flex;flex-wrap:wrap;align-items:flex-end;gap:8px 16px}
+.sn-titles{flex:1 1 280px;display:grid;gap:2px}
+.sn-kicker{margin:0;font:600 11px/1.4 var(--mono);letter-spacing:.1em;color:var(--accent);text-transform:uppercase}
+.sn-head h1{margin:0;font:600 34px/1.15 var(--sans)}
+.sn-lead{margin:0;color:var(--muted);font-size:13px}
+.sn-mode{margin:0 0 4px;font:400 11px/1.4 var(--mono);letter-spacing:.08em;color:var(--weak);text-transform:uppercase}
+.sn-controls{display:flex;flex-wrap:wrap;gap:14px 24px;padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+.sn-place{flex:1 1 320px;display:grid;gap:6px;align-content:start}
+.sn-date{flex:1 1 280px;display:grid;gap:6px;align-content:start}
+.sn-label{font:400 11px/1.4 var(--mono);letter-spacing:.1em;color:var(--weak);text-transform:uppercase}
+.sn-row{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px}
+.sn-select,.sn-field input,.sn-date input{font:inherit;color:var(--text);background:var(--panel);border:1px solid var(--line-2);border-radius:8px;padding:6px 10px;min-height:34px}
+.sn-select{flex:1 1 220px;max-width:420px;font-weight:500}
+.sn-select:focus,.sn-field input:focus,.sn-date input:focus{border-color:var(--accent);outline:none}
+.sn-btn{font:500 13px/1.3 var(--sans);color:var(--text);background:transparent;border:1px solid var(--line-2);border-radius:8px;padding:6px 14px;min-height:34px;cursor:pointer}
+.sn-btn:hover:not(:disabled),.sn-btn:focus-visible{border-color:var(--accent);outline:none}
+.sn-btn:focus-visible{box-shadow:0 0 0 1px var(--accent)}
+.sn-btn:disabled{opacity:.45;cursor:not-allowed}
+.sn-step{padding:6px 12px;font-size:16px}
+.sn-quiet{border-color:var(--line);color:var(--muted)}
+.sn-primary{border-color:var(--accent);background:var(--accent);color:var(--bg);font-weight:600}
+.sn-board{display:grid;gap:12px;padding:20px 22px;border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:14px;background:var(--panel)}
+.sn-board-head{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:4px 12px}
+.sn-board-head h2{margin:0;font:600 22px/1.2 var(--sans)}
+.sn-source,.sn-hint{margin:0;font:400 12px/1.5 var(--mono);color:var(--muted)}
+.sn-section{margin:6px 0 0;font:400 11px/1.4 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.sn-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px}
+.sn-tile{display:grid;gap:6px;align-content:start;padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--sn-tile)}
+.sn-major{border-color:var(--line-2)}
+.sn-value{font:600 28px/1.1 var(--sans);font-variant-numeric:tabular-nums}
+.sn-note{font:400 11px/1.4 var(--mono);color:var(--weak)}
+.sn-warn{margin:0;color:#d8c48e;font-weight:500}
+.sn-empty{padding:24px;border:1px dashed var(--line-2);border-radius:14px;color:var(--muted);text-align:center;margin:0}
+.sn-panel{border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+.sn-panel>summary{cursor:pointer;padding:12px 16px;font-weight:600}
+.sn-panel>summary:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:12px}
+.sn-panel>:not(summary){margin:0 14px 12px}
+.sn-panel>:last-child{margin-bottom:14px}
+.sn-field{display:grid;gap:4px;flex:1 1 140px}
+.sn-status{margin:0;padding:8px 12px;border:1px solid var(--line);border-left:3px solid var(--line-2);border-radius:8px;background:var(--panel);font:400 12px/1.5 var(--sans);color:var(--muted)}
+.sn-status:empty{display:none}
+.sn-status[data-tone="bad"]{border-left-color:var(--danger);color:var(--danger)}
+@media (max-width:560px){.sn-root{padding:12px}.sn-head h1{font-size:28px}.sn-grid{grid-template-columns:1fr 1fr}.sn-value{font-size:24px}.sn-board{padding:16px}}

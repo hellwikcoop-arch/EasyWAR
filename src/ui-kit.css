@@ -552,6 +552,36 @@ html[data-ew-module] .dl div > * { min-width: 0; overflow-wrap: anywhere; }
 .ew-skin-btn { width: 32px; min-width: 32px; height: 32px; padding: 0; display: inline-grid; place-items: center; font-size: 15px; line-height: 1; border-radius: 999px; }
 .ew-skin-btn[aria-pressed="true"] { opacity: 1; color: var(--accent); border-color: var(--accent); }
 
+/* Темна тема: scrim під фото KPI / банерів, щоб цифри й підписи лишались читабельними. */
+html:not([data-theme="light"]) .kpipanel > .kh::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, rgba(4, 10, 20, .78) 0%, rgba(4, 10, 20, .42) 52%, rgba(4, 10, 20, .62) 100%),
+    linear-gradient(180deg, rgba(4, 10, 20, .18), rgba(4, 10, 20, .55));
+}
+html:not([data-theme="light"]) .kpipanel > .kh .kh-l,
+html:not([data-theme="light"]) .kpipanel > .kh .kh-r,
+html:not([data-theme="light"]) .kpipanel > .kh .kh-tag { position: relative; z-index: 2; }
+html:not([data-theme="light"]) .kpipanel > .kh .kh-jet { opacity: .55; }
+html:not([data-theme="light"]) .kc { position: relative; isolation: isolate; }
+html:not([data-theme="light"]) .kc::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(6, 12, 22, .42), rgba(6, 12, 22, .78) 78%);
+}
+html:not([data-theme="light"]) .kc > :not(.kc-art) { position: relative; z-index: 1; }
+html:not([data-theme="light"]) .kc .kc-art { z-index: 0; }
+html:not([data-theme="light"]) .kc .kc-photo { opacity: .38 !important; filter: brightness(.82) saturate(.9); }
+html:not([data-theme="light"]) .dpanel > .ph { position: relative; z-index: 1; text-shadow: 0 1px 10px rgba(0, 0, 0, .45); }
+
 /* Поля дат «дд.мм.рррр» (ui-kit.js, розділ 4): текст показує поле .ew-date-t поверх input[type=date];
    власний текст і значок календаря браузера приховані, але клік справа відкриває календар. */
 .ew-date { position: relative; vertical-align: middle; }

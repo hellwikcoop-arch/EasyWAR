@@ -18,14 +18,15 @@ export const SPLASH = Object.freeze({
   startTimeoutMs: 2500,
 });
 
-// Ті самі роди військ і командування, що на стартовому екрані. Лише підписи, без посилань:
+// Ті самі рядки, що на екрані вибору модулів: роди військ, командування і власний модуль. Лише підписи, без посилань:
 // заставка не є навігацією.
 export const SPLASH_TILES = Object.freeze([
   Object.freeze({ id: 'air', label: 'Повітряні Сили' }),
   Object.freeze({ id: 'rocket', label: 'Ракетні Війська' }),
   Object.freeze({ id: 'artillery', label: 'Артилерія' }),
-  Object.freeze({ id: 'pvk', label: 'Командування ПС' }),
-  Object.freeze({ id: 'dshv', label: 'Командування ДШВ' }),
+  Object.freeze({ id: 'army', label: 'Армійська авіація' }),
+  Object.freeze({ id: 'command', label: 'Командування військ' }),
+  Object.freeze({ id: 'custom', label: 'Власний модуль' }),
 ]);
 
 // Слоган під логотипом. Змінити текст можна тут, більше ніде.
