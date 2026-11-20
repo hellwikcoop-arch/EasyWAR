@@ -138,7 +138,7 @@ network_policy(&NetworkContext, Purpose) -> Verdict::Allowed | Verdict::Denied(r
 | `img-src 'self' data: blob: https://tile.openstreetmap.org https://server.arcgisonline.com https://clarity.maptiles.arcgis.com https://tiles.planet.com` | плитки карт через `img.src` (`air.html`/`rocket.html`), вбудовані зображення (`data:`), експорт у `blob:` | legacy HTML, `tilesStatus` |
 | `frame-src https://dimap.live` | вбудований dimap («Підключення до dimap.live», `dm-gate`) | `air.html`/`rocket.html` |
 | `media-src 'self'` | відео заставки `splash/easywar-intro.mp4` | `startup-splash.js` |
-| `connect-src 'self' ipc: http://ipc.localhost` | `fetch` власних ресурсів (`.glb`, `map-assets`, довідники, шаблони), IPC Tauri | `guide-kit.js`, `map-app.js`, `phone-export.js`, `presentation-art.js`, `dashboard-module-weather-3d.js` |
+| `connect-src 'self' ipc: http://ipc.localhost` | `fetch` власних ресурсів (`.glb`, `map-assets`, довідники, шаблони), IPC Tauri | `guide-kit.js`, `map-app.js`, `phone-export.js`, `presentation-art.js`, `dashboard-module-weather-3d.js`, `workspace/easyfly/views/route-board.js` (`map-assets/regions.json`) |
 | `style-src 'self' 'unsafe-inline'` | inline-стилі legacy і Vite | legacy HTML |
 | `object-src 'none'`, `base-uri 'self'` | — | беклог P2-1 |
 | **Не потрібно в CSP** | Open-Meteo, оновлення, модель, Signal — усе через Rust (`reqwest`/плагін), не через webview | розділ 1 |

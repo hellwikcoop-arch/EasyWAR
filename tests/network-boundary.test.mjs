@@ -28,6 +28,7 @@ const JS_NETWORK_ALLOWLIST = new Set([
   'src/phone-export.js',                // шаблони телефону (phoneAssetUrl)
   'src/presentation-art.js',            // зображення презентації з власних ресурсів
   'src/startup-splash.js',              // відео заставки (VIDEO_URL)
+  'src/workspace/easyfly/views/route-board.js', // контур регіонів map-assets/regions.json для схеми маршруту (на телефоні не викликається)
   'src/assistant/assistant-cloud.js', // явний онлайн-канал через fetchImpl, перевірка chatEndpoint
 ]);
 const NETWORK_CALL = /\b(?:fetch|fetchImpl)\s*\(|\bnew\s+XMLHttpRequest\b|\bnew\s+WebSocket\s*\(|\bnew\s+EventSource\s*\(|\bsendBeacon\s*\(/;
