@@ -199,3 +199,34 @@ test('CSP головного вікна: null — відомий ризик P2-1
     for (const host of ['tile.openstreetmap.org', 'dimap.live']) assert.ok(text.includes(host), host);
   }
 });
+
+
+test('погодні Rust-команди перевіряють зашифрований дозвіл перед запитом', async () => {
+  const lib = await read('src-tauri/src/lib.rs');
+  const weather = await read('src-tauri/src/weather_online.rs');
+  const ui = await read('src/workspace/weather/app.js');
+
+  assert.match(lib, /store\s*\.get\(&keys, "weather\.state"\)/, 'дозвіл береться із локального зашифрованого запису');
+  assert.match(lib, /network_policy::network_policy\(&context, network_policy::Purpose::WeatherOnline\)/,
+    'перевіряється наявна авторитетна Rust-політика');
+
+  for (const name of ['weather_online_fetch', 'weather_online_search']) {
+    const body = lib.match(new RegExp(`async fn ${name}\\([\\s\\S]*?\\n\\}`))?.[0];
+    assert.ok(body, `команда ${name} існує`);
+    const consent = body.indexOf('ensure_weather_network_permission(');
+    const network = body.indexOf('weather_online::fetch_json(url).await');
+    assert.ok(consent !== -1 && network > consent, `${name} перевіряє дозвіл до HTTP`);
+  }
+
+  assert.match(weather, /pub fn saved_online_enabled\(raw: Option<&str>\) -> bool/,
+    'значення дозволу розбирається в Rust');
+  assert.match(ui, /const stored = await save\(\{ \.\.\.state, online: enabled \}\)/,
+    'UI завершує збереження дозволу до першого запиту');
+  assert.match(ui, /if \(enabled\) tick\(\)/, 'перший запит лише після успішного збереження');
+  assert.match(ui, /const previousOnline = state\.online;/,
+    'непідтверджений перемикач пам’ятає попередній дозвіл');
+  assert.match(ui, /state = \{ \.\.\.state, online: previousOnline \};/,
+    'після помилки збереження UI відновлює старий дозвіл, а не повідомляє про успішне вимкнення');
+  assert.match(ui, /Не вдалося зберегти вимкнення\./,
+    'у разі відмови вимкнення користувач бачить попередження');
+});
