@@ -2054,9 +2054,11 @@ async fn collective_detail(
     webview: tauri::Webview,
     session: tauri::State<'_, ProfileSession>,
     collectives: tauri::State<'_, CollectiveStore>,
+    handles: tauri::State<'_, office_files::OfficeFileHandles>,
     collective: String,
 ) -> Result<collective_sync::CollectiveDetail, String> {
-    office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
+    office_files::ensure_collectives_editor(webview.label(), &handles)
+        .map_err(|error| error.to_string())?;
     let profile_id = active_profile_id(&session)?;
     collectives
         .detail(&profile_id, &collective, Utc::now().timestamp())
@@ -2071,6 +2073,7 @@ async fn collective_table_set(
     webview: tauri::Webview,
     session: tauri::State<'_, ProfileSession>,
     collectives: tauri::State<'_, CollectiveStore>,
+    handles: tauri::State<'_, office_files::OfficeFileHandles>,
     collective: String,
     table: Option<String>,
     title: String,
@@ -2078,7 +2081,8 @@ async fn collective_table_set(
     purpose: String,
     columns: Option<Vec<String>>,
 ) -> Result<collective_sync::TableSummary, String> {
-    office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
+    office_files::ensure_collectives_editor(webview.label(), &handles)
+        .map_err(|error| error.to_string())?;
     let profile_id = active_profile_id(&session)?;
     collectives
         .set_table(
@@ -2103,11 +2107,13 @@ async fn collective_table_read(
     profiles: tauri::State<'_, LocalProfileStore>,
     session: tauri::State<'_, ProfileSession>,
     collectives: tauri::State<'_, CollectiveStore>,
+    handles: tauri::State<'_, office_files::OfficeFileHandles>,
     password: String,
     collective: String,
     table: String,
 ) -> Result<collective_sync::TableData, String> {
-    office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
+    office_files::ensure_collectives_editor(webview.label(), &handles)
+        .map_err(|error| error.to_string())?;
     let profile_id = active_profile_id(&session)?;
     let password = collective_password(&profiles, &profile_id, password).await?;
     collectives
@@ -2122,11 +2128,13 @@ async fn collective_invite_create(
     profiles: tauri::State<'_, LocalProfileStore>,
     session: tauri::State<'_, ProfileSession>,
     collectives: tauri::State<'_, CollectiveStore>,
+    handles: tauri::State<'_, office_files::OfficeFileHandles>,
     password: String,
     collective: String,
     hours: i64,
 ) -> Result<collective_sync::InvitationText, String> {
-    office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
+    office_files::ensure_collectives_editor(webview.label(), &handles)
+        .map_err(|error| error.to_string())?;
     let profile_id = active_profile_id(&session)?;
     let password = collective_password(&profiles, &profile_id, password).await?;
     collectives
@@ -2147,11 +2155,13 @@ async fn collective_join_request(
     profiles: tauri::State<'_, LocalProfileStore>,
     session: tauri::State<'_, ProfileSession>,
     collectives: tauri::State<'_, CollectiveStore>,
+    handles: tauri::State<'_, office_files::OfficeFileHandles>,
     password: String,
     invitation: String,
     member_name: String,
 ) -> Result<collective_sync::JoinRequestText, String> {
-    office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
+    office_files::ensure_collectives_editor(webview.label(), &handles)
+        .map_err(|error| error.to_string())?;
     let profile_id = active_profile_id(&session)?;
     let password = collective_password(&profiles, &profile_id, password).await?;
     collectives
@@ -2172,11 +2182,13 @@ async fn collective_invite_admit(
     profiles: tauri::State<'_, LocalProfileStore>,
     session: tauri::State<'_, ProfileSession>,
     collectives: tauri::State<'_, CollectiveStore>,
+    handles: tauri::State<'_, office_files::OfficeFileHandles>,
     password: String,
     collective: String,
     request: String,
 ) -> Result<collective_sync::AdmissionText, String> {
-    office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
+    office_files::ensure_collectives_editor(webview.label(), &handles)
+        .map_err(|error| error.to_string())?;
     let profile_id = active_profile_id(&session)?;
     let password = collective_password(&profiles, &profile_id, password).await?;
     collectives
@@ -2198,10 +2210,12 @@ async fn collective_join_accept(
     profiles: tauri::State<'_, LocalProfileStore>,
     session: tauri::State<'_, ProfileSession>,
     collectives: tauri::State<'_, CollectiveStore>,
+    handles: tauri::State<'_, office_files::OfficeFileHandles>,
     password: String,
     keys: String,
 ) -> Result<collective_sync::JoinedCollective, String> {
-    office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
+    office_files::ensure_collectives_editor(webview.label(), &handles)
+        .map_err(|error| error.to_string())?;
     let profile_id = active_profile_id(&session)?;
     let password = collective_password(&profiles, &profile_id, password).await?;
     collectives
@@ -2218,13 +2232,15 @@ async fn collective_report_prepare(
     webview: tauri::Webview,
     session: tauri::State<'_, ProfileSession>,
     collectives: tauri::State<'_, CollectiveStore>,
+    handles: tauri::State<'_, office_files::OfficeFileHandles>,
     collective: String,
     table: String,
     transport: String,
     explicit_wan: bool,
     operation: String,
 ) -> Result<collective_sync::PrepareOutcome, String> {
-    office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
+    office_files::ensure_collectives_editor(webview.label(), &handles)
+        .map_err(|error| error.to_string())?;
     let profile_id = active_profile_id(&session)?;
     collectives
         .report_prepare(
@@ -2248,10 +2264,12 @@ async fn collective_report_confirm(
     profiles: tauri::State<'_, LocalProfileStore>,
     session: tauri::State<'_, ProfileSession>,
     collectives: tauri::State<'_, CollectiveStore>,
+    handles: tauri::State<'_, office_files::OfficeFileHandles>,
     password: String,
     intent: String,
 ) -> Result<collective_sync::ReportOutcome, String> {
-    office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
+    office_files::ensure_collectives_editor(webview.label(), &handles)
+        .map_err(|error| error.to_string())?;
     let profile_id = active_profile_id(&session)?;
     let password = collective_password(&profiles, &profile_id, password).await?;
     collectives
@@ -2269,10 +2287,12 @@ async fn collective_sync_export(
     profiles: tauri::State<'_, LocalProfileStore>,
     session: tauri::State<'_, ProfileSession>,
     collectives: tauri::State<'_, CollectiveStore>,
+    handles: tauri::State<'_, office_files::OfficeFileHandles>,
     password: String,
     collective: String,
 ) -> Result<collective_sync::SyncText, String> {
-    office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
+    office_files::ensure_collectives_editor(webview.label(), &handles)
+        .map_err(|error| error.to_string())?;
     let profile_id = active_profile_id(&session)?;
     let password = collective_password(&profiles, &profile_id, password).await?;
     collectives
@@ -2288,10 +2308,12 @@ async fn collective_sync_import(
     profiles: tauri::State<'_, LocalProfileStore>,
     session: tauri::State<'_, ProfileSession>,
     collectives: tauri::State<'_, CollectiveStore>,
+    handles: tauri::State<'_, office_files::OfficeFileHandles>,
     password: String,
     text: String,
 ) -> Result<collective_sync::SyncOutcome, String> {
-    office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
+    office_files::ensure_collectives_editor(webview.label(), &handles)
+        .map_err(|error| error.to_string())?;
     let profile_id = active_profile_id(&session)?;
     let password = collective_password(&profiles, &profile_id, password).await?;
     collectives
