@@ -15,6 +15,11 @@ import {
   installAppUpdate,
   LIBRARY_BACKUP_NOTE,
   LIBRARY_RESTORE_NOTE,
+  PROFILE_DATA_BACKUP_NOTE,
+  createProfileDataBackup,
+  profileDataBackupMessage,
+  profileDataRestoreMessage,
+  restoreProfileDataBackup,
   restoreStartupMessage,
   setAppUpdateAutoCheck,
   stageLocalRestore,
@@ -25,18 +30,21 @@ function initializeBackup() {
 
   const toolbar = document.querySelector('.appbar-right');
   if (!toolbar) return;
+  const mount = window.__EW_TOOLS_MOUNT__ || toolbar;
 
   const openButton = document.createElement('button');
   openButton.type = 'button';
   openButton.className = 'btn quiet ew-backup-open';
   openButton.textContent = 'Резервна копія';
-  toolbar.prepend(openButton);
+  openButton.setAttribute('role', 'menuitem');
+  mount.append(openButton);
 
   const headerUpdate = document.createElement('button');
   headerUpdate.type = 'button';
   headerUpdate.className = 'btn quiet ew-header-update';
   headerUpdate.title = 'Оновлення та міграції EasyWAR';
   headerUpdate.textContent = 'Оновлення';
+  headerUpdate.setAttribute('role', 'menuitem');
   openButton.after(headerUpdate);
 
   const dialog = document.createElement('dialog');
@@ -80,6 +88,18 @@ function initializeBackup() {
         <button type="button" class="btn quiet" id="ew-restore-finalize" hidden>Видалити попередню базу</button>
       </div>
     </section>
+    <section class="ew-profile-data-section" aria-labelledby="ew-profile-data-title">
+      <h3 id="ew-profile-data-title">Дані профілю</h3>
+      <p class="ew-backup-warning">${PROFILE_DATA_BACKUP_NOTE}</p>
+      <label class="ew-profile-data-password">
+        <span>Пароль профілю на момент копії (потрібен лише для відновлення)</span>
+        <input type="password" id="ew-profile-data-password" autocomplete="current-password" maxlength="256">
+      </label>
+      <div class="ew-backup-actions">
+        <button type="button" class="btn" id="ew-profile-data-create">Зберегти копію даних профілю…</button>
+        <button type="button" class="btn" id="ew-profile-data-restore">Відновити дані профілю з копії…</button>
+      </div>
+    </section>
     <div class="ew-backup-actions">
       <button type="button" class="btn" id="ew-backup-cancel">Скасувати</button>
       <button type="button" class="btn" id="ew-backup-inspect">Перевірити копію</button>
@@ -119,6 +139,9 @@ function initializeBackup() {
   const location = dialog.querySelector('#ew-backup-location');
   const createButton = dialog.querySelector('#ew-backup-create');
   const inspectButton = dialog.querySelector('#ew-backup-inspect');
+  const profileDataCreateButton = dialog.querySelector('#ew-profile-data-create');
+  const profileDataRestoreButton = dialog.querySelector('#ew-profile-data-restore');
+  const profileDataPassword = dialog.querySelector('#ew-profile-data-password');
   const restoreSelectButton = dialog.querySelector('#ew-restore-select');
   const restoreCancelButton = dialog.querySelector('#ew-restore-cancel-stage');
   const restoreApplyButton = dialog.querySelector('#ew-restore-apply');
@@ -146,6 +169,8 @@ function initializeBackup() {
     createButton.disabled = value;
     inspectButton.disabled = value;
     restoreSelectButton.disabled = value;
+    profileDataCreateButton.disabled = value;
+    profileDataRestoreButton.disabled = value;
     restoreCancelButton.disabled = value;
     restoreApplyButton.disabled = value;
     restoreFinalizeButton.disabled = value;
@@ -318,6 +343,38 @@ function initializeBackup() {
     } catch (error) {
       status.textContent = `Не вдалося створити копію: ${String(error)}`;
     } finally {
+      setBusy(false);
+    }
+  });
+
+  profileDataCreateButton.addEventListener('click', async () => {
+    setBusy(true);
+    status.textContent = 'Оберіть місце для копії даних профілю…';
+    location.hidden = true;
+    try {
+      const result = await createProfileDataBackup();
+      status.textContent = profileDataBackupMessage(result);
+      if (result) {
+        location.textContent = result.path;
+        location.hidden = false;
+      }
+    } catch (error) {
+      status.textContent = `Не вдалося створити копію даних профілю: ${String(error)}`;
+    } finally {
+      setBusy(false);
+    }
+  });
+
+  profileDataRestoreButton.addEventListener('click', async () => {
+    if (!window.confirm('Відновити дані профілю з копії? Записи, яких немає в профілі, будуть додані, а ті, що в копії новіші, замінять наявні. Новіші записи профілю не змінюються.')) return;
+    setBusy(true);
+    status.textContent = 'Оберіть файл копії даних профілю…';
+    try {
+      status.textContent = profileDataRestoreMessage(await restoreProfileDataBackup(profileDataPassword.value));
+    } catch (error) {
+      status.textContent = `Не вдалося відновити дані профілю: ${String(error)}`;
+    } finally {
+      profileDataPassword.value = '';
       setBusy(false);
     }
   });

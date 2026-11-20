@@ -1,0 +1,11 @@
+/* Фон дашбордів РВ і УДШВ — плакат роду військ на всю сторінку (лише темна тема; у світлій — як було).
+   Плакат лежить на <html> і не рухається при прокручуванні, панелі й картки лишаються непрозорими, тож читаність та сама.
+   `!important` і додатковий `[data-command]` потрібні, бо rocket.html задає свої фони (`html.rocket-ref24`, марунове вікно УДШВ `:not(:has(body.udshv-open))`) теж з `!important`. */
+html:not([data-command]):not([data-theme="light"]) {
+  background: linear-gradient(180deg, rgba(10, 8, 4, .36), rgba(10, 8, 4, .64)), url('./brand-art/rv-background.webp') center / cover no-repeat fixed, var(--bg) !important;
+}
+html[data-command="dshv"][data-command]:not([data-theme="light"]) {
+  background: linear-gradient(180deg, rgba(16, 5, 10, .34), rgba(16, 5, 10, .64)), url('./brand-art/udshv-background.webp') center / cover no-repeat fixed, #1b0a10 !important;
+}
+html:not([data-command]):not([data-theme="light"]) body { background: transparent !important; }
+html[data-command="dshv"][data-command]:not([data-theme="light"]) body { background: transparent !important; }

@@ -112,11 +112,11 @@ test('each branch has its own table slot and base tables open in their module', 
   assert.equal(profileTablePath(profile, 'air'), '/synthetic/air.xlsx');
   assert.equal(profileTablePath(profile, 'rocket'), null);
   assert.equal(profileTablePath({}, 'air'), null);
-  assert.deepEqual(PROFILE_BRANCHES.map(item => item.branch), ['air', 'pvk', 'rocket', 'dshv']);
+  assert.deepEqual(PROFILE_BRANCHES.map(item => item.branch), ['air', 'army', 'pvk', 'rocket', 'dshv']);
   assert.equal(profileTablePath({ tables: { pvk: '/synthetic/pvk.xlsx', dshv: '/synthetic/dshv.xlsx' } }, 'dshv'), '/synthetic/dshv.xlsx');
   assert.deepEqual(
     Object.fromEntries(BASE_TABLES.map(table => [table.key, table.branch])),
-    { air: 'air', pvk: 'pvk', rvia: 'rocket' },
+    { air: 'air', army: 'army', pvk: 'pvk', rvia: 'rocket' },
   );
   assert.equal(BASE_TABLES.find(table => table.key === 'pvk').note, undefined);
 });
@@ -181,6 +181,20 @@ test('only password-protected profiles outside the session are locked', async ()
   assert.equal(isProfileLocked({ id, hasPassword: true }, id), false);
   assert.equal(databaseFileName('/Users/x/AVIA_BASE.xlsx'), 'AVIA_BASE.xlsx');
   assert.equal(databaseFileName('C:\\bases\\ROCKET.xlsx'), 'ROCKET.xlsx');
+});
+
+test('a table bound to the encrypted store is named by its reference, not by a path', async () => {
+  const { databaseFileName, databaseLocation, isStoreTable } = await import('../src/local-profiles-core.js');
+  const ref = 'ewstore:0123456789abcdef0123456789abcdef:EasyWAR_РВ.xlsx';
+  assert.equal(isStoreTable(ref), true);
+  assert.equal(isStoreTable('/Users/x/EasyWAR_РВ.xlsx'), false);
+  assert.equal(isStoreTable(null), false);
+  assert.equal(databaseFileName(ref), 'EasyWAR_РВ.xlsx');
+  assert.equal(databaseFileName('ewstore:0123456789abcdef0123456789abcdef:Звіт: жовтень.xlsx'), 'Звіт: жовтень.xlsx');
+  assert.equal(databaseFileName('ewstore:broken'), '');
+  assert.match(databaseLocation(ref), /^У зашифрованому сховищі профілю/);
+  assert.equal(databaseLocation('/Users/x/EasyWAR_РВ.xlsx'), '/Users/x/EasyWAR_РВ.xlsx');
+  assert.equal(databaseLocation(''), '');
 });
 
 test('profile database bytes are copied into this realm', async () => {

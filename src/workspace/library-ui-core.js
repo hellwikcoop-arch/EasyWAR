@@ -54,7 +54,7 @@ export const BRANCHES = Object.freeze([
 ]);
 
 /** Межі пароля профілю — як у profile-gate-core.js і local_profiles.rs (ядро перевіряє ще раз). */
-export const PASSWORD_MIN = 6;
+export const PASSWORD_MIN = 8;
 export const PASSWORD_MAX = 128;
 
 const SCREENS = new Set(['no_profile', 'no_password', 'none', 'locked', 'unlocked']);

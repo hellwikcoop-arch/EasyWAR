@@ -3,8 +3,8 @@
    window.RVKpiCore (src/rv-kpi.js). Підписи, форматування чисел і малювання карток лишаються на сторінці
    (docs/MODULES_ROADMAP.md, етап E2). */
 
-/** Визначення реєстру модулів (docs/MODULE_DEFINITIONS.md), які рахує цей блок. */
-export const RV_KPI_DEFINITIONS = Object.freeze([
+/** Визначення реєстру модулів (docs/MODULE_DEFINITIONS.md), які рахує цей блок. `@__PURE__`: незадіяний масив не лишається у збірці ПВК-lite. */
+export const RV_KPI_DEFINITIONS = /* @__PURE__ */ Object.freeze([
   'legacy:rv-kpi-launches',
   'legacy:rv-kpi-munitions',
   'legacy:rv-kpi-destroyed',
@@ -26,6 +26,17 @@ export function rocketOutcome(s) {
   if (/^(?:пошкоджен|частков)/.test(t)) return 'damaged';
   if (/^не\s*(?:уражен|влуч|підтверджен)/.test(t)) return 'miss';
   return null;
+}
+
+/** Вид результату запису за текстом «Результат» (як `resKind` у rocket.html): hit / part / miss / unk. */
+export function resKind(s) {
+  const t = String(s || '').trim().toLowerCase();
+  if (!t) return 'unk';
+  if (/^частков/.test(t)) return 'part';
+  if (/^не\s*(?:уражен|влуч|підтверджен)/.test(t)) return 'miss';
+  if (/^(?:уражен|знищен)/.test(t)) return 'hit';
+  if (/^(?:пошкоджен|подавлен)/.test(t)) return 'part';
+  return 'unk';
 }
 
 export function inc(map, key, by) { map.set(key, (map.get(key) || 0) + by); }

@@ -140,11 +140,38 @@ test('Base44 лише для A–C і лише з наскрізним шифр�
   assert.equal(routeFor('D', 'base44', { endToEnd: true }).code, 'class-d-cloud');
 });
 
-test('peer_wan заборонений для всіх класів; «Дельта» в v1 закрита', () => {
+test('WAN: клас не блокує синхронізацію між учасниками (SEC-005), «Дельта» закрита', () => {
   for (const cls of SENSITIVITY_CLASSES) {
-    assert.equal(routeFor(cls, 'peer_wan', { endToEnd: true }).code, 'peer-wan-forbidden', cls);
     assert.equal(routeFor(cls, 'delta', { endToEnd: true }).code, 'delta-unverified', cls);
   }
+  const allProofs = { endToEnd: true, membershipVerified: true,
+    explicitUserChoice: true, relayOpaqueVerified: true, transportSecurityApproved: true };
+  for (const cls of SENSITIVITY_CLASSES) {
+    assert.equal(routeFor(cls, 'peer_wan', allProofs).allowed, true, cls);
+  }
+  // Хмара — окреме правило: клас D у Base44 не йде.
+  assert.equal(routeFor('D', 'base44', { endToEnd: true }).code, 'class-d-cloud');
+});
+
+test('WAN: повний позитивний preflight лише за всіма незалежними підтвердженнями', () => {
+  const proof = { endToEnd: true, membershipVerified: true,
+    explicitUserChoice: true, relayOpaqueVerified: true, transportSecurityApproved: true };
+  const prerequisites = [
+    ['endToEnd', 'no-e2e'],
+    ['membershipVerified', 'wan-membership-unverified'],
+    ['explicitUserChoice', 'wan-needs-user-choice'],
+    ['relayOpaqueVerified', 'wan-relay-unverified'],
+    ['transportSecurityApproved', 'wan-not-ready'],
+  ];
+  for (const [field, code] of prerequisites) {
+    const absent = { ...proof };
+    delete absent[field];
+    assert.equal(routeFor('C', 'peer_wan', absent).code, code, field);
+    assert.equal(routeFor('C', 'peer_wan', { ...proof, [field]: 'true' }).code, code, field);
+  }
+  assert.equal(routeFor('C', 'peer_wan').code, 'no-e2e');
+  assert.equal(routeFor('C', 'peer_wan', [true]).code, 'no-e2e');
+  assert.equal(routeFor('C', 'peer_wan', proof).code, 'allowed');
 });
 
 test('невідомий клас чи транспорт — відмова, а не дозвіл', () => {
@@ -155,7 +182,7 @@ test('невідомий клас чи транспорт — відмова, а
   const all = [routeFor('E', 'lan'), routeFor('A', 'ftp'), routeFor('D', 'base44', { endToEnd: true }),
     routeFor('A', 'base44'), routeFor('A', 'delta'), routeFor('A', 'peer_wan'), routeFor('A', 'lan')];
   assert.deepEqual(all.map(r => r.code),
-    ['unknown-class', 'unknown-transport', 'class-d-cloud', 'no-e2e', 'delta-unverified', 'peer-wan-forbidden', 'allowed']);
+    ['unknown-class', 'unknown-transport', 'class-d-cloud', 'no-e2e', 'delta-unverified', 'no-e2e', 'allowed']);
   for (const r of all) assert.match(r.reason, /^[^a-z]*[А-ЯІЇЄҐ«]/u, `${r.code}: пояснення українською`);
 });
 

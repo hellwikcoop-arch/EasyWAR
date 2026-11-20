@@ -194,7 +194,7 @@ test('Артилерія показує лише демонстрацію мод
   const app = await read('artillery-app.js'), wiki = await read('ref-wiki.js');
   assert.match(app, /interactive:\s*false/);
   assert.match(wiki, /interactive = true/);
-  assert.match(wiki, /const both = interactive && /);
+  assert.match(wiki, /const both = !mapped && interactive && /);
 });
 
 test('Артилерія: вкладка «Довідник» повернена й показує лише обертову ілюстрацію, а емблеми є в таблицях підрозділів', async () => {

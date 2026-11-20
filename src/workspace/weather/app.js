@@ -2,9 +2,12 @@
 // хмар, видимість, хмарність, вітер біля землі й на висотах і тиск у вибраному населеному пункті. Дані — вручну або, якщо користувач увімкнув
 // онлайн-оновлення, з Open-Meteo через Rust-команди weather_online_fetch / weather_online_search.
 // Мережу вимкнено за замовчуванням; перед кожним запитом видно, що саме піде назовні.
-// Пункти й останні спостереження зберігаються лише в цьому браузері (localStorage).
+// Пункти й останні спостереження — дані профілю: зберігаються самі, зашифровані, у прихованій теці
+// застосунку (host.profile, profile-store.js); у браузері без Tauri — у localStorage сторінки.
 import { findInvoke } from '../workspace-host.js';
+import { loadText, safeLocalStorage } from '../profile-store.js';
 import {
+  PROFILE_KEY,
   REFRESH_MINUTES,
   STORAGE_KEY,
   addPlace,
@@ -70,25 +73,10 @@ function button(text, className = '') {
   return node;
 }
 
-function readState() {
-  try {
-    return parseState(window.localStorage.getItem(STORAGE_KEY));
-  } catch {
-    return emptyState();
-  }
-}
-
-function writeState(state) {
-  try {
-    window.localStorage.setItem(STORAGE_KEY, serializeState(state));
-  } catch {
-    /* сховище недоступне: стан живе до закриття */
-  }
-}
-
 export async function mount(container, host) {
   const invoke = findInvoke(window);
-  let state = readState();
+  const stored = await loadText(host.profile, { key: PROFILE_KEY, legacyStorage: safeLocalStorage(window), legacyKey: STORAGE_KEY });
+  let state = stored.text ? parseState(stored.text) : emptyState();
   let busy = false;
   let timer = 0;
 
@@ -185,6 +173,13 @@ export async function mount(container, host) {
   container.replaceChildren(head, controls, card, status, add, manual);
 
   const current = () => state.places.find(place => place.id === state.selected) || null;
+
+  /** Записує стан у дані профілю; невдача не ламає екран, але про неї видно. */
+  function writeState(value) {
+    host.profile.write(PROFILE_KEY, serializeState(value)).catch(error => {
+      say(`Зміни не збережено в профілі: ${error?.message || error}`, 'warn');
+    });
+  }
 
   function say(text, tone = '') {
     status.textContent = text;
