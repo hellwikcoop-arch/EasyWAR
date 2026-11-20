@@ -64,6 +64,8 @@ pub enum OfficeFileError {
     ProtectedTable(String),
     #[error("файли «Офісу» відкриваються лише у вікні редактора")]
     NotEditorWindow,
+    #[error("команди захищених колективів доступні лише в застосунку «Колективи»")]
+    NotCollectivesApp,
     #[error("невідомий застосунок «Офісу»")]
     UnknownApp,
     #[error("вміст не відповідає формату «.{0}»; збережіть документ через «Зберегти як…»")]
@@ -138,6 +140,20 @@ pub fn ensure_editor_window(label: &str) -> Result<(), OfficeFileError> {
         Ok(())
     } else {
         Err(OfficeFileError::NotEditorWindow)
+    }
+}
+
+/// Authorize a collective command against both the trusted Tauri window label
+/// and the editor app ID recorded by Rust when opening that shared editor window.
+pub fn ensure_collectives_editor(
+    label: &str,
+    handles: &OfficeFileHandles,
+) -> Result<(), OfficeFileError> {
+    ensure_editor_window(label)?;
+    if handles.editor_window_app() == Some("collectives") {
+        Ok(())
+    } else {
+        Err(OfficeFileError::NotCollectivesApp)
     }
 }
 
@@ -642,6 +658,41 @@ mod tests {
                 "{label:?}"
             );
         }
+    }
+
+    #[test]
+    fn collective_commands_require_active_collectives_app() {
+        let handles = OfficeFileHandles::default();
+        assert_eq!(
+            ensure_collectives_editor("main", &handles),
+            Err(OfficeFileError::NotEditorWindow)
+        );
+        assert_eq!(
+            ensure_collectives_editor(EDITOR_WINDOW_LABEL, &handles),
+            Err(OfficeFileError::NotCollectivesApp)
+        );
+        for app in ["easygreen", "easydoc", "easyslide", "easypay", "easyfly"] {
+            handles.set_editor_window_app(Some(app));
+            assert_eq!(
+                ensure_collectives_editor(EDITOR_WINDOW_LABEL, &handles),
+                Err(OfficeFileError::NotCollectivesApp),
+                "{app}"
+            );
+        }
+        handles.set_editor_window_app(Some("collectives"));
+        assert_eq!(
+            ensure_collectives_editor(EDITOR_WINDOW_LABEL, &handles),
+            Ok(())
+        );
+        assert_eq!(
+            ensure_collectives_editor("main", &handles),
+            Err(OfficeFileError::NotEditorWindow)
+        );
+        handles.set_editor_window_app(None);
+        assert_eq!(
+            ensure_collectives_editor(EDITOR_WINDOW_LABEL, &handles),
+            Err(OfficeFileError::NotCollectivesApp)
+        );
     }
 
     #[test]

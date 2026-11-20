@@ -117,7 +117,10 @@ mod tests {
 
     fn package_text(table: BaseTable) -> (Vec<String>, String) {
         let mut archive = zip::ZipArchive::new(Cursor::new(table.bytes())).unwrap();
-        let names = archive.file_names().map(str::to_owned).collect::<Vec<_>>();
+        let names = archive
+            .file_names()
+            .map(|name| name.unwrap().into_owned())
+            .collect::<Vec<_>>();
         let mut all = String::new();
         for name in &names {
             archive

@@ -65,7 +65,27 @@ test('pluralDays', () => {
 
 // ───────────── Медицина ─────────────
 
-test('ВЛК↔ПМО: чергування з кроком 6 місяців', () => {
+test('ВЛК раз на 12 місяців, ПМО раз на 6 місяців', () => {
+  assert.equal(core.VLK_MONTHS, 12);
+  assert.equal(core.PMO_MONTHS, 6);
+  // після ВЛК: ПМО через 6 міс, ВЛК через 12
+  assert.deepEqual(core.medicalNext('2026-01-10', null), { kind: 'ПМО', dueDate: '2026-07-10', vlkDue: '2027-01-10', pmoDue: '2026-07-10' });
+  // ВЛК і вчасний ПМО: наступною ВЛК рівно через рік після попередньої
+  assert.deepEqual(core.medicalNext('2026-01-10', '2026-07-10'), { kind: 'ВЛК', dueDate: '2027-01-10', vlkDue: '2027-01-10', pmoDue: '2027-01-10' });
+  // ПМО із запізненням не зсуває річний строк ВЛК
+  const late = core.medicalNext('2026-01-10', '2026-09-01');
+  assert.deepEqual([late.kind, late.dueDate, late.pmoDue], ['ВЛК', '2027-01-10', '2027-03-01']);
+  // ПМО пройдено раніше строку: наступний ПМО настає до ВЛК
+  const early = core.medicalNext('2026-01-10', '2026-05-10');
+  assert.deepEqual([early.kind, early.dueDate, early.vlkDue], ['ПМО', '2026-11-10', '2027-01-10']);
+  // лише ПМО: ВЛК очікується через 6 міс після нього
+  assert.deepEqual(core.medicalNext(null, '2026-06-14'), { kind: 'ВЛК', dueDate: '2026-12-14', vlkDue: '2026-12-14', pmoDue: '2026-12-14' });
+  assert.equal(core.medicalNext(null, null), null);
+  const state = core.medicalState({ medical: [{ kind: 'ВЛК', date: '2026-01-10' }, { kind: 'ПМО', date: '2026-09-01' }] }, TODAY);
+  assert.deepEqual([state.nextKind, state.dueDate, state.vlkDue, state.pmoDue, state.lastKind], ['ВЛК', '2027-01-10', '2027-01-10', '2027-03-01', 'ПМО']);
+});
+
+test('ВЛК/ПМО: найближчий строк після останньої події', () => {
   const afterVlk = core.medicalState({ medical: [{ kind: 'ВЛК', date: '2026-06-14' }] }, TODAY);
   assert.equal(afterVlk.nextKind, 'ПМО');
   assert.equal(afterVlk.dueDate, '2026-12-14');
@@ -103,28 +123,28 @@ function art205(dates, kind = 'helicopter') {
   return { aircraftKind: kind, article205 };
 }
 
-test('Стаття 205: «дійсно» лише коли здані всі чотири; «скоро» за найранішим; один прострочений блокує', () => {
+test('Стаття 205: одна дата; у старих напрямах береться найраніша, пропуск напряму не прострочує', () => {
+  const single = core.article205State({ article205: { date: '2026-09-01' } }, TODAY);
+  assert.equal(single.status, 'valid');
+  assert.equal(single.dueDate, '2027-03-01');
+  assert.equal(single.legacy, false);
+
   const valid = core.article205State(art205(['2026-09-01', '2026-09-02', '2026-09-03', '2026-09-04']), TODAY);
   assert.equal(valid.status, 'valid');
   assert.equal(valid.dueDate, '2027-03-01');
 
   const soon = core.article205State(art205(['2026-09-01', '2026-05-10', '2026-09-03', '2026-09-04']), TODAY);
-  assert.equal(soon.status, 'soon'); // РЕО: до 10.11.2026 = 21 доба
-  assert.equal(soon.earliest.label, 'РЕО');
+  assert.equal(soon.status, 'soon');
   assert.equal(soon.daysLeft, 21);
 
   const oneOverdue = core.article205State(art205(['2026-09-01', '2026-09-02', '2026-03-01', '2026-09-04']), TODAY);
-  assert.equal(oneOverdue.status, 'overdue'); // ВД: до 01.09.2026
+  assert.equal(oneOverdue.status, 'overdue');
   assert.equal(oneOverdue.blocks, true);
-  assert.equal(oneOverdue.directions.find(d => d.id === 'vd_sd').status, 'overdue');
-  assert.equal(oneOverdue.directions.find(d => d.id === 'ao').status, 'valid');
-});
 
-test('Стаття 205: напрям без дати — не здано (прострочено); без жодних даних — невідомо', () => {
   const partial = core.article205State(art205(['2026-09-01', '2026-09-02', '2026-09-03']), TODAY);
-  assert.equal(partial.status, 'overdue');
-  assert.deepEqual(partial.missing, ['АОз']);
-  assert.equal(partial.dueDate, null);
+  assert.equal(partial.status, 'valid');
+  assert.deepEqual(partial.missing, []);
+  assert.equal(partial.dueDate, '2027-03-01');
   assert.equal(core.article205State({ article205: {} }, TODAY), null);
   assert.equal(core.article205State({}, TODAY), null);
 });
@@ -171,7 +191,7 @@ test('КБПВ п. 1.1.10: терміни перевірок за класом �
   assert.equal(ke3.instr_landing, 6);
   assert.equal(ke3.instr_backup, 6);
   assert.equal(ke3.engine_failure, 12);
-  assert.equal(ke1.instructor_seat, undefined);
+  assert.equal(ke1.instructor_seat, 12);
   assert.equal(monthsOf({ role: 'КЕ', classQual: '2', instructor: true }).instructor_seat, 12);
   // ЛШ: з власного сидіння раз на 3 міс (1–2 клас — не рідше разу на 6 міс)
   assert.equal(monthsOf({ role: 'ЛШ', classQual: '3' }).lsh_technique, 3);
@@ -716,7 +736,7 @@ test('«скоро» залежить від налаштованого поро
 test('createEmpty: схема версії 1 з усіма розділами, валідна', () => {
   const empty = store.createEmpty();
   assert.equal(empty.version, 1);
-  assert.deepEqual(Object.keys(empty), ['version', 'unit', 'persons', 'checks', 'admissions', 'flights', 'shifts', 'navFlights']);
+  assert.deepEqual(Object.keys(empty), ['version', 'unit', 'persons', 'checks', 'admissions', 'flights', 'shifts', 'navFlights', 'leaves', 'timings', 'sheets']);
   assert.deepEqual(Object.keys(empty.unit), ['name', 'airfield', 'signers', 'settings']);
   assert.equal(store.validate(empty).ok, true);
 });

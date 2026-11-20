@@ -13,6 +13,7 @@ pub mod envelope;
 pub mod epoch;
 pub mod identity;
 pub mod invite;
+pub mod join_request;
 pub mod pairing;
 pub mod relay;
 pub mod relay_auth;

@@ -28,6 +28,7 @@ const JS_NETWORK_ALLOWLIST = new Set([
   'src/phone-export.js',                // шаблони телефону (phoneAssetUrl)
   'src/presentation-art.js',            // зображення презентації з власних ресурсів
   'src/startup-splash.js',              // відео заставки (VIDEO_URL)
+  'src/workspace/easyfly/views/route-board.js', // контур регіонів map-assets/regions.json для схеми маршруту (на телефоні не викликається)
   'src/assistant/assistant-cloud.js', // явний онлайн-канал через fetchImpl, перевірка chatEndpoint
 ]);
 const NETWORK_CALL = /\b(?:fetch|fetchImpl)\s*\(|\bnew\s+XMLHttpRequest\b|\bnew\s+WebSocket\s*\(|\bnew\s+EventSource\s*\(|\bsendBeacon\s*\(/;
@@ -236,4 +237,35 @@ test('CSP головного вікна задано за ADR §5 (T-0018, JE-21
   }
   // 'unsafe-inline' для скриптів лишається до переходу legacy HTML на хеші: P2-1 закрито частково.
   console.log("network-boundary: CSP увімкнено (T-0018); 'unsafe-inline' для legacy-скриптів — залишковий ризик P2-1");
+});
+
+
+test('погодні Rust-команди перевіряють зашифрований дозвіл перед запитом', async () => {
+  const lib = await read('src-tauri/src/lib.rs');
+  const weather = await read('src-tauri/src/weather_online.rs');
+  const ui = await read('src/workspace/weather/app.js');
+
+  assert.match(lib, /store\s*\.get\(&keys, "weather\.state"\)/, 'дозвіл береться із локального зашифрованого запису');
+  assert.match(lib, /network_policy::network_policy\(&context, network_policy::Purpose::WeatherOnline\)/,
+    'перевіряється наявна авторитетна Rust-політика');
+
+  for (const name of ['weather_online_fetch', 'weather_online_search']) {
+    const body = lib.match(new RegExp(`async fn ${name}\\([\\s\\S]*?\\n\\}`))?.[0];
+    assert.ok(body, `команда ${name} існує`);
+    const consent = body.indexOf('ensure_weather_network_permission(');
+    const network = body.indexOf('weather_online::fetch_json(url).await');
+    assert.ok(consent !== -1 && network > consent, `${name} перевіряє дозвіл до HTTP`);
+  }
+
+  assert.match(weather, /pub fn saved_online_enabled\(raw: Option<&str>\) -> bool/,
+    'значення дозволу розбирається в Rust');
+  assert.match(ui, /const stored = await save\(\{ \.\.\.state, online: enabled \}\)/,
+    'UI завершує збереження дозволу до першого запиту');
+  assert.match(ui, /if \(enabled\) tick\(\)/, 'перший запит лише після успішного збереження');
+  assert.match(ui, /const previousOnline = state\.online;/,
+    'непідтверджений перемикач пам’ятає попередній дозвіл');
+  assert.match(ui, /state = \{ \.\.\.state, online: previousOnline \};/,
+    'після помилки збереження UI відновлює старий дозвіл, а не повідомляє про успішне вимкнення');
+  assert.match(ui, /Не вдалося зберегти вимкнення\./,
+    'у разі відмови вимкнення користувач бачить попередження');
 });

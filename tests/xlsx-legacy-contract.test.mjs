@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -229,6 +230,55 @@ function runRustContract(cases) {
   return JSON.parse(result.stdout);
 }
 
+async function stringCompatibilityWorkbook(core, storage, rich, space) {
+  const base = await syntheticWorkbook(core);
+  const decoder = new TextDecoder();
+  const entries = {};
+  for (const entry of core.readZip(base)) {
+    entries[entry.name] = decoder.decode(await core.entryBytes(entry));
+  }
+  const attribute = space === 'omitted' ? '' : ` xml:space="${space}"`;
+  const payloads = [
+    {
+      runs: [' \tКиїв &amp; ', ' \t\n ', '&lt;так&gt; &#xA0; &#1046; &#x1F680;&#13; \n'],
+      expected: ' \tКиїв &  \t\n <так> \u00a0 Ж 🚀\r \n',
+    },
+    { runs: [' \t', '\n ', '\t '], expected: ' \t\n \t ' },
+    {
+      runs: ['_x0041_', ' / _x005F_x0041_', ' / _xD83D__xDE80_'],
+      expected: '_x0041_ / _x005F_x0041_ / _xD83D__xDE80_',
+    },
+  ];
+  const strings = payloads.map(({ runs }) => rich
+    ? runs.map(value => `<r><t${attribute}>${value}</t></r>`).join('')
+    : `<t${attribute}>${runs.join('')}</t>`
+  );
+  const headers = Object.values(LEGACY_FIELDS);
+  const rows = payloads.map((_, index) => {
+    const number = index + 2;
+    const values = Object.keys(LEGACY_FIELDS).map(key => SYNTHETIC_ROW[key]);
+    const note = storage === 'shared'
+      ? `<c r="O${number}" t="s"><v>${index}</v></c>`
+      : `<c r="O${number}" t="inlineStr"><is>${strings[index]}</is></c>`;
+    return xmlRow(number, values).replace(
+      new RegExp(`<c r="O${number}"[^>]*>[\\s\\S]*?</c>`), note
+    );
+  }).join('');
+  entries['xl/worksheets/sheet1.xml'] = `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${xmlRow(1, headers)}${rows}</sheetData></worksheet>`;
+  if (storage === 'shared') {
+    entries['xl/sharedStrings.xml'] = `<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="3" uniqueCount="3">${strings.map(value => `<si>${value}</si>`).join('')}</sst>`;
+    entries['xl/_rels/workbook.xml.rels'] = entries['xl/_rels/workbook.xml.rels'].replace(
+      '</Relationships>',
+      '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/></Relationships>'
+    );
+  }
+  return {
+    name: `${storage}-${rich ? 'rich' : 'plain'}-space-${space}`,
+    bytes: await writeZipEntries(core, entries),
+    expected: payloads.map(item => item.expected),
+  };
+}
+
 function comparableLegacyRows(records) {
   return records.map(record => {
     const parsed = JSON.parse(JSON.stringify(record));
@@ -341,4 +391,41 @@ test('legacy CORE and Rust importer match on identical synthetic XLSX variants',
   const rustDuplicate = rustOutcomes.get(duplicate.name);
   assert.equal(rustDuplicate.batch, null);
   assert.match(rustDuplicate.error, /неоднозначні повторні заголовки/);
+});
+
+test('Calamine retains legacy shared and inline string whitespace, entities and source provenance', async (t) => {
+  const cargoCheck = spawnSync('cargo', ['--version']);
+  if (cargoCheck.error && cargoCheck.error.code === 'ENOENT') {
+    t.skip('cargo toolchain not installed in this environment');
+    return;
+  }
+  const core = await legacyCore();
+  const cases = [];
+  for (const storage of ['shared', 'inline']) {
+    for (const rich of [false, true]) {
+      for (const space of ['omitted', 'preserve', 'default']) {
+        cases.push(await stringCompatibilityWorkbook(core, storage, rich, space));
+      }
+    }
+  }
+  const outcomes = new Map(runRustContract(cases).map(outcome => [outcome.name, outcome]));
+  for (const contractCase of cases) {
+    const rust = outcomes.get(contractCase.name);
+    assert.equal(rust.error, null, `${contractCase.name}: Rust rejected the workbook`);
+    assert.equal(
+      rust.batch.workbook_sha256,
+      createHash('sha256').update(contractCase.bytes).digest('hex'),
+      `${contractCase.name}: provenance must hash the original XLSX bytes`
+    );
+    const legacy = await core.openWorkbook(contractCase.bytes);
+    assert.equal(rust.batch.rows.length, contractCase.expected.length);
+    for (const [index, expected] of contractCase.expected.entries()) {
+      const context = `${contractCase.name}, row ${index + 2}`;
+      assert.equal(legacy.records[index].note, expected, `${context}: legacy fixture semantics`);
+      const row = rust.batch.rows[index];
+      assert.equal(row.raw_values[LEGACY_FIELDS.note], expected, `${context}: raw value`);
+      assert.equal(row.source_cells.find(cell => cell.column === 15).value, expected, `${context}: source cell`);
+      assert.equal(row.parsed.note, expected, `${context}: parsed value`);
+    }
+  }
 });

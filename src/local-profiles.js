@@ -202,9 +202,10 @@ function initializeLocalProfiles() {
   if (typeof window.__TAURI_INTERNALS__?.invoke !== 'function') return;
   const toolbar = document.querySelector('.appbar-right');
   if (!toolbar) return;
+  const mount = window.__EW_TOOLS_MOUNT__ || toolbar;
 
-  const openButton = el('button', { type: 'button', class: 'btn quiet ew-profile-open' });
-  toolbar.prepend(openButton);
+  const openButton = el('button', { type: 'button', class: 'btn quiet ew-profile-open', role: 'menuitem' });
+  mount.prepend(openButton);
 
   const dialog = el('dialog', { class: 'ew-profile-dialog', 'aria-labelledby': 'ew-profile-title' });
   dialog.innerHTML = `
@@ -382,9 +383,11 @@ function initializeLocalProfiles() {
     list.textContent = '';
     if (!state.profiles.length) {
       list.append(el('p', { class: 'ew-profile-empty', text: 'Локальних профілів ще немає.' }));
+      notifyProfilesChanged();
       return;
     }
     for (const profile of state.profiles) list.append(renderRow(profile));
+    notifyProfilesChanged();
   }
 
   function renderRow(profile) {
@@ -775,6 +778,38 @@ function initializeLocalProfiles() {
     const slot = branchInfo(branch);
     return trackModuleWork(slot.command || branch, slot.ownLosses ? openOwnLosses(profile, slot, manual) : openProfileDatabase(profile, branch, manual));
   }
+
+  function notifyProfilesChanged() {
+    const detail = { activeProfileId: state.activeProfileId };
+    window.dispatchEvent(new CustomEvent('ew-profiles-changed', { detail }));
+    // Empty-state кнопка в iframe модуля слухає ту саму подію у своєму вікні.
+    for (const frame of document.querySelectorAll('iframe')) {
+      try { frame.contentWindow?.dispatchEvent(new CustomEvent('ew-profiles-changed', { detail })); } catch { /* cross-origin або ще не готове */ }
+    }
+  }
+
+  // Порожній дашборд модуля: «Остання таблиця профілю» читає прив'язку через цей API.
+  window.EWProfiles = {
+    boundPath(branch) {
+      const profile = activeProfile();
+      if (!profile || isProfileLocked(profile, sessionProfileId)) return null;
+      return profileTablePath(profile, branch);
+    },
+    boundName(branch) {
+      const path = this.boundPath(branch);
+      return path ? databaseFileName(path) : null;
+    },
+    openBound(branch) {
+      const profile = activeProfile();
+      if (!profile || isProfileLocked(profile, sessionProfileId)) {
+        return Promise.reject(new Error('Профіль не обрано або заблоковано'));
+      }
+      if (!profileTablePath(profile, branch)) {
+        return Promise.reject(new Error('Таблицю профілю для цього модуля не прив’язано'));
+      }
+      return loadProfileDatabase(profile, branch, true);
+    },
+  };
 
   // «Наші втрати» читаються лише для перегляду: байти йдуть на вкладку дашборда командування,
   // а «Оновити з файлу» перечитує прив'язаний файл тим самим шляхом.

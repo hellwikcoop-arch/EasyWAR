@@ -42,6 +42,7 @@ pub mod weather_online;
 pub mod workspace_files;
 pub mod workspace_tables;
 pub mod workspace_templates;
+mod xlsx_compat;
 pub mod xlsx_export;
 pub mod xlsx_import;
 
@@ -1107,12 +1108,16 @@ struct InstallResult {
 #[tauri::command]
 async fn install_local_model(
     app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
     store: tauri::State<'_, LocalModelStore>,
     runtime: tauri::State<'_, LocalModelRuntime>,
     installer: tauri::State<'_, InstallController>,
     session: tauri::State<'_, ProfileSession>,
     on_event: tauri::ipc::Channel<InstallEvent>,
 ) -> Result<InstallResult, String> {
+    if window.label() != network_policy::MAIN_WINDOW_LABEL {
+        return Err(network_policy::Denied::WindowNotAllowed.to_string());
+    }
     local_model_signed_in(&session)?;
     let guard = installer.begin().map_err(|error| error.to_string())?;
     let source = model_install::qwen3_4b_q4km();
@@ -1120,9 +1125,12 @@ async fn install_local_model(
     let emit: model_install::Emit = std::sync::Arc::new(move |event| {
         let _ = on_event.send(event);
     });
-    match model_install::install_model(&source, &dir, &guard, emit, model_install::native_consent())
-        .await
-    {
+    let consent = model_install::consent_under_network_policy(
+        window.label().to_owned(),
+        session.get().is_some(),
+        model_install::native_consent(),
+    );
+    match model_install::install_model(&source, &dir, &guard, emit, consent).await {
         Ok(_) => {}
         Err(
             error
@@ -1854,13 +1862,45 @@ fn office_close_file(
     Ok(())
 }
 
+/// Перед будь-яким запитом погоди Rust звіряє дозвіл із зашифрованим
+/// `weather.state` поточного профілю. JS-прапорець не є авторитетним дозволом.
+fn ensure_weather_network_permission(
+    window: &tauri::WebviewWindow,
+    session: &ProfileSession,
+    data: &ProfileDataSession,
+    store: &ProfileDataStore,
+) -> Result<(), String> {
+    let mut context = network_policy::NetworkContext::closed(window.label());
+    if let Some(profile_id) = session.get() {
+        context.profile_open = true;
+        if window.label() == network_policy::MAIN_WINDOW_LABEL {
+            let keys = data.keys(&profile_id).map_err(|error| error.to_string())?;
+            let saved = store
+                .get(&keys, "weather.state")
+                .map_err(|error| error.to_string())?;
+            context.weather_online_enabled = weather_online::saved_online_enabled(
+                saved.as_ref().map(|record| record.value.as_str()),
+            );
+        }
+    }
+    match network_policy::network_policy(&context, network_policy::Purpose::WeatherOnline) {
+        network_policy::Verdict::Allowed => Ok(()),
+        network_policy::Verdict::Denied(reason) => Err(reason.to_string()),
+    }
+}
+
 /// Застосунок «Погода»: поточні умови в пункті з Open-Meteo. Назовні йдуть лише
-/// координати, округлені до 0,01°. Викликається тільки після явного ввімкнення онлайн-оновлення.
+/// координати, округлені до 0,01°. Потрібен дозвіл поточного профілю.
 #[tauri::command]
 async fn weather_online_fetch(
+    window: tauri::WebviewWindow,
+    session: tauri::State<'_, ProfileSession>,
+    data: tauri::State<'_, ProfileDataSession>,
+    store: tauri::State<'_, ProfileDataStore>,
     latitude: f64,
     longitude: f64,
 ) -> Result<weather_online::WeatherObservation, String> {
+    ensure_weather_network_permission(&window, &session, &data, &store)?;
     let url =
         weather_online::forecast_url(latitude, longitude).map_err(|error| error.to_string())?;
     let body = weather_online::fetch_json(url).await?;
@@ -1869,7 +1909,14 @@ async fn weather_online_fetch(
 
 /// Застосунок «Погода»: пошук населеного пункту за назвою (Open-Meteo, лише Україна).
 #[tauri::command]
-async fn weather_online_search(name: String) -> Result<Vec<weather_online::WeatherPlace>, String> {
+async fn weather_online_search(
+    window: tauri::WebviewWindow,
+    session: tauri::State<'_, ProfileSession>,
+    data: tauri::State<'_, ProfileDataSession>,
+    store: tauri::State<'_, ProfileDataStore>,
+    name: String,
+) -> Result<Vec<weather_online::WeatherPlace>, String> {
+    ensure_weather_network_permission(&window, &session, &data, &store)?;
     let url = weather_online::geocode_url(&name).map_err(|error| error.to_string())?;
     let body = weather_online::fetch_json(url).await?;
     weather_online::parse_places(&body).map_err(|error| error.to_string())
@@ -1910,8 +1957,10 @@ async fn collective_status(
     webview: tauri::Webview,
     session: tauri::State<'_, ProfileSession>,
     collectives: tauri::State<'_, CollectiveStore>,
+    handles: tauri::State<'_, office_files::OfficeFileHandles>,
 ) -> Result<collective_store::CollectiveStatus, String> {
-    office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
+    office_files::ensure_collectives_editor(webview.label(), &handles)
+        .map_err(|error| error.to_string())?;
     let profile_id = active_profile_id(&session)?;
     collectives
         .status(&profile_id)
@@ -1926,9 +1975,11 @@ async fn collective_create_identity(
     profiles: tauri::State<'_, LocalProfileStore>,
     session: tauri::State<'_, ProfileSession>,
     collectives: tauri::State<'_, CollectiveStore>,
+    handles: tauri::State<'_, office_files::OfficeFileHandles>,
     password: String,
 ) -> Result<collective_store::CreatedIdentity, String> {
-    office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
+    office_files::ensure_collectives_editor(webview.label(), &handles)
+        .map_err(|error| error.to_string())?;
     let password = zeroize::Zeroizing::new(password);
     let profile_id = active_profile_id(&session)?;
     if !profiles
@@ -1952,11 +2003,13 @@ async fn collective_create(
     profiles: tauri::State<'_, LocalProfileStore>,
     session: tauri::State<'_, ProfileSession>,
     collectives: tauri::State<'_, CollectiveStore>,
+    handles: tauri::State<'_, office_files::OfficeFileHandles>,
     password: String,
     name: String,
     member_name: String,
 ) -> Result<collective_store::CollectiveSummary, String> {
-    office_files::ensure_editor_window(webview.label()).map_err(|error| error.to_string())?;
+    office_files::ensure_collectives_editor(webview.label(), &handles)
+        .map_err(|error| error.to_string())?;
     let password = zeroize::Zeroizing::new(password);
     let profile_id = active_profile_id(&session)?;
     verify_library_password(&profiles, &profile_id, &password).await?;
