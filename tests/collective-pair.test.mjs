@@ -131,3 +131,40 @@ test('помилка з повтором відновлює попередній
   assert.equal(next.requests.r1.status, 'SAS_VERIFIED');
   assert.equal(state.requests.r1.status, 'SAS_VERIFIED');
 });
+
+test('C1c security: чужий колектив не може підтвердити запрошення та вступ', () => {
+  const foreignId = 'foreign-collective-synthetic';
+  const foreign = membershipState([
+    { ...created, collective_id: foreignId },
+    { ...admission('c1', 1), collective_id: foreignId },
+  ], { verify: () => true, heldEpochs: () => [0] });
+  assert.equal(foreign.collectiveId, foreignId);
+  assert.equal(foreign.members[owner].active, true);
+  assert.equal(foreign.members.c1.active, true);
+
+  const foreignCtx = ctx(foreign);
+  const deniedActivation = step(invitation(), 'activate', {}, foreignCtx);
+  assert.equal(deniedActivation.code, 'inviter-not-authorized');
+  assert.equal(deniedActivation.state.status, 'DRAFT');
+
+  const pending = verified(requested(start(), 'r1', 'c1'), 'r1');
+  const candidateConfirmed = must(step(pending, 'candidate_confirmed', { requestId: 'r1' }));
+  const deniedApprover = step(candidateConfirmed, 'approver_confirmed',
+    { requestId: 'r1', approverId: owner }, foreignCtx);
+  assert.equal(deniedApprover.code, 'wrong-collective');
+  assert.equal(deniedApprover.state, candidateConfirmed);
+  assert.equal(deniedApprover.state.requests.r1.approverConfirmed, false);
+
+  const legitimate = must(step(candidateConfirmed, 'approver_confirmed',
+    { requestId: 'r1', approverId: owner }));
+  const deniedMembership = step(legitimate, 'membership_recorded',
+    { requestId: 'r1' }, foreignCtx);
+  assert.equal(deniedMembership.code, 'wrong-collective');
+  assert.equal(deniedMembership.state, legitimate);
+  assert.equal(deniedMembership.state.joinsUsed, 0);
+  assert.equal(deniedMembership.state.requests.r1.membershipRecorded, false);
+
+  const accepted = must(step(legitimate, 'membership_recorded',
+    { requestId: 'r1' }, ctx(membership('c1'))));
+  assert.equal(accepted.joinsUsed, 1);
+});

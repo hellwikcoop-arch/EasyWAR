@@ -81,6 +81,9 @@ export function pairTransition(state, event, ctx = {}) {
   const next = copy(state);
   if (event.type === 'activate') {
     if (state.status !== 'DRAFT') return fail(state, 'invalid-transition');
+    // The local invitation itself does not prove collective membership of its inviter.
+    if (!ctx.membership || ctx.membership.collectiveId !== state.collectiveId
+      || !isMember(ctx.membership, state.inviterId)) return fail(state, 'inviter-not-authorized');
     next.status = 'ACTIVE';
     return result(true, freeze(next));
   }
@@ -132,7 +135,11 @@ export function pairTransition(state, event, ctx = {}) {
   } else if (event.type === 'approver_confirmed') {
     if (!['SAS_VERIFIED', 'WAITING_FOR_APPROVAL'].includes(status) || request.approverConfirmed
       || !id(event.approverId)) return fail(state, 'invalid-transition');
-    if (!ctx.membership || !canApprove(ctx.membership, event.approverId, { heldEpochs: ctx.heldEpochs })) {
+    // A valid member of a different collective must never approve this invitation.
+    if (!ctx.membership || ctx.membership.collectiveId !== state.collectiveId) {
+      return fail(state, 'wrong-collective');
+    }
+    if (!canApprove(ctx.membership, event.approverId, { heldEpochs: ctx.heldEpochs })) {
       return fail(state, 'approver-missing-epochs');
     }
     changeRequest(next, event.requestId, {
@@ -145,7 +152,10 @@ export function pairTransition(state, event, ctx = {}) {
   } else if (event.type === 'membership_recorded') {
     if (status !== 'APPROVED_BOTH') return fail(state, 'invalid-transition');
     if (state.joinsUsed >= state.maxJoins) return fail(state, 'invitation-exhausted');
-    if (!ctx.membership || !isMember(ctx.membership, request.candidateId)) return fail(state, 'membership-not-recorded');
+    if (!ctx.membership || ctx.membership.collectiveId !== state.collectiveId) {
+      return fail(state, 'wrong-collective');
+    }
+    if (!isMember(ctx.membership, request.candidateId)) return fail(state, 'membership-not-recorded');
     next.joinsUsed += 1;
     changeRequest(next, event.requestId, { status: 'MEMBERSHIP_RECORDED', membershipRecorded: true });
   } else if (event.type === 'keys_distributed') {
