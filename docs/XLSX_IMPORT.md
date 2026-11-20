@@ -7,9 +7,17 @@ workbook contract. It accepts workbook bytes, reads the `Зведена` sheet a
 returns a typed import batch. It does not upload, copy, modify or export the
 source workbook.
 
-The adapter uses Calamine `0.26.1`. It was pinned while the repository's Rust
-baseline was `1.77.2`; `rust-version` is now `1.90`, so that constraint no longer
-applies and an upgrade is a separate decision (audit 2026-10-19, M8).
+The adapter uses Calamine `0.38.0` and quick-xml `0.42.0` (Issue #267).
+Before Calamine reads a workbook, `xlsx_compat` prepares a temporary ZIP in memory:
+string `<t>` nodes in shared/inline strings preserve whitespace even when
+`xml:space` is absent or `default`, matching the legacy reader. Literal Excel
+`_xHHHH_` sequences and CR/CRLF also retain their prior values, including cached
+text formula results. XML entities and Unicode are retained.
+The original workbook bytes remain the source for storage, export and SHA-256.
+Existing ZIP expansion checks run first; the compatibility copy also enforces
+part/total XML byte limits, including the added compatibility markup. A workbook
+whose normalized XML exceeds those limits is rejected rather than read unbounded.
+Unrelated ZIP members are copied without decompression.
 
 ## Required sheet contract
 
@@ -115,6 +123,13 @@ date matrix. The date cases include numeric serials, fractional serials,
 boundary/out-of-range numbers, ISO timestamps, mixed text separators and
 ambiguous text. Both parsers also reject the same synthetic missing-sheet and
 missing-header workbooks.
+
+Additional Issue #267 cases cover the 12 combinations of shared/inline strings,
+plain/rich text and absent/preserve/default `xml:space`, including whitespace-only
+runs, Unicode, XML/numeric entities and literal Excel escape sequences. They
+check `raw_values`, `source_cells`, parsed values and the original source SHA.
+Rust regressions also cover literal CR/CRLF, cached string formulas, XML byte
+limits and both ordinary and reference-workbook export/import round-trips.
 
 One intentional validation difference is pinned explicitly: legacy CORE keeps
 the first matching required header when a normalized duplicate exists, while

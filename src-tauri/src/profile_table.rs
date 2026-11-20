@@ -103,11 +103,14 @@ fn find_sheet(sheet_names: &[String], required: &str) -> Option<String> {
 fn open_workbook(
     bytes: &[u8],
     limits: ZipLimits,
-) -> Result<Xlsx<Cursor<&[u8]>>, ProfileTableError> {
+) -> Result<Xlsx<Cursor<Vec<u8>>>, ProfileTableError> {
     ensure_zip_within_limits_with(bytes, limits)
         .map_err(|error| ProfileTableError::InvalidWorkbook(error.to_string()))?;
-    Xlsx::new(Cursor::new(bytes))
-        .map_err(|error| ProfileTableError::InvalidWorkbook(error.to_string()))
+    Xlsx::new(Cursor::new(
+        crate::xlsx_compat::prepare_xlsx_for_calamine(bytes, limits)
+            .map_err(|error| ProfileTableError::InvalidWorkbook(error.to_string()))?,
+    ))
+    .map_err(|error| ProfileTableError::InvalidWorkbook(error.to_string()))
 }
 
 /// Перевіряє байти до запису. Нічого не змінює.

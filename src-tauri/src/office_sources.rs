@@ -384,8 +384,11 @@ const XLSX_MAX_COLUMN: u32 = 16_383;
 fn xlsx_rows(bytes: &[u8]) -> Result<(String, Vec<Vec<String>>), SourceError> {
     ensure_zip_within_limits_with(bytes, ZipLimits::DEFAULT)
         .map_err(|error| SourceError::InvalidTable(error.to_string()))?;
-    let mut workbook = Xlsx::new(Cursor::new(bytes))
-        .map_err(|error| SourceError::InvalidTable(error.to_string()))?;
+    let mut workbook = Xlsx::new(Cursor::new(
+        crate::xlsx_compat::prepare_xlsx_for_calamine(bytes, ZipLimits::DEFAULT)
+            .map_err(|error| SourceError::InvalidTable(error.to_string()))?,
+    ))
+    .map_err(|error| SourceError::InvalidTable(error.to_string()))?;
     let sheet = workbook
         .sheets_metadata()
         .iter()
