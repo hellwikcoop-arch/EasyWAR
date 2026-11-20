@@ -19,13 +19,15 @@ function initializeSignalSettings() {
 
   const toolbar = document.querySelector('.appbar-right');
   if (!toolbar) return;
+  const mount = window.__EW_TOOLS_MOUNT__ || toolbar;
 
   const openButton = document.createElement('button');
   openButton.type = 'button';
-  openButton.className = 'btn quiet';
+  openButton.className = 'btn quiet ew-signal-open';
   openButton.textContent = 'Signal: не підключено';
   openButton.setAttribute('aria-label', 'Signal не підключено. Відкрити локальні налаштування');
-  toolbar.prepend(openButton);
+  openButton.setAttribute('role', 'menuitem');
+  mount.append(openButton);
 
   const dialog = document.createElement('dialog');
   dialog.className = 'ew-signal-dialog';

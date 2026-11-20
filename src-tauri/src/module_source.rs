@@ -91,8 +91,11 @@ fn open_within(
 ) -> Result<Xlsx<Cursor<Vec<u8>>>, ModuleSourceError> {
     ensure_zip_within_limits_with(bytes, limits)
         .map_err(|error| ModuleSourceError::InvalidWorkbook(error.to_string()))?;
-    Xlsx::new(Cursor::new(bytes.to_vec()))
-        .map_err(|error| ModuleSourceError::InvalidWorkbook(error.to_string()))
+    Xlsx::new(Cursor::new(
+        crate::xlsx_compat::prepare_xlsx_for_calamine(bytes, limits)
+            .map_err(|error| ModuleSourceError::InvalidWorkbook(error.to_string()))?,
+    ))
+    .map_err(|error| ModuleSourceError::InvalidWorkbook(error.to_string()))
 }
 
 fn visible_sheet_names(workbook: &Xlsx<Cursor<Vec<u8>>>) -> Vec<String> {

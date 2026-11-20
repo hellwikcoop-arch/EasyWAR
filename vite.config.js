@@ -118,6 +118,10 @@ export default defineConfig({
           /\/src\/workspace\/(?:[^/]+\/app|library|files)\.js$/.test((chunk.facadeModuleId || "").replace(/\\/g, "/"))
             ? "assets/workspace-[name]-[hash].js"
             : "assets/[name]-[hash].js",
+        // Ангар копіюється як є і посилається на цей файл за сталим іменем.
+        entryFileNames: (chunk) => chunk.name === "onboarding-hangar"
+          ? "onboarding-hangar.js"
+          : "assets/[name]-[hash].js",
       },
       input: {
         index: fileURLToPath(new URL("./src/index.html", import.meta.url)),
@@ -138,6 +142,8 @@ export default defineConfig({
         // Робоче середовище: розділ «Офіс» і сторінка застосунку; лаунчер відкриває його в iframe-накладці (src/workspace-launcher.js).
         workspace: fileURLToPath(new URL("./src/workspace/index.html", import.meta.url)),
         "workspace-app": fileURLToPath(new URL("./src/workspace/app.html", import.meta.url)),
+        // Сторінка ангара не обробляється Vite, тож тур підключається окремим сталим файлом.
+        "onboarding-hangar": fileURLToPath(new URL("./src/onboarding-hangar.js", import.meta.url)),
       },
     },
   },

@@ -1,0 +1,15 @@
+Manrope
+Copyright 2018 The Manrope Project Authors
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+The license is included below in full. The font is bundled with EasyFLY for offline use.
+
+SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+Permission is granted to use, study, copy, merge, embed, modify and redistribute
+the fonts, provided that they are not sold by themselves, that this notice is
+kept, and that a modified version does not use the Reserved Font Name without
+permission. The fonts stay under this license.
+
+THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.

@@ -99,6 +99,13 @@ npm run build:standalone           # обидва
 - Файл із таблицею — знімок: зміни в таблиці на ПК туди не потрапляють, поки
   файл не збережено знову.
 
+## EasyFLY одним файлом
+
+Так само збирається EasyFLY для телефона: `npm run build:easyfly-html` →
+`dist-standalone/EasyFLY.html` (≈0,3 МБ, `script/build_easyfly_html.mjs`). Дані у ньому
+зашифровано парольною фразою; подробиці — `docs/USER_GUIDE.md`, розділ «EasyFLY на телефоні:
+один HTML-файл», і `docs/UNIFIED_FRONTEND.md`.
+
 ## Перевірка вручну
 
 ```bash
