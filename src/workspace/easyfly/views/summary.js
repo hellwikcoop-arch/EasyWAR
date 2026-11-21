@@ -1,7 +1,7 @@
 // Екран «Сьогодні»: дуга готовності, картка льотної зміни, заборони, стан за пілотами.
 // Числа — з todayHome (реальні дані). Схема маршруту лишається згорнутою внизу.
 import { formatDate, keStatusLabel, pluralDays } from '../fly-core.js';
-import { hasSubordinates, personalHome, pluralFlights, pluralPilots, todayHome } from '../glow-core.js';
+import { hasSubordinates, nearestDeadline, personalHome, pluralFlights, pluralPilots, todayHome } from '../glow-core.js';
 import { el } from '../ui.js';
 import { openPilotForm } from './card.js';
 import { routeBoard } from './route-board.js';
@@ -63,6 +63,21 @@ function arc(percent) {
   return svg;
 }
 
+/** Велике число днів до найближчого строку однієї людини. Не список підлеглих. */
+export function daysHero(nearest, { actionLabel = '', onClick = null } = {}) {
+  const days = nearest?.daysLeft;
+  const headline = days === null || days === undefined ? '—' : String(Math.abs(days));
+  const unit = days === null || days === undefined ? 'немає строку' : days < 0 ? 'днів прострочено' : pluralDays(days);
+  const pct = days === null || days === undefined ? 0 : days < 0 ? 100 : Math.max(6, Math.round((1 - Math.min(days, 365) / 365) * 100));
+  return el('section', { class: 'ef-glow-card ef-days-hero', 'data-ef': 'days-hero' },
+    arc(pct),
+    el('div', { class: 'ef-komis-num' },
+      el('strong', { text: headline }),
+      el('span', { text: unit })),
+    nearest?.label ? el('p', { class: 'ef-glow-quiet', text: nearest.label }) : null,
+    onClick ? el('button', { type: 'button', class: 'ef-btn ef-btn-primary', text: actionLabel, onClick }) : null);
+}
+
 function banRow(ctx, item) {
   const days = item.daysOverdue === null ? 'строк невідомий' : `прострочено ${item.daysOverdue} дн.`;
   return el('button', {
@@ -89,22 +104,17 @@ function renderPersonal(ctx) {
       el('button', { type: 'button', class: 'ef-btn ef-btn-primary', text: 'Почати', onClick: () => openPilotForm(ctx) }));
     return root;
   }
-  const nearest = view.nearest;
-  const headline = view.blockers.length
-    ? 'Польоти заборонені'
-    : nearest && nearest.daysLeft < 0
-      ? `Прострочено ${-nearest.daysLeft} ${pluralDays(nearest.daysLeft)}`
-      : nearest?.daysLeft === 0
-        ? 'Строк сьогодні'
-        : nearest?.daysLeft > 0
-          ? `${nearest.daysLeft} ${pluralDays(nearest.daysLeft)}`
-          : 'Без блокувань';
-  root.append(el('section', { class: 'ef-glow-card ef-komis-hero' },
-    el('div', { class: 'ef-komis-num' }, el('strong', { text: headline })),
-    el('p', { class: 'ef-glow-quiet', text: view.blockers.length
-      ? view.blockers.map(item => item.daysOverdue === null ? item.label : `${item.label} · ${item.daysOverdue} дн.`).join('; ')
-      : (nearest ? `Найближче: ${nearest.label}${nearest.dueDate ? ` до ${formatDate(nearest.dueDate)}` : ''}` : 'Прострочених і близьких строків немає.') }),
-    el('button', { type: 'button', class: 'ef-btn ef-btn-primary', text: 'Комісація', onClick: () => ctx.go('pilot', { id: person.id, tab: 'komis' }) })));
+  root.append(daysHero(view.nearest || nearestDeadline(person, data, today), {
+    actionLabel: 'Перевірки',
+    onClick: () => ctx.go('pilot', { id: person.id, tab: 'checks' }),
+  }));
+  if (view.blockers.length) {
+    root.append(el('section', { class: 'ef-glow-card' },
+      el('div', { class: 'ef-glow-card-head' }, el('h2', { text: 'Польоти заборонені' })),
+      view.blockers.map(item => el('div', { class: 'ef-ban-row ef-flight-row' },
+        el('span', { class: 'ef-ban-who' }, el('strong', { text: item.label })),
+        el('span', { class: 'ef-ban-days', text: item.daysOverdue === null ? '' : `${item.daysOverdue} дн.` })))));
+  }
   if (view.board?.length) {
     root.append(el('section', { class: 'ef-glow-card', 'data-ef': 'ke-board' },
       el('div', { class: 'ef-glow-card-head' }, el('h2', { text: 'Комісування' })),

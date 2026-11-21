@@ -24,8 +24,7 @@ export function render(ctx) {
   const root = el('div', { class: 'ef-view' });
   root.append(pageHeader({
     crumbs: [{ label: 'EasyFLY' }, { label: 'Налаштування' }],
-    title: 'Налаштування частини',
-    subtitle: 'Локальні параметри штурманських документів, повідомлень і обліку',
+    title: 'Налаштування',
   }));
 
   const first = signerBlock('Начальник ІАС', 'first', unit.signersFull?.first, unit.signers?.first);
@@ -50,16 +49,11 @@ export function render(ctx) {
         field('Назва частини', unitName).root,
         field('Аеродром базування', airfield).root,
         field('Часовий пояс', tz).root, el('span'),
-        field('Широта', lat).root, field('Довгота', lon).root),
-      el('p', { class: 'ef-hint ef-hint-block', text: 'Координати користувач заповнює сам; вони потрібні лише для розрахунку Сонця й Місяця. Порожні поля означають «невідомо».' })),
+        field('Широта', lat).root, field('Довгота', lon).root)),
     card('Параметри ОНБ',
-      field('Поріг освітленості Місяця, %', onb).root,
-      el('p', { text: '«Сприятлива ніч» — при освітленості не менш ніж задане значення.' }),
-      el('p', { class: 'ef-hint ef-hint-block', text: 'Розрахунок є довідковим і не підтверджує допуск.' })),
+      field('Поріг освітленості Місяця, %', onb).root),
     card('Норми льотної зміни',
-      field('Пілотаж · максимум польотів', aero).root,
-      el('p', { text: 'Попереджати при досягненні встановленого максимуму.' }),
-      el('p', { class: 'ef-hint ef-hint-block', text: 'Не є інструментом затвердження польотів.' })),
+      field('Пілотаж · максимум польотів', aero).root),
     card('Пороги строків',
       el('div', { class: 'ef-form-grid' },
         field('«Скоро» — днів до строку', soon, { hint: 'Типово 30.' }).root,
