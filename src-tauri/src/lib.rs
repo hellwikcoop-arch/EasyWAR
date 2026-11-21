@@ -10,6 +10,7 @@ pub mod dashboard_layout;
 pub mod dashboard_modules;
 mod database;
 mod desktop_shell;
+pub mod dimap;
 pub mod local_model;
 pub mod local_profiles;
 mod migration_startup;
@@ -1922,6 +1923,45 @@ async fn weather_online_search(
     weather_online::parse_places(&body).map_err(|error| error.to_string())
 }
 
+/// Дозвіл шару DIMAP лежить у зашифрованому `dimap.state` поточного профілю.
+/// Немає запису або помилка читання — шар вимкнено, запиту немає.
+fn ensure_dimap_network_permission(
+    window: &tauri::WebviewWindow,
+    session: &ProfileSession,
+    data: &ProfileDataSession,
+    store: &ProfileDataStore,
+) -> Result<(), String> {
+    let mut context = network_policy::NetworkContext::closed(window.label());
+    if let Some(profile_id) = session.get() {
+        context.profile_open = true;
+        if window.label() == network_policy::MAIN_WINDOW_LABEL {
+            if let Ok(keys) = data.keys(&profile_id) {
+                if let Ok(saved) = store.get(&keys, "dimap.state") {
+                    context.dimap_live_enabled =
+                        dimap::saved_enabled(saved.as_ref().map(|record| record.value.as_str()));
+                }
+            }
+        }
+    }
+    match network_policy::network_policy(&context, network_policy::Purpose::DimapLive) {
+        network_policy::Verdict::Allowed => Ok(()),
+        network_policy::Verdict::Denied(reason) => Err(reason.to_string()),
+    }
+}
+
+/// Публічний знімок DIMAP для карти дашборда. Назовні йде лише If-None-Match.
+#[tauri::command]
+async fn dimap_poll(
+    window: tauri::WebviewWindow,
+    session: tauri::State<'_, ProfileSession>,
+    data: tauri::State<'_, ProfileDataSession>,
+    store: tauri::State<'_, ProfileDataStore>,
+    cache: tauri::State<'_, dimap::DimapCache>,
+) -> Result<dimap::DimapPoll, String> {
+    ensure_dimap_network_permission(&window, &session, &data, &store)?;
+    Ok(cache.poll_once().await)
+}
+
 /// Головне вікно відкриває застосунок «Офісу» в окремому вікні редактора (F-01): код
 /// редактора не бачить команд EasyWAR, крім `office_*`. Відкрите вікно лише виводиться наперед.
 /// Асинхронна команда: нове вікно не створюють із синхронної (на Windows це блокує цикл подій).
@@ -1997,6 +2037,7 @@ async fn collective_create_identity(
 }
 
 /// Створює захищений колектив, де власник — учасник цього профілю.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 async fn collective_create(
     webview: tauri::Webview,
@@ -2101,6 +2142,7 @@ async fn collective_table_set(
 
 /// «Оновити таблицю»: стовпці й перевірені пакети змін таблиці колективу на цьому вузлі.
 /// Конверти відкриваються ключами епох, тому потрібен пароль профілю.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 async fn collective_table_read(
     webview: tauri::Webview,
@@ -2122,6 +2164,7 @@ async fn collective_table_read(
         .map_err(|error| error.to_string())
 }
 
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 async fn collective_invite_create(
     webview: tauri::Webview,
@@ -2149,6 +2192,7 @@ async fn collective_invite_create(
         .map_err(|error| error.to_string())
 }
 
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 async fn collective_join_request(
     webview: tauri::Webview,
@@ -2176,6 +2220,7 @@ async fn collective_join_request(
         .map_err(|error| error.to_string())
 }
 
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 async fn collective_invite_admit(
     webview: tauri::Webview,
@@ -5066,6 +5111,7 @@ pub fn run() {
             .join(profile_data::ROOT_DIR_NAME);
             app.manage(ProfileDataStore::new(profile_data_root));
             app.manage(ProfileDataSession::default());
+            app.manage(dimap::DimapCache::default());
             app.manage(LibraryStateEvents::default());
             let notify_app = app.handle().clone();
             app.state::<LibrarySession>()
@@ -5159,6 +5205,7 @@ pub fn run() {
             office_close_file,
             weather_online_fetch,
             weather_online_search,
+            dimap_poll,
             office_editor_close,
             workspace_open_editor,
             collective_status,

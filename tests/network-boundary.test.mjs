@@ -110,6 +110,7 @@ const RUST_NETWORK_ALLOWLIST = new Set([
   'signal_policy.rs',   // перевірка loopback-адреси
   'signal_session.rs',  // сеанс signal-cli
   'weather_online.rs',  // Open-Meteo
+  'dimap.rs',           // публічне опитування DIMAP
   'app_update.rs',      // tauri-plugin-updater (endpoint з tauri.conf.json)
   'pair_relay.rs',      // сервер зустрічі для вступу за кодом; клієнт лише з дозволом WAN
   'pair_session.rs',    // сеанс вступу за кодом: тільки тести на localhost (tokio::net), мережі в коді немає
@@ -157,7 +158,7 @@ test('network_policy.rs — чиста функція без мережі й б�
 test('перелік призначень Purpose збігається з розділом 1 ADR', async () => {
   const policy = await read('src-tauri/src/network_policy.rs');
   const names = [...policy.matchAll(/=> "([a-z0-9_]+)",/g)].map(match => match[1]);
-  const expected = ['weather_online', 'model_install', 'app_update', 'signal_daemon', 'collective_lan', 'collective_base44', 'collective_peer_wan'];
+  const expected = ['weather_online', 'model_install', 'app_update', 'signal_daemon', 'dimap_live', 'collective_lan', 'collective_base44', 'collective_peer_wan'];
   assert.deepEqual(names, expected);
   const adr = await read('docs/adr/network-and-secret-boundaries.md');
   for (const name of expected) assert.match(adr, new RegExp(`\\| \`${name}\``), `ADR, розділ 1: ${name}`);
@@ -268,4 +269,23 @@ test('погодні Rust-команди перевіряють зашифров
     'після помилки збереження UI відновлює старий дозвіл, а не повідомляє про успішне вимкнення');
   assert.match(ui, /Не вдалося зберегти вимкнення\./,
     'у разі відмови вимкнення користувач бачить попередження');
+});
+
+test('dimap_poll перевіряє політику до HTTP і не відкриває webview до служби', async () => {
+  const lib = await read('src-tauri/src/lib.rs');
+  const dimap = await read('src-tauri/src/dimap.rs');
+  const body = lib.slice(lib.indexOf('async fn dimap_poll(')).split('\n#[tauri::command]')[0];
+  const consent = body.indexOf('ensure_dimap_network_permission(');
+  const network = body.indexOf('cache.poll_once()');
+  assert.ok(consent !== -1 && network > consent, 'дозвіл перевіряється до запиту');
+  assert.match(dimap, /https:\/\/api\.dimap\.live\/api\/polling/);
+  assert.match(dimap, /redirect::Policy::none/);
+  assert.match(dimap, /from_secs\(8\)/);
+  assert.match(dimap, /if-none-match/);
+  const conf = await read('src-tauri/tauri.conf.json');
+  assert.doesNotMatch(conf, /api\.dimap\.live/);
+  const ui = await read('src/public/dimap-layer.js');
+  assert.doesNotMatch(ui, /\bfetch\s*\(|\bXMLHttpRequest\b|api\.dimap\.live/);
+  const core = await read('src/public/dimap-layer-core.js');
+  assert.doesNotMatch(core, /\bfetch\s*\(|api\.dimap\.live|н\/д/);
 });

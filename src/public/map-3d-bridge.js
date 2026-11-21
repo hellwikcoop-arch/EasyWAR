@@ -41,6 +41,7 @@
       if (frame && hello) { try { frame.contentWindow.postMessage(m, location.origin === 'null' ? '*' : location.origin); } catch (e) { /* iframe закрито */ } }
       else {
         // до відповіді iframe зберігаємо лише останній набір точок і один запит «показати все»
+        if (m.type === 'dimap') queue = queue.filter(function (q) { return q.type !== 'dimap'; });
         queue = queue.filter(function (q) { return q.type !== m.type || (m.type !== 'points' && m.type !== 'fit'); });
         queue.push(m);
       }
@@ -96,6 +97,7 @@
       fit: function () { if (is3d) post({ type: 'fit' }); },
       zoom: function (k) { if (is3d) post({ type: 'zoom', k: k }); },
       select: function (id) { post({ type: 'select', id: id }); },
+      post: post,
       // викликається, коли сторінка вже побудувала решту панелі
       init: function () { if (!hint.parentNode && wrap.parentNode) wrap.after(hint); if (want) { apply(true); sync(true); } else apply(false); }
     };

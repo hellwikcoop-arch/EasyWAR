@@ -1,0 +1,132 @@
+{
+  "type": "polling_update",
+  "data": {
+    "targets": {
+      "timestamp": "2026-11-21T12:00:00Z",
+      "totalActiveTargets": 5,
+      "targets": [
+        {
+          "id": "t-shahed",
+          "type": "shahed",
+          "lat": 49.61,
+          "lng": 36.5,
+          "bearing": 270,
+          "speed": 180,
+          "lastSeen": "2026-11-21T11:58:00Z",
+          "name": "Шахед",
+          "history": [{ "skip": true }],
+          "traj": {
+            "path": [[49.55, 36.7, 400], [49.57, 36.62, 420], [49.59, 36.55, 410], [49.61, 36.5, 400]],
+            "observed": [{ "lat": 49.4, "lng": 36.9, "at": "2026-11-21T11:40:00Z", "src": "x" }]
+          }
+        },
+        {
+          "id": "t-fpv",
+          "type": "fpv",
+          "lat": "48.50",
+          "lng": 37.4,
+          "bearing": 45,
+          "speed": 90,
+          "lastSeen": 1763722500000,
+          "name": "БпЛА"
+        },
+        {
+          "id": "t-reactive",
+          "type": "reactive_shahed",
+          "lat": 47.17,
+          "lng": 35.77,
+          "bearing": 180,
+          "speed": 220,
+          "lastSeen": "2026-11-21T11:55:00Z",
+          "name": "Герань-4"
+        },
+        {
+          "id": "t-avia",
+          "type": "avia",
+          "lat": 50.1,
+          "lng": 34.2,
+          "bearing": 200,
+          "speed": 640,
+          "lastSeen": "2026-11-21T11:50:00Z",
+          "name": "Авіація"
+        },
+        {
+          "id": "t-kab",
+          "type": "kab",
+          "lat": 47.8,
+          "lng": 36.1,
+          "bearing": 150,
+          "speed": 780,
+          "lastSeen": "2026-11-21T11:48:00Z",
+          "name": "КАБ",
+          "traj": {
+            "observed": [
+              { "lat": 48.05, "lng": 36.35 },
+              { "lat": 47.95, "lng": 36.22 },
+              { "lat": 47.8, "lng": 36.1 }
+            ]
+          }
+        },
+        {
+          "id": "t-bad",
+          "type": "fpv",
+          "lat": "не число",
+          "lng": 36,
+          "name": "зіпсоване"
+        }
+      ]
+    },
+    "alerts": {
+      "updatedAt": 1763722800000,
+      "alerts": [
+        {
+          "id": "a-oblast",
+          "region": "Харківська область",
+          "alertType": "air",
+          "color": "red",
+          "startedAt": 1763720000000,
+          "updatedAt": 1763722800000,
+          "durationMs": 2800000,
+          "kind": "oblast",
+          "typeName": "Повітряна"
+        },
+        {
+          "id": "a-district",
+          "region": "Тестова область",
+          "district": "Тестовий район",
+          "alertType": "artillery",
+          "color": "yellow",
+          "startedAt": 1763721000000,
+          "updatedAt": 1763722800000,
+          "kind": "district",
+          "typeName": "Артилерія"
+        },
+        {
+          "id": "a-community",
+          "region": "Тестова область",
+          "district": "Тестова громада",
+          "alertType": "air",
+          "color": "red",
+          "startedAt": 1763721200000,
+          "updatedAt": 1763722800000,
+          "kind": "community",
+          "typeName": "Повітряна"
+        },
+        {
+          "id": "a-city",
+          "region": "Тестова область",
+          "city": "Тестове місто",
+          "alertType": "urban_fights",
+          "color": "yellow",
+          "startedAt": 1763721400000,
+          "updatedAt": 1763722800000,
+          "kind": "city",
+          "typeName": "Міські бої"
+        }
+      ],
+      "history": [
+        { "region": "Стара", "kind": "district", "alertType": "air", "color": "red", "startedAt": 1, "endedAt": 2, "durationMs": 1 }
+      ]
+    }
+  }
+}

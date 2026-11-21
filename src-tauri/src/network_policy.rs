@@ -30,6 +30,8 @@ pub enum Purpose {
         /// Чи адреса демона — loopback (перевіряє `signal_policy`).
         loopback: bool,
     },
+    /// Публічне опитування DIMAP для шару карти. Назовні не йдуть дані таблиці.
+    DimapLive,
     /// Прямий обмін колективу в LAN (C6a). До C3b — завжди відхилено.
     CollectiveLan,
     /// Транспорт Base44 колективу (C4). До C3b і G01–G05 — завжди відхилено.
@@ -40,11 +42,12 @@ pub enum Purpose {
 
 impl Purpose {
     /// Усі відомі призначення в порядку таблиці ADR (для тестів і діагностики).
-    pub const ALL: [Purpose; 7] = [
+    pub const ALL: [Purpose; 8] = [
         Purpose::WeatherOnline,
         Purpose::ModelInstall,
         Purpose::AppUpdate { manual: true },
         Purpose::SignalDaemon { loopback: true },
+        Purpose::DimapLive,
         Purpose::CollectiveLan,
         Purpose::CollectiveBase44,
         Purpose::CollectivePeerWan,
@@ -57,6 +60,7 @@ impl Purpose {
             Purpose::ModelInstall => "model_install",
             Purpose::AppUpdate { .. } => "app_update",
             Purpose::SignalDaemon { .. } => "signal_daemon",
+            Purpose::DimapLive => "dimap_live",
             Purpose::CollectiveLan => "collective_lan",
             Purpose::CollectiveBase44 => "collective_base44",
             Purpose::CollectivePeerWan => "collective_peer_wan",
@@ -72,6 +76,7 @@ impl Purpose {
             "model_install" => Some(Purpose::ModelInstall),
             "app_update" => Some(Purpose::AppUpdate { manual: false }),
             "signal_daemon" => Some(Purpose::SignalDaemon { loopback: false }),
+            "dimap_live" => Some(Purpose::DimapLive),
             "collective_lan" => Some(Purpose::CollectiveLan),
             "collective_base44" => Some(Purpose::CollectiveBase44),
             "collective_peer_wan" => Some(Purpose::CollectivePeerWan),
@@ -105,6 +110,8 @@ pub struct NetworkContext<'a> {
     pub model_install_confirmed: bool,
     /// Налаштування Signal: приймання ввімкнено й перелік відправників непорожній.
     pub signal_intake_enabled: bool,
+    /// Перемикач «Шар DIMAP»: запис профілю `dimap.state` містить `enabled: true`.
+    pub dimap_live_enabled: bool,
 }
 
 impl<'a> NetworkContext<'a> {
@@ -119,6 +126,7 @@ impl<'a> NetworkContext<'a> {
             auto_update_enabled: false,
             model_install_confirmed: false,
             signal_intake_enabled: false,
+            dimap_live_enabled: false,
         }
     }
 }
@@ -205,6 +213,8 @@ pub fn network_policy(context: &NetworkContext<'_>, purpose: Purpose) -> Verdict
             Some(Denied::IntegrationDisabled)
         }
         Purpose::SignalDaemon { loopback: true } => None,
+        Purpose::DimapLive if !context.dimap_live_enabled => Some(Denied::IntegrationDisabled),
+        Purpose::DimapLive => None,
         Purpose::CollectiveLan | Purpose::CollectiveBase44 | Purpose::CollectivePeerWan
             if !context.profile_has_password =>
         {
@@ -275,6 +285,17 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn dimap_follows_the_map_setting() {
+        let mut context = open_main();
+        assert_eq!(
+            network_policy(&context, Purpose::DimapLive),
+            Verdict::Denied(Denied::IntegrationDisabled)
+        );
+        context.dimap_live_enabled = true;
+        assert!(network_policy(&context, Purpose::DimapLive).is_allowed());
     }
 
     #[test]

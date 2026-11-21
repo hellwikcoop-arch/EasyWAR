@@ -162,3 +162,8 @@ body.embed .bar{padding-bottom:calc(20px + env(safe-area-inset-bottom,0px))}
 /* Вузька вкладка: підпис джерел переноситься на кілька рядків — панель шарів піднімається над ним, а не накладається */
 @media (max-width:640px){body.embed .bar{padding-bottom:calc(46px + env(safe-area-inset-bottom,0px))}}
 @media (max-width:420px){body.embed .bar{padding-bottom:calc(70px + env(safe-area-inset-bottom,0px))}}
+#dimap-live{position:fixed;inset:0;pointer-events:none;z-index:2}
+#dimap-live .mk{position:absolute;width:18px;height:18px;pointer-events:auto}
+#dimap-live .mk svg{display:block;width:18px;height:18px;overflow:visible}
+#dimap-live .halo{position:absolute;width:64px;height:64px;border-radius:50%;pointer-events:none}
+#dimap-live .tracks{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none}
