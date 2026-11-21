@@ -59,11 +59,13 @@ test('лончер відкриває кожен вид у власному ві
   const sources = html.match(/const MODULE_SRC = (\{[^}]+\});/);
   assert.ok(sources, 'MODULE_SRC');
   const map = vm.runInNewContext(`(${sources[1].replace(/(\w+):'/g, '"$1":\'')})`);
+  // 3D-мапа — окреме вікно лончера (./map.html), не режим командування ПС чи РВ.
   assert.deepEqual({ ...map }, { air: './air.html', rocket: './rocket.html', artillery: './artillery.html', pvk: './air.html?command=pvk', dshv: './rocket.html?command=dshv', custom: './custom.html', army: './air.html?module=army', map: './map.html' });
-  assert.equal(new Set(Object.values(map)).size, 8, 'вісім різних адрес');
+  assert.equal(new Set(Object.values(map)).size, Object.keys(map).length, 'кожен вид має власну адресу');
   for (const branch of ['air', 'rocket', 'artillery', 'pvk', 'dshv', 'custom', 'army', 'map']) assert.match(html, new RegExp(`id="frame-${branch}"`), `frame-${branch}`);
   assert.match(html, /branch-card" data-branch="air"/);
   assert.match(html, /branch-card" data-branch="rocket"/);
+  assert.match(html, /data-branch="map"/);
   assert.match(html, /command-tile" data-command="pvk"/);
   assert.match(html, /command-tile" data-command="dshv"/);
 });

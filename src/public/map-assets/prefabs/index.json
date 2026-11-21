@@ -1,0 +1,146 @@
+{
+  "highrises": [
+    {
+      "id": "highrise_01_panel9",
+      "file": "prefabs/highrise_01_panel9.glb",
+      "title": "Панельна 9-поверхівка з лоджіями та ліфтовими шахтами",
+      "vertices": 2524,
+      "triangles": 1262
+    },
+    {
+      "id": "highrise_02_monolith_tower",
+      "file": "prefabs/highrise_02_monolith_tower.glb",
+      "title": "Монолітна 18-поверхова вежа з техповерхом",
+      "vertices": 1776,
+      "triangles": 888
+    },
+    {
+      "id": "highrise_03_setback_tower",
+      "file": "prefabs/highrise_03_setback_tower.glb",
+      "title": "Ступінчаста висотка з терасами (IMG_9557)",
+      "vertices": 1904,
+      "triangles": 952
+    },
+    {
+      "id": "highrise_04_glass_office",
+      "file": "prefabs/highrise_04_glass_office.glb",
+      "title": "Скляний бізнес-центр із блоками HVAC",
+      "vertices": 1876,
+      "triangles": 938
+    },
+    {
+      "id": "highrise_05_bay_residential",
+      "file": "prefabs/highrise_05_bay_residential.glb",
+      "title": "Житлова багатоповерхівка з еркерами",
+      "vertices": 2580,
+      "triangles": 1290
+    },
+    {
+      "id": "highrise_06_courtyard_mansard",
+      "file": "prefabs/highrise_06_courtyard_mansard.glb",
+      "title": "Міський корпус із мансардним дахом",
+      "vertices": 862,
+      "triangles": 430
+    },
+    {
+      "id": "highrise_07_monumental_spire",
+      "file": "prefabs/highrise_07_monumental_spire.glb",
+      "title": "Монументальна класична висотка зі шпилем (IMG_9556)",
+      "vertices": 2084,
+      "triangles": 1038
+    },
+    {
+      "id": "highrise_08_cylindrical_tower",
+      "file": "prefabs/highrise_08_cylindrical_tower.glb",
+      "title": "Циліндрична висотна вежа з короною (IMG_9557)",
+      "vertices": 188,
+      "triangles": 82
+    },
+    {
+      "id": "highrise_09_slanted_crown",
+      "file": "prefabs/highrise_09_slanted_crown.glb",
+      "title": "Висотка зі скошеним дахом-вітрилом (IMG_9557)",
+      "vertices": 1192,
+      "triangles": 596
+    },
+    {
+      "id": "highrise_10_industrial_hall",
+      "file": "prefabs/highrise_10_industrial_hall.glb",
+      "title": "Промисловий корпус зі світловими ліхтарями",
+      "vertices": 462,
+      "triangles": 228
+    }
+  ],
+  "houses": [
+    {
+      "id": "house_01_gabled_cottage",
+      "file": "prefabs/house_01_gabled_cottage.glb",
+      "title": "Класичний будинок із двосхилим дахом і димарем",
+      "vertices": 102,
+      "triangles": 50
+    },
+    {
+      "id": "house_02_hipped_manor",
+      "file": "prefabs/house_02_hipped_manor.glb",
+      "title": "Садиба з чотирисхилим вальмовим дахом",
+      "vertices": 102,
+      "triangles": 50
+    },
+    {
+      "id": "house_03_l_shaped_villa",
+      "file": "prefabs/house_03_l_shaped_villa.glb",
+      "title": "Г-подібний котедж із перехресним дахом",
+      "vertices": 164,
+      "triangles": 80
+    },
+    {
+      "id": "house_04_two_story_dormer",
+      "file": "prefabs/house_04_two_story_dormer.glb",
+      "title": "Двоповерховий котедж із мансардним вікном",
+      "vertices": 150,
+      "triangles": 74
+    },
+    {
+      "id": "house_05_duplex_townhouse",
+      "file": "prefabs/house_05_duplex_townhouse.glb",
+      "title": "Зблокований двосімейний таунхаус",
+      "vertices": 266,
+      "triangles": 132
+    },
+    {
+      "id": "house_06_garage_cottage",
+      "file": "prefabs/house_06_garage_cottage.glb",
+      "title": "Котедж із прибудованим гаражем",
+      "vertices": 150,
+      "triangles": 74
+    },
+    {
+      "id": "house_07_mansard_homestead",
+      "file": "prefabs/house_07_mansard_homestead.glb",
+      "title": "Садиба з ламаним мансардним дахом",
+      "vertices": 134,
+      "triangles": 66
+    },
+    {
+      "id": "house_08_modern_flat",
+      "file": "prefabs/house_08_modern_flat.glb",
+      "title": "Сучасний двоярусний котедж із плоским дахом",
+      "vertices": 280,
+      "triangles": 140
+    },
+    {
+      "id": "house_09_rural_veranda",
+      "file": "prefabs/house_09_rural_veranda.glb",
+      "title": "Сільська садиба з верандою",
+      "vertices": 132,
+      "triangles": 64
+    },
+    {
+      "id": "house_10_steep_dacha",
+      "file": "prefabs/house_10_steep_dacha.glb",
+      "title": "Компактний будинок із крутим дахом",
+      "vertices": 66,
+      "triangles": 32
+    }
+  ]
+}

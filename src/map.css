@@ -152,8 +152,29 @@ body.in-launcher #credits,body.in-launcher #hud{top:calc(108px + env(safe-area-i
 @media (max-width:640px){#credits{display:none}.card{max-width:calc(100vw - 32px);padding:10px 12px}#readout{font-size:11px}.strip{flex-wrap:nowrap;justify-content:flex-start;overflow-x:auto}#pop,#pop2,#pop3,#pop-hd{bottom:calc(78px + env(safe-area-inset-bottom,0px))}}
 @media (prefers-reduced-motion:reduce){#loader,.seg button,.tog{transition:none}}
 
+#dimap-panel{position:fixed;right:16px;top:calc(16px + env(safe-area-inset-top,0px));width:min(540px,calc(100vw - 32px));height:min(68vh,560px);display:flex;flex-direction:column;border:1px solid var(--line-strong);border-radius:14px;background:var(--panel);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);box-shadow:0 16px 40px rgba(0,0,0,.35);z-index:4;overflow:hidden}
+#dimap-panel[hidden]{display:none}
+#dimap-panel header{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+#dimap-panel h2{margin:0;font:600 10px/1 var(--body);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+#dimap-panel .dm-tools{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-left:auto}
+#dimap-panel select{font:500 11px/1.2 var(--body);color:var(--fg);background:var(--panel-hi);border:1px solid var(--line);border-radius:7px;padding:4px 6px}
+#dimap-panel .go,#dimap-panel .dm-ext,#dimap-panel .dm-off{font:500 11px/1 var(--mono);color:var(--muted);background:transparent;border:1px solid var(--line);border-radius:6px;padding:4px 7px;cursor:pointer;text-decoration:none}
+#dimap-panel .go:hover,#dimap-panel .dm-ext:hover,#dimap-panel .dm-off:hover{color:var(--accent);border-color:var(--accent)}
+#dm-body{position:relative;flex:1;min-height:0;display:flex;flex-direction:column}
+#dm-body iframe{width:100%;height:100%;border:0;background:#0b101a}
+.dm-gate{flex:1;display:grid;place-items:center;padding:18px;overflow:auto}
+.dm-card{max-width:420px;display:flex;flex-direction:column;gap:10px;font:400 12px/1.5 var(--body);color:var(--fg)}
+.dm-card h3{margin:0;font:600 14px/1.2 var(--display)}
+.dm-card p{margin:0;color:var(--muted)}
+.dm-card .dm-warn{color:var(--warn);font-size:11px}
+.dm-act{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px}
+.dm-act button,.dm-act a{font:500 12px/1 var(--body);padding:8px 12px;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--fg);cursor:pointer;text-decoration:none}
+.dm-act .primary{background:var(--accent);border-color:var(--accent);color:#fff}
+body.dimap-open #credits{display:none}
+@media (max-width:640px){#dimap-panel{left:16px;right:16px;width:auto;top:auto;bottom:calc(78px + env(safe-area-inset-bottom,0px));height:min(60vh,460px)}}
+
 /* Вбудований режим (?embed=1): карта стоїть усередині вкладки «Карта» модулів ПС і РВ. Заголовок і підписи джерел бере на себе модуль. */
-body.embed .card,body.embed .sep,body.embed #t-wire,body.embed #t-rot,body.embed #t-prof,body.embed #t-reset,body.embed #t-bld,body.embed #t-c3d,body.embed #t-views,body.embed #t-hd,body.embed #t-water,body.embed #t-meas,body.embed #meas-panel,body.embed #pop2,body.embed #pop3,body.embed #pop-hd,body.embed #hud,body.embed .group:has(#sun),body.embed .group:has(#exag){display:none!important}
+body.embed .card,body.embed .sep,body.embed #t-wire,body.embed #t-rot,body.embed #t-prof,body.embed #t-reset,body.embed #t-bld,body.embed #t-c3d,body.embed #t-views,body.embed #t-hd,body.embed #t-dimap,body.embed #dimap-panel,body.embed #t-water,body.embed #t-meas,body.embed #meas-panel,body.embed #pop2,body.embed #pop3,body.embed #pop-hd,body.embed #hud,body.embed .group:has(#sun),body.embed .group:has(#exag){display:none!important}
 body.embed .bar{padding:8px 8px calc(8px + env(safe-area-inset-bottom,0px))}
 body.embed .strip{flex-wrap:nowrap;justify-content:flex-start;overflow-x:auto;gap:8px}
 body.embed #pop{bottom:calc(78px + env(safe-area-inset-bottom,0px))}

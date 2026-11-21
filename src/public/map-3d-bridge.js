@@ -96,6 +96,7 @@
       fit: function () { if (is3d) post({ type: 'fit' }); },
       zoom: function (k) { if (is3d) post({ type: 'zoom', k: k }); },
       select: function (id) { post({ type: 'select', id: id }); },
+      focusRegion: function (region) { if (is3d) post({ type: 'focusRegion', region: region || '' }); },
       // викликається, коли сторінка вже побудувала решту панелі
       init: function () { if (!hint.parentNode && wrap.parentNode) wrap.after(hint); if (want) { apply(true); sync(true); } else apply(false); }
     };
