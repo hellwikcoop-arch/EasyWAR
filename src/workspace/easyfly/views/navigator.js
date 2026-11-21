@@ -86,9 +86,7 @@ export function render(ctx) {
     root.replaceChildren();
     const tab = navSession.tab;
     const body = tab === 'calc' ? calcScreen() : docScreen(tab);
-    root.append(
-      el('p', { class: 'nv-sub' }, btn('Калькулятори', { onClick: () => ctx.go('calculators') })),
-      body, toastBox);
+    root.append(body, toastBox);
   };
   const switchTab = tab => { navSession.tab = tab; paint(); };
 
@@ -99,6 +97,7 @@ export function render(ctx) {
         type: 'button', class: 'nv-tab', role: 'tab', 'aria-selected': String(item.id === active),
         onClick: () => switchTab(item.id),
       }, item.label)),
+      el('button', { type: 'button', class: 'nv-tab', onClick: () => ctx.go('calculators') }, 'Калькулятори'),
       el('button', { type: 'button', class: 'nv-tab', onClick: () => ctx.go('timing') }, 'Хронометраж'),
       el('button', { type: 'button', class: 'nv-tab', onClick: () => ctx.go('sheet') }, 'Польотний лист'));
   }
@@ -447,8 +446,22 @@ export function render(ctx) {
       btn('Приклад', { title: 'Заповнити синтетичним прикладом (Мі-8МТВ-1, борт № 123)', onClick: () => { navSession.draft = demoDraft({ today: ctx.today, unit }); paint(); } }),
       btn('Очистити', { onClick: () => { navSession.draft = defaultDraft({ today: ctx.today, unit }); paint(); toast('Розрахунок очищено.'); } }),
     ];
+    let snap = summarize(d, unit);
+    if (!snap.totalKm) {
+      const saved = (ctx.data?.navFlights || []).at(-1);
+      if (saved?.flight) snap = summarize(flightToDraft(saved.flight), unit);
+    }
+    const metric = (label, value) => el('div', { class: 'ef-overview-cell' },
+      el('span', { text: label }),
+      el('strong', { text: value }));
+    const routeHero = el('section', { class: 'ef-glow-card ef-route-hero', 'data-ef': 'route-hero' },
+      el('div', { class: 'ef-overview' },
+        metric('км', snap.totalKm ? fmtInt(snap.totalKm) : '—'),
+        metric('час', snap.airTimeMin == null ? '—' : (fmtDuration(snap.airTimeMin) || '—')),
+        metric('паливо, кг', snap.fuelKg == null ? '—' : fmtInt(snap.fuelKg))));
     return el('div', {},
-      header({ crumb: 'Новий розрахунок', title: 'Новий розрахунок', subtitle: 'Дані польоту й попередній підсумок', actions }),
+      routeHero,
+      header({ crumb: 'Новий розрахунок', title: 'Новий розрахунок', subtitle: '', actions }),
       tabsBar('calc'),
       el('div', { class: 'nv-layout' }, el('div', { class: 'nv-col' }, savedCard, flightCard, massCard, routeCard, condCard), summaryBox));
   }
