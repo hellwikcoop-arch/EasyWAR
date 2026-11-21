@@ -22,7 +22,7 @@
   <div id="legend"><i></i><span>0 → 2061 м</span></div>
 </div>
 
-<div id="credits">висоти: Mapzen Terrain Tiles (SRTM, ~600 м/px)<br>проєкція: конформна конічна Ламберта, WGS84<br>знімки: Esri World Imagery<br>кордони: geoBoundaries · OpenStreetMap<br>лінія зіткнення: DeepStateMap, <span id="front-date">—</span></div>
+<div id="credits">висоти: Mapzen Terrain Tiles (SRTM, ~600 м/px)<br>проєкція: конформна конічна Ламберта, WGS84<br>знімки: <span id="sat-src">Esri World Imagery</span><br>кордони: geoBoundaries · OpenStreetMap<br>лінія зіткнення: DeepStateMap, <span id="front-date">—</span></div>
 
 <div class="bar"><div class="strip">
   <div class="group"><label>Вигляд</label>
@@ -39,6 +39,7 @@
   </div>
   <div class="sep"></div>
   <div class="group"><label for="sun">Сонце</label><input id="sun" type="range" min="0" max="360" step="1" value="240"><span class="val" id="sun-v">240°</span></div>
+  <div class="group"><label for="exag">Рельєф</label><input id="exag" type="range" min="1" max="10" step="0.5" value="2.5"><span class="val" id="exag-v">2,5×</span></div>
   <div class="sep"></div>
   <div class="group"><label>Забудова</label>
     <button class="tog" id="t-c3d" aria-pressed="false" aria-expanded="false" aria-controls="pop2">Міста 3D</button>
@@ -46,6 +47,10 @@
   </div>
   <div class="sep"></div>
   <div class="group">
+    <button class="tog" id="t-views" aria-pressed="false" aria-expanded="false" aria-controls="pop3">Ракурси</button>
+    <button class="tog" id="t-hd" aria-pressed="false" aria-expanded="false" aria-controls="pop-hd" title="Опційне довантаження супутникових знімків високої чіткості (Esri / Google Maps)">HD-знімки</button>
+    <button class="tog" id="t-water" aria-pressed="true">Вода</button>
+    <button class="tog" id="t-meas" aria-pressed="false" aria-expanded="false" aria-controls="meas-panel" title="Вимірювання відстані, азимута, площі й профілю висот (M)">Вимір</button>
     <button class="tog" id="t-wire" aria-pressed="false">Сітка</button>
     <button class="tog" id="t-cities" aria-pressed="true">Міста</button>
     <button class="tog" id="t-brd" aria-pressed="true">Кордони</button>
@@ -57,8 +62,72 @@
   </div>
 </div></div>
 
+<aside id="meas-panel" hidden aria-label="Інструменти вимірювання">
+  <header>
+    <h2>Вимірювання</h2>
+    <div class="ms-modes" role="group" aria-label="Режим вимірювання">
+      <button id="ms-dist" type="button" aria-pressed="true">Відстань</button>
+      <button id="ms-area" type="button" aria-pressed="false">Площа</button>
+    </div>
+    <button class="go" id="ms-close" type="button" aria-label="Закрити вимірювання">×</button>
+  </header>
+  <p class="ms-hint" id="ms-hint">Клікайте по карті, щоб поставити точки</p>
+  <dl id="ms-stats">
+    <dt>Точки</dt><dd id="ms-pts">0</dd>
+    <dt id="ms-len-lbl">Відстань</dt><dd id="ms-len">—</dd>
+    <dt id="ms-az-lbl">Азимут</dt><dd id="ms-az">—</dd>
+    <dt id="ms-area-lbl" hidden>Площа</dt><dd id="ms-area-val" hidden>—</dd>
+    <dt>Висота</dt><dd id="ms-elev">—</dd>
+  </dl>
+  <div class="ms-prof-wrap" id="ms-prof-wrap" hidden>
+    <div class="ms-prof-head"><span>Профіль висот</span><small id="ms-prof-meta">—</small></div>
+    <canvas id="meas-profile" aria-label="Профіль висот маршруту"></canvas>
+  </div>
+  <div class="ms-acts">
+    <button id="ms-undo" type="button" disabled>Назад</button>
+    <button id="ms-clear" type="button" disabled>Очистити</button>
+  </div>
+</aside>
+
+<div id="pop-hd" class="popover" hidden>
+  <header>
+    <h2>Онлайн HD-знімки при наближенні</h2>
+    <span class="pop-count" id="hd-status">Офлайн · 0 запитів</span>
+  </header>
+  <p class="hd-note">За замовчуванням карта працює повністю без інтернету. Увімкнення підвантажує чіткі тайли лише для видимої ділянки при наближенні (у режимі «Супутник»).</p>
+  <label class="hd-switch"><input id="hd-on" type="checkbox"><span>Увімкнути онлайн HD-знімки</span></label>
+  <div class="hd-field">
+    <label for="hd-src">Джерело знімків</label>
+    <select id="hd-src">
+      <option value="esri">Esri World Imagery — до z18 (без ключа)</option>
+      <option value="esri_clarity">Esri Clarity — чіткий архів до z17 (без ключа)</option>
+      <option value="google">Google Maps Satellite — до z19 (власний API-ключ)</option>
+    </select>
+  </div>
+  <div class="hd-field" id="hd-key-wrap" hidden>
+    <label for="hd-key">Google Maps API-ключ (Map Tiles API)</label>
+    <div class="hd-key-row">
+      <input id="hd-key" type="password" placeholder="Вставте Google Cloud API-ключ…" autocomplete="off" spellcheck="false">
+      <button id="hd-key-save" type="button">Зберегти</button>
+      <button id="hd-key-clear" type="button">Очистити</button>
+    </div>
+    <p class="hd-sub">Ключ зберігається лише локально на цьому пристрої й передається тільки в Google Map Tiles API. Потрібен увімкнений Map Tiles API без HTTP-referrer обмежень.</p>
+  </div>
+</div>
+
+<div id="pop3" class="popover" hidden>
+  <header><h2>Швидкі ракурси</h2></header>
+  <ul id="views-list"></ul>
+</div>
+
 <div id="pop2" class="popover" hidden>
-  <header><h2>Міста з 3D-забудовою</h2></header>
+  <header>
+    <h2>Міста України та 3D-забудова</h2>
+    <span class="pop-count" id="cities-count"></span>
+  </header>
+  <div class="pop-search">
+    <input id="city-search" type="search" placeholder="Пошук міста, селища або області…" autocomplete="off" spellcheck="false">
+  </div>
   <ul id="cities3d"></ul>
 </div>
 

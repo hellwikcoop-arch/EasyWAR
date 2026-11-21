@@ -1,6 +1,8 @@
 // 3D-карта «Рельєф України» для вкладки «Карта» модулів ПС і РВ. Працює повністю офлайн: ресурси лежать у map-assets.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { haversineKm, bearingDeg, compassDirUk, polygonAreaKm2, buildElevationProfile, searchPlaces } from './map-measure-core.js';
+import { HD_SOURCES, pickHdZoom, visibleTileSpecs } from './map-hd-tiles-core.js';
 
 // Армійська авіація відкриває карту з ?module=army: тло, панелі й сітка в її зеленому кольорі (map.css).
 if (new URLSearchParams(location.search).get('module') === 'army') document.documentElement.dataset.module = 'army';
@@ -196,8 +198,10 @@ META.scale = SCALE;
 const PLINTH = 0.32;
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const EMBED = /[?&]embed=1/.test(location.search);   // вбудована в модуль (ПС / РВ): без вступної анімації й автообертання
+const IN_LAUNCHER = !EMBED && (() => { try { return window.self !== window.top; } catch (e) { return true; } })();
 const skipIntro = reduced || EMBED;
 if (EMBED){ document.body.classList.add('embed'); const cr = document.getElementById('credits'); if (cr) cr.innerHTML = cr.innerHTML.replace(/<br\s*\/?>/g, ' · '); }
+if (IN_LAUNCHER) document.body.classList.add('in-launcher');
 const ASSET = s => /^(?:[a-z][a-z0-9+.-]*:|\.{0,2}\/)/i.test(s) ? s : './map-assets/' + s;   // усі ресурси карти лежать у map-assets: застосунок працює без мережі
 const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) || innerWidth < 700;
 const $ = id => document.getElementById(id);
@@ -257,6 +261,8 @@ const stage = $('stage');
 const renderer = new THREE.WebGLRenderer({antialias:true, powerPreference:'high-performance', logarithmicDepthBuffer:true});
 renderer.setPixelRatio(Math.min(devicePixelRatio, isMobile?1.5:2));
 renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.06;
 stage.appendChild(renderer.domElement);
 const ANISO = Math.min(8, renderer.capabilities.getMaxAnisotropy());
 
@@ -275,7 +281,10 @@ renderer.domElement.addEventListener('pointerdown', e => { if (e.button === 0) r
 addEventListener('pointerup', () => { renderer.domElement.style.cursor = 'grab'; });
 renderer.domElement.addEventListener('contextmenu', e => e.preventDefault());
 controls.autoRotate = !skipIntro; controls.autoRotateSpeed = 0.45;
-controls.addEventListener('start', () => { if (controls.autoRotate) { controls.autoRotate = false; setPressed(btnRot, false); } });
+controls.addEventListener('start', () => {
+  if (controls.autoRotate) { controls.autoRotate = false; setPressed(btnRot, false); }
+  if (flyTo) flyTo = null;
+});
 
 const HOME = {pos:new THREE.Vector3(-3.5, 13.5, 17.5), target:new THREE.Vector3(0, 0, 0.6)};
 camera.position.copy(skipIntro ? HOME.pos : new THREE.Vector3(-2, 36, 44));
@@ -302,12 +311,13 @@ const vert = /* glsl */`
   #include <logdepthbuf_pars_vertex>
   attribute vec2 aUv;
   uniform sampler2D uData; uniform float uExag; uniform float uScale; uniform float uLift; uniform float uSkirt; uniform vec4 uRect;
-  varying vec2 vUvImg; varying vec2 vUvD; varying float vH;
+  varying vec2 vUvImg; varying vec2 vUvD; varying float vH; varying vec3 vWorldPos;
   void main(){
     vUvD = aUv;
     vUvImg = vec2((aUv.x - uRect.x)/uRect.z, 1.0 - (aUv.y - uRect.y)/uRect.w);   // this tile's own imagery
     float h = max(texture2D(uData, aUv).r, 0.0); vH = h;
     vec3 p = vec3(position.x, (h + uLift)*uScale*uExag + position.y*uSkirt, position.z);   // uLift (m) keeps finer patches above coarser ones where they overlap
+    vWorldPos = (modelMatrix * vec4(p, 1.0)).xyz;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
     #include <logdepthbuf_vertex>
   }`;
@@ -321,7 +331,8 @@ const frag = /* glsl */`
   uniform vec3 uInk; uniform vec3 uPaper; uniform vec2 uGridDiv;   // режими-креслення: туш, папір і крок сітки каркаса (клітинок на всю плиту)
   uniform vec4 uHoles[48]; uniform int uHoleN; uniform int uCityN; uniform int uFineN; uniform int uHoleMode; uniform sampler2D uBorders; uniform float uBorderOn; uniform float uFrontOn;
   uniform sampler2D uMask; uniform vec2 uMaskTexel;   // precise national outline (OSM), 4096 px
-  varying vec2 vUvImg; varying vec2 vUvD; varying float vH;
+  uniform float uTime; uniform float uAtmo; uniform float uNight;
+  varying vec2 vUvImg; varying vec2 vUvD; varying float vH; varying vec3 vWorldPos;
   vec3 ramp(float h){
     float s[7]; s[0]=0.0; s[1]=150.0; s[2]=300.0; s[3]=600.0; s[4]=1000.0; s[5]=1500.0; s[6]=2061.0;
     vec3 c = uRamp[0];
@@ -345,18 +356,51 @@ const frag = /* glsl */`
     // holes ordered city, fine(z12), coarse(z11): [0,uCityN) [uCityN,uFineN) [uFineN,uHoleN). mode 0 = base (all), 1 = coarse patch (city+fine), 2 = fine patch (city), 3 = city patch (none)
     if (uHoleMode < 3){ int lim = uHoleMode == 0 ? uHoleN : uHoleMode == 1 ? uFineN : uCityN; for (int i = 0; i < 48; i++){ if (i >= lim) break; vec4 hh = uHoles[i]; if (vUvD.x > hh.x && vUvD.x < hh.z && vUvD.y > hh.y && vUvD.y < hh.w) discard; } }
     vec3 L = normalize(uSun);
+    vec3 V = normalize(cameraPosition - vWorldPos);
+    float camDist = length(cameraPosition - vWorldPos);
     vec3 col;
     vec2 g = texture2D(uData, vUvD).ba * uExag;      // dh/dx, dh/dz in the scene frame, precomputed from the DEM
     vec3 n = normalize(vec3(-g.x, 1.0, -g.y));
     float diff = max(dot(n, L), 0.0);
+    float backDiff = max(dot(n, normalize(vec3(-L.x, 0.35, -L.z))), 0.0);
     float hemi = 0.5 + 0.5*n.y;
     float slope = 1.0 - n.y;
+    vec3 sunTint = vec3(1.06, 1.01, 0.94);
+    vec3 skyTint = mix(vec3(0.76, 0.86, 1.0), vec3(0.54, 0.68, 0.92), uNight);
     if (uMode == 0) {
       vec3 base = texture2D(uSat, vUvImg).rgb;
-      col = base * (0.42*hemi + 0.78*diff) * (1.0 - 0.35*slope);
+      vec3 lit = (0.38*hemi*skyTint + 0.80*diff*sunTint + 0.08*backDiff*skyTint);
+      col = base * lit * (1.0 - 0.28*slope);
+      // water detection & animated specular shimmer for rivers, reservoirs, and bays
+      float waterBlue = smoothstep(0.008, 0.075, base.b - base.r*0.90) * smoothstep(0.36, 0.06, base.r);
+      float waterDark = smoothstep(0.22, 0.09, max(base.r, base.g)) * smoothstep(0.0, 0.04, base.b - base.r*0.85);
+      float waterFlat = (1.0 - smoothstep(0.004, 0.022, slope)) * (1.0 - smoothstep(190.0, 320.0, vH));
+      float waterMask = clamp(max(waterBlue, waterDark*0.8), 0.0, 1.0) * waterFlat;
+      if (waterMask > 0.01) {
+        float w1 = sin(vWorldPos.x*52.0 + vWorldPos.z*18.0 + uTime*1.5)*cos(vWorldPos.z*48.0 - uTime*1.2);
+        float w2 = sin(vWorldPos.x*110.0 - vWorldPos.z*76.0 - uTime*2.1)*0.5;
+        vec3 wn = normalize(vec3((w1 + w2)*0.024, 1.0, (w2 - w1)*0.022));
+        vec3 H = normalize(L + V);
+        float spec = pow(max(dot(wn, H), 0.0), 56.0);
+        float fres = pow(1.0 - max(dot(wn, V), 0.0), 3.0);
+        vec3 deepWater = mix(vec3(0.05, 0.22, 0.36), vec3(0.03, 0.13, 0.25), uNight);
+        vec3 skyRef = mix(vec3(0.55, 0.76, 0.96), vec3(0.18, 0.36, 0.62), uNight);
+        vec3 wCol = mix(mix(base*0.72, deepWater, 0.42), skyRef, fres*0.48) + sunTint*spec*0.85;
+        col = mix(col, wCol, waterMask*0.9);
+      }
+      // subtle atmospheric aerial perspective when viewing at low angles / long distances
+      float viewGrazing = 1.0 - clamp(V.y, 0.0, 1.0);
+      float haze = clamp((camDist - 4.0) / 34.0, 0.0, 1.0) * viewGrazing * uAtmo * 0.28;
+      vec3 hazeCol = mix(uBg, skyTint * 0.85, 0.35);
+      col = mix(col, hazeCol, haze);
     } else if (uMode == 1) {
       vec3 base = ramp(vH);
-      col = base * (0.38*hemi + 0.80*diff) * (1.0 - 0.3*slope);
+      vec3 lit = (0.36*hemi*skyTint + 0.82*diff*sunTint + 0.08*backDiff*skyTint);
+      col = base * lit * (1.0 - 0.26*slope);
+      float topo = contour(vH, 200.0);
+      col = mix(col, col * 0.78, topo * 0.22);
+      float haze = clamp((camDist - 6.0) / 38.0, 0.0, 1.0) * (1.0 - clamp(V.y, 0.0, 1.0)) * uAtmo * 0.22;
+      col = mix(col, uBg, haze);
     } else if (uMode == 2) {
       // Креслення: горизонталі тушшю на папері, легка відмивка схилів, як на топографічному аркуші
       float minor = contour(vH, 50.0), major = contour(vH, 250.0);
@@ -417,7 +461,8 @@ const uniforms = {
   uInk:{value:new THREE.Color('#2b2b2b')}, uPaper:{value:new THREE.Color('#f3efe4')}, uGridDiv:{value:new THREE.Vector2((META.lon1-META.lon0)/0.25, (META.lat1-META.lat0)/0.25)},   // сітка каркаса: клітинка 0,25°
   uRamp:{value:rampHex.map(h=>new THREE.Color(h))},
   uHoles:{value:Array.from({length:48}, () => new THREE.Vector4(0,0,0,0))}, uHoleN:{value:0}, uCityN:{value:0}, uFineN:{value:0}, uHoleMode:{value:0}, uLift:{value:0}, uBExag:{value:1},   // real-world scale: no vertical exaggeration for terrain or buildings
-  uBorders:{value:blackTex}, uBorderOn:{value:0}, uFrontOn:{value:1}, uMask:{value:null}, uMaskTexel:{value:new THREE.Vector2(1/4096, 1/2796)}
+  uBorders:{value:blackTex}, uBorderOn:{value:0}, uFrontOn:{value:1}, uMask:{value:null}, uMaskTexel:{value:new THREE.Vector2(1/4096, 1/2796)},
+  uTime:{value:0}, uAtmo:{value:1}, uNight:{value:1}
 };
 const mat = new THREE.ShaderMaterial({uniforms, vertexShader:vert, fragmentShader:frag, side:THREE.DoubleSide});
 const wireMat = new THREE.ShaderMaterial({
@@ -525,6 +570,144 @@ function updateChunks(){
   }
 }
 
+// ---------- procedural atmospheric sky dome ----------
+const skyMat = new THREE.ShaderMaterial({
+  uniforms:{
+    uBg:uniforms.uBg, uSun:uniforms.uSun, uNight:uniforms.uNight, uAtmo:uniforms.uAtmo,
+    uHorizon:{value:new THREE.Color('#162442')}, uZenith:{value:new THREE.Color('#070b16')}
+  },
+  side:THREE.BackSide, depthWrite:false, depthTest:false,
+  vertexShader:`varying vec3 vDir; void main(){ vDir = normalize(position); vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_Position = projectionMatrix * mv; }`,
+  fragmentShader:`precision highp float;
+    uniform vec3 uBg; uniform vec3 uSun; uniform float uNight; uniform float uAtmo; uniform vec3 uHorizon; uniform vec3 uZenith;
+    varying vec3 vDir;
+    void main(){
+      vec3 d = normalize(vDir);
+      float h = clamp(d.y * 1.45 + 0.14, 0.0, 1.0);
+      vec3 sky = mix(uHorizon, uZenith, pow(h, 0.65));
+      float sunAmt = max(dot(d, normalize(uSun)), 0.0);
+      vec3 sunGlow = mix(vec3(1.0, 0.88, 0.68), vec3(0.32, 0.56, 0.96), uNight);
+      sky += sunGlow * (pow(sunAmt, 14.0)*0.16 + pow(sunAmt, 96.0)*0.22) * uAtmo;
+      vec3 col = mix(uBg, sky, uAtmo);
+      gl_FragColor = vec4(col, 1.0);
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
+    }`
+});
+const skyMesh = new THREE.Mesh(new THREE.SphereGeometry(160, 32, 20), skyMat);
+skyMesh.frustumCulled = false; skyMesh.renderOrder = -10;
+scene.add(skyMesh);
+
+// ---------- animated Black Sea & Sea of Azov coastal water shelf (clipped strictly outside land mask) ----------
+let waterOn = true;
+const seaMat = new THREE.ShaderMaterial({
+  uniforms:{
+    uMask:uniforms.uMask, uMaskTexel:uniforms.uMaskTexel, uSun:uniforms.uSun, uTime:uniforms.uTime,
+    uNight:uniforms.uNight, uMode:uniforms.uMode, uBg:uniforms.uBg, uInk:uniforms.uInk
+  },
+  transparent:true, depthWrite:false, side:THREE.FrontSide,
+  vertexShader:`#include <common>
+    #include <logdepthbuf_pars_vertex>
+    attribute vec2 aUv;
+    varying vec2 vUvD; varying vec3 vWorldPos;
+    void main(){
+      vUvD = aUv;
+      vec4 wp = modelMatrix * vec4(position, 1.0);
+      vWorldPos = wp.xyz;
+      gl_Position = projectionMatrix * viewMatrix * wp;
+      #include <logdepthbuf_vertex>
+    }`,
+  fragmentShader:`precision highp float;
+    #include <common>
+    #include <logdepthbuf_pars_fragment>
+    uniform sampler2D uMask; uniform vec2 uMaskTexel; uniform vec3 uSun; uniform float uTime;
+    uniform float uNight; uniform int uMode; uniform vec3 uBg; uniform vec3 uInk;
+    varying vec2 vUvD; varying vec3 vWorldPos;
+    void main(){
+      #include <logdepthbuf_fragment>
+      // Only draw outside Ukraine's land silhouette
+      float inBox = step(0.0, vUvD.x)*step(vUvD.x, 1.0)*step(0.0, vUvD.y)*step(vUvD.y, 1.0);
+      float land = inBox > 0.5 ? texture2D(uMask, vUvD).r : 0.0;
+      if (land > 0.48) discard;
+      // Geographic lon/lat reconstructed from plate UV for Black Sea & Sea of Azov basin mask
+      float lon = 21.9 + vUvD.x * 18.6;
+      float lat = 52.5 - vUvD.y * 8.45;
+      // Coastal distance estimate by multi-radius land-mask sampling (organic curved coastal bathymetry, zero straight box edges)
+      float near1 = 0.0, near2 = 0.0, near3 = 0.0, near4 = 0.0;
+      for (int i = 0; i < 8; i++){
+        float ang = float(i) * 0.785398;
+        vec2 dir = vec2(cos(ang), sin(ang));
+        vec2 o1 = vUvD + dir * uMaskTexel * 20.0;
+        vec2 o2 = vUvD + dir * uMaskTexel * 72.0;
+        vec2 o3 = vUvD + dir * uMaskTexel * 165.0;
+        vec2 o4 = vUvD + dir * uMaskTexel * 290.0;
+        near1 = max(near1, step(0.0, o1.x)*step(o1.x, 1.0)*step(0.0, o1.y)*step(o1.y, 1.0) * texture2D(uMask, clamp(o1, 0.0, 1.0)).r);
+        near2 = max(near2, step(0.0, o2.x)*step(o2.x, 1.0)*step(0.0, o2.y)*step(o2.y, 1.0) * texture2D(uMask, clamp(o2, 0.0, 1.0)).r);
+        near3 = max(near3, step(0.0, o3.x)*step(o3.x, 1.0)*step(0.0, o3.y)*step(o3.y, 1.0) * texture2D(uMask, clamp(o3, 0.0, 1.0)).r);
+        near4 = max(near4, step(0.0, o4.x)*step(o4.x, 1.0)*step(0.0, o4.y)*step(o4.y, 1.0) * texture2D(uMask, clamp(o4, 0.0, 1.0)).r);
+      }
+      // Restrict sea shelf strictly to southern maritime basins (Black Sea + Sea of Azov), never northern/western land borders
+      float southBasin = smoothstep(47.25, 46.55, lat) * smoothstep(29.35, 30.1, lon) * smoothstep(39.0, 37.8, lon);
+      float westCut = smoothstep(29.75, 30.45, lon) + smoothstep(46.05, 45.2, lat);
+      float eastCut = smoothstep(38.3, 37.3, lon) + smoothstep(46.7, 45.7, lat);
+      float basin = clamp(southBasin * min(1.0, westCut) * min(1.0, eastCut), 0.0, 1.0);
+      // Purely organic coast-hugging bathymetry envelope + soft radial fade in the open Black Sea
+      float shelf = clamp(near1*0.42 + near2*0.30 + near3*0.20 + near4*0.14, 0.0, 1.0);
+      vec2 bsCenter = vec2((lon - 33.4)/4.4, (lat - 45.2)/1.85);
+      float bsRadial = 1.0 - smoothstep(0.55, 1.15, length(bsCenter));
+      float seaEnv = basin * smoothstep(0.04, 0.42, max(shelf, bsRadial * 0.55)) * smoothstep(43.4, 44.3, lat);
+      if (seaEnv < 0.01) discard;
+
+      // Multi-octave procedural waves + sun glint + Fresnel sky reflection
+      vec2 p = vWorldPos.xz;
+      float w1 = sin(p.x*16.0 + p.y*9.0 + uTime*0.9) * cos(p.y*14.0 - p.x*6.0 - uTime*0.75);
+      float w2 = sin(p.x*34.0 - p.y*28.0 - uTime*1.35) * 0.5;
+      float w3 = cos(p.x*68.0 + p.y*54.0 + uTime*1.9) * 0.25;
+      vec3 wn = normalize(vec3((w1 + w2 + w3)*0.028, 1.0, (w2 - w1 + w3)*0.026));
+      vec3 L = normalize(uSun);
+      vec3 V = normalize(cameraPosition - vWorldPos);
+      vec3 H = normalize(L + V);
+      float spec = pow(max(dot(wn, H), 0.0), 72.0);
+      float fres = pow(1.0 - max(dot(wn, V), 0.0), 3.2);
+
+      // Bathymetric colour: luminous turquoise shallows near shore -> rich sapphire/navy deep water
+      vec3 shallowCol = mix(vec3(0.14, 0.56, 0.68), vec3(0.06, 0.34, 0.48), uNight);
+      vec3 deepCol    = mix(vec3(0.07, 0.24, 0.44), vec3(0.03, 0.11, 0.24), uNight);
+      vec3 skyRef     = mix(vec3(0.62, 0.80, 0.96), vec3(0.16, 0.32, 0.56), uNight);
+      vec3 col = mix(deepCol, shallowCol, clamp(near1*0.75 + near2*0.25, 0.0, 1.0));
+      col = mix(col, skyRef, fres * 0.45);
+      col += vec3(1.0, 0.95, 0.84) * spec * mix(0.85, 0.65, uNight);
+      // Crisp coastal foam shimmer right next to shore
+      float foam = near1 * (0.55 + 0.45*sin(p.x*26.0 + p.y*22.0 - uTime*1.8));
+      col = mix(col, mix(vec3(0.88, 0.96, 1.0), vec3(0.42, 0.72, 0.88), uNight), foam * 0.24);
+
+      // Bathymetry contour ripples for stylized modes (Neon / Blueprint)
+      float alpha = seaEnv * mix(0.82, 0.86, uNight);
+      if (uMode == 7) {
+        float ring = smoothstep(0.02, 0.0, abs(fract(shelf * 5.0) - 0.5) - 0.04);
+        col = mix(vec3(0.02, 0.08, 0.18), vec3(0.20, 0.88, 1.0), ring * 0.65 + near1 * 0.35);
+        alpha = seaEnv * 0.72;
+      } else if (uMode == 2) {
+        float hatch = smoothstep(0.02, 0.0, abs(fract(shelf * 6.0) - 0.5) - 0.03);
+        col = mix(uBg, uInk, hatch * 0.32 + near1 * 0.14);
+        alpha = seaEnv * 0.65;
+      }
+      gl_FragColor = vec4(col, alpha);
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
+    }`
+});
+const seaMesh = (() => {
+  const g = core.buildGrid([28.6, 39.8, 43.25, 47.45], 96, 56, false);
+  const geo = gridGeometry(g);
+  const m = new THREE.Mesh(geo, seaMat);
+  m.position.set(g.origin[0], -0.002, g.origin[1]);
+  m.renderOrder = -0.5;
+  m.frustumCulled = false;
+  scene.add(m);
+  return m;
+})();
+
 // ---------- drop shadow under the plinth ----------
 const shadowCanvas = document.createElement('canvas'); shadowCanvas.width = 640; shadowCanvas.height = Math.round(640*META.h/META.w);
 const shadowTex = new THREE.CanvasTexture(shadowCanvas); shadowTex.colorSpace = THREE.NoColorSpace; track(shadowTex, shadowCanvas.width, shadowCanvas.height, 4, 'тінь');
@@ -564,8 +747,10 @@ const wallMat = new THREE.ShaderMaterial({
   void main(){
     #include <logdepthbuf_fragment>
     vec3 n = normalize(cross(dFdx(vWorld), dFdy(vWorld))); float d = max(dot(n, normalize(uSun)), 0.0);
-    float rim = 0.55 + 0.45*clamp((vWorld.y + uPlinth)/0.6, 0.0, 1.0);
-    vec3 col = uWall * (0.55 + 0.55*d) * rim;
+    float hNorm = clamp((vWorld.y + uPlinth)/max(uPlinth, 0.1), 0.0, 1.0);
+    float rim = 0.42 + 0.58*smoothstep(0.0, 1.0, hNorm);
+    float bevel = smoothstep(0.90, 0.955, vTop) * (1.0 - smoothstep(0.955, 0.965, vTop));
+    vec3 col = uWall * (0.50 + 0.58*d) * rim + vec3(0.18, 0.22, 0.28) * bevel * 0.45;
     if (vTop > 0.955) col = vec3(0.0);   // black band along the top edge (~1 km)
     gl_FragColor = vec4(col, 1.0);
     #include <tonemapping_fragment>
@@ -748,25 +933,30 @@ const Labels = (() => {
 // ---------- 3D cities: detail satellite patches + OSM buildings, loaded on approach and released when the camera leaves ----------
 const CITY3D = [];                       // registry entries + runtime state
 const LOAD_DIST = 3.0, UNLOAD_DIST = 6.0, SHOW_DIST = 2.5;
-const sunLight = new THREE.DirectionalLight(0xffffff, 2.4); const hemiLight = new THREE.HemisphereLight(0xdfe8ff, 0x7a6e60, 1.1); scene.add(sunLight, hemiLight);
+const sunLight = new THREE.DirectionalLight(0xfff6e8, 2.5);
+const rimLight = new THREE.DirectionalLight(0x88b4ff, 0.55);
+const hemiLight = new THREE.HemisphereLight(0xdce8ff, 0x6b6054, 1.15);
+scene.add(sunLight, rimLight, hemiLight);
 const BLD_COLORS = ['#d8c8ae', '#c6ccd6', '#b9bfc8', '#d9b182', '#a39d95'].map(h => new THREE.Color(h));   // houses, apartments, industrial/commercial, public, garages
 // Facade tiles (facades.json): per category a repeating texture with its size in metres; UVs are written in tile units so floors stay 2.8 m.
 const FACADES = {};
-function patchBld(mat){
+function patchBld(mat, lit = false){
   mat.onBeforeCompile = sh => {
     sh.uniforms.uExag = uniforms.uExag; sh.uniforms.uBExag = uniforms.uBExag; sh.uniforms.uScale = uniforms.uScale;
+    sh.uniforms.uNight = uniforms.uNight; sh.uniforms.uLit = {value:lit ? 1 : 0};
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute float aGround; uniform float uExag; uniform float uBExag; uniform float uScale;')
-      .replace('#include <begin_vertex>', 'vec3 transformed = vec3(position.x, (aGround*uExag + position.y*uBExag)*uScale + 0.00002*uExag, position.z);');
+      .replace('#include <common>', '#include <common>\nattribute float aGround; uniform float uExag; uniform float uBExag; uniform float uScale; varying float vBldAo; varying float vBldH; varying vec2 vBldPos;')
+      .replace('#include <begin_vertex>', 'vBldH = position.y;\nvBldPos = position.xz;\nvBldAo = clamp(0.66 + 0.34 * smoothstep(0.0, 18.0, position.y), 0.66, 1.0);\nvec3 transformed = vec3(position.x, (aGround*uExag + position.y*uBExag)*uScale + 0.00002*uExag, position.z);');
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform float uBExag;')
-      .replace('#include <map_fragment>', '#ifdef USE_MAP\n vec4 sampledDiffuseColor = texture2D( map, vec2(vMapUv.x, vMapUv.y*uBExag) );\n diffuseColor *= sampledDiffuseColor;\n#endif');
+      .replace('#include <common>', '#include <common>\nuniform float uBExag; uniform float uNight; uniform float uLit; varying float vBldAo; varying float vBldH; varying vec2 vBldPos;')
+      .replace('#include <map_fragment>', '#ifdef USE_MAP\n vec4 sampledDiffuseColor = texture2D( map, vec2(vMapUv.x, vMapUv.y*uBExag) );\n diffuseColor *= sampledDiffuseColor;\n#endif\ndiffuseColor.rgb *= vBldAo;')
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\nif (uLit > 0.5 && uNight > 0.5 && vBldH > 3.2){\n  float fl = fract(vBldH / 3.1);\n  float colGrid = fract((vBldPos.x + vBldPos.y) * 9500.0);\n  float win = step(0.28, fl) * step(fl, 0.72) * step(0.22, colGrid) * step(colGrid, 0.78);\n  float cellHash = fract(sin(floor(vBldH / 3.1)*127.1 + floor((vBldPos.x + vBldPos.y)*9500.0)*311.7)*43758.5453);\n  float litWin = win * step(0.64, cellHash);\n  totalEmissiveRadiance += vec3(1.0, 0.78, 0.44) * litWin * 0.38;\n}');
   };
   return mat;
 }
 const ROOF_COLORS = ['#8a6b50', '#6f6a62', '#8d8f90', '#7d7267', '#6e665c'];
 const roofMats = ROOF_COLORS.map(h => patchBld(new THREE.MeshLambertMaterial({color:h, flatShading:true})));   // flat roof colour per category (vertex colours tint walls only)
-const wallMats = BLD_COLORS.map(() => patchBld(new THREE.MeshLambertMaterial({vertexColors:true, flatShading:true})));
+const wallMats = BLD_COLORS.map((_, idx) => patchBld(new THREE.MeshLambertMaterial({vertexColors:true, flatShading:true}), idx === 1 || idx === 3));
 const bldMats = [...roofMats, ...wallMats];
 // Режими-креслення малюють забудову без фасадів: білий макет, сіра відмивка, світлий каркас або неоновий каркас
 const monoMats = (color, wire = false) => Array.from({length:10}, () => patchBld(wire
@@ -874,22 +1064,58 @@ function updateCities(){
 }
 function flyToCity(c){
   const t = c.centre.clone(); t.y = sampleH(c.centre0[0], c.centre0[1])*SCALE*targetExag;
-  flyTo = {from:camera.position.clone(), to:t.clone().add(new THREE.Vector3(-0.09, 0.15, 0.22)), tFrom:controls.target.clone(), tTo:t, t0:performance.now()};
+  flyTo = {from:camera.position.clone(), to:t.clone().add(new THREE.Vector3(-0.09, 0.15, 0.22)), tFrom:controls.target.clone(), tTo:t, t0:performance.now(), dur:1150};
   if (controls.autoRotate){ controls.autoRotate = false; setPressed(btnRot, false); }
   if (c.state === 'idle') loadCity(c);
   togglePop2(false);
 }
-function buildCityPanel(){
-  const ul = $('cities3d'); ul.textContent = '';
-  for (const c of CITY3D){
-    if (isVillage(c)) continue;
-    const li = document.createElement('li'); const lab = document.createElement('span'); lab.className = 'cn'; lab.textContent = c.name;
-    const sm = document.createElement('small'); sm.textContent = c.count.toLocaleString('uk-UA');
-    const go = document.createElement('button'); go.className = 'go'; go.type = 'button'; go.textContent = '→'; go.title = 'Перелетіти до міста';
-    go.addEventListener('click', () => flyToCity(c));
-    li.append(lab, sm, go); ul.append(li);
+function flyToPlace(item){
+  if (item.city3d){ flyToCity(item.city3d); return; }
+  if (item.oblast && CITY_DATA && CITY_DATA[item.oblast] && !selected.has(item.oblast)){
+    selected.add(item.oblast);
+    const cb = $('ob-' + item.oblast); if (cb) cb.checked = true;
+    applyOblasts();
+  }
+  const t = toWorld(item.lon, item.lat); t.y = sampleH(item.lon, item.lat)*SCALE*targetExag;
+  const dist = item.pop >= 100000 ? 0.55 : item.pop >= 25000 ? 0.42 : 0.34;
+  flyTo = {from:camera.position.clone(), to:t.clone().add(new THREE.Vector3(-dist*0.38, dist*0.62, dist*0.85)), tFrom:controls.target.clone(), tTo:t, t0:performance.now(), dur:1100};
+  if (controls.autoRotate){ controls.autoRotate = false; setPressed(btnRot, false); }
+  togglePop2(false);
+}
+function buildCityPanel(query = ''){
+  const ul = $('cities3d'); if (!ul) return;
+  ul.textContent = '';
+  const items = searchPlaces(query, CITY3D, CITY_DATA, 36);
+  const cnt = $('cities-count');
+  if (cnt){
+    const q = String(query || '').trim();
+    cnt.textContent = q ? (items.length ? 'Знайдено: ' + items.length : 'Нічого не знайдено') : (items.length + ' міст у 3D');
+  }
+  if (!items.length){
+    const li = document.createElement('li'); li.className = 'empty'; li.textContent = 'Спробуйте іншу назву міста чи області';
+    ul.append(li); return;
+  }
+  for (const item of items){
+    const li = document.createElement('li');
+    const wrap = document.createElement('div'); wrap.className = 'cn-wrap';
+    const lab = document.createElement('span'); lab.className = 'cn'; lab.textContent = item.name;
+    wrap.append(lab);
+    if (item.oblast){ const sub = document.createElement('em'); sub.textContent = item.oblast; wrap.append(sub); }
+    const sm = document.createElement('small');
+    if (item.city3d){
+      const b3 = document.createElement('span'); b3.className = 'badge-3d'; b3.textContent = '3D';
+      sm.append(b3, ' ' + item.count3d.toLocaleString('uk-UA'));
+    } else if (item.pop > 0){
+      sm.textContent = item.pop >= 1000 ? Math.round(item.pop/1000) + ' тис.' : String(item.pop);
+    }
+    const go = document.createElement('button'); go.className = 'go'; go.type = 'button'; go.textContent = '→'; go.title = 'Перелетіти: ' + item.name;
+    go.addEventListener('click', () => flyToPlace(item));
+    li.addEventListener('dblclick', () => flyToPlace(item));
+    li.append(wrap, sm, go); ul.append(li);
   }
 }
+const citySearchEl = $('city-search');
+if (citySearchEl) citySearchEl.addEventListener('input', () => buildCityPanel(citySearchEl.value));
 
 // ---------- regional imagery tiles: two layers (z11 ≈ 75 m/px, z12 ≈ 38 m/px) around the look-at point ----------
 // A tile first arrives at half resolution (a quarter of the GPU memory) and is swapped for the full image only once the camera is low enough to resolve it.
@@ -1031,7 +1257,7 @@ defLayer('places', 'Міста й підписи', async () => {
   for (const name in CITY_DATA) for (const [n, lon, lat, pop, place, cap] of CITY_DATA[name]) if (cap && !centres.has(n)) centres.set(n, Labels.add(n, lon, lat, 'capital', 0, name, pop));
   PEAKS.forEach(([n, lon, lat]) => Labels.add(n, lon, lat, 'peak', 1, null, 0));
   try { for (const [name, lon, lat] of await fetchJson('oblasts.json')) Labels.add(name, lon, lat, 'obl', 5, null, 0); } catch (err) { console.warn('назви областей не завантажились', err); }
-  buildOblastPanel(); applyOblasts();
+  buildOblastPanel(); applyOblasts(); buildCityPanel(citySearchEl ? citySearchEl.value : '');
 }, () => { Labels.clear(); oblastLabels.clear(); centres.clear(); });
 defLayer('imagery', 'Супутникові знімки', async () => {
   const satImg = await loadImage('sat.jpg', p => { if (booting) setProgress(0.7 + p*0.3, 'Завантаження знімків…'); });
@@ -1080,8 +1306,17 @@ function sceneStyle(m = uniforms.uMode.value){
 }
 function applyTheme(){
   const s = sceneStyle();
+  const dark = document.documentElement.dataset.theme !== 'light';
+  const army = document.documentElement.dataset.module === 'army';
+  const photo = uniforms.uMode.value === MODE.sat || uniforms.uMode.value === MODE.hyp;
   uniforms.uWall.value = new THREE.Color(s ? s.wall : css('--wall')); uniforms.uBg.value = new THREE.Color(s ? s.bg : css('--bg')); uniforms.uGrid.value = cssColor('--grid');
   uniforms.uInk.value = new THREE.Color(s ? s.ink : css('--grid')); uniforms.uPaper.value = new THREE.Color(s ? s.paper : css('--bg'));
+  uniforms.uNight.value = dark ? 1 : 0;
+  uniforms.uAtmo.value = photo ? 1 : 0;
+  skyMat.uniforms.uHorizon.value.set(dark ? (army ? '#142616' : '#142342') : '#c8daee');
+  skyMat.uniforms.uZenith.value.set(dark ? (army ? '#070f08' : '#060a14') : '#e9f0f8');
+  seaMesh.visible = waterOn && (photo || uniforms.uMode.value === MODE.neon || uniforms.uMode.value === MODE.con);
+  renderer.toneMappingExposure = photo ? (dark ? 1.06 : 1.04) : 1.0;
   renderer.setClearColor(uniforms.uBg.value, 1); shadowMat.color = new THREE.Color(css('--shadow').replace(/rgba\(([^,]+,[^,]+,[^,]+),[^)]*\)/, 'rgb($1)')); shadowMat.opacity = parseFloat(css('--shadow').split(',')[3]) || 0.5;
   shadowPlane.visible = !(s && parseInt(s.bg.slice(1, 3), 16) < 0x10);   // на чорному тлі тінь невидима — не малюємо
   Labels.restyle(s ? {fg:new THREE.Color(s.fg), bg:new THREE.Color(s.bg), muted:new THREE.Color(s.muted)} : null);
@@ -1103,18 +1338,75 @@ function setMode(m){
   try{localStorage.setItem('ukr3d.mode', m)}catch(e){}
 }
 Object.entries(modeBtns).forEach(([m,b]) => b.addEventListener('click', () => setMode(+m)));
-const targetExag = 1;   // true vertical scale
-function setSun(){ const az = +$('sun').value; $('sun-v').textContent = az+'°'; const a = THREE.MathUtils.degToRad(az), el = THREE.MathUtils.degToRad(38);
+let targetExag = EMBED ? 1 : 2.5;
+const exagEl = $('exag'), exagV = $('exag-v');
+function setExag(v){
+  targetExag = Math.max(1, Math.min(10, Number(v) || 1));
+  if (exagEl) exagEl.value = String(targetExag);
+  if (exagV) exagV.textContent = targetExag.toLocaleString('uk-UA', {maximumFractionDigits:1}) + '×';
+  if (!EMBED) try { localStorage.setItem('ukr3d.exag', String(targetExag)); } catch(e){}
+}
+if (!EMBED) {
+  try { const sv = localStorage.getItem('ukr3d.exag'); if (sv !== null && isFinite(+sv)) targetExag = Math.max(1, Math.min(10, +sv)); } catch(e){}
+  if (exagEl){ exagEl.addEventListener('input', () => setExag(exagEl.value)); setExag(targetExag); }
+}
+function setSun(){ const az = +$('sun').value; $('sun-v').textContent = az+'°'; const a = THREE.MathUtils.degToRad(az), el = THREE.MathUtils.degToRad(36);
   uniforms.uSun.value.set(Math.sin(a)*Math.cos(el), Math.sin(el), Math.cos(a)*Math.cos(el));
   sunLight.position.copy(uniforms.uSun.value).multiplyScalar(50);
+  rimLight.position.set(-uniforms.uSun.value.x*40, 22, -uniforms.uSun.value.z*40);
   const home = shadowPlane.userData.home; shadowPlane.position.set(home.x - Math.sin(a)*0.45, home.y, home.z - Math.cos(a)*0.45); }
 $('sun').addEventListener('input', setSun); setSun();
 $('t-bld').addEventListener('click', e => { bldOn = !bldOn; setPressed(e.currentTarget, bldOn); });
 const pop2 = $('pop2'), btnC3d = $('t-c3d');
-function togglePop2(open){ pop2.hidden = !open; btnC3d.setAttribute('aria-expanded', String(open)); btnC3d.setAttribute('aria-pressed', String(open)); if (open) togglePop(false); }
+const pop3 = $('pop3'), btnViews = $('t-views');
+const popHd = $('pop-hd'), btnHd = $('t-hd');
+function togglePopHd(open){
+  if (!popHd || !btnHd) return;
+  popHd.hidden = !open; btnHd.setAttribute('aria-expanded', String(open));
+  if (open){ togglePop(false); togglePop2(false); togglePop3(false); }
+}
+function togglePop3(open){ if (!pop3 || !btnViews) return; pop3.hidden = !open; btnViews.setAttribute('aria-expanded', String(open)); btnViews.setAttribute('aria-pressed', String(open)); if (open){ togglePop(false); togglePop2(false); togglePopHd(false); } }
+function togglePop2(open){
+  pop2.hidden = !open; btnC3d.setAttribute('aria-expanded', String(open)); btnC3d.setAttribute('aria-pressed', String(open));
+  if (open){ togglePop(false); togglePop3(false); togglePopHd(false); if (citySearchEl){ buildCityPanel(citySearchEl.value); setTimeout(() => citySearchEl.focus(), 20); } }
+}
 btnC3d.addEventListener('click', () => togglePop2(pop2.hidden));
 document.addEventListener('pointerdown', e => { if (!pop2.hidden && !pop2.contains(e.target) && e.target !== btnC3d) togglePop2(false); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && !pop2.hidden) togglePop2(false); });
+if (btnViews && pop3){
+  const VIEWS = [
+    ['Вся Україна', null, HOME.pos, HOME.target, 'Огляд'],
+    ['Карпати · Говерла', [24.50, 48.16], [-0.95, 1.35, 1.85], null, '2061 м'],
+    ['Крим · Роман-Кош', [34.25, 44.61], [-0.85, 1.25, 1.80], null, '1545 м'],
+    ['Київ · Дніпро', [30.52, 50.45], [-0.18, 0.32, 0.48], null, 'Столиця'],
+    ['Харків · 3D', [36.23, 49.99], [-0.14, 0.24, 0.36], null, 'Місто 3D'],
+    ['Дніпро · 3D', [35.04, 48.46], [-0.14, 0.24, 0.36], null, 'Місто 3D'],
+    ['Схід · Донбас', [37.80, 48.02], [-0.80, 2.20, 2.80], null, 'Регіон'],
+    ['Південь · Одеса', [30.73, 46.48], [-0.40, 1.15, 1.65], null, 'Узбережжя'],
+  ];
+  const ul = $('views-list');
+  for (const [name, ll, off, tgt, tag] of VIEWS){
+    const li = document.createElement('li'), sp = document.createElement('span'); sp.className = 'cn'; sp.textContent = name;
+    const sm = document.createElement('small'); sm.textContent = tag;
+    const go = document.createElement('button'); go.className = 'go'; go.type = 'button'; go.textContent = '→'; go.title = 'Перелетіти: ' + name;
+    go.addEventListener('click', () => {
+      if (!ll){
+        flyTo = {from:camera.position.clone(), to:off.clone(), tFrom:controls.target.clone(), tTo:tgt.clone(), t0:performance.now(), dur:1100};
+      } else {
+        const c = toWorld(ll[0], ll[1]); c.y = sampleH(ll[0], ll[1])*SCALE*targetExag;
+        flyTo = {from:camera.position.clone(), to:c.clone().add(new THREE.Vector3(off[0], off[1], off[2])), tFrom:controls.target.clone(), tTo:c, t0:performance.now(), dur:1150};
+      }
+      if (controls.autoRotate){ controls.autoRotate = false; setPressed(btnRot, false); }
+      togglePop3(false);
+    });
+    li.append(sp, sm, go); ul.append(li);
+  }
+  btnViews.addEventListener('click', () => togglePop3(pop3.hidden));
+  document.addEventListener('pointerdown', e => { if (!pop3.hidden && !pop3.contains(e.target) && e.target !== btnViews) togglePop3(false); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !pop3.hidden) togglePop3(false); });
+}
+const btnWater = $('t-water');
+if (btnWater) btnWater.addEventListener('click', () => { waterOn = !waterOn; setPressed(btnWater, waterOn); applyTheme(); });
 $('t-wire').addEventListener('click', e => { wireOn = !wireOn; syncOverlays(); setPressed(e.currentTarget, wireOn); });
 let bordersOn = true, frontOn = true, labelsOn = true;
 $('t-front').addEventListener('click', e => { frontOn = !frontOn; uniforms.uFrontOn.value = frontOn ? 1 : 0; setPressed(e.currentTarget, frontOn); });
@@ -1122,7 +1414,7 @@ $('t-brd').addEventListener('click', e => { bordersOn = !bordersOn; uniforms.uBo
 $('t-cities').addEventListener('click', e => { labelsOn = !labelsOn; setPressed(e.currentTarget, labelsOn); });
 const pop = $('pop'), btnObl = $('t-obl');
 function togglePop(open){ pop.hidden = !open; btnObl.setAttribute('aria-expanded', String(open)); btnObl.setAttribute('aria-pressed', String(open)); }
-btnObl.addEventListener('click', () => { togglePop(pop.hidden); if (!pop.hidden) togglePop2(false); });
+btnObl.addEventListener('click', () => { togglePop(pop.hidden); if (!pop.hidden){ togglePop2(false); togglePop3(false); togglePopHd(false); } });
 document.addEventListener('pointerdown', e => { if (!pop.hidden && !pop.contains(e.target) && e.target !== btnObl) togglePop(false); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && !pop.hidden) togglePop(false); });
 const btnRot = $('t-rot');
@@ -1214,30 +1506,532 @@ $('h-close').addEventListener('click', () => toggleHud(false));
 try { if (localStorage.getItem('ukr3d.hud') === '1') toggleHud(true); } catch (e) {}
 setInterval(drawHud, 500);
 
-// ---------- cursor readout (ray-march against the heightfield, through the inverse projection) ----------
-const ray = new THREE.Raycaster(); const ndc = new THREE.Vector2(); let hover = null;
-renderer.domElement.addEventListener('pointermove', e => { ndc.set(e.clientX/innerWidth*2-1, -(e.clientY/innerHeight)*2+1); hover = ndc; });
-renderer.domElement.addEventListener('pointerleave', () => { hover = null; $('r-pos').textContent = '—'; $('r-h').textContent = '—'; });
-function pick(){
-  if (!hover || !heights) return;
-  ray.setFromCamera(hover, camera); const o = ray.ray.origin, d = ray.ray.direction;
+// ---------- cursor readout & ray-march against the heightfield ----------
+const ray = new THREE.Raycaster(); const ndc = new THREE.Vector2(); let hover = null, lastGeo = null;
+function pickGeo(pt){
+  if (!pt || !heights) return null;
+  ray.setFromCamera(pt, camera); const o = ray.ray.origin, d = ray.ray.direction;
   const ex = uniforms.uExag.value, top = 2100*SCALE*ex;
-  if (Math.abs(d.y) < 1e-4) return;
-  let t0 = (top - o.y)/d.y, t1 = (0 - o.y)/d.y; if (t0 < 0) t0 = 0; if (t1 < t0) return;
+  if (Math.abs(d.y) < 1e-4) return null;
+  let t0 = (top - o.y)/d.y, t1 = (0 - o.y)/d.y; if (t0 < 0) t0 = 0; if (t1 < t0) return null;
   const steps = 160;
   for (let i = 0; i <= steps; i++){
     const t = t0 + (t1-t0)*i/steps; const x = o.x + d.x*t, z = o.z + d.z*t, y = o.y + d.y*t;
     core.inv(x, z, _q); const lon = _q[0], lat = _q[1];
     if (lon < META.lon0 || lon > META.lon1 || lat < META.lat0 || lat > META.lat1) continue;
     const h = sampleH(lon, lat);
-    if (y <= h*SCALE*ex) {
-      $('r-pos').textContent = lat.toFixed(3)+'° N  '+lon.toFixed(3)+'° E';
-      $('r-h').textContent = Math.round(h)+' м';
-      return;
-    }
+    if (y <= h*SCALE*ex) return {lon, lat, h, x, z};
+  }
+  return null;
+}
+renderer.domElement.addEventListener('pointermove', e => { ndc.set(e.clientX/innerWidth*2-1, -(e.clientY/innerHeight)*2+1); hover = ndc; });
+renderer.domElement.addEventListener('pointerleave', () => { hover = null; lastGeo = null; $('r-pos').textContent = '—'; $('r-h').textContent = '—'; Measure.setPreview(null); });
+function pick(){
+  const g = pickGeo(hover);
+  lastGeo = g;
+  if (g){
+    $('r-pos').textContent = g.lat.toFixed(3)+'° N  '+g.lon.toFixed(3)+'° E';
+    $('r-h').textContent = Math.round(g.h)+' м';
+    if (Measure.active) Measure.setPreview(g);
+    return;
   }
   $('r-pos').textContent = '—'; $('r-h').textContent = '—';
+  if (Measure.active) Measure.setPreview(null);
 }
+
+// ---------- measurement tools: geodesic distance, azimuth, area polygon, draped 3D path & elevation profile ----------
+const Measure = (() => {
+  const panel = $('meas-panel'), btnMeas = $('t-meas');
+  const btnDist = $('ms-dist'), btnArea = $('ms-area'), btnClose = $('ms-close');
+  const btnUndo = $('ms-undo'), btnClear = $('ms-clear');
+  const elHint = $('ms-hint'), elPts = $('ms-pts'), elLenLbl = $('ms-len-lbl'), elLen = $('ms-len');
+  const elAzLbl = $('ms-az-lbl'), elAz = $('ms-az'), elAreaLbl = $('ms-area-lbl'), elAreaVal = $('ms-area-val');
+  const elElev = $('ms-elev'), profWrap = $('ms-prof-wrap'), profMeta = $('ms-prof-meta'), profCanvas = $('meas-profile');
+
+  let active = false, mode = 'dist';   // 'dist' | 'area'
+  const pts = [];                      // [{lon, lat, h}]
+  let preview = null, lastExag = -1;
+
+  const group = new THREE.Group();
+  group.renderOrder = 45;
+  scene.add(group);
+
+  const lineGeo = new THREE.BufferGeometry();
+  const lineMat = new THREE.MeshBasicMaterial({color:0x60dde8, side:THREE.DoubleSide, depthTest:false, transparent:true, opacity:0.95});
+  const lineObj = new THREE.Mesh(lineGeo, lineMat); lineObj.renderOrder = 48; lineObj.frustumCulled = false;
+
+  const haloGeo = new THREE.BufferGeometry();
+  const haloMat = new THREE.MeshBasicMaterial({color:0x081324, side:THREE.DoubleSide, depthTest:false, transparent:true, opacity:0.72});
+  const haloObj = new THREE.Mesh(haloGeo, haloMat); haloObj.renderOrder = 47; haloObj.frustumCulled = false;
+
+  const prevGeo = new THREE.BufferGeometry();
+  const prevMat = new THREE.MeshBasicMaterial({color:0xffd500, side:THREE.DoubleSide, depthTest:false, transparent:true, opacity:0.82});
+  const prevObj = new THREE.Mesh(prevGeo, prevMat); prevObj.renderOrder = 47; prevObj.frustumCulled = false;
+
+  const polyGeo = new THREE.BufferGeometry();
+  const polyMat = new THREE.MeshBasicMaterial({color:0x60dde8, transparent:true, opacity:0.22, side:THREE.DoubleSide, depthTest:false, depthWrite:false});
+  const polyObj = new THREE.Mesh(polyGeo, polyMat); polyObj.renderOrder = 44; polyObj.frustumCulled = false;
+
+  const pinGeo = new THREE.BufferGeometry();
+  const pinMat = new THREE.PointsMaterial({color:0xffd500, size:11, sizeAttenuation:false, depthTest:false, transparent:true, opacity:1});
+  const pinObj = new THREE.Points(pinGeo, pinMat); pinObj.renderOrder = 50; pinObj.frustumCulled = false;
+
+  group.add(polyObj, haloObj, lineObj, prevObj, pinObj);
+
+  function toDrapeVec(lon, lat, lift = 0.004){
+    const w = toWorld(lon, lat), h = heights ? sampleH(lon, lat) : 0;
+    return [w.x, h*SCALE*uniforms.uExag.value + lift, w.z];
+  }
+  function pushRibbon(arr, a, b, halfW, lift = 0.004){
+    const km = haversineKm(a.lon, a.lat, b.lon, b.lat);
+    const steps = Math.max(4, Math.min(48, Math.ceil(km / 4)));
+    const chain = [];
+    for (let i = 0; i <= steps; i++){
+      const t = i / steps;
+      chain.push(toDrapeVec(a.lon + (b.lon - a.lon)*t, a.lat + (b.lat - a.lat)*t, lift));
+    }
+    for (let i = 0; i < chain.length - 1; i++){
+      const p0 = chain[i], p1 = chain[i + 1];
+      let dx = p1[0] - p0[0], dz = p1[2] - p0[2];
+      const len = Math.hypot(dx, dz) || 1e-6;
+      const nx = (-dz / len) * halfW, nz = (dx / len) * halfW;
+      arr.push(
+        p0[0] - nx, p0[1], p0[2] - nz,  p0[0] + nx, p0[1], p0[2] + nz,  p1[0] + nx, p1[1], p1[2] + nz,
+        p0[0] - nx, p0[1], p0[2] - nz,  p1[0] + nx, p1[1], p1[2] + nz,  p1[0] - nx, p1[1], p1[2] - nz
+      );
+    }
+  }
+  function ribbonWidth(){ return Math.max(0.003, Math.min(0.048, camera.position.distanceTo(controls.target) * 0.0022)); }
+  function rebuild3d(){
+    lastExag = uniforms.uExag.value;
+    const verts = [], hVerts = [], w = ribbonWidth();
+    const list = pts;
+    for (let i = 0; i < list.length - 1; i++){
+      pushRibbon(verts, list[i], list[i + 1], w, 0.0045);
+      pushRibbon(hVerts, list[i], list[i + 1], w * 1.9, 0.0035);
+    }
+    if (mode === 'area' && list.length >= 3){
+      pushRibbon(verts, list[list.length - 1], list[0], w, 0.0045);
+      pushRibbon(hVerts, list[list.length - 1], list[0], w * 1.9, 0.0035);
+    }
+    lineGeo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+    lineGeo.computeBoundingSphere();
+    lineObj.visible = verts.length >= 9;
+    haloGeo.setAttribute('position', new THREE.Float32BufferAttribute(hVerts, 3));
+    haloGeo.computeBoundingSphere();
+    haloObj.visible = hVerts.length >= 9;
+
+    const pVerts = [];
+    for (const p of list){ const v = toDrapeVec(p.lon, p.lat, 0.006); pVerts.push(v[0], v[1], v[2]); }
+    pinGeo.setAttribute('position', new THREE.Float32BufferAttribute(pVerts, 3));
+    pinGeo.computeBoundingSphere();
+    pinObj.visible = pVerts.length > 0;
+
+    if (mode === 'area' && list.length >= 3){
+      const polyV = [];
+      const p0 = toDrapeVec(list[0].lon, list[0].lat, 0.0025);
+      for (let i = 1; i < list.length - 1; i++){
+        const p1 = toDrapeVec(list[i].lon, list[i].lat, 0.0025);
+        const p2 = toDrapeVec(list[i + 1].lon, list[i + 1].lat, 0.0025);
+        polyV.push(p0[0], p0[1], p0[2], p1[0], p1[1], p1[2], p2[0], p2[1], p2[2]);
+      }
+      polyGeo.setAttribute('position', new THREE.Float32BufferAttribute(polyV, 3));
+      polyGeo.computeBoundingSphere();
+      polyObj.visible = true;
+    } else {
+      polyObj.visible = false;
+    }
+    rebuildPreview();
+  }
+  function rebuildPreview(){
+    if (!active || !preview || !pts.length || haversineKm(pts[pts.length - 1].lon, pts[pts.length - 1].lat, preview.lon, preview.lat) < 0.05){ prevObj.visible = false; return; }
+    const pv = [], w = ribbonWidth() * 0.78;
+    pushRibbon(pv, pts[pts.length - 1], preview, w, 0.0042);
+    if (mode === 'area' && pts.length >= 2) pushRibbon(pv, preview, pts[0], w, 0.0042);
+    prevGeo.setAttribute('position', new THREE.Float32BufferAttribute(pv, 3));
+    prevGeo.computeBoundingSphere();
+    prevObj.visible = pv.length >= 9;
+  }
+  function drawProfile(prof){
+    if (!profCanvas || !profWrap) return;
+    if (prof.samples.length < 2){ profWrap.hidden = true; return; }
+    profWrap.hidden = false;
+    const dpr = Math.min(2, devicePixelRatio || 1);
+    const w = profCanvas.clientWidth || 248, h = profCanvas.clientHeight || 72;
+    if (profCanvas.width !== Math.round(w*dpr) || profCanvas.height !== Math.round(h*dpr)){
+      profCanvas.width = Math.round(w*dpr); profCanvas.height = Math.round(h*dpr);
+    }
+    const ctx = profCanvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    const padT = 8, padB = 14, padL = 2, padR = 2;
+    const iw = w - padL - padR, ih = h - padT - padB;
+    const lo = Math.max(0, Math.floor(prof.minH / 50) * 50);
+    const hi = Math.max(lo + 100, Math.ceil(prof.maxH / 50) * 50);
+    const accent = css('--accent') || '#4c8df2';
+    const muted = css('--muted') || '#8f9eb8';
+    const line = css('--line') || 'rgba(255,255,255,.15)';
+
+    // Subtle horizontal gridlines
+    ctx.strokeStyle = line; ctx.lineWidth = 1;
+    for (let g = 0; g <= 2; g++){
+      const y = padT + ih * (g / 2);
+      ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(w - padR, y); ctx.stroke();
+    }
+    // Area fill + elevation curve
+    const grad = ctx.createLinearGradient(0, padT, 0, padT + ih);
+    grad.addColorStop(0, accent); grad.addColorStop(1, 'transparent');
+    ctx.beginPath();
+    prof.samples.forEach((s, i) => {
+      const x = padL + (s.km / Math.max(1e-6, prof.totalKm)) * iw;
+      const y = padT + ih - ((s.h - lo) / (hi - lo)) * ih;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.strokeStyle = accent; ctx.lineWidth = 2; ctx.stroke();
+    ctx.lineTo(padL + iw, padT + ih); ctx.lineTo(padL, padT + ih); ctx.closePath();
+    ctx.globalAlpha = 0.24; ctx.fillStyle = grad; ctx.fill(); ctx.globalAlpha = 1;
+
+    // Labels
+    ctx.fillStyle = muted; ctx.font = '500 9.5px ui-monospace, Menlo, monospace';
+    ctx.fillText(Math.round(prof.maxH) + ' м', padL + 3, padT + 9);
+    ctx.fillText('0 км', padL + 3, h - 2);
+    const endTxt = fmt(prof.totalKm, prof.totalKm >= 100 ? 0 : 1) + ' км';
+    ctx.fillText(endTxt, w - padR - ctx.measureText(endTxt).width - 2, h - 2);
+    if (profMeta) profMeta.textContent = '▲ ' + Math.round(prof.gain) + ' м · ▼ ' + Math.round(prof.loss) + ' м';
+  }
+  function updateUI(){
+    if (!panel) return;
+    const usePrev = !!(preview && active && pts.length && haversineKm(pts[pts.length - 1].lon, pts[pts.length - 1].lat, preview.lon, preview.lat) >= 0.05);
+    const list = usePrev ? pts.concat([preview]) : pts;
+    elPts.textContent = String(pts.length);
+    if (btnUndo) btnUndo.disabled = pts.length === 0;
+    if (btnClear) btnClear.disabled = pts.length === 0;
+    const isArea = mode === 'area';
+    if (elLenLbl) elLenLbl.textContent = isArea ? 'Периметр' : 'Відстань';
+    if (elAzLbl) elAzLbl.hidden = isArea;
+    if (elAz) elAz.hidden = isArea;
+    if (elAreaLbl) elAreaLbl.hidden = !isArea;
+    if (elAreaVal) elAreaVal.hidden = !isArea;
+    if (elHint){
+      if (!pts.length) elHint.textContent = isArea ? 'Поставте щонайменше 3 точки для розрахунку площі' : 'Клікайте по карті, щоб виміряти відстань і профіль';
+      else if (isArea && pts.length < 3) elHint.textContent = 'Додайте ще ' + (3 - pts.length) + ' т. для замикання контуру';
+      else elHint.textContent = 'Клік — нова точка · Backspace — назад · Esc — вихід';
+    }
+    if (list.length < 2){
+      elLen.textContent = '—'; elAz.textContent = '—'; elAreaVal.textContent = '—';
+      elElev.textContent = pts.length === 1 ? Math.round(pts[0].h) + ' м' : '—';
+      if (profWrap) profWrap.hidden = true;
+      return;
+    }
+    const loopList = isArea && list.length >= 3 ? list.concat([list[0]]) : list;
+    const prof = buildElevationProfile(loopList, sampleH, 96);
+    elLen.textContent = fmt(prof.totalKm, prof.totalKm >= 100 ? 1 : 2) + ' км';
+    const a = list[list.length - 2], b = list[list.length - 1];
+    const az = bearingDeg(a.lon, a.lat, b.lon, b.lat);
+    elAz.textContent = Math.round(az) + '° (' + compassDirUk(az) + ')';
+    elElev.textContent = Math.round(prof.minH) + ' → ' + Math.round(prof.maxH) + ' м';
+    if (isArea && list.length >= 3){
+      const km2 = polygonAreaKm2(list);
+      elAreaVal.textContent = km2 >= 100 ? Math.round(km2).toLocaleString('uk-UA') + ' км²' : fmt(km2, 2) + ' км²';
+    } else {
+      elAreaVal.textContent = '—';
+    }
+    drawProfile(prof);
+  }
+  function setMode(m){
+    mode = m === 'area' ? 'area' : 'dist';
+    if (btnDist) setPressed(btnDist, mode === 'dist');
+    if (btnArea) setPressed(btnArea, mode === 'area');
+    rebuild3d(); updateUI();
+  }
+  function toggle(on){
+    if (EMBED || !panel || !btnMeas) return;
+    active = on === undefined ? !active : !!on;
+    panel.hidden = !active;
+    setPressed(btnMeas, active);
+    btnMeas.setAttribute('aria-expanded', String(active));
+    document.body.classList.toggle('measuring', active);
+    if (active){
+      togglePop(false); togglePop2(false); togglePop3(false); togglePopHd(false);
+      if (controls.autoRotate){ controls.autoRotate = false; setPressed(btnRot, false); }
+      rebuild3d(); updateUI();
+    } else {
+      preview = null; rebuildPreview();
+    }
+  }
+  function addPoint(g){
+    if (!g) return;
+    pts.push({lon:g.lon, lat:g.lat, h:g.h});
+    rebuild3d(); updateUI();
+  }
+  function undo(){ if (!pts.length) return; pts.pop(); rebuild3d(); updateUI(); }
+  function clear(){ pts.length = 0; preview = null; rebuild3d(); updateUI(); }
+  function setPreview(g){
+    preview = g;
+    if (active && pts.length){ rebuildPreview(); updateUI(); }
+  }
+  function syncExag(){ if (pts.length && Math.abs(uniforms.uExag.value - lastExag) > 1e-4) rebuild3d(); }
+
+  if (btnMeas) btnMeas.addEventListener('click', () => toggle());
+  if (btnClose) btnClose.addEventListener('click', () => toggle(false));
+  if (btnDist) btnDist.addEventListener('click', () => setMode('dist'));
+  if (btnArea) btnArea.addEventListener('click', () => setMode('area'));
+  if (btnUndo) btnUndo.addEventListener('click', undo);
+  if (btnClear) btnClear.addEventListener('click', clear);
+
+  // Clean click detection (pan/drag > 5px is ignored so camera navigation still works while measuring)
+  let pDown = null;
+  renderer.domElement.addEventListener('pointerdown', e => { pDown = e.button === 0 ? {x:e.clientX, y:e.clientY} : null; });
+  renderer.domElement.addEventListener('pointerup', e => {
+    if (!active || !pDown || e.button !== 0) { pDown = null; return; }
+    const moved = Math.hypot(e.clientX - pDown.x, e.clientY - pDown.y);
+    pDown = null;
+    if (moved > 5) return;
+    const pt = new THREE.Vector2(e.clientX/innerWidth*2 - 1, -(e.clientY/innerHeight)*2 + 1);
+    const g = pickGeo(pt);
+    if (g) addPoint(g);
+  });
+  // Double-click on terrain flies smoothly closer when not measuring
+  renderer.domElement.addEventListener('dblclick', e => {
+    if (active || EMBED || !ready) return;
+    const pt = new THREE.Vector2(e.clientX/innerWidth*2 - 1, -(e.clientY/innerHeight)*2 + 1);
+    const g = pickGeo(pt);
+    if (!g) return;
+    const t = new THREE.Vector3(g.x, g.h*SCALE*targetExag, g.z);
+    const curD = camera.position.distanceTo(controls.target);
+    const nextD = Math.max(0.22, curD * 0.42);
+    const dir = camera.position.clone().sub(controls.target).normalize();
+    flyTo = {from:camera.position.clone(), to:t.clone().add(dir.multiplyScalar(nextD)), tFrom:controls.target.clone(), tTo:t, t0:performance.now(), dur:850};
+    if (controls.autoRotate){ controls.autoRotate = false; setPressed(btnRot, false); }
+  });
+  document.addEventListener('keydown', e => {
+    if (EMBED) return;
+    const tag = document.activeElement && document.activeElement.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    if (e.key === 'm' || e.key === 'M' || e.key === 'ь' || e.key === 'Ь'){ toggle(); }
+    else if (active && (e.key === 'Backspace' || (e.key === 'z' && (e.metaKey || e.ctrlKey)))){ e.preventDefault(); undo(); }
+    else if (active && e.key === 'Escape'){ toggle(false); }
+  });
+
+  return {get active(){ return active; }, toggle, addPoint, undo, clear, setMode, setPreview, syncExag, get points(){ return pts; }};
+})();
+
+// ---------- optional online HD satellite tile streaming (OFF by default — explicit user opt-in) ----------
+const HdTiles = (() => {
+  const hdOnEl = $('hd-on'), hdSrcEl = $('hd-src'), hdStatusEl = $('hd-status');
+  const hdKeyWrap = $('hd-key-wrap'), hdKeyEl = $('hd-key'), hdKeySave = $('hd-key-save'), hdKeyClear = $('hd-key-clear');
+  const satSrcEl = $('sat-src');
+  const hdGroup = new THREE.Group();
+  hdGroup.visible = false;
+  scene.add(hdGroup);
+
+  let enabled = false;
+  let sourceId = 'esri';
+  let apiKey = '';
+  let session = null, sessionKey = '', sessionExpiry = 0, sessionPromise = null, lastErr = '';
+  const tiles = new Map();       // key -> {key, z, mesh, state, lastUsed, ac}
+  let inflight = 0, curZ = 0, frameTick = 0;
+  const MAX_TILES = isMobile ? 16 : 36;
+  const MAX_INFLIGHT = 6;
+
+  try {
+    const savedSrc = localStorage.getItem('ukr3d.hdSrc');
+    if (savedSrc && HD_SOURCES[savedSrc]) sourceId = savedSrc;
+    apiKey = (localStorage.getItem('ukr3d.googleKey') || '').trim();
+  } catch (e) {}
+
+  function source(){ return HD_SOURCES[sourceId] || HD_SOURCES.esri; }
+  function updateAttr(){
+    if (!satSrcEl) return;
+    satSrcEl.textContent = enabled ? source().attr : 'Esri World Imagery';
+  }
+  function setStatus(msg, isErr = false){
+    if (!hdStatusEl) return;
+    hdStatusEl.textContent = msg;
+    hdStatusEl.dataset.state = isErr ? 'error' : enabled ? 'ok' : '';
+  }
+  function refreshStatus(){
+    if (btnHd) setPressed(btnHd, enabled);
+    if (!enabled){ setStatus('Офлайн · 0 запитів'); return; }
+    if (lastErr){ setStatus(lastErr, true); return; }
+    const src = source();
+    if (src.needsKey && !apiKey){ setStatus('Вкажіть Google API-ключ', true); return; }
+    if (src.needsKey && !session){ setStatus('Підключення до Google Maps…'); return; }
+    if (curZ === 0){ setStatus(src.id === 'google' ? 'Google HD · наблизьте карту' : 'Esri HD · наблизьте карту'); return; }
+    let readyCount = 0;
+    for (const t of tiles.values()) if (t.state === 'ready') readyCount++;
+    const tag = src.id === 'google' ? 'Google HD' : src.id === 'esri_clarity' ? 'Clarity HD' : 'Esri HD';
+    setStatus(`${tag} · z${curZ} · ${readyCount} тайлів`);
+  }
+  function dropTile(t){
+    if (t.ac){ try { t.ac.abort(); } catch (e) {} t.ac = null; }
+    if (t.mesh){
+      hdGroup.remove(t.mesh);
+      dropTex(t.mesh.material.uniforms.uSat.value);
+      t.mesh.geometry.dispose();
+      t.mesh.material.dispose();
+      t.mesh = null;
+    }
+    tiles.delete(t.key);
+  }
+  function clearTiles(){
+    for (const t of Array.from(tiles.values())) dropTile(t);
+    inflight = 0; curZ = 0; lastErr = '';
+  }
+  async function ensureSession(){
+    const src = source();
+    if (!src.needsKey) return true;
+    if (!apiKey){ lastErr = 'Вкажіть Google API-ключ'; refreshStatus(); return false; }
+    if (session && sessionKey === apiKey && Date.now() < sessionExpiry - 60000) return true;
+    if (sessionPromise) return sessionPromise;
+    sessionPromise = (async () => {
+      try {
+        lastErr = ''; refreshStatus();
+        const r = await fetch(src.sessionUrl(apiKey), {
+          method:'POST', mode:'cors',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify(src.sessionBody())
+        });
+        if (!r.ok){
+          const txt = await r.text().catch(() => '');
+          throw new Error(r.status === 403 || r.status === 401 ? 'Ключ відхилено (' + r.status + ')' : 'Помилка Google API (' + r.status + ')' + (txt ? '' : ''));
+        }
+        const data = await r.json();
+        if (!data || !data.session) throw new Error('Немає токена сесії Google');
+        session = data.session;
+        sessionKey = apiKey;
+        sessionExpiry = data.expiry ? Number(data.expiry) * 1000 : Date.now() + 3600 * 1000;
+        lastErr = '';
+        refreshStatus();
+        return true;
+      } catch (err) {
+        session = null;
+        lastErr = err && err.message ? err.message : 'Не вдалося створити сесію Google';
+        refreshStatus();
+        return false;
+      } finally {
+        sessionPromise = null;
+      }
+    })();
+    return sessionPromise;
+  }
+  async function loadTile(spec){
+    const src = source();
+    const url = src.tileUrl(spec.z, spec.x, spec.y, {session, apiKey});
+    if (!url) return;
+    const ac = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const entry = {key:spec.key, z:spec.z, mesh:null, state:'loading', lastUsed:frameTick, ac};
+    tiles.set(spec.key, entry);
+    inflight++;
+    try {
+      const res = await fetch(url, {mode:'cors', signal:ac ? ac.signal : undefined});
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const blob = await res.blob();
+      if (tiles.get(spec.key) !== entry || !enabled) return;
+      const img = await blobImage(blob);
+      if (tiles.get(spec.key) !== entry || !enabled) return;
+      const tex = imageTexture(img, 'HD z' + spec.z);
+      const g = core.buildGrid(spec.bbox, 12, 12, true);
+      const lift = 0.72 + (spec.z - 10) * 0.04;
+      const mesh = new THREE.Mesh(gridGeometry(g), patchMaterial(tex, 3, lift, spec.bbox));
+      mesh.position.set(g.origin[0], 0, g.origin[1]);
+      mesh.renderOrder = spec.z - 10;
+      entry.mesh = mesh; entry.state = 'ready'; entry.ac = null;
+      hdGroup.add(mesh);
+      lastErr = '';
+    } catch (err) {
+      if (entry.ac && entry.ac.signal && entry.ac.signal.aborted){ tiles.delete(spec.key); return; }
+      entry.state = 'error'; entry.ac = null;
+      if (tiles.get(spec.key) === entry) tiles.delete(spec.key);
+      if (!lastErr && enabled) lastErr = 'Немає доступу до тайлів (' + (err.message || 'мережа') + ')';
+    } finally {
+      inflight = Math.max(0, inflight - 1);
+      refreshStatus();
+    }
+  }
+  function update(){
+    hdGroup.visible = enabled && uniforms.uMode.value === MODE.sat;
+    if (!hdGroup.visible || !ready || EMBED) return;
+    frameTick++;
+    const src = source();
+    if (src.needsKey && !session){
+      if (apiKey && !sessionPromise && !lastErr) ensureSession();
+      return;
+    }
+    const z = pickHdZoom(camera.position.y, src.maxZoom, src.minZoom);
+    if (z !== curZ){ curZ = z; refreshStatus(); }
+    if (!z) return;
+    core.inv(controls.target.x, controls.target.z, _q);
+    const radius = z >= 15 ? 2 : 1;
+    const want = visibleTileSpecs(_q[0], _q[1], z, radius, META);
+    const keepKeys = new Set();
+    for (const s of want){
+      keepKeys.add(s.key);
+      const existing = tiles.get(s.key);
+      if (existing) existing.lastUsed = frameTick;
+    }
+    // Evict stale tiles from far-off zooms or beyond GPU tile cap
+    if (tiles.size > MAX_TILES){
+      const victims = Array.from(tiles.values())
+        .filter(t => !keepKeys.has(t.key))
+        .sort((a, b) => Math.abs(b.z - z) - Math.abs(a.z - z) || a.lastUsed - b.lastUsed);
+      while (tiles.size > MAX_TILES && victims.length) dropTile(victims.shift());
+    }
+    for (const t of Array.from(tiles.values())){
+      if (Math.abs(t.z - z) > 2 && t.state !== 'loading') dropTile(t);
+    }
+    for (const s of want){
+      if (inflight >= MAX_INFLIGHT) break;
+      if (tiles.has(s.key)) continue;
+      loadTile(s);
+    }
+  }
+  function syncKeyUI(){
+    const isGoogle = sourceId === 'google';
+    if (hdKeyWrap) hdKeyWrap.hidden = !isGoogle;
+    if (hdKeyEl && document.activeElement !== hdKeyEl) hdKeyEl.value = apiKey;
+  }
+  function setEnabled(on){
+    enabled = !!on;
+    if (hdOnEl) hdOnEl.checked = enabled;
+    lastErr = '';
+    if (!enabled) clearTiles();
+    else if (source().needsKey) ensureSession();
+    hdGroup.visible = enabled && uniforms.uMode.value === MODE.sat;
+    updateAttr(); refreshStatus();
+  }
+  function setSource(id){
+    if (!HD_SOURCES[id]) return;
+    sourceId = id;
+    if (hdSrcEl) hdSrcEl.value = id;
+    try { localStorage.setItem('ukr3d.hdSrc', id); } catch (e) {}
+    clearTiles(); syncKeyUI(); updateAttr();
+    if (enabled && source().needsKey) ensureSession();
+    refreshStatus();
+  }
+
+  if (btnHd && popHd){
+    btnHd.addEventListener('click', () => togglePopHd(popHd.hidden));
+    document.addEventListener('pointerdown', e => { if (!popHd.hidden && !popHd.contains(e.target) && e.target !== btnHd) togglePopHd(false); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && !popHd.hidden) togglePopHd(false); });
+  }
+  if (hdOnEl) hdOnEl.addEventListener('change', () => setEnabled(hdOnEl.checked));
+  if (hdSrcEl){ hdSrcEl.value = sourceId; hdSrcEl.addEventListener('change', () => setSource(hdSrcEl.value)); }
+  if (hdKeySave) hdKeySave.addEventListener('click', () => {
+    apiKey = (hdKeyEl ? hdKeyEl.value : '').trim();
+    try { apiKey ? localStorage.setItem('ukr3d.googleKey', apiKey) : localStorage.removeItem('ukr3d.googleKey'); } catch (e) {}
+    session = null; lastErr = ''; clearTiles();
+    if (enabled && source().needsKey) ensureSession();
+    refreshStatus();
+  });
+  if (hdKeyClear) hdKeyClear.addEventListener('click', () => {
+    apiKey = ''; if (hdKeyEl) hdKeyEl.value = '';
+    try { localStorage.removeItem('ukr3d.googleKey'); } catch (e) {}
+    session = null; lastErr = ''; clearTiles(); refreshStatus();
+  });
+  syncKeyUI(); updateAttr(); refreshStatus();
+  return {update, setEnabled, setSource, clear:clearTiles, get active(){ return enabled; }, get count(){ return tiles.size; }};
+})();
 
 // ---------- loop ----------
 let ready = false, startTime = 0, frame = 0, introDone = false, lastNow = performance.now();
@@ -1250,13 +2044,25 @@ function tick(now){
     const t = Math.min(1, (now-startTime)/2600);
     if (t < 1){ const k = ease(t); camera.position.lerpVectors(new THREE.Vector3(-2,36,44), HOME.pos, k); uniforms.uExag.value = 0.001 + (targetExag-0.001)*ease(Math.min(1, Math.max(0,(t-0.25)/0.75))); }
     else { if (!introDone){ introDone = true; camera.position.copy(HOME.pos); } uniforms.uExag.value += (targetExag - uniforms.uExag.value)*0.12; }
-  } else if (ready) uniforms.uExag.value = targetExag;
-  if (flyTo){ const k = ease(Math.min(1,(now-flyTo.t0)/900)); camera.position.lerpVectors(flyTo.from, flyTo.to, k); controls.target.lerpVectors(flyTo.tFrom, flyTo.tTo, k); if (k >= 1) flyTo = null; }
+  } else if (ready) uniforms.uExag.value += (targetExag - uniforms.uExag.value)*0.18;
+  if (!reduced) uniforms.uTime.value = now * 0.001;
+  if (flyTo){
+    const dur = flyTo.dur || 950;
+    const raw = Math.min(1, (now - flyTo.t0) / dur);
+    const k = raw < 0.5 ? 4*raw*raw*raw : 1 - Math.pow(-2*raw + 2, 3)/2;
+    const arc = Math.sin(raw * Math.PI) * Math.min(2.4, flyTo.from.distanceTo(flyTo.to) * 0.16);
+    camera.position.lerpVectors(flyTo.from, flyTo.to, k);
+    camera.position.y += arc;
+    controls.target.lerpVectors(flyTo.tFrom, flyTo.tTo, k);
+    if (raw >= 1) flyTo = null;
+  }
   controls.update();
   core.inv(controls.target.x, controls.target.z, _q); tgtP = toPlate(_q[0], _q[1]);
   updateChunks();
   if (CITY3D.length) updateCities();
   updateRegions();
+  HdTiles.update();
+  Measure.syncExag();
   Labels.update(dt, camera.position.distanceTo(controls.target), uniforms.uExag.value, labelsOn && ready, bordersOn);
   if ((frame++ & 1) === 0) pick();
   const t1 = performance.now();
@@ -1264,7 +2070,7 @@ function tick(now){
   Perf.frame(frameMs, t1 - t0, performance.now() - t1);
 }
 requestAnimationFrame(tick);
-window.__ukr = {REGIONS, CITY3D, camera, controls, renderer, scene, toWorld, chunks, Labels, layers:Layers, reloadLayer, perf:() => Perf.read(), geo:Geo};   // debug hook
+window.__ukr = {REGIONS, CITY3D, camera, controls, renderer, scene, toWorld, chunks, Labels, Measure, HdTiles, seaMesh, layers:Layers, reloadLayer, perf:() => Perf.read(), geo:Geo};   // debug hook
 addEventListener('resize', () => { camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); Labels.material.uniforms.uView.value.set(innerWidth, innerHeight); });
 
 // ---------- вбудований режим: точки DPI з вікна модуля (ПС / РВ) ----------

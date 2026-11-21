@@ -20,7 +20,8 @@ test('launcher opens both branch modules as same-origin pages', async () => {
   const html = await read('index.html');
   assert.match(html, /<iframe class="module-frame" id="frame-air"/);
   assert.match(html, /<iframe class="module-frame" id="frame-rocket"/);
-  assert.match(html, /const MODULE_SRC = \{air:'\.\/air\.html', rocket:'\.\/rocket\.html', artillery:'\.\/artillery\.html', pvk:'\.\/air\.html\?command=pvk', dshv:'\.\/rocket\.html\?command=dshv', custom:'\.\/custom\.html', army:'\.\/air\.html\?module=army'\};/);
+  assert.match(html, /<iframe class="module-frame" id="frame-map"/);
+  assert.match(html, /const MODULE_SRC = \{air:'\.\/air\.html', rocket:'\.\/rocket\.html', artillery:'\.\/artillery\.html', pvk:'\.\/air\.html\?command=pvk', dshv:'\.\/rocket\.html\?command=dshv', custom:'\.\/custom\.html', army:'\.\/air\.html\?module=army', map:'\.\/map\.html'\};/);
   assert.match(html, /frame\.src = MODULE_SRC\[branch\];/);
   assert.doesNotMatch(html, /application\/x-easywar-module/, 'base64 module payloads must not be shipped');
   assert.doesNotMatch(html, /\.srcdoc\s*=/);
@@ -179,6 +180,8 @@ test('start screen is neutral and fits 16:9 / 16:10 monitors; tile grids are bal
   const html = await read('index.html');
   assert.match(html, /<style id="easywar-start-wide">[\s\S]*?min-aspect-ratio:3\/2[\s\S]*?repeat\(4,minmax\(0,1fr\)\)/, 'four cards in one row on wide monitors');
   assert.match(html, /function fitStart\(\)[\s\S]*?box\.style\.zoom/, 'start box is scaled down instead of scrolling');
+  assert.match(html, /<style id="easywar-start-refresh">[\s\S]*?@media \(prefers-reduced-motion: reduce\)[\s\S]*?animation: none !important/, 'start refresh respects reduced motion');
+  assert.match(html, /<style id="easywar-start-refresh">[\s\S]*?\.branch-card\.branch-card-soon:not\(\.branch-card-live\)[\s\S]*?border-style: dashed/, 'unavailable start cards have a distinct disabled state');
   for (const page of ['air.html', 'rocket.html']) {
     const doc = await read(page);
     assert.match(doc, /<style id="easywar-kpi-balance">[\s\S]*?nth-child\(6\):last-child[\s\S]*?repeat\(3/, `${page}: six tiles lay out as 3×2`);

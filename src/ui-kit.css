@@ -8,30 +8,69 @@
  */
 
 :root {
-  --ew-r: 14px;
+  --ew-r: 16px;
   --ew-r-sm: 10px;
   --ew-accent: var(--accent, #3d9bff);
-  --ew-card: color-mix(in srgb, var(--surface, #0e1a2e) 94%, #000 6%);
-  --ew-card-hi: color-mix(in srgb, var(--surface-2, #122340) 70%, var(--surface, #0e1a2e));
-  --ew-line: color-mix(in srgb, var(--ew-accent) 16%, var(--line, #1b2c47));
-  --ew-line-hi: color-mix(in srgb, var(--ew-accent) 42%, var(--line, #1b2c47));
-  --ew-glow: color-mix(in srgb, var(--ew-accent) 26%, transparent);
-  --ew-shadow: 0 1px 0 rgba(255, 255, 255, .035) inset, 0 10px 30px rgba(0, 0, 0, .18);
-  --ew-shadow-hi: 0 1px 0 rgba(255, 255, 255, .05) inset, 0 18px 44px rgba(0, 0, 0, .3);
+  --ew-card: color-mix(in srgb, var(--surface, #0e1a2e) 90%, #050a14 10%);
+  --ew-card-hi: color-mix(in srgb, var(--surface-2, #122340) 76%, var(--surface, #0e1a2e));
+  --ew-line: color-mix(in srgb, var(--ew-accent) 18%, var(--line, #1b2c47));
+  --ew-line-hi: color-mix(in srgb, var(--ew-accent) 48%, var(--line, #1b2c47));
+  --ew-glow: color-mix(in srgb, var(--ew-accent) 28%, transparent);
+  --ew-shadow: 0 1px 0 rgba(255, 255, 255, .055) inset, 0 12px 32px rgba(0, 0, 0, .24);
+  --ew-shadow-hi: 0 1px 0 rgba(255, 255, 255, .085) inset, 0 20px 48px rgba(0, 0, 0, .38), 0 0 24px color-mix(in srgb, var(--ew-accent) 10%, transparent);
   --ew-ease: cubic-bezier(.22, 1, .36, 1);
   --ew-ease-io: cubic-bezier(.65, 0, .35, 1);
   --ew-t-fast: .18s;
-  --ew-t: .42s;
+  --ew-t: .38s;
   --ew-t-slow: .8s;
 }
 :root[data-theme="light"] {
-  --ew-card: var(--surface, #fff);
+  --ew-card: color-mix(in srgb, var(--surface, #fff) 94%, #f4f7fa 6%);
   --ew-card-hi: var(--surface-2, #f2f6f4);
-  --ew-line: color-mix(in srgb, var(--ew-accent) 14%, var(--line, #cfd8d4));
-  --ew-line-hi: color-mix(in srgb, var(--ew-accent) 40%, var(--line, #cfd8d4));
-  --ew-glow: color-mix(in srgb, var(--ew-accent) 16%, transparent);
-  --ew-shadow: 0 1px 2px rgba(20, 32, 28, .06);
-  --ew-shadow-hi: 0 14px 34px rgba(20, 32, 28, .14);
+  --ew-line: color-mix(in srgb, var(--ew-accent) 16%, var(--line, #cfd8d4));
+  --ew-line-hi: color-mix(in srgb, var(--ew-accent) 44%, var(--line, #cfd8d4));
+  --ew-glow: color-mix(in srgb, var(--ew-accent) 18%, transparent);
+  --ew-shadow: 0 1px 0 rgba(255, 255, 255, .85) inset, 0 4px 16px rgba(18, 30, 44, .06);
+  --ew-shadow-hi: 0 1px 0 rgba(255, 255, 255, .95) inset, 0 16px 36px rgba(18, 30, 44, .12);
+}
+
+/* ---------- Tactical Glass: верхня смуга й поверхні ---------- */
+.appbar {
+  backdrop-filter: blur(16px) saturate(1.22);
+  -webkit-backdrop-filter: blur(16px) saturate(1.22);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--ew-accent) 14%, transparent), 0 8px 24px rgba(0, 0, 0, .14);
+}
+:root[data-theme="light"] .appbar {
+  box-shadow: 0 1px 0 var(--ew-line), 0 6px 20px rgba(18, 30, 44, .06);
+}
+.dpanel, .panel, .pvk-metric, .pvk-journal-card, .pvk-section, .pvk-kpi, .ud-card, .ud-kpi {
+  transition: border-color var(--ew-t-fast) ease, box-shadow var(--ew-t) var(--ew-ease), transform var(--ew-t) var(--ew-ease);
+}
+.pvk-metric:hover, .pvk-kpi:hover, .ud-kpi:hover {
+  border-color: var(--ew-line-hi);
+  box-shadow: var(--ew-shadow-hi);
+}
+.btn {
+  transition: border-color var(--ew-t-fast) ease, background var(--ew-t-fast) ease, box-shadow var(--ew-t-fast) ease, transform var(--ew-t-fast) ease;
+}
+.btn:hover:not(:disabled) {
+  border-color: var(--ew-line-hi);
+}
+.btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.dmain > .toolbar {
+  backdrop-filter: blur(14px) saturate(1.18);
+  -webkit-backdrop-filter: blur(14px) saturate(1.18);
+}
+html[data-motion="off"] .dpanel,
+html[data-motion="off"] .panel,
+html[data-motion="off"] .btn,
+html[data-motion="off"] .pvk-metric,
+html[data-motion="off"] .pvk-kpi,
+html[data-motion="off"] .ud-kpi {
+  transition: none !important;
+  transform: none !important;
 }
 
 /* ---------- Каркас сторінки: рівний фон, однакові відступи ---------- */

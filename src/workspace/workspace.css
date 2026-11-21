@@ -30,20 +30,20 @@ button:disabled{cursor:not-allowed}
 .ws-screen[hidden],.ws-workspace[hidden],.ws-confirm[hidden],.ws-state-area[hidden],.ws-filename[hidden],.ws-dirty-dot[hidden]{display:none}
 
 /* Верхня смуга */
-.ws-topbar{flex:none;height:72px;min-height:72px;display:flex;align-items:center;gap:16px;padding:0 32px;border-bottom:1px solid var(--line-2);background:var(--panel)}
+.ws-topbar{flex:none;height:72px;min-height:72px;display:flex;align-items:center;gap:16px;padding:0 32px;border-bottom:1px solid var(--line-2);background:color-mix(in srgb,var(--panel) 84%,transparent);backdrop-filter:blur(16px) saturate(1.22);-webkit-backdrop-filter:blur(16px) saturate(1.22);box-shadow:0 1px 0 rgba(255,255,255,.04) inset,0 8px 26px rgba(0,0,0,.22)}
 .ws-topbar-home{justify-content:space-between;padding-inline:44px}
 .ws-topbar-title,.ws-eyebrow,.ws-card-type,.ws-card-formats,.ws-state-eyebrow,.ws-loading-steps,.ws-card-action{font-family:var(--mono);font-weight:500}
 .ws-topbar-title{font-size:11px;line-height:16px;letter-spacing:.14em;color:var(--muted)}
 
 /* Кнопки */
-.ws-button{min-height:40px;display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:8px 15px;border:1px solid var(--interactive-line);border-radius:var(--radius-button);background:var(--raised);color:var(--text);font-size:14px;font-weight:600;line-height:20px;white-space:nowrap;transition:background var(--duration-fast) ease,border-color var(--duration-fast) ease,color var(--duration-fast) ease}
-.ws-button:hover{background:var(--editor);border-color:var(--accent)}
-.ws-button:active{background:var(--pressed);transition:none}
+.ws-button{min-height:40px;display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:8px 15px;border:1px solid var(--interactive-line);border-radius:var(--radius-button);background:linear-gradient(180deg,color-mix(in srgb,var(--raised) 92%,#fff 8%),var(--raised));color:var(--text);font-size:14px;font-weight:600;line-height:20px;white-space:nowrap;box-shadow:0 1px 0 rgba(255,255,255,.05) inset;transition:background var(--duration-fast) ease,border-color var(--duration-fast) ease,color var(--duration-fast) ease,box-shadow var(--duration-fast) ease,transform var(--duration-fast) ease}
+.ws-button:hover{background:var(--editor);border-color:var(--accent);box-shadow:0 6px 18px rgba(0,0,0,.22)}
+.ws-button:active{background:var(--pressed);transform:translateY(1px);transition:none}
 .ws-button:focus-visible,.ws-card:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
-.ws-button:disabled{background:var(--editor);color:var(--weak);border-color:var(--line-2)}
-.ws-button-quiet{background:transparent}
+.ws-button:disabled{background:var(--editor);color:var(--weak);border-color:var(--line-2);box-shadow:none}
+.ws-button-quiet{background:transparent;box-shadow:none}
 .ws-button-quiet:hover{background:var(--editor)}
-.ws-button-primary{background:var(--accent);border-color:var(--accent);color:var(--bg)}
+.ws-button-primary{background:linear-gradient(180deg,color-mix(in srgb,var(--accent) 88%,#fff 12%),var(--accent));border-color:var(--accent);color:var(--bg);box-shadow:0 6px 20px color-mix(in srgb,var(--accent) 28%,transparent)}
 .ws-button-primary:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
 .ws-button-primary:active{background:var(--accent-pressed);border-color:var(--accent-pressed)}
 .ws-button-danger{background:var(--danger);border-color:var(--danger);color:var(--bg)}
@@ -51,7 +51,7 @@ button:disabled{cursor:not-allowed}
 .ws-button-danger:active{background:var(--danger-pressed);border-color:var(--danger-pressed)}
 
 /* Головна «Офіс» */
-.ws-screen{min-height:100%}
+.ws-screen{min-height:100%;background:radial-gradient(60% 45% at 18% 0%,color-mix(in srgb,var(--accent) 10%,transparent),transparent 70%),var(--bg)}
 .ws-home-main{max-width:1216px;margin:0 auto;padding:80px 0}
 .ws-home-heading{max-width:760px}
 .ws-eyebrow,.ws-state-eyebrow{margin:0 0 18px;color:var(--accent);font-size:11px;line-height:16px;letter-spacing:.13em}
@@ -60,15 +60,15 @@ button:disabled{cursor:not-allowed}
 .ws-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;margin-top:44px}
 
 /* Картка застосунку */
-.ws-card{position:relative;display:flex;flex-direction:column;min-width:0;min-height:354px;width:100%;padding:28px 30px 26px;text-align:left;border:1px solid var(--interactive-line);border-radius:var(--radius-card);background:var(--panel);cursor:pointer;transition:background var(--duration-fast) ease,border-color var(--duration-fast) ease,box-shadow var(--duration-fast) ease,transform var(--duration-fast) ease}
-.ws-card:hover{background:var(--raised);border-color:var(--accent);box-shadow:var(--shadow-hover);transform:translateY(-2px)}
+.ws-card{position:relative;display:flex;flex-direction:column;min-width:0;min-height:354px;width:100%;padding:28px 30px 26px;text-align:left;border:1px solid color-mix(in srgb,var(--accent) 18%,var(--interactive-line));border-radius:var(--radius-card);background:linear-gradient(180deg,color-mix(in srgb,var(--accent) 5%,var(--panel)),var(--panel) 54%);box-shadow:0 1px 0 rgba(255,255,255,.06) inset,0 12px 32px rgba(0,0,0,.22);cursor:pointer;transition:background var(--duration-fast) ease,border-color var(--duration-fast) ease,box-shadow 240ms cubic-bezier(.22,1,.36,1),transform 240ms cubic-bezier(.22,1,.36,1)}
+.ws-card:hover{background:linear-gradient(180deg,color-mix(in srgb,var(--accent) 9%,var(--raised)),var(--raised) 60%);border-color:var(--accent);box-shadow:0 1px 0 rgba(255,255,255,.09) inset,0 20px 44px rgba(0,0,0,.34),0 0 26px color-mix(in srgb,var(--accent) 14%,transparent);transform:translateY(-3px)}
 .ws-card:hover .ws-card-action{color:var(--text)}
 .ws-card:hover .ws-card-arrow{transform:translateX(4px)}
 .ws-card:active{background:var(--card-pressed);box-shadow:none;transform:none;transition:none}
 .ws-card:focus-visible{border-color:var(--accent);background:var(--raised);outline:2px solid var(--accent);outline-offset:2px}
-.ws-card-spine{position:absolute;left:0;top:117px;width:3px;height:54px;background:var(--accent);border-radius:0 3px 3px 0}
+.ws-card-spine{position:absolute;left:0;top:117px;width:3px;height:54px;background:var(--accent);border-radius:0 3px 3px 0;box-shadow:0 0 12px color-mix(in srgb,var(--accent) 45%,transparent)}
 .ws-card-top{display:flex;align-items:center;justify-content:space-between;gap:12px}
-.ws-icon-tile{display:grid;place-items:center;width:70px;height:70px;flex:none;color:var(--accent);border:1px solid var(--line-2);border-radius:var(--radius-icon);background:var(--raised)}
+.ws-icon-tile{display:grid;place-items:center;width:70px;height:70px;flex:none;color:var(--accent);border:1px solid color-mix(in srgb,var(--accent) 26%,var(--line-2));border-radius:var(--radius-icon);background:radial-gradient(circle at 30% 20%,color-mix(in srgb,var(--accent) 16%,var(--raised)),var(--raised));box-shadow:0 1px 0 rgba(255,255,255,.06) inset}
 .ws-icon-tile svg,.ws-card-arrow svg,.ws-appbar-icon svg,.ws-state-symbol svg{display:block}
 .ws-card-type{font-size:11px;line-height:16px;letter-spacing:.1em;color:var(--muted);text-align:right}
 .ws-card-name{display:block;margin-top:33px;font-size:29px;line-height:36px;font-weight:600;letter-spacing:-.025em}
