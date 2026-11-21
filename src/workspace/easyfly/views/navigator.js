@@ -86,9 +86,7 @@ export function render(ctx) {
     root.replaceChildren();
     const tab = navSession.tab;
     const body = tab === 'calc' ? calcScreen() : docScreen(tab);
-    root.append(
-      el('p', { class: 'nv-sub' }, btn('Калькулятори', { onClick: () => ctx.go('calculators') })),
-      body, toastBox);
+    root.append(body, toastBox);
   };
   const switchTab = tab => { navSession.tab = tab; paint(); };
 
@@ -99,6 +97,7 @@ export function render(ctx) {
         type: 'button', class: 'nv-tab', role: 'tab', 'aria-selected': String(item.id === active),
         onClick: () => switchTab(item.id),
       }, item.label)),
+      el('button', { type: 'button', class: 'nv-tab', onClick: () => ctx.go('calculators') }, 'Калькулятори'),
       el('button', { type: 'button', class: 'nv-tab', onClick: () => ctx.go('timing') }, 'Хронометраж'),
       el('button', { type: 'button', class: 'nv-tab', onClick: () => ctx.go('sheet') }, 'Польотний лист'));
   }
@@ -459,7 +458,7 @@ export function render(ctx) {
       el('div', { class: 'ef-overview' },
         metric('км', snap.totalKm ? fmtInt(snap.totalKm) : '—'),
         metric('час', snap.airTimeMin == null ? '—' : (fmtDuration(snap.airTimeMin) || '—')),
-        metric('паливо', snap.routeFuelKg == null ? '—' : fmtInt(snap.routeFuelKg))));
+        metric('паливо, кг', snap.fuelKg == null ? '—' : fmtInt(snap.fuelKg))));
     return el('div', {},
       routeHero,
       header({ crumb: 'Новий розрахунок', title: 'Новий розрахунок', subtitle: '', actions }),
