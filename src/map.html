@@ -49,6 +49,7 @@
   <div class="group">
     <button class="tog" id="t-views" aria-pressed="false" aria-expanded="false" aria-controls="pop3">Ракурси</button>
     <button class="tog" id="t-hd" aria-pressed="false" aria-expanded="false" aria-controls="pop-hd" title="Опційне довантаження супутникових знімків високої чіткості (Esri / Google Maps)">HD-знімки</button>
+    <button class="tog" id="t-dimap" aria-pressed="false" aria-expanded="false" aria-controls="dimap-panel" title="Карта повітряних тривог DIMAP.LIVE у вікні (за вашою згодою) із синхронізацією областей">Тривоги · DIMAP</button>
     <button class="tog" id="t-water" aria-pressed="true">Вода</button>
     <button class="tog" id="t-meas" aria-pressed="false" aria-expanded="false" aria-controls="meas-panel" title="Вимірювання відстані, азимута, площі й профілю висот (M)">Вимір</button>
     <button class="tog" id="t-wire" aria-pressed="false">Сітка</button>
@@ -144,6 +145,23 @@
   <dl id="h-rows"></dl>
   <h3>Шари даних</h3>
   <ul id="h-layers"></ul>
+</aside>
+
+<aside id="dimap-panel" hidden aria-label="Карта тривог DIMAP.LIVE">
+  <header>
+    <h2>Тривоги · DIMAP.LIVE</h2>
+    <div class="dm-tools" id="dm-tools" hidden>
+      <select id="dm-mode" aria-label="Розділ DIMAP"></select>
+      <select id="dm-reg" aria-label="Область або місто"></select>
+      <button class="go" id="dm-sync" type="button" title="Взяти область під поточною 3D-камерою">◎</button>
+      <button class="go" id="dm-fly" type="button" title="Перелетіти на цю область на 3D-карті">→</button>
+      <button class="go" id="dm-reload" type="button" title="Оновити карту тривог">↻</button>
+      <a class="dm-ext" id="dm-open" target="_blank" rel="noopener noreferrer" title="Відкрити у новій вкладці">↗</a>
+      <button class="dm-off" id="dm-off" type="button" title="Вивантажити карту й скасувати згоду">Відкл.</button>
+    </div>
+    <button class="go" id="dm-close" type="button" aria-label="Закрити карту тривог">×</button>
+  </header>
+  <div id="dm-body"></div>
 </aside>
 
 <div id="loader"><div><b>Рельєф України</b><span id="l-msg">Завантаження висот…</span><i id="l-bar"></i></div></div>
