@@ -2037,8 +2037,8 @@ async fn collective_create_identity(
 }
 
 /// Створює захищений колектив, де власник — учасник цього профілю.
-#[allow(clippy::too_many_arguments)]
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn collective_create(
     webview: tauri::Webview,
     profiles: tauri::State<'_, LocalProfileStore>,
@@ -2142,8 +2142,8 @@ async fn collective_table_set(
 
 /// «Оновити таблицю»: стовпці й перевірені пакети змін таблиці колективу на цьому вузлі.
 /// Конверти відкриваються ключами епох, тому потрібен пароль профілю.
-#[allow(clippy::too_many_arguments)]
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn collective_table_read(
     webview: tauri::Webview,
     profiles: tauri::State<'_, LocalProfileStore>,
@@ -2164,8 +2164,8 @@ async fn collective_table_read(
         .map_err(|error| error.to_string())
 }
 
-#[allow(clippy::too_many_arguments)]
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn collective_invite_create(
     webview: tauri::Webview,
     profiles: tauri::State<'_, LocalProfileStore>,
@@ -2192,8 +2192,8 @@ async fn collective_invite_create(
         .map_err(|error| error.to_string())
 }
 
-#[allow(clippy::too_many_arguments)]
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn collective_join_request(
     webview: tauri::Webview,
     profiles: tauri::State<'_, LocalProfileStore>,
@@ -2220,8 +2220,8 @@ async fn collective_join_request(
         .map_err(|error| error.to_string())
 }
 
-#[allow(clippy::too_many_arguments)]
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn collective_invite_admit(
     webview: tauri::Webview,
     profiles: tauri::State<'_, LocalProfileStore>,
