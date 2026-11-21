@@ -180,3 +180,39 @@ export function syncImportText(got) {
   if (got.rejected) parts.push(`не пройшли перевірку й не збережені: ${got.rejected}`);
   return `Пакет прийнято: ${parts.join(', ')}.`;
 }
+
+// --- Ролі колективу, 6-значний код запрошення та колективне файлове середовище -------------
+
+export {
+  ROLES,
+  ROLE_KEYS,
+  ASSIGNABLE_ROLE_OPTIONS,
+  ALL_ROLE_OPTIONS,
+  FILE_KINDS,
+  FILE_KIND_OPTIONS,
+  AUDIT_ACTIONS,
+  normalizeRole,
+  roleLabel,
+  rolePermissions,
+  canAssignRole,
+  formatInviteCode,
+  parseInviteCode,
+  generateInviteCode,
+  createCollectiveWorkspace,
+  issueInviteCode,
+  redeemInviteCode,
+  assignMemberRole,
+  removeWorkspaceMember,
+  saveWorkspaceFile,
+  deleteWorkspaceFile,
+  mergeWorkspaceStates,
+  formatAuditLine,
+} from './collective-workspace-core.js';
+
+/** Підпис учасника з його роллю (Керівник / Молодший керівник / Користувач). */
+export function memberRoleLabel(member) {
+  if (member?.founder || member?.role === 'leader' || member?.role === 'owner') return 'Керівник';
+  if (member?.role === 'junior_leader' || member?.role === 'admin') return 'Молодший керівник';
+  return 'Користувач';
+}
+

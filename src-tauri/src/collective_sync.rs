@@ -161,12 +161,14 @@ pub struct CollectiveDetail {
     pub base44_accepted: bool,
 }
 
-/// Учасник за журналом складу: відбиток і ім'я, яке він вказав сам (якщо вказав).
+/// Учасник за журналом складу: відбиток, ім'я, яке він вказав сам (якщо вказав), і роль.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MemberSummary {
     pub fingerprint: String,
     pub name: Option<String>,
+    /// Роль у колективі: `leader`, `junior_leader` або `user`.
+    pub role: &'static str,
     /// Це ви (профіль цього вузла).
     pub me: bool,
     /// Перший запис `Join` журналу — той, хто створив колектив.
@@ -1460,11 +1462,17 @@ fn member_summary(
             .map(|bound| bound.member_id()),
         _ => None,
     });
+    let is_founder = founder.as_ref() == Some(member);
+    let role = membership
+        .member_role(member)
+        .map(|r| r.as_str())
+        .unwrap_or(if is_founder { "leader" } else { "user" });
     MemberSummary {
         fingerprint: fingerprint(member),
         name: membership.member_name(member).map(str::to_owned),
+        role,
         me: member == me,
-        founder: founder.as_ref() == Some(member),
+        founder: is_founder,
     }
 }
 
@@ -2504,12 +2512,14 @@ mod tests {
             MemberSummary {
                 fingerprint: owner_fp,
                 name: Some("Синтетик Власник".into()),
+                role: "leader",
                 me: false,
                 founder: true,
             },
             MemberSummary {
                 fingerprint: guest_fp,
                 name: Some("Синтетик Гість".into()),
+                role: "user",
                 me: true,
                 founder: false,
             },

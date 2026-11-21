@@ -11,7 +11,9 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use super::codec::{Reader, Writer};
 use super::envelope::{self, Envelope, SignedPayload};
 use super::epoch::{CollectiveId, EpochKey};
-use super::identity::{BoundMember, DeviceRecord, ExchangeBinding, MemberId, NameRecord};
+use super::identity::{
+    BoundMember, CollectiveRole, DeviceRecord, ExchangeBinding, MemberId, NameRecord, RoleRecord,
+};
 use super::{Reason, ID_LEN, KEY_LEN};
 
 /// Правило для операцій, створених до відкликання й доставлених після (підпитання JE-16):
@@ -265,6 +267,8 @@ pub enum MembershipRecord {
     Revoke(MemberId),
     /// Ім'я учасника, підписане ним самим; новіше (більший `issued_at`) замінює попереднє.
     SetName(NameRecord),
+    /// Призначення ролі учаснику (`JuniorLeader` або `User`), підписане Керівником чи Молодшим керівником.
+    SetRole(RoleRecord),
 }
 
 impl MembershipRecord {
@@ -274,6 +278,7 @@ impl MembershipRecord {
     const ADD_DEVICE: u8 = 4;
     const REVOKE: u8 = 5;
     const SET_NAME: u8 = 6;
+    const SET_ROLE: u8 = 7;
 
     /// Канонічне кодування для сховища (C3b): байт виду і поля фіксованої довжини.
     pub fn to_bytes(&self) -> Vec<u8> {
@@ -296,6 +301,9 @@ impl MembershipRecord {
             }
             MembershipRecord::SetName(record) => {
                 w.u8(Self::SET_NAME).fixed(&record.to_bytes());
+            }
+            MembershipRecord::SetRole(record) => {
+                w.u8(Self::SET_ROLE).fixed(&record.to_bytes());
             }
         }
         w.finish()
@@ -323,12 +331,17 @@ impl MembershipRecord {
                 let mut r = Reader::new(rest);
                 let member = r.fixed()?;
                 r.finish()?;
-                Ok(MembershipRecord::Revoke(member))
+                Ok(record_revoke(member))
             }
             Self::SET_NAME => Ok(MembershipRecord::SetName(NameRecord::from_bytes(rest)?)),
+            Self::SET_ROLE => Ok(MembershipRecord::SetRole(RoleRecord::from_bytes(rest)?)),
             _ => Err(Reason::Malformed),
         }
     }
+}
+
+fn record_revoke(member: MemberId) -> MembershipRecord {
+    MembershipRecord::Revoke(member)
 }
 
 /// Еталонна реалізація журналу складу в пам'яті (синтетична; для тестів і як зразок для
@@ -351,6 +364,10 @@ struct MemberState {
     devices: Vec<([u8; KEY_LEN], u64)>,
     /// Чинне ім'я і його `issued_at`.
     name: Option<(String, i64)>,
+    /// Чинна роль учасника (Керівник — творець колективу з першого `Join`, решта — `User` за замовчуванням).
+    role: CollectiveRole,
+    role_issued_at: i64,
+    is_founder: bool,
 }
 
 impl InMemoryMembership {
@@ -439,6 +456,7 @@ impl InMemoryMembership {
                 if self.members.contains_key(&bound.member_id()) {
                     return Err(Reason::BindingNotNewer);
                 }
+                let is_founder = self.members.is_empty();
                 self.members.insert(
                     bound.member_id(),
                     MemberState {
@@ -448,6 +466,13 @@ impl InMemoryMembership {
                         tables: Vec::new(),
                         devices: Vec::new(),
                         name: None,
+                        role: if is_founder {
+                            CollectiveRole::Leader
+                        } else {
+                            CollectiveRole::User
+                        },
+                        role_issued_at: 0,
+                        is_founder,
                     },
                 );
             }
@@ -501,6 +526,51 @@ impl InMemoryMembership {
                     return Err(Reason::BindingNotNewer);
                 }
                 state.name = Some((name.name.clone(), name.issued_at));
+            }
+            MembershipRecord::SetRole(role_rec) => {
+                let actor_state = self
+                    .members
+                    .get(&role_rec.actor_id)
+                    .ok_or(Reason::ExchangeNotBound)?;
+                if actor_state.revoked_at.is_some() {
+                    return Err(Reason::MemberRevoked);
+                }
+                role_rec.verify(actor_state.bound.public(), &self.collective_id)?;
+                let actor_role = actor_state.role;
+                let target_state = self
+                    .members
+                    .get(&role_rec.target_id)
+                    .ok_or(Reason::ExchangeNotBound)?;
+                if target_state.revoked_at.is_some() {
+                    return Err(Reason::MemberRevoked);
+                }
+                if target_state.is_founder
+                    || target_state.role == CollectiveRole::Leader
+                    || role_rec.role == CollectiveRole::Leader
+                    || role_rec.actor_id == role_rec.target_id
+                {
+                    return Err(Reason::NoWriteRight);
+                }
+                match actor_role {
+                    CollectiveRole::Leader => {}
+                    CollectiveRole::JuniorLeader => {
+                        if target_state.role == CollectiveRole::JuniorLeader
+                            || role_rec.role != CollectiveRole::User
+                        {
+                            return Err(Reason::NoWriteRight);
+                        }
+                    }
+                    CollectiveRole::User => return Err(Reason::NoWriteRight),
+                }
+                let target_state = self
+                    .members
+                    .get_mut(&role_rec.target_id)
+                    .ok_or(Reason::ExchangeNotBound)?;
+                if role_rec.issued_at <= target_state.role_issued_at {
+                    return Err(Reason::BindingNotNewer);
+                }
+                target_state.role = role_rec.role;
+                target_state.role_issued_at = role_rec.issued_at;
             }
         }
         self.log.push(record);
@@ -579,6 +649,16 @@ impl InMemoryMembership {
             .get(member)
             .and_then(|state| state.name.as_ref())
             .map(|(name, _)| name.as_str())
+    }
+
+    /// Призначення ролі учаснику, підписане Керівником або Молодшим керівником.
+    pub fn set_role(&mut self, record: &RoleRecord) -> Result<u64, Reason> {
+        self.append(MembershipRecord::SetRole(*record))
+    }
+
+    /// Чинна роль учасника в колективі (`Leader`, `JuniorLeader` або `User`).
+    pub fn member_role(&self, member: &MemberId) -> Option<CollectiveRole> {
+        self.members.get(member).map(|state| state.role)
     }
 
     /// Відкликання: новий запис і нова епоха (ADR, 2.3).
