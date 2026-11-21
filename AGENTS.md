@@ -23,6 +23,28 @@ See also `docs/PROJECT_CONTEXT.md` (project brief, glossary), `docs/WORKFLOW.md`
     destination is chosen by the owner and documented; the code is added only after a separate
     owner decision and is tested with synthetic data.
   - Any other automatic transfer needs a new owner decision and an edit here.
+- Collective sync (owner decisions 2026-10-30 00:21Z, 09:30Z, 09:47Z, 10:28Z, 10:32Z): sealed
+  collective records may be exchanged between authorised members of the same collective, and
+  only by an action of the user in the interface («Доповісти», «Оновити таблицю», joining by a
+  code); this is not one of the two automatic transfers above and does not make any transfer
+  automatic or background.
+  - Channels: LAN; a direct port opened by the application only while the user's action runs and
+    closed right after it; a member's own node in the RELAY role, enabled by that member's
+    separate consent and visible in the interface; the rendezvous server for joining by a code.
+    No hidden persistent service; no UPnP or firewall changes without a separate owner decision.
+  - Payload: only `EnvelopeV1` records encrypted end to end with the collective's epoch keys,
+    signed by a device of a current member; a relay or rendezvous node never holds epoch keys and
+    sees only addresses, sizes, times and the encrypted pairing messages (the first two digits of
+    the join code are the slot number; the other four never leave the two applications).
+    Records of every data class may travel; sensitive current data keeps the explicit
+    confirmation before each transfer and the Rust send gate; unclassified data stays blocked.
+  - Gate: `GatePolicy::CURRENT` keeps WAN and Base44 off in code. Turning WAN on is a separate
+    change that needs an accepted independent security review (including the `spake2` crate and
+    the roles matrix SEC-005) and a new owner decision recorded in `docs/adr/collective-pairing.md`; until
+    then the code exists but cannot send.
+  - Documentation: the user guide states what is sent, to whom and when; the interface shows the
+    chosen relay address and the delivery status.
+  - Tests use synthetic data only.
 - Ukrainian UI only.
 
 ## Source-of-truth rule
