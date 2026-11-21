@@ -119,3 +119,23 @@ test('buildCity у контексті Web Worker штампує 20 архети�
   assert.ok(vCount3 > 160, `DNB3 має містити скатні дахи (>160 вершин), отримано ${vCount3}`);
   for (let i = 0; i < r3.idx.length; i++) assert.ok(r3.idx[i] < vCount3, 'індекс DNB3 у межах вершин');
 });
+
+test('DIMAP.LIVE синхронізується з 3D-картою: allowlist URL, пошук області під камерою, local-first за замовчуванням', async () => {
+  const dimap = await import('../src/map-dimap-core.js');
+  assert.equal(dimap.DIMAP_STORAGE_KEY, 'aviahub.dimap');
+  assert.equal(dimap.buildDimapUrl('/', ''), 'https://dimap.live/');
+  assert.equal(dimap.buildDimapUrl('/', 'dnipro'), 'https://dimap.live/?r=dnipro');
+  assert.equal(dimap.buildDimapUrl('/shahed', 'dnipro'), 'https://dimap.live/shahed');
+  assert.equal(dimap.buildDimapUrl('/evil', 'javascript:alert(1)'), 'https://dimap.live/');
+  assert.equal(dimap.nearestDimapRegion(35.04, 48.47), 'dnipro');
+  assert.equal(dimap.nearestDimapRegion(30.52, 50.45), 'kyiv');
+  assert.equal(dimap.nearestDimapRegion(24.03, 49.84), 'lvivska');
+  assert.equal(dimap.nearestDimapRegion(10.0, 10.0), '');
+  assert.deepEqual(dimap.parseDimapState(null), { ok: false, r: '', m: '/' });
+  assert.deepEqual(dimap.parseDimapState('{"ok":true,"r":"kharkivska","m":"/now"}'), { ok: true, r: 'kharkivska', m: '/now' });
+  assert.deepEqual(dimap.parseDimapState('{"ok":true,"r":"bad","m":"/bad"}'), { ok: true, r: '', m: '/' });
+  const app = readSrc('map-app.js');
+  const bridge = readSrc('public/map-3d-bridge.js');
+  assert.ok(app.includes("m.type === 'focusRegion'"), 'map-app.js обробляє focusRegion');
+  assert.ok(bridge.includes("type: 'focusRegion'"), 'map-3d-bridge.js передає focusRegion');
+});

@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { haversineKm, bearingDeg, compassDirUk, polygonAreaKm2, buildElevationProfile, searchPlaces } from './map-measure-core.js';
 import { HD_SOURCES, pickHdZoom, visibleTileSpecs } from './map-hd-tiles-core.js';
+import { DIMAP_STORAGE_KEY, DIMAP_MODES, DIMAP_REGIONS, findDimapRegion, buildDimapUrl, nearestDimapRegion, parseDimapState } from './map-dimap-core.js';
 
 // Армійська авіація відкриває карту з ?module=army: тло, панелі й сітка в її зеленому кольорі (map.css).
 if (new URLSearchParams(location.search).get('module') === 'army') document.documentElement.dataset.module = 'army';
@@ -2205,6 +2206,103 @@ const HdTiles = (() => {
   return {update, setEnabled, setSource, clear:clearTiles, get active(){ return enabled; }, get count(){ return tiles.size; }};
 })();
 
+// ---------- optional DIMAP.LIVE air-raid alerts panel (explicit opt-in, synced with 3D camera and oblasts) ----------
+const Dimap = (() => {
+  const panel = $('dimap-panel'), btn = $('t-dimap'), body = $('dm-body');
+  const tools = $('dm-tools'), modeEl = $('dm-mode'), regEl = $('dm-reg'), openEl = $('dm-open');
+  const btnSync = $('dm-sync'), btnFly = $('dm-fly'), btnReload = $('dm-reload'), btnOff = $('dm-off'), btnClose = $('dm-close');
+  if (!panel || !btn || !body) return {open:() => {}, close:() => {}, focusRegion:() => {}, get openState(){ return false; }};
+
+  let st = parseDimapState((() => { try { return localStorage.getItem(DIMAP_STORAGE_KEY); } catch (e) { return null; } })());
+  const save = () => { try { localStorage.setItem(DIMAP_STORAGE_KEY, JSON.stringify(st)); } catch (e) {} };
+  for (const [val, label] of DIMAP_MODES){ const o = document.createElement('option'); o.value = val; o.textContent = label; modeEl.append(o); }
+  for (const r of DIMAP_REGIONS){ const o = document.createElement('option'); o.value = r.slug; o.textContent = r.label; regEl.append(o); }
+
+  function focusRegion(slug){
+    const r = findDimapRegion(slug);
+    if (!r.slug){
+      flyTo = {from:camera.position.clone(), to:HOME.pos.clone(), tFrom:controls.target.clone(), tTo:HOME.target.clone(), t0:performance.now(), dur:950};
+      return;
+    }
+    if (r.oblast && typeof CITY_DATA === 'object' && CITY_DATA && CITY_DATA[r.oblast] && !selected.has(r.oblast)){
+      selected.add(r.oblast);
+      const cb = document.getElementById('ob-' + r.oblast); if (cb) cb.checked = true;
+      applyOblasts();
+    }
+    const t = toWorld(r.lon, r.lat);
+    t.y = (heights ? sampleH(r.lon, r.lat) : 0) * SCALE * targetExag;
+    const d = r.dist || 5.5;
+    flyTo = {from:camera.position.clone(), to:t.clone().add(new THREE.Vector3(-0.2*d, 0.78*d, 0.9*d)), tFrom:controls.target.clone(), tTo:t, t0:performance.now(), dur:950};
+    if (controls.autoRotate){ controls.autoRotate = false; setPressed(btnRot, false); }
+  }
+
+  function syncFromCamera(){
+    core.inv(controls.target.x, controls.target.z, _q);
+    const camDist = camera.position.distanceTo(controls.target);
+    st.r = camDist < 12 ? nearestDimapRegion(_q[0], _q[1]) : '';
+    st.m = '/';
+    save();
+    render();
+  }
+
+  function render(){
+    body.textContent = '';
+    modeEl.value = st.m; regEl.value = st.r; regEl.disabled = st.m !== '/';
+    const url = buildDimapUrl(st.m, st.r);
+    if (openEl) openEl.href = url;
+    tools.hidden = !st.ok;
+    if (!st.ok){
+      const gate = document.createElement('div'); gate.className = 'dm-gate';
+      const card = document.createElement('div'); card.className = 'dm-card';
+      const h3 = document.createElement('h3'); h3.textContent = 'Підключення до dimap.live';
+      const p1 = document.createElement('p'); p1.textContent = 'Карта тривог — стороння вебслужба. Після дозволу ваш браузер підключиться до dimap.live: сайт побачить вашу IP-адресу й зможе зберігати свої дані у браузері. 3D-карта нічого не передає.';
+      const p2 = document.createElement('p'); p2.className = 'dm-warn'; p2.textContent = 'Геолокацію у цьому вікні вимкнено. Не вмикайте GPS-режим поблизу ЛБЗ.';
+      const act = document.createElement('div'); act.className = 'dm-act';
+      const bOk = document.createElement('button'); bOk.type = 'button'; bOk.className = 'primary'; bOk.textContent = 'Дозволити й завантажити';
+      bOk.addEventListener('click', () => { st.ok = true; save(); render(); });
+      const aExt = document.createElement('a'); aExt.href = url; aExt.target = '_blank'; aExt.rel = 'noopener noreferrer'; aExt.textContent = 'Відкрити на сайті ↗';
+      const bNo = document.createElement('button'); bNo.type = 'button'; bNo.textContent = 'Скасувати';
+      bNo.addEventListener('click', () => toggle(false));
+      act.append(bOk, aExt, bNo); card.append(h3, p1, p2, act); gate.append(card); body.append(gate);
+      return;
+    }
+    const fr = document.createElement('iframe');
+    fr.src = url; fr.title = 'Карта тривог DIMAP.LIVE'; fr.referrerPolicy = 'no-referrer';
+    fr.setAttribute('allow', 'fullscreen'); fr.setAttribute('allowfullscreen', 'true');
+    fr.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-popups allow-forms');
+    body.append(fr);
+  }
+
+  function toggle(open){
+    if (open){
+      // Перечитати спільний стан (могли змінити у вкладці ПС/РВ)
+      st = parseDimapState((() => { try { return localStorage.getItem(DIMAP_STORAGE_KEY); } catch (e) { return null; } })());
+      if (st.m === '/' && !st.r){
+        core.inv(controls.target.x, controls.target.z, _q);
+        if (camera.position.distanceTo(controls.target) < 12) st.r = nearestDimapRegion(_q[0], _q[1]);
+      }
+      if (hud && !hud.hidden) toggleHud(false);
+    } else {
+      body.textContent = '';   // вивантажити iframe при закритті панелі
+    }
+    panel.hidden = !open;
+    setPressed(btn, open); btn.setAttribute('aria-expanded', String(open));
+    document.body.classList.toggle('dimap-open', open);
+    if (open) render();
+  }
+
+  btn.addEventListener('click', () => toggle(panel.hidden));
+  if (btnClose) btnClose.addEventListener('click', () => toggle(false));
+  modeEl.addEventListener('change', () => { st.m = modeEl.value; save(); render(); });
+  regEl.addEventListener('change', () => { st.r = regEl.value; save(); render(); });
+  if (btnSync) btnSync.addEventListener('click', syncFromCamera);
+  if (btnFly) btnFly.addEventListener('click', () => focusRegion(st.r));
+  if (btnReload) btnReload.addEventListener('click', render);
+  if (btnOff) btnOff.addEventListener('click', () => { st.ok = false; save(); render(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !panel.hidden) toggle(false); });
+  return {open:() => toggle(true), close:() => toggle(false), focusRegion, syncFromCamera, get openState(){ return !panel.hidden; }};
+})();
+
 // ---------- loop ----------
 let ready = false, startTime = 0, frame = 0, introDone = false, lastNow = performance.now();
 const ease = t => 1 - Math.pow(1-t, 3);
@@ -2242,7 +2340,7 @@ function tick(now){
   Perf.frame(frameMs, t1 - t0, performance.now() - t1);
 }
 requestAnimationFrame(tick);
-window.__ukr = {REGIONS, CITY3D, camera, controls, renderer, scene, toWorld, chunks, Labels, Measure, HdTiles, seaMesh, layers:Layers, reloadLayer, perf:() => Perf.read(), geo:Geo};   // debug hook
+window.__ukr = {REGIONS, CITY3D, camera, controls, renderer, scene, toWorld, chunks, Labels, Measure, HdTiles, Dimap, seaMesh, layers:Layers, reloadLayer, perf:() => Perf.read(), geo:Geo};   // debug hook
 addEventListener('resize', () => { camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); Labels.material.uniforms.uView.value.set(innerWidth, innerHeight); });
 
 // ---------- вбудований режим: точки DPI з вікна модуля (ПС / РВ) ----------
@@ -2356,6 +2454,7 @@ const Embed = (() => {
     else if (m.type === 'select'){ Pts.select(m.id); if (m.focus) Pts.view(m.id); }
     else if (m.type === 'zoom'){ const d = camera.position.clone().sub(controls.target); const len = d.length(), nl = THREE.MathUtils.clamp(len/m.k, controls.minDistance, controls.maxDistance); camera.position.copy(controls.target).add(d.multiplyScalar(nl/len)); if (controls.autoRotate){ controls.autoRotate = false; setPressed(btnRot, false); } }
     else if (m.type === 'theme'){ document.documentElement.dataset.theme = m.theme === 'light' ? 'light' : 'dark'; }
+    else if (m.type === 'focusRegion'){ Dimap.focusRegion(m.region || ''); }
   });
   send({type:'hello'});
   return {send, onReady(){ Pts.reheight(); if (wantFit){ wantFit = false; Pts.view(); } send({type:'ready'}); }};
