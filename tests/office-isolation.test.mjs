@@ -21,7 +21,8 @@ const EDITOR_COMMANDS = ['office_open_file', 'office_save_file', 'office_save_fi
   'collective_status', 'collective_create_identity', 'collective_create',
   'collective_detail', 'collective_table_set', 'collective_invite_create', 'collective_join_request',
   'collective_invite_admit', 'collective_join_accept', 'collective_report_prepare', 'collective_report_confirm',
-  'collective_table_read', 'collective_sync_export', 'collective_sync_import'];
+  'collective_table_read', 'collective_sync_export', 'collective_sync_import',
+  'collective_workspace_call'];
 // Дані профілю: вікно редактора бачить лише простір імен свого застосунку (Rust: profile_data_window_allows).
 const PROFILE_EDITOR_COMMANDS = ['profile_data_get', 'profile_data_set', 'profile_data_remove', 'profile_data_list'];
 const EDITOR_GRANTED = [...EDITOR_COMMANDS, ...PROFILE_EDITOR_COMMANDS];

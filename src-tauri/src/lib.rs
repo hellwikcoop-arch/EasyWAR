@@ -5,6 +5,7 @@ pub mod base_tables;
 pub mod collective;
 pub mod collective_store;
 pub mod collective_sync;
+mod collective_workspace_net;
 use collective_store::CollectiveStore;
 pub mod dashboard_layout;
 pub mod dashboard_modules;
@@ -147,6 +148,22 @@ pub(crate) fn install_tls_provider() {
     if rustls::crypto::CryptoProvider::get_default().is_none() {
         let _ = rustls::crypto::ring::default_provider().install_default();
     }
+}
+
+/// Обмін колективного файлового середовища з адресою, яку ввів користувач.
+/// Вікно «Колективи» лише передає дію; з’єднання робить оболонка.
+#[tauri::command]
+async fn collective_workspace_call(
+    webview: tauri::Webview,
+    handles: tauri::State<'_, office_files::OfficeFileHandles>,
+    url: String,
+    operation: String,
+    token: Option<String>,
+    body: Option<serde_json::Value>,
+) -> Result<serde_json::Value, String> {
+    office_files::ensure_collectives_editor(webview.label(), &handles)
+        .map_err(|error| error.to_string())?;
+    collective_workspace_net::exchange(url, operation, token, body).await
 }
 
 #[tauri::command]
@@ -5180,6 +5197,7 @@ pub fn run() {
             collective_table_read,
             collective_sync_export,
             collective_sync_import,
+            collective_workspace_call,
             clear_profile_database,
             read_profile_database,
             write_profile_database,

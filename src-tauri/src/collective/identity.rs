@@ -441,6 +441,152 @@ impl NameRecord {
     }
 }
 
+/// Три ролі учасників колективу:
+/// - `Leader` («Керівник») — творець колективу (призначається першому `Join` автоматично);
+/// - `JuniorLeader` («Молодший керівник») — керування файлами, запрошення та призначення ролі «Користувач»;
+/// - `User` («Користувач») — робота зі спільними файлами й таблицями колективу.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CollectiveRole {
+    Leader,
+    JuniorLeader,
+    User,
+}
+
+impl CollectiveRole {
+    pub const CODE_LEADER: u8 = 1;
+    pub const CODE_JUNIOR_LEADER: u8 = 2;
+    pub const CODE_USER: u8 = 3;
+
+    pub fn code(self) -> u8 {
+        match self {
+            CollectiveRole::Leader => Self::CODE_LEADER,
+            CollectiveRole::JuniorLeader => Self::CODE_JUNIOR_LEADER,
+            CollectiveRole::User => Self::CODE_USER,
+        }
+    }
+
+    pub fn from_code(code: u8) -> Result<Self, Reason> {
+        match code {
+            Self::CODE_LEADER => Ok(CollectiveRole::Leader),
+            Self::CODE_JUNIOR_LEADER => Ok(CollectiveRole::JuniorLeader),
+            Self::CODE_USER => Ok(CollectiveRole::User),
+            _ => Err(Reason::Malformed),
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CollectiveRole::Leader => "leader",
+            CollectiveRole::JuniorLeader => "junior_leader",
+            CollectiveRole::User => "user",
+        }
+    }
+
+    pub fn label_uk(self) -> &'static str {
+        match self {
+            CollectiveRole::Leader => "Керівник",
+            CollectiveRole::JuniorLeader => "Молодший керівник",
+            CollectiveRole::User => "Користувач",
+        }
+    }
+}
+
+/// Підписаний запис призначення ролі учаснику в журналі складу колективу.
+/// Призначає Керівник (або Молодший керівник — для ролі «Користувач»).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RoleRecord {
+    pub actor_id: MemberId,
+    pub target_id: MemberId,
+    pub collective_id: [u8; ID_LEN],
+    pub role: CollectiveRole,
+    pub issued_at: i64,
+    pub signature: [u8; SIGNATURE_LEN],
+}
+
+impl RoleRecord {
+    pub const LEN: usize = 2 * KEY_LEN + ID_LEN + 1 + 8 + SIGNATURE_LEN;
+
+    fn signed_bytes(&self) -> Vec<u8> {
+        let mut w = Writer::with_capacity(labels::MEMBER_ROLE.len() + 2 * KEY_LEN + ID_LEN + 9);
+        w.fixed(labels::MEMBER_ROLE)
+            .fixed(&self.actor_id)
+            .fixed(&self.target_id)
+            .fixed(&self.collective_id)
+            .u8(self.role.code())
+            .i64(self.issued_at);
+        w.finish()
+    }
+
+    /// Перевіряє підпис автора призначення ролі (`actor`) для цього колективу.
+    pub fn verify(&self, actor: &MemberPublic, collective_id: &[u8; ID_LEN]) -> Result<(), Reason> {
+        if self.actor_id != actor.member_id() || &self.collective_id != collective_id {
+            return Err(Reason::ExchangeNotBound);
+        }
+        if self.role == CollectiveRole::Leader {
+            return Err(Reason::Malformed);
+        }
+        verify(&actor.sign, &self.signed_bytes(), &self.signature).map_err(|_| Reason::BadSignature)
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut w = Writer::with_capacity(Self::LEN);
+        w.fixed(&self.actor_id)
+            .fixed(&self.target_id)
+            .fixed(&self.collective_id)
+            .u8(self.role.code())
+            .i64(self.issued_at)
+            .fixed(&self.signature);
+        w.finish()
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, Reason> {
+        let mut r = Reader::new(bytes);
+        let actor_id = r.fixed()?;
+        let target_id = r.fixed()?;
+        let collective_id = r.fixed()?;
+        let role = CollectiveRole::from_code(r.u8()?)?;
+        let issued_at = r.i64()?;
+        let signature = r.fixed()?;
+        r.finish()?;
+        if role == CollectiveRole::Leader {
+            return Err(Reason::Malformed);
+        }
+        Ok(Self {
+            actor_id,
+            target_id,
+            collective_id,
+            role,
+            issued_at,
+            signature,
+        })
+    }
+}
+
+impl MemberIdentity {
+    /// Підписує призначення ролі (`JuniorLeader` або `User`) іншому учаснику колективу.
+    pub fn role_record(
+        &self,
+        collective_id: [u8; ID_LEN],
+        target_id: MemberId,
+        role: CollectiveRole,
+        issued_at: i64,
+    ) -> Result<RoleRecord, Reason> {
+        if role == CollectiveRole::Leader || target_id == self.member_id() {
+            return Err(Reason::Malformed);
+        }
+        let mut record = RoleRecord {
+            actor_id: self.member_id(),
+            target_id,
+            collective_id,
+            role,
+            issued_at,
+            signature: [0u8; SIGNATURE_LEN],
+        };
+        record.signature = self.signing.sign(&record.signed_bytes()).to_bytes();
+        Ok(record)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -113,6 +113,7 @@ const RUST_NETWORK_ALLOWLIST = new Set([
   'app_update.rs',      // tauri-plugin-updater (endpoint з tauri.conf.json)
   'pair_relay.rs',      // сервер зустрічі для вступу за кодом; клієнт лише з дозволом WAN
   'pair_session.rs',    // сеанс вступу за кодом: тільки тести на localhost (tokio::net), мережі в коді немає
+  'collective_workspace_net.rs', // явний сервер файлового середовища: лише адреса, яку ввів користувач
 ]);
 const RUST_NETWORK = /\breqwest\b|\bstd::net\b|\btokio::net\b|TcpListener|TcpStream|UdpSocket/;
 

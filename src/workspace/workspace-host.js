@@ -250,6 +250,19 @@ export function createHost({
     })
     : null;
 
+  // Сервер файлового середовища: лише якщо користувач сам увів адресу. Жетон іде в Rust
+  // заголовком, у спільний знімок колективу не потрапляє.
+  const workspaceSync = invoke && appEntry.id === 'collectives'
+    ? Object.freeze({
+      call: (url, operation, token, body) => invoke('collective_workspace_call', {
+        url: String(url ?? ''),
+        operation: String(operation ?? ''),
+        token: token ? String(token) : null,
+        body: body && typeof body === 'object' ? body : null,
+      }),
+    })
+    : null;
+
   return Object.freeze({
     contract: CONTRACT_VERSION,
     appId: appEntry.id,
@@ -264,6 +277,7 @@ export function createHost({
     saveFileAs,
     closeFile,
     collectives,
+    workspaceSync,
     profile,
     setTitle(title) {
       state.title = String(title ?? '');

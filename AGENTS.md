@@ -23,6 +23,12 @@ See also `docs/PROJECT_CONTEXT.md` (project brief, glossary), `docs/WORKFLOW.md`
     destination is chosen by the owner and documented; the code is added only after a separate
     owner decision and is tested with synthetic data.
   - Any other automatic transfer needs a new owner decision and an edit here.
+  - Owner decision (2026-11-21): the collective file workspace may send that collective's
+    names, roles, files and edit journal to a server URL the user typed on the collectives
+    screen. Nothing is sent until the URL is saved. The webview CSP is not widened; the
+    desktop shell calls only that URL (HTTPS, or loopback HTTP for a local check). Invite
+    codes and member tokens are not part of the shared snapshot. Deploy steps:
+    `server/collective-workspace/README.md`. Stated in `docs/USER_GUIDE.md`.
 - Ukrainian UI only.
 
 ## Source-of-truth rule

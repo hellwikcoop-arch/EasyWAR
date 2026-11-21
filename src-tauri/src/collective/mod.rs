@@ -48,6 +48,7 @@ pub mod labels {
     pub const INVITATION: &[u8] = b"easywar/collective/v1/invitation";
     pub const JOIN_REQUEST: &[u8] = b"easywar/collective/v1/join-request";
     pub const MEMBER_NAME: &[u8] = b"easywar/collective/v1/member-name";
+    pub const MEMBER_ROLE: &[u8] = b"easywar/collective/v1/member-role";
     pub const MEMBER_SCOPE: &[u8] = b"easywar/collective/v1/member-scope";
     pub const RELAY_PUT: &[u8] = b"easywar/collective/v1/relay-put";
     pub const RELAY_FETCH: &[u8] = b"easywar/collective/v1/relay-fetch";

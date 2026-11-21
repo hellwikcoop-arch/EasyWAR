@@ -89,3 +89,19 @@
 .ec-preview-list li[data-kind="deleted"] strong{color:var(--danger)}
 .ec-preview-list li[data-kind="new"] strong{color:var(--accent)}
 .ec-secure,.ec-coll-panel,.ec-sections,.ec-section,.ec-grid-wrap{min-width:0;max-width:100%}
+/* Колективне файлове середовище, 6-значний код запрошення та журнал редагувань */
+.ec-hub{display:grid;gap:16px}
+.ec-hub-top{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
+.ec-hub-box,.ec-hub-section{display:grid;gap:12px;padding:16px;border:1px solid var(--line-2);border-radius:10px;background:var(--raised)}
+.ec-subhead{margin:0;font-size:16px}
+.ec-invite-bar{display:grid;gap:10px;padding-top:10px;border-top:1px solid var(--line-2)}
+.ec-code-banner{text-align:center;justify-items:center}
+.ec-pair-code{font-family:var(--mono,ui-monospace,monospace);font-size:28px;font-weight:700;letter-spacing:.14em;color:var(--accent);padding:6px 14px;border-radius:8px;background:var(--bg);border:1px solid var(--accent);user-select:all}
+.ec-file-editor,.ec-file-create{display:grid;gap:12px;padding:16px;border:1px solid var(--accent);border-radius:10px;background:var(--panel)}
+.ec-file-editor h4{margin:0;font-size:16px}
+.ec-audit-list{list-style:none;margin:0;padding:0;display:grid;gap:8px;max-height:320px;overflow-y:auto}
+.ec-audit-item{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;padding:10px 12px;border:1px solid var(--line-2);border-radius:8px;background:var(--bg);font-size:13px;line-height:1.45}
+.ec-audit-time{font-family:var(--mono,ui-monospace,monospace);font-size:12px;color:var(--muted)}
+.ec-audit-actor{color:var(--accent)}
+.ec-audit-text{color:var(--text);flex:1;min-width:200px}
+
