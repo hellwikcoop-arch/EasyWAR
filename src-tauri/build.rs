@@ -54,6 +54,7 @@ const COMMANDS: &[&str] = &[
     "office_close_file",
     "weather_online_fetch",
     "weather_online_search",
+    "dimap_poll",
     "office_editor_close",
     "workspace_open_editor",
     "collective_status",

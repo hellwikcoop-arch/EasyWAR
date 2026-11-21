@@ -92,7 +92,7 @@ test('міст і сторінка карти розуміють одні й т�
   const bridge = read('public/map-3d-bridge.js');
   const app = read('map-app.js');
   new vm.Script(bridge);
-  for (const t of ['points', 'fit', 'select', 'zoom', 'theme']) {
+  for (const t of ['points', 'fit', 'select', 'zoom', 'theme', 'dimap']) {
     assert.ok(bridge.includes(`'${t}'`), `міст надсилає ${t}`);
     assert.ok(app.includes(`'${t}'`), `карта обробляє ${t}`);
   }

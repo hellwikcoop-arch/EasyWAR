@@ -1,0 +1,14 @@
+/* Шар DIMAP на карті операцій: перемикач, список тривог, підпис джерела. */
+.dimap-sw { display: inline-flex; align-items: center; gap: 6px; font: 650 13px/1 var(--sans, system-ui, sans-serif); cursor: pointer; }
+.dimap-sw input { width: 16px; height: 16px; accent-color: var(--accent, #4c8df2); }
+.dimap-hud { position: absolute; z-index: 4; left: 8px; top: 8px; width: min(240px, 48%); max-height: calc(100% - 56px); overflow: auto; display: grid; gap: 4px; padding: 8px 10px; border-radius: 8px; background: color-mix(in srgb, var(--surface, #101826) 88%, transparent); border: 1px solid var(--line, rgba(255,255,255,.16)); font: 600 12px/1.35 var(--sans, system-ui, sans-serif); color: var(--ink, #e8edf6); pointer-events: auto; }
+.dimap-hud[hidden] { display: none !important; }
+.dimap-hud ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; }
+.dimap-hud li { display: flex; gap: 6px; align-items: baseline; min-width: 0; }
+.dimap-hud i { width: 8px; height: 8px; border-radius: 2px; flex: none; display: block; }
+.dimap-hud .rg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dimap-hud .st { margin: 0; color: var(--muted, #9aa6bd); font-weight: 600; }
+.map-ctl { z-index: 5; }
+.dimap-attr { position: absolute; z-index: 4; left: 50%; bottom: 8px; transform: translateX(-50%); padding: 1px 6px; font: 600 10.5px/1.4 var(--sans, system-ui, sans-serif); color: #e9eef6; background: rgba(8, 17, 31, .62); border-radius: 4px; pointer-events: none; white-space: nowrap; }
+.dimap-attr[hidden] { display: none !important; }
+.mapwrap .dimap-target { cursor: default; }
