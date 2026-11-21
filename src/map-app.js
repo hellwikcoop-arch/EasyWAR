@@ -107,30 +107,79 @@ function geoCore(){
     }
     return {pos, uvg, idx, origin:o, radius:Math.sqrt(r2)};
   }
-  // building footprints (DNB2/DNB3 packs) -> one merged buffer per pack; every vertex is projected exactly, relative to the pack's centre
+  // building footprints (DNB2/DNB3 packs) -> one merged buffer per pack; stamps 20 3D archetypes (10 high-rise + 10 private house types) onto real footprints
   function buildCity(u8, c, o){
     const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
     const magic = String.fromCharCode(u8[0], u8[1], u8[2], u8[3]); if (magic !== 'DNB2' && magic !== 'DNB3') throw new Error('формат забудови');
     const unit = magic === 'DNB3' ? 1 : 0.5;   // DNB2: half-metres (city packs), DNB3: whole metres (village cells, 65 km range)
     const count = dv.getUint32(4, true), skipCat = o.skipCat;
-    // DNB3 record with n == 0 is an oriented box (10 bytes): cx, cy (m), w, l (half-m), angle (0..255 = 0..180°), h (half-m), cat
+    const isDNB2 = magic === 'DNB2';
+    // First pass: estimate vertex budget including 3D architectural crowns, pitched roofs, setbacks, spires, and rooftop structures
     let p = 8, nv = 0;
     for (let b = 0; b < count; b++){ const n = u8[p];
-      if (n === 0){ if (u8[p + 9] !== skipCat) nv += 16; p += 10; continue; }
-      if (u8[p + 3] !== skipCat) nv += 4*n; p += 4 + n*4 + (n - 2)*3; }
-    // layout per building: n wall quads × 4 vertices [top a, bottom a, bottom b, top b]; the roof reuses "top a" of each wall
-    const pos = new Float32Array(nv*3), grd = new Float32Array(nv), col = new Uint8Array(nv*3), uv = new Float32Array(nv*2);
+      if (n === 0){ if (u8[p + 9] !== skipCat) nv += 44; p += 10; continue; }
+      const h0 = dv.getUint16(p + 1, true)/10, cat = u8[p + 3];
+      if (cat !== skipCat){
+        nv += 4*n + 8;   // walls + central apex/ridge vertices for pitched/pyramid roofs
+        if (isDNB2 && (cat === 1 || cat === 2 || cat === 3 || h0 >= 11)) nv += 56;   // setbacks, elevator penthouses, spires, skylights
+      }
+      p += 4 + n*4 + (n - 2)*3; }
+    let pos = new Float32Array(nv*3), grd = new Float32Array(nv), col = new Uint8Array(nv*3), uv = new Float32Array(nv*2);
+    function ensure(need){
+      if (v + need <= grd.length) return;
+      const nn = Math.max(grd.length + need, Math.ceil(grd.length * 1.35));
+      const nPos = new Float32Array(nn*3), nGrd = new Float32Array(nn), nCol = new Uint8Array(nn*3), nUv = new Float32Array(nn*2);
+      nPos.set(pos); nGrd.set(grd); nCol.set(col); nUv.set(uv);
+      pos = nPos; grd = nGrd; col = nCol; uv = nUv;
+    }
     const idxRoof = [[], [], [], [], []], idxWall = [[], [], [], [], []];
+    const sc = P.s;
     const org = fwd((c.b[0] + c.b[1])/2, (c.b[2] + c.b[3])/2, [0, 0]), q = [0, 0], lon0 = c.b[0], lat1 = c.b[3], lonM = c.lonM;
     const px = new Float64Array(256), py = new Float64Array(256), wx = new Float64Array(256), wz = new Float64Array(256), tri = new Uint8Array(765);
     const DU = [-0.5, -0.5, 0.5, 0.5], DL = [-0.5, 0.5, 0.5, -0.5];   // box corners, CCW seen from above (y points south)
+    // Helper: append an oriented 3D architectural box (tier, penthouse, dormer, chimney, or skylight) in scene space
+    function pushBox(cx, cz, ux, uz, vx, vz, y0, y1, tw, th, wr, wg, wb, rr, rg, rb, g, wl, rl, crownPitch){
+      ensure(24);
+      const bx0 = cx - ux - vx, bz0 = cz - uz - vz;
+      const bx1 = cx - ux + vx, bz1 = cz - uz + vz;
+      const bx2 = cx + ux + vx, bz2 = cz + uz + vz;
+      const bx3 = cx + ux - vx, bz3 = cz + uz - vz;
+      const xs = [bx0, bx1, bx2, bx3], zs = [bz0, bz1, bz2, bz3];
+      const wLen = Math.hypot(ux, uz)*2 / sc, lLen = Math.hypot(vx, vz)*2 / sc;
+      const base = v, v0 = y0/th, v1 = y1/th, bBot = Math.round(wr*0.84), gBot = Math.round(wg*0.84), rBot = Math.round(wb*0.84);
+      let uRun = 0;
+      for (let i = 0; i < 4; i++){
+        const j = (i + 1) & 3, seg = (i & 1) ? wLen : lLen, u0 = uRun/tw, u1 = (uRun + seg)/tw; uRun += seg;
+        const k = base + 4*i;
+        pos[k*3] = xs[i]; pos[k*3+1] = y1; pos[k*3+2] = zs[i]; uv[k*2] = u0; uv[k*2+1] = v1;
+        pos[k*3+3] = xs[i]; pos[k*3+4] = y0; pos[k*3+5] = zs[i]; uv[k*2+2] = u0; uv[k*2+3] = v0;
+        pos[k*3+6] = xs[j]; pos[k*3+7] = y0; pos[k*3+8] = zs[j]; uv[k*2+4] = u1; uv[k*2+5] = v0;
+        pos[k*3+9] = xs[j]; pos[k*3+10] = y1; pos[k*3+11] = zs[j]; uv[k*2+6] = u1; uv[k*2+7] = v1;
+        col[k*3] = wr; col[k*3+1] = wg; col[k*3+2] = wb;
+        col[(k+1)*3] = bBot; col[(k+1)*3+1] = gBot; col[(k+1)*3+2] = rBot;
+        col[(k+2)*3] = bBot; col[(k+2)*3+1] = gBot; col[(k+2)*3+2] = rBot;
+        col[(k+3)*3] = wr; col[(k+3)*3+1] = wg; col[(k+3)*3+2] = wb;
+        for (let s = 0; s < 4; s++) grd[k + s] = g;
+        wl.push(k, k + 1, k + 2, k, k + 2, k + 3);
+      }
+      v += 16;
+      if (crownPitch > 0){
+        const ap = v++;
+        pos[ap*3] = cx; pos[ap*3+1] = y1 + crownPitch; pos[ap*3+2] = cz; uv[ap*2] = 0.5; uv[ap*2+1] = 0.5;
+        col[ap*3] = Math.min(255, rr + 14); col[ap*3+1] = Math.min(255, rg + 14); col[ap*3+2] = Math.min(255, rb + 14); grd[ap] = g;
+        for (let i = 0; i < 4; i++) rl.push(base + 4*i, base + 4*((i + 1) & 3), ap);
+      } else {
+        for (let i = 0; i < 4; i++){ const k = base + 4*i; col[k*3] = rr; col[k*3+1] = rg; col[k*3+2] = rb; }
+        rl.push(base, base + 4, base + 8, base, base + 8, base + 12);
+      }
+    }
     p = 8; let v = 0, r2 = 0;
     for (let b = 0; b < count; b++){
-      let n = u8[p], h, cat;
+      let n = u8[p], h, cat, isBox = false;
       if (n === 0){
         const mx = dv.getUint16(p + 1, true), my = dv.getUint16(p + 3, true), w = u8[p + 5]/2, l = u8[p + 6]/2, ang = u8[p + 7]/256*Math.PI; h = u8[p + 8]/2; cat = u8[p + 9]; p += 10;
         if (cat === skipCat) continue;
-        n = 4; const ca = Math.cos(ang), sa = Math.sin(ang);
+        n = 4; isBox = true; const ca = Math.cos(ang), sa = Math.sin(ang);
         for (let i = 0; i < 4; i++){ px[i] = mx + DU[i]*w*ca - DL[i]*l*sa; py[i] = my + DU[i]*w*sa + DL[i]*l*ca; }
         tri[0] = 0; tri[1] = 1; tri[2] = 2; tri[3] = 0; tri[4] = 2; tri[5] = 3;
       } else {
@@ -139,31 +188,154 @@ function geoCore(){
         for (let i = 0; i < n; i++){ px[i] = dv.getUint16(p + i*4, true)*unit; py[i] = dv.getUint16(p + i*4 + 2, true)*unit; }
         p += n*4; tri.set(u8.subarray(p, p + (n - 2)*3)); p += (n - 2)*3;
       }
-      let cx = 0, cy = 0;
-      for (let i = 0; i < n; i++){ cx += px[i]; cy += py[i]; fwd(lon0 + px[i]/lonM, lat1 - py[i]/111320, q); wx[i] = q[0] - org[0]; wz[i] = q[1] - org[1]; r2 = Math.max(r2, wx[i]*wx[i] + wz[i]*wz[i]); }
-      const g = sampleH(lon0 + cx/n/lonM, lat1 - cy/n/111320);
-      const fac = o.fac[cat] || o.fac[0], tw = fac ? fac[0] : 6, th = fac ? fac[1] : 3;
-      const jit = 0.86 + ((b*2654435761) >>> 0) % 1000 / 1000 * 0.18;   // per-building brightness variation
-      const cc = o.colors[cat] || o.colors[0], wr = fac ? 255*jit : cc[0]*255*jit, wg = fac ? 255*jit : cc[1]*255*jit, wb = fac ? 255*jit : cc[2]*255*jit;
-      const base = v, vTop = h/th; let uRun = 0;
-      const wl = idxWall[cat] || idxWall[0], rl = idxRoof[cat] || idxRoof[0];
+      let cx = 0, cy = 0, wcx = 0, wcz = 0;
       for (let i = 0; i < n; i++){
-        const j = (i + 1) % n, len = Math.hypot(px[j] - px[i], py[j] - py[i]), u0 = uRun/tw, u1 = (uRun + len)/tw; uRun += len;
+        cx += px[i]; cy += py[i]; fwd(lon0 + px[i]/lonM, lat1 - py[i]/111320, q);
+        wx[i] = q[0] - org[0]; wz[i] = q[1] - org[1]; wcx += wx[i]; wcz += wz[i];
+        r2 = Math.max(r2, wx[i]*wx[i] + wz[i]*wz[i]);
+      }
+      wcx /= n; wcz /= n;
+      const g = sampleH(lon0 + cx/n/lonM, lat1 - cy/n/111320);
+      const hash = ((b*2654435761) >>> 0);
+      const arch = hash % 10;   // deterministic archetype index 0..9 (10 high-rises / 10 private houses)
+      const fac = o.fac[cat] || o.fac[0], tw = fac ? fac[0] : 6, th = fac ? fac[1] : 3;
+      const jit = 0.85 + (hash % 1000) / 1000 * 0.22;
+      // Richer architectural palette variation inspired by IMG_9557 (cool glass/concrete) & IMG_9556 (warm sandstone/ochre/terracotta)
+      const warmShift = ((hash >>> 10) & 7) < 4 ? 1.04 : 0.96;
+      const cc = o.colors[cat] || o.colors[0];
+      const wr = Math.min(255, Math.round((fac ? 246 : cc[0]*255)*jit*warmShift));
+      const wg = Math.min(255, Math.round((fac ? 242 : cc[1]*255)*jit));
+      const wb = Math.min(255, Math.round((fac ? 236 : cc[2]*255)*jit*(2 - warmShift)));
+      // Ground ambient occlusion: bottom of walls is darker (gives realistic street canyon depth as in IMG_9557)
+      const ao = h > 16 ? 0.72 : h > 8 ? 0.78 : 0.84;
+      const wrBot = Math.round(wr*ao), wgBot = Math.round(wg*ao), wbBot = Math.round(wb*ao);
+      const rr = Math.min(255, Math.round(wr*0.92)), rg = Math.min(255, Math.round(wg*0.90)), rb = Math.min(255, Math.round(wb*0.88));
+      const wl = idxWall[cat] || idxWall[0], rl = idxRoof[cat] || idxRoof[0];
+
+      // Determine whether this footprint gets a high-rise archetype (0..9) or private house archetype (0..9)
+      const isHighrise = cat === 1 || cat === 3 || (cat === 2 && h >= 10) || h >= 10.5;
+      const isHouse = !isHighrise && (cat === 0 || (cat === 4 && h >= 3.2));
+      // Slanted roof crown for highrise archetype 8 (highrise_09_slanted_crown)
+      const slant = isHighrise && arch === 8 && h >= 18 ? Math.min(6.5, h*0.16) : 0;
+
+      ensure(4*n + 8);
+      const base = v, vTop = h/th; let uRun = 0;
+      let maxEdge = 0, majUx = 1, majUz = 0, spanAcc = 0;
+      for (let i = 0; i < n; i++){
+        const j = (i + 1) % n, dx = px[j] - px[i], dy = py[j] - py[i], len = Math.hypot(dx, dy);
+        const sdx = wx[j] - wx[i], sdz = wz[j] - wz[i], sLen = Math.hypot(sdx, sdz);
+        spanAcc += sLen;
+        if (sLen > maxEdge){ maxEdge = sLen; majUx = sdx / (sLen || 1); majUz = sdz / (sLen || 1); }
+        const u0 = uRun/tw, u1 = (uRun + len)/tw; uRun += len;
+        const hi = slant ? h + slant * ((i === 0 || i === 1) ? 1 : 0) : h;
+        const hj = slant ? h + slant * ((j === 0 || j === 1) ? 1 : 0) : h;
         const k = base + 4*i;
-        pos[k*3] = wx[i]; pos[k*3 + 1] = h; pos[k*3 + 2] = wz[i];  uv[k*2] = u0; uv[k*2 + 1] = vTop;
+        pos[k*3] = wx[i]; pos[k*3 + 1] = hi; pos[k*3 + 2] = wz[i];     uv[k*2] = u0; uv[k*2 + 1] = vTop;
         pos[k*3 + 3] = wx[i]; pos[k*3 + 4] = 0; pos[k*3 + 5] = wz[i];  uv[k*2 + 2] = u0; uv[k*2 + 3] = 0;
         pos[k*3 + 6] = wx[j]; pos[k*3 + 7] = 0; pos[k*3 + 8] = wz[j];  uv[k*2 + 4] = u1; uv[k*2 + 5] = 0;
-        pos[k*3 + 9] = wx[j]; pos[k*3 + 10] = h; pos[k*3 + 11] = wz[j]; uv[k*2 + 6] = u1; uv[k*2 + 7] = vTop;
-        for (let s = 0; s < 4; s++){ col[(k + s)*3] = wr; col[(k + s)*3 + 1] = wg; col[(k + s)*3 + 2] = wb; grd[k + s] = g; }
+        pos[k*3 + 9] = wx[j]; pos[k*3 + 10] = hj; pos[k*3 + 11] = wz[j]; uv[k*2 + 6] = u1; uv[k*2 + 7] = vTop;
+        col[k*3] = wr; col[k*3 + 1] = wg; col[k*3 + 2] = wb;
+        col[(k + 1)*3] = wrBot; col[(k + 1)*3 + 1] = wgBot; col[(k + 1)*3 + 2] = wbBot;
+        col[(k + 2)*3] = wrBot; col[(k + 2)*3 + 1] = wgBot; col[(k + 2)*3 + 2] = wbBot;
+        col[(k + 3)*3] = wr; col[(k + 3)*3 + 1] = wg; col[(k + 3)*3 + 2] = wb;
+        for (let s = 0; s < 4; s++) grd[k + s] = g;
         wl.push(k, k + 1, k + 2, k, k + 2, k + 3);
       }
-      for (let t = 0; t < n - 2; t++) rl.push(base + 4*tri[t*3], base + 4*tri[t*3 + 1], base + 4*tri[t*3 + 2]);
       v += 4*n;
+
+      // Principal axes of the footprint in scene units for stamping 3D superstructures
+      const avgSide = Math.max(4*sc, Math.min(45*sc, spanAcc / n));
+      const minSide = Math.min(maxEdge, avgSide * 0.85);
+      const ux = majUx * Math.min(maxEdge * 0.42, 22*sc), uz = majUz * Math.min(maxEdge * 0.42, 22*sc);
+      const vx = -majUz * Math.min(minSide * 0.36, 12*sc), vz = majUx * Math.min(minSide * 0.36, 12*sc);
+
+      // ---------- 10 PRIVATE HOUSE ARCHETYPES (pitched gabled/hipped/mansard/modern roofs) ----------
+      if (isHouse && n === 4 && arch !== 7){
+        // Archetypes 0..9 for 4-corner residential houses: gabled ridge or hipped/mansard apex
+        const pitch = arch === 9 ? Math.min(3.5, h*0.72) : arch === 6 ? Math.min(2.8, h*0.58) : Math.min(2.5, Math.max(1.3, h*0.46));
+        const d01 = Math.hypot(wx[1] - wx[0], wz[1] - wz[0]), d12 = Math.hypot(wx[2] - wx[1], wz[2] - wz[1]);
+        const hip = (arch === 1 || arch === 5 || arch === 8) ? 0.22 : 0.04;   // hipped vs gabled ridge inset
+        const r0 = v++, r1 = v++;
+        if (d01 >= d12){
+          const mx0 = (wx[0] + wx[3])*0.5, mz0 = (wz[0] + wz[3])*0.5, mx1 = (wx[1] + wx[2])*0.5, mz1 = (wz[1] + wz[2])*0.5;
+          pos[r0*3] = mx0 + (mx1 - mx0)*hip; pos[r0*3+1] = h + pitch; pos[r0*3+2] = mz0 + (mz1 - mz0)*hip;
+          pos[r1*3] = mx1 - (mx1 - mx0)*hip; pos[r1*3+1] = h + pitch; pos[r1*3+2] = mz1 - (mz1 - mz0)*hip;
+          rl.push(base, base + 4, r1, base, r1, r0, base + 8, base + 12, r0, base + 8, r0, r1, base + 4, base + 8, r1, base + 12, base, r0);
+        } else {
+          const mx0 = (wx[0] + wx[1])*0.5, mz0 = (wz[0] + wz[1])*0.5, mx1 = (wx[2] + wx[3])*0.5, mz1 = (wz[2] + wz[3])*0.5;
+          pos[r0*3] = mx0 + (mx1 - mx0)*hip; pos[r0*3+1] = h + pitch; pos[r0*3+2] = mz0 + (mz1 - mz0)*hip;
+          pos[r1*3] = mx1 - (mx1 - mx0)*hip; pos[r1*3+1] = h + pitch; pos[r1*3+2] = mz1 - (mz1 - mz0)*hip;
+          rl.push(base + 4, base + 8, r1, base + 4, r1, r0, base + 12, base, r0, base + 12, r0, r1, base, base + 4, r0, base + 8, base + 12, r1);
+        }
+        for (const rv of [r0, r1]){
+          uv[rv*2] = 0.5; uv[rv*2+1] = 0.5;
+          col[rv*3] = Math.min(255, rr + 18); col[rv*3+1] = Math.min(255, rg + 16); col[rv*3+2] = Math.min(255, rb + 14); grd[rv] = g;
+        }
+        // In city packs (DNB2), add chimney or dormer/upper tier for house archetypes 3, 4, 6
+        if (isDNB2 && (arch === 3 || arch === 4 || arch === 6) && minSide > 6*sc){
+          pushBox(wcx + ux*0.25, wcz + uz*0.25, ux*0.28, uz*0.28, vx*0.35, vz*0.35, h*0.65, h + pitch*0.88, tw, th, wr, wg, wb, rr, rg, rb, g, wl, rl, 0);
+        }
+      } else if (isHouse && arch !== 7){
+        // Polygonal private houses (L-shaped, U-shaped, rural homesteads): hipped pyramid roof to centroid apex
+        const pitch = Math.min(2.6, Math.max(1.3, h*0.44));
+        const ap = v++;
+        pos[ap*3] = wcx; pos[ap*3+1] = h + pitch; pos[ap*3+2] = wcz; uv[ap*2] = 0.5; uv[ap*2+1] = 0.5;
+        col[ap*3] = Math.min(255, rr + 18); col[ap*3+1] = Math.min(255, rg + 16); col[ap*3+2] = Math.min(255, rb + 14); grd[ap] = g;
+        for (let i = 0; i < n; i++) rl.push(base + 4*i, base + 4*((i + 1) % n), ap);
+      } else if (isHighrise && arch === 5){
+        // High-rise Archetype 6 (highrise_06_courtyard_mansard): classic urban block with pitched mansard crown
+        const pitch = Math.min(3.6, Math.max(1.8, h*0.16));
+        const ap = v++;
+        pos[ap*3] = wcx; pos[ap*3+1] = h + pitch; pos[ap*3+2] = wcz; uv[ap*2] = 0.5; uv[ap*2+1] = 0.5;
+        col[ap*3] = Math.min(255, rr + 16); col[ap*3+1] = Math.min(255, rg + 16); col[ap*3+2] = Math.min(255, rb + 16); grd[ap] = g;
+        for (let i = 0; i < n; i++) rl.push(base + 4*i, base + 4*((i + 1) % n), ap);
+      } else {
+        // Flat roof base (for modern flat houses arch===7, industrial halls, and high-rises with 3D rooftop superstructures)
+        for (let t = 0; t < n - 2; t++) rl.push(base + 4*tri[t*3], base + 4*tri[t*3 + 1], base + 4*tri[t*3 + 2]);
+        if (isDNB2 && isHouse && arch === 7 && minSide > 6*sc){
+          // Modern flat-roof house archetype 8: upper terrace volume
+          pushBox(wcx - ux*0.18, wcz - uz*0.18, ux*0.58, uz*0.58, vx*0.62, vz*0.62, h, h + Math.min(3.0, h*0.65), tw, th, wr, wg, wb, rr, rg, rb, g, wl, rl, 0);
+        }
+      }
+
+      // ---------- 10 HIGH-RISE & URBAN ARCHETYPES (superstructures, setbacks, spires, HVAC, skylights) ----------
+      if (isDNB2 && isHighrise && !isBox && minSide > 6.5*sc){
+        if (arch === 0 || arch === 4){
+          // Archetype 1 (panel9) & Archetype 5 (bay residential): twin elevator penthouses + rooftop parapet volume
+          const ph = Math.min(3.2, Math.max(2.0, h*0.10));
+          pushBox(wcx - ux*0.42, wcz - uz*0.42, ux*0.24, uz*0.24, vx*0.42, vz*0.42, h, h + ph, tw, th, wrBot, wgBot, wbBot, rr, rg, rb, g, wl, rl, 0);
+          if (maxEdge > 18*sc) pushBox(wcx + ux*0.42, wcz + uz*0.42, ux*0.24, uz*0.24, vx*0.42, vz*0.42, h, h + ph, tw, th, wrBot, wgBot, wbBot, rr, rg, rb, g, wl, rl, 0);
+        } else if (arch === 1 || arch === 7){
+          // Archetype 2 (monolith tower) & Archetype 8 (cylindrical/crown tower): recessed mechanical crown + spire/mast
+          const th1 = Math.min(4.8, Math.max(2.4, h*0.13));
+          pushBox(wcx, wcz, ux*0.56, uz*0.56, vx*0.56, vz*0.56, h, h + th1, tw, th, wr, wg, wb, rr, rg, rb, g, wl, rl, arch === 7 ? 1.4 : 0);
+        } else if (arch === 2){
+          // Archetype 3 (setback tower, IMG_9557): two stepped architectural tiers
+          const t1 = Math.min(12.0, Math.max(3.5, h*0.26)), t2 = Math.min(8.0, Math.max(2.6, h*0.18));
+          pushBox(wcx, wcz, ux*0.72, uz*0.72, vx*0.72, vz*0.72, h, h + t1, tw, th, wr, wg, wb, rr, rg, rb, g, wl, rl, 0);
+          pushBox(wcx, wcz, ux*0.44, uz*0.44, vx*0.44, vz*0.44, h + t1, h + t1 + t2, tw, th, wr, wg, wb, rr, rg, rb, g, wl, rl, 0);
+        } else if (arch === 3){
+          // Archetype 4 (glass office business centre): HVAC mechanical row + helipad/crown slab
+          const hh = Math.min(3.0, Math.max(1.8, h*0.09));
+          pushBox(wcx - ux*0.35, wcz - uz*0.35, ux*0.22, uz*0.22, vx*0.48, vz*0.48, h, h + hh, tw, th, wrBot, wgBot, wbBot, rr, rg, rb, g, wl, rl, 0);
+          pushBox(wcx + ux*0.35, wcz + uz*0.35, ux*0.22, uz*0.22, vx*0.48, vz*0.48, h, h + hh*0.85, tw, th, wrBot, wgBot, wbBot, rr, rg, rb, g, wl, rl, 0);
+        } else if (arch === 6){
+          // Archetype 7 (monumental spire building, IMG_9556): stepped central tower + pyramidal spire
+          const t1 = Math.min(14.0, Math.max(4.0, h*0.32)), sp = Math.min(11.0, Math.max(3.5, h*0.28));
+          pushBox(wcx, wcz, ux*0.54, uz*0.54, vx*0.54, vz*0.54, h, h + t1, tw, th, wr, wg, wb, rr, rg, rb, g, wl, rl, sp);
+        } else if (arch === 9 || cat === 2){
+          // Archetype 10 (industrial hall): sawtooth / clerestory roof monitors along the roof
+          const sh = Math.min(2.6, Math.max(1.5, h*0.16));
+          pushBox(wcx - ux*0.36, wcz - uz*0.36, ux*0.22, uz*0.22, vx*0.68, vz*0.68, h, h + sh, tw, th, wrBot, wgBot, wbBot, rr, rg, rb, g, wl, rl, sh*0.6);
+          pushBox(wcx + ux*0.36, wcz + uz*0.36, ux*0.22, uz*0.22, vx*0.68, vz*0.68, h, h + sh, tw, th, wrBot, wgBot, wbBot, rr, rg, rb, g, wl, rl, sh*0.6);
+        }
+      }
     }
+    const usedPos = pos.subarray(0, v*3), usedGrd = grd.subarray(0, v), usedCol = col.subarray(0, v*3), usedUv = uv.subarray(0, v*2);
     const total = a => a.reduce((s, x) => s + x.length, 0), idx = new Uint32Array(total(idxRoof) + total(idxWall)), groups = []; let off = 0;
     idxRoof.forEach((a, k) => { if (a.length){ idx.set(a, off); groups.push([off, a.length, k]); off += a.length; } });
     idxWall.forEach((a, k) => { if (a.length){ idx.set(a, off); groups.push([off, a.length, 5 + k]); off += a.length; } });
-    return {pos, grd, col, uv, idx, groups, origin:org, radius:Math.sqrt(r2)};
+    return {pos:usedPos.slice(), grd:usedGrd.slice(), col:usedCol.slice(), uv:usedUv.slice(), idx, groups, origin:org, radius:Math.sqrt(r2)};
   }
   return {setup, fwd, inv, setHeights, sampleH, processHeights, buildGrid, buildCity};
 }
@@ -955,13 +1127,13 @@ function patchBld(mat, lit = false){
   return mat;
 }
 const ROOF_COLORS = ['#8a6b50', '#6f6a62', '#8d8f90', '#7d7267', '#6e665c'];
-const roofMats = ROOF_COLORS.map(h => patchBld(new THREE.MeshLambertMaterial({color:h, flatShading:true})));   // flat roof colour per category (vertex colours tint walls only)
+const roofMats = ROOF_COLORS.map(h => patchBld(new THREE.MeshLambertMaterial({color:h, vertexColors:true, flatShading:true})));   // roof colour per category modulated by per-building/apex shading
 const wallMats = BLD_COLORS.map((_, idx) => patchBld(new THREE.MeshLambertMaterial({vertexColors:true, flatShading:true}), idx === 1 || idx === 3));
 const bldMats = [...roofMats, ...wallMats];
 // Режими-креслення малюють забудову без фасадів: білий макет, сіра відмивка, світлий каркас або неоновий каркас
 const monoMats = (color, wire = false) => Array.from({length:10}, () => patchBld(wire
   ? new THREE.MeshBasicMaterial({color, wireframe:true, transparent:true, opacity:0.45, depthWrite:false})
-  : new THREE.MeshLambertMaterial({color, flatShading:true})));
+  : new THREE.MeshLambertMaterial({color, vertexColors:true, flatShading:true})));
 const clayMats = monoMats('#f4f4f2'), paperMats = monoMats('#e9e4d6'), shadeMats = monoMats('#cfcfcf'), wireBld = monoMats('#e6f0ff', true), neonBld = monoMats('#8df3ff', true);
 const bldSetFor = m => m === 3 ? clayMats : m === 2 ? paperMats : m === 5 ? shadeMats : m === 4 || m === 6 ? wireBld : m === 7 ? neonBld : bldMats;
 async function loadFacades(){
