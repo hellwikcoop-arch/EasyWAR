@@ -1,7 +1,7 @@
 // Модель екрана «Сьогодні» (макет «тепле світіння») з реальних даних файлу .easyfly.
 // Без DOM і без вигаданих чисел: немає зміни — картка про це каже, немає пілотів — дуга порожня.
 import {
-  commanderSummary, flightsOfShift, formatDate, formatDuration, hasSubordinates, keBoard, resolveSettings,
+  commanderSummary, flightsOfShift, formatDate, formatDuration, hasSubordinates, keBoard, personItems, resolveSettings,
 } from './fly-core.js';
 
 export { hasSubordinates };
@@ -90,6 +90,17 @@ export function todayHome(data, today) {
     deadlines: summary.counters,
     shift: shiftCard(data, today),
   };
+}
+
+/** Найближчий строк однієї людини. Без списку підлеглих. */
+export function nearestDeadline(person, data, today) {
+  if (!person) return null;
+  const settings = resolveSettings(data?.unit?.settings);
+  const items = personItems(person, today, { checks: data?.checks || [], settings })
+    .filter(item => item.dueDate && item.daysLeft !== null && item.daysLeft !== undefined)
+    .sort((a, b) => (a.dueDate < b.dueDate ? -1 : a.dueDate > b.dueDate ? 1 : 0));
+  const first = items[0];
+  return first ? { label: first.label, dueDate: first.dueDate, daysLeft: first.daysLeft, status: first.status } : null;
 }
 
 /** Особистий екран: один пілот, його заборони й найближчі строки. Без дуги N/M і списку підлеглих. */

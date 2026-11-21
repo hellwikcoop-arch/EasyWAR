@@ -1,7 +1,7 @@
 // Нагадування 30 / 14 / 7 днів: локально, без сповіщень ОС і мережі. Пороги — у налаштуваннях частини.
 import { addDays, buildReminders, formatDate, personItems, pluralDays, upcomingDeadlines } from '../fly-core.js';
 import { coreCtx, effectiveSettings, toggleReminderDay } from '../fly-state.js';
-import { dateText, el, emptyState, notice, pageHeader, statusChip, table, toast } from '../ui.js';
+import { dateText, el, emptyState, pageHeader, statusChip, table, toast } from '../ui.js';
 
 function toggle(day, on, ctx) {
   const input = el('input', { type: 'checkbox', class: 'ef-toggle-input', checked: on, id: `ef-rem-${day}` });
@@ -26,16 +26,13 @@ export function render(ctx) {
   const root = el('div', { class: 'ef-view' });
   root.append(pageHeader({
     crumbs: [{ label: 'EasyFLY' }, { label: 'Нагадування' }],
-    title: 'Нагадування про перевірки',
-    subtitle: 'Локальні сповіщення про строки · без синхронізації й мережевих сервісів',
+    title: 'Нагадування',
   }));
 
   root.append(el('section', { class: 'ef-card', 'aria-labelledby': 'ef-rem-params' },
     el('h2', { id: 'ef-rem-params', class: 'ef-eyebrow', text: 'Параметри сповіщень' }),
     el('div', { class: 'ef-toggles' }, all.map(day => toggle(day, active.has(day), ctx)),
       el('span', { class: 'ef-text-valid ef-toggle-state', text: 'Увімкнено' }))));
-  root.append(notice('Нагадування працюють лише на цьому пристрої.', 'Сповіщення не надсилаються іншим користувачам і не потребують інтернету.'));
-
   if (!data.persons.length) {
     root.append(emptyState('Немає даних', 'Додайте пілотів, щоб бачити нагадування про строки.'));
     return root;

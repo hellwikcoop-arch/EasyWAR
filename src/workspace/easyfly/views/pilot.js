@@ -16,6 +16,8 @@ import {
   confirmDeletePerson, openAdmissionForm, openPilotForm, openTrainingForm, removeAdmission, setAdmissionLost,
 } from './card.js';
 import { openEntry } from './entry.js';
+import { nearestDeadline } from '../glow-core.js';
+import { daysHero } from './summary.js';
 import { openLeaveForm } from './leaves-form.js';
 import { leaveColumns } from './leaves.js';
 
@@ -162,9 +164,10 @@ function checkCard(ctx, person, c) {
 function checksTab(ctx, person) {
   const cards = profileCards(person, ctx.data, ctx.today);
   return el('div', { class: 'ef-stack' },
-    el('div', { class: 'ef-toolbar' },
-      el('p', { class: 'ef-muted', text: `Дані станом на ${formatDate(ctx.today)}` }),
-      button('Внести перевірку', { variant: 'primary', iconName: 'vnesty', onClick: () => openEntry(ctx, { mode: 'check', personId: person.id, lockPilot: true }) })),
+    daysHero(nearestDeadline(person, ctx.data, ctx.today), {
+      actionLabel: 'Внести перевірку',
+      onClick: () => openEntry(ctx, { mode: 'check', personId: person.id, lockPilot: true }),
+    }),
     el('div', { class: 'ef-check-grid' }, cards.map(c => checkCard(ctx, person, c))));
 }
 
@@ -250,14 +253,12 @@ function logbookTab(ctx, person) {
       el('div', { class: 'ef-filter-row' }, monthSel, dn, ex,
         button('Додати політ', { variant: 'primary', iconName: 'vnesty', onClick: () => openEntry(ctx, { mode: 'flight', personId: person.id, lockPilot: true }) }))),
     view.entries.length ? entriesTable : emptyState('Немає даних', 'Записів польотів за вибраними фільтрами немає.'),
-    el('p', { class: 'ef-muted ef-pad', text: 'Показано лише внесені записи. Невідомі значення позначено тире. Звіряйте з паперовою льотною книжкою — вона лишається юридичним оригіналом.' }),
     view.monthIncomplete ? notice('Є записи без нальоту.', 'Наліт за місяць показано лише за відомими значеннями.', { tone: 'amber' }) : null,
     el('div', { class: 'ef-split ef-split-even' },
       card('Підсумки за видами', el('div', { class: 'ef-sum-row' },
         el('span', { class: 'ef-muted', text: 'День' }), el('strong', { text: dash(view.dayAirtime) }),
         el('span', { class: 'ef-muted', text: 'Ніч' }), el('strong', { text: dash(view.nightAirtime) }))),
-      card('Перерви в польотах', el('p', { text: breakText }))),
-    el('p', { class: 'ef-muted ef-pad', text: 'Дані внесено пілотом · без підтвердження й затвердження у застосунку' }));
+      card('Перерви в польотах', el('p', { text: breakText }))));
 }
 
 async function removeFlight(ctx, entry) {
@@ -274,11 +275,9 @@ async function removeFlight(ctx, entry) {
 function navDocsTab(ctx, person) {
   return el('div', { class: 'ef-split ef-split-even' },
     card('Штурманські документи',
-      el('p', { text: 'ІШР, бортжурнал і розрахунки маси, пального та маршруту формуються на екрані «Штурман». Вони допомагають підготуватися і не замінюють паперові документи.' }),
-      el('div', { class: 'ef-actions' }, button('Відкрити «Штурман»', { variant: 'primary', iconName: 'shturman', onClick: () => ctx.go('navigator', { pilot: person.id }) }))),
+      el('div', { class: 'ef-actions' }, button('ІШР, бортжурнал, ШПП', { variant: 'primary', iconName: 'shturman', onClick: () => ctx.go('navigator', { pilot: person.id }) }))),
     card('Сонце і Місяць',
-      el('p', { text: 'Схід і захід Сонця, фаза Місяця та довідковий індикатор освітленості для ОНБ. Індикатор не є допуском.' }),
-      el('div', { class: 'ef-actions' }, button('Відкрити «Сонце і Місяць»', { variant: 'secondary', iconName: 'sontse-misiats', onClick: () => ctx.go('sunmoon') }))));
+      el('div', { class: 'ef-actions' }, button('Сонце і Місяць', { variant: 'secondary', iconName: 'sontse-misiats', onClick: () => ctx.go('sunmoon') }))));
 }
 
 function leavesTab(ctx, person) {
