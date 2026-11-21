@@ -68,6 +68,8 @@ const roles = ROLE_TITLES;
 const WORKSPACE_STORE_KEY = 'collectives.workspaces';
 const INVITE_INDEX_KEY = 'collectives.invites';
 const ACTIVE_USER_KEY = 'collectives.user';
+const SERVER_KEY = 'collectives.workspaceServer';
+const SESSION_KEY = 'collectives.workspaceSession';
 const BROADCAST_CHANNEL = 'easywar-collective-workspace-v1';
 
 export async function mount(container, host) {
@@ -119,6 +121,11 @@ export async function mount(container, host) {
   let hubError = '';
   let lastGeneratedInvite = null;
   let broadcast = null;
+  let serverUrl = '';
+  let session = null;
+  let holdEditor = false;
+  let pollTimer = null;
+  let lastPullError = '';
 
   try {
     if (typeof BroadcastChannel === 'function') {
@@ -162,9 +169,19 @@ export async function mount(container, host) {
       if (savedUser?.collectiveId && workspaces.some(w => w.collectiveId === savedUser.collectiveId)) {
         activeCollId = savedUser.collectiveId;
       }
-    } catch { /* працюємо в пам'яті */ }
+      const savedServer = await host.profile.readJson(SERVER_KEY);
+      if (typeof savedServer?.url === 'string') serverUrl = savedServer.url.trim();
+      const savedSession = await host.profile.readJson(SESSION_KEY);
+      if (savedSession?.token && savedSession.url === serverUrl) {
+        session = savedSession;
+        activeMemberId = savedSession.memberId || activeMemberId;
+        activeCollId = savedSession.collectiveId || activeCollId;
+      }
+    } catch { /* працюємо в пам’яті */ }
     ensureActiveMember();
     renderHub();
+    startPoll();
+    pullServer();
   }
 
   async function persistWorkspaces(notifyPeers = true) {
@@ -183,7 +200,7 @@ export async function mount(container, host) {
         }
       } catch { /* ігноруємо помилку сховища */ }
     }
-    if (notifyPeers && broadcast) {
+    if (notifyPeers && broadcast && !serverUrl) {
       const current = currentWorkspace();
       if (current) {
         try { broadcast.postMessage({ type: 'workspace-sync', workspace: current }); } catch { /* ignore */ }
@@ -191,16 +208,91 @@ export async function mount(container, host) {
     }
   }
 
+  function serverReady() {
+    return Boolean(serverUrl && host.workspaceSync);
+  }
+
   function currentWorkspace() {
+    if (serverReady()) {
+      return session?.collectiveId
+        ? workspaces.find(w => w.collectiveId === session.collectiveId) || null
+        : null;
+    }
     return workspaces.find(w => w.collectiveId === activeCollId) || workspaces[0] || null;
   }
 
   function ensureActiveMember() {
     const ws = currentWorkspace();
     if (!ws) { activeMemberId = ''; return; }
-    if (!ws.members.some(m => m.id === activeMemberId)) {
-      activeMemberId = ws.members[0]?.id || '';
+    if (session?.memberId && ws.members.some(m => m.id === session.memberId)) {
+      activeMemberId = session.memberId;
+      return;
     }
+    if (!ws.members.some(m => m.id === activeMemberId)) activeMemberId = '';
+  }
+
+  function applyServerView(view, memberId) {
+    if (!view?.collectiveId) return;
+    const ws = { ...view, invites: [], nextSeq: (view.revision || 0) + 1 };
+    const idx = workspaces.findIndex(item => item.collectiveId === ws.collectiveId);
+    if (idx >= 0) workspaces[idx] = ws;
+    else workspaces.unshift(ws);
+    activeCollId = ws.collectiveId;
+    if (memberId && ws.members.some(m => m.id === memberId)) activeMemberId = memberId;
+    else ensureActiveMember();
+    if (!holdEditor) renderHub();
+    syncDraftFromWorkspace();
+  }
+
+  async function saveSession(next) {
+    session = next;
+    if (host.profile?.available) {
+      try { await host.profile.writeJson(SESSION_KEY, next); } catch { /* лишається в пам’яті */ }
+    }
+    startPoll();
+  }
+
+  async function serverCall(operation, body, token = session?.token || null) {
+    const result = await host.workspaceSync.call(serverUrl, operation, token, {
+      ...(body || {}),
+      collectiveId: body?.collectiveId || session?.collectiveId || '',
+    });
+    if (result?.token && result?.collectiveId && result?.memberId) {
+      session = {
+        url: serverUrl,
+        collectiveId: result.collectiveId,
+        memberId: result.memberId,
+        token: result.token,
+      };
+    }
+    if (result?.view) applyServerView(result.view, result.memberId || session?.memberId);
+    if (!result?.ok) {
+      const error = new Error(result?.error || 'Сервер відхилив дію.');
+      error.conflict = Boolean(result?.conflict);
+      throw error;
+    }
+    return result;
+  }
+
+  async function pullServer() {
+    if (!serverUrl || !session?.token || !host.workspaceSync) return;
+    try {
+      await serverCall('sync', {});
+      lastPullError = '';
+    } catch (error) {
+      const message = error.message || 'Немає зв’язку із сервером.';
+      if (message !== lastPullError && !holdEditor) {
+        lastPullError = message;
+        hubSay(message, true);
+      }
+    }
+  }
+
+  function startPoll() {
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = null;
+    if (!serverUrl || !session?.token || !host.workspaceSync) return;
+    pollTimer = setInterval(() => { pullServer(); }, 2000);
   }
 
   function updateWorkspace(nextWs, msg = '') {
@@ -265,8 +357,54 @@ export async function mount(container, host) {
     hub.replaceChildren(
       $('p', 'ec-label', 'КОЛЕКТИВНЕ ФАЙЛОВЕ СЕРЕДОВИЩЕ / ОБМІН ДАНИМИ ЗА 6-ЗНАЧНИМ КОДОМ'),
       $('h2', '', 'Колективний робочий простір'),
-      $('p', 'ec-caption', 'Той, хто створює колектив, отримує роль «Керівник». Доступні 3 ролі: «Керівник», «Молодший керівник» та «Користувач». Запрошення генерує 6-значний код: другий користувач вводить його й одразу потрапляє в колектив і спільне файлове середовище.'),
+      $('p', 'ec-caption', 'Той, хто створює колектив, отримує роль «Керівник» і може призначати «Керівника», «Молодшого керівника» та «Користувача». Код запрошення вводить інша людина — і на іншому комп’ютері, якщо вказано сервер.'),
     );
+    const mode = $('p', 'ec-status', !serverUrl
+      ? 'Локальний режим: обмін лише на цьому комп’ютері. Між різними комп’ютерами даних немає, доки не вказано адресу сервера.'
+      : (host.workspaceSync
+        ? `Сервер обміну: ${serverUrl}. Зміни надсилаються туди й з’являються в усіх учасників.`
+        : `Адресу ${serverUrl} збережено. У цьому вікні з’єднання немає, тож лишається локальний режим.`));
+    mode.dataset.tone = serverUrl ? 'ok' : 'local';
+    hub.append(mode);
+    const serverForm = $('form', 'ec-inline');
+    const serverIn = input('https://адреса-вашого-сервера');
+    serverIn.value = serverUrl;
+    serverIn.maxLength = 200;
+    const serverBtn = button(serverUrl ? 'Оновити адресу' : 'Зберегти адресу сервера');
+    serverBtn.type = 'submit';
+    const clearBtn = button('Лише цей комп’ютер');
+    serverForm.append(field('Адреса сервера обміну', serverIn), serverBtn, clearBtn);
+    serverForm.addEventListener('submit', event => {
+      event.preventDefault();
+      const next = serverIn.value.trim();
+      if (next && !/^https:\/\/[^/\s]+\/?$/u.test(next) && !/^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?\/?$/u.test(next)) {
+        hubSay('Адреса має бути https://… без шляху або http://127.0.0.1:8787 для локальної перевірки.', true);
+        return;
+      }
+      serverUrl = next.replace(/\/$/, '');
+      session = null;
+      if (host.profile?.available) {
+        host.profile.writeJson(SERVER_KEY, serverUrl ? { url: serverUrl } : null).catch(() => {});
+        host.profile.writeJson(SESSION_KEY, null).catch(() => {});
+      }
+      startPoll();
+      hubSay(serverUrl ? 'Адресу збережено. Створіть колектив або вступіть за кодом.' : 'Сервер вимкнено. Залишився локальний режим.');
+    });
+    clearBtn.addEventListener('click', () => {
+      serverIn.value = '';
+      serverUrl = '';
+      session = null;
+      if (host.profile?.available) {
+        host.profile.writeJson(SERVER_KEY, null).catch(() => {});
+        host.profile.writeJson(SESSION_KEY, null).catch(() => {});
+      }
+      startPoll();
+      hubSay('Сервер вимкнено. Залишився локальний режим.');
+    });
+    hub.append(serverForm);
+    if (serverUrl && !host.workspaceSync) {
+      hub.append($('p', 'ec-warning', 'Обмін із сервером працює в настільному застосунку. У цьому вікні лишається локальний режим.'));
+    }
 
     if (hubMessage) {
       const m = $('p', 'ec-status', hubMessage);
@@ -286,13 +424,29 @@ export async function mount(container, host) {
     const createBox = $('div', 'ec-hub-box');
     createBox.append($('p', 'ec-label', 'СТВОРИТИ КОЛЕКТИВ (ВИ — КЕРІВНИК)'));
     const createForm = $('form', 'ec-inline');
-    const collNameIn = input('Назва колективу (напр. Штаб А)');
+    const collNameIn = input('Назва колективу (напр. Навчальна група)');
     const founderNameIn = input('Ваше ім’я або позивний');
     const createBtn = button('Створити колектив');
     createBtn.type = 'submit';
     createForm.append(field('Назва колективу', collNameIn), field('Керівник (ви)', founderNameIn), createBtn);
     createForm.addEventListener('submit', event => {
       event.preventDefault();
+      if (serverReady()) {
+        serverCall('create', { name: collNameIn.value, memberName: founderNameIn.value }, null)
+          .then(async result => {
+            lastGeneratedInvite = null;
+            await saveSession({
+              url: serverUrl,
+              collectiveId: result.collectiveId,
+              memberId: result.memberId,
+              token: result.token,
+            });
+            holdEditor = false;
+            hubSay(`Колектив створено на сервері. Ваша роль — «${ROLES.leader}». Жетон сеансу лишається лише на цьому комп’ютері.`);
+          })
+          .catch(error => hubSay(error.message || 'Не вдалося створити колектив.', true));
+        return;
+      }
       try {
         const idNum = workspaces.length + 1;
         const ws = createCollectiveWorkspace({
@@ -303,8 +457,9 @@ export async function mount(container, host) {
           now: nowSec(),
         });
         activeMemberId = ws.members[0].id;
+        session = null;
         lastGeneratedInvite = null;
-        updateWorkspace(ws, `Колектив «${ws.name}» створено. Ваша роль — «${ROLES.leader}».`);
+        updateWorkspace(ws, `Колектив «${ws.name}» створено локально. Ваша роль — «${ROLES.leader}». Інші комп’ютери його не бачать.`);
       } catch (error) {
         hubSay(error.message || 'Не вдалося створити колектив.', true);
       }
@@ -324,6 +479,21 @@ export async function mount(container, host) {
     joinForm.append(field('6-значний код запрошення', codeIn), field('Ваше ім’я', guestNameIn), joinBtn);
     joinForm.addEventListener('submit', event => {
       event.preventDefault();
+      if (serverReady()) {
+        serverCall('join', { code: codeIn.value, memberName: guestNameIn.value }, null)
+          .then(async result => {
+            await saveSession({
+              url: serverUrl,
+              collectiveId: result.collectiveId,
+              memberId: result.memberId,
+              token: result.token,
+            });
+            holdEditor = false;
+            hubSay(`Ви в колективі. Роль: «${roleLabel(result.view?.yourRole || 'user')}».`);
+          })
+          .catch(error => hubSay(error.message || 'Не вдалося вступити за кодом.', true));
+        return;
+      }
       try {
         const digits = parseInviteCode(codeIn.value);
         const targetWs = workspaces.find(w => (w.invites ?? []).some(inv => inv.code === digits)) || currentWorkspace();
@@ -352,15 +522,17 @@ export async function mount(container, host) {
     topGrid.append(createBox, joinBox);
     hub.append(topGrid);
 
-    // Список створених/приєднаних колективів
-    if (!workspaces.length) {
+    const shown = serverReady()
+      ? workspaces.filter(item => item.collectiveId === session?.collectiveId)
+      : workspaces;
+    if (!shown.length) {
       hub.append($('p', 'ec-empty', 'Немає активного колективного середовища. Створіть колектив вище або введіть 6-значний код запрошення.'));
       return;
     }
 
-    if (workspaces.length > 1) {
+    if (!serverReady() && shown.length > 1) {
       const collBar = $('div', 'ec-coll-grid');
-      for (const item of workspaces) {
+      for (const item of shown) {
         const card = $('button', 'ec-coll-card');
         card.type = 'button';
         card.setAttribute('aria-pressed', String(item.collectiveId === activeCollId));
@@ -381,8 +553,19 @@ export async function mount(container, host) {
     const ws = currentWorkspace();
     if (!ws) return;
     ensureActiveMember();
-    const activeMember = ws.members.find(m => m.id === activeMemberId) || ws.members[0];
-    const perms = rolePermissions(activeMember.role, { isFounder: activeMember.founder });
+    const activeMember = ws.members.find(m => m.id === activeMemberId);
+    if (!activeMember) {
+      hub.append($('p', 'ec-empty', 'Увійти від чужого імені не можна. Створіть колектив або вступіть за своїм кодом.'));
+      return;
+    }
+    const perms = serverReady()
+      ? {
+        canInvite: activeMember.role === 'leader' || activeMember.role === 'junior_leader',
+        canAssignJuniorLeader: activeMember.role === 'leader',
+        canRemoveMembers: activeMember.role === 'leader',
+        canDeleteFiles: true,
+      }
+      : rolePermissions(activeMember.role, { isFounder: activeMember.founder });
 
     const wsPanel = $('div', 'ec-coll-panel');
     const wsHead = $('div', 'ec-coll-head');
@@ -392,21 +575,7 @@ export async function mount(container, host) {
       $('p', 'ec-caption', `Активний користувач: ${activeMember.name} (${roleLabel(activeMember.role, { isFounder: activeMember.founder })}) · Учасників: ${ws.members.length} · Файлів: ${ws.files.length}`),
     );
 
-    // Перемикач активного учасника (дозволяє перевірити роботу від імені Керівника, Молодшого керівника чи Користувача)
-    const switcherWrap = $('div', 'ec-inline');
-    const memberSelect = select(ws.members.map(m => ({
-      value: m.id,
-      label: `${m.name} — ${roleLabel(m.role, { isFounder: m.founder })}`,
-    })));
-    memberSelect.value = activeMember.id;
-    memberSelect.setAttribute('aria-label', 'Активний учасник колективу');
-    memberSelect.addEventListener('change', () => {
-      activeMemberId = memberSelect.value;
-      persistWorkspaces(false);
-      renderHub();
-    });
-    switcherWrap.append(field('Ви працюєте як учасник', memberSelect));
-    wsHead.append(wsTitle, switcherWrap);
+    wsHead.append(wsTitle);
     wsPanel.append(wsHead);
 
     // --- 1. Склад колективу, призначення 3 ролей та запрошення за 6-значним кодом ------------
@@ -427,7 +596,8 @@ export async function mount(container, host) {
       info.append(titleLine);
       row.append(avatar(member.name, member.id === activeMember.id), info);
 
-      if (member.founder || member.role === 'leader') {
+      const serverCanAssign = serverReady() && activeMember.role === 'leader' && member.id !== activeMember.id;
+      if ((member.founder || member.role === 'leader') && !serverCanAssign) {
         row.append($('span', 'ec-tag', ROLES.leader));
       } else {
         const canChangeToJunior = canAssignRole({
@@ -441,11 +611,20 @@ export async function mount(container, host) {
           newRole: 'user',
         }).allowed;
 
-        if (canChangeToJunior || canChangeToUser) {
-          const roleSel = select(ASSIGNABLE_ROLE_OPTIONS);
+        if (serverCanAssign || canChangeToJunior || canChangeToUser) {
+          const roleChoices = serverCanAssign
+            ? [...ASSIGNABLE_ROLE_OPTIONS, { value: 'leader', label: ROLES.leader }]
+            : ASSIGNABLE_ROLE_OPTIONS;
+          const roleSel = select(roleChoices);
           roleSel.value = member.role;
           roleSel.setAttribute('aria-label', `Призначити роль для ${member.name}`);
           roleSel.addEventListener('change', () => {
+            if (serverReady()) {
+              serverCall('role', { targetId: member.id, role: roleSel.value })
+                .then(() => hubSay(`Учаснику «${member.name}» призначено роль «${roleLabel(roleSel.value)}». Запис у журналі сервера.`))
+                .catch(error => { roleSel.value = member.role; hubSay(error.message || 'Не вдалося змінити роль.', true); });
+              return;
+            }
             try {
               const updated = assignMemberRole(ws, {
                 actorId: activeMember.id,
@@ -467,6 +646,12 @@ export async function mount(container, host) {
         if (perms.canRemoveMembers && member.id !== activeMember.id) {
           const remBtn = button('Вилучити');
           remBtn.addEventListener('click', () => {
+            if (serverReady()) {
+              serverCall('remove', { targetId: member.id })
+                .then(() => hubSay(`Учасника «${member.name}» вилучено. Запис у журналі сервера.`))
+                .catch(error => hubSay(error.message || 'Не вдалося вилучити учасника.', true));
+              return;
+            }
             try {
               const updated = removeWorkspaceMember(ws, {
                 actorId: activeMember.id,
@@ -490,15 +675,26 @@ export async function mount(container, host) {
     inviteSection.append($('p', 'ec-label', 'ЗАПРОШЕННЯ ДО КОЛЕКТИВУ ЗА 6-ЗНАЧНИМ КОДОМ'));
     if (perms.canInvite) {
       const invForm = $('form', 'ec-inline');
-      const roleOpts = perms.canAssignJuniorLeader
-        ? ASSIGNABLE_ROLE_OPTIONS
-        : [ASSIGNABLE_ROLE_OPTIONS[0]];
+      const roleOpts = serverReady() && activeMember.role === 'leader'
+        ? [...ASSIGNABLE_ROLE_OPTIONS, { value: 'leader', label: ROLES.leader }]
+        : (perms.canAssignJuniorLeader ? ASSIGNABLE_ROLE_OPTIONS : [ASSIGNABLE_ROLE_OPTIONS[0]]);
       const invRoleSelect = select(roleOpts);
       const genBtn = button('Згенерувати 6-значний код');
       genBtn.type = 'submit';
       invForm.append(field('Початкова роль запрошеного', invRoleSelect), genBtn);
       invForm.addEventListener('submit', event => {
         event.preventDefault();
+        if (serverReady()) {
+          serverCall('invite', { assignedRole: invRoleSelect.value })
+            .then(result => {
+              lastGeneratedInvite = result.invite;
+              holdEditor = false;
+              renderHub();
+              hubSay(`Код ${result.invite.displayCode} діє 24 години і приймається один раз. Іншим учасникам він не показується.`);
+            })
+            .catch(error => hubSay(error.message || 'Не вдалося згенерувати 6-значний код.', true));
+          return;
+        }
         try {
           const issued = issueInviteCode(ws, {
             actorId: activeMember.id,
@@ -522,15 +718,19 @@ export async function mount(container, host) {
 
     const activeInvites = (ws.invites ?? []).filter(inv => !inv.usedBy);
     if (lastGeneratedInvite || activeInvites.length) {
-      const shownInv = lastGeneratedInvite && activeInvites.some(i => i.code === lastGeneratedInvite.code)
+      const shownInv = serverReady()
         ? lastGeneratedInvite
-        : activeInvites[0];
+        : (lastGeneratedInvite && activeInvites.some(i => i.code === lastGeneratedInvite.code)
+          ? lastGeneratedInvite
+          : activeInvites[0]);
       if (shownInv) {
         const codeCard = $('div', 'ec-recovery ec-code-banner');
         codeCard.append(
           $('p', 'ec-label', 'АКТИВНИЙ 6-ЗНАЧНИЙ КОД ЗАПРОШЕННЯ'),
           $('code', 'ec-pair-code', shownInv.displayCode),
-          $('p', 'ec-caption', `Передайте цей 6-значний код другому користувачу. Роль при вступі: «${roleLabel(shownInv.assignedRole)}». Видав: ${shownInv.issuerName}.`),
+          $('p', 'ec-caption', serverReady()
+            ? `Роль при вступі: «${roleLabel(shownInv.assignedRole)}». Код діє 24 години, один раз, і не потрапляє в спільний журнал.`
+            : `Локальний код для цього комп’ютера. Роль при вступі: «${roleLabel(shownInv.assignedRole)}».`),
         );
         inviteSection.append(codeCard);
       }
@@ -570,6 +770,12 @@ export async function mount(container, host) {
         if (perms.canDeleteFiles) {
           const delBtn = button('Видалити');
           delBtn.addEventListener('click', () => {
+            if (serverReady()) {
+              serverCall('file', { fileOp: 'delete', fileId: file.id, baseVersion: file.version })
+                .then(() => { if (activeFileId === file.id) activeFileId = ''; hubSay(`Файл «${file.name}» видалено на сервері.`); })
+                .catch(error => hubSay(error.message || 'Не вдалося видалити файл.', true));
+              return;
+            }
             try {
               const nextWs = deleteWorkspaceFile(ws, {
                 actorId: activeMember.id,
@@ -600,23 +806,47 @@ export async function mount(container, host) {
         $('h4', '', openedFile.name),
         $('p', 'ec-caption', `Останнє оновлення: ${openedFile.updatedByName} (${roleLabel(openedFile.updatedByRole || 'user')}) о ${formatTime(openedFile.updatedAt)}`),
       );
+      const nameIn = input('Назва файлу');
+      nameIn.value = openedFile.name;
       const contentArea = area('Вміст файлу…');
       contentArea.rows = 6;
       contentArea.value = openedFile.content;
+      contentArea.addEventListener('input', () => { holdEditor = true; });
+      nameIn.addEventListener('input', () => { holdEditor = true; });
       const summaryIn = input('Короткий опис змін (для журналу редагувань)');
       const saveFileBtn = button('Зберегти та оновити для всіх');
       saveFileBtn.addEventListener('click', () => {
+        if (serverReady()) {
+          serverCall('file', {
+            fileOp: 'save', fileId: openedFile.id, baseVersion: openedFile.version,
+            name: nameIn.value, kind: openedFile.kind, content: contentArea.value,
+            summary: summaryIn.value || `Оновлено файл «${nameIn.value || openedFile.name}»`,
+          }).then(result => {
+            holdEditor = false;
+            const next = result.view?.files?.find(item => item.id === openedFile.id);
+            hubSay(next
+              ? `Файл «${next.name}» на сервері, версія ${next.version}.`
+              : 'Зміни надіслано на сервер.');
+          }).catch(error => {
+            holdEditor = false;
+            hubSay(error.conflict
+              ? 'Конфлікт: файл уже змінено. Показано версію із сервера, ваш текст не перезаписав її.'
+              : (error.message || 'Не вдалося оновити файл.'), true);
+          });
+          return;
+        }
         try {
           const saved = saveWorkspaceFile(ws, {
             actorId: activeMember.id,
             fileId: openedFile.id,
-            name: openedFile.name,
+            name: nameIn.value,
             kind: openedFile.kind,
             content: contentArea.value,
             summary: summaryIn.value || `Оновлено файл «${openedFile.name}»`,
             now: nowSec(),
           });
-          updateWorkspace(saved.workspace, `Файл «${saved.file.name}» оновлено до версії ${saved.file.version}. Зміни відображено для всіх учасників колективу.`);
+          holdEditor = false;
+          updateWorkspace(saved.workspace, `Файл «${saved.file.name}» оновлено до версії ${saved.file.version}.`);
         } catch (error) {
           hubSay(error.message || 'Не вдалося оновити файл.', true);
         }
@@ -628,7 +858,7 @@ export async function mount(container, host) {
       });
       const btnBar = $('div', 'ec-inline');
       btnBar.append(saveFileBtn, closeFileBtn);
-      editorCard.append(field('Вміст спільного файлу', contentArea), field('Коментар до редагування', summaryIn), btnBar);
+      editorCard.append(field('Назва', nameIn), field('Вміст спільного файлу', contentArea), field('Коментар до редагування', summaryIn), btnBar);
 
       if (openedFile.history?.length) {
         const histList = $('ul', 'ec-preview-list');
@@ -655,6 +885,17 @@ export async function mount(container, host) {
     newFileForm.append(topFields, field('Вміст файлу', fContentIn), field('Опис у журнал', fSummaryIn), fCreateBtn);
     newFileForm.addEventListener('submit', event => {
       event.preventDefault();
+      if (serverReady()) {
+        serverCall('file', {
+          fileOp: 'create', name: fNameIn.value, kind: fKindSel.value,
+          content: fContentIn.value, summary: fSummaryIn.value,
+        }).then(result => {
+          activeFileId = result.fileId || '';
+          holdEditor = false;
+          hubSay('Файл створено на сервері й з’явиться в усіх учасників.');
+        }).catch(error => hubSay(error.message || 'Не вдалося створити файл.', true));
+        return;
+      }
       try {
         const created = saveWorkspaceFile(ws, {
           actorId: activeMember.id,

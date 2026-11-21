@@ -1,0 +1,16 @@
+# Розгортання: див. README.md. Обліковий запис і секрети сюди не записувати.
+name = "easywar-collective-workspace"
+main = "src/worker.mjs"
+compatibility_date = "2026-11-01"
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "CollectiveRoom"
+
+[[durable_objects.bindings]]
+name = "DIRECTORY"
+class_name = "CodeDirectory"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["CollectiveRoom", "CodeDirectory"]

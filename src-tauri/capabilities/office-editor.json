@@ -25,6 +25,7 @@
     "allow-collective-table-read",
     "allow-collective-sync-export",
     "allow-collective-sync-import",
+    "allow-collective-workspace-call",
     "allow-profile-data-get",
     "allow-profile-data-set",
     "allow-profile-data-remove",
