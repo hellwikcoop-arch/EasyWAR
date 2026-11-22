@@ -8,6 +8,8 @@ import {
   checklistView,
   demoView,
   detectModule,
+  dismissOnboarding,
+  enableOnboarding,
   loadState,
   markChecklist,
   reopenWelcome,
@@ -254,7 +256,8 @@ export function mountOnboarding(options = {}) {
         h('div', { class: 'ew-onb-actions' },
           h('button', { type: 'submit', class: 'ew-onb-primary', text: 'Показати на демо-даних' }),
           h('button', { type: 'button', class: 'ew-onb-quiet', text: 'Огляну сам', onclick: () => finish('self') }),
-          h('button', { type: 'button', class: 'ew-onb-quiet', text: 'Пізніше', onclick: () => finish('later') }))));
+          h('button', { type: 'button', class: 'ew-onb-quiet', text: 'Пізніше', onclick: () => finish('later') }),
+          h('button', { type: 'button', class: 'ew-onb-quiet', text: 'Вимкнути навчання', onclick: () => { closeWelcome(); persist(dismissOnboarding(state)); } }))));
     document.body.append(welcome);
     input.focus();
     welcome.addEventListener('keydown', event => {
@@ -284,6 +287,7 @@ export function mountOnboarding(options = {}) {
   }
 
   function beginTour(force) {
+    if (state.dismissed && !force) return;
     const status = tourOf(state, moduleId).status;
     if (!force && status !== 'idle' && status !== 'active') return;
     if (force || status === 'idle') persist(startTour(state, moduleId));
@@ -319,6 +323,7 @@ export function mountOnboarding(options = {}) {
         h('p', { text: step.body }),
         h('div', { class: 'ew-onb-actions' },
           h('button', { type: 'button', class: 'ew-onb-quiet', text: 'Пропустити', onclick: () => { persist(skipTour(state, moduleId)); closeTour(); } }),
+          h('button', { type: 'button', class: 'ew-onb-quiet', text: 'Вимкнути навчання', onclick: () => { closeTour(); persist(dismissOnboarding(state)); } }),
           index > 0 ? h('button', { type: 'button', class: 'ew-onb-quiet', text: 'Назад', onclick: () => { persist(retreatTour(state, moduleId)); draw(); } }) : null,
           h('button', {
             type: 'button',
@@ -370,7 +375,7 @@ export function mountOnboarding(options = {}) {
     if (checklist) checklist.hidden = covered;
     if (resume) resume.hidden = covered;
     if (covered) closeTour();
-    else if (!welcome && tourOf(state, moduleId).status === 'active' && !spot) beginTour(false);
+    else if (!state.dismissed && !welcome && tourOf(state, moduleId).status === 'active' && !spot) beginTour(false);
   }
 
   function watchCover() {
@@ -387,6 +392,7 @@ export function mountOnboarding(options = {}) {
 
   function renderChecklist() {
     if (!checklistList) return;
+    checklist.hidden = state.dismissed;
     const items = checklistView(state);
     const done = items.filter(item => item.done).length;
     checklistCount.textContent = `${done}/${items.length}`;
@@ -428,6 +434,17 @@ export function mountOnboarding(options = {}) {
     helpMenu.textContent = '';
     const item = (text, run) => h('button', { type: 'button', role: 'menuitem', text, onclick: () => { helpMenu.hidden = true; helpButton.setAttribute('aria-expanded', 'false'); run(); } });
     helpMenu.append(
+      item(state.dismissed ? 'Увімкнути навчання' : 'Вимкнути навчання', () => {
+        if (state.dismissed) persist(enableOnboarding(state));
+        else {
+          closeWelcome();
+          closeTour();
+          resume?.remove();
+          resume = null;
+          document.getElementById('ew-onb-pop')?.remove();
+          persist(dismissOnboarding(state));
+        }
+      }),
       item('Пройти цей модуль', () => beginTour(true)),
       item('З чого почати', () => {
         if (checklistList) {
@@ -498,6 +515,13 @@ export function mountOnboarding(options = {}) {
   window.addEventListener('storage', event => {
     if (event.key && event.key !== 'easywar.onboarding.v1') return;
     state = loadState(storageOf());
+    if (state.dismissed) {
+      closeWelcome();
+      closeTour();
+      resume?.remove();
+      resume = null;
+      document.getElementById('ew-onb-pop')?.remove();
+    }
     renderChrome();
   });
 
