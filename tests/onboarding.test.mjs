@@ -11,6 +11,8 @@ import {
   demoView,
   detectHangarModule,
   detectModule,
+  dismissOnboarding,
+  enableOnboarding,
   isDemoRecord,
   loadState,
   markChecklist,
@@ -32,6 +34,17 @@ import {
 } from '../src/onboarding-core.js';
 
 const read = name => readFile(new URL(`../${name}`, import.meta.url), 'utf8');
+
+test('turning off onboarding persists and stops automatic prompts in every module', () => {
+  const initial = startTour(submitWelcome(readState(''), { role: 'operator', unitName: '', choice: 'demo' }).state, 'air');
+  const off = readState(writeState(dismissOnboarding(initial)));
+  assert.equal(off.demo, false);
+  assert.equal(shouldAutoStart(off, 'air'), false);
+  assert.equal(shouldAutoStart(off, 'hangar'), false);
+  assert.equal(resumeMessage(off), null);
+  assert.equal(shouldShowWelcome(dismissOnboarding(readState('')), 'launcher'), false);
+  assert.equal(shouldAutoStart(enableOnboarding(off), 'air'), true);
+});
 
 function memory() {
   const data = new Map();

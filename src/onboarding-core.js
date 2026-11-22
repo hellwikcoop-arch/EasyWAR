@@ -145,6 +145,7 @@ export function freshState() {
     v: 1,
     welcome: null,
     demo: false,
+    dismissed: false,
     checklist: Object.fromEntries(CHECKLIST.map(item => [item.id, false])),
     tours: {},
     updatedAt: 0,
@@ -186,6 +187,7 @@ export function normalizeState(raw) {
     v: 1,
     welcome,
     demo: raw.demo === true && Boolean(welcome) && welcome.choice !== 'later',
+    dismissed: raw.dismissed === true,
     checklist,
     tours,
     updatedAt: Number(raw.updatedAt) || 0,
@@ -250,7 +252,15 @@ export function submitWelcome(state, input, at = Date.now()) {
 }
 
 export function reopenWelcome(state, at = Date.now()) {
-  return touch({ ...normalizeState(state), welcome: null, demo: false }, at);
+  return touch({ ...normalizeState(state), welcome: null, demo: false, dismissed: false }, at);
+}
+
+export function dismissOnboarding(state, at = Date.now()) {
+  return touch({ ...normalizeState(state), dismissed: true, demo: false }, at);
+}
+
+export function enableOnboarding(state, at = Date.now()) {
+  return touch({ ...normalizeState(state), dismissed: false }, at);
 }
 
 export function markChecklist(state, id, at = Date.now()) {
@@ -309,12 +319,13 @@ export function skipTour(state, moduleId, at = Date.now()) {
 }
 
 export function shouldShowWelcome(state, moduleId) {
-  return moduleId === 'launcher' && !normalizeState(state).welcome;
+  const current = normalizeState(state);
+  return moduleId === 'launcher' && !current.dismissed && !current.welcome;
 }
 
 export function shouldAutoStart(state, moduleId) {
   const current = normalizeState(state);
-  if (!TOURS[moduleId] || current.welcome?.choice !== 'demo') return false;
+  if (current.dismissed || !TOURS[moduleId] || current.welcome?.choice !== 'demo') return false;
   const status = current.tours[moduleId]?.status;
   return !status || status === 'idle' || status === 'active';
 }
@@ -339,7 +350,7 @@ export function stepsLeftTitle(count) {
 
 export function resumeMessage(state) {
   const current = normalizeState(state);
-  if (!current.welcome) return null;
+  if (current.dismissed || !current.welcome) return null;
   const left = checklistLeft(current);
   if (current.welcome.choice === 'later' && left.length === CHECKLIST.length) {
     return {
